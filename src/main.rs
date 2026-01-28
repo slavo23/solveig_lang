@@ -1,4 +1,4 @@
-use std::ops::Index;
+use std::{env::temp_dir, ops::Index};
 
 #[derive(Clone, PartialEq, Debug)]
 enum Ty {
@@ -16,6 +16,17 @@ impl Ty {
             Ty::TyVar(_) | Ty::TyExVar(_) => true,
             Ty::TyArr(lhs, rhs) => lhs.is_mono() && rhs.is_mono(),
             Ty::TyForAll(_, _) => false,
+        }
+    }
+
+    pub fn occurs_check(&self, var_name: String) -> bool {
+        match self {
+            Self::TyExVar(name) | Self::TyVar(name) if *name == var_name => true,
+            Self::TyArr(lhs, rhs) => {
+                lhs.occurs_check(var_name.clone()) || rhs.occurs_check(var_name)
+            }
+            Self::TyForAll(_, body) => body.occurs_check(var_name),
+            _ => false,
         }
     }
 
@@ -40,6 +51,9 @@ impl Ty {
                 rhs.substitute(var_name, with_type),
             ),
             Self::TyForAll(quantifier, body) => {
+                if quantifier == var_name {
+                    return self.clone();
+                }
                 Self::make_forall(quantifier.clone(), body.substitute(var_name, with_type))
             }
             _ => panic!("subst failed"),
@@ -49,6 +63,7 @@ impl Ty {
 
 #[derive(Clone, Debug)]
 enum CoreExpr {
+    Unit,
     Var(String),
     App(Box<CoreExpr>, Box<CoreExpr>),
     Abs(String, Box<CoreExpr>),
@@ -90,16 +105,8 @@ impl Context {
     }
 
     pub fn until(&self, entry: &ContextEntry) -> Context {
-        let found_ix = self.entries.iter().position(|ent| ent == entry);
-        match found_ix {
-            Some(ix) => {
-                let mut new_ctx = self.entries.clone();
-                let _split_entries = new_ctx.split_off(ix);
-
-                Context { entries: new_ctx }
-            }
-            None => panic!("error context until"),
-        }
+        let (left, _, _) = self.split_2(entry);
+        return Context { entries: left }
     }
 
     pub fn before(&self, entry_a: &ContextEntry, entry_b: &ContextEntry) -> bool {
@@ -160,6 +167,14 @@ impl Context {
             })
             .is_some()
     }
+
+    pub fn get_typed_var(&self, var_name: String) -> Option<&ContextEntry> {
+        self.entries.iter().find(
+            |ent| matches!(
+                ent,
+                ContextEntry::TypedVar { var_name: typed_var_name, ty: var_type } if var_name == *typed_var_name )
+            )
+    }
 }
 
 fn apply_context(ctx: &Context, ty: &Ty) -> Ty {
@@ -180,14 +195,7 @@ fn apply_context(ctx: &Context, ty: &Ty) -> Ty {
                 return apply_context(ctx, &solved_type);
             };
 
-            if ctx.has_evar(ex_var_name.clone()) {
-                return ty.clone();
-            }
-            let err = format!(
-                "evar {} is missing during context application",
-                *ex_var_name
-            );
-            panic!("{}", err)
+            return ty.clone()
         }
         Ty::TyForAll(quant_var, body) => {
             Ty::make_forall(quant_var.clone(), apply_context(ctx, body))
@@ -205,7 +213,15 @@ struct InferenceResult {
     ctx: Context,
 }
 
+fn trace_rule(rule_name: &'static str) {
+    println!("executing rule [{}]", rule_name)
+}
+
 impl TypeInference {
+    pub fn new() -> TypeInference {
+        Self { var_counter: 0 }
+    }
+
     fn make_fresh_evar(&mut self) -> String {
         self.var_counter += 1;
         format!("a^{}", self.var_counter)
@@ -227,9 +243,10 @@ impl TypeInference {
             (Ty::TyVar(ty_var_a), Ty::TyVar(ty_var_b)) if ty_var_a == ty_var_b => Ok(ctx.clone()),
             (Ty::TyUnit, Ty::TyUnit) => Ok(ctx.clone()),
             (Ty::TyArr(a1, a2), Ty::TyArr(b1, b2)) => {
+                trace_rule("<:->");
                 let theta_ctx = self.solve_subtype(ctx, b1, a1)?;
                 let delta_ctx = self.solve_subtype(
-                    ctx,
+                    &mut theta_ctx.clone(),
                     &apply_context(&theta_ctx, &a2),
                     &apply_context(&theta_ctx, &b2),
                 )?;
@@ -237,6 +254,7 @@ impl TypeInference {
                 Ok(delta_ctx)
             }
             (Ty::TyForAll(quant_var, body), right_subtype) => {
+                trace_rule("<: forAllL");
                 let fresh_evar = self.make_fresh_evar();
                 let evar_marker = ContextEntry::Marker {
                     var_name: fresh_evar.clone(),
@@ -252,6 +270,7 @@ impl TypeInference {
                 Ok(theta.until(&evar_marker))
             }
             (left_subtype, Ty::TyForAll(quant_var, body)) => {
+                trace_rule("<: forAllR");
                 let ctx_mono_var = ContextEntry::MonoVar(quant_var.clone());
                 ctx.add_entry(ctx_mono_var.clone());
 
@@ -260,10 +279,18 @@ impl TypeInference {
                 Ok(theta.until(&ctx_mono_var))
             }
             (Ty::TyExVar(evar), ty) => {
-                todo!("instantiateL")
+                trace_rule("<: instantiateL");
+                if ty.occurs_check(evar.clone()) {
+                    return Err(format!("occurs check error instantiateL"));
+                };
+                self.instantiate(ctx, ty_a, ty_b)
             }
             (ty, Ty::TyExVar(evar)) => {
-                todo!("intantiateR")
+                trace_rule("<: instantiateR");
+                if ty.occurs_check(evar.clone()) {
+                    return Err(format!("occurs check error instantiateR"));
+                };
+                self.instantiate(ctx, ty_b, ty_a)
             }
             (lhs, rhs) => Err(format!("unknown subtyping relation {:?} <: {:?}", lhs, rhs)),
         }
@@ -271,21 +298,8 @@ impl TypeInference {
 
     fn instantiate(&mut self, ctx: &mut Context, ty_a: &Ty, ty_b: &Ty) -> Result<Context, String> {
         match (ty_a, ty_b) {
-            (Ty::TyExVar(evar), mono_ty) | (mono_ty, Ty::TyExVar(evar)) if mono_ty.is_mono() => {
-                // instLSolve / instRSolve
-                let (gamma_l, _, gamma_r) = ctx.split_2(&ContextEntry::ExVar(evar.clone()));
-                let solution = ContextEntry::SolvedEVar {
-                    lhs: evar.clone(),
-                    rhs: mono_ty.clone(),
-                };
-                let mut gamma = gamma_l.clone();
-                gamma.push(solution);
-                gamma.extend(gamma_r);
-
-                Ok(Context { entries: gamma })
-            }
             (Ty::TyExVar(evar_a), Ty::TyExVar(evar_b)) => {
-                // instLReach / instRReach
+                trace_rule("instLReach / instRReach");
                 let evar_a_entry = &ContextEntry::ExVar(evar_a.clone());
                 let evar_b_entry = &ContextEntry::ExVar(evar_b.clone());
                 if !ctx.before(evar_a_entry, evar_b_entry) {
@@ -306,15 +320,46 @@ impl TypeInference {
 
                 Ok(gamma.clone())
             }
+            (Ty::TyExVar(evar), mono_ty)
+                if mono_ty.is_mono() && !matches!(mono_ty, Ty::TyExVar(_)) =>
+            {
+                trace_rule("instLSolve");
+                let (gamma_l, _, gamma_r) = ctx.split_2(&ContextEntry::ExVar(evar.clone()));
+                let solution = ContextEntry::SolvedEVar {
+                    lhs: evar.clone(),
+                    rhs: mono_ty.clone(),
+                };
+                let mut gamma = gamma_l.clone();
+                gamma.push(solution);
+                gamma.extend(gamma_r);
+                Ok(Context { entries: gamma })
+            }
+            (mono_ty, Ty::TyExVar(evar))
+                if mono_ty.is_mono() && !matches!(mono_ty, Ty::TyExVar(_)) =>
+            {
+                trace_rule("instRSolve");
+                let (gamma_l, _, gamma_r) = ctx.split_2(&ContextEntry::ExVar(evar.clone()));
+                let solution = ContextEntry::SolvedEVar {
+                    lhs: evar.clone(),
+                    rhs: mono_ty.clone(),
+                };
+                let mut gamma = gamma_l.clone();
+                gamma.push(solution);
+                gamma.extend(gamma_r);
+
+                Ok(Context { entries: gamma })
+            }
+
             (Ty::TyExVar(_), Ty::TyForAll(quantifier, body)) => {
-                // InstLAllR
+                trace_rule("InstLAllR");
                 let quant_ctx_entry = ContextEntry::MonoVar(quantifier.clone());
+                ctx.add_entry(quant_ctx_entry.clone());
                 let delta = self.instantiate(ctx, ty_a, body)?.until(&quant_ctx_entry);
 
                 Ok(delta)
             }
             (Ty::TyForAll(quantifier, body), Ty::TyExVar(_)) => {
-                // instRAllL
+                trace_rule("instRAllL");
                 let beta_var = self.make_fresh_evar();
                 let beta_ctx_evar = ContextEntry::ExVar(beta_var.clone());
                 let beta_ctx_marker = ContextEntry::Marker {
@@ -333,7 +378,7 @@ impl TypeInference {
                 Ok(delta.until(&beta_ctx_marker))
             }
             (Ty::TyExVar(evar), Ty::TyArr(b1, b2)) => {
-                // instLArr
+                trace_rule("instLArr");
                 let (mut gamma_l, _, gamma_r) = ctx.split_2(&ContextEntry::ExVar(evar.clone()));
                 let a2_ex_var = self.make_fresh_evar();
                 let a1_ex_var = self.make_fresh_evar();
@@ -352,14 +397,14 @@ impl TypeInference {
                 let mut new_ctx = Context::from_2(gamma_l, gamma_r);
                 let theta = self.instantiate(&mut new_ctx, b1, &Ty::TyExVar(a1_ex_var.clone()))?;
                 let delta = self.instantiate(
-                    &mut new_ctx,
+                    &mut theta.clone(),
                     &Ty::TyExVar(a2_ex_var.clone()),
                     &apply_context(&theta, b2),
                 )?;
                 Ok(delta)
             }
             (Ty::TyArr(b1, b2), Ty::TyExVar(evar)) => {
-                // instRArr
+                trace_rule("instRArr");
                 let (mut gamma_l, _, gamma_r) = ctx.split_2(&ContextEntry::ExVar(evar.clone()));
                 let a2_ex_var = self.make_fresh_evar();
                 let a1_ex_var = self.make_fresh_evar();
@@ -378,7 +423,7 @@ impl TypeInference {
                 let mut new_ctx = Context::from_2(gamma_l, gamma_r);
                 let theta = self.instantiate(&mut new_ctx, &Ty::TyExVar(a1_ex_var.clone()), b1)?;
                 let delta = self.instantiate(
-                    &mut new_ctx,
+                    &mut theta.clone(),
                     &apply_context(&theta, b2),
                     &Ty::TyExVar(a2_ex_var.clone()),
                 )?;
@@ -395,7 +440,57 @@ impl TypeInference {
         expr: &CoreExpr,
         check_against: &Ty,
     ) -> Result<InferenceResult, String> {
-        todo!()
+        match (expr, check_against) {
+            (CoreExpr::Unit, Ty::TyUnit) => Ok(InferenceResult {
+                // 1I
+                expr: expr.clone(),
+                expr_ty: check_against.clone(),
+                ctx: ctx.clone(),
+            }),
+            (CoreExpr::Abs(arg, body), Ty::TyArr(a1, a2)) => {
+                trace_rule("->I");
+                let typed_var_entry = ContextEntry::TypedVar {
+                    var_name: arg.clone(),
+                    ty: *a1.clone(),
+                };
+                ctx.add_entry(typed_var_entry.clone());
+                let check_result = self.solve_checking(ctx, body, &a2.clone())?;
+                Ok(InferenceResult {
+                    expr: expr.clone(),
+                    expr_ty: check_against.clone(),
+                    ctx: check_result.ctx.until(&typed_var_entry),
+                })
+            }
+            (_, Ty::TyForAll(quantifier, body)) => {
+                trace_rule("forAllI");
+                ctx.add_entry(ContextEntry::MonoVar(quantifier.clone()));
+
+                let check_result = self.solve_checking(ctx, expr, body)?;
+
+                Ok(InferenceResult {
+                    expr: expr.clone(),
+                    expr_ty: check_result.expr_ty,
+                    ctx: check_result
+                        .ctx
+                        .until(&ContextEntry::MonoVar(quantifier.clone())),
+                })
+            }
+            (_, _) => {
+                trace_rule("Sub");
+                let infer_result = self.solve_inference(ctx, expr)?;
+                let subtype_result = self.solve_subtype(
+                    &mut infer_result.ctx.clone(),
+                    &apply_context(&infer_result.ctx, &infer_result.expr_ty),
+                    &apply_context(&infer_result.ctx, check_against),
+                )?;
+
+                Ok(InferenceResult {
+                    expr: expr.clone(),
+                    expr_ty: check_against.clone(),
+                    ctx: subtype_result,
+                })
+            }
+        }
     }
 
     fn solve_app_inference(
@@ -406,7 +501,7 @@ impl TypeInference {
     ) -> Result<InferenceResult, String> {
         match (lhs_type, expr) {
             (Ty::TyExVar(evar), _) => {
-                // existApp
+                trace_rule("existApp");
                 let (mut gamma_l, _, gamma_r) = ctx.split_2(&ContextEntry::ExVar(evar.clone()));
                 let alpha_2 = self.make_fresh_evar();
                 let alpha_1 = self.make_fresh_evar();
@@ -428,7 +523,7 @@ impl TypeInference {
                 })
             }
             (Ty::TyForAll(quantifier, body), _) => {
-                // forAllApp
+                trace_rule("forAllApp");
                 let alpha = self.make_fresh_evar();
                 let alpha_ctx_evar = ContextEntry::ExVar(alpha.clone());
                 ctx.add_entry(alpha_ctx_evar);
@@ -446,7 +541,7 @@ impl TypeInference {
                 })
             }
             (Ty::TyArr(a1, a2), _) => {
-                // arrApp
+                trace_rule("arrApp");
                 let checked_result = self.solve_checking(ctx, expr, a1)?;
                 Ok(InferenceResult {
                     expr: expr.clone(),
@@ -465,10 +560,59 @@ impl TypeInference {
         expr: &CoreExpr,
     ) -> Result<InferenceResult, String> {
         match expr {
+            CoreExpr::Unit => Ok(InferenceResult {
+                expr: expr.clone(),
+                expr_ty: Ty::TyUnit,
+                ctx: ctx.clone(),
+            }),
+            CoreExpr::Var(name) => {
+                trace_rule("Var");
+                if let Some(ContextEntry::TypedVar { var_name: _, ty }) =
+                    ctx.get_typed_var(name.clone())
+                {
+                    return Ok(InferenceResult {
+                        expr: expr.clone(),
+                        expr_ty: ty.clone(),
+                        ctx: ctx.clone(),
+                    });
+                }
+
+                Err(format!("variable {} not in scope", name))
+            }
+            CoreExpr::Abs(arg, body) => {
+                trace_rule("I=>");
+                let alpha_ctx_evar = self.make_fresh_evar();
+                let beta_ctx_evar = self.make_fresh_evar();
+                let arg_ctx_evar = ContextEntry::TypedVar {
+                    var_name: arg.clone(),
+                    ty: Ty::TyExVar(alpha_ctx_evar.clone()),
+                };
+
+                ctx.add_entry(ContextEntry::ExVar(alpha_ctx_evar.clone()));
+                ctx.add_entry(ContextEntry::ExVar(beta_ctx_evar.clone()));
+                ctx.add_entry(arg_ctx_evar.clone());
+
+                let checked =
+                    self.solve_checking(ctx, body, &Ty::TyExVar(beta_ctx_evar.clone()))?;
+
+                Ok(InferenceResult {
+                    expr: expr.clone(),
+                    expr_ty: Ty::make_arr(
+                        Ty::TyExVar(alpha_ctx_evar.clone()),
+                        Ty::TyExVar(beta_ctx_evar.clone()),
+                    ),
+                    ctx: checked.ctx.until(&arg_ctx_evar.clone()),
+                })
+            }
             CoreExpr::App(left, right) => {
-                let inf_left = self.solve_inference(ctx, left)?;
+                trace_rule("->E");
+                let mut inf_left = self.solve_inference(ctx, left)?;
                 let ctx_applied_to_inf = apply_context(&inf_left.ctx, &inf_left.expr_ty);
-                let inf_app = self.solve_app_inference(ctx, &ctx_applied_to_inf, right)?;
+                let inf_app = self.solve_app_inference(
+                    &mut inf_left.ctx,
+                    &ctx_applied_to_inf,
+                    right,
+                )?;
 
                 Ok(inf_app)
             }
@@ -478,19 +622,19 @@ impl TypeInference {
 }
 
 fn main() {
-    println!("Hello, world!");
+    let f_var = Box::new(CoreExpr::Var("f".to_string()));
+    let g_var = Box::new(CoreExpr::Var("g".to_string()));
+    let f1 = CoreExpr::Abs("f".to_string(), Box::new(CoreExpr::App(f_var, g_var)));
+    let f2 = CoreExpr::Abs("g".to_string(), Box::new(f1.clone()));
 
+    let app = CoreExpr::App(Box::new(f2.clone()), Box::new(CoreExpr::Unit));
+
+    let mut inference = TypeInference::new();
     let mut ctx = Context::new();
-    ctx.add_entry(ContextEntry::ExVar("a".to_string()));
-    ctx.add_entry(ContextEntry::MonoVar("b".to_string()));
-    ctx.add_entry(ContextEntry::Marker {
-        var_name: "ex1".to_string(),
-    });
-    ctx.add_entry(ContextEntry::MonoVar("c".to_string()));
 
-    let new_ctx = ctx.split_2(&ContextEntry::Marker {
-        var_name: "ex1".to_string(),
-    });
+    let solved = inference.solve_inference(&mut ctx, &app).unwrap();
+    let result_type = solved.expr_ty.clone();
 
-    println!("{:?}", new_ctx);
+    println!("{:?}", apply_context(&solved.ctx, &result_type));
+
 }
