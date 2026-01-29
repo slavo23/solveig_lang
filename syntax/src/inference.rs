@@ -432,8 +432,19 @@ impl TypeInference {
 
                 Ok(inf_app)
             }
+            CoreExpr::Anno(ann_expr, assigned_ty) => {
+                assert!(
+                    ty_well_formed(assigned_ty, &ctx),
+                    "{}",
+                    format!(
+                        "ill-formed type in annotation {:?}:{}",
+                        ann_expr.clone(),
+                        assigned_ty.pretty()
+                    )
+                );
+                let delta = self.solve_checking(ctx, ann_expr, assigned_ty)?;
+                Ok((delta, assigned_ty.clone()))
+            }
         }
     }
 }
-
-

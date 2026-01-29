@@ -9,12 +9,41 @@ pub enum Ty {
 
 impl Ty {
     pub fn pretty(&self) -> String {
-        match self {
-            Ty::TyUnit => "()".into(),
-            Ty::TyVar(name) | Ty::TyExVar(name) => name.clone(),
-            Ty::TyArr(lhs, rhs) => format!("{} -> {}", lhs.pretty(), rhs.pretty()),
-            Ty::TyForAll(quantifier, body) => format!("forall {}. {}", quantifier, body.pretty()),
+        const PRECEDENCE_LOOSE: u8 = 0;
+        const PRECENDENCE_MID: u8 = 1;
+        const PRECEDENCE_TIGHT: u8 = 2;
+
+        fn print_precedence(t: &Ty) -> u8 {
+            match t {
+                Ty::TyForAll(_, _) => PRECEDENCE_LOOSE,
+                Ty::TyArr(_, _) => PRECENDENCE_MID,
+                _ => PRECEDENCE_TIGHT,
+            }
         }
+
+        fn traverse_helper(t: &Ty, parent_precedence: u8) -> String {
+            let curr_precedence = print_precedence(t);
+            let type_fmt = match t {
+                Ty::TyUnit => "()".into(),
+                Ty::TyVar(name) | Ty::TyExVar(name) => name.clone(),
+                Ty::TyArr(lhs, rhs) => {
+                    let lhs_fmt = traverse_helper(lhs, PRECEDENCE_TIGHT);
+                    let rhs_fmt = traverse_helper(rhs, PRECENDENCE_MID);
+                    format!("{lhs_fmt} -> {rhs_fmt}")
+                }
+                Ty::TyForAll(q, body) => {
+                    format!("forall {q}. {}", traverse_helper(body, PRECEDENCE_LOOSE))
+                }
+            };
+
+            if curr_precedence < parent_precedence {
+                format!("({type_fmt})")
+            } else {
+                type_fmt
+            }
+        }
+
+        traverse_helper(self, PRECEDENCE_LOOSE)
     }
 
     pub fn is_mono(&self) -> bool {
@@ -34,7 +63,7 @@ impl Ty {
             }
             Self::TyForAll(quantifier, body) => {
                 var_name == *quantifier || body.occurs_check(var_name)
-            },
+            }
             _ => false,
         }
     }
