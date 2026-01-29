@@ -6,3 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+
+core_lang = {path = "core_lang", version = "0.1.0"}
+syntax = {path = "syntax", version = "0.1.0" }
