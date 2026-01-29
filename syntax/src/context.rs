@@ -20,7 +20,7 @@ impl Context {
     }
 
     pub fn from_entries(entries: Vec<ContextEntry>) -> Context {
-        return Context { entries: entries }
+        return Context { entries: entries };
     }
 
     pub fn add_entry(self, entry: ContextEntry) -> Context {
@@ -44,7 +44,7 @@ impl Context {
 
     pub fn has_solved_evar(&self, evar_name: String) -> bool {
         self.find_solved_evar(evar_name).is_some()
-    } 
+    }
 
     pub fn until(&self, entry: &ContextEntry) -> Context {
         let (left, _, _) = self.split_2(entry);
@@ -114,7 +114,7 @@ impl Context {
     }
 
     pub fn has_var(&self, var_name: String) -> bool {
-                self.entries
+        self.entries
             .iter()
             .find(|ent| {
                 matches!(
