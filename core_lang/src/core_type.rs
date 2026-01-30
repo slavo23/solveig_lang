@@ -82,7 +82,7 @@ impl Ty {
 
     pub fn substitute(&self, var_name: &str, with_type: &Ty) -> Ty {
         match self {
-            Self::TyVar(sub_var_name) => {
+            Self::TyVar(sub_var_name) | Self::TyExVar(sub_var_name) => {
                 if sub_var_name == var_name {
                     with_type.clone()
                 } else {
@@ -101,7 +101,7 @@ impl Ty {
                     Self::make_forall(quantifier.clone(), body.substitute(var_name, with_type))
                 }
             }
-            _ => panic!("subst failed"),
+            
         }
     }
 }
