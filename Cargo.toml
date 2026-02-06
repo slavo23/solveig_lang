@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 
 core_lang = {path = "core_lang", version = "0.1.0"}
+surface_lang = {path = "surface_lang", version = "0.1.0"}
 syntax = {path = "syntax", version = "0.1.0" }
 base = {path = "base", version = "0.1.0" }
