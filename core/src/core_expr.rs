@@ -1,13 +1,13 @@
 use crate::core_type::Ty;
 
-
 #[derive(Clone, Debug)]
 pub enum CoreExpr {
     Unit,
     Var(String),
     App(Box<CoreExpr>, Box<CoreExpr>),
     Abs(String, Box<CoreExpr>),
-    Anno(Box<CoreExpr>, Ty)
+    Anno(Box<CoreExpr>, Ty),
+    Let(String, Box<CoreExpr>, Box<CoreExpr>),
 }
 
 impl CoreExpr {

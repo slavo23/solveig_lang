@@ -71,7 +71,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "core_lang"
+name = "core"
 version = "0.1.0"
 
 [[package]]
@@ -108,8 +108,9 @@ name = "lang_experiments"
 version = "0.1.0"
 dependencies = [
  "base",
- "core_lang",
- "surface_lang",
+ "chumsky",
+ "core",
+ "surface",
  "syntax",
 ]
 
@@ -229,7 +230,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "surface_lang"
+name = "surface"
 version = "0.1.0"
 dependencies = [
  "ariadne",
@@ -251,7 +252,7 @@ dependencies = [
 name = "syntax"
 version = "0.1.0"
 dependencies = [
- "core_lang",
+ "core",
 ]
 
 [[package]]

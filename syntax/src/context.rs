@@ -1,4 +1,4 @@
-use core_lang::core_type::Ty;
+use core::core_type::Ty;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ContextEntry {

@@ -1,5 +1,5 @@
 use crate::context::{Context, ContextEntry};
-use core_lang::{core_expr::CoreExpr, core_type::Ty};
+use core::{core_expr::CoreExpr, core_type::Ty};
 
 pub fn apply_context(ctx: &Context, ty: &Ty) -> Ty {
     match ty {
@@ -445,6 +445,7 @@ impl TypeInference {
                 let delta = self.solve_checking(ctx, ann_expr, assigned_ty)?;
                 Ok((delta, assigned_ty.clone()))
             }
+            _ => todo!("unhandled expression!"),
         }
     }
 }
