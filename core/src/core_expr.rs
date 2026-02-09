@@ -8,6 +8,7 @@ pub enum CoreExpr {
     Abs(String, Box<CoreExpr>),
     Anno(Box<CoreExpr>, Ty),
     Let(String, Box<CoreExpr>, Box<CoreExpr>),
+    Fix(Box<CoreExpr>)
 }
 
 impl CoreExpr {
@@ -29,5 +30,13 @@ impl CoreExpr {
 
     pub fn anno(expr: CoreExpr, ty: Ty) -> CoreExpr {
         CoreExpr::Anno(Box::new(expr), ty)
+    }
+
+    pub fn let_expr(bind_name: String, body: CoreExpr, in_expr: CoreExpr) -> CoreExpr {
+        CoreExpr::Let(bind_name.into(), Box::new(body), Box::new(in_expr))
+    }
+
+    pub fn fix(expr: CoreExpr) -> CoreExpr {
+        CoreExpr::Fix(Box::new(expr))
     }
 }

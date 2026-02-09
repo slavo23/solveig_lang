@@ -102,6 +102,12 @@ impl Context {
         Self { entries: left_ctx }
     }
 
+    pub fn remove_in_place(&self, on_entry: &ContextEntry) -> Context {
+        let (left_ctx, _, right_ctx) = self.split_2(on_entry);
+
+        Self::from_2(left_ctx, right_ctx)
+    }
+
     pub fn has_evar(&self, evar_name: String) -> bool {
         self.entries
             .iter()

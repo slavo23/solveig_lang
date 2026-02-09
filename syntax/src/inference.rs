@@ -121,7 +121,7 @@ impl TypeInference {
             (ty, Ty::TyExVar(evar)) => {
                 self.trace_rule("<: instantiateR");
                 if ty.occurs_check(evar.clone()) {
-                    return Err(format!("occurs check error instantiateR"));
+                    return Err(format!("occurs check error instantiateR: {} <: {}", ty_a.pretty(), ty_b.pretty()));
                 };
                 self.instantiate_right(ctx, ty_a, evar.clone())
             }
@@ -445,7 +445,31 @@ impl TypeInference {
                 let delta = self.solve_checking(ctx, ann_expr, assigned_ty)?;
                 Ok((delta, assigned_ty.clone()))
             }
-            _ => todo!("unhandled expression!"),
+            CoreExpr::Let(bind_name, bind_expr, in_expr) => {
+                let (gamma, bind_expr_ty) = self.solve_inference(ctx, bind_expr)?;
+                let typed_var_ctx_entry = ContextEntry::TypedVar {
+                    var_name: bind_name.into(),
+                    ty: bind_expr_ty,
+                };
+                let theta = gamma.add_entry(typed_var_ctx_entry.clone());
+                let (delta, in_expr_ty) = self.solve_inference(theta, in_expr)?;
+
+                Ok((
+                    delta.remove_in_place(&typed_var_ctx_entry.clone()),
+                    in_expr_ty,
+                ))
+            },
+            CoreExpr::Fix(inner) => {
+                let alpha_evar_name = self.make_fresh_evar();
+                let alpha_evar_ctx_entry = ContextEntry::ExVar(alpha_evar_name.clone());
+                let alpha_evar_ty = Ty::TyExVar(alpha_evar_name.clone());
+                let alpha_evar_fn = Ty::make_arr(alpha_evar_ty.clone(), alpha_evar_ty.clone());
+
+                let gamma = ctx.add_entry(alpha_evar_ctx_entry);
+                let delta = self.solve_checking(gamma, inner, &alpha_evar_fn)?;
+
+                Ok((delta, alpha_evar_ty))
+            }
         }
     }
 }
