@@ -5,7 +5,7 @@ use chumsky::{
     span::SpanWrap,
 };
 
-use crate::ast::{SurfaceExpr, SurfaceTy};
+use crate::ast::{SurfaceDefinition, SurfaceExpr, SurfaceTy, SurfaceProgram};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
@@ -152,13 +152,47 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     })
 }
 
+pub fn func_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<SurfaceDefinition<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    let ident = select_ref! { Token::Ident(x) => *x };
+    just(Token::Let)
+        .ignore_then(
+            ident
+                .spanned()
+                .then_ignore(just(Token::Colon))
+                .then(ty_parser()),
+        )
+        .then_ignore(just(Token::EqBind))
+        .then(expr_parser())
+        .map(|((name, signature), body)| SurfaceDefinition::FunDef {
+            name: name,
+            signature: signature,
+            body: body,
+        })
+        .spanned()
+}
+
+pub fn toplevel_defition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<SurfaceDefinition<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    // TODO: add toplevel type choice
+    choice((func_definition_parser(), ))
+}
+
 pub fn program_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
     MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
-    Vec<Spanned<SurfaceExpr<'src>>>,
+    SurfaceProgram<'src>,
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
-    expr_parser().separated_by(just(Token::Semicolon)).collect()
+    toplevel_defition_parser().separated_by(just(Token::Semicolon)).collect()
 }
 
 #[test]

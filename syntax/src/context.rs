@@ -63,12 +63,11 @@ impl Context {
 
     pub fn replace(&self, entry: &ContextEntry, replacement: &ContextEntry) -> Context {
         let mut new_entries = self.entries.clone();
-        for i in 0..new_entries.len() {
-            if new_entries[i] == *entry {
-                new_entries[i] = replacement.clone();
-            }
+        if let Some(i) = new_entries.iter().rposition(|ent| ent == entry) {
+            new_entries[i] = replacement.clone();
+        } else {
+            panic!("{:?} not found in the context", entry);
         }
-
         Context {
             entries: new_entries,
         }
@@ -78,20 +77,16 @@ impl Context {
         &self,
         on_entry: &ContextEntry,
     ) -> (Vec<ContextEntry>, &ContextEntry, Vec<ContextEntry>) {
-        let found_ix = self.entries.iter().position(|ent| ent == on_entry);
+        let found_ix = self.entries.iter().rposition(|ent| ent == on_entry);
         match found_ix {
             Some(ix) => {
                 let middle = &self.entries[ix];
-                let entries_copy = self.entries.clone();
-
-                let left = entries_copy.get(0..ix).unwrap_or_default().to_vec();
-                let right = &entries_copy.get(ix + 1..).unwrap_or_default().to_vec();
-
-                (left.clone(), middle, right.clone())
+                let left = self.entries[..ix].to_vec();
+                let right = self.entries[ix + 1..].to_vec();
+                (left, middle, right)
             }
             None => {
-                let err = format!("{:?}", on_entry);
-                panic!("{} not found in the context", err);
+                panic!("{:?} not found in the context", on_entry);
             }
         }
     }

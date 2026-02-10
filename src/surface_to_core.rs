@@ -1,6 +1,8 @@
-use core::core_expr::CoreExpr;
-use core::core_type::Ty;
-use surface::ast::{SpannedWrapper, SurfaceExpr, SurfaceTy};
+use core::{
+    core_expr::{CoreDefinition, CoreExpr},
+    core_type::Ty,
+};
+use surface::ast::{SpannedWrapper, SurfaceDefinition, SurfaceExpr, SurfaceProgram, SurfaceTy};
 
 pub fn convert_surface_to_core_ty<'src>(sf_ty: &SpannedWrapper<SurfaceTy<'src>>) -> Ty {
     match &**sf_ty {
@@ -9,14 +11,12 @@ pub fn convert_surface_to_core_ty<'src>(sf_ty: &SpannedWrapper<SurfaceTy<'src>>)
             convert_surface_to_core_ty(&**lhs),
             convert_surface_to_core_ty(&**rhs),
         ),
-        SurfaceTy::ForAll(quants, body) => {
-            // TODO: handle multiple args
-
-            Ty::TyForAll(
-                (*quants[0]).into(),
-                Box::new(convert_surface_to_core_ty(&**body)),
-            )
-        }
+        SurfaceTy::ForAll(quants, body) => quants
+            .iter()
+            .rev()
+            .fold(convert_surface_to_core_ty(&**body), |acc, quant| {
+                Ty::make_forall((*quant).to_string(), acc)
+            }),
         SurfaceTy::Unit => Ty::TyUnit,
     }
 }
@@ -44,11 +44,19 @@ pub fn convert_to_core_expr<'src>(sf_expr: &SpannedWrapper<SurfaceExpr<'src>>) -
     }
 }
 
-pub fn convert_to_core_program<'src>(
-    sf_prog: Vec<SpannedWrapper<SurfaceExpr<'src>>>,
-) -> Vec<CoreExpr> {
+pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> Vec<CoreDefinition> {
     sf_prog
         .iter()
-        .map(|prog_entry| convert_to_core_expr(prog_entry))
+        .map(|defn| match &**defn {
+            SurfaceDefinition::FunDef {
+                name,
+                signature,
+                body,
+            } => CoreDefinition::FunDef {
+                name: (**name).into(),
+                signature: convert_surface_to_core_ty(signature),
+                body: convert_to_core_expr(body),
+            },
+        })
         .collect()
 }

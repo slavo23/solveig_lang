@@ -11,6 +11,15 @@ pub enum CoreExpr {
     Fix(Box<CoreExpr>)
 }
 
+#[derive(Clone, Debug)]
+pub enum CoreDefinition {
+    FunDef {
+        name: String,
+        signature: Ty,
+        body: CoreExpr
+    }
+}
+
 impl CoreExpr {
     pub fn app(lhs: CoreExpr, rhs: CoreExpr) -> CoreExpr {
         CoreExpr::App(Box::new(lhs), Box::new(rhs))

@@ -1,5 +1,8 @@
 use crate::context::{Context, ContextEntry};
-use core::{core_expr::CoreExpr, core_type::Ty};
+use core::{
+    core_expr::{CoreDefinition, CoreExpr},
+    core_type::Ty,
+};
 
 pub fn apply_context(ctx: &Context, ty: &Ty) -> Ty {
     match ty {
@@ -121,7 +124,11 @@ impl TypeInference {
             (ty, Ty::TyExVar(evar)) => {
                 self.trace_rule("<: instantiateR");
                 if ty.occurs_check(evar.clone()) {
-                    return Err(format!("occurs check error instantiateR: {} <: {}", ty_a.pretty(), ty_b.pretty()));
+                    return Err(format!(
+                        "occurs check error instantiateR: {} <: {}",
+                        ty_a.pretty(),
+                        ty_b.pretty()
+                    ));
                 };
                 self.instantiate_right(ctx, ty_a, evar.clone())
             }
@@ -218,6 +225,7 @@ impl TypeInference {
             let mut gamma = gamma_l.clone();
             gamma.push(solution);
             gamma.extend(gamma_r);
+
             return Ok(Context::from_entries(gamma));
         }
         match to_type {
@@ -458,7 +466,7 @@ impl TypeInference {
                     delta.remove_in_place(&typed_var_ctx_entry.clone()),
                     in_expr_ty,
                 ))
-            },
+            }
             CoreExpr::Fix(inner) => {
                 let alpha_evar_name = self.make_fresh_evar();
                 let alpha_evar_ctx_entry = ContextEntry::ExVar(alpha_evar_name.clone());
@@ -471,5 +479,32 @@ impl TypeInference {
                 Ok((delta, alpha_evar_ty))
             }
         }
+    }
+
+    pub fn check_program(&mut self, definitions: Vec<CoreDefinition>) -> Result<Context, String> {
+        let mut ctx = Context::new();
+        for defn in definitions.iter() {
+            match defn {
+                CoreDefinition::FunDef {
+                    name,
+                    signature,
+                    body,
+                } => {
+                    if !ty_well_formed(signature, &ctx) {
+                        return Err(format!(
+                            "ill-formed top-level type for {}: {}",
+                            name,
+                            signature.pretty()
+                        ));
+                    }
+                    let delta = self.solve_checking(ctx.clone(), body, signature)?;
+                    ctx = delta.add_entry(ContextEntry::TypedVar {
+                        var_name: name.clone(),
+                        ty: signature.clone(),
+                    })
+                }
+            }
+        }
+        Ok(ctx)
     }
 }

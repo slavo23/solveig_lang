@@ -96,12 +96,28 @@ impl Ty {
             ),
             Self::TyForAll(quantifier, body) => {
                 if quantifier == var_name {
-                    Self::make_forall(quantifier.clone(), with_type.clone())
+                    Self::make_forall(quantifier.clone(), (**body).clone())
                 } else {
                     Self::make_forall(quantifier.clone(), body.substitute(var_name, with_type))
                 }
             }
-            
         }
+    }
+}
+
+
+#[derive(Clone, PartialEq, Debug)]
+enum Kind {
+    KStar,
+    KArrow(Box<Kind>, Box<Kind>),
+}
+
+impl Kind {
+    pub fn make_star() -> Self {
+        Kind::KStar
+    }
+
+    pub fn make_arrow(lhs: Kind, rhs: Kind) -> Self {
+        Kind::KArrow(Box::new(lhs), Box::new(rhs))
     }
 }
