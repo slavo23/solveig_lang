@@ -2,6 +2,7 @@ use core::{
     core_expr::{CoreDefinition, CoreExpr},
     core_type::Ty,
 };
+use std::collections::HashMap;
 use surface::ast::{SpannedWrapper, SurfaceDefinition, SurfaceExpr, SurfaceProgram, SurfaceTy};
 
 pub fn convert_surface_to_core_ty<'src>(sf_ty: &SpannedWrapper<SurfaceTy<'src>>) -> Ty {
@@ -45,18 +46,38 @@ pub fn convert_to_core_expr<'src>(sf_expr: &SpannedWrapper<SurfaceExpr<'src>>) -
 }
 
 pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> Vec<CoreDefinition> {
-    sf_prog
-        .iter()
-        .map(|defn| match &**defn {
-            SurfaceDefinition::FunDef {
-                name,
-                signature,
-                body,
-            } => CoreDefinition::FunDef {
-                name: (**name).into(),
-                signature: convert_surface_to_core_ty(signature),
-                body: convert_to_core_expr(body),
-            },
-        })
-        .collect()
+    let signatures = sf_prog.iter().fold(
+        HashMap::new(),
+        |mut sig_map: HashMap<String, Ty>, curr| match &**curr {
+            SurfaceDefinition::SigDef { name, ty } => {
+                sig_map.insert((*name).to_string(), convert_surface_to_core_ty(ty));
+                sig_map
+            }
+            _ => sig_map,
+        },
+    );
+
+    let mut func_defs = vec![];
+
+    for defn in sf_prog.iter() {
+        match &**defn {
+            SurfaceDefinition::FunDef { name, body, params } => {
+                if let Some(func_signature) = signatures.get(**name) {
+                    let mut core_body = convert_to_core_expr(body);
+                    for param in params.iter().rev() {
+                        core_body = CoreExpr::Abs((*param).to_string(), Box::new(core_body))
+                    }
+
+                    func_defs.push(CoreDefinition::FunDef {
+                        name: (**name).to_string(),
+                        signature: func_signature.clone(),
+                        body: core_body ,
+                    });
+                }
+            }
+            _ => continue
+        }
+    }
+
+    func_defs
 }

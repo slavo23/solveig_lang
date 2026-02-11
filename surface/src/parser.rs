@@ -5,7 +5,7 @@ use chumsky::{
     span::SpanWrap,
 };
 
-use crate::ast::{SurfaceDefinition, SurfaceExpr, SurfaceTy, SurfaceProgram};
+use crate::ast::{SurfaceDefinition, SurfaceExpr, SurfaceProgram, SurfaceTy};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
@@ -159,22 +159,34 @@ pub fn func_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
     let ident = select_ref! { Token::Ident(x) => *x };
-    just(Token::Let)
-        .ignore_then(
-            ident
-                .spanned()
-                .then_ignore(just(Token::Colon))
-                .then(ty_parser()),
-        )
+
+    ident
+        .spanned()
+        .then(ident.spanned().repeated().collect::<Vec<_>>())
         .then_ignore(just(Token::EqBind))
         .then(expr_parser())
-        .map(|((name, signature), body)| SurfaceDefinition::FunDef {
-            name: name,
-            signature: signature,
-            body: body,
+        .map(|((name, params), body)| SurfaceDefinition::FunDef { name, body, params })
+        .spanned()
+}
+
+pub fn signature_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<SurfaceDefinition<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    let ident = select_ref! { Token::Ident(x) => *x };
+
+    ident
+        .spanned()
+        .then_ignore(just(Token::Colon))
+        .then(ty_parser())
+        .map(|(name, ty)| {
+            SurfaceDefinition::SigDef { name, ty }
         })
         .spanned()
 }
+
 
 pub fn toplevel_defition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
@@ -183,7 +195,7 @@ pub fn toplevel_defition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
     // TODO: add toplevel type choice
-    choice((func_definition_parser(), ))
+    choice((func_definition_parser(), signature_definition_parser()))
 }
 
 pub fn program_parser<'tokens, 'src: 'tokens>() -> impl Parser<
@@ -192,7 +204,9 @@ pub fn program_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     SurfaceProgram<'src>,
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
-    toplevel_defition_parser().separated_by(just(Token::Semicolon)).collect()
+    toplevel_defition_parser()
+        .separated_by(just(Token::Semicolon))
+        .collect()
 }
 
 #[test]

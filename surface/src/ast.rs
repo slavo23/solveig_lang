@@ -6,8 +6,12 @@ pub type SpannedWrapper<T, S = SimpleSpan> = Spanned<T, S>;
 pub enum SurfaceDefinition<'src> {
     FunDef {
         name: Spanned<&'src str>,
-        signature: Spanned<SurfaceTy<'src>>,
-        body: Spanned<SurfaceExpr<'src>>
+        body: Spanned<SurfaceExpr<'src>>,
+        params: Vec<Spanned<&'src str>>
+    },
+    SigDef {
+        name: Spanned<&'src str>,
+        ty: Spanned<SurfaceTy<'src>>
     }
 }
 
