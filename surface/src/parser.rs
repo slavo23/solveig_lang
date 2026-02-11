@@ -2,14 +2,16 @@ use chumsky::{
     input::{Input as _, MappedInput},
     pratt::*,
     prelude::*,
+    primitive::select_ref,
     span::SpanWrap,
 };
 
-use crate::ast::{SurfaceDefinition, SurfaceExpr, SurfaceProgram, SurfaceTy};
+use crate::ast::{SufraceConstructor, SurfaceDefinition, SurfaceExpr, SurfaceProgram, SurfaceTy};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
     Ident(&'src str),
+    UpperIdent(&'src str),
     Parens(Vec<Spanned<Self>>),
     Sig,
     Fun,
@@ -22,6 +24,8 @@ pub enum Token<'src> {
     EqBind,
     Arrow,
     FatArrow,
+    Data,
+    Pipe,
 }
 
 pub fn lexer<'src>()
@@ -34,7 +38,15 @@ pub fn lexer<'src>()
                 "fun" => Token::Fun,
                 "forall" => Token::ForAll,
                 "sig" => Token::Sig,
-                s => Token::Ident(s),
+                "data" => Token::Data,
+                s => {
+                    let is_upper = s.chars().nth(0).unwrap().is_uppercase();
+                    if is_upper {
+                        Token::UpperIdent(s)
+                    } else {
+                        Token::Ident(s)
+                    }
+                }
             }),
             just("=>").to(Token::FatArrow),
             just("=").to(Token::EqBind),
@@ -42,6 +54,7 @@ pub fn lexer<'src>()
             just(":").to(Token::Colon),
             just(".").to(Token::Dot),
             just(";").to(Token::Semicolon),
+            just("|").to(Token::Pipe),
             token
                 .repeated()
                 .collect()
@@ -57,6 +70,36 @@ pub fn lexer<'src>()
     .collect()
 }
 
+fn ty_atom_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<SurfaceTy<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    let ident = select_ref! { Token::Ident(x) => *x };
+    let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
+
+    let var_ty = ident.map(SurfaceTy::Var).spanned();
+
+    let con_ty = upper_ident
+        .spanned()
+        .map(SurfaceTy::Con)
+        .spanned();
+
+    let unit_ty = select_ref! {
+        Token::Parens(ts) if ts.is_empty() => SurfaceTy::Unit
+    }
+    .spanned();
+
+    // Parenthesized type is ONE atomic field; inside parens parse the full type
+    let parens_ty = ty_parser().nested_in(select_ref! {
+        Token::Parens(ts) = e => ts.split_spanned(e.span())
+    });
+
+    choice((unit_ty, con_ty, var_ty, parens_ty))
+}
+
+
 fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
     MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
@@ -65,6 +108,8 @@ fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
 > {
     recursive(|ty| {
         let ident = select_ref! { Token::Ident(x) => *x };
+        let upper_ident = select_ref! { Token::UpperIdent(x) => *x};
+
         let var_ty = ident.map(SurfaceTy::Var);
         let unit_ty = select_ref! {
             Token::Parens(ts) if ts.is_empty() => SurfaceTy::Unit
@@ -79,13 +124,19 @@ fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             SurfaceTy::Arr(Box::new(lhs), Box::new(rhs)).with_span(e.span())
         });
 
+        let ctor_ty = upper_ident.spanned().map(SurfaceTy::Con);
+        let ctor_infix = infix(left(0), empty(), |lhs, _, rhs, e| {
+            SurfaceTy::App(Box::new(lhs), Box::new(rhs)).with_span(e.span())
+        });
+
         choice((
             unit_ty.spanned(),
+            ctor_ty.spanned(),
             var_ty.spanned(),
             forall_ty.spanned(),
             ty.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
         ))
-        .pratt((arr_infix,))
+        .pratt((arr_infix, ctor_infix))
     })
 }
 
@@ -97,9 +148,12 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
 > {
     recursive(|expr| {
         let ident = select_ref! { Token::Ident(x) => *x };
+        let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
         let unit_expr = select_ref! {
             Token::Parens(ts) if ts.is_empty() => SurfaceExpr::Unit
         };
+
+        let expr_ctor = upper_ident.spanned().map(SurfaceExpr::Con);
 
         let expr_fun = just(Token::Fun)
             .ignore_then(ident.spanned())
@@ -134,7 +188,7 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             })
             .boxed();
 
-        let app_infix = infix(left(0), empty(), |lhs, _, rhs, e| {
+        let app_infix = infix(left(1), empty(), |lhs, _, rhs, e| {
             SurfaceExpr::App(Box::new(lhs), Box::new(rhs)).with_span(e.span())
         });
 
@@ -142,6 +196,7 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
 
         choice((
             expr_let.spanned(),
+            expr_ctor.spanned(),
             expr_let_anno.spanned(),
             expr_fun.spanned(),
             unit_expr.spanned(),
@@ -181,12 +236,43 @@ pub fn signature_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
         .spanned()
         .then_ignore(just(Token::Colon))
         .then(ty_parser())
-        .map(|(name, ty)| {
-            SurfaceDefinition::SigDef { name, ty }
-        })
+        .map(|(name, ty)| SurfaceDefinition::SigDef { name, ty })
         .spanned()
 }
 
+pub fn data_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<SurfaceDefinition<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    let ident = select_ref! { Token::Ident(x) => *x };
+    let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
+
+    let ctor_variant = upper_ident
+        .spanned()
+        .then(ty_atom_parser().repeated().collect::<Vec<_>>())
+        .map(|(name, ty)| SufraceConstructor { name, args: ty });
+
+    just(Token::Data)
+        .ignore_then(upper_ident.spanned())
+        .then(ident.spanned().repeated().collect::<Vec<_>>())
+        .then_ignore(just(Token::EqBind))
+        .then(
+            ctor_variant
+                .spanned()
+                .separated_by(just(Token::Pipe))
+                .collect::<Vec<_>>(),
+        )
+        .map(
+            |((ctor_name, params), variants)| SurfaceDefinition::DataDef {
+                name: ctor_name,
+                ty_params: params,
+                constructors: variants,
+            },
+        )
+        .spanned()
+}
 
 pub fn toplevel_defition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
@@ -194,8 +280,11 @@ pub fn toplevel_defition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     Spanned<SurfaceDefinition<'src>>,
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
-    // TODO: add toplevel type choice
-    choice((func_definition_parser(), signature_definition_parser()))
+    choice((
+        func_definition_parser(),
+        signature_definition_parser(),
+        data_definition_parser(),
+    ))
 }
 
 pub fn program_parser<'tokens, 'src: 'tokens>() -> impl Parser<
@@ -207,14 +296,4 @@ pub fn program_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     toplevel_defition_parser()
         .separated_by(just(Token::Semicolon))
         .collect()
-}
-
-#[test]
-fn test_lexer() {
-    let raw = r"let id: forall a. a -> a = fun b => b in id ()";
-
-    let l = lexer().parse(raw).unwrap();
-    let _ = expr_parser()
-        .parse(l[..].split_spanned((0..raw.len()).into()))
-        .unwrap();
 }

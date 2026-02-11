@@ -3,15 +3,21 @@ use core::{
     core_expr::{CoreDefinition, CoreExpr},
     core_type::Ty,
 };
+use std::iter::successors;
 
-pub fn apply_context(ctx: &Context, ty: &Ty) -> Ty {
+pub fn apply_context_once(ctx: &Context, ty: &Ty) -> Ty {
     match ty {
-        Ty::TyVar(_) => ty.clone(),
+        Ty::TyVar(_) | Ty::TyCon(_) => ty.clone(),
         Ty::TyUnit => ty.clone(),
         Ty::TyArr(lhs, rhs) => {
             let app_lhs = apply_context(ctx, lhs);
             let app_rhs = apply_context(ctx, rhs);
             Ty::make_arr(app_lhs, app_rhs)
+        }
+        Ty::TyApp(lhs, rhs) => {
+            let app_lhs = apply_context(ctx, lhs);
+            let app_rhs = apply_context(ctx, rhs);
+            Ty::make_app(app_lhs, app_rhs)
         }
         Ty::TyExVar(ex_var_name) => {
             if let Some(ContextEntry::SolvedEVar {
@@ -30,11 +36,23 @@ pub fn apply_context(ctx: &Context, ty: &Ty) -> Ty {
     }
 }
 
+pub fn apply_context(ctx: &Context, ty: &Ty) -> Ty {
+    successors(Some(ty.clone()), |prev| {
+        let next = apply_context_once(ctx, prev);
+        if next != *prev { Some(next) } else { None }
+    })
+    .last()
+    .unwrap()
+}
+
 fn ty_well_formed(ty: &Ty, ctx: &Context) -> bool {
     match ty {
         Ty::TyUnit => true,
         Ty::TyVar(var_name) => ctx.has_var(var_name.clone()),
-        Ty::TyArr(lhs, rhs) => ty_well_formed(lhs, ctx) && ty_well_formed(rhs, ctx),
+        Ty::TyArr(lhs, rhs) | Ty::TyApp(lhs, rhs) => {
+            ty_well_formed(lhs, ctx) && ty_well_formed(rhs, ctx)
+        }
+
         Ty::TyExVar(evar_name) => {
             ctx.has_evar(evar_name.clone()) || ctx.has_solved_evar(evar_name.clone())
         }
@@ -42,6 +60,7 @@ fn ty_well_formed(ty: &Ty, ctx: &Context) -> bool {
             body,
             &ctx.clone().add_entry(ContextEntry::MonoVar(quant.clone())),
         ),
+        _ => todo!("add constructors!"),
     }
 }
 
@@ -77,6 +96,9 @@ impl TypeInference {
         match (ty_a, ty_b) {
             (Ty::TyExVar(evar_a), Ty::TyExVar(evar_b)) if evar_a == evar_b => Ok(ctx.clone()),
             (Ty::TyVar(ty_var_a), Ty::TyVar(ty_var_b)) if ty_var_a == ty_var_b => Ok(ctx.clone()),
+            (Ty::TyCon(ctor_name_a), Ty::TyCon(ctor_name_b)) if ctor_name_a == ctor_name_b => {
+                Ok(ctx.clone())
+            }
             (Ty::TyUnit, Ty::TyUnit) => Ok(ctx.clone()),
             (Ty::TyArr(a1, a2), Ty::TyArr(b1, b2)) => {
                 self.trace_rule("<:->");
@@ -478,6 +500,7 @@ impl TypeInference {
 
                 Ok((delta, alpha_evar_ty))
             }
+            _ => todo!("expressions like {:?} are not implemented", expr),
         }
     }
 

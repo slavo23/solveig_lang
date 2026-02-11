@@ -19,6 +19,11 @@ pub fn convert_surface_to_core_ty<'src>(sf_ty: &SpannedWrapper<SurfaceTy<'src>>)
                 Ty::make_forall((*quant).to_string(), acc)
             }),
         SurfaceTy::Unit => Ty::TyUnit,
+        SurfaceTy::Con(ctor_name) => Ty::TyCon(ctor_name.to_string()),
+        SurfaceTy::App(lhs, rhs) => Ty::make_app(
+            convert_surface_to_core_ty(&**lhs),
+            convert_surface_to_core_ty(&**rhs),
+        ),
     }
 }
 
@@ -42,10 +47,24 @@ pub fn convert_to_core_expr<'src>(sf_expr: &SpannedWrapper<SurfaceExpr<'src>>) -
             Box::new(convert_to_core_expr(&**body)),
             Box::new(convert_to_core_expr(&**then)),
         ),
+        SurfaceExpr::Con(ctor_name) => CoreExpr::Con(ctor_name.to_string()),
     }
 }
 
 pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> Vec<CoreDefinition> {
+    for data_def in sf_prog.iter() {
+        if let SurfaceDefinition::DataDef {
+            name,
+            ty_params,
+            constructors,
+        } = &**data_def
+        {
+            
+        } else {
+            continue;
+        }
+    }
+
     let signatures = sf_prog.iter().fold(
         HashMap::new(),
         |mut sig_map: HashMap<String, Ty>, curr| match &**curr {
@@ -71,11 +90,11 @@ pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> Vec<CoreD
                     func_defs.push(CoreDefinition::FunDef {
                         name: (**name).to_string(),
                         signature: func_signature.clone(),
-                        body: core_body ,
+                        body: core_body,
                     });
                 }
             }
-            _ => continue
+            _ => continue,
         }
     }
 

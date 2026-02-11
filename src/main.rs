@@ -5,7 +5,7 @@ use surface_to_core::convert_to_core_program;
 use syntax::inference::TypeInference;
 
 fn main() {
-    let my_expr = r"
+    let my_expr = r"        
         const : forall a b. a -> b -> a;
         const x y = x;
         
@@ -33,8 +33,15 @@ fn main() {
         result : ();
         result = polyId2 ();
 
-        partial : forall a b. a -> b -> a;
-        partial x = fun y => const x y
+        partial : forall a b. a -> (b -> a);
+        partial x = const x;
+
+        partialTest: ();
+        partialTest = (partial ()) ();
+
+        letId : forall a. a -> a;
+        letId x = let func = fun y => y in func x
+
     ";
     let l = lexer().parse(my_expr).unwrap();
     let parser = program_parser()

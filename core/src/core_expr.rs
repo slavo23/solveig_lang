@@ -8,6 +8,7 @@ pub enum CoreExpr {
     Abs(String, Box<CoreExpr>),
     Anno(Box<CoreExpr>, Ty),
     Let(String, Box<CoreExpr>, Box<CoreExpr>),
+    Con(String),
     Fix(Box<CoreExpr>)
 }
 

@@ -5,19 +5,23 @@ pub enum Ty {
     TyExVar(String),
     TyArr(Box<Ty>, Box<Ty>),
     TyForAll(String, Box<Ty>),
+    TyCon(String),
+    TyApp(Box<Ty>, Box<Ty>),
 }
 
 impl Ty {
     pub fn pretty(&self) -> String {
-        const PRECEDENCE_LOOSE: u8 = 0;
-        const PRECENDENCE_MID: u8 = 1;
-        const PRECEDENCE_TIGHT: u8 = 2;
+        const PRECEDENCE_LOOSE: u8 = 0; // forall
+        const PRECEDENCE_ARR: u8 = 1; // ->
+        const PRECEDENCE_APP: u8 = 2; // type application
+        const PRECEDENCE_ATOM: u8 = 3; // vars/cons/unit/exvars
 
         fn print_precedence(t: &Ty) -> u8 {
             match t {
                 Ty::TyForAll(_, _) => PRECEDENCE_LOOSE,
-                Ty::TyArr(_, _) => PRECENDENCE_MID,
-                _ => PRECEDENCE_TIGHT,
+                Ty::TyArr(_, _) => PRECEDENCE_ARR,
+                Ty::TyApp(_, _) => PRECEDENCE_APP,
+                Ty::TyUnit | Ty::TyVar(_) | Ty::TyExVar(_) | Ty::TyCon(_) => PRECEDENCE_ATOM,
             }
         }
 
@@ -25,14 +29,19 @@ impl Ty {
             let curr_precedence = print_precedence(t);
             let type_fmt = match t {
                 Ty::TyUnit => "()".into(),
-                Ty::TyVar(name) | Ty::TyExVar(name) => name.clone(),
+                Ty::TyVar(name) | Ty::TyExVar(name) | Ty::TyCon(name) => name.clone(),
                 Ty::TyArr(lhs, rhs) => {
-                    let lhs_fmt = traverse_helper(lhs, PRECEDENCE_TIGHT);
-                    let rhs_fmt = traverse_helper(rhs, PRECENDENCE_MID);
+                    let lhs_fmt = traverse_helper(lhs, PRECEDENCE_APP);
+                    let rhs_fmt = traverse_helper(rhs, PRECEDENCE_ARR);
                     format!("{lhs_fmt} -> {rhs_fmt}")
                 }
                 Ty::TyForAll(q, body) => {
                     format!("forall {q}. {}", traverse_helper(body, PRECEDENCE_LOOSE))
+                }
+                Ty::TyApp(f, x) => {
+                    let f_s = traverse_helper(f, PRECEDENCE_APP); // allow nesting without parens on the left
+                    let x_s = traverse_helper(x, PRECEDENCE_ATOM); // argument needs to be atomic; otherwise parenthesize
+                    format!("{f_s} {x_s}")
                 }
             };
 
@@ -49,8 +58,8 @@ impl Ty {
     pub fn is_mono(&self) -> bool {
         match self {
             Ty::TyUnit => true,
-            Ty::TyVar(_) | Ty::TyExVar(_) => true,
-            Ty::TyArr(lhs, rhs) => lhs.is_mono() && rhs.is_mono(),
+            Ty::TyVar(_) | Ty::TyExVar(_) | Ty::TyCon(_) => true,
+            Ty::TyArr(lhs, rhs) | Ty::TyApp(lhs, rhs) => lhs.is_mono() && rhs.is_mono(),
             Ty::TyForAll(_, _) => false,
         }
     }
@@ -72,6 +81,10 @@ impl Ty {
         Ty::TyArr(Box::new(lhs), Box::new(rhs))
     }
 
+    pub fn make_app(lhs: Ty, rhs: Ty) -> Ty {
+        Ty::TyApp(Box::new(lhs), Box::new(rhs))
+    }
+
     pub fn make_var(var_name: String) -> Ty {
         Self::TyVar(var_name)
     }
@@ -89,8 +102,13 @@ impl Ty {
                     self.clone()
                 }
             }
+            Self::TyCon(_) => self.clone(),
             Self::TyUnit => self.clone(),
             Self::TyArr(lhs, rhs) => Self::make_arr(
+                lhs.substitute(var_name, with_type),
+                rhs.substitute(var_name, with_type),
+            ),
+            Self::TyApp(lhs, rhs) => Self::make_app(
                 lhs.substitute(var_name, with_type),
                 rhs.substitute(var_name, with_type),
             ),
@@ -104,7 +122,6 @@ impl Ty {
         }
     }
 }
-
 
 #[derive(Clone, PartialEq, Debug)]
 enum Kind {
