@@ -1,3 +1,4 @@
+use chumsky::input::Input;
 use core::{
     core_expr::{CoreConstructor, CoreDataDef, CoreDefinition, CoreExpr},
     core_type::{Kind, Ty},
@@ -49,7 +50,10 @@ pub fn convert_to_core_expr<'src>(sf_expr: &SpannedWrapper<SurfaceExpr<'src>>) -
             Box::new(convert_to_core_expr(&**body)),
             Box::new(convert_to_core_expr(&**then)),
         ),
-        SurfaceExpr::Con(ctor_name) => CoreExpr::Con(ctor_name.to_string()),
+        SurfaceExpr::Con(ctor_name, args) => CoreExpr::Con(
+            ctor_name.to_string(),
+            args.iter().map(|e| convert_to_core_expr(e)).collect(),
+        ),
     }
 }
 

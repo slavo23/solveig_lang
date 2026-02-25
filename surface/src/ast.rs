@@ -16,7 +16,7 @@ pub enum SurfaceDefinition<'src> {
     DataDef {
         name: Spanned<&'src str>,
         ty_params: Vec<Spanned<&'src str>>,
-        constructors: Vec<Spanned<SufraceConstructor<'src>>> 
+        constructors: Vec<Spanned<SufraceConstructor<'src>>>,
     },
 }
 
@@ -53,5 +53,5 @@ pub enum SurfaceExpr<'src> {
         Box<Spanned<SurfaceExpr<'src>>>,
         Box<Spanned<SurfaceExpr<'src>>>,
     ),
-    Con(Spanned<&'src str>)
+    Con(Spanned<&'src str>, Vec<Spanned<SurfaceExpr<'src>>>),
 }

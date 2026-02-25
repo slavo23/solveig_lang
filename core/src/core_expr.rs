@@ -1,4 +1,4 @@
-use crate::core_type::{Ty, Kind};
+use crate::core_type::{Kind, Ty};
 
 #[derive(Clone, Debug)]
 pub enum CoreExpr {
@@ -8,8 +8,8 @@ pub enum CoreExpr {
     Abs(String, Box<CoreExpr>),
     Anno(Box<CoreExpr>, Ty),
     Let(String, Box<CoreExpr>, Box<CoreExpr>),
-    Con(String),
-    Fix(Box<CoreExpr>)
+    Con(String, Vec<CoreExpr>),
+    Fix(Box<CoreExpr>),
 }
 
 #[derive(Clone, Debug)]
@@ -17,21 +17,21 @@ pub enum CoreDefinition {
     FunDef {
         name: String,
         signature: Ty,
-        body: CoreExpr
-    }
+        body: CoreExpr,
+    },
 }
 
 #[derive(Clone, Debug)]
 pub struct CoreConstructor {
     pub name: String,
-    pub ty: Ty
+    pub ty: Ty,
 }
 
 #[derive(Clone, Debug)]
 pub struct CoreDataDef {
     pub name: String,
     pub kind: Kind,
-    pub ctors: Vec<CoreConstructor>
+    pub ctors: Vec<CoreConstructor>,
 }
 
 impl CoreExpr {

@@ -81,10 +81,7 @@ fn ty_atom_parser<'tokens, 'src: 'tokens>() -> impl Parser<
 
     let var_ty = ident.map(SurfaceTy::Var).spanned();
 
-    let con_ty = upper_ident
-        .spanned()
-        .map(SurfaceTy::Con)
-        .spanned();
+    let con_ty = upper_ident.spanned().map(SurfaceTy::Con).spanned();
 
     let unit_ty = select_ref! {
         Token::Parens(ts) if ts.is_empty() => SurfaceTy::Unit
@@ -98,7 +95,6 @@ fn ty_atom_parser<'tokens, 'src: 'tokens>() -> impl Parser<
 
     choice((unit_ty, con_ty, var_ty, parens_ty))
 }
-
 
 fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
@@ -153,7 +149,10 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             Token::Parens(ts) if ts.is_empty() => SurfaceExpr::Unit
         };
 
-        let expr_ctor = upper_ident.spanned().map(SurfaceExpr::Con);
+        let expr_ctor = upper_ident
+            .spanned()
+            .then(expr.clone().repeated().collect::<Vec<_>>())
+            .map(|(name, args)| SurfaceExpr::Con(name, args));
 
         let expr_fun = just(Token::Fun)
             .ignore_then(ident.spanned())

@@ -6,8 +6,14 @@ use syntax::inference::TypeInference;
 
 fn main() {
     let my_expr = r"
+        -- kind * -> *
         data List a = Nil | Cons a (List a);
-        data Eiher l r = Left l | Right r;
+
+        -- kind * -> (* -> *)
+        data Eiher a b = Left l | Right r;
+
+        singletonList : forall a. a -> List a;
+        singletonList x = Cons Nil x;
 
         const : forall a b. a -> b -> a;
         const x y = x;
