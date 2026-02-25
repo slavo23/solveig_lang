@@ -5,7 +5,10 @@ use surface_to_core::convert_to_core_program;
 use syntax::inference::TypeInference;
 
 fn main() {
-    let my_expr = r"        
+    let my_expr = r"
+        data List a = Nil | Cons a (List a);
+        data Eiher l r = Left l | Right r;
+
         const : forall a b. a -> b -> a;
         const x y = x;
         
@@ -25,7 +28,7 @@ fn main() {
         pid x = x;
 
         polyComp : (forall a. a -> a) -> (forall a. a -> a) -> (forall a. a -> a);
-        polyComp f g x = f (g x);
+        polyComp f g = f g;
 
         polyId2 : forall a. a -> a;
         polyId2 = polyComp pid pid;

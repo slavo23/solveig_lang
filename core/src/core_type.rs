@@ -77,6 +77,26 @@ impl Ty {
         }
     }
 
+    pub fn peel_forall(&self) -> (Vec<String>, Self) {
+        let mut current_ty = self.clone();
+        let mut quants = vec![];
+        while let Ty::TyForAll(q, body) = current_ty {
+            current_ty = *body;
+            quants.push(q.clone());
+        }
+
+        (quants, current_ty)
+    }
+
+    pub fn quantify_with(&self, qs: &Vec<String>) -> Self {
+        let mut current_ty = self.clone();
+        for quant in qs.iter().rev() {
+            current_ty = Ty::make_forall(quant.clone(), current_ty)
+        }
+
+        current_ty
+    }
+
     pub fn make_arr(lhs: Ty, rhs: Ty) -> Ty {
         Ty::TyArr(Box::new(lhs), Box::new(rhs))
     }
@@ -124,7 +144,7 @@ impl Ty {
 }
 
 #[derive(Clone, PartialEq, Debug)]
-enum Kind {
+pub enum Kind {
     KStar,
     KArrow(Box<Kind>, Box<Kind>),
 }

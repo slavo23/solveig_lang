@@ -23,7 +23,7 @@ pub enum SurfaceDefinition<'src> {
 #[derive(Debug)]
 pub struct SufraceConstructor<'src> {
     pub name: Spanned<&'src str>,
-    pub args: Vec<Spanned<SurfaceTy<'src>>>,
+    pub params: Vec<Spanned<SurfaceTy<'src>>>,
 }
 
 pub type SurfaceProgram<'src> = Vec<Spanned<SurfaceDefinition<'src>>>;

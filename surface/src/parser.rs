@@ -252,7 +252,7 @@ pub fn data_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     let ctor_variant = upper_ident
         .spanned()
         .then(ty_atom_parser().repeated().collect::<Vec<_>>())
-        .map(|(name, ty)| SufraceConstructor { name, args: ty });
+        .map(|(name, ty)| SufraceConstructor { name, params: ty });
 
     just(Token::Data)
         .ignore_then(upper_ident.spanned())

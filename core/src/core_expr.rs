@@ -1,4 +1,4 @@
-use crate::core_type::Ty;
+use crate::core_type::{Ty, Kind};
 
 #[derive(Clone, Debug)]
 pub enum CoreExpr {
@@ -19,6 +19,19 @@ pub enum CoreDefinition {
         signature: Ty,
         body: CoreExpr
     }
+}
+
+#[derive(Clone, Debug)]
+pub struct CoreConstructor {
+    pub name: String,
+    pub ty: Ty
+}
+
+#[derive(Clone, Debug)]
+pub struct CoreDataDef {
+    pub name: String,
+    pub kind: Kind,
+    pub ctors: Vec<CoreConstructor>
 }
 
 impl CoreExpr {
