@@ -12,20 +12,21 @@ pub enum CoreExpr {
     Let(String, Box<CoreExpr>, Box<CoreExpr>),
     Con(String, Vec<CoreExpr>),
     Fix(Box<CoreExpr>),
-    Case(Box<CoreExpr>, Vec<CoreCaseArm>)
+    Case(Box<CoreExpr>, Vec<CoreCaseArm>),
+    IfThenElse(Box<CoreExpr>, Box<CoreExpr>, Box<CoreExpr>),
 }
 
 #[derive(Clone, Debug)]
 pub enum CorePattern {
     Con(String, Vec<CorePattern>),
     Var(String),
-    Wild
+    Wild,
 }
 
 #[derive(Clone, Debug)]
 pub struct CoreCaseArm {
     pub pattern: CorePattern,
-    pub expr: CoreExpr
+    pub expr: CoreExpr,
 }
 
 #[derive(Clone, Debug)]

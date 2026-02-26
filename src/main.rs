@@ -10,6 +10,20 @@ fn main() {
         data Either a b = Left a | Right b;
         data Maybe a = Nothing | Just a;
         data Pair a b = Pair a b;
+        data Nat = Z | S Nat;
+        data Bool = True | False;
+
+        succ : Nat -> Nat;
+        succ n = 
+            case n of Z => S Z | S k => S (succ k);
+
+        prev : Nat -> Nat;
+        prev n = 
+            case n of Z => Z | S k => prev k;
+
+        isZero : Nat -> Bool;
+        isZero n = 
+            case n of Z => True | S _ => False;
 
         singletonList : forall a. a -> List a;
         singletonList x = Cons x Nil;
@@ -32,6 +46,14 @@ fn main() {
                 Nil => Nil
                 | Cons y ys => Cons (f y) (listMap f ys)
         ;
+
+        listFilter : forall a. (a -> Bool) -> List a -> List a;
+        listFilter f xs = 
+            case xs of
+                Nil => Nil
+                | Cons y ys => 
+                    if f y then Cons y (listFilter f ys)
+                    else listFilter f ys;
 
         listMapId : forall a. List a -> List a;
         listMapId xs = listMap id xs;

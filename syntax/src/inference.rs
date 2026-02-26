@@ -485,6 +485,16 @@ impl TypeInference {
                 let check_result = self.solve_checking(new_ctx, body, &a2.clone())?;
                 Ok(check_result.until(&typed_var_entry))
             }
+            (CoreExpr::IfThenElse(cond, then_br, else_br), check_against) => {
+                self.trace_rule("If⇐");
+
+                let bool_ty = Ty::TyCon("Bool".to_string());
+                let gamma = self.solve_checking(ctx, cond, &bool_ty)?;
+                let gamma = self.solve_checking(gamma, then_br, check_against)?;
+                let gamma = self.solve_checking(gamma, else_br, check_against)?;
+
+                Ok(gamma)
+            }
             (_, Ty::TyForAll(quantifier, body)) => {
                 self.trace_rule("forAllI");
                 let new_ctx = ctx.add_entry(ContextEntry::MonoVar(quantifier.clone()));
@@ -728,6 +738,23 @@ impl TypeInference {
                 }
 
                 Ok((theta.clone(), theta.apply(&result_ty)))
+            }
+            CoreExpr::IfThenElse(cond, then_br, else_br) => {
+                self.trace_rule("If⇒");
+
+                let bool_ty = Ty::TyCon("Bool".to_string());
+                let (gamma, cond_ty) = self.solve_inference(ctx, cond)?;
+                let gamma = self.solve_subtype(gamma.clone(), &gamma.apply(&cond_ty), &bool_ty)?;
+
+                let res_evar = self.make_fresh_evar();
+                let res_ty = Ty::TyExVar(res_evar.clone());
+                let mut theta = gamma.add_entry(ContextEntry::ExVar(res_evar.clone()));
+
+                theta = self.solve_checking(theta, then_br, &res_ty)?;
+                theta = self.solve_checking(theta, else_br, &res_ty)?;
+
+                let final_ty = theta.apply(&res_ty);
+                Ok((theta, final_ty))
             }
         }
     }

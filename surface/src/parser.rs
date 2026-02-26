@@ -31,6 +31,9 @@ pub enum Token<'src> {
     Case,
     Of,
     Uns,
+    If,
+    Then,
+    Else,
 }
 
 pub fn lexer<'src>()
@@ -46,6 +49,9 @@ pub fn lexer<'src>()
                 "data" => Token::Data,
                 "case" => Token::Case,
                 "of" => Token::Of,
+                "if" => Token::If,
+                "then" => Token::Then,
+                "else" => Token::Else,
                 s => {
                     let is_upper = s.chars().nth(0).unwrap().is_uppercase();
                     if is_upper {
@@ -214,7 +220,21 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             Token::Parens(ts) if ts.is_empty() => SurfaceExpr::Unit
         };
 
-        // Define what counts as an atomic argument for constructors
+        let expr_if = just(Token::If)
+            .ignore_then(expr.clone())
+            .then_ignore(just(Token::Then))
+            .then(expr.clone())
+            .then_ignore(just(Token::Else))
+            .then(expr.clone())
+            .map(|((cond, then_branch), else_branch)| {
+                SurfaceExpr::IfThenElse(
+                    Box::new(cond),
+                    Box::new(then_branch),
+                    Box::new(else_branch),
+                )
+            })
+            .boxed();
+
         let ctor_arg = choice((
             unit_expr.clone().spanned(),
             upper_ident
@@ -298,6 +318,7 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             unit_expr.spanned(),
             variable.spanned(),
             expr_case.spanned(),
+            expr_if.spanned(),
             expr.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
         ))
         .pratt((app_infix,))
