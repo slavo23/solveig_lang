@@ -125,6 +125,19 @@ impl Context {
             .is_some()
     }
 
+    fn evar_index(&self, name: &str) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|e| matches!(e, ContextEntry::ExVar(n) if n == name))
+    }
+
+    pub fn evar_before(&self, a: &str, b: &str) -> bool {
+        match (self.evar_index(a), self.evar_index(b)) {
+            (Some(i), Some(j)) => i < j,
+            _ => false,
+        }
+    }
+
     pub fn get_typed_var(&self, var_name: String) -> Option<&ContextEntry> {
         self.entries.iter().find(
             |ent| matches!(

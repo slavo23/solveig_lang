@@ -38,6 +38,19 @@ pub enum SurfaceTy<'src> {
     App(Box<Spanned<SurfaceTy<'src>>>, Box<Spanned<SurfaceTy<'src>>>),
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum SurfacePattern<'src> {
+    Var(&'src str),
+    Con(Spanned<&'src str>, Vec<Spanned<SurfacePattern<'src>>>),
+    Wild
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct SurfaceMatchArm<'src> {
+    pub pattern: Spanned<SurfacePattern<'src>>,
+    pub expr: Spanned<SurfaceExpr<'src>>
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SurfaceExpr<'src> {
     Unit,
@@ -54,4 +67,5 @@ pub enum SurfaceExpr<'src> {
         Box<Spanned<SurfaceExpr<'src>>>,
     ),
     Con(Spanned<&'src str>, Vec<Spanned<SurfaceExpr<'src>>>),
+    Case(Box<Spanned<SurfaceExpr<'src>>>, Vec<Spanned<SurfaceMatchArm<'src>>>)
 }

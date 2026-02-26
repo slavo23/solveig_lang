@@ -7,8 +7,9 @@ use syntax::inference::{TypeInference, check_module};
 fn main() {
     let my_expr = r"
         data List a = Nil | Cons a (List a);
-
         data Either a b = Left a | Right b;
+        data Maybe a = Nothing | Just a;
+        data Pair a b = Pair a b;
 
         singletonList : forall a. a -> List a;
         singletonList x = Cons x Nil;
@@ -25,8 +26,27 @@ fn main() {
         eitherListUnit2 : forall a. a -> Either (List a) ();
         eitherListUnit2 x = Right ();
 
-        listConcat : forall a. List a -> List a -> List a;
-        listConcat xs ys = (Cons xs) ys;
+        listMap : forall a b. (a -> b) -> List a -> List b;
+        listMap f xs =
+            case xs of
+                Nil => Nil
+                | Cons y ys => Cons (f y) (listMap f ys)
+        ;
+
+        listMapId : forall a. List a -> List a;
+        listMapId xs = listMap id xs;
+
+        listSafeHead : forall a. List a -> Maybe a;
+        listSafeHead xs = 
+            case xs of
+                Nil => Nothing
+                | Cons y ys => Just y;
+
+        listSafeTail : forall a. List a -> Maybe (List a);
+        listSafeTail xs = 
+            case xs of
+                Nil => Nothing
+                | Cons y ys => Just ys;
 
         const : forall a b. a -> b -> a;
         const x y = x;
@@ -34,35 +54,17 @@ fn main() {
         id : forall a. a -> a;
         id x = x;
 
-        testConst : ();
-        testConst = const () id;
-
         flipArgs : forall a b c. (a -> b -> c) -> (b -> a -> c);
         flipArgs f x1 x2 = f x2 x1;
 
-        testConst2 : ();
-        testConst2 = (flipArgs const) id ();
-        
-        pid : forall a. a -> a;
-        pid x = x;
+        flipManyArgs : forall a b. List (a -> b -> c) -> List (b -> a -> c);
+        listManyArgs xs = listMap flipArgs xs;
 
-        polyComp : (forall a. a -> a) -> (forall a. a -> a) -> (forall a. a -> a);
-        polyComp f g = f g;
-
-        polyId2 : forall a. a -> a;
-        polyId2 = polyComp pid pid;
-
-        result : ();
-        result = polyId2 ();
-
-        partial : forall a b. a -> (b -> a);
-        partial x = const x;
-
-        partialTest: ();
-        partialTest = (partial ()) ();
-
-        letId : forall a. a -> a;
-        letId x = let func = fun y => y in func x
+        foldr : forall a b. (a -> b -> b) -> b -> List a -> b;
+        foldr f z xs =
+            case xs of
+                Nil => z
+                | Cons y ys => f y (foldr f z ys)
 
     ";
     let l = lexer().parse(my_expr).unwrap();

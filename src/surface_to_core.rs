@@ -1,10 +1,10 @@
 use core::{
-    core_expr::{CoreConstructor, CoreDataDef, CoreExpr, CoreModule, CoreTermDef},
+    core_expr::{CoreCaseArm, CoreConstructor, CoreDataDef, CoreExpr, CoreModule, CorePattern, CoreTermDef},
     core_type::{Kind, Ty},
 };
 use std::collections::HashMap;
 use surface::ast::{
-    SpannedWrapper, SufraceConstructor, SurfaceDefinition, SurfaceExpr, SurfaceProgram, SurfaceTy,
+    SpannedWrapper, SufraceConstructor, SurfaceDefinition, SurfaceExpr, SurfacePattern, SurfaceProgram, SurfaceTy
 };
 
 pub fn convert_surface_to_core_ty<'src>(sf_ty: &SpannedWrapper<SurfaceTy<'src>>) -> Ty {
@@ -26,6 +26,21 @@ pub fn convert_surface_to_core_ty<'src>(sf_ty: &SpannedWrapper<SurfaceTy<'src>>)
             convert_surface_to_core_ty(&**lhs),
             convert_surface_to_core_ty(&**rhs),
         ),
+    }
+}
+
+pub fn convert_to_core_pattern<'src>(
+    sf_pattern: &SurfacePattern<'src>
+) -> CorePattern {
+    match sf_pattern {
+        SurfacePattern::Var(name) => CorePattern::Var(name.to_string()),
+        SurfacePattern::Wild => CorePattern::Wild,
+        SurfacePattern::Con(name, args) => {
+            CorePattern::Con(
+                (*name).to_string(),
+                args.iter().map(|p| convert_to_core_pattern(&p)).collect(),
+            )
+        }
     }
 }
 
@@ -52,6 +67,15 @@ pub fn convert_to_core_expr<'src>(sf_expr: &SpannedWrapper<SurfaceExpr<'src>>) -
         SurfaceExpr::Con(ctor_name, args) => CoreExpr::Con(
             ctor_name.to_string(),
             args.iter().map(|e| convert_to_core_expr(e)).collect(),
+        ),
+        SurfaceExpr::Case(scrutinee, arms) => CoreExpr::Case(
+            Box::new(convert_to_core_expr(scrutinee)),
+            arms.iter()
+                .map(|arm| CoreCaseArm {
+                    pattern: convert_to_core_pattern(&arm.pattern),
+                    expr: convert_to_core_expr(&arm.expr),
+                })
+                .collect(),
         ),
     }
 }

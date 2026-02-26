@@ -3,10 +3,24 @@ use crate::{
     inference,
 };
 use core::{
-    core_expr::{CoreDefinition, CoreExpr, CoreModule},
+    core_expr::{CoreDefinition, CoreExpr, CoreModule, CorePattern},
     core_type::Ty,
 };
 use std::{collections::HashMap, iter::successors};
+
+fn substitute_type(ty: &Ty, subst: &HashMap<String, Ty>) -> Ty {
+    match ty {
+        Ty::TyVar(name) => subst.get(name).cloned().unwrap_or_else(|| ty.clone()),
+        Ty::TyExVar(_) | Ty::TyUnit | Ty::TyCon(_) => ty.clone(),
+        Ty::TyArr(t1, t2) => Ty::make_arr(substitute_type(t1, subst), substitute_type(t2, subst)),
+        Ty::TyApp(t1, t2) => Ty::make_app(substitute_type(t1, subst), substitute_type(t2, subst)),
+        Ty::TyForAll(name, body) => {
+            let mut new_subst = subst.clone();
+            new_subst.remove(name);
+            Ty::make_forall(name.clone(), substitute_type(body, &new_subst))
+        }
+    }
+}
 
 pub fn apply_context_once(ctx: &Context, ty: &Ty) -> Ty {
     match ty {
@@ -114,6 +128,38 @@ impl TypeInference {
         println!("executing rule [{}]", rule_name)
     }
 
+    fn extract_tycon_app(&self, ty: &Ty) -> Result<(String, Vec<Ty>), String> {
+        fn go(ty: &Ty, args: &mut Vec<Ty>) -> Result<String, String> {
+            match ty {
+                Ty::TyCon(name) => Ok(name.clone()),
+                Ty::TyApp(t1, t2) => {
+                    args.insert(0, (**t2).clone());
+                    go(t1, args)
+                }
+                _ => Err(format!(
+                    "Expected type constructor application, got {:?}",
+                    ty
+                )),
+            }
+        }
+
+        let mut args = Vec::new();
+        let name = go(ty, &mut args)?;
+        Ok((name, args))
+    }
+
+    // Helper: get pattern variables
+    fn pattern_vars(&self, pattern: &CorePattern) -> Vec<String> {
+        match pattern {
+            CorePattern::Var(name) => vec![name.clone()],
+            CorePattern::Wild => vec![],
+            CorePattern::Con(_, sub_patterns) => sub_patterns
+                .iter()
+                .flat_map(|p| self.pattern_vars(p))
+                .collect(),
+        }
+    }
+
     fn solve_subtype(&mut self, ctx: Context, ty_a: &Ty, ty_b: &Ty) -> Result<Context, String> {
         assert!(
             ty_well_formed(&ty_a, &ctx) && ty_well_formed(&ty_b, &ctx),
@@ -194,7 +240,11 @@ impl TypeInference {
                 };
                 self.instantiate_right(ctx, ty_a, evar.clone())
             }
-            (lhs, rhs) => Err(format!("unknown subtyping relation {} <: {}", lhs.pretty(), rhs.pretty())),
+            (lhs, rhs) => Err(format!(
+                "unknown subtyping relation {} <: {}",
+                lhs.pretty(),
+                rhs.pretty()
+            )),
         }
     }
 
@@ -254,17 +304,55 @@ impl TypeInference {
                 )?;
                 Ok(delta)
             }
+
+            Ty::TyApp(t1, t2) => {
+                self.trace_rule("instLApp");
+                let a2_ex_var = self.make_fresh_evar();
+                let a1_ex_var = self.make_fresh_evar();
+                let solved_evar = ContextEntry::SolvedEVar {
+                    lhs: left_evar.clone(),
+                    rhs: Ty::make_app(
+                        Ty::TyExVar(a1_ex_var.clone()),
+                        Ty::TyExVar(a2_ex_var.clone()),
+                    ),
+                };
+
+                gamma_l.push(ContextEntry::ExVar(a2_ex_var.clone()));
+                gamma_l.push(ContextEntry::ExVar(a1_ex_var.clone()));
+                gamma_l.push(solved_evar);
+
+                let new_ctx = Context::from_2(gamma_l, gamma_r);
+                let theta = self.instantiate_left(new_ctx, a1_ex_var.clone(), t1)?;
+                let delta = self.instantiate_left(
+                    theta.clone(),
+                    a2_ex_var.clone(),
+                    &apply_context(&theta, t2),
+                )?;
+                Ok(delta)
+            }
             Ty::TyExVar(right_evar) => {
                 self.trace_rule("instLReach");
-                let gamma = ctx.replace(
-                    &ContextEntry::ExVar(right_evar.clone()),
-                    &ContextEntry::SolvedEVar {
-                        lhs: right_evar.clone(),
-                        rhs: Ty::TyExVar(left_evar.clone()),
-                    },
-                );
+                let left_first = &ctx.evar_before(&left_evar, right_evar);
 
-                Ok(gamma.clone())
+                let gamma = if *left_first {
+                    ctx.replace(
+                        &ContextEntry::ExVar(right_evar.clone()),
+                        &ContextEntry::SolvedEVar {
+                            lhs: right_evar.clone(),
+                            rhs: Ty::TyExVar(left_evar.clone()),
+                        },
+                    )
+                } else {
+                    ctx.replace(
+                        &ContextEntry::ExVar(left_evar.clone()),
+                        &ContextEntry::SolvedEVar {
+                            lhs: left_evar.clone(),
+                            rhs: Ty::TyExVar(right_evar.clone()),
+                        },
+                    )
+                };
+
+                Ok(gamma)
             }
             _ => todo!(),
         }
@@ -336,20 +424,195 @@ impl TypeInference {
                 )?;
                 Ok(delta)
             }
+            Ty::TyApp(t1, t2) => {
+                self.trace_rule("instRApp");
+                let a2_ex_var = self.make_fresh_evar();
+                let a1_ex_var = self.make_fresh_evar();
+                let solved_evar = ContextEntry::SolvedEVar {
+                    lhs: right_evar.clone(),
+                    rhs: Ty::make_app(
+                        Ty::TyExVar(a1_ex_var.clone()),
+                        Ty::TyExVar(a2_ex_var.clone()),
+                    ),
+                };
+
+                gamma_l.push(ContextEntry::ExVar(a2_ex_var.clone()));
+                gamma_l.push(ContextEntry::ExVar(a1_ex_var.clone()));
+                gamma_l.push(solved_evar);
+
+                let new_ctx = Context::from_2(gamma_l, gamma_r);
+                let theta = self.instantiate_left(new_ctx, a1_ex_var.clone(), t1)?;
+                let delta = self.instantiate_right(
+                    theta.clone(),
+                    &apply_context(&theta, t2),
+                    a2_ex_var.clone(),
+                )?;
+                Ok(delta)
+            }
             Ty::TyExVar(left_evar) => {
                 self.trace_rule("instRReach");
+
+                let left_first = &ctx.evar_before(left_evar, &right_evar);
+
+                let gamma = if *left_first {
+                    ctx.replace(
+                        &ContextEntry::ExVar(right_evar.clone()),
+                        &ContextEntry::SolvedEVar {
+                            lhs: right_evar.clone(),
+                            rhs: Ty::TyExVar(left_evar.clone()),
+                        },
+                    )
+                } else {
+                    ctx.replace(
+                        &ContextEntry::ExVar(left_evar.clone()),
+                        &ContextEntry::SolvedEVar {
+                            lhs: left_evar.clone(),
+                            rhs: Ty::TyExVar(right_evar.clone()),
+                        },
+                    )
+                };
+
+                Ok(gamma)
+            }
+            _ => todo!(
+                "unhandled right instantiation case {} => {}",
+                right_evar,
+                to_type.pretty()
+            ),
+        }
+    }
+
+    fn check_pattern(
+        &mut self,
+        ctx: Context,
+        pattern: &CorePattern,
+        expected_ty: &Ty,
+    ) -> Result<(Context, Vec<(String, Ty)>), String> {
+        // Apply context to resolve any solved existentials first
+        let expected_ty = apply_context(&ctx, expected_ty);
+
+        match pattern {
+            CorePattern::Wild => Ok((ctx, vec![])),
+
+            CorePattern::Var(name) => Ok((ctx, vec![(name.clone(), expected_ty.clone())])),
+
+            CorePattern::Con(ctor_name, sub_patterns) => {
+                let ctor_ty = self
+                    .get_data_ctor_ty(ctor_name.clone())
+                    .ok_or_else(|| format!("Unknown constructor in pattern: {}", ctor_name))?;
+                let (instantiated_ty, gamma) = self.instantiate_poly(ctx, &ctor_ty)?;
+
+                let (field_types, result_ty) = self.peel_arrows(&instantiated_ty);
+
+                if sub_patterns.len() != field_types.len() {
+                    return Err(format!(
+                        "Constructor {} expects {} arguments, got {}",
+                        ctor_name,
+                        field_types.len(),
+                        sub_patterns.len()
+                    ));
+                }
+
+                let delta = self.unify(gamma, &result_ty, &expected_ty)?;
+
+                let mut theta = delta;
+                let mut all_bindings = Vec::new();
+
+                for (sub_pattern, field_ty) in sub_patterns.iter().zip(field_types.iter()) {
+                    // Apply context to get the unified field type
+                    let field_ty = apply_context(&theta, field_ty);
+                    let (new_ctx, bindings) = self.check_pattern(theta, sub_pattern, &field_ty)?;
+                    theta = new_ctx;
+                    all_bindings.extend(bindings);
+                }
+
+                Ok((theta, all_bindings))
+            }
+        }
+    }
+
+    // NEW: Instantiate a polymorphic type with fresh existentials
+    fn instantiate_poly(&mut self, mut ctx: Context, ty: &Ty) -> Result<(Ty, Context), String> {
+        match ty {
+            Ty::TyForAll(param, body) => {
+                let fresh = self.make_fresh_evar();
+                ctx = ctx.add_entry(ContextEntry::ExVar(fresh.clone()));
+                let substituted = body.substitute(param, &Ty::TyExVar(fresh));
+                self.instantiate_poly(ctx, &substituted)
+            }
+            _ => Ok((ty.clone(), ctx)),
+        }
+    }
+
+    fn unify(&mut self, ctx: Context, ty1: &Ty, ty2: &Ty) -> Result<Context, String> {
+        let ty1 = apply_context(&ctx, ty1);
+        let ty2 = apply_context(&ctx, ty2);
+
+        match (&ty1, &ty2) {
+            (Ty::TyUnit, Ty::TyUnit) => Ok(ctx),
+            (Ty::TyVar(a), Ty::TyVar(b)) if a == b => Ok(ctx),
+            (Ty::TyCon(a), Ty::TyCon(b)) if a == b => Ok(ctx),
+            (Ty::TyExVar(a), Ty::TyExVar(b)) if a == b => Ok(ctx),
+            (Ty::TyArr(a1, a2), Ty::TyArr(b1, b2)) | (Ty::TyApp(a1, a2), Ty::TyApp(b1, b2)) => {
+                let gamma = self.unify(ctx, a1, b1)?;
+                self.unify(
+                    gamma.clone(),
+                    &apply_context(&gamma, a2),
+                    &apply_context(&gamma, b2),
+                )
+            }
+
+            (Ty::TyExVar(evar), ty) | (ty, Ty::TyExVar(evar)) => {
+                if ty.occurs_check(evar.clone()) {
+                    return Err(format!("Occurs check failed: {} in {}", evar, ty.pretty()));
+                }
+
+                if !ty_well_formed(ty, &ctx) {
+                    return Err(format!(
+                        "Cannot solve {}: {} not well-formed in context",
+                        evar,
+                        ty.pretty()
+                    ));
+                }
+
+                if !ctx.has_evar(evar.clone()) {
+                    return Err(format!("Existential {} not in context", evar));
+                }
+
                 let gamma = ctx.replace(
-                    &ContextEntry::ExVar(right_evar.clone()),
+                    &ContextEntry::ExVar(evar.clone()),
                     &ContextEntry::SolvedEVar {
-                        lhs: right_evar.clone(),
-                        rhs: Ty::TyExVar(left_evar.clone()),
+                        lhs: evar.clone(),
+                        rhs: ty.clone(),
                     },
                 );
 
-                Ok(gamma.clone())
+                Ok(gamma)
             }
-            _ => todo!("unhandled right instantiation case"),
+
+            _ => Err(format!(
+                "Cannot unify {} with {}",
+                ty1.pretty(),
+                ty2.pretty()
+            )),
         }
+    }
+
+    fn peel_arrows(&self, ty: &Ty) -> (Vec<Ty>, Ty) {
+        let mut args = Vec::new();
+        let mut current = ty.clone();
+
+        loop {
+            match current {
+                Ty::TyArr(a, b) => {
+                    args.push((*a).clone());
+                    current = (*b).clone();
+                }
+                _ => break,
+            }
+        }
+
+        (args, current)
     }
 
     fn solve_checking(
@@ -358,7 +621,13 @@ impl TypeInference {
         expr: &CoreExpr,
         check_against: &Ty,
     ) -> Result<Context, String> {
-        assert!(ty_well_formed(&check_against, &ctx));
+        assert!(
+            ty_well_formed(&check_against, &ctx),
+            "can't check expression {:#?} against the malformed type {}",
+            expr,
+            check_against.pretty()
+        );
+
         match (expr, check_against) {
             (CoreExpr::Unit, Ty::TyUnit) => {
                 self.trace_rule("1I");
@@ -568,11 +837,57 @@ impl TypeInference {
 
                 Ok((delta.clone(), current_ty.clone()))
             }
-        }
-    }
 
-    pub fn check_program(&mut self, module: CoreModule) -> Result<Context, String> {
-        todo!()
+            CoreExpr::Case(scrutinee, arms) => {
+                self.trace_rule("Case⇒");
+
+                if arms.is_empty() {
+                    return Err("Case with no arms".to_string());
+                }
+
+                let (gamma, scrut_ty0) = self.solve_inference(ctx, scrutinee)?;
+                let mut theta = gamma;
+                let scrut_ty0 = apply_context(&theta, &scrut_ty0);
+
+                let result_evar = self.make_fresh_evar();
+                let result_ty = Ty::TyExVar(result_evar.clone());
+                theta = theta.add_entry(ContextEntry::ExVar(result_evar.clone()));
+
+                for (arm_ix, arm) in arms.iter().enumerate() {
+                    let marker = ContextEntry::Marker {
+                        var_name: format!("case_arm#{}", arm_ix),
+                    };
+
+                    let arm_base = theta.clone().add_entry(marker.clone());
+                    let scrut_ty = apply_context(&arm_base, &scrut_ty0);
+
+                    let (delta, bindings) =
+                        self.check_pattern(arm_base, &arm.pattern, &scrut_ty)?;
+
+                    let mut arm_ctx = delta;
+                    for (var_name, var_ty) in bindings {
+                        arm_ctx = arm_ctx.add_entry(ContextEntry::TypedVar {
+                            var_name,
+                            ty: var_ty,
+                        });
+                    }
+                    if !arm_ctx.has_evar(result_evar.clone())
+                        && !arm_ctx.has_solved_evar(result_evar.clone())
+                    {
+                        return Err(format!(
+                            "BUG: case result existential {} missing from arm context (arm {})",
+                            result_evar, arm_ix
+                        ));
+                    }
+
+                    let res_ty = apply_context(&arm_ctx, &result_ty);
+                    let omega = self.solve_checking(arm_ctx, &arm.expr, &res_ty)?;
+                    theta = omega.until(&marker);
+                }
+
+                Ok((theta.clone(), apply_context(&theta, &result_ty)))
+            }
+        }
     }
 }
 
@@ -584,4 +899,6 @@ pub fn check_module(module: CoreModule) {
             .solve_checking(ctx, &func_def.body, &func_def.signature)
             .unwrap();
     }
+
+    println!("{:#?}", ctx)
 }

@@ -6,7 +6,10 @@ use chumsky::{
     span::SpanWrap,
 };
 
-use crate::ast::{SufraceConstructor, SurfaceDefinition, SurfaceExpr, SurfaceProgram, SurfaceTy};
+use crate::ast::{
+    SufraceConstructor, SurfaceDefinition, SurfaceExpr, SurfaceMatchArm, SurfacePattern,
+    SurfaceProgram, SurfaceTy,
+};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
@@ -26,6 +29,9 @@ pub enum Token<'src> {
     FatArrow,
     Data,
     Pipe,
+    Case,
+    Of,
+    Uns,
 }
 
 pub fn lexer<'src>()
@@ -39,6 +45,8 @@ pub fn lexer<'src>()
                 "forall" => Token::ForAll,
                 "sig" => Token::Sig,
                 "data" => Token::Data,
+                "case" => Token::Case,
+                "of" => Token::Of,
                 s => {
                     let is_upper = s.chars().nth(0).unwrap().is_uppercase();
                     if is_upper {
@@ -55,6 +63,7 @@ pub fn lexer<'src>()
             just(".").to(Token::Dot),
             just(";").to(Token::Semicolon),
             just("|").to(Token::Pipe),
+            just("_").to(Token::Uns),
             token
                 .repeated()
                 .collect()
@@ -104,40 +113,96 @@ fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
 > {
     recursive(|ty| {
         let ident = select_ref! { Token::Ident(x) => *x };
-        let upper_ident = select_ref! { Token::UpperIdent(x) => *x};
+        let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
 
-        let var_ty = ident.map(SurfaceTy::Var);
+        // ---- atoms ----
         let unit_ty = select_ref! {
             Token::Parens(ts) if ts.is_empty() => SurfaceTy::Unit
-        };
-        let forall_ty = just(Token::ForAll)
+        }
+        .spanned();
+
+        let var_ty = ident.map(SurfaceTy::Var).spanned();
+
+        let con_ty = upper_ident.spanned().map(SurfaceTy::Con).spanned();
+
+        let parens_ty = ty
+            .clone()
+            .nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) });
+
+        let atom = choice((unit_ty, con_ty, var_ty, parens_ty));
+
+        let app = atom
+            .clone()
+            .then(atom.clone().repeated().collect::<Vec<_>>())
+            .map_with(|(head, rest), e| {
+                let mut t = head;
+                for arg in rest {
+                    t = SurfaceTy::App(Box::new(t), Box::new(arg)).with_span(e.span());
+                }
+                t
+            });
+
+        let arrow = app
+            .clone()
+            .then(just(Token::Arrow).ignore_then(ty.clone()).or_not())
+            .map_with(|(lhs, rhs_opt), e| match rhs_opt {
+                None => lhs,
+                Some(rhs) => SurfaceTy::Arr(Box::new(lhs), Box::new(rhs)).with_span(e.span()),
+            });
+
+        // ---- forall (lowest precedence) ----
+        let forall = just(Token::ForAll)
             .ignore_then(ident.spanned().repeated().at_least(1).collect::<Vec<_>>())
             .then_ignore(just(Token::Dot))
             .then(ty.clone())
-            .map(|(quant, body)| SurfaceTy::ForAll(quant, Box::new(body)));
+            .map_with(|(quants, body), e| SurfaceTy::ForAll(quants, Box::new(body)).with_span(e.span()));
 
-        let arr_infix = infix(right(0), just(Token::Arrow), |lhs, _, rhs, e| {
-            SurfaceTy::Arr(Box::new(lhs), Box::new(rhs)).with_span(e.span())
-        });
-
-        let ctor_ty = upper_ident.spanned().map(SurfaceTy::Con);
-        let ctor_infix = infix(left(0), empty(), |lhs, _, rhs, e| {
-            SurfaceTy::App(Box::new(lhs), Box::new(rhs)).with_span(e.span())
-        });
-
-        choice((
-            unit_ty.spanned(),
-            ctor_ty.spanned(),
-            var_ty.spanned(),
-            forall_ty.spanned(),
-            ty.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
-        ))
-        .pratt((arr_infix, ctor_infix))
+        choice((forall, arrow))
     })
 }
 
+pub fn pattern_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<SurfacePattern<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    recursive(|pattern| {
+        let ident = select_ref! { Token::Ident(x) => *x };
+        let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
+        let wild = just(Token::Uns).to(SurfacePattern::Wild);
+        let var = ident.map(SurfacePattern::Var);
 
-pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser <
+        // Atomic patterns for constructor arguments
+        let atom_pattern = choice((
+            wild.clone().spanned(),
+            upper_ident
+                .spanned()
+                .map(|name| SurfacePattern::Con(name, vec![]))
+                .spanned(),
+            var.clone().spanned(),
+            pattern.clone().nested_in(select_ref! {
+                Token::Parens(ts) = e => ts.split_spanned(e.span())
+            }),
+        ));
+
+        let con_pattern = upper_ident
+            .spanned()
+            .then(atom_pattern.repeated().collect::<Vec<_>>())
+            .map(|(name, args)| SurfacePattern::Con(name, args));
+
+        choice((
+            con_pattern.spanned(),
+            wild.spanned(),
+            var.spanned(),
+            pattern.nested_in(select_ref! {
+                Token::Parens(ts) = e => ts.split_spanned(e.span())
+            }),
+        ))
+    })
+}
+
+pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
     MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
     Spanned<SurfaceExpr<'src>>,
@@ -153,12 +218,35 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser <
         // Define what counts as an atomic argument for constructors
         let ctor_arg = choice((
             unit_expr.clone().spanned(),
-            upper_ident.spanned().map(|name| SurfaceExpr::Con(name, vec![])).spanned(),
+            upper_ident
+                .spanned()
+                .map(|name| SurfaceExpr::Con(name, vec![]))
+                .spanned(),
             ident.map(SurfaceExpr::Var).spanned(),
-            expr.clone().nested_in(select_ref! { 
-                Token::Parens(ts) = e => ts.split_spanned(e.span()) 
+            expr.clone().nested_in(select_ref! {
+                Token::Parens(ts) = e => ts.split_spanned(e.span())
             }),
         ));
+
+        let case_arm = pattern_parser()
+            .then_ignore(just(Token::FatArrow))
+            .then(expr.clone())
+            .map(|(pattern, body)| SurfaceMatchArm {
+                pattern: pattern,
+                expr: body,
+            });
+
+        let expr_case = just(Token::Case)
+            .ignore_then(expr.clone())
+            .then_ignore(just(Token::Of))
+            .then(
+                case_arm
+                    .spanned()
+                    .separated_by(just(Token::Pipe))
+                    .collect::<Vec<_>>(),
+            )
+            .map(|(scrutinee, arms)| SurfaceExpr::Case(Box::new(scrutinee), arms))
+            .boxed();
 
         // Constructor with atomic arguments
         let expr_ctor = upper_ident
@@ -211,6 +299,7 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser <
             expr_fun.spanned(),
             unit_expr.spanned(),
             variable.spanned(),
+            expr_case.spanned(),
             expr.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
         ))
         .pratt((app_infix,))
