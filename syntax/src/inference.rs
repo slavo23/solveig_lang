@@ -1,9 +1,12 @@
-use crate::context::{Context, ContextEntry};
+use crate::{
+    context::{Context, ContextEntry},
+    inference,
+};
 use core::{
-    core_expr::{CoreDefinition, CoreExpr},
+    core_expr::{CoreDefinition, CoreExpr, CoreModule},
     core_type::Ty,
 };
-use std::iter::successors;
+use std::{collections::HashMap, iter::successors};
 
 pub fn apply_context_once(ctx: &Context, ty: &Ty) -> Ty {
     match ty {
@@ -60,17 +63,42 @@ fn ty_well_formed(ty: &Ty, ctx: &Context) -> bool {
             body,
             &ctx.clone().add_entry(ContextEntry::MonoVar(quant.clone())),
         ),
-        _ => todo!("add constructors!"),
+        _ => true,
     }
 }
 
 pub struct TypeInference {
     var_counter: usize,
+    data_ctors: HashMap<String, Ty>,
+    func_types: HashMap<String, Ty>,
 }
 
 impl TypeInference {
     pub fn new() -> TypeInference {
-        Self { var_counter: 0 }
+        Self {
+            var_counter: 0,
+            data_ctors: Default::default(),
+            func_types: Default::default(),
+        }
+    }
+
+    pub fn with_module_context(
+        data_ctors: HashMap<String, Ty>,
+        func_types: HashMap<String, Ty>,
+    ) -> TypeInference {
+        Self {
+            var_counter: 0,
+            data_ctors,
+            func_types,
+        }
+    }
+
+    fn get_data_ctor_ty(&self, name: String) -> Option<Ty> {
+        self.data_ctors.get(&name).cloned()
+    }
+
+    fn get_func_type(&self, name: String) -> Option<Ty> {
+        self.func_types.get(&name).cloned()
     }
 
     fn increment_counter(&mut self) -> usize {
@@ -111,6 +139,18 @@ impl TypeInference {
 
                 Ok(delta_ctx)
             }
+            (Ty::TyApp(a1, a2), Ty::TyApp(b1, b2)) => {
+                self.trace_rule("<:$");
+                let theta_ctx = self.solve_subtype(ctx, b1, a1)?;
+                let delta_ctx = self.solve_subtype(
+                    theta_ctx.clone(),
+                    &apply_context(&theta_ctx, &a2),
+                    &apply_context(&theta_ctx, &b2),
+                )?;
+
+                Ok(delta_ctx)
+            }
+
             (Ty::TyForAll(quant_var, body), right_subtype) => {
                 self.trace_rule("<: forAllL");
                 let fresh_evar = self.make_fresh_evar();
@@ -154,7 +194,7 @@ impl TypeInference {
                 };
                 self.instantiate_right(ctx, ty_a, evar.clone())
             }
-            (lhs, rhs) => Err(format!("unknown subtyping relation {:?} <: {:?}", lhs, rhs)),
+            (lhs, rhs) => Err(format!("unknown subtyping relation {} <: {}", lhs.pretty(), rhs.pretty())),
         }
     }
 
@@ -408,7 +448,11 @@ impl TypeInference {
                 Ok((checked_result, *a2.clone()))
             }
 
-            _ => todo!("unacceptable app inference case"),
+            _ => todo!(
+                "unacceptable app inference case, {:?} : {}",
+                expr,
+                lhs_type.clone().pretty()
+            ),
         }
     }
 
@@ -424,6 +468,10 @@ impl TypeInference {
                 if let Some(ContextEntry::TypedVar { var_name: _, ty }) =
                     ctx.get_typed_var(name.clone())
                 {
+                    return Ok((ctx.clone(), ty.clone()));
+                }
+
+                if let Some(ty) = self.get_func_type(name.clone()) {
                     return Ok((ctx.clone(), ty.clone()));
                 }
 
@@ -500,34 +548,40 @@ impl TypeInference {
 
                 Ok((delta, alpha_evar_ty))
             }
-            _ => todo!("expressions like {:?} are not implemented", expr),
+            CoreExpr::Con(name, args) => {
+                let ctor_ty = self.get_data_ctor_ty(name.clone()).unwrap();
+
+                if args.is_empty() {
+                    return Ok((ctx.clone(), ctor_ty.clone()));
+                }
+
+                let mut delta = ctx.clone();
+                let mut current_ty = ctor_ty.clone();
+
+                for arg in args.iter() {
+                    let applied_ty = apply_context(&delta, &current_ty);
+                    let (theta, result_ty) =
+                        self.solve_app_inference(delta.clone(), &applied_ty, arg)?;
+                    delta = theta;
+                    current_ty = result_ty;
+                }
+
+                Ok((delta.clone(), current_ty.clone()))
+            }
         }
     }
 
-    pub fn check_program(&mut self, definitions: Vec<CoreDefinition>) -> Result<Context, String> {
-        let mut ctx = Context::new();
-        for defn in definitions.iter() {
-            match defn {
-                CoreDefinition::FunDef {
-                    name,
-                    signature,
-                    body,
-                } => {
-                    if !ty_well_formed(signature, &ctx) {
-                        return Err(format!(
-                            "ill-formed top-level type for {}: {}",
-                            name,
-                            signature.pretty()
-                        ));
-                    }
-                    let delta = self.solve_checking(ctx.clone(), body, signature)?;
-                    ctx = delta.add_entry(ContextEntry::TypedVar {
-                        var_name: name.clone(),
-                        ty: signature.clone(),
-                    })
-                }
-            }
-        }
-        Ok(ctx)
+    pub fn check_program(&mut self, module: CoreModule) -> Result<Context, String> {
+        todo!()
+    }
+}
+
+pub fn check_module(module: CoreModule) {
+    let mut inference = TypeInference::with_module_context(module.data_ctors, module.func_types);
+    let mut ctx = Context::new();
+    for func_def in module.func_defns.iter() {
+        ctx = inference
+            .solve_checking(ctx, &func_def.body, &func_def.signature)
+            .unwrap();
     }
 }

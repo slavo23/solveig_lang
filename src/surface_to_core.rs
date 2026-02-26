@@ -1,6 +1,5 @@
-use chumsky::input::Input;
 use core::{
-    core_expr::{CoreConstructor, CoreDataDef, CoreDefinition, CoreExpr},
+    core_expr::{CoreConstructor, CoreDataDef, CoreExpr, CoreModule, CoreTermDef},
     core_type::{Kind, Ty},
 };
 use std::collections::HashMap;
@@ -118,8 +117,9 @@ fn convert_to_core_data_def(
     }
 }
 
-pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> Vec<CoreDefinition> {
-    let mut data_defs = vec![];
+pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> CoreModule {
+    let mut type_ctors: HashMap<String, (Kind, Vec<CoreConstructor>)> = HashMap::new();
+    let mut data_ctors: HashMap<String, Ty> = HashMap::new();
 
     for data_def in sf_prog.iter() {
         if let SurfaceDefinition::DataDef {
@@ -128,15 +128,16 @@ pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> Vec<CoreD
             constructors,
         } = &**data_def
         {
-            data_defs.push(convert_to_core_data_def(name, ty_params, constructors));
-        } else {
-            continue;
+            let converted = convert_to_core_data_def(name, ty_params, constructors);
+            for converted_ctor in converted.ctors.iter() {
+                data_ctors.insert(converted_ctor.name.clone(), converted_ctor.ty.clone());
+            }
+
+            type_ctors.insert((*name).to_string(), (converted.kind, converted.ctors));
         }
     }
 
-    println!("data defs {:#?}", data_defs);
-
-    let signatures = sf_prog.iter().fold(
+    let func_types = sf_prog.iter().fold(
         HashMap::new(),
         |mut sig_map: HashMap<String, Ty>, curr| match &**curr {
             SurfaceDefinition::SigDef { name, ty } => {
@@ -147,19 +148,19 @@ pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> Vec<CoreD
         },
     );
 
-    let mut func_defs = vec![];
+    let mut func_defns = vec![];
 
     for defn in sf_prog.iter() {
         match &**defn {
             SurfaceDefinition::FunDef { name, body, params } => {
-                if let Some(func_signature) = signatures.get(**name) {
+                if let Some(func_signature) = func_types.get(**name) {
                     let mut core_body = convert_to_core_expr(body);
 
                     for param in params.iter().rev() {
                         core_body = CoreExpr::Abs((*param).to_string(), Box::new(core_body));
                     }
 
-                    func_defs.push(CoreDefinition::FunDef {
+                    func_defns.push(CoreTermDef {
                         name: (**name).to_string(),
                         signature: func_signature.clone(),
                         body: core_body,
@@ -170,5 +171,10 @@ pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> Vec<CoreD
         }
     }
 
-    func_defs
+    CoreModule {
+        data_ctors,
+        type_ctors,
+        func_types,
+        func_defns,
+    }
 }

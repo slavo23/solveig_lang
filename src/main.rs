@@ -2,18 +2,31 @@ mod surface_to_core;
 use chumsky::{input::Input as _, prelude::*};
 use surface::parser::{lexer, program_parser};
 use surface_to_core::convert_to_core_program;
-use syntax::inference::TypeInference;
+use syntax::inference::{TypeInference, check_module};
 
 fn main() {
     let my_expr = r"
-        -- kind * -> *
         data List a = Nil | Cons a (List a);
 
-        -- kind * -> (* -> *)
-        data Eiher a b = Left l | Right r;
+        data Either a b = Left a | Right b;
 
         singletonList : forall a. a -> List a;
-        singletonList x = Cons Nil x;
+        singletonList x = Cons x Nil;
+
+        left : forall a b. a -> Either a b;
+        left x = Left x;
+
+        right : forall a b. b -> Either a b;
+        right x = Right x;
+
+        eitherListUnit : forall a. a -> Either (List a) ();
+        eitherListUnit x = Left (Cons x Nil);
+
+        eitherListUnit2 : forall a. a -> Either (List a) ();
+        eitherListUnit2 x = Right ();
+
+        listConcat : forall a. List a -> List a -> List a;
+        listConcat xs ys = (Cons xs) ys;
 
         const : forall a b. a -> b -> a;
         const x y = x;
@@ -59,7 +72,5 @@ fn main() {
 
     let stc = convert_to_core_program(parser);
 
-    let mut inference = TypeInference::new();
-    let inferred = inference.check_program(stc);
-    println!("{:?}", inferred);
+    let inferred = check_module(stc);
 }

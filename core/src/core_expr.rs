@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::core_type::{Kind, Ty};
 
 #[derive(Clone, Debug)]
@@ -22,6 +24,13 @@ pub enum CoreDefinition {
 }
 
 #[derive(Clone, Debug)]
+pub struct CoreTermDef {
+    pub name: String,
+    pub signature: Ty,
+    pub body: CoreExpr,
+}
+
+#[derive(Clone, Debug)]
 pub struct CoreConstructor {
     pub name: String,
     pub ty: Ty,
@@ -32,6 +41,14 @@ pub struct CoreDataDef {
     pub name: String,
     pub kind: Kind,
     pub ctors: Vec<CoreConstructor>,
+}
+
+#[derive(Clone, Debug)]
+pub struct CoreModule {
+    pub data_ctors: HashMap<String, Ty>,
+    pub type_ctors: HashMap<String, (Kind, Vec<CoreConstructor>)>,
+    pub func_types: HashMap<String, Ty>,
+    pub func_defns: Vec<CoreTermDef>,
 }
 
 impl CoreExpr {

@@ -136,7 +136,8 @@ fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     })
 }
 
-pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+
+pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser <
     'tokens,
     MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
     Spanned<SurfaceExpr<'src>>,
@@ -149,9 +150,20 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             Token::Parens(ts) if ts.is_empty() => SurfaceExpr::Unit
         };
 
+        // Define what counts as an atomic argument for constructors
+        let ctor_arg = choice((
+            unit_expr.clone().spanned(),
+            upper_ident.spanned().map(|name| SurfaceExpr::Con(name, vec![])).spanned(),
+            ident.map(SurfaceExpr::Var).spanned(),
+            expr.clone().nested_in(select_ref! { 
+                Token::Parens(ts) = e => ts.split_spanned(e.span()) 
+            }),
+        ));
+
+        // Constructor with atomic arguments
         let expr_ctor = upper_ident
             .spanned()
-            .then(expr.clone().repeated().collect::<Vec<_>>())
+            .then(ctor_arg.repeated().collect::<Vec<_>>())
             .map(|(name, args)| SurfaceExpr::Con(name, args));
 
         let expr_fun = just(Token::Fun)
@@ -182,7 +194,6 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .map_with(|(((bind_name, ty_expr), rhs), then), e| {
                 let l =
                     SurfaceExpr::Let(bind_name, Box::new(rhs), Box::new(then)).with_span(e.span());
-
                 SurfaceExpr::Ann(Box::new(l), ty_expr)
             })
             .boxed();
