@@ -2,7 +2,7 @@ mod surface_to_core;
 use chumsky::{input::Input as _, prelude::*};
 use surface::parser::{lexer, program_parser};
 use surface_to_core::convert_to_core_program;
-use syntax::inference::{TypeInference, check_module};
+use syntax::inference::check_module;
 
 fn main() {
     let my_expr = r"
@@ -64,7 +64,14 @@ fn main() {
         foldr f z xs =
             case xs of
                 Nil => z
-                | Cons y ys => f y (foldr f z ys)
+                | Cons y ys => f y (foldr f z ys);
+
+
+        append : forall a. List a -> List a -> List a;
+        append xs ys = 
+            case xs of 
+                Nil => ys
+                | Cons x1 x1s => Cons x1 (append x1s ys)
 
     ";
     let l = lexer().parse(my_expr).unwrap();

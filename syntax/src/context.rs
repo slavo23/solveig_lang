@@ -1,4 +1,5 @@
 use core::core_type::Ty;
+use std::iter::successors;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ContextEntry {
@@ -20,7 +21,45 @@ impl Context {
     }
 
     pub fn from_entries(entries: Vec<ContextEntry>) -> Context {
-        return Context { entries: entries };
+        Context { entries: entries }
+    }
+
+    fn apply_once(&self, ty: &Ty) -> Ty {
+        match ty {
+            Ty::TyVar(_) | Ty::TyCon(_) => ty.clone(),
+            Ty::TyUnit => ty.clone(),
+            Ty::TyArr(lhs, rhs) => {
+                let app_lhs = self.apply(lhs);
+                let app_rhs = self.apply(rhs);
+                Ty::make_arr(app_lhs, app_rhs)
+            }
+            Ty::TyApp(lhs, rhs) => {
+                let app_lhs = self.apply(lhs);
+                let app_rhs = self.apply(rhs);
+                Ty::make_app(app_lhs, app_rhs)
+            }
+            Ty::TyExVar(ex_var_name) => {
+                if let Some(ContextEntry::SolvedEVar {
+                    lhs: _,
+                    rhs: solved_type,
+                }) = self.find_solved_evar(ex_var_name.clone())
+                {
+                    return self.apply(&solved_type);
+                };
+
+                ty.clone()
+            }
+            Ty::TyForAll(quant_var, body) => Ty::make_forall(quant_var.clone(), self.apply(body)),
+        }
+    }
+
+    pub fn apply(&self, ty: &Ty) -> Ty {
+        successors(Some(ty.clone()), |prev| {
+            let next = self.apply_once(prev);
+            if next != *prev { Some(next) } else { None }
+        })
+        .last()
+        .unwrap()
     }
 
     pub fn add_entry(self, entry: ContextEntry) -> Context {

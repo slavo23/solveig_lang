@@ -2,7 +2,6 @@ use chumsky::{
     input::{Input as _, MappedInput},
     pratt::*,
     prelude::*,
-    primitive::select_ref,
     span::SpanWrap,
 };
 
@@ -115,7 +114,6 @@ fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
         let ident = select_ref! { Token::Ident(x) => *x };
         let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
 
-        // ---- atoms ----
         let unit_ty = select_ref! {
             Token::Parens(ts) if ts.is_empty() => SurfaceTy::Unit
         }
@@ -150,12 +148,13 @@ fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 Some(rhs) => SurfaceTy::Arr(Box::new(lhs), Box::new(rhs)).with_span(e.span()),
             });
 
-        // ---- forall (lowest precedence) ----
         let forall = just(Token::ForAll)
             .ignore_then(ident.spanned().repeated().at_least(1).collect::<Vec<_>>())
             .then_ignore(just(Token::Dot))
             .then(ty.clone())
-            .map_with(|(quants, body), e| SurfaceTy::ForAll(quants, Box::new(body)).with_span(e.span()));
+            .map_with(|(quants, body), e| {
+                SurfaceTy::ForAll(quants, Box::new(body)).with_span(e.span())
+            });
 
         choice((forall, arrow))
     })
@@ -248,7 +247,6 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .map(|(scrutinee, arms)| SurfaceExpr::Case(Box::new(scrutinee), arms))
             .boxed();
 
-        // Constructor with atomic arguments
         let expr_ctor = upper_ident
             .spanned()
             .then(ctor_arg.repeated().collect::<Vec<_>>())
