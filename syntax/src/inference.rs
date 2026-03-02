@@ -78,6 +78,9 @@ impl TypeInference {
             format!("ill-formed subtype {} <: {}", ty_a.pretty(), ty_b.pretty())
         );
 
+        let ty_a = &ctx.apply(ty_a);
+        let ty_b = &ctx.apply(ty_b);
+
         match (ty_a, ty_b) {
             (Ty::TyExVar(evar_a), Ty::TyExVar(evar_b)) if evar_a == evar_b => Ok(ctx.clone()),
             (Ty::TyVar(ty_var_a), Ty::TyVar(ty_var_b)) if ty_var_a == ty_var_b => Ok(ctx.clone()),

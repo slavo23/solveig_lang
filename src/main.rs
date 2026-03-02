@@ -13,6 +13,17 @@ fn main() {
         data Nat = Z | S Nat;
         data Bool = True | False;
 
+        pairId : forall a b. a -> b -> Pair a b;
+        pairId x y = Pair (id x) (id y);
+
+        max : Nat -> Nat -> Nat;
+        max k m = 
+            case Pair k m of 
+                Pair Z Z => Z
+                | Pair (S s0) Z => k
+                | Pair Z (S s1) => m
+                | Pair (S s0) (S s1) => max s0 s1;
+
         succ : Nat -> Nat;
         succ n = 
             case n of Z => S Z | S k => S (succ k);
