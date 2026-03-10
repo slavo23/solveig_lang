@@ -35,12 +35,18 @@ impl Ty {
                     let rhs_fmt = traverse_helper(rhs, PRECEDENCE_ARR);
                     format!("{lhs_fmt} -> {rhs_fmt}")
                 }
-                Ty::TyForAll(q, body) => {
-                    format!("forall {q}. {}", traverse_helper(body, PRECEDENCE_LOOSE))
+                Ty::TyForAll(_, _) => {
+                    let (peeled_quants, ty_body) = t.peel_forall();
+
+                    format!(
+                        "∀ {}. {}",
+                        peeled_quants.join(" "),
+                        traverse_helper(&ty_body, PRECEDENCE_LOOSE)
+                    )
                 }
                 Ty::TyApp(f, x) => {
-                    let f_s = traverse_helper(f, PRECEDENCE_APP); // allow nesting without parens on the left
-                    let x_s = traverse_helper(x, PRECEDENCE_ATOM); // argument needs to be atomic; otherwise parenthesize
+                    let f_s = traverse_helper(f, PRECEDENCE_APP);
+                    let x_s = traverse_helper(x, PRECEDENCE_ATOM);
                     format!("{f_s} {x_s}")
                 }
             };

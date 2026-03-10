@@ -13,6 +13,14 @@ fn main() {
         data Nat = Z | S Nat;
         data Bool = True | False;
 
+        class Functor f where
+            fmap : forall a b. (a -> b) -> f a -> f b;
+        end;
+
+        instance Functor List where
+            fmap f xs = listMap;
+        end;
+
         pairId : forall a b. a -> b -> Pair a b;
         pairId x y = Pair (id x) (id y);
 

@@ -2,6 +2,19 @@ use chumsky::span::{SimpleSpan, Spanned};
 
 pub type SpannedWrapper<T, S = SimpleSpan> = Spanned<T, S>;
 
+#[derive(Debug, Clone)]
+pub struct ClassMethod<'src> {
+    pub name: Spanned<&'src str>,
+    pub ty: Spanned<SurfaceTy<'src>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct InstanceMethod<'src> {
+    pub name: Spanned<&'src str>,
+    pub params: Vec<Spanned<&'src str>>,
+    pub body: Spanned<SurfaceExpr<'src>>,
+}
+
 #[derive(Debug)]
 pub enum SurfaceDefinition<'src> {
     FunDef {
@@ -17,6 +30,16 @@ pub enum SurfaceDefinition<'src> {
         name: Spanned<&'src str>,
         ty_params: Vec<Spanned<&'src str>>,
         constructors: Vec<Spanned<SufraceConstructor<'src>>>,
+    },
+    ClassDef {
+        name: Spanned<&'src str>,
+        ty_param: Spanned<&'src str>,
+        methods: Vec<ClassMethod<'src>>,
+    },
+    InstanceDef {
+        class_name: Spanned<&'src str>,
+        ty_arg: Spanned<SurfaceTy<'src>>,
+        methods: Vec<InstanceMethod<'src>>,
     },
 }
 

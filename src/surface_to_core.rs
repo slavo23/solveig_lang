@@ -198,6 +198,13 @@ pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> CoreModul
                     });
                 }
             }
+            SurfaceDefinition::ClassDef {
+                name,
+                ty_param,
+                methods,
+            } => {
+                println!("{:#?}", defn)
+            }
             _ => continue,
         }
     }

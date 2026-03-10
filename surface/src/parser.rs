@@ -6,8 +6,8 @@ use chumsky::{
 };
 
 use crate::ast::{
-    SufraceConstructor, SurfaceDefinition, SurfaceExpr, SurfaceMatchArm, SurfacePattern,
-    SurfaceProgram, SurfaceTy,
+    ClassMethod, InstanceMethod, SufraceConstructor, SurfaceDefinition, SurfaceExpr,
+    SurfaceMatchArm, SurfacePattern, SurfaceProgram, SurfaceTy,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -35,6 +35,10 @@ pub enum Token<'src> {
     Then,
     Else,
     Comma,
+    Class,
+    Instance,
+    Where,
+    End,
 }
 
 pub fn lexer<'src>()
@@ -53,6 +57,10 @@ pub fn lexer<'src>()
                 "if" => Token::If,
                 "then" => Token::Then,
                 "else" => Token::Else,
+                "class" => Token::Class,       // NEW
+                "instance" => Token::Instance, // NEW
+                "where" => Token::Where,       // NEW
+                "end" => Token::End,
                 s => {
                     let is_upper = s.chars().nth(0).unwrap().is_uppercase();
                     if is_upper {
@@ -84,6 +92,84 @@ pub fn lexer<'src>()
     })
     .repeated()
     .collect()
+}
+
+pub fn class_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<SurfaceDefinition<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    let ident = select_ref! { Token::Ident(x) => *x };
+    let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
+
+    let method_sig = ident
+        .spanned()
+        .then_ignore(just(Token::Colon))
+        .then(ty_parser())
+        .map(|(name, ty)| ClassMethod { name, ty });
+
+    just(Token::Class)
+        .ignore_then(upper_ident.spanned())
+        .then(ident.spanned())
+        .then_ignore(just(Token::Where))
+        .then(
+            method_sig
+                .separated_by(just(Token::Semicolon))
+                .allow_trailing()
+                .collect::<Vec<_>>(),
+        )
+        .then_ignore(just(Token::End))
+        .map(|((name, ty_param), methods)| SurfaceDefinition::ClassDef {
+            name,
+            ty_param,
+            methods,
+        })
+        .spanned()
+}
+
+pub fn instance_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<SurfaceDefinition<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    let ident = select_ref! { Token::Ident(x) => *x };
+    let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
+
+    let method_def = ident
+        .spanned()
+        .then(ident.spanned().repeated().collect::<Vec<_>>())
+        .then_ignore(just(Token::EqBind))
+        .then(expr_parser())
+        .map(|((name, params), body)| InstanceMethod { name, params, body });
+
+    let ty_arg = choice((
+        upper_ident.spanned().map(SurfaceTy::Con).spanned(),
+        ty_parser().nested_in(select_ref! {
+            Token::Parens(ts) = e => ts.split_spanned(e.span())
+        }),
+    ));
+
+    just(Token::Instance)
+        .ignore_then(upper_ident.spanned())
+        .then(ty_arg)
+        .then_ignore(just(Token::Where))
+        .then(
+            method_def
+                .separated_by(just(Token::Semicolon))
+                .allow_trailing()
+                .collect::<Vec<_>>(),
+        )
+        .then_ignore(just(Token::End))
+        .map(
+            |((class_name, ty_arg), methods)| SurfaceDefinition::InstanceDef {
+                class_name,
+                ty_arg,
+                methods,
+            },
+        )
+        .spanned()
 }
 
 fn ty_atom_parser<'tokens, 'src: 'tokens>() -> impl Parser<
@@ -403,6 +489,8 @@ pub fn toplevel_defition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
     choice((
+        class_definition_parser(),
+        instance_definition_parser(),
         func_definition_parser(),
         signature_definition_parser(),
         data_definition_parser(),
@@ -416,6 +504,7 @@ pub fn program_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
     toplevel_defition_parser()
-        .separated_by(just(Token::Semicolon)).allow_trailing()
+        .separated_by(just(Token::Semicolon))
+        .allow_trailing()
         .collect()
 }
