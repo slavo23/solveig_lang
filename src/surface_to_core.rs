@@ -46,10 +46,16 @@ pub fn convert_to_core_pattern<'src>(sf_pattern: &SurfacePattern<'src>) -> CoreP
 pub fn convert_to_core_expr<'src>(sf_expr: &SpannedWrapper<SurfaceExpr<'src>>) -> CoreExpr {
     match &**sf_expr {
         SurfaceExpr::Var(var_name) => CoreExpr::Var(var_name.to_string()),
-        SurfaceExpr::Abs(arg_name, body) => CoreExpr::Abs(
-            arg_name.to_string(),
-            Box::new(convert_to_core_expr(&**body)),
-        ),
+        SurfaceExpr::Abs(params, body) => {
+            let mut core_body = convert_to_core_expr(body);
+
+            for (name, opt_ty) in params.iter().rev() {
+                let core_anno = opt_ty.as_ref().map(|t| convert_surface_to_core_ty(t));
+                core_body = CoreExpr::Abs(name.to_string(), core_anno, Box::new(core_body));
+            }
+
+            core_body
+        }
         SurfaceExpr::Ann(ann_expr, ann_ty) => CoreExpr::Anno(
             Box::new(convert_to_core_expr(&**ann_expr)),
             convert_surface_to_core_ty(ann_ty),
@@ -63,10 +69,7 @@ pub fn convert_to_core_expr<'src>(sf_expr: &SpannedWrapper<SurfaceExpr<'src>>) -
             Box::new(convert_to_core_expr(&**body)),
             Box::new(convert_to_core_expr(&**then)),
         ),
-        SurfaceExpr::Con(ctor_name, args) => CoreExpr::Con(
-            ctor_name.to_string(),
-            args.iter().map(|e| convert_to_core_expr(e)).collect(),
-        ),
+        SurfaceExpr::Con(ctor_name) => CoreExpr::Con(ctor_name.to_string()),
         SurfaceExpr::Case(scrutinee, arms) => CoreExpr::Case(
             Box::new(convert_to_core_expr(scrutinee)),
             arms.iter()
@@ -185,7 +188,7 @@ pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> CoreModul
                     let mut core_body = convert_to_core_expr(body);
 
                     for param in params.iter().rev() {
-                        core_body = CoreExpr::Abs((*param).to_string(), Box::new(core_body));
+                        core_body = CoreExpr::Abs((*param).to_string(), None, Box::new(core_body));
                     }
 
                     func_defns.push(CoreTermDef {

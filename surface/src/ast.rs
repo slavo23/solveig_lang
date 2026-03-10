@@ -59,14 +59,18 @@ pub enum SurfaceExpr<'src> {
         Box<Spanned<SurfaceExpr<'src>>>,
         Box<Spanned<SurfaceExpr<'src>>>,
     ),
-    Abs(Spanned<&'src str>, Box<Spanned<SurfaceExpr<'src>>>),
+
+    Abs(
+        Vec<(Spanned<&'src str>, Option<Spanned<SurfaceTy<'src>>>)>,
+        Box<Spanned<SurfaceExpr<'src>>>,
+    ),
     Ann(Box<Spanned<SurfaceExpr<'src>>>, Spanned<SurfaceTy<'src>>),
     Let(
         Spanned<&'src str>,
         Box<Spanned<SurfaceExpr<'src>>>,
         Box<Spanned<SurfaceExpr<'src>>>,
     ),
-    Con(Spanned<&'src str>, Vec<Spanned<SurfaceExpr<'src>>>),
+    Con(&'src str),
     Case(
         Box<Spanned<SurfaceExpr<'src>>>,
         Vec<Spanned<SurfaceMatchArm<'src>>>,

@@ -104,7 +104,39 @@ fn main() {
         append xs ys = 
             case xs of 
                 Nil => ys
-                | Cons x1 x1s => Cons x1 (append x1s ys)
+                | Cons x1 x1s => Cons x1 (append x1s ys);
+
+        constFun : forall a b. a -> b -> a;
+        constFun = fun (x : a) (y : b) => x;
+
+        makeList : forall a. a -> List a -> List a;
+        makeList x = Cons x;
+
+        mapSucc : List Nat -> List Nat;
+        mapSucc xs = listMap (fun (x : Nat) => S x) xs;
+
+        data FunctorDict f = MkFunctor (forall a b. (a -> b) -> f a -> f b);
+
+        maybeMap : forall a b. (a -> b) -> Maybe a -> Maybe b;
+        maybeMap f mx =
+            case mx of
+                Nothing => Nothing
+                | Just x => Just (f x);
+
+        getFmap : forall f a b. FunctorDict f -> (a -> b) -> f a -> f b;
+        getFmap dict =
+            case dict of
+                MkFunctor fmapFn => fmapFn;
+
+        listFunctor : FunctorDict List;
+        listFunctor = MkFunctor listMap;
+
+        maybeFunctor : FunctorDict Maybe;
+        maybeFunctor = MkFunctor maybeMap;
+
+        mapBoth : forall f a b. FunctorDict f -> (a -> b) -> f a -> f b;
+        mapBoth dict f xs = getFmap dict f xs;
+
 
     ";
     let l = lexer().parse(my_expr).unwrap();

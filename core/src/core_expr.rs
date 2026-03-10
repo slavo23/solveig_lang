@@ -7,11 +7,12 @@ pub enum CoreExpr {
     Unit,
     Var(String),
     App(Box<CoreExpr>, Box<CoreExpr>),
-    Abs(String, Box<CoreExpr>),
+    Abs(String, Option<Ty>, Box<CoreExpr>),
+    TyAbs(String, Box<CoreExpr>),
+    TyApp(Box<CoreExpr>, Ty),
     Anno(Box<CoreExpr>, Ty),
     Let(String, Box<CoreExpr>, Box<CoreExpr>),
-    Con(String, Vec<CoreExpr>),
-    Fix(Box<CoreExpr>),
+    Con(String),
     Case(Box<CoreExpr>, Vec<CoreCaseArm>),
     IfThenElse(Box<CoreExpr>, Box<CoreExpr>, Box<CoreExpr>),
 }
@@ -72,7 +73,11 @@ impl CoreExpr {
     }
 
     pub fn abs(arg: String, body: CoreExpr) -> CoreExpr {
-        CoreExpr::Abs(arg, Box::new(body))
+        CoreExpr::Abs(arg, None, Box::new(body))
+    }
+
+    pub fn abs_anno(arg: String, ty: Ty, body: CoreExpr) -> CoreExpr{
+        CoreExpr::Abs(arg, Some(ty), Box::new(body))
     }
 
     pub fn var(name: String) -> CoreExpr {
@@ -91,7 +96,5 @@ impl CoreExpr {
         CoreExpr::Let(bind_name.into(), Box::new(body), Box::new(in_expr))
     }
 
-    pub fn fix(expr: CoreExpr) -> CoreExpr {
-        CoreExpr::Fix(Box::new(expr))
-    }
+
 }

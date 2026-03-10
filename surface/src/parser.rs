@@ -34,6 +34,7 @@ pub enum Token<'src> {
     If,
     Then,
     Else,
+    Comma,
 }
 
 pub fn lexer<'src>()
@@ -69,6 +70,7 @@ pub fn lexer<'src>()
             just(";").to(Token::Semicolon),
             just("|").to(Token::Pipe),
             just("_").to(Token::Uns),
+            just(",").to(Token::Comma),
             token
                 .repeated()
                 .collect()
@@ -102,7 +104,6 @@ fn ty_atom_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     }
     .spanned();
 
-    // Parenthesized type is ONE atomic field; inside parens parse the full type
     let parens_ty = ty_parser().nested_in(select_ref! {
         Token::Parens(ts) = e => ts.split_spanned(e.span())
     });
@@ -235,18 +236,6 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             })
             .boxed();
 
-        let ctor_arg = choice((
-            unit_expr.clone().spanned(),
-            upper_ident
-                .spanned()
-                .map(|name| SurfaceExpr::Con(name, vec![]))
-                .spanned(),
-            ident.map(SurfaceExpr::Var).spanned(),
-            expr.clone().nested_in(select_ref! {
-                Token::Parens(ts) = e => ts.split_spanned(e.span())
-            }),
-        ));
-
         let case_arm = pattern_parser()
             .then_ignore(just(Token::FatArrow))
             .then(expr.clone())
@@ -267,16 +256,31 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .map(|(scrutinee, arms)| SurfaceExpr::Case(Box::new(scrutinee), arms))
             .boxed();
 
-        let expr_ctor = upper_ident
+        let expr_ctor = upper_ident.map(SurfaceExpr::Con);
+
+        let ty = ty_parser().boxed();
+
+        let param_typed = ident
             .spanned()
-            .then(ctor_arg.repeated().collect::<Vec<_>>())
-            .map(|(name, args)| SurfaceExpr::Con(name, args));
+            .then_ignore(just(Token::Colon))
+            .then(ty.clone())
+            .nested_in(select_ref! {
+                Token::Parens(ts) = e => ts.split_spanned(e.span())
+            })
+            .map(|(name, ty)| (name, Some(ty)));
+
+        let param_untyped = ident.spanned().map(|name| (name, None));
+
+        let params = choice((param_typed, param_untyped))
+            .repeated()
+            .at_least(1)
+            .collect::<Vec<_>>();
 
         let expr_fun = just(Token::Fun)
-            .ignore_then(ident.spanned())
+            .ignore_then(params)
             .then_ignore(just(Token::FatArrow))
             .then(expr.clone())
-            .map(|(name, body)| SurfaceExpr::Abs(name, Box::new(body)));
+            .map(|(params, body)| SurfaceExpr::Abs(params, Box::new(body)));
 
         let expr_let = just(Token::Let)
             .ignore_then(ident.spanned())
@@ -412,6 +416,6 @@ pub fn program_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
     toplevel_defition_parser()
-        .separated_by(just(Token::Semicolon))
+        .separated_by(just(Token::Semicolon)).allow_trailing()
         .collect()
 }
