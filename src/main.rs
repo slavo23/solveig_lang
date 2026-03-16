@@ -4,6 +4,7 @@ use surface::parser::{lexer, program_parser};
 use surface_to_core::convert_to_core_program;
 use syntax::inference::check_module;
 
+
 fn main() {
     let my_expr = r"
         data List a = Nil | Cons a (List a);
@@ -12,14 +13,6 @@ fn main() {
         data Pair a b = Pair a b;
         data Nat = Z | S Nat;
         data Bool = True | False;
-
-        class Functor f where
-            fmap : forall a b. (a -> b) -> f a -> f b;
-        end;
-
-        instance Functor List where
-            fmap f xs = listMap;
-        end;
 
         pairId : forall a b. a -> b -> Pair a b;
         pairId x y = Pair (id x) (id y);
@@ -95,11 +88,6 @@ fn main() {
         id : forall a. a -> a;
         id x = x;
 
-        flipArgs : forall a b c. (a -> b -> c) -> (b -> a -> c);
-        flipArgs f x1 x2 = f x2 x1;
-
-        flipManyArgs : forall a b. List (a -> b -> c) -> List (b -> a -> c);
-        listManyArgs xs = listMap flipArgs xs;
 
         foldr : forall a b. (a -> b -> b) -> b -> List a -> b;
         foldr f z xs =
@@ -144,6 +132,9 @@ fn main() {
 
         mapBoth : forall f a b. FunctorDict f -> (a -> b) -> f a -> f b;
         mapBoth dict f xs = getFmap dict f xs;
+
+        fix : forall a. (a -> a) -> a;
+        fix f = f (fix f);
 
 
     ";

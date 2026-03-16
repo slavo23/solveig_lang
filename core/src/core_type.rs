@@ -94,6 +94,13 @@ impl Ty {
         (quants, current_ty)
     }
 
+    pub fn peel_arrow(&self) -> Option<(Ty, Ty)> {
+        match self {
+            Self::TyArr(fun_ty, arg_ty) => Some((*fun_ty.clone(), *arg_ty.clone())),
+            _ => None,
+        }
+    }
+
     pub fn quantify_with(&self, qs: &Vec<String>) -> Self {
         let mut current_ty = self.clone();
         for quant in qs.iter().rev() {

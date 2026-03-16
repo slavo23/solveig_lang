@@ -43,7 +43,7 @@ impl Context {
                     lhs: _,
                     rhs: solved_type,
                 }) = self.find_solved_evar(ex_var_name.clone())
-                {   
+                {
                     return self.apply(&solved_type);
                 };
 

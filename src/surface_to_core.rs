@@ -148,6 +148,35 @@ fn convert_to_core_data_def(
     }
 }
 
+fn convert_function_body<'src>(
+    signature: &Ty,
+    body: &SpannedWrapper<SurfaceExpr<'src>>,
+    params: &Vec<SpannedWrapper<&'src str>>,
+) -> CoreExpr {
+    let mut core_body = convert_to_core_expr(body);
+    let (quants, after_foralls) = signature.peel_forall();
+
+    let mut remaining_ty = after_foralls;
+    let mut param_annos: Vec<(String, Ty)> = Vec::new();
+    for param in params.iter() {
+        let (arg_ty, ret_ty) = remaining_ty
+            .peel_arrow()
+            .unwrap_or_else(|| panic!("parameter mismatch"));
+        param_annos.push(((*param).to_string(), arg_ty));
+        remaining_ty = ret_ty;
+    }
+
+    for (param_name, param_ty) in param_annos.into_iter().rev() {
+        core_body = CoreExpr::Abs(param_name, Some(param_ty), Box::new(core_body));
+    }
+
+    for quant in quants.iter().rev() {
+        core_body = CoreExpr::TyAbs(quant.clone(), Box::new(core_body))
+    }
+
+    core_body
+}
+
 pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> CoreModule {
     let mut type_ctors: HashMap<String, (Kind, Vec<CoreConstructor>)> = HashMap::new();
     let mut data_ctors: HashMap<String, Ty> = HashMap::new();
@@ -185,26 +214,14 @@ pub fn convert_to_core_program<'src>(sf_prog: SurfaceProgram<'src>) -> CoreModul
         match &**defn {
             SurfaceDefinition::FunDef { name, body, params } => {
                 if let Some(func_signature) = func_types.get(**name) {
-                    let mut core_body = convert_to_core_expr(body);
-
-                    for param in params.iter().rev() {
-                        core_body = CoreExpr::Abs((*param).to_string(), None, Box::new(core_body));
-                    }
-
                     func_defns.push(CoreTermDef {
                         name: (**name).to_string(),
                         signature: func_signature.clone(),
-                        body: core_body,
+                        body: convert_function_body(func_signature, body, params),
                     });
                 }
             }
-            SurfaceDefinition::ClassDef {
-                name,
-                ty_param,
-                methods,
-            } => {
-                println!("{:#?}", defn)
-            }
+
             _ => continue,
         }
     }
