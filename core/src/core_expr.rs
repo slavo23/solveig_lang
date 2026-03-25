@@ -76,7 +76,7 @@ impl CoreExpr {
         CoreExpr::Abs(arg, None, Box::new(body))
     }
 
-    pub fn abs_anno(arg: String, ty: Ty, body: CoreExpr) -> CoreExpr{
+    pub fn abs_anno(arg: String, ty: Ty, body: CoreExpr) -> CoreExpr {
         CoreExpr::Abs(arg, Some(ty), Box::new(body))
     }
 
@@ -95,6 +95,4 @@ impl CoreExpr {
     pub fn let_expr(bind_name: String, body: CoreExpr, in_expr: CoreExpr) -> CoreExpr {
         CoreExpr::Let(bind_name.into(), Box::new(body), Box::new(in_expr))
     }
-
-
 }

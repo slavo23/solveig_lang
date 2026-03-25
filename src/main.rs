@@ -4,7 +4,6 @@ use surface::parser::{lexer, program_parser};
 use surface_to_core::convert_to_core_program;
 use syntax::inference::check_module;
 
-
 fn main() {
     let my_expr = r"
         data List a = Nil | Cons a (List a);
@@ -135,8 +134,6 @@ fn main() {
 
         fix : forall a. (a -> a) -> a;
         fix f = f (fix f);
-
-
     ";
     let l = lexer().parse(my_expr).unwrap();
     let parser = program_parser()
