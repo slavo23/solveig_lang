@@ -73,6 +73,9 @@ dependencies = [
 [[package]]
 name = "core"
 version = "0.1.0"
+dependencies = [
+ "slab",
+]
 
 [[package]]
 name = "equivalent"
@@ -110,6 +113,7 @@ dependencies = [
  "base",
  "chumsky",
  "core",
+ "slab",
  "surface",
  "syntax",
 ]
@@ -217,6 +221,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0fda2ff0d084019ba4d7c6f371c95d8fd75ce3524c3cb8fb653a3023f6323e64"
 
 [[package]]
+name = "slab"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
 name = "stacker"
 version = "0.1.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -253,6 +263,7 @@ name = "syntax"
 version = "0.1.0"
 dependencies = [
  "core",
+ "slab",
 ]
 
 [[package]]

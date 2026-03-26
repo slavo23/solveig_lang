@@ -1,146 +1,93 @@
+mod resolver;
 mod surface_to_core;
+
+use core::ast::Pretty;
+
 use chumsky::{input::Input as _, prelude::*};
+use resolver::Resolver;
 use surface::parser::{lexer, program_parser};
-use surface_to_core::convert_to_core_program;
-use syntax::inference::check_module;
 
 fn main() {
-    let my_expr = r"
-        data List a = Nil | Cons a (List a);
+    let src = r"
+        data Int = Int;
+        data Maybe a = Just a | Nothing;
+
         data Either a b = Left a | Right b;
-        data Maybe a = Nothing | Just a;
-        data Pair a b = Pair a b;
-        data Nat = Z | S Nat;
-        data Bool = True | False;
 
-        pairId : forall a b. a -> b -> Pair a b;
-        pairId x y = Pair (id x) (id y);
+        data Pair a b = MkPair a b;
 
-        max : Nat -> Nat -> Nat;
-        max k m = 
-            case Pair k m of 
-                Pair Z Z => Z
-                | Pair (S s0) Z => k
-                | Pair Z (S s1) => m
-                | Pair (S s0) (S s1) => max s0 s1;
+        data List a = Cons a (List a) | Nil;
+        data Compose f g a = MkCompose (f (g a));
 
-        succ : Nat -> Nat;
-        succ n = 
-            case n of Z => S Z | S k => S (succ k);
+        data Tree a = MkRose a (Forest a);
+        data Forest a = MkForest (List (Tree a));
 
-        prev : Nat -> Nat;
-        prev n = 
-            case n of Z => Z | S k => prev k;
+        data Fix f = MkFix (f (Fix f));
 
-        isZero : Nat -> Bool;
-        isZero n = 
-            case n of Z => True | S _ => False;
+        data Phantom a = MkPhantom;
 
-        singletonList : forall a. a -> List a;
-        singletonList x = Cons x Nil;
+        data Void = Void;
 
-        left : forall a b. a -> Either a b;
-        left x = Left x;
+        data Q1 a = MkQ1;
+        data Q2 = MkQ2 (Q1 Int);
+        data T f = MkT (f Int);
+  
+        data AppInt f = Mk (f Int);
 
-        right : forall a b. b -> Either a b;
-        right x = Right x;
-
-        eitherListUnit : forall a. a -> Either (List a) ();
-        eitherListUnit x = Left (Cons x Nil);
-
-        eitherListUnit2 : forall a. a -> Either (List a) ();
-        eitherListUnit2 x = Right ();
-
-        listMap : forall a b. (a -> b) -> List a -> List b;
-        listMap f xs =
-            case xs of
-                Nil => Nil
-                | Cons y ys => Cons (f y) (listMap f ys)
-        ;
-
-        listFilter : forall a. (a -> Bool) -> List a -> List a;
-        listFilter f xs = 
-            case xs of
-                Nil => Nil
-                | Cons y ys => 
-                    if f y then Cons y (listFilter f ys)
-                    else listFilter f ys;
-
-        listMapId : forall a. List a -> List a;
-        listMapId xs = listMap id xs;
-
-        listSafeHead : forall a. List a -> Maybe a;
-        listSafeHead xs = 
-            case xs of
-                Nil => Nothing
-                | Cons y ys => Just y;
-
-        listSafeTail : forall a. List a -> Maybe (List a);
-        listSafeTail xs = 
-            case xs of
-                Nil => Nothing
-                | Cons y ys => Just ys;
-
-        const : forall a b. a -> b -> a;
-        const x y = x;
-        
         id : forall a. a -> a;
         id x = x;
 
+        idInt : Int;
+        idInt = id Int;
 
-        foldr : forall a b. (a -> b -> b) -> b -> List a -> b;
-        foldr f z xs =
+        head : forall a. List a -> a;
+        head xs =
             case xs of
-                Nil => z
-                | Cons y ys => f y (foldr f z ys);
+             Cons x rest => x;
 
+        fmap : forall f a b. (a -> b) -> f a -> f b;
+        fmap g xs =
+            case xs of
+             Cons fst rst => Cons (g fst) (fmap g rst)
+             | Nil => Nil;
 
-        append : forall a. List a -> List a -> List a;
-        append xs ys = 
-            case xs of 
-                Nil => ys
-                | Cons x1 x1s => Cons x1 (append x1s ys);
-
-        constFun : forall a b. a -> b -> a;
-        constFun = fun (x : a) (y : b) => x;
-
-        makeList : forall a. a -> List a -> List a;
-        makeList x = Cons x;
-
-        mapSucc : List Nat -> List Nat;
-        mapSucc xs = listMap (fun (x : Nat) => S x) xs;
-
-        data FunctorDict f = MkFunctor (forall a b. (a -> b) -> f a -> f b);
-
-        maybeMap : forall a b. (a -> b) -> Maybe a -> Maybe b;
-        maybeMap f mx =
+        fromMaybe : forall a. a -> Maybe a -> a;
+        fromMaybe def mx =
             case mx of
-                Nothing => Nothing
-                | Just x => Just (f x);
+             Just x => x
+             | Nothing => def;
 
-        getFmap : forall f a b. FunctorDict f -> (a -> b) -> f a -> f b;
-        getFmap dict =
-            case dict of
-                MkFunctor fmapFn => fmapFn;
+        hrCompose1 : forall a. (forall f g. f (g a)) -> a -> a;
+        hrCompose1 x y = y;
 
-        listFunctor : FunctorDict List;
-        listFunctor = MkFunctor listMap;
-
-        maybeFunctor : FunctorDict Maybe;
-        maybeFunctor = MkFunctor maybeMap;
-
-        mapBoth : forall f a b. FunctorDict f -> (a -> b) -> f a -> f b;
-        mapBoth dict f xs = getFmap dict f xs;
-
-        fix : forall a. (a -> a) -> a;
-        fix f = f (fix f);
     ";
-    let l = lexer().parse(my_expr).unwrap();
-    let parser = program_parser()
-        .parse(l[..].split_spanned((0..l.len()).into()))
+
+    let tokens = lexer().parse(src).unwrap();
+    let ast = program_parser()
+        .parse(tokens[..].split_spanned((0..tokens.len()).into()))
         .unwrap();
 
-    let stc = convert_to_core_program(parser);
+    let resolver = Resolver::new();
+    let resolved = resolver.resolve_surface_program(ast).unwrap();
 
-    let inferred = check_module(stc);
+    println!("=== Data Definitions (kind-inferred) ===\n");
+    for dd in &resolved.data_defs {
+        println!("{} : {}", dd.name, dd.tycon_kind.pretty());
+        for c in &dd.constructors {
+            println!("  {} : {}", c.name, c.full_type.pretty());
+        }
+        println!();
+    }
+
+    println!("=== Constructor Types ===\n");
+    let mut ctor_names: Vec<_> = resolved.constructor_types.keys().collect();
+    ctor_names.sort();
+    for name in ctor_names {
+        println!("{} : {}", name, resolved.constructor_types[name].pretty());
+    }
+
+    println!("\n=== Function Signatures ===\n");
+    for def in &resolved.func_defs {
+        println!("{} : {}", def.name, def.signature.pretty());
+    }
 }

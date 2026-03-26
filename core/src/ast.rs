@@ -31,9 +31,6 @@ impl Kind {
 
 impl Pretty<Kind> for Kind {
     fn get_precedence(kind: &Kind) -> u8 {
-        const PRECEDENCE_ARR: u8 = 0;
-        const PRECEDENCE_ATOM: u8 = 1;
-
         match kind {
             Kind::Star | Kind::Var(_) => PRECEDENCE_ATOM,
             Kind::Arrow(_, _) => PRECEDENCE_ARR,
@@ -47,20 +44,20 @@ impl Pretty<Kind> for Kind {
                 Kind::Star => "*".to_string(),
                 Kind::Var(k_var) => k_var.to_string(),
                 Kind::Arrow(lhs, rhs) => {
-                    let lhs_fmt = traverse_helper(lhs, PRECEDENCE_APP);
+                    let lhs_fmt = traverse_helper(lhs, PRECEDENCE_ATOM);
                     let rhs_fmt = traverse_helper(rhs, PRECEDENCE_ARR);
                     format!("{lhs_fmt} -> {rhs_fmt}")
                 }
             };
 
             if curr_precedence < parent_precedence {
-                format!("({})", kind_fmt)
+                format!("({kind_fmt})")
             } else {
                 kind_fmt
             }
         }
 
-        traverse_helper(self, PRECEDENCE_LOOSE)
+        traverse_helper(self, PRECEDENCE_ARR)
     }
 }
 
@@ -194,7 +191,7 @@ impl Pretty<TypeExpr> for TypeExpr {
                     let (kinded_quants, ty_body) = t.peel_forall();
                     let peeled_quants = kinded_quants
                         .iter()
-                        .map(|(name, _)| name.as_str())
+                        .map(|(name, kind)| format!("({name} : {})", kind.pretty()))
                         .collect::<Vec<_>>();
 
                     format!(
@@ -222,12 +219,18 @@ impl Pretty<TypeExpr> for TypeExpr {
 }
 
 #[derive(Clone, Debug)]
-pub struct AstNode<T, A> {
-    node: T,
-    anno: A,
+pub struct ExprNode<T, A> {
+    pub node: T,
+    pub anno: A,
 }
 
-type TermExprNode<A> = AstNode<A, TermExpr<A>>;
+impl<T, A> ExprNode<T, A> {
+    pub fn new(node: T, anno: A) -> Self {
+        Self { node, anno }
+    }
+}
+
+pub type TermExprNode<A> = ExprNode<TermExpr<A>, A>;
 
 #[derive(Clone, Debug)]
 pub enum TermExpr<A> {
@@ -238,9 +241,8 @@ pub enum TermExpr<A> {
     TyAbs(String, Kind, Box<TermExprNode<A>>),
     TyApp(Box<TermExprNode<A>>, TypeExpr),
     Anno(Box<TermExprNode<A>>, TypeExpr),
-    Let(String, Box<TermExprNode<A>>, Box<TermExprNode<A>>),
     Con(String),
-    Case(Box<TermExprNode<A>>, Vec<CaseArmNode<A>>),
+    Case(Box<TermExprNode<A>>, Vec<CaseArm<A>>),
     IfThenElse(
         Box<TermExprNode<A>>,
         Box<TermExprNode<A>>,
@@ -248,19 +250,39 @@ pub enum TermExpr<A> {
     ),
 }
 
-type PatternNode<A> = AstNode<A, Pattern<A>>;
-
 #[derive(Clone, Debug)]
-pub enum Pattern<A> {
-    Con(String, Vec<PatternNode<A>>),
+pub enum Pattern {
+    Con(String, Vec<Pattern>),
     Var(String),
     Wild,
 }
 
-type CaseArmNode<A> = AstNode<A, CaseArm<A>>;
-
 #[derive(Clone, Debug)]
 pub struct CaseArm<A> {
-    pub pattern: PatternNode<A>,
+    pub pattern: Pattern,
     pub expr: TermExprNode<A>,
+}
+
+#[derive(Clone, Debug)]
+pub struct TermDefinition<A> {
+    pub name: String,
+    pub signature: TypeExpr,
+    pub body: TermExprNode<A>,
+}
+ 
+
+ 
+#[derive(Clone, Debug)]
+pub struct DataDefinition {
+    pub name: String,
+    pub ty_params: Vec<(String, Kind)>,
+    pub tycon_kind: Kind,
+    pub constructors: Vec<ConstructorDef>,
+}
+ 
+#[derive(Clone, Debug)]
+pub struct ConstructorDef {
+    pub name: String,
+    pub fields: Vec<TypeExpr>,
+    pub full_type: TypeExpr,
 }
