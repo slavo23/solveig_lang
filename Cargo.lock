@@ -39,6 +39,9 @@ dependencies = [
 [[package]]
 name = "base"
 version = "0.1.0"
+dependencies = [
+ "ariadne",
+]
 
 [[package]]
 name = "cc"
@@ -262,6 +265,7 @@ dependencies = [
 name = "syntax"
 version = "0.1.0"
 dependencies = [
+ "base",
  "core",
  "slab",
 ]

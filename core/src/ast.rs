@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 const PRECEDENCE_LOOSE: u8 = 0;
 const PRECEDENCE_ARR: u8 = 1;
 const PRECEDENCE_APP: u8 = 2;
@@ -285,4 +287,13 @@ pub struct ConstructorDef {
     pub name: String,
     pub fields: Vec<TypeExpr>,
     pub full_type: TypeExpr,
+}
+
+#[derive(Debug)]
+pub struct ResolvedModule<A> {
+    pub data_defs: Vec<DataDefinition>,
+    pub tycon_kinds: HashMap<String, Kind>,
+    pub constructor_types: HashMap<String, TypeExpr>,
+    pub func_types: HashMap<String, TypeExpr>,
+    pub func_defs: Vec<TermDefinition<A>>,
 }

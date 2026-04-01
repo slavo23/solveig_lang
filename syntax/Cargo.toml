@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 core = { path = "../core" }
+base = { path = "../base"}
 slab = { workspace = true }
 
 [build-dependencies]

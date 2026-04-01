@@ -3,9 +3,11 @@ mod surface_to_core;
 
 use core::ast::Pretty;
 
+use base::utils::diagnostics::emit_type_errors;
 use chumsky::{input::Input as _, prelude::*};
 use resolver::Resolver;
 use surface::parser::{lexer, program_parser};
+use syntax::inference::type_infer::check_and_elab_module;
 
 fn main() {
     let src = r"
@@ -23,42 +25,140 @@ fn main() {
         data Forest a = MkForest (List (Tree a));
 
         data Fix f = MkFix (f (Fix f));
+        data List a = Nil | Cons a (List a);
+        data Either a b = Left a | Right b;
+        data Maybe a = Nothing | Just a;
+        data Pair a b = Pair a b;
+        data Nat = Z | S Nat;
+        data Bool = True | False;
 
-        data Phantom a = MkPhantom;
+        pairId : forall a b. a -> b -> Pair a b;
+        pairId x y = Pair (id x) (id y);
 
-        data Void = Void;
+        max : Nat -> Nat -> Nat;
+        max k m = 
+            case Pair k m of 
+                Pair Z Z => Z
+                | Pair (S s0) Z => k
+                | Pair Z (S s1) => m
+                | Pair (S s0) (S s1) => max s0 s1;
 
-        data Q1 a = MkQ1;
-        data Q2 = MkQ2 (Q1 Int);
-        data T f = MkT (f Int);
-  
-        data AppInt f = Mk (f Int);
+        succ : Nat -> Nat;
+        succ n = 
+            case n of Z => S Z | S k => S (succ k);
 
+        prev : Nat -> Nat;
+        prev n = 
+            case n of Z => Z | S k => prev k;
+
+        isZero : Nat -> Bool;
+        isZero n = 
+            case n of Z => True | S _ => False;
+
+        singletonList : forall a. a -> List a;
+        singletonList x = Cons x Nil;
+
+        left : forall a b. a -> Either a b;
+        left x = Left x;
+
+        right : forall a b. b -> Either a b;
+        right x = Right x;
+
+        eitherListUnit : forall a. a -> Either (List a) ();
+        eitherListUnit x = Left (Cons x Nil);
+
+        eitherListUnit2 : forall a. a -> Either (List a) ();
+        eitherListUnit2 x = Right ();
+
+        listMap : forall a b. (a -> b) -> List a -> List b;
+        listMap f xs =
+            case xs of
+                Nil => Nil
+                | Cons y ys => Cons (f y) (listMap f ys)
+        ;
+
+        listFilter : forall a. (a -> Bool) -> List a -> List a;
+        listFilter f xs = 
+            case xs of
+                Nil => Nil
+                | Cons y ys => 
+                    if f y then Cons y (listFilter f ys)
+                    else listFilter f ys;
+
+        listMapId : forall a. List a -> List a;
+        listMapId xs = listMap id xs;
+
+        listSafeHead : forall a. List a -> Maybe a;
+        listSafeHead xs = 
+            case xs of
+                Nil => Nothing
+                | Cons y ys => Just y;
+
+        listSafeTail : forall a. List a -> Maybe (List a);
+        listSafeTail xs = 
+            case xs of
+                Nil => Nothing
+                | Cons y ys => Just ys;
+
+        const : forall a b. a -> b -> a;
+        const x y = x;
+        
         id : forall a. a -> a;
         id x = x;
 
-        idInt : Int;
-        idInt = id Int;
 
-        head : forall a. List a -> a;
-        head xs =
+        foldr : forall a b. (a -> b -> b) -> b -> List a -> b;
+        foldr f z xs =
             case xs of
-             Cons x rest => x;
+                Nil => z
+                | Cons y ys => f y (foldr f z ys);
 
-        fmap : forall f a b. (a -> b) -> f a -> f b;
-        fmap g xs =
-            case xs of
-             Cons fst rst => Cons (g fst) (fmap g rst)
-             | Nil => Nil;
 
-        fromMaybe : forall a. a -> Maybe a -> a;
-        fromMaybe def mx =
+        append : forall a. List a -> List a -> List a;
+        append xs ys = 
+            case xs of 
+                Nil => ys
+                | Cons x1 x1s => Cons x1 (append x1s ys);
+
+        constFun : forall a b. a -> b -> a;
+        constFun x y = x;
+
+        makeList : forall a. a -> List a -> List a;
+        makeList x = Cons x;
+
+        mapSucc : List Nat -> List Nat;
+        mapSucc xs = listMap (fun (x : Nat) => S x) xs;
+
+        data FunctorDict f = MkFunctor (forall a b. (a -> b) -> f a -> f b);
+
+        maybeMap : forall a b. (a -> b) -> Maybe a -> Maybe b;
+        maybeMap f mx =
             case mx of
-             Just x => x
-             | Nothing => def;
+                Nothing => Nothing
+                | Just x => Just (f x);
 
-        hrCompose1 : forall a. (forall f g. f (g a)) -> a -> a;
-        hrCompose1 x y = y;
+        getFmap : forall f a b. FunctorDict f -> (a -> b) -> f a -> f b;
+        getFmap dict =
+            case dict of
+                MkFunctor fmapFn => fmapFn;
+
+        listFunctor : FunctorDict List;
+        listFunctor = MkFunctor listMap;
+
+        maybeFunctor : FunctorDict Maybe;
+        maybeFunctor = MkFunctor maybeMap;
+
+        mapBoth : forall f a b. FunctorDict f -> (a -> b) -> f a -> f b;
+        mapBoth dict f xs = getFmap dict f xs;
+
+        brokenId : forall a. a -> a;
+        brokenId x = x ();
+
+        brokenConst : forall a b. a -> b -> a;
+        brokenConst x y = y;
+
+        brokenMaybe : forall a. a -> Maybe a;
+        brokenMaybe x = Right x;
 
     ";
 
@@ -69,25 +169,13 @@ fn main() {
 
     let resolver = Resolver::new();
     let resolved = resolver.resolve_surface_program(ast).unwrap();
-
-    println!("=== Data Definitions (kind-inferred) ===\n");
-    for dd in &resolved.data_defs {
-        println!("{} : {}", dd.name, dd.tycon_kind.pretty());
-        for c in &dd.constructors {
-            println!("  {} : {}", c.name, c.full_type.pretty());
+    match check_and_elab_module(&resolved, "repl".to_string()) {
+        Ok(()) => {
+            println!("typecheck ok");
         }
-        println!();
-    }
-
-    println!("=== Constructor Types ===\n");
-    let mut ctor_names: Vec<_> = resolved.constructor_types.keys().collect();
-    ctor_names.sort();
-    for name in ctor_names {
-        println!("{} : {}", name, resolved.constructor_types[name].pretty());
-    }
-
-    println!("\n=== Function Signatures ===\n");
-    for def in &resolved.func_defs {
-        println!("{} : {}", def.name, def.signature.pretty());
+        Err(errors) => {
+            emit_type_errors(&errors, src).unwrap();
+            std::process::exit(1);
+        }
     }
 }

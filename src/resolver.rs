@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use base::utils::span::Span;
 use core::ast::{
     CaseArm, ConstructorDef, DataDefinition, Kind, Pattern, TermDefinition, TermExpr, TermExprNode,
-    TypeExpr,
+    TypeExpr, ResolvedModule
 };
 use surface::ast::{
     SpannedWrapper, SurfaceDefinition, SurfaceExpr, SurfaceMatchArm, SurfacePattern,
@@ -13,14 +13,7 @@ use surface::ast::{
 use syntax::data_kind_infer::{infer_all_data_kinds, RawConstructorDef, RawDataDef};
 use syntax::signature_infer::{KindError, SignatureKindInferencer};
 
-#[derive(Debug)]
-pub struct ResolvedProgram<A> {
-    pub data_defs: Vec<DataDefinition>,
-    pub tycon_kinds: HashMap<String, Kind>,
-    pub constructor_types: HashMap<String, TypeExpr>,
-    pub func_types: HashMap<String, TypeExpr>,
-    pub func_defs: Vec<TermDefinition<A>>,
-}
+
 
 pub struct Resolver;
 
@@ -31,15 +24,16 @@ impl Resolver {
 
     pub fn resolve_surface_type<'src>(&self, sf: &SpannedWrapper<SurfaceTy<'src>>) -> TypeExpr {
         match &**sf {
-            SurfaceTy::Var(v) => TypeExpr::make_var(v.to_string()),
-            SurfaceTy::Arr(l, r) => {
-                TypeExpr::make_arr(self.resolve_surface_type(l), self.resolve_surface_type(r))
-            }
-            SurfaceTy::ForAll(qs, body) => qs
+            SurfaceTy::Var(var_name) => TypeExpr::make_var(var_name.to_string()),
+            SurfaceTy::Arr(lhs, rhs) => TypeExpr::make_arr(
+                self.resolve_surface_type(lhs),
+                self.resolve_surface_type(rhs),
+            ),
+            SurfaceTy::ForAll(quants, body) => quants
                 .iter()
                 .rev()
-                .fold(self.resolve_surface_type(body), |acc, q| {
-                    TypeExpr::make_forall((*q).to_string(), Kind::Star, acc)
+                .fold(self.resolve_surface_type(body), |acc, quant| {
+                    TypeExpr::make_forall((*quant).to_string(), Kind::Star, acc)
                 }),
             SurfaceTy::Unit => TypeExpr::TyUnit,
             SurfaceTy::Con(c) => TypeExpr::TyCon(c.to_string()),
@@ -53,10 +47,10 @@ impl Resolver {
         match &**sf {
             SurfacePattern::Var(v) => Pattern::Var(v.to_string()),
             SurfacePattern::Wild => Pattern::Wild,
-            SurfacePattern::Con(c, args) => Pattern::Con(
-                c.to_string(),
+            SurfacePattern::Con(con_name, args) => Pattern::Con(
+                con_name.to_string(),
                 args.iter()
-                    .map(|a| self.resolve_surface_pattern(a))
+                    .map(|arg_name| self.resolve_surface_pattern(arg_name))
                     .collect(),
             ),
         }
@@ -94,15 +88,17 @@ impl Resolver {
                 let (last_p, last_ty) = rev.next().unwrap();
                 let mut body_node = self.resolve_surface_expr(body);
 
-                for (p, mt) in rev {
-                    let pt = mt.as_ref().map(|t| self.resolve_surface_type(t));
+                for (param_name, param_ty_anno) in rev {
+                    let pt = param_ty_anno
+                        .as_ref()
+                        .map(|ty| self.resolve_surface_type(ty));
                     body_node = TermExprNode::new(
-                        TermExpr::Abs(p.to_string(), pt, Box::new(body_node)),
+                        TermExpr::Abs(param_name.to_string(), pt, Box::new(body_node)),
                         span.clone(),
                     );
                 }
-                let lpt = last_ty.as_ref().map(|t| self.resolve_surface_type(t));
-                TermExpr::Abs(last_p.to_string(), lpt, Box::new(body_node))
+                let last_param_ty = last_ty.as_ref().map(|ty| self.resolve_surface_type(ty));
+                TermExpr::Abs(last_p.to_string(), last_param_ty, Box::new(body_node))
             }
             SurfaceExpr::IfThenElse(c, t, e) => TermExpr::IfThenElse(
                 Box::new(self.resolve_surface_expr(c)),
@@ -196,7 +192,7 @@ impl Resolver {
     pub fn resolve_surface_program<'src>(
         mut self,
         sf_prog: SurfaceProgram<'src>,
-    ) -> Result<ResolvedProgram<Span>, KindError> {
+    ) -> Result<ResolvedModule<Span>, KindError> {
         let mut raw_data_defs = Vec::new();
         for defn in sf_prog.iter() {
             if let SurfaceDefinition::DataDef {
@@ -265,7 +261,7 @@ impl Resolver {
             }
         }
 
-        Ok(ResolvedProgram {
+        Ok(ResolvedModule {
             data_defs,
             tycon_kinds,
             constructor_types,
