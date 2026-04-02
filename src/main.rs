@@ -1,13 +1,12 @@
 mod resolver;
-mod surface_to_core;
-
-use core::ast::Pretty;
 
 use base::utils::diagnostics::emit_type_errors;
 use chumsky::{input::Input as _, prelude::*};
 use resolver::Resolver;
 use surface::parser::{lexer, program_parser};
 use syntax::inference::type_infer::check_and_elab_module;
+pub mod compile;
+use compile::{lowering::lower_module, interpret::Machine};
 
 fn main() {
     let src = r"
@@ -151,15 +150,6 @@ fn main() {
         mapBoth : forall f a b. FunctorDict f -> (a -> b) -> f a -> f b;
         mapBoth dict f xs = getFmap dict f xs;
 
-        brokenId : forall a. a -> a;
-        brokenId x = x ();
-
-        brokenConst : forall a b. a -> b -> a;
-        brokenConst x y = y;
-
-        brokenMaybe : forall a. a -> Maybe a;
-        brokenMaybe x = Right x;
-
         testPolyMatch : Nat -> (forall a. a -> a);
         testPolyMatch n = case n of
               Z => id
@@ -170,6 +160,112 @@ fn main() {
         testManyIds : List Id;
         testManyIds = Cons (MkId id) (Cons (MkId (fun x => x)) Nil);
 
+        ifElsePoly : Nat -> (forall a. a -> a);
+        ifElsePoly n =
+            if isZero n then
+                if isZero n then id else id
+            else
+                fun (x : a) => x;
+
+        pairPartial : forall a b. a -> (b -> Pair a b);
+        pairPartial x = Pair x;
+
+        not : Bool -> Bool;
+        not b = case b of True => False | False => True;
+
+        natList : List Nat;
+        natList = Cons Z (Cons (S Z) (Cons (S Z) (Cons Z (Cons Z Nil))));
+
+        noZeros : List Nat;
+        noZeros = listFilter (fun n => not (isZero n)) natList;
+
+        not : Bool -> Bool;
+        not b =
+            case b of
+                True => False
+                | False => True;
+
+  
+        data Bool = True | False;
+
+
+        not : Bool -> Bool;
+        not b =
+            case b of
+                True => False
+                | False => True;
+
+        leq : Nat -> Nat -> Bool;
+        leq n m =
+            case n of
+                Z => True
+                | S n1 =>
+                    case m of
+                        Z => False
+                        | S m1 => leq n1 m1;
+
+        append : forall a. [a] -> [a] -> [a];
+        append xs ys =
+            case xs of
+                Nil => ys
+                | Cons x x1s => Cons x (append x1s ys);
+
+        filter : forall a. (a -> Bool) -> [a] -> [a];
+        filter p xs =
+            case xs of
+                [] => Nil
+                | y :: ys =>
+                    if p y then y :: (filter p ys)
+                    else filter p ys;
+
+        qsort : [Nat] -> [Nat];
+        qsort xs =
+            case xs of
+                [] => Nil
+                | pivot :: rest =>
+                    append
+                        (qsort (filter (fun x => leq x pivot) rest))
+                        (pivot :: (qsort (filter (fun x => not (leq x pivot)) rest)));
+
+
+        add : Nat -> Nat -> Nat;
+        add n m =
+            case n of
+                Z => m
+                | S k => S (add k m);
+
+        mul : Nat -> Nat -> Nat;
+        mul n m =
+            case n of
+                Z => Z
+                | S k => add m (mul k m);
+
+        one : Nat;
+        one = S Z;
+
+        two : Nat;
+        two = S one;
+
+        three : Nat;
+        three = S two;
+
+        four : Nat;
+        four = S three;
+
+        five : Nat;
+        five = S four;
+
+        six : Nat;
+        six = add one five;
+
+        seven : Nat;
+        seven = add one six;
+
+        sample : [Nat];
+        sample = [three, one, six, four, one, five, seven];
+
+        main : List Nat;
+        main = qsort sample;
     ";
 
     let tokens = lexer().parse(src).unwrap();
@@ -179,9 +275,11 @@ fn main() {
 
     let resolver = Resolver::new();
     let resolved = resolver.resolve_surface_program(ast).unwrap();
-    match check_and_elab_module(&resolved, "repl".to_string()) {
-        Ok(()) => {
-            println!("typecheck ok");
+    match check_and_elab_module(&resolved, "repl") {
+        Ok(checked) => {
+            let ir = lower_module(&checked);
+            let result = Machine::exec(&ir, "main");
+            println!("{}", result.display(&ir));
         }
         Err(errors) => {
             emit_type_errors(&errors, src).unwrap();

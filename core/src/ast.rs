@@ -232,48 +232,57 @@ impl<T, A> ExprNode<T, A> {
     }
 }
 
-pub type TermExprNode<A> = ExprNode<TermExpr<A>, A>;
+pub type TermExprNode<A, P = A> = ExprNode<TermExpr<A, P>, A>;
+pub type PatternNode<A> = ExprNode<Pattern<A>, A>;
+pub type CaseArmNode<A, P = A> = ExprNode<CaseArm<A, P>, P>;
 
 #[derive(Clone, Debug)]
-pub enum TermExpr<A> {
+pub enum TermExpr<A, P = A> {
     Unit,
     Var(String),
-    App(Box<TermExprNode<A>>, Box<TermExprNode<A>>),
-    Abs(String, Option<TypeExpr>, Box<TermExprNode<A>>),
-    TyAbs(String, Kind, Box<TermExprNode<A>>),
-    TyApp(Box<TermExprNode<A>>, TypeExpr),
-    Anno(Box<TermExprNode<A>>, TypeExpr),
+    App(Box<TermExprNode<A, P>>, Box<TermExprNode<A, P>>),
+    Abs(String, Option<TypeExpr>, Box<TermExprNode<A, P>>),
+    TyAbs(String, Kind, Box<TermExprNode<A, P>>),
+    TyApp(Box<TermExprNode<A, P>>, TypeExpr),
+    Anno(Box<TermExprNode<A, P>>, TypeExpr),
     Con(String),
-    Case(Box<TermExprNode<A>>, Vec<CaseArm<A>>),
+    Case(Box<TermExprNode<A, P>>, Vec<CaseArmNode<A, P>>),
     IfThenElse(
-        Box<TermExprNode<A>>,
-        Box<TermExprNode<A>>,
-        Box<TermExprNode<A>>,
+        Box<TermExprNode<A, P>>,
+        Box<TermExprNode<A, P>>,
+        Box<TermExprNode<A, P>>,
     ),
 }
 
 #[derive(Clone, Debug)]
-pub enum Pattern {
-    Con(String, Vec<Pattern>),
+pub enum Pattern<A> {
+    Con(String, Vec<PatternNode<A>>),
     Var(String),
     Wild,
 }
 
 #[derive(Clone, Debug)]
-pub struct CaseArm<A> {
-    pub pattern: Pattern,
-    pub expr: TermExprNode<A>,
+pub struct CaseArm<A, P = A> {
+    pub pattern: PatternNode<P>,
+    pub expr: TermExprNode<A, P>,
 }
 
 #[derive(Clone, Debug)]
-pub struct TermDefinition<A> {
+pub struct TermDefinition<A, P = A> {
     pub name: String,
     pub signature: TypeExpr,
-    pub body: TermExprNode<A>,
+    pub body: TermExprNode<A, P>,
 }
- 
 
- 
+#[derive(Debug)]
+pub struct ResolvedModule<A, P = A> {
+    pub data_defs: Vec<DataDefinition>,
+    pub tycon_kinds: HashMap<String, Kind>,
+    pub constructor_types: HashMap<String, TypeExpr>,
+    pub func_types: HashMap<String, TypeExpr>,
+    pub func_defs: Vec<TermDefinition<A, P>>,
+}
+
 #[derive(Clone, Debug)]
 pub struct DataDefinition {
     pub name: String,
@@ -281,19 +290,10 @@ pub struct DataDefinition {
     pub tycon_kind: Kind,
     pub constructors: Vec<ConstructorDef>,
 }
- 
+
 #[derive(Clone, Debug)]
 pub struct ConstructorDef {
     pub name: String,
     pub fields: Vec<TypeExpr>,
     pub full_type: TypeExpr,
-}
-
-#[derive(Debug)]
-pub struct ResolvedModule<A> {
-    pub data_defs: Vec<DataDefinition>,
-    pub tycon_kinds: HashMap<String, Kind>,
-    pub constructor_types: HashMap<String, TypeExpr>,
-    pub func_types: HashMap<String, TypeExpr>,
-    pub func_defs: Vec<TermDefinition<A>>,
 }

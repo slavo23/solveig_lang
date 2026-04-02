@@ -3,7 +3,10 @@ use std::collections::HashMap;
 use crate::inference::inference_ctx::{Context, ContextEntry};
 use base::utils::diagnostics::{FileSpan, TypeError};
 use base::utils::span::Span;
-use core::ast::{CaseArm, Kind, Pattern, Pretty, ResolvedModule, TermExpr, TermExprNode, TypeExpr};
+use core::ast::{
+    CaseArm, CaseArmNode, Kind, Pattern, PatternNode, Pretty, ResolvedModule, TermExpr,
+    TermExprNode, TypeExpr, TermDefinition
+};
 
 #[derive(Clone, Debug)]
 pub struct TcMetadata {
@@ -22,10 +25,13 @@ impl TcMetadata {
     }
 }
 
-fn elab_node(node: TermExpr<TcMetadata>, span: Span, ty: TypeExpr) -> TermExprNode<TcMetadata> {
+fn elab_node(
+    node: TermExpr<TcMetadata, Span>,
+    span: Span,
+    ty: TypeExpr,
+) -> TermExprNode<TcMetadata, Span> {
     TermExprNode::new(node, TcMetadata::new(span, ty))
 }
-
 pub struct TypeChecker {
     file_id: String,
     counter: usize,
@@ -89,6 +95,10 @@ impl TypeChecker {
         }
     }
 
+    fn bool_type(&self) -> TypeExpr {
+        TypeExpr::TyCon("Bool".to_string())
+    }
+
     pub fn zonk_type(&self, ty: &TypeExpr) -> TypeExpr {
         match ty {
             TypeExpr::TyExVar(name) => {
@@ -111,7 +121,10 @@ impl TypeChecker {
         }
     }
 
-    pub fn zonk_expr(&self, expr: &TermExprNode<TcMetadata>) -> TermExprNode<TcMetadata> {
+    pub fn zonk_expr(
+        &self,
+        expr: &TermExprNode<TcMetadata, Span>,
+    ) -> TermExprNode<TcMetadata, Span> {
         let zonked_meta = TcMetadata::new(
             expr.anno.span.clone(),
             self.zonk_type(&expr.anno.inferred_type),
@@ -141,9 +154,14 @@ impl TypeChecker {
             TermExpr::Case(scrutinee, arms) => TermExpr::Case(
                 Box::new(self.zonk_expr(scrutinee)),
                 arms.iter()
-                    .map(|arm| CaseArm {
-                        pattern: arm.pattern.clone(),
-                        expr: self.zonk_expr(&arm.expr),
+                    .map(|arm| {
+                        CaseArmNode::new(
+                            CaseArm {
+                                pattern: arm.node.pattern.clone(),
+                                expr: self.zonk_expr(&arm.node.expr),
+                            },
+                            arm.anno.clone(),
+                        )
                     })
                     .collect(),
             ),
@@ -205,11 +223,7 @@ impl TypeChecker {
                 let theta = self.solve_subtype_inner(ctx, domain_b, domain_a)?;
                 let codomain_a_applied = theta.apply(codomain_a);
                 let codomain_b_applied = theta.apply(codomain_b);
-                self.solve_subtype_inner(
-                    theta,
-                    &codomain_a_applied,
-                    &codomain_b_applied,
-                )
+                self.solve_subtype_inner(theta, &codomain_a_applied, &codomain_b_applied)
             }
             (TypeExpr::TyApp(func_a, arg_a), TypeExpr::TyApp(func_b, arg_b)) => {
                 let theta = self.solve_subtype_inner(ctx, func_b, func_a)?;
@@ -227,8 +241,7 @@ impl TypeChecker {
                     .add_entry(ContextEntry::ExVar(fresh_evar.clone(), kind.clone()));
 
                 let instantiated_body = body.substitute(quantifier, &TypeExpr::TyExVar(fresh_evar));
-                let theta =
-                    self.solve_subtype_inner(extended_ctx, &instantiated_body, right)?;
+                let theta = self.solve_subtype_inner(extended_ctx, &instantiated_body, right)?;
                 Ok(theta.until(&marker))
             }
             (_, TypeExpr::TyForAll(quantifier, kind, body)) => {
@@ -500,12 +513,16 @@ impl TypeChecker {
             TypeExpr::TyForAll(quantifier, kind, body) => {
                 let fresh_evar = self.fresh_evar_name();
                 let new_ctx = ctx.add_entry(ContextEntry::ExVar(fresh_evar.clone(), kind.clone()));
-                let instantiated = body.substitute(&quantifier, &TypeExpr::TyExVar(fresh_evar));
+                let instantiated = body.substitute(quantifier, &TypeExpr::TyExVar(fresh_evar));
                 self.force_arrow(new_ctx, &instantiated)
             }
 
             TypeExpr::TyExVar(evar_name) if ctx.has_unsolved_evar(evar_name) => {
-                let evar_entry = ContextEntry::ExVar(evar_name.clone(), Kind::Star);
+                let evar_entry = ContextEntry::ExVar(
+                    evar_name.clone(),
+                    ctx.evar_kind(evar_name)
+                        .unwrap_or_else(|| panic!("missing evar kind for {}", evar_name)),
+                );
                 let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 
                 let domain_evar = self.fresh_evar_name();
@@ -535,15 +552,140 @@ impl TypeChecker {
         }
     }
 
+    fn check_optional_param_annotation(
+        &mut self,
+        ctx: Context,
+        maybe_annotation: &Option<TypeExpr>,
+        expected_domain: &TypeExpr,
+        span: Span,
+    ) -> TcResult<Context> {
+        match maybe_annotation {
+            Some(annotation) => {
+                let origin = self.get_file_span(span);
+                let ctx = self.solve_subtype(
+                    ctx.clone(),
+                    &ctx.apply(expected_domain),
+                    &ctx.apply(annotation),
+                    origin.clone(),
+                )?;
+                self.solve_subtype(
+                    ctx.clone(),
+                    &ctx.apply(annotation),
+                    &ctx.apply(expected_domain),
+                    origin,
+                )
+            }
+            None => Ok(ctx),
+        }
+    }
+
+    fn instantiate_constructor_pattern(
+        &mut self,
+        ctx: Context,
+        constructor_type: &TypeExpr,
+        arity: usize,
+    ) -> TcResult<(Context, Vec<TypeExpr>, TypeExpr)> {
+        let mut theta = ctx;
+        let mut current_type = constructor_type.clone();
+        let mut field_types = Vec::with_capacity(arity);
+
+        for _ in 0..arity {
+            let (new_ctx, domain, codomain) = self.force_arrow(theta, &current_type)?;
+            theta = new_ctx;
+            field_types.push(domain);
+            current_type = codomain;
+        }
+
+        Ok((theta, field_types, current_type))
+    }
+
+    fn add_pattern_bindings(&self, mut ctx: Context, bindings: &[(String, TypeExpr)]) -> Context {
+        for (var_name, var_type) in bindings {
+            ctx = ctx.add_entry(ContextEntry::TypedVar {
+                var_name: var_name.clone(),
+                ty: var_type.clone(),
+            });
+        }
+        ctx
+    }
+
+    fn solve_case_inference(
+        &mut self,
+        ctx: Context,
+        scrutinee: &TermExprNode<Span>,
+        arms: &[CaseArmNode<Span>],
+        span: Span,
+    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
+        if arms.is_empty() {
+            return Err(TypeError::EmptyCaseExpression {
+                span: self.get_file_span(span.clone()),
+            });
+        }
+
+        let (gamma, elaborated_scrutinee, scrutinee_type) = self.solve_inference(ctx, scrutinee)?;
+        let scrutinee_type = gamma.apply(&scrutinee_type);
+
+        let result_evar = self.fresh_evar_name();
+        let result_type = TypeExpr::TyExVar(result_evar.clone());
+        let mut theta = gamma.add_entry(ContextEntry::ExVar(result_evar.clone(), Kind::Star));
+
+        let mut elaborated_arms: Vec<CaseArmNode<TcMetadata, Span>> =
+            Vec::with_capacity(arms.len());
+
+        for (arm_index, arm) in arms.iter().enumerate() {
+            let arm_marker = ContextEntry::Marker {
+                var_name: format!("case_arm#{}", arm_index),
+            };
+
+            let arm_ctx = theta.clone().add_entry(arm_marker.clone());
+            let scrutinee_in_arm = arm_ctx.apply(&scrutinee_type);
+
+            let (delta, bindings) =
+                self.check_pattern(arm_ctx, &arm.node.pattern, &scrutinee_in_arm)?;
+
+            let body_ctx = self.add_pattern_bindings(delta, &bindings);
+            let arm_result_type = body_ctx.apply(&result_type);
+
+            let (omega, elaborated_body) =
+                self.solve_checking(body_ctx, &arm.node.expr, &arm_result_type)?;
+
+            if !omega.has_unsolved_evar(&result_evar) && !omega.has_solved_evar(&result_evar) {
+                panic!(
+                    "internal compiler error: missing case result existential `{}` after arm {}",
+                    result_evar, arm_index
+                );
+            }
+
+            theta = omega.until(&arm_marker);
+
+            elaborated_arms.push(CaseArmNode::new(
+                CaseArm {
+                    pattern: arm.node.pattern.clone(),
+                    expr: elaborated_body,
+                },
+                arm.anno.clone(),
+            ));
+        }
+
+        let final_type = theta.apply(&result_type);
+        let elaborated = elab_node(
+            TermExpr::Case(Box::new(elaborated_scrutinee), elaborated_arms),
+            span,
+            final_type.clone(),
+        );
+
+        Ok((theta, elaborated, final_type))
+    }
+
     fn check_pattern(
         &mut self,
         ctx: Context,
-        pattern: &Pattern,
+        pattern: &PatternNode<Span>,
         scrutinee_type: &TypeExpr,
     ) -> TcResult<(Context, Vec<(String, TypeExpr)>)> {
         let scrutinee_type = ctx.apply(scrutinee_type);
 
-        match pattern {
+        match &pattern.node {
             Pattern::Wild => Ok((ctx, vec![])),
 
             Pattern::Var(name) => Ok((ctx, vec![(name.clone(), scrutinee_type)])),
@@ -554,42 +696,30 @@ impl TypeChecker {
                     .get(constructor_name)
                     .cloned()
                     .ok_or_else(|| TypeError::UnknownPatternConstructor {
-                        span: self.get_file_span(0..0),
+                        span: self.get_file_span(pattern.anno.clone()),
                         name: constructor_name.clone(),
                     })?;
 
-                let mut theta = ctx;
-                let mut current_type = constructor_type;
-                let mut field_types = Vec::with_capacity(sub_patterns.len());
+                let (mut theta, field_types, constructor_result_type) = self
+                    .instantiate_constructor_pattern(ctx, &constructor_type, sub_patterns.len())?;
 
-                for _ in 0..sub_patterns.len() {
-                    let (new_ctx, domain, codomain) = self.force_arrow(theta, &current_type)?;
-                    theta = new_ctx;
-                    field_types.push(domain);
-                    current_type = codomain;
-                }
-
-                // Subtype the constructor's result type against scrutinee
-                let result_type_applied = theta.apply(&current_type);
-                let scrutinee_applied = theta.apply(&scrutinee_type);
                 theta = self.solve_subtype(
-                    theta,
-                    &result_type_applied,
-                    &scrutinee_applied,
-                    self.get_file_span(0..0),
+                    theta.clone(),
+                    &theta.apply(&constructor_result_type),
+                    &theta.apply(&scrutinee_type),
+                    self.get_file_span(pattern.anno.clone()),
                 )?;
 
-                // Recurse into sub-patterns
-                let mut all_bindings = Vec::new();
+                let mut bindings = Vec::new();
                 for (sub_pattern, field_type) in sub_patterns.iter().zip(field_types.iter()) {
                     let field_type_applied = theta.apply(field_type);
-                    let (new_ctx, bindings) =
+                    let (new_ctx, sub_bindings) =
                         self.check_pattern(theta, sub_pattern, &field_type_applied)?;
                     theta = new_ctx;
-                    all_bindings.extend(bindings);
+                    bindings.extend(sub_bindings);
                 }
 
-                Ok((theta, all_bindings))
+                Ok((theta, bindings))
             }
         }
     }
@@ -599,7 +729,7 @@ impl TypeChecker {
         ctx: Context,
         expr: &TermExprNode<Span>,
         expected_type: &TypeExpr,
-    ) -> TcResult<(Context, TermExprNode<TcMetadata>)> {
+    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>)> {
         let expected_type = &ctx.apply(expected_type);
         let span = expr.anno.clone();
 
@@ -631,24 +761,12 @@ impl TypeChecker {
             }
 
             (TermExpr::Abs(param, maybe_annotation, body), TypeExpr::TyArr(domain, codomain)) => {
-                let ctx = if let Some(annotation) = maybe_annotation {
-                    let annotation_applied = ctx.apply(annotation);
-                    let domain_applied = ctx.apply(domain);
-                    let ctx = self.solve_subtype(
-                        ctx,
-                        &domain_applied,
-                        &annotation_applied,
-                        self.get_file_span(span.clone()),
-                    )?;
-                    self.solve_subtype(
-                        ctx.clone(),
-                        &ctx.apply(annotation),
-                        &ctx.apply(domain),
-                        self.get_file_span(span.clone()),
-                    )?
-                } else {
-                    ctx
-                };
+                let ctx = self.check_optional_param_annotation(
+                    ctx,
+                    maybe_annotation,
+                    domain,
+                    span.clone(),
+                )?;
 
                 let typed_var_entry = ContextEntry::TypedVar {
                     var_name: param.clone(),
@@ -724,11 +842,37 @@ impl TypeChecker {
         }
     }
 
+    fn infer_lambda_param_type(
+        &mut self,
+        ctx: Context,
+        param: &str,
+        maybe_annotation: &Option<TypeExpr>,
+        span: Span,
+    ) -> TcResult<(Context, TypeExpr)> {
+        match maybe_annotation {
+            Some(annotation) => {
+                if !ctx.type_well_formed(annotation) {
+                    return Err(TypeError::IllFormedAnnotation {
+                        span: self.get_file_span(span),
+                        ty: annotation.pretty(),
+                        target: format!("parameter `{}`", param),
+                    });
+                }
+                Ok((ctx, annotation.clone()))
+            }
+            None => {
+                let evar_name = self.fresh_evar_name();
+                let new_ctx = ctx.add_entry(ContextEntry::ExVar(evar_name.clone(), Kind::Star));
+                Ok((new_ctx, TypeExpr::TyExVar(evar_name)))
+            }
+        }
+    }
+
     pub fn solve_inference(
         &mut self,
         ctx: Context,
         expr: &TermExprNode<Span>,
-    ) -> TcResult<(Context, TermExprNode<TcMetadata>, TypeExpr)> {
+    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
         let span = expr.anno.clone();
 
         match &expr.node {
@@ -767,40 +911,38 @@ impl TypeChecker {
 
             // →I⇒: λx. e  (infer mode — create evars for param and return)
             TermExpr::Abs(param, maybe_annotation, body) => {
-                let (param_type, ctx) = match maybe_annotation {
-                    Some(annotation) => (annotation.clone(), ctx),
-                    None => {
-                        let evar_name = self.fresh_evar_name();
-                        let new_ctx =
-                            ctx.add_entry(ContextEntry::ExVar(evar_name.clone(), Kind::Star));
-                        (TypeExpr::TyExVar(evar_name), new_ctx)
-                    }
-                };
+                let (ctx, param_type) =
+                    self.infer_lambda_param_type(ctx, param, maybe_annotation, span.clone())?;
 
-                let return_evar = self.fresh_evar_name();
+                let result_evar = self.fresh_evar_name();
                 let typed_var_entry = ContextEntry::TypedVar {
                     var_name: param.clone(),
                     ty: param_type.clone(),
                 };
+
                 let extended_ctx = ctx
-                    .add_entry(ContextEntry::ExVar(return_evar.clone(), Kind::Star))
+                    .add_entry(ContextEntry::ExVar(result_evar.clone(), Kind::Star))
                     .add_entry(typed_var_entry.clone());
 
-                let return_type = TypeExpr::TyExVar(return_evar.clone());
+                let body_expected_type = TypeExpr::TyExVar(result_evar.clone());
                 let (delta, elaborated_body) =
-                    self.solve_checking(extended_ctx, body, &return_type)?;
+                    self.solve_checking(extended_ctx, body, &body_expected_type)?;
 
+                let final_param_type = delta.apply(&param_type);
+                let final_result_type = delta.apply(&body_expected_type);
                 let arrow_type =
-                    TypeExpr::make_arr(delta.apply(&param_type), delta.apply(&return_type));
+                    TypeExpr::make_arr(final_param_type.clone(), final_result_type.clone());
+
                 let elaborated = elab_node(
                     TermExpr::Abs(
                         param.clone(),
-                        Some(delta.apply(&param_type)),
+                        Some(final_param_type),
                         Box::new(elaborated_body),
                     ),
                     span,
                     arrow_type.clone(),
                 );
+
                 Ok((delta.until(&typed_var_entry), elaborated, arrow_type))
             }
 
@@ -872,69 +1014,12 @@ impl TypeChecker {
 
             // Case⇒
             TermExpr::Case(scrutinee, arms) => {
-                if arms.is_empty() {
-                    todo!()
-                }
-
-                let (gamma, elaborated_scrutinee, scrutinee_type) =
-                    self.solve_inference(ctx, scrutinee)?;
-                let scrutinee_type = gamma.apply(&scrutinee_type);
-
-                let result_evar = self.fresh_evar_name();
-                let result_type = TypeExpr::TyExVar(result_evar.clone());
-                let mut theta =
-                    gamma.add_entry(ContextEntry::ExVar(result_evar.clone(), Kind::Star));
-
-                let mut elaborated_arms = Vec::with_capacity(arms.len());
-
-                for (arm_index, arm) in arms.iter().enumerate() {
-                    let arm_marker = ContextEntry::Marker {
-                        var_name: format!("case_arm#{}", arm_index),
-                    };
-                    let arm_ctx = theta.clone().add_entry(arm_marker.clone());
-                    let scrutinee_in_arm = arm_ctx.apply(&scrutinee_type);
-
-                    let (delta, bindings) =
-                        self.check_pattern(arm_ctx, &arm.pattern, &scrutinee_in_arm)?;
-
-                    let mut body_ctx = delta;
-                    for (var_name, var_type) in &bindings {
-                        body_ctx = body_ctx.add_entry(ContextEntry::TypedVar {
-                            var_name: var_name.clone(),
-                            ty: var_type.clone(),
-                        });
-                    }
-
-                    let arm_result_type = body_ctx.apply(&result_type);
-                    let (omega, elaborated_body) =
-                        self.solve_checking(body_ctx, &arm.expr, &arm_result_type)?;
-                    theta = omega.until(&arm_marker);
-
-                    elaborated_arms.push(CaseArm {
-                        pattern: arm.pattern.clone(),
-                        expr: elaborated_body,
-                    });
-                }
-
-                let final_type = theta.apply(&result_type);
-                let elaborated = elab_node(
-                    TermExpr::Case(Box::new(elaborated_scrutinee), elaborated_arms),
-                    span,
-                    final_type.clone(),
-                );
-                Ok((theta, elaborated, final_type))
+                self.solve_case_inference(ctx, scrutinee, arms, span)
             }
 
-            // If⇒
             TermExpr::IfThenElse(cond, then_branch, else_branch) => {
-                let bool_type = TypeExpr::TyCon("Bool".to_string());
-                let (gamma, elaborated_cond, cond_type) = self.solve_inference(ctx, cond)?;
-                let gamma = self.solve_subtype(
-                    gamma.clone(),
-                    &gamma.apply(&cond_type),
-                    &bool_type,
-                    self.get_file_span(cond.anno.clone()),
-                )?;
+                let bool_type = self.bool_type();
+                let (gamma, elaborated_cond) = self.solve_checking(ctx, cond, &bool_type)?;
 
                 let result_evar = self.fresh_evar_name();
                 let result_type = TypeExpr::TyExVar(result_evar.clone());
@@ -965,9 +1050,9 @@ impl TypeChecker {
         ctx: Context,
         function_type: &TypeExpr,
         argument: &TermExprNode<Span>,
-        elaborated_function: &TermExprNode<TcMetadata>,
+        elaborated_function: &TermExprNode<TcMetadata, Span>,
         span: Span,
-    ) -> TcResult<(Context, TermExprNode<TcMetadata>, TypeExpr)> {
+    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
         let function_type = ctx.apply(function_type);
 
         match &function_type {
@@ -1011,12 +1096,15 @@ impl TypeChecker {
             }
 
             TypeExpr::TyExVar(evar_name) if ctx.has_unsolved_evar(evar_name) => {
-                let evar_entry = ContextEntry::ExVar(evar_name.clone(), Kind::Star);
+                let evar_entry = ContextEntry::ExVar(
+                    evar_name.clone(),
+                    ctx.evar_kind(evar_name)
+                        .unwrap_or_else(|| panic!("missing evar kind for {}", evar_name)),
+                );
                 let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 
                 let domain_evar = self.fresh_evar_name();
                 let codomain_evar = self.fresh_evar_name();
-
                 let arrow_solution = ContextEntry::SolvedEVar {
                     lhs: evar_name.clone(),
                     rhs: TypeExpr::make_arr(
@@ -1054,31 +1142,43 @@ impl TypeChecker {
     }
 }
 
+pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
+
 pub fn check_and_elab_module(
     module: &ResolvedModule<Span>,
     file_id: impl Into<String>,
-) -> Result<(), Vec<TypeError>> {
+) -> Result<CheckedModule, Vec<TypeError>> {
     let file_id = file_id.into();
     let mut errors = Vec::new();
+    let mut checked_defs = Vec::new();
 
     for func_def in &module.func_defs {
-        let mut inference = TypeChecker::with_module_context(module, file_id.clone());
+        let mut checker = TypeChecker::with_module_context(module, file_id.clone());
 
-        match inference.solve_checking(Context::new(), &func_def.body, &func_def.signature) {
-            Ok((_ctx, elaborated_expr)) => {
-                let _zonked = inference.zonk_expr(&elaborated_expr);
-                println!("(OK) {}: {}", func_def.name, func_def.signature.pretty());
+        match checker.solve_checking(Context::new(), &func_def.body, &func_def.signature) {
+            Ok((_final_ctx, elaborated)) => {
+                let zonked = checker.zonk_expr(&elaborated);
+                checked_defs.push(TermDefinition {
+                    name: func_def.name.clone(),
+                    signature: func_def.signature.clone(),
+                    body: zonked,
+                });
             }
             Err(err) => {
-                println!("(ERR) {} : ???", func_def.name);
                 errors.push(err);
             }
         }
     }
 
-    if errors.is_empty() {
-        Ok(())
-    } else {
-        Err(errors)
+    if !errors.is_empty() {
+        return Err(errors);
     }
+
+    Ok(ResolvedModule {
+        data_defs: module.data_defs.clone(),
+        tycon_kinds: module.tycon_kinds.clone(),
+        constructor_types: module.constructor_types.clone(),
+        func_types: module.func_types.clone(),
+        func_defs: checked_defs,
+    })
 }

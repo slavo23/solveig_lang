@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use base::utils::span::Span;
 use core::ast::{
     CaseArm, ConstructorDef, DataDefinition, Kind, Pattern, ResolvedModule, TermDefinition,
-    TermExpr, TermExprNode, TypeExpr,
+    TermExpr, TermExprNode, TypeExpr, CaseArmNode, PatternNode
 };
 use surface::ast::{
     SpannedWrapper, SurfaceDefinition, SurfaceExpr, SurfaceMatchArm, SurfacePattern,
@@ -41,27 +41,36 @@ impl Resolver {
         }
     }
 
-    fn resolve_surface_pattern<'src>(&self, sf: &SpannedWrapper<SurfacePattern<'src>>) -> Pattern {
-        match &**sf {
+    fn resolve_surface_pattern<'src>(
+        &self,
+        sf: &SpannedWrapper<SurfacePattern<'src>>,
+    ) -> PatternNode<Span> {
+        let span: Span = sf.span.into();
+
+        let node = match &**sf {
             SurfacePattern::Var(v) => Pattern::Var(v.to_string()),
             SurfacePattern::Wild => Pattern::Wild,
             SurfacePattern::Con(con_name, args) => Pattern::Con(
                 con_name.to_string(),
                 args.iter()
-                    .map(|arg_name| self.resolve_surface_pattern(arg_name))
+                    .map(|arg| self.resolve_surface_pattern(arg))
                     .collect(),
             ),
-        }
-    }
+        };
 
+        PatternNode::new(node, span)
+    }
     fn resolve_surface_case_arm<'src>(
         &mut self,
         sf: &SpannedWrapper<SurfaceMatchArm<'src>>,
-    ) -> CaseArm<Span> {
-        CaseArm {
-            pattern: self.resolve_surface_pattern(&sf.pattern),
-            expr: self.resolve_surface_expr(&sf.expr),
-        }
+    ) -> CaseArmNode<Span> {
+        CaseArmNode::new(
+            CaseArm {
+                pattern: self.resolve_surface_pattern(&sf.pattern),
+                expr: self.resolve_surface_expr(&sf.expr),
+            },
+            sf.span.into(),
+        )
     }
 
     fn resolve_surface_expr<'src>(

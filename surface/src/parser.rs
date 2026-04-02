@@ -15,6 +15,7 @@ pub enum Token<'src> {
     Ident(&'src str),
     UpperIdent(&'src str),
     Parens(Vec<Spanned<Self>>),
+    Brackets(Vec<Spanned<Self>>),
     Sig,
     Fun,
     Let,
@@ -39,11 +40,32 @@ pub enum Token<'src> {
     Instance,
     Where,
     End,
+    ConsSep,
 }
 
 pub fn lexer<'src>()
 -> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, extra::Err<Rich<'src, char>>> {
     recursive(|token| {
+        let token = token.boxed();
+
+        let parens = token
+            .clone()
+            .repeated()
+            .collect()
+            .delimited_by(just('('), just(')'))
+            .labelled("token tree")
+            .as_context()
+            .map(Token::Parens);
+
+        let brackets = token
+            .clone()
+            .repeated()
+            .collect()
+            .delimited_by(just('['), just(']'))
+            .labelled("token tree")
+            .as_context()
+            .map(Token::Brackets);
+
         choice((
             text::ident().map(|s| match s {
                 "let" => Token::Let,
@@ -73,25 +95,50 @@ pub fn lexer<'src>()
             just("=>").to(Token::FatArrow),
             just("=").to(Token::EqBind),
             just("->").to(Token::Arrow),
+            just("::").to(Token::ConsSep),
             just(":").to(Token::Colon),
             just(".").to(Token::Dot),
             just(";").to(Token::Semicolon),
             just("|").to(Token::Pipe),
             just("_").to(Token::Uns),
             just(",").to(Token::Comma),
-            token
-                .repeated()
-                .collect()
-                .delimited_by(just('('), just(')'))
-                .labelled("token tree")
-                .as_context()
-                .map(Token::Parens),
+            parens,
+            brackets,
         ))
         .spanned()
         .padded()
     })
     .repeated()
     .collect()
+}
+
+fn merge_spans(left: &SimpleSpan, right: &SimpleSpan) -> SimpleSpan {
+    (left.start..right.end).into()
+}
+
+fn mk_list_expr<'src>(
+    elems: Vec<Spanned<SurfaceExpr<'src>>>,
+    list_span: SimpleSpan,
+) -> Spanned<SurfaceExpr<'src>> {
+    elems.into_iter().rev().fold(
+        SurfaceExpr::Con("Nil").with_span(list_span.clone()),
+        |acc, elem| {
+            let head_span = elem.span.clone();
+            let full_span = merge_spans(&head_span, &acc.span);
+
+            let cons_head = SurfaceExpr::App(
+                Box::new(SurfaceExpr::Con("Cons").with_span(head_span.clone())),
+                Box::new(elem),
+            )
+            .with_span(head_span);
+
+            SurfaceExpr::App(
+                Box::new(cons_head),
+                Box::new(acc),
+            )
+            .with_span(full_span)
+        },
+    )
 }
 
 pub fn class_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
@@ -182,7 +229,6 @@ fn ty_atom_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
 
     let var_ty = ident.map(SurfaceTy::Var).spanned();
-
     let con_ty = upper_ident.spanned().map(SurfaceTy::Con).spanned();
 
     let unit_ty = select_ref! {
@@ -190,11 +236,31 @@ fn ty_atom_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     }
     .spanned();
 
-    let parens_ty = ty_parser().nested_in(select_ref! {
-        Token::Parens(ts) = e => ts.split_spanned(e.span())
-    });
+    let parens_ty = ty_parser()
+        .nested_in(select_ref! {
+            Token::Parens(ts) = e => ts.split_spanned(e.span())
+        })
+        .boxed();
 
-    choice((unit_ty, con_ty, var_ty, parens_ty))
+    let list_ty = ty_parser()
+        .nested_in(select_ref! {
+            Token::Brackets(ts) = e => ts.split_spanned(e.span())
+        })
+        .map(mk_list_ty)
+        .boxed();
+
+    choice((unit_ty, con_ty, var_ty, parens_ty, list_ty)).boxed()
+}
+
+fn mk_list_ty<'src>(elem_ty: Spanned<SurfaceTy<'src>>) -> Spanned<SurfaceTy<'src>> {
+    let span = elem_ty.span.clone();
+    let list_name = "List".with_span(span.clone());
+
+    SurfaceTy::App(
+        Box::new(SurfaceTy::Con(list_name).with_span(span.clone())),
+        Box::new(elem_ty),
+    )
+    .with_span(span)
 }
 
 fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
@@ -213,44 +279,90 @@ fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
         .spanned();
 
         let var_ty = ident.map(SurfaceTy::Var).spanned();
-
         let con_ty = upper_ident.spanned().map(SurfaceTy::Con).spanned();
 
         let parens_ty = ty
             .clone()
-            .nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) });
+            .nested_in(select_ref! {
+                Token::Parens(ts) = e => ts.split_spanned(e.span())
+            })
+            .boxed();
 
-        let atom = choice((unit_ty, con_ty, var_ty, parens_ty));
+        let list_ty = ty
+            .clone()
+            .nested_in(select_ref! {
+                Token::Brackets(ts) = e => ts.split_spanned(e.span())
+            })
+            .map(mk_list_ty)
+            .boxed();
+
+        let atom = choice((unit_ty, con_ty, var_ty, parens_ty, list_ty)).boxed();
 
         let app = atom
             .clone()
-            .then(atom.clone().repeated().collect::<Vec<_>>())
-            .map_with(|(head, rest), e| {
+            .then(atom.repeated().collect::<Vec<_>>())
+            .map(|(head, rest)| {
                 let mut t = head;
                 for arg in rest {
-                    t = SurfaceTy::App(Box::new(t), Box::new(arg)).with_span(e.span());
+                    let span = t.span.clone();
+                    t = SurfaceTy::App(Box::new(t), Box::new(arg)).with_span(span);
                 }
                 t
-            });
+            })
+            .boxed();
 
         let arrow = app
             .clone()
             .then(just(Token::Arrow).ignore_then(ty.clone()).or_not())
-            .map_with(|(lhs, rhs_opt), e| match rhs_opt {
+            .map(|(lhs, rhs_opt)| match rhs_opt {
                 None => lhs,
-                Some(rhs) => SurfaceTy::Arr(Box::new(lhs), Box::new(rhs)).with_span(e.span()),
-            });
+                Some(rhs) => {
+                    let span = lhs.span.clone();
+                    SurfaceTy::Arr(Box::new(lhs), Box::new(rhs)).with_span(span)
+                }
+            })
+            .boxed();
 
         let forall = just(Token::ForAll)
             .ignore_then(ident.spanned().repeated().at_least(1).collect::<Vec<_>>())
             .then_ignore(just(Token::Dot))
             .then(ty.clone())
-            .map_with(|(quants, body), e| {
-                SurfaceTy::ForAll(quants, Box::new(body)).with_span(e.span())
-            });
+            .map(|(quants, body)| {
+                let span = body.span.clone();
+                SurfaceTy::ForAll(quants, Box::new(body)).with_span(span)
+            })
+            .boxed();
 
         choice((forall, arrow))
     })
+}
+
+fn mk_cons_pattern<'src>(
+    head: Spanned<SurfacePattern<'src>>,
+    tail: Spanned<SurfacePattern<'src>>,
+) -> Spanned<SurfacePattern<'src>> {
+    let span = head.span.clone();
+    SurfacePattern::Con("Cons".with_span(span.clone()), vec![head, tail]).with_span(span)
+}
+
+fn mk_list_pattern<'src>(
+    elems: Vec<Spanned<SurfacePattern<'src>>>,
+    list_span: SimpleSpan,
+) -> Spanned<SurfacePattern<'src>> {
+    elems.into_iter().rev().fold(
+        SurfacePattern::Con("Nil".with_span(list_span.clone()), vec![])
+            .with_span(list_span.clone()),
+        |acc, elem| {
+            let head_span = elem.span.clone();
+            let full_span = merge_spans(&head_span, &acc.span);
+
+            SurfacePattern::Con(
+                "Cons".with_span(full_span.clone()),
+                vec![elem, acc],
+            )
+            .with_span(full_span)
+        },
+    )
 }
 
 pub fn pattern_parser<'tokens, 'src: 'tokens>() -> impl Parser<
@@ -262,36 +374,76 @@ pub fn pattern_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     recursive(|pattern| {
         let ident = select_ref! { Token::Ident(x) => *x };
         let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
-        let wild = just(Token::Uns).to(SurfacePattern::Wild);
-        let var = ident.map(SurfacePattern::Var);
 
-        // Atomic patterns for constructor arguments
+        let wild = just(Token::Uns).to(SurfacePattern::Wild).spanned().boxed();
+        let var = ident.map(SurfacePattern::Var).spanned().boxed();
+
+        let list_pattern = pattern
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .nested_in(select_ref! {
+                Token::Brackets(ts) = e => ts.split_spanned(e.span())
+            })
+            .map_with(|elems, e| mk_list_pattern(elems, e.span()))
+            .boxed();
+
+        let paren_pattern = pattern
+            .clone()
+            .nested_in(select_ref! {
+                Token::Parens(ts) = e => ts.split_spanned(e.span())
+            })
+            .boxed();
+
         let atom_pattern = choice((
-            wild.clone().spanned(),
+            wild.clone(),
+            var.clone(),
+            list_pattern.clone(),
             upper_ident
                 .spanned()
                 .map(|name| SurfacePattern::Con(name, vec![]))
                 .spanned(),
-            var.clone().spanned(),
-            pattern.clone().nested_in(select_ref! {
-                Token::Parens(ts) = e => ts.split_spanned(e.span())
-            }),
-        ));
+            paren_pattern,
+        ))
+        .boxed();
 
         let con_pattern = upper_ident
             .spanned()
-            .then(atom_pattern.repeated().collect::<Vec<_>>())
-            .map(|(name, args)| SurfacePattern::Con(name, args));
+            .then(atom_pattern.clone().repeated().collect::<Vec<_>>())
+            .map(|(name, args)| SurfacePattern::Con(name, args))
+            .spanned()
+            .boxed();
 
-        choice((
-            con_pattern.spanned(),
-            wild.spanned(),
-            var.spanned(),
-            pattern.nested_in(select_ref! {
-                Token::Parens(ts) = e => ts.split_spanned(e.span())
-            }),
-        ))
+        let pattern_head = choice((con_pattern, list_pattern, wild, var, atom_pattern)).boxed();
+
+        pattern_head
+            .clone()
+            .then(just(Token::ConsSep).ignore_then(pattern.clone()).or_not())
+            .map(|(head, tail_opt)| match tail_opt {
+                None => head,
+                Some(tail) => mk_cons_pattern(head, tail),
+            })
+            .boxed()
     })
+}
+
+fn mk_cons_expr<'src>(
+    head: Spanned<SurfaceExpr<'src>>,
+    tail: Spanned<SurfaceExpr<'src>>,
+    span: SimpleSpan,
+) -> Spanned<SurfaceExpr<'src>> {
+    SurfaceExpr::App(
+        Box::new(
+            SurfaceExpr::App(
+                Box::new(SurfaceExpr::Con("Cons").with_span(span.clone())),
+                Box::new(head),
+            )
+            .with_span(span.clone()),
+        ),
+        Box::new(tail),
+    )
+    .with_span(span)
 }
 
 pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
@@ -394,8 +546,23 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             })
             .boxed();
 
+        let expr_list = expr
+            .clone()
+            .separated_by(just(Token::Comma))
+            .allow_trailing()
+            .collect::<Vec<_>>()
+            .nested_in(select_ref! {
+                Token::Brackets(ts) = e => ts.split_spanned(e.span())
+            })
+            .map_with(|elems, e| mk_list_expr(elems, e.span()))
+            .boxed();
+
         let app_infix = infix(left(1), empty(), |lhs, _, rhs, e| {
             SurfaceExpr::App(Box::new(lhs), Box::new(rhs)).with_span(e.span())
+        });
+
+        let cons_infix = infix(right(0), just(Token::ConsSep), |lhs, _, rhs, e| {
+            mk_cons_expr(lhs, rhs, e.span())
         });
 
         let variable = ident.map(SurfaceExpr::Var);
@@ -409,9 +576,10 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             variable.spanned(),
             expr_case.spanned(),
             expr_if.spanned(),
+            expr_list,
             expr.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
         ))
-        .pratt((app_infix,))
+        .pratt((app_infix, cons_infix))
     })
 }
 
