@@ -270,7 +270,7 @@ pub struct CaseArm<A, P = A> {
 #[derive(Clone, Debug)]
 pub struct TermDefinition<A, P = A> {
     pub name: String,
-    pub signature: TypeExpr,
+    pub signature: Option<TypeExpr>,
     pub body: TermExprNode<A, P>,
 }
 

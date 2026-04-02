@@ -6,7 +6,7 @@ use resolver::Resolver;
 use surface::parser::{lexer, program_parser};
 use syntax::inference::type_infer::check_and_elab_module;
 pub mod compile;
-use compile::{lowering::lower_module, interpret::Machine};
+use compile::{interpret::Machine, lowering::lower_module};
 
 fn main() {
     let src = r"
@@ -93,7 +93,6 @@ fn main() {
                 Nil => Nothing
                 | Cons y ys => Just y;
 
-        listSafeTail : forall a. List a -> Maybe (List a);
         listSafeTail xs = 
             case xs of
                 Nil => Nothing
@@ -119,8 +118,8 @@ fn main() {
                 Nil => ys
                 | Cons x1 x1s => Cons x1 (append x1s ys);
 
-        constFun : forall a b. a -> b -> a;
-        constFun = fun (x : a) (y : b) => x;
+        
+        constFun = fun x y => x;
 
         makeList : forall a. a -> List a -> List a;
         makeList x = Cons x;
@@ -167,7 +166,6 @@ fn main() {
             else
                 fun (x : a) => x;
 
-        pairPartial : forall a b. a -> (b -> Pair a b);
         pairPartial x = Pair x;
 
         not : Bool -> Bool;
@@ -176,7 +174,6 @@ fn main() {
         natList : List Nat;
         natList = Cons Z (Cons (S Z) (Cons (S Z) (Cons Z (Cons Z Nil))));
 
-        noZeros : List Nat;
         noZeros = listFilter (fun n => not (isZero n)) natList;
 
         not : Bool -> Bool;
@@ -227,6 +224,12 @@ fn main() {
                         (qsort (filter (fun x => leq x pivot) rest))
                         (pivot :: (qsort (filter (fun x => not (leq x pivot)) rest)));
 
+        reverse : forall a. [a] -> [a];
+        reverse xs = 
+            case xs of
+                [] => []
+                 | y :: ys => append (reverse ys) [y];
+
 
         add : Nat -> Nat -> Nat;
         add n m =
@@ -240,32 +243,23 @@ fn main() {
                 Z => Z
                 | S k => add m (mul k m);
 
-        one : Nat;
         one = S Z;
-
-        two : Nat;
         two = S one;
-
-        three : Nat;
         three = S two;
-
-        four : Nat;
         four = S three;
-
-        five : Nat;
         five = S four;
-
-        six : Nat;
         six = add one five;
-
-        seven : Nat;
         seven = add one six;
 
-        sample : [Nat];
         sample = [three, one, six, four, one, five, seven];
 
+        constInf x y = x;
+        swap f x y = f y x;
+
+        testSwap = fun x => swap constInf x two;
+
         main : List Nat;
-        main = qsort sample;
+        main = listMap (fun x => mul x six) (qsort sample);
     ";
 
     let tokens = lexer().parse(src).unwrap();

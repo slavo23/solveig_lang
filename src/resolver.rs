@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use base::utils::span::Span;
 use core::ast::{
-    CaseArm, ConstructorDef, DataDefinition, Kind, Pattern, ResolvedModule, TermDefinition,
-    TermExpr, TermExprNode, TypeExpr, CaseArmNode, PatternNode
+    CaseArm, CaseArmNode, ConstructorDef, DataDefinition, Kind, Pattern, PatternNode,
+    ResolvedModule, TermDefinition, TermExpr, TermExprNode, TypeExpr,
 };
 use surface::ast::{
     SpannedWrapper, SurfaceDefinition, SurfaceExpr, SurfaceMatchArm, SurfacePattern,
@@ -139,6 +139,24 @@ impl Resolver {
         }
     }
 
+    fn wrap_function_body_without_signature<'src>(
+        &mut self,
+        body: &SpannedWrapper<SurfaceExpr<'src>>,
+        params: &Vec<SpannedWrapper<&'src str>>,
+    ) -> TermExprNode<Span> {
+        let span: Span = body.span.into();
+        let mut body_node = self.resolve_surface_expr(body);
+
+        for p in params.iter().rev() {
+            body_node = TermExprNode::new(
+                TermExpr::Abs(p.to_string(), None, Box::new(body_node)),
+                span.clone(),
+            );
+        }
+
+        body_node
+    }
+
     fn wrap_function_body_with_signature<'src>(
         &mut self,
         sig: &TypeExpr,
@@ -254,11 +272,13 @@ impl Resolver {
         for defn in sf_prog.iter() {
             if let SurfaceDefinition::FunDef { name, body, params } = &**defn {
                 let fn_name = (**name).to_string();
-                let sig = func_types
-                    .get(&fn_name)
-                    .unwrap_or_else(|| panic!("missing signature for {}", fn_name))
-                    .clone();
-                let wrapped = self.wrap_function_body_with_signature(&sig, body, params);
+                let sig = func_types.get(&fn_name).cloned();
+
+                let wrapped = match &sig {
+                    Some(sig) => self.wrap_function_body_with_signature(sig, body, params),
+                    None => self.wrap_function_body_without_signature(body, params),
+                };
+
                 func_defs.push(TermDefinition {
                     name: fn_name,
                     signature: sig,

@@ -4,8 +4,8 @@ use crate::inference::inference_ctx::{Context, ContextEntry};
 use base::utils::diagnostics::{FileSpan, TypeError};
 use base::utils::span::Span;
 use core::ast::{
-    CaseArm, CaseArmNode, Kind, Pattern, PatternNode, Pretty, ResolvedModule, TermExpr,
-    TermExprNode, TypeExpr, TermDefinition
+    CaseArm, CaseArmNode, Kind, Pattern, PatternNode, Pretty, ResolvedModule, TermDefinition,
+    TermExpr, TermExprNode, TypeExpr,
 };
 
 #[derive(Clone, Debug)]
@@ -81,7 +81,7 @@ impl TypeChecker {
     }
 
     fn fresh_universal_name(&mut self, base: &str) -> String {
-        format!("{}${}", base, self.fresh_id())
+        format!("{}{}", base, self.fresh_id())
     }
 
     fn record_solution(&mut self, solved_entry: &ContextEntry) {
@@ -97,6 +97,52 @@ impl TypeChecker {
 
     fn bool_type(&self) -> TypeExpr {
         TypeExpr::TyCon("Bool".to_string())
+    }
+
+    fn collect_exvars_in_type(ty: &TypeExpr, acc: &mut Vec<String>) {
+        match ty {
+            TypeExpr::TyExVar(name) => {
+                if !acc.contains(name) {
+                    acc.push(name.clone());
+                }
+            }
+            TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
+                Self::collect_exvars_in_type(lhs, acc);
+                Self::collect_exvars_in_type(rhs, acc);
+            }
+            TypeExpr::TyForAll(_, _, body) => {
+                Self::collect_exvars_in_type(body, acc);
+            }
+            TypeExpr::TyUnit | TypeExpr::TyVar(_) | TypeExpr::TyCon(_) => {}
+        }
+    }
+
+    fn generalize_top_level_type(&mut self, ctx: &Context, ty: &TypeExpr) -> TypeExpr {
+        let zonked = self.zonk_type(&ctx.apply(ty));
+
+        let mut evars = Vec::new();
+        Self::collect_exvars_in_type(&zonked, &mut evars);
+
+        if evars.is_empty() {
+            return zonked;
+        }
+
+        let mut result = zonked;
+        let mut binders = Vec::new();
+
+        for evar in evars {
+            let universal = self.fresh_universal_name("t");
+            let kind = ctx.evar_kind(&evar).unwrap_or(Kind::Star);
+
+            result = result.substitute(&evar, &TypeExpr::TyVar(universal.clone()));
+            binders.push((universal, kind));
+        }
+
+        for (name, kind) in binders.into_iter().rev() {
+            result = TypeExpr::make_forall(name, kind, result);
+        }
+
+        result
     }
 
     pub fn zonk_type(&self, ty: &TypeExpr) -> TypeExpr {
@@ -1151,22 +1197,46 @@ pub fn check_and_elab_module(
     let file_id = file_id.into();
     let mut errors = Vec::new();
     let mut checked_defs = Vec::new();
+    let mut available_func_types = module.func_types.clone();
 
     for func_def in &module.func_defs {
         let mut checker = TypeChecker::with_module_context(module, file_id.clone());
+        checker.func_types = available_func_types.clone();
 
-        match checker.solve_checking(Context::new(), &func_def.body, &func_def.signature) {
-            Ok((_final_ctx, elaborated)) => {
-                let zonked = checker.zonk_expr(&elaborated);
-                checked_defs.push(TermDefinition {
-                    name: func_def.name.clone(),
-                    signature: func_def.signature.clone(),
-                    body: zonked,
-                });
-            }
-            Err(err) => {
-                errors.push(err);
-            }
+        match &func_def.signature {
+            Some(sig) => match checker.solve_checking(Context::new(), &func_def.body, sig) {
+                Ok((final_ctx, elaborated)) => {
+                    let zonked_expr = checker.zonk_expr(&elaborated);
+                    let final_sig = checker.zonk_type(&final_ctx.apply(sig));
+
+                    available_func_types.insert(func_def.name.clone(), final_sig.clone());
+
+                    checked_defs.push(TermDefinition {
+                        name: func_def.name.clone(),
+                        signature: Some(final_sig),
+                        body: zonked_expr,
+                    });
+                }
+                Err(err) => errors.push(err),
+            },
+
+            None => match checker.solve_inference(Context::new(), &func_def.body) {
+                Ok((final_ctx, elaborated, inferred_ty)) => {
+                    let zonked_expr = checker.zonk_expr(&elaborated);
+
+                    let final_sig = checker.generalize_top_level_type(&final_ctx, &inferred_ty);
+                    println!("(inferred) {} : {}", func_def.name, final_sig.pretty());
+
+                    available_func_types.insert(func_def.name.clone(), final_sig.clone());
+
+                    checked_defs.push(TermDefinition {
+                        name: func_def.name.clone(),
+                        signature: Some(final_sig),
+                        body: zonked_expr,
+                    });
+                }
+                Err(err) => errors.push(err),
+            },
         }
     }
 
@@ -1178,7 +1248,7 @@ pub fn check_and_elab_module(
         data_defs: module.data_defs.clone(),
         tycon_kinds: module.tycon_kinds.clone(),
         constructor_types: module.constructor_types.clone(),
-        func_types: module.func_types.clone(),
+        func_types: available_func_types,
         func_defs: checked_defs,
     })
 }
