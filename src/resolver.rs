@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use base::utils::span::Span;
 use core::ast::{
-    CaseArm, ConstructorDef, DataDefinition, Kind, Pattern, TermDefinition, TermExpr, TermExprNode,
-    TypeExpr, ResolvedModule
+    CaseArm, ConstructorDef, DataDefinition, Kind, Pattern, ResolvedModule, TermDefinition,
+    TermExpr, TermExprNode, TypeExpr,
 };
 use surface::ast::{
     SpannedWrapper, SurfaceDefinition, SurfaceExpr, SurfaceMatchArm, SurfacePattern,
@@ -12,8 +12,6 @@ use surface::ast::{
 
 use syntax::data_kind_infer::{infer_all_data_kinds, RawConstructorDef, RawDataDef};
 use syntax::signature_infer::{KindError, SignatureKindInferencer};
-
-
 
 pub struct Resolver;
 
@@ -84,21 +82,20 @@ impl Resolver {
                 self.resolve_surface_type(t),
             ),
             SurfaceExpr::Abs(params, body) => {
-                let mut rev = params.iter().rev();
-                let (last_p, last_ty) = rev.next().unwrap();
                 let mut body_node = self.resolve_surface_expr(body);
 
-                for (param_name, param_ty_anno) in rev {
-                    let pt = param_ty_anno
+                for (param_name, param_ty_anno) in params.iter().rev() {
+                    let param_ty = param_ty_anno
                         .as_ref()
                         .map(|ty| self.resolve_surface_type(ty));
+
                     body_node = TermExprNode::new(
-                        TermExpr::Abs(param_name.to_string(), pt, Box::new(body_node)),
+                        TermExpr::Abs(param_name.to_string(), param_ty, Box::new(body_node)),
                         span.clone(),
                     );
                 }
-                let last_param_ty = last_ty.as_ref().map(|ty| self.resolve_surface_type(ty));
-                TermExpr::Abs(last_p.to_string(), last_param_ty, Box::new(body_node))
+
+                return body_node;
             }
             SurfaceExpr::IfThenElse(c, t, e) => TermExpr::IfThenElse(
                 Box::new(self.resolve_surface_expr(c)),

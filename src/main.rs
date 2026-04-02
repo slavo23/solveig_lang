@@ -121,7 +121,7 @@ fn main() {
                 | Cons x1 x1s => Cons x1 (append x1s ys);
 
         constFun : forall a b. a -> b -> a;
-        constFun x y = x;
+        constFun = fun (x : a) (y : b) => x;
 
         makeList : forall a. a -> List a -> List a;
         makeList x = Cons x;
@@ -159,6 +159,16 @@ fn main() {
 
         brokenMaybe : forall a. a -> Maybe a;
         brokenMaybe x = Right x;
+
+        testPolyMatch : Nat -> (forall a. a -> a);
+        testPolyMatch n = case n of
+              Z => id
+            | S n => fun (y : a) => y;
+
+        data Id = MkId (forall a. a -> a);
+
+        testManyIds : List Id;
+        testManyIds = Cons (MkId id) (Cons (MkId (fun x => x)) Nil);
 
     ";
 
