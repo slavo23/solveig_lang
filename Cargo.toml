@@ -13,6 +13,7 @@ syntax = { path = "syntax", version = "0.1.0" }
 base = { path = "base", version = "0.1.0" }
 chumsky = { version = "0.12.0", features = ["pratt"] }
 slab = "0.4.12"
+petgraph = "0.8.3"
 
 
 [workspace]
@@ -20,3 +21,4 @@ members = ["core", "syntax"]
 
 [workspace.dependencies]
 slab = "0.4.12"
+petgraph = "0.8.3"
