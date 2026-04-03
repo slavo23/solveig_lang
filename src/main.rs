@@ -243,6 +243,17 @@ fn main() {
                 Z => Z
                 | S k => add m (mul k m);
 
+        pred n = 
+            case n of
+                Z => Z
+                | S k => k;
+
+        sub : Nat -> Nat -> Nat;
+        sub n m = 
+            case m of
+                Z => n
+                | S k => sub (pred n) k;
+
         one = S Z;
         two = S one;
         three = S two;
@@ -258,8 +269,18 @@ fn main() {
 
         testSwap = fun x => swap constInf x two;
 
-        main : List Nat;
-        main = listMap (fun x => mul x six) (qsort sample);
+        sumOfNats : [Nat] -> Nat;
+        sumOfNats xs = foldr add Z xs;
+
+        natRangeOfSize : Nat -> Bool -> [Nat];
+        natRangeOfSize size incZero = 
+            case size of
+                Z => []
+                | S Z => if (not incZero) then [] else [Z]
+                | S k => k :: (natRangeOfSize k incZero);
+
+        main : Nat;
+        main = sumOfNats (reverse (natRangeOfSize (mul six (mul six five)) False));
     ";
 
     let tokens = lexer().parse(src).unwrap();

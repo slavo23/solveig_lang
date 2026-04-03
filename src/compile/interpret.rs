@@ -3,17 +3,20 @@ use std::rc::Rc;
 
 use super::lower_ast::{IRCaseArm, IRExpr, IRPattern, IRProgram};
 
-#[derive(Clone, Debug)]
+type ValueRef = Rc<Value>;
+type SharedEnv = Rc<Env>;
+
+#[derive(Debug, Clone)]
 pub enum Value {
     Unit,
     Closure {
-        env: Rc<Env>,
+        env: SharedEnv,
         body: Rc<IRExpr>,
     },
     PartialCon {
         tag: u16,
         arity: u16,
-        fields: Vec<Value>,
+        fields: Vec<ValueRef>,
     },
 }
 
@@ -52,9 +55,7 @@ fn format_value(value: &Value, program: &IRProgram) -> String {
 
     match value {
         Value::Unit => "()".to_string(),
-
         Value::Closure { .. } => "<closure>".to_string(),
-
         Value::PartialCon { tag, arity, fields } => {
             let name = program
                 .constructor_name(*tag)
@@ -66,7 +67,7 @@ fn format_value(value: &Value, program: &IRProgram) -> String {
 
             let rendered_args = fields
                 .iter()
-                .map(|field| format_atomic(field, program))
+                .map(|field| format_atomic(field.as_ref(), program))
                 .collect::<Vec<_>>()
                 .join(" ");
 
@@ -115,7 +116,7 @@ fn try_format_nat(value: &Value, program: &IRProgram) -> Option<String> {
                     && fields.len() == 1 =>
             {
                 n += 1;
-                current = &fields[0];
+                current = fields[0].as_ref();
             }
 
             _ => return None,
@@ -142,8 +143,8 @@ fn try_format_list(value: &Value, program: &IRProgram) -> Option<String> {
                     && *arity == 2
                     && fields.len() == 2 =>
             {
-                items.push(format_value(&fields[0], program));
-                current = &fields[1];
+                items.push(format_value(fields[0].as_ref(), program));
+                current = fields[1].as_ref();
             }
 
             _ => return None,
@@ -154,43 +155,46 @@ fn try_format_list(value: &Value, program: &IRProgram) -> Option<String> {
 fn try_format_pair(value: &Value, program: &IRProgram) -> Option<String> {
     match value {
         Value::PartialCon { tag, arity, fields }
-            if (*arity == 2)
+            if *arity == 2
                 && (program.constructor_name(*tag) == Some("Pair")
                     || program.constructor_name(*tag) == Some("MkPair"))
                 && fields.len() == 2 =>
         {
             Some(format!(
                 "({}, {})",
-                format_value(&fields[0], program),
-                format_value(&fields[1], program)
+                format_value(fields[0].as_ref(), program),
+                format_value(fields[1].as_ref(), program)
             ))
         }
-
         _ => None,
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum Env {
     Empty,
-    Cons(Value, Rc<Env>),
+    Cons(ValueRef, SharedEnv),
 }
 
 impl Env {
-    fn extend(&self, value: Value) -> Env {
-        Env::Cons(value, Rc::new(self.clone()))
+    fn empty() -> SharedEnv {
+        Rc::new(Env::Empty)
     }
 
-    fn extend_many(&self, values: &[Value]) -> Env {
-        let mut env = self.clone();
+    fn extend(env: &SharedEnv, value: ValueRef) -> SharedEnv {
+        Rc::new(Env::Cons(value, env.clone()))
+    }
+
+    fn extend_many(env: &SharedEnv, values: &[ValueRef]) -> SharedEnv {
+        let mut current = env.clone();
         for value in values {
-            env = env.extend(value.clone());
+            current = Self::extend(&current, value.clone());
         }
-        env
+        current
     }
 
-    fn lookup(&self, index: usize) -> &Value {
-        let mut current = self;
+    fn lookup(env: &SharedEnv, index: usize) -> ValueRef {
+        let mut current = env.as_ref();
         let mut remaining = index;
 
         loop {
@@ -198,7 +202,7 @@ impl Env {
                 Env::Empty => panic!("unbound variable at index {}", index),
                 Env::Cons(value, parent) => {
                     if remaining == 0 {
-                        return value;
+                        return value.clone();
                     }
                     remaining -= 1;
                     current = parent.as_ref();
@@ -211,29 +215,34 @@ impl Env {
 enum Frame {
     EvalArg {
         arg: Rc<IRExpr>,
-        env: Env,
+        env: SharedEnv,
     },
-    Apply(Value),
+    Apply(ValueRef),
     CaseOf {
-        arms: Vec<IRCaseArm>,
-        env: Env,
+        arms: Rc<[IRCaseArm]>,
+        env: SharedEnv,
     },
     IfBranch {
         then_br: Rc<IRExpr>,
         else_br: Rc<IRExpr>,
-        env: Env,
+        env: SharedEnv,
     },
     LetBody {
         body: Rc<IRExpr>,
-        env: Env,
+        env: SharedEnv,
     },
+}
+
+enum GlobalEntry {
+    Closure(ValueRef),
+    Expr(Rc<IRExpr>),
 }
 
 pub struct Machine {
     control: Rc<IRExpr>,
-    env: Env,
+    env: SharedEnv,
     continuation: Vec<Frame>,
-    globals: Vec<Rc<IRExpr>>,
+    globals: Vec<GlobalEntry>,
     true_tag: u16,
     false_tag: u16,
 }
@@ -253,25 +262,31 @@ impl Machine {
             .constructor_tag("False")
             .unwrap_or_else(|| panic!("constructor 'False' not found"));
 
-        let globals: Vec<Rc<IRExpr>> = program
+        let globals = program
             .globals
             .iter()
-            .map(|global_def| global_def.body.clone())
+            .map(|global_def| match global_def.body.as_ref() {
+                IRExpr::Abs(body) => GlobalEntry::Closure(Rc::new(Value::Closure {
+                    env: Env::empty(),
+                    body: body.clone(),
+                })),
+                _ => GlobalEntry::Expr(global_def.body.clone()),
+            })
             .collect();
 
         let mut machine = Machine {
             control: Rc::new(IRExpr::FVar(entry_index)),
-            env: Env::Empty,
+            env: Env::empty(),
             continuation: Vec::new(),
             globals,
             true_tag,
             false_tag,
         };
 
-        machine.run()
+        Rc::try_unwrap(machine.run()).unwrap_or_else(|rc| (*rc).clone())
     }
 
-    fn run(&mut self) -> Value {
+    fn run(&mut self) -> ValueRef {
         loop {
             let value = self.step();
             match self.return_value(value) {
@@ -281,44 +296,35 @@ impl Machine {
         }
     }
 
-    fn step(&mut self) -> Value {
+    fn step(&mut self) -> ValueRef {
         loop {
             match self.control.as_ref() {
-                IRExpr::Unit => return Value::Unit,
+                IRExpr::Unit => return Rc::new(Value::Unit),
 
-                IRExpr::BVar(index) => return self.env.lookup(*index).clone(),
+                IRExpr::BVar(index) => return Env::lookup(&self.env, *index),
 
-                IRExpr::FVar(index) => {
-                    let expr = self.globals[*index].clone();
-
-                    match expr.as_ref() {
-                        IRExpr::Abs(body) => {
-                            return Value::Closure {
-                                env: Rc::new(Env::Empty),
-                                body: body.clone(),
-                            };
-                        }
-                        _ => {
-                            self.control = expr;
-                            self.env = Env::Empty;
-                            continue;
-                        }
+                IRExpr::FVar(index) => match &self.globals[*index] {
+                    GlobalEntry::Closure(value) => return value.clone(),
+                    GlobalEntry::Expr(expr) => {
+                        self.control = expr.clone();
+                        self.env = Env::empty();
+                        continue;
                     }
-                }
+                },
 
                 IRExpr::Con { tag, arity } => {
-                    return Value::PartialCon {
+                    return Rc::new(Value::PartialCon {
                         tag: *tag,
                         arity: *arity,
                         fields: Vec::new(),
-                    };
+                    });
                 }
 
                 IRExpr::Abs(body) => {
-                    return Value::Closure {
-                        env: Rc::new(self.env.clone()),
+                    return Rc::new(Value::Closure {
+                        env: self.env.clone(),
                         body: body.clone(),
-                    };
+                    });
                 }
 
                 IRExpr::App(func, arg) => {
@@ -341,7 +347,7 @@ impl Machine {
 
                 IRExpr::Case { scrutinee, arms } => {
                     self.continuation.push(Frame::CaseOf {
-                        arms: arms.clone(),
+                        arms: arms.clone().into(),
                         env: self.env.clone(),
                     });
                     self.control = scrutinee.clone();
@@ -365,82 +371,90 @@ impl Machine {
         }
     }
 
-    fn return_value(&mut self, value: Value) -> Option<Value> {
-        match self.continuation.pop() {
-            None => Some(value),
+    fn return_value(&mut self, mut value: ValueRef) -> Option<ValueRef> {
+        loop {
+            match self.continuation.pop() {
+                None => return Some(value),
 
-            Some(Frame::EvalArg { arg, env }) => {
-                self.continuation.push(Frame::Apply(value));
-                self.control = arg;
-                self.env = env;
-                None
-            }
-
-            Some(Frame::Apply(function)) => self.apply(function, value),
-
-            Some(Frame::LetBody { body, env }) => {
-                self.env = env.extend(value);
-                self.control = body;
-                None
-            }
-
-            Some(Frame::CaseOf { arms, env }) => {
-                for arm in &arms {
-                    let mut bindings = Vec::new();
-                    if match_pattern(&arm.pattern, &value, &mut bindings) {
-                        self.env = env.extend_many(&bindings);
-                        self.control = arm.body.clone();
-                        return None;
-                    }
+                Some(Frame::EvalArg { arg, env }) => {
+                    self.continuation.push(Frame::Apply(value));
+                    self.control = arg;
+                    self.env = env;
+                    return None;
                 }
-                panic!("non-exhaustive case");
-            }
 
-            Some(Frame::IfBranch {
-                then_br,
-                else_br,
-                env,
-            }) => {
-                self.env = env;
-                self.control = match &value {
-                    Value::PartialCon {
-                        tag,
-                        arity: 0,
-                        fields,
-                    } if *tag == self.true_tag && fields.is_empty() => then_br,
-                    Value::PartialCon {
-                        tag,
-                        arity: 0,
-                        fields,
-                    } if *tag == self.false_tag && fields.is_empty() => else_br,
-                    _ => panic!("if-condition is not a boolean"),
-                };
-                None
+                Some(Frame::Apply(function)) => match self.apply(function, value) {
+                    Some(next_value) => {
+                        value = next_value;
+                        continue;
+                    }
+                    None => return None,
+                },
+                Some(Frame::LetBody { body, env }) => {
+                    self.env = Env::extend(&env, value);
+                    self.control = body;
+                    return None;
+                }
+
+                Some(Frame::CaseOf { arms, env }) => {
+                    for arm in arms.iter() {
+                        let mut bindings = Vec::new();
+                        if match_pattern(&arm.pattern, &value, &mut bindings) {
+                            self.env = Env::extend_many(&env, &bindings);
+                            self.control = arm.body.clone();
+                            return None;
+                        }
+                    }
+                    panic!("non-exhaustive case");
+                }
+
+                Some(Frame::IfBranch {
+                    then_br,
+                    else_br,
+                    env,
+                }) => {
+                    self.env = env;
+                    self.control = match value.as_ref() {
+                        Value::PartialCon {
+                            tag,
+                            arity: 0,
+                            fields,
+                        } if *tag == self.true_tag && fields.is_empty() => then_br,
+                        Value::PartialCon {
+                            tag,
+                            arity: 0,
+                            fields,
+                        } if *tag == self.false_tag && fields.is_empty() => else_br,
+                        _ => panic!("if-condition is not a boolean"),
+                    };
+                    return None;
+                }
             }
         }
     }
 
-    fn apply(&mut self, function: Value, argument: Value) -> Option<Value> {
-        match function {
+    fn apply(&mut self, function: ValueRef, argument: ValueRef) -> Option<ValueRef> {
+        match function.as_ref() {
             Value::Closure { env, body } => {
-                self.env = env.extend(argument);
-                self.control = body;
+                self.env = Env::extend(env, argument);
+                self.control = body.clone();
                 None
             }
 
-            Value::PartialCon {
-                tag,
-                arity,
-                mut fields,
-            } => {
-                if fields.len() >= arity as usize {
+            Value::PartialCon { tag, arity, fields } => {
+                if fields.len() >= *arity as usize {
                     panic!("cannot over-apply constructor tag {}", tag);
                 }
 
-                fields.push(argument);
+                let mut new_fields = Vec::with_capacity(fields.len() + 1);
+                new_fields.extend(fields.iter().cloned());
+                new_fields.push(argument);
 
-                let result = Value::PartialCon { tag, arity, fields };
-                self.return_value(result)
+                Some(Rc::new(Value::PartialCon {
+                    tag: *tag,
+                    arity: *arity,
+                    fields: new_fields,
+                }))
             }
 
             _ => panic!("cannot apply non-function"),
@@ -448,29 +462,28 @@ impl Machine {
     }
 }
 
-fn match_pattern(pattern: &IRPattern, value: &Value, bindings: &mut Vec<Value>) -> bool {
-    match (pattern, value) {
-        (IRPattern::Var, _) => {
-            bindings.push(value.clone());
-            true
-        }
+fn match_pattern(pattern: &IRPattern, value: &ValueRef, bindings: &mut Vec<ValueRef>) -> bool {
+    let mut work: Vec<(&IRPattern, &ValueRef)> = vec![(pattern, value)];
 
-        (IRPattern::Wild, _) => true,
-
-        (IRPattern::Con(expected_tag, sub_patterns), Value::PartialCon { tag, fields, .. }) => {
-            if *expected_tag != *tag || sub_patterns.len() != fields.len() {
-                return false;
+    while let Some((pat, val)) = work.pop() {
+        match (pat, val.as_ref()) {
+            (IRPattern::Var, _) => {
+                bindings.push(val.clone());
             }
-
-            for (sub_pattern, field_value) in sub_patterns.iter().zip(fields.iter()) {
-                if !match_pattern(sub_pattern, field_value, bindings) {
+            (IRPattern::Wild, _) => {}
+            (IRPattern::Con(expected_tag, sub_patterns), Value::PartialCon { tag, fields, .. }) => {
+                if *expected_tag != *tag || sub_patterns.len() != fields.len() {
                     return false;
+                }
+
+                for (sub_pat, field_val) in sub_patterns.iter().zip(fields.iter()).rev() {
+                    work.push((sub_pat, field_val));
                 }
             }
 
-            true
+            _ => return false,
         }
-
-        _ => false,
     }
+
+    true
 }
