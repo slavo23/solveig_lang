@@ -279,6 +279,7 @@ pub enum TermExpr<A, P = A> {
     ),
     BinaryOperator(BinOp, Box<TermExprNode<A, P>>, Box<TermExprNode<A, P>>),
     UnaryOperator(UnOp, Box<TermExprNode<A, P>>),
+    Let(String, Box<TermExprNode<A, P>>, Box<TermExprNode<A, P>>),
 }
 
 #[derive(Clone, Debug)]

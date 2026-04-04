@@ -145,7 +145,16 @@ impl Resolver {
                 };
                 TermExpr::UnaryOperator(core_unop, Box::new(self.resolve_surface_expr(rhs)))
             }
-            _ => todo!("unacceptable node to resolve"),
+            SurfaceExpr::Let(binder_name, binder_expr, in_expr) => {
+                let resolved_binder = self.resolve_surface_expr(binder_expr);
+                let resolved_in_expr = self.resolve_surface_expr(in_expr);
+
+                TermExpr::Let(
+                    binder_name.to_string(),
+                    Box::new(resolved_binder),
+                    Box::new(resolved_in_expr),
+                )
+            }
         };
         TermExprNode::new(node, span)
     }

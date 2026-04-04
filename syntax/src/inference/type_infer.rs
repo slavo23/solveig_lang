@@ -225,6 +225,11 @@ impl TypeChecker {
             TermExpr::UnaryOperator(op, rhs) => {
                 TermExpr::UnaryOperator(op.clone(), Box::new(self.zonk_expr(rhs)))
             }
+            TermExpr::Let(binder_name, binder_expr, in_expr) => TermExpr::Let(
+                binder_name.clone(),
+                Box::new(self.zonk_expr(binder_expr)),
+                Box::new(self.zonk_expr(in_expr)),
+            ),
         };
         TermExprNode::new(zonked_node, zonked_meta)
     }
@@ -843,7 +848,32 @@ impl TypeChecker {
                 );
                 Ok((delta.until(&typed_var_entry), elaborated))
             }
+            (TermExpr::Let(name, rhs, body), _) => {
+                let (gamma, elaborated_rhs, rhs_type) = self.solve_inference(ctx, rhs)?;
+                let rhs_type = gamma.apply(&rhs_type);
 
+                let typed_var_entry = ContextEntry::TypedVar {
+                    var_name: name.clone(),
+                    ty: rhs_type,
+                };
+                let extended_ctx = gamma.add_entry(typed_var_entry.clone());
+
+                let (delta, elaborated_body) =
+                    self.solve_checking(extended_ctx, body, expected_type)?;
+                let result_type = delta.apply(expected_type);
+
+                let elaborated = elab_node(
+                    TermExpr::Let(
+                        name.clone(),
+                        Box::new(elaborated_rhs),
+                        Box::new(elaborated_body),
+                    ),
+                    span,
+                    result_type,
+                );
+
+                Ok((delta.until(&typed_var_entry), elaborated))
+            }
             (TermExpr::IfThenElse(cond, then_branch, else_branch), _) => {
                 let bool_type = TypeExpr::TyCon("Bool".to_string());
                 let (gamma, elaborated_cond) = self.solve_checking(ctx, cond, &bool_type)?;
@@ -1058,6 +1088,32 @@ impl TypeChecker {
                 );
 
                 Ok((delta.until(&typed_var_entry), elaborated, arrow_type))
+            }
+            TermExpr::Let(name, rhs, body) => {
+                let (gamma, elaborated_rhs, rhs_type) = self.solve_inference(ctx, rhs)?;
+                let rhs_type = gamma.apply(&rhs_type);
+
+                let typed_var_entry = ContextEntry::TypedVar {
+                    var_name: name.clone(),
+                    ty: rhs_type,
+                };
+                let extended_ctx = gamma.add_entry(typed_var_entry.clone());
+
+                let (delta, elaborated_body, body_type) =
+                    self.solve_inference(extended_ctx, body)?;
+                let result_type = delta.apply(&body_type);
+
+                let elaborated = elab_node(
+                    TermExpr::Let(
+                        name.clone(),
+                        Box::new(elaborated_rhs),
+                        Box::new(elaborated_body),
+                    ),
+                    span,
+                    result_type.clone(),
+                );
+
+                Ok((delta.until(&typed_var_entry), elaborated, result_type))
             }
 
             // →E⇒: e₁ e₂  (application — infer function, then app-infer)

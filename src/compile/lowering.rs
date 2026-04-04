@@ -126,6 +126,15 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
             let lowered_rhs = lower_expr(ctx, rhs);
             Rc::new(IRExpr::UnaryOp(op.clone(), lowered_rhs))
         }
+        TermExpr::Let(name, binder, in_expr) => {
+            let lowered_binder = lower_expr(ctx, binder);
+
+            ctx.push(name);
+            let lowered_in_expr = lower_expr(ctx, in_expr);
+            ctx.pop();
+
+            Rc::new(IRExpr::Let(lowered_binder, lowered_in_expr))
+        }
     }
 }
 

@@ -560,9 +560,9 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .then_ignore(just(Token::In))
             .then(expr.clone())
             .map_with(|(((bind_name, ty_expr), rhs), then), e| {
-                let l =
-                    SurfaceExpr::Let(bind_name, Box::new(rhs), Box::new(then)).with_span(e.span());
-                SurfaceExpr::Ann(Box::new(l), ty_expr)
+                let annotated_rhs = SurfaceExpr::Ann(Box::new(rhs), ty_expr).with_span(e.span());
+
+                SurfaceExpr::Let(bind_name, Box::new(annotated_rhs), Box::new(then))
             })
             .boxed();
 

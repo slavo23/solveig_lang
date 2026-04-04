@@ -45,6 +45,9 @@ foldl f acc xs =
         [] => acc
         | y :: ys => foldl f (f acc y) ys;
 
-sumList = foldl (fun acc x => acc + x) 1; 
+
+sumList =
+ let add = fun x y => x + y
+  in foldl add 1; 
 
 main = sumList (intRange 1 1000 True);
