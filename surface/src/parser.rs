@@ -58,6 +58,34 @@ pub fn lexer<'src>()
     recursive(|token| {
         let token = token.boxed();
 
+        let line_comment = just("--")
+            .ignore_then(none_of("\n").repeated())
+            .ignored()
+            .boxed();
+
+        let block_comment = recursive(|block_comment| {
+            just("{-")
+                .ignore_then(
+                    choice((
+                        block_comment,
+                        just("{-").or(just("-}")).not().ignore_then(any()).ignored(),
+                    ))
+                    .repeated(),
+                )
+                .then_ignore(just("-}"))
+                .ignored()
+        })
+        .boxed();
+
+        let padding = choice((
+            text::whitespace().at_least(1).ignored(),
+            line_comment,
+            block_comment,
+        ))
+        .repeated()
+        .ignored()
+        .boxed();
+
         let int_lit = text::int(10)
             .from_str::<i64>()
             .unwrapped()
@@ -131,7 +159,7 @@ pub fn lexer<'src>()
             brackets,
         ))
         .spanned()
-        .padded()
+        .padded_by(padding.clone())
     })
     .repeated()
     .collect()

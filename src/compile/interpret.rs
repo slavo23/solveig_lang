@@ -408,7 +408,6 @@ impl Machine {
         if self.store.len() < self.next_gc_threshold {
             return;
         }
-
         self.next_gc_threshold = (self.next_gc_threshold.max(1024) * 2).max(self.store.len() + 1);
     }
 
@@ -426,22 +425,16 @@ impl Machine {
         loop {
             match self.control.as_ref() {
                 IRExpr::Unit => return self.alloc(Value::Unit),
-
                 IRExpr::Int(n) => return self.alloc(Value::Int(*n)),
-
                 IRExpr::BVar(index) => return self.env.lookup(*index),
-
                 IRExpr::FVar(index) => return self.force_global(*index),
-
                 IRExpr::Con { tag, arity } => return self.eval_constructor(*tag, *arity),
-
                 IRExpr::Abs(body) => {
                     return self.alloc(Value::Closure {
                         env: self.env.clone(),
                         body: body.clone(),
                     });
                 }
-
                 IRExpr::App(func, arg) => {
                     self.continuation.push(Frame::EvalArg {
                         arg: arg.clone(),
@@ -449,7 +442,6 @@ impl Machine {
                     });
                     self.control = func.clone();
                 }
-
                 IRExpr::Let(binding, body) => {
                     self.continuation.push(Frame::LetBody {
                         body: body.clone(),
@@ -457,7 +449,6 @@ impl Machine {
                     });
                     self.control = binding.clone();
                 }
-
                 IRExpr::Case { scrutinee, arms } => {
                     self.continuation.push(Frame::CaseOf {
                         arms: arms.clone().into(),
@@ -465,7 +456,6 @@ impl Machine {
                     });
                     self.control = scrutinee.clone();
                 }
-
                 IRExpr::IfThenElse {
                     cond,
                     then_br,
@@ -478,7 +468,6 @@ impl Machine {
                     });
                     self.control = cond.clone();
                 }
-
                 IRExpr::BinaryOp(op, lhs, rhs) => {
                     self.continuation.push(Frame::EvalBinaryR {
                         op: op.clone(),
@@ -487,7 +476,6 @@ impl Machine {
                     });
                     self.control = lhs.clone();
                 }
-
                 IRExpr::UnaryOp(op, rhs) => {
                     self.continuation.push(Frame::ApplyUnary(op.clone()));
                     self.control = rhs.clone();
@@ -500,19 +488,16 @@ impl Machine {
         loop {
             match self.continuation.pop() {
                 None => return Some(value),
-
                 Some(Frame::EvalArg { arg, env }) => {
                     self.continuation.push(Frame::Apply(value));
                     self.control = arg;
                     self.env = env;
                     return None;
                 }
-
                 Some(Frame::Apply(function)) => match self.apply(function, value) {
                     Some(next_value) => value = next_value,
                     None => return None,
                 },
-
                 Some(Frame::EvalBinaryR { op, rhs, env }) => {
                     self.continuation
                         .push(Frame::ApplyBinary { op, lhs: value });
@@ -520,21 +505,17 @@ impl Machine {
                     self.env = env;
                     return None;
                 }
-
                 Some(Frame::ApplyBinary { op, lhs }) => {
                     value = self.eval_binary_prim(&op, lhs, value);
                 }
-
                 Some(Frame::ApplyUnary(op)) => {
                     value = self.eval_unary_prim(&op, value);
                 }
-
                 Some(Frame::LetBody { body, env }) => {
                     self.env = env.extend(value);
                     self.control = body;
                     return None;
                 }
-
                 Some(Frame::CaseOf { arms, env }) => {
                     for arm in arms.iter() {
                         let mut bindings = Vec::new();
@@ -546,24 +527,20 @@ impl Machine {
                     }
                     panic!("non-exhaustive case");
                 }
-
                 Some(Frame::IfBranch {
                     then_br,
                     else_br,
                     env,
                 }) => {
                     self.env = env;
-
                     if value == self.ctors.true_addr {
                         self.control = then_br;
                         return None;
                     }
-
                     if value == self.ctors.false_addr {
                         self.control = else_br;
                         return None;
                     }
-
                     panic!("if-condition is not a boolean");
                 }
 
@@ -677,9 +654,7 @@ impl Machine {
         while let Some((pat, addr)) = work.pop() {
             match (pat, self.store.get(addr)) {
                 (IRPattern::Var, _) => bindings.push(addr),
-
                 (IRPattern::Wild, _) => {}
-
                 (
                     IRPattern::Con(expected_tag, sub_patterns),
                     Value::Constructor { tag, fields, .. },
@@ -692,11 +667,9 @@ impl Machine {
                         work.push((sub_pat, field_addr));
                     }
                 }
-
                 _ => return false,
             }
         }
-
         true
     }
 }
