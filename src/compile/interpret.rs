@@ -1,3 +1,4 @@
+use core::ast::{BinOp, UnOp};
 use std::fmt;
 use std::rc::Rc;
 
@@ -9,6 +10,7 @@ type SharedEnv = Rc<Env>;
 #[derive(Debug, Clone)]
 pub enum Value {
     Unit,
+    Int(i64),
     Closure {
         env: SharedEnv,
         body: Rc<IRExpr>,
@@ -55,6 +57,7 @@ fn format_value(value: &Value, program: &IRProgram) -> String {
 
     match value {
         Value::Unit => "()".to_string(),
+        Value::Int(n) => n.to_string(),
         Value::Closure { .. } => "<closure>".to_string(),
         Value::PartialCon { tag, arity, fields } => {
             let name = program
@@ -90,6 +93,7 @@ fn format_atomic(value: &Value, program: &IRProgram) -> String {
 
     match value {
         Value::Unit => format_value(value, program),
+        Value::Int(_) => format_value(value, program),
         Value::Closure { .. } => format_value(value, program),
         Value::PartialCon { fields, .. } if fields.is_empty() => format_value(value, program),
         _ => format!("({})", format_value(value, program)),
@@ -218,6 +222,16 @@ enum Frame {
         env: SharedEnv,
     },
     Apply(ValueRef),
+    EvalBinaryR {
+        op: BinOp,
+        rhs: Rc<IRExpr>,
+        env: SharedEnv,
+    },
+    ApplyBinary {
+        op: BinOp,
+        lhs: ValueRef,
+    },
+    ApplyUnary(UnOp),
     CaseOf {
         arms: Rc<[IRCaseArm]>,
         env: SharedEnv,
@@ -245,6 +259,46 @@ pub struct Machine {
     globals: Vec<GlobalEntry>,
     true_tag: u16,
     false_tag: u16,
+}
+
+fn expect_int(value: &Value) -> i64 {
+    match value {
+        Value::Int(n) => *n,
+        _ => panic!("expected Int value"),
+    }
+}
+
+fn eval_unary_prim(op: &UnOp, rhs: &Value) -> Value {
+    let rhs = expect_int(rhs);
+
+    match op {
+        UnOp::Neg => Value::Int(-rhs),
+    }
+}
+
+fn bool_value(tag: u16) -> Value {
+    Value::PartialCon {
+        tag,
+        arity: 0,
+        fields: Vec::new(),
+    }
+}
+fn eval_binary_prim(op: &BinOp, lhs: &Value, rhs: &Value, true_tag: u16, false_tag: u16) -> Value {
+    let lhs = expect_int(lhs);
+    let rhs = expect_int(rhs);
+
+    match op {
+        BinOp::Plus => Value::Int(lhs + rhs),
+        BinOp::Minus => Value::Int(lhs - rhs),
+        BinOp::Mult => Value::Int(lhs * rhs),
+        BinOp::Div => Value::Int(lhs / rhs),
+
+        BinOp::Less => bool_value(if lhs < rhs { true_tag } else { false_tag }),
+        BinOp::Greater => bool_value(if lhs > rhs { true_tag } else { false_tag }),
+        BinOp::LessOrEqual => bool_value(if lhs <= rhs { true_tag } else { false_tag }),
+        BinOp::GreaterOrEqual => bool_value(if lhs >= rhs { true_tag } else { false_tag }),
+        BinOp::Equal => bool_value(if lhs == rhs { true_tag } else { false_tag }),
+    }
 }
 
 impl Machine {
@@ -300,7 +354,7 @@ impl Machine {
         loop {
             match self.control.as_ref() {
                 IRExpr::Unit => return Rc::new(Value::Unit),
-
+                IRExpr::Int(n) => return Rc::new(Value::Int(*n)),
                 IRExpr::BVar(index) => return Env::lookup(&self.env, *index),
 
                 IRExpr::FVar(index) => match &self.globals[*index] {
@@ -367,6 +421,21 @@ impl Machine {
                     self.control = cond.clone();
                     continue;
                 }
+                IRExpr::BinaryOp(op, lhs, rhs) => {
+                    self.continuation.push(Frame::EvalBinaryR {
+                        op: op.clone(),
+                        rhs: rhs.clone(),
+                        env: self.env.clone(),
+                    });
+                    self.control = lhs.clone();
+                    continue;
+                }
+
+                IRExpr::UnaryOp(op, rhs) => {
+                    self.continuation.push(Frame::ApplyUnary(op.clone()));
+                    self.control = rhs.clone();
+                    continue;
+                }
             }
         }
     }
@@ -390,6 +459,29 @@ impl Machine {
                     }
                     None => return None,
                 },
+                Some(Frame::EvalBinaryR { op, rhs, env }) => {
+                    self.continuation
+                        .push(Frame::ApplyBinary { op, lhs: value });
+                    self.control = rhs;
+                    self.env = env;
+                    return None;
+                }
+
+                Some(Frame::ApplyBinary { op, lhs }) => {
+                    value = Rc::new(eval_binary_prim(
+                        &op,
+                        lhs.as_ref(),
+                        value.as_ref(),
+                        self.true_tag,
+                        self.false_tag,
+                    ));
+                    continue;
+                }
+
+                Some(Frame::ApplyUnary(op)) => {
+                    value = Rc::new(eval_unary_prim(&op, value.as_ref()));
+                    continue;
+                }
                 Some(Frame::LetBody { body, env }) => {
                     self.env = Env::extend(&env, value);
                     self.control = body;

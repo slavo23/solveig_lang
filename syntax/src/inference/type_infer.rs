@@ -4,8 +4,8 @@ use crate::inference::inference_ctx::{Context, ContextEntry};
 use base::utils::diagnostics::{FileSpan, TypeError};
 use base::utils::span::Span;
 use core::ast::{
-    CaseArm, CaseArmNode, Kind, Pattern, PatternNode, Pretty, ResolvedModule, TermDefinition,
-    TermExpr, TermExprNode, TypeExpr,
+    BinOp, CaseArm, CaseArmNode, Kind, Literal, Pattern, PatternNode, Pretty, ResolvedModule,
+    TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
 };
 
 #[derive(Clone, Debug)]
@@ -178,6 +178,7 @@ impl TypeChecker {
         let zonked_node = match &expr.node {
             TermExpr::Unit => TermExpr::Unit,
             TermExpr::Var(name) => TermExpr::Var(name.clone()),
+            TermExpr::Lit(lit_val) => TermExpr::Lit(lit_val.clone()),
             TermExpr::Con(name) => TermExpr::Con(name.clone()),
             TermExpr::App(func, arg) => TermExpr::App(
                 Box::new(self.zonk_expr(func)),
@@ -216,6 +217,14 @@ impl TypeChecker {
                 Box::new(self.zonk_expr(then_branch)),
                 Box::new(self.zonk_expr(else_branch)),
             ),
+            TermExpr::BinaryOperator(op, lhs, rhs) => TermExpr::BinaryOperator(
+                op.clone(),
+                Box::new(self.zonk_expr(lhs)),
+                Box::new(self.zonk_expr(rhs)),
+            ),
+            TermExpr::UnaryOperator(op, rhs) => {
+                TermExpr::UnaryOperator(op.clone(), Box::new(self.zonk_expr(rhs)))
+            }
         };
         TermExprNode::new(zonked_node, zonked_meta)
     }
@@ -914,6 +923,65 @@ impl TypeChecker {
         }
     }
 
+    fn int_type(&self) -> TypeExpr {
+        TypeExpr::TyCon("Int".to_string())
+    }
+
+    fn solve_unary_operator_inference(
+        &mut self,
+        ctx: Context,
+        op: &UnOp,
+        rhs: &TermExprNode<Span>,
+        span: Span,
+    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
+        let int_type = self.int_type();
+        let (ctx, elaborated_rhs) = self.solve_checking(ctx, rhs, &int_type)?;
+
+        let result_type = int_type.clone();
+        let elaborated = elab_node(
+            TermExpr::UnaryOperator(op.clone(), Box::new(elaborated_rhs)),
+            span,
+            result_type.clone(),
+        );
+
+        Ok((ctx, elaborated, result_type))
+    }
+
+    fn solve_binary_operator_inference(
+        &mut self,
+        ctx: Context,
+        op: &BinOp,
+        lhs: &TermExprNode<Span>,
+        rhs: &TermExprNode<Span>,
+        span: Span,
+    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
+        let int_type = self.int_type();
+
+        let (ctx, elaborated_lhs) = self.solve_checking(ctx, lhs, &int_type)?;
+        let (ctx, elaborated_rhs) = self.solve_checking(ctx, rhs, &int_type)?;
+
+        let result_type = match op {
+            BinOp::Equal
+            | BinOp::Less
+            | BinOp::Greater
+            | BinOp::GreaterOrEqual
+            | BinOp::LessOrEqual => self.bool_type(),
+            _ => self.int_type(),
+        };
+
+        let elaborated = elab_node(
+            TermExpr::BinaryOperator(
+                op.clone(),
+                Box::new(elaborated_lhs),
+                Box::new(elaborated_rhs),
+            ),
+            span,
+            result_type.clone(),
+        );
+
+        Ok((ctx, elaborated, result_type))
+    }
+
     pub fn solve_inference(
         &mut self,
         ctx: Context,
@@ -1087,6 +1155,21 @@ impl TypeChecker {
                     final_type.clone(),
                 );
                 Ok((theta, elaborated, final_type))
+            }
+            TermExpr::Lit(lit) => {
+                let ty = match lit {
+                    Literal::Int(_) => self.int_type(),
+                };
+
+                let elaborated = elab_node(TermExpr::Lit(lit.clone()), span, ty.clone());
+                Ok((ctx, elaborated, ty))
+            }
+            TermExpr::BinaryOperator(op, lhs, rhs) => {
+                self.solve_binary_operator_inference(ctx, op, lhs, rhs, span)
+            }
+
+            TermExpr::UnaryOperator(op, rhs) => {
+                self.solve_unary_operator_inference(ctx, op, rhs, span)
             }
         }
     }

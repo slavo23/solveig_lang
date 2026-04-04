@@ -75,14 +75,38 @@ pub struct SurfaceMatchArm<'src> {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+pub enum SurfaceBinOp {
+    Plus,
+    Minus,
+    Mult,
+    Div,
+
+    Less,
+    Greater,
+    LessOrEqual,
+    GreaterOrEqual,
+    Equal,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SurfaceUnOp {
+    Neg,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum SurfaceLiteral {
+    Int(i64),
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum SurfaceExpr<'src> {
     Unit,
+    Literal(SurfaceLiteral),
     Var(&'src str),
     App(
         Box<Spanned<SurfaceExpr<'src>>>,
         Box<Spanned<SurfaceExpr<'src>>>,
     ),
-
     Abs(
         Vec<(Spanned<&'src str>, Option<Spanned<SurfaceTy<'src>>>)>,
         Box<Spanned<SurfaceExpr<'src>>>,
@@ -103,4 +127,10 @@ pub enum SurfaceExpr<'src> {
         Box<Spanned<SurfaceExpr<'src>>>,
         Box<Spanned<SurfaceExpr<'src>>>,
     ),
+    BinaryOperator(
+        SurfaceBinOp,
+        Box<Spanned<SurfaceExpr<'src>>>,
+        Box<Spanned<SurfaceExpr<'src>>>,
+    ),
+    UnaryOperator(SurfaceUnOp, Box<Spanned<SurfaceExpr<'src>>>),
 }

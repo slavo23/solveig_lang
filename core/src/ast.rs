@@ -237,9 +237,34 @@ pub type PatternNode<A> = ExprNode<Pattern<A>, A>;
 pub type CaseArmNode<A, P = A> = ExprNode<CaseArm<A, P>, P>;
 
 #[derive(Clone, Debug)]
+pub enum Literal {
+    Int(i64),
+}
+
+#[derive(Clone, Debug)]
+pub enum BinOp {
+    Plus,
+    Minus,
+    Mult,
+    Div,
+
+    Less,
+    Greater,
+    LessOrEqual,
+    GreaterOrEqual,
+    Equal,
+}
+
+#[derive(Clone, Debug)]
+pub enum UnOp {
+    Neg,
+}
+
+#[derive(Clone, Debug)]
 pub enum TermExpr<A, P = A> {
     Unit,
     Var(String),
+    Lit(Literal),
     App(Box<TermExprNode<A, P>>, Box<TermExprNode<A, P>>),
     Abs(String, Option<TypeExpr>, Box<TermExprNode<A, P>>),
     TyAbs(String, Kind, Box<TermExprNode<A, P>>),
@@ -252,6 +277,8 @@ pub enum TermExpr<A, P = A> {
         Box<TermExprNode<A, P>>,
         Box<TermExprNode<A, P>>,
     ),
+    BinaryOperator(BinOp, Box<TermExprNode<A, P>>, Box<TermExprNode<A, P>>),
+    UnaryOperator(UnOp, Box<TermExprNode<A, P>>),
 }
 
 #[derive(Clone, Debug)]

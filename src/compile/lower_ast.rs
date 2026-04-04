@@ -1,3 +1,4 @@
+use core::ast::{BinOp, UnOp};
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -5,6 +6,9 @@ pub enum IRExpr {
     Unit,
     BVar(usize),
     FVar(usize),
+    Int(i64),
+    BinaryOp(BinOp, Rc<IRExpr>, Rc<IRExpr>),
+    UnaryOp(UnOp, Rc<IRExpr>),
 
     Abs(Rc<IRExpr>),
     App(Rc<IRExpr>, Rc<IRExpr>),
@@ -42,9 +46,7 @@ impl IRPattern {
         match self {
             IRPattern::Var => 1,
             IRPattern::Wild => 0,
-            IRPattern::Con(_, sub_patterns) => {
-                sub_patterns.iter().map(|p| p.binder_count()).sum()
-            }
+            IRPattern::Con(_, sub_patterns) => sub_patterns.iter().map(|p| p.binder_count()).sum(),
         }
     }
 }

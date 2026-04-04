@@ -2,12 +2,12 @@ use std::collections::HashMap;
 
 use base::utils::span::Span;
 use core::ast::{
-    CaseArm, CaseArmNode, ConstructorDef, DataDefinition, Kind, Pattern, PatternNode,
-    ResolvedModule, TermDefinition, TermExpr, TermExprNode, TypeExpr,
+    BinOp, CaseArm, CaseArmNode, ConstructorDef, DataDefinition, Kind, Literal, Pattern,
+    PatternNode, ResolvedModule, TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
 };
 use surface::ast::{
-    SpannedWrapper, SurfaceDefinition, SurfaceExpr, SurfaceMatchArm, SurfacePattern,
-    SurfaceProgram, SurfaceTy,
+    SpannedWrapper, SurfaceBinOp, SurfaceDefinition, SurfaceExpr, SurfaceLiteral, SurfaceMatchArm,
+    SurfacePattern, SurfaceProgram, SurfaceTy, SurfaceUnOp,
 };
 
 use syntax::data_kind_infer::{infer_all_data_kinds, RawConstructorDef, RawDataDef};
@@ -82,6 +82,9 @@ impl Resolver {
             SurfaceExpr::Unit => TermExpr::Unit,
             SurfaceExpr::Var(v) => TermExpr::Var(v.to_string()),
             SurfaceExpr::Con(c) => TermExpr::Con(c.to_string()),
+            SurfaceExpr::Literal(lit) => match lit {
+                SurfaceLiteral::Int(i_val) => TermExpr::Lit(Literal::Int(i_val.clone())),
+            },
             SurfaceExpr::App(l, r) => TermExpr::App(
                 Box::new(self.resolve_surface_expr(l)),
                 Box::new(self.resolve_surface_expr(r)),
@@ -117,6 +120,31 @@ impl Resolver {
                     .map(|a| self.resolve_surface_case_arm(a))
                     .collect(),
             ),
+            SurfaceExpr::BinaryOperator(op, lhs, rhs) => {
+                let core_binop = match op {
+                    SurfaceBinOp::Plus => BinOp::Plus,
+                    SurfaceBinOp::Minus => BinOp::Minus,
+                    SurfaceBinOp::Mult => BinOp::Mult,
+                    SurfaceBinOp::Div => BinOp::Div,
+
+                    SurfaceBinOp::Less => BinOp::Less,
+                    SurfaceBinOp::Greater => BinOp::Greater,
+                    SurfaceBinOp::LessOrEqual => BinOp::LessOrEqual,
+                    SurfaceBinOp::GreaterOrEqual => BinOp::GreaterOrEqual,
+                    SurfaceBinOp::Equal => BinOp::Equal,
+                };
+                TermExpr::BinaryOperator(
+                    core_binop,
+                    Box::new(self.resolve_surface_expr(lhs)),
+                    Box::new(self.resolve_surface_expr(rhs)),
+                )
+            }
+            SurfaceExpr::UnaryOperator(op, rhs) => {
+                let core_unop = match op {
+                    SurfaceUnOp::Neg => UnOp::Neg,
+                };
+                TermExpr::UnaryOperator(core_unop, Box::new(self.resolve_surface_expr(rhs)))
+            }
             _ => todo!("unacceptable node to resolve"),
         };
         TermExprNode::new(node, span)

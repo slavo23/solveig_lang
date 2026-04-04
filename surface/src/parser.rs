@@ -6,12 +6,13 @@ use chumsky::{
 };
 
 use crate::ast::{
-    ClassMethod, InstanceMethod, SufraceConstructor, SurfaceDefinition, SurfaceExpr,
-    SurfaceMatchArm, SurfacePattern, SurfaceProgram, SurfaceTy,
+    ClassMethod, InstanceMethod, SufraceConstructor, SurfaceBinOp, SurfaceDefinition, SurfaceExpr,
+    SurfaceLiteral, SurfaceMatchArm, SurfacePattern, SurfaceProgram, SurfaceTy, SurfaceUnOp,
 };
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Token<'src> {
+    IntLit(i64),
     Ident(&'src str),
     UpperIdent(&'src str),
     Parens(Vec<Spanned<Self>>),
@@ -41,12 +42,26 @@ pub enum Token<'src> {
     Where,
     End,
     ConsSep,
+    Minus,
+    Plus,
+    Multiply,
+    Divide,
+    Less,
+    Greater,
+    GreaterOrEqual,
+    LessOrEqual,
+    Equal,
 }
 
 pub fn lexer<'src>()
 -> impl Parser<'src, &'src str, Vec<Spanned<Token<'src>>>, extra::Err<Rich<'src, char>>> {
     recursive(|token| {
         let token = token.boxed();
+
+        let int_lit = text::int(10)
+            .from_str::<i64>()
+            .unwrapped()
+            .map(Token::IntLit);
 
         let parens = token
             .clone()
@@ -67,6 +82,7 @@ pub fn lexer<'src>()
             .map(Token::Brackets);
 
         choice((
+            int_lit,
             text::ident().map(|s| match s {
                 "let" => Token::Let,
                 "in" => Token::In,
@@ -92,7 +108,12 @@ pub fn lexer<'src>()
                     }
                 }
             }),
+            just(">=").to(Token::GreaterOrEqual),
+            just(">").to(Token::Greater),
+            just("<=").to(Token::LessOrEqual),
+            just("<").to(Token::Less),
             just("=>").to(Token::FatArrow),
+            just("==").to(Token::Equal),
             just("=").to(Token::EqBind),
             just("->").to(Token::Arrow),
             just("::").to(Token::ConsSep),
@@ -102,6 +123,10 @@ pub fn lexer<'src>()
             just("|").to(Token::Pipe),
             just("_").to(Token::Uns),
             just(",").to(Token::Comma),
+            just("+").to(Token::Plus),
+            just("-").to(Token::Minus),
+            just("*").to(Token::Multiply),
+            just("/").to(Token::Divide),
             parens,
             brackets,
         ))
@@ -132,11 +157,7 @@ fn mk_list_expr<'src>(
             )
             .with_span(head_span);
 
-            SurfaceExpr::App(
-                Box::new(cons_head),
-                Box::new(acc),
-            )
-            .with_span(full_span)
+            SurfaceExpr::App(Box::new(cons_head), Box::new(acc)).with_span(full_span)
         },
     )
 }
@@ -356,11 +377,8 @@ fn mk_list_pattern<'src>(
             let head_span = elem.span.clone();
             let full_span = merge_spans(&head_span, &acc.span);
 
-            SurfacePattern::Con(
-                "Cons".with_span(full_span.clone()),
-                vec![elem, acc],
-            )
-            .with_span(full_span)
+            SurfacePattern::Con("Cons".with_span(full_span.clone()), vec![elem, acc])
+                .with_span(full_span)
         },
     )
 }
@@ -458,6 +476,8 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
         let unit_expr = select_ref! {
             Token::Parens(ts) if ts.is_empty() => SurfaceExpr::Unit
         };
+        let expr_int =
+            select_ref! { Token::IntLit(n) => SurfaceExpr::Literal(SurfaceLiteral::Int(*n)) };
 
         let expr_if = just(Token::If)
             .ignore_then(expr.clone())
@@ -557,17 +577,10 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .map_with(|elems, e| mk_list_expr(elems, e.span()))
             .boxed();
 
-        let app_infix = infix(left(1), empty(), |lhs, _, rhs, e| {
-            SurfaceExpr::App(Box::new(lhs), Box::new(rhs)).with_span(e.span())
-        });
-
-        let cons_infix = infix(right(0), just(Token::ConsSep), |lhs, _, rhs, e| {
-            mk_cons_expr(lhs, rhs, e.span())
-        });
-
         let variable = ident.map(SurfaceExpr::Var);
 
-        choice((
+        let atom = choice((
+            expr_int.spanned(),
             expr_let.spanned(),
             expr_ctor.spanned(),
             expr_let_anno.spanned(),
@@ -577,9 +590,91 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             expr_case.spanned(),
             expr_if.spanned(),
             expr_list,
-            expr.nested_in(select_ref! { Token::Parens(ts) = e => ts.split_spanned(e.span()) }),
+            expr.nested_in(select_ref! {
+                Token::Parens(ts) = e => ts.split_spanned(e.span())
+            }),
         ))
-        .pratt((app_infix, cons_infix))
+        .boxed();
+
+        let app = atom
+            .clone()
+            .then(atom.repeated().collect::<Vec<_>>())
+            .map(|(head, rest)| {
+                let mut out = head;
+                for arg in rest {
+                    let span = merge_spans(&out.span, &arg.span);
+                    out = SurfaceExpr::App(Box::new(out), Box::new(arg)).with_span(span);
+                }
+                out
+            })
+            .boxed();
+
+        let cons_infix = infix(right(0), just(Token::ConsSep), |lhs, _, rhs, e| {
+            mk_cons_expr(lhs, rhs, e.span())
+        });
+
+        let less_infix = infix(none(2), just(Token::Less), |lhs, _, rhs, e| {
+            SurfaceExpr::BinaryOperator(SurfaceBinOp::Less, Box::new(lhs), Box::new(rhs))
+                .with_span(e.span())
+        });
+
+        let greater_infix = infix(none(2), just(Token::Greater), |lhs, _, rhs, e| {
+            SurfaceExpr::BinaryOperator(SurfaceBinOp::Greater, Box::new(lhs), Box::new(rhs))
+                .with_span(e.span())
+        });
+
+        let less_eq_infix = infix(none(2), just(Token::LessOrEqual), |lhs, _, rhs, e| {
+            SurfaceExpr::BinaryOperator(SurfaceBinOp::LessOrEqual, Box::new(lhs), Box::new(rhs))
+                .with_span(e.span())
+        });
+
+        let greater_eq_infix = infix(none(2), just(Token::GreaterOrEqual), |lhs, _, rhs, e| {
+            SurfaceExpr::BinaryOperator(SurfaceBinOp::GreaterOrEqual, Box::new(lhs), Box::new(rhs))
+                .with_span(e.span())
+        });
+
+        let eq_infix = infix(none(2), just(Token::Equal), |lhs, _, rhs, e| {
+            SurfaceExpr::BinaryOperator(SurfaceBinOp::Equal, Box::new(lhs), Box::new(rhs))
+                .with_span(e.span())
+        });
+
+        let add_infix = infix(left(3), just(Token::Plus), |lhs, _, rhs, e| {
+            SurfaceExpr::BinaryOperator(SurfaceBinOp::Plus, Box::new(lhs), Box::new(rhs))
+                .with_span(e.span())
+        });
+
+        let sub_infix = infix(left(3), just(Token::Minus), |lhs, _, rhs, e| {
+            SurfaceExpr::BinaryOperator(SurfaceBinOp::Minus, Box::new(lhs), Box::new(rhs))
+                .with_span(e.span())
+        });
+
+        let mul_infix = infix(left(4), just(Token::Multiply), |lhs, _, rhs, e| {
+            SurfaceExpr::BinaryOperator(SurfaceBinOp::Mult, Box::new(lhs), Box::new(rhs))
+                .with_span(e.span())
+        });
+
+        let div_infix = infix(left(4), just(Token::Divide), |lhs, _, rhs, e| {
+            SurfaceExpr::BinaryOperator(SurfaceBinOp::Div, Box::new(lhs), Box::new(rhs))
+                .with_span(e.span())
+        });
+
+        let neg_prefix = prefix(5, just(Token::Minus), |_, rhs, e| {
+            SurfaceExpr::UnaryOperator(SurfaceUnOp::Neg, Box::new(rhs)).with_span(e.span())
+        });
+
+        app.pratt((
+            neg_prefix,
+            mul_infix,
+            div_infix,
+            add_infix,
+            sub_infix,
+            less_infix,
+            greater_infix,
+            less_eq_infix,
+            greater_eq_infix,
+            eq_infix,
+            cons_infix,
+        ))
     })
 }
 

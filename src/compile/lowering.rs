@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use core::ast::{
-    CaseArm, DataDefinition, Pattern, PatternNode, ResolvedModule, TermExpr, TermExprNode,
+    CaseArm, DataDefinition, Literal, Pattern, PatternNode, ResolvedModule, TermExpr, TermExprNode,
 };
 
 use super::lower_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
@@ -67,9 +67,8 @@ impl LowerCtx {
 fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr> {
     match &expr.node {
         TermExpr::Unit => Rc::new(IRExpr::Unit),
-
         TermExpr::Var(name) => ctx.resolve_var(name),
-
+        TermExpr::Lit(Literal::Int(n)) => Rc::new(IRExpr::Int(*n)),
         TermExpr::Con(name) => {
             let &(tag, arity) = ctx
                 .constructors
@@ -116,6 +115,16 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
                 then_br: lowered_then,
                 else_br: lowered_else,
             })
+        }
+        TermExpr::BinaryOperator(op, lhs, rhs) => {
+            let lowered_lhs = lower_expr(ctx, lhs);
+            let lowered_rhs = lower_expr(ctx, rhs);
+            Rc::new(IRExpr::BinaryOp(op.clone(), lowered_lhs, lowered_rhs))
+        }
+
+        TermExpr::UnaryOperator(op, rhs) => {
+            let lowered_rhs = lower_expr(ctx, rhs);
+            Rc::new(IRExpr::UnaryOp(op.clone(), lowered_rhs))
         }
     }
 }

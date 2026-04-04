@@ -279,8 +279,29 @@ fn main() {
                 | S Z => if (not incZero) then [] else [Z]
                 | S k => k :: (natRangeOfSize k incZero);
 
-        main : Nat;
-        main = sumOfNats (reverse (natRangeOfSize (mul six (mul six five)) False));
+        odd : Nat -> Bool;
+        odd n = 
+            case n of
+                Z => False
+                | S k => even (sub k one);
+
+        even : Nat -> Bool;
+        even n = 
+            case n of
+                Z => True
+                | S k => odd (sub k one);
+
+        natRange = natRangeOfSize (mul six (mul six five)) False;
+
+        numsParse : Int;
+        numsParse = (2 + 2) * -10;
+
+        intFact : Int -> Int;
+        intFact n = 
+            if n == 0 then 1 else n * intFact (n - 1);
+
+        main : Int;
+        main = intFact 10;
     ";
 
     let tokens = lexer().parse(src).unwrap();
