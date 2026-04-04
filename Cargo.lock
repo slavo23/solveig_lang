@@ -240,20 +240,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a6cb138bb79a146c1bd460005623e142ef0181e3d0219cb493e02f7d08a35695"
 
 [[package]]
-name = "lang_experiments"
-version = "0.1.0"
-dependencies = [
- "base",
- "chumsky",
- "clap",
- "core",
- "petgraph",
- "slab",
- "surface",
- "syntax",
-]
-
-[[package]]
 name = "libc"
 version = "0.2.184"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -378,6 +364,20 @@ name = "slab"
 version = "0.4.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
+
+[[package]]
+name = "solveig_lang"
+version = "0.1.0"
+dependencies = [
+ "base",
+ "chumsky",
+ "clap",
+ "core",
+ "petgraph",
+ "slab",
+ "surface",
+ "syntax",
+]
 
 [[package]]
 name = "stacker"

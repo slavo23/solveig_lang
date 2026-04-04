@@ -1,87 +1,161 @@
 # Solveig
 
-Solveig is a small typed functional language with algebraic data types, pattern matching, explicit polymorphism, higher-order functions, list syntax, and built-in integer arithmetic.
+Solveig is a small statically typed functional language under active development.
 
-The current goal of Solveig is not “minimal toy syntax”, but a compact language with a clear functional core that can grow into a more principled language over time.
+Its current design centers on a compact core with:
+
+- algebraic data types
+- pattern matching
+- first-class functions
+- explicit universal quantification
+- higher-rank polymorphism
+- list syntax
+- local `let` bindings
+- built-in integer arithmetic and comparisons
+
+The goal is not to imitate a large production language in every detail, but to provide a serious, principled functional language core that is expressive enough for non-trivial programs and precise enough to serve as a foundation for further work.
+
+
+
+## Status
+
+Solveig already supports a meaningful fragment of typed functional programming.
+
+The current example programs demonstrate:
+
+- recursive algebraic data types such as `List`, `Maybe`, `Either`, `Nat`, `Tree`, and `Fix`
+- parametric polymorphism with explicit `forall`
+- higher-order programming with functions such as `map`, `filter`, `foldr`, and `foldl`
+- higher-rank polymorphism, including values and fields whose types themselves contain `forall`
+- local `let ... in ...`
+- list literals and `::` patterns
+- primitive integer programs using `Int`, arithmetic, and comparisons
+
+See the attached example programs for representative code.
+
+
+## Building and running
+
+Solveig is currently built and run through Cargo.
+
+The command-line driver accepts:
+
+- a source file path
+- an optional entry-point name
+- default entry point: `main` 
+
+### Run directly
+
+```bash
+cargo run -- path/to/program.txt
+cargo run -- path/to/program.txt --entry main
+cargo run -- path/to/program.txt -e someOtherDefinition
+```
+
+### Build a release binary
+
+```bash
+cargo build --release
+```
+
+Then run the produced executable:
+
+```bash
+./target/release/<binary-name> path/to/program.solveig --entry main
+```
+
+The binary name depends on the Cargo package name.
+
+---
 
 ## Example
 
 ```hs
 data Bool = True | False;
-data Nat = Z | S Nat;
 data List a = Nil | Cons a (List a);
 
-map : forall a b. (a -> b) -> List a -> List b;
+map : forall a b. (a -> b) -> [a] -> [b];
 map f xs =
     case xs of
-      Nil => Nil
-    | Cons y ys => Cons (f y) (map f ys);
+        [] => []
+        | y :: ys => (f y) :: map f ys;
 
 inc : Int -> Int;
 inc x = x + 1;
 
-main =
-    map inc [1, 2, 3, 4];
+main = map inc [1, 2, 3, 4];
 ```
 
-## Running Solveig
+This example already shows several core aspects of the language:
 
-At the moment, Solveig is run as a Cargo program that takes a source file and an optional entry-point name.
+- algebraic data
+- explicit polymorphism
+- list syntax
+- pattern matching
+- higher-order programming
+- primitive integer arithmetic
 
-Typical usage:
 
-```bash
-cargo run -- path/to/program.txt
-cargo run -- path/to/program.txt --entry main
-cargo run -- path/to/program.txt --entry someOtherDefinition
-```
+## Core language features
 
-The current CLI expects a file path and has an `--entry` option that defaults to `main`. The checked-in example program also uses `main` as the default entry point. 
+## Algebraic data types
 
-## Language features
-
-### 1. Algebraic data types
-
-You can define ordinary algebraic data types with constructors.
+Solveig supports user-defined algebraic data types.
 
 ```hs
 data Maybe a = Nothing | Just a;
 data Either a b = Left a | Right b;
 data Nat = Z | S Nat;
-data Tree a = Leaf a | Branch (Tree a) (Tree a);
+data List a = Nil | Cons a (List a);
 ```
 
-The current example file already uses `Maybe`, `Either`, `Nat`, recursive list-like types, trees, and fixpoint-style types. 
+Recursive and parameterized definitions are both supported. The current larger example also includes types such as `Tree`, `Forest`, `Compose`, and `Fix`. 
 
-### 2. Pattern matching
+## Pattern matching
 
-`case ... of` is the main way to inspect values.
+Pattern matching is the primary elimination form for algebraic data.
 
 ```hs
 isZero : Nat -> Bool;
 isZero n =
     case n of
-      Z => True
-    | S _ => False;
+        Z => True
+        | S _ => False;
 ```
 
-Nested patterns work naturally:
+Patterns are also used with lists:
 
 ```hs
-maxNat : Nat -> Nat -> Nat;
-maxNat x y =
-    case Pair x y of
-      Pair Z Z => Z
-    | Pair (S a) Z => x
-    | Pair Z (S b) => y
-    | Pair (S a) (S b) => S (maxNat a b);
+sum : [Int] -> Int;
+sum xs =
+    case xs of
+        [] => 0
+        | y :: ys => y + sum ys;
 ```
 
-The current sample uses pattern matching heavily over naturals, lists, pairs, booleans, and user-defined dictionary-like values. 
+## Functions and higher-order programming
 
-### 3. Explicit polymorphism with `forall`
+Functions are first-class and curried.
 
-Solveig supports explicit universal quantification in signatures.
+```hs
+id : forall a. a -> a;
+id x = x;
+
+applyTwice : forall a. (a -> a) -> a -> a;
+applyTwice f x = f (f x);
+```
+
+Anonymous functions use `fun`:
+
+```hs
+main = applyTwice (fun n => n + 1) 10;
+```
+
+The current examples already make extensive use of higher-order programming via `map`, `filter`, `foldr`, `foldl`, and function-valued records encoded as data. turn16file0 
+
+## Explicit polymorphism
+
+Solveig uses explicit `forall` in source types.
 
 ```hs
 id : forall a. a -> a;
@@ -91,46 +165,44 @@ const : forall a b. a -> b -> a;
 const x y = x;
 ```
 
-It also supports more interesting polymorphic values, such as constructors that store polymorphic functions.
+This is a deliberate part of the language style: polymorphism is visible in the source language rather than hidden behind fully implicit syntax.
 
-### 4. First-class and higher-order functions
+## Higher-rank polymorphism
 
-Functions are ordinary values. You can pass them around, return them, and write lambdas with `fun`.
+Solveig already supports higher-rank types, not just ordinary rank-1 top-level polymorphism.
+
+Representative examples from the current codebase include:
 
 ```hs
-applyTwice : forall a. (a -> a) -> a -> a;
-applyTwice f x = f (f x);
+data Id = MkId (forall a. a -> a);
 
-main =
-    applyTwice (fun n => n + 1) 10;
+testPolyMatch : Nat -> (forall a. a -> a);
+
+data FunctorDict f = MkFunctor (forall a b. (a -> b) -> f a -> f b);
 ```
 
-The example file already contains higher-order functions such as `listMap`, `foldr`, `swap`, and manually encoded functor dictionaries. 
+These are genuine higher-rank uses: polymorphic functions appear as constructor fields and as function results, not only at the outermost type level. 
 
-### 5. Lists and list syntax
+## Lists
 
-Solveig supports both constructor-style lists and convenient list notation.
+Solveig supports both constructor-style and sugared list syntax.
 
 ```hs
-numbers1 = Cons 1 (Cons 2 (Cons 3 Nil));
-numbers2 = [1, 2, 3];
+xs1 = Cons 1 (Cons 2 (Cons 3 Nil));
+xs2 = [1, 2, 3];
 ```
 
-You can also pattern-match using either `Nil` / `Cons` or list sugar:
+List patterns are also available:
 
 ```hs
-sum : [Int] -> Int;
-sum xs =
+headOrZero : [Int] -> Int;
+headOrZero xs =
     case xs of
-      [] => 0
-    | y :: ys => y + sum ys;
+        [] => 0
+        | y :: ys => y;
 ```
 
-The shipped example uses both styles. 
-
-### 6. Conditionals
-
-Booleans integrate with `if ... then ... else ...`.
+## Conditionals
 
 ```hs
 absInt : Int -> Int;
@@ -138,88 +210,130 @@ absInt n =
     if n < 0 then -n else n;
 ```
 
-The example program uses `if` in filtering logic and integer recursion. 
+This is used throughout the examples for boolean control flow and integer recursion. 
 
-### 7. Primitive integers and arithmetic
+## Local bindings
 
-Solveig supports integer literals, arithmetic, comparison, and unary minus.
+Solveig supports local `let ... in ...` bindings.
+
+```hs
+sumList =
+    let add = fun x y => x + y
+    in foldl add 1;
+```
+
+This is present directly in the smaller example program. turn16file0
+
+## Integers and arithmetic
+
+`Int` is available for ordinary arithmetic and comparisons.
 
 ```hs
 distance : Int -> Int -> Int;
 distance x y =
     if x >= y then x - y else y - x;
-
-main = (2 + 2) * -10;
 ```
 
-The current sample includes `Int`, arithmetic expressions, integer equality, and a recursive integer factorial.
+The current examples also include integer range construction, arithmetic parsing, and recursive integer factorial.
 
-### 8. User-defined recursion over algebraic data
 
-A lot of Solveig code is written in the standard structural recursion style.
+## Brief tutorial
+
+## 1. Define data
 
 ```hs
-append : forall a. [a] -> [a] -> [a];
-append xs ys =
+data Bool = True | False;
+data Maybe a = Nothing | Just a;
+data List a = Nil | Cons a (List a);
+```
+
+## 2. Define typed functions
+
+```hs
+not : Bool -> Bool;
+not b =
+    case b of
+        True => False
+        | False => True;
+
+id : forall a. a -> a;
+id x = x;
+```
+
+## 3. Write recursive functions by pattern matching
+
+```hs
+map : forall a b. (a -> b) -> [a] -> [b];
+map f xs =
     case xs of
-      [] => ys
-    | x :: rest => x :: append rest ys;
+        [] => []
+        | y :: ys => (f y) :: map f ys;
 ```
-
-This style appears throughout the example file for `Nat`, lists, sorting, reversing, filtering, mapping, and folds. 
-
-## Tutorial
-
-A more guided introduction is available in [TUTORIAL.md](./TUTORIAL.md).
-
-## What Solveig is good at today
-
-Solveig already feels good for:
-
-- small functional programs
-- recursive data structures
-- pattern matching
-- higher-order programming
-- explicit polymorphic APIs
-- experimenting with typed encodings
-
-The current example demonstrates all of those in one file.
-
-## Current caveats
-
-Solveig is usable, but still clearly under construction.
-
-### Surface language is more mature than the surrounding tooling
-
-The core language is already expressive, but the surrounding developer experience is still young. Expect rough edges in ergonomics and documentation.
-
-### Classes and instances are not fully done yet
-
-You already parse class/instance-related syntax in the broader project direction, but the example language style still relies on explicit dictionary encodings like:
 
 ```hs
-data FunctorDict f = MkFunctor (forall a b. (a -> b) -> f a -> f b);
+foldr : forall a b. (a -> b -> b) -> b -> [a] -> b;
+foldr f z xs =
+    case xs of
+        [] => z
+        | y :: ys => f y (foldr f z ys);
 ```
 
-That is powerful, but still more manual than a finished type class system. The example file shows this style directly.
+The current examples also include `foldl`, `filter`, `append`, `reverse`, and list-based sorting.
 
-### `Nat` and `Int` serve different roles
+## 4. Use lambdas when local function values are clearer
 
-`Nat` is used as an ordinary algebraic data type with constructors like `Z` and `S`, while `Int` is used for primitive arithmetic. Both appear in the current example program, and it is worth treating them as different parts of the language rather than interchangeable number types.
+```hs
+main = map (fun x => x + 1) [1, 2, 3, 4];
+```
 
-### The big sample file is a stress/example file, not a polished standard library
+## 5. Use local let-bindings for structure
 
-The current example source repeats several declarations and uses multiple styles in one file. That makes it useful for testing the language, but not yet a canonical “best style” program.
+```hs
+sum : [Int] -> Int;
+sum xs =
+    let add = fun acc x => acc + x
+    in foldl add 0 xs;
+```
 
-## Near-term roadmap
+## 6. Use `main` or another selected entry point
 
-Important work that still remains:
+```hs
+main = foldl (fun acc x => acc + x) 0 [1, 2, 3, 4];
+```
 
-- built-in basis / prelude cleanup for things like `Int`, `Bool`, and `Nat`
-- a cleaner standard prelude
-- a smaller canonical tutorial program set
-- better REPL UX
-- finished class / instance elaboration
-- match checking improvements
-- runtime polish and later GC work
-- eventually effects / IO
+By default, Solveig runs `main`, but another top-level definition can be chosen with `--entry`. 
+
+## Repository examples
+
+Two attached examples are especially useful:
+
+### `with_prelude.txt`
+
+A smaller program showing:
+
+- `filter`
+- `map`
+- `foldr`
+- `foldl`
+- `intRange`
+- local `let`
+- integer list processing
+
+### `main.txt`
+
+A larger feature file showing:
+
+- a broader collection of algebraic data types
+- `Nat`-based recursion
+- list processing
+- higher-order programming
+- higher-rank polymorphism
+- explicit dictionary encodings
+- both `Nat` and `Int` programs 
+
+---
+
+## Notes
+
+- `Nat` and `Int` play different roles in the current examples: `Nat` is an ordinary algebraic type, while `Int` is used for primitive arithmetic. 
+- the larger example file is intentionally broad and exploratory; it is better read as a feature exercise than as a canonical standard library
