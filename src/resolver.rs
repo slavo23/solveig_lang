@@ -190,6 +190,7 @@ impl Resolver {
         sig: &TypeExpr,
         body: &SpannedWrapper<SurfaceExpr<'src>>,
         params: &Vec<SpannedWrapper<&'src str>>,
+        name: &'src str,
     ) -> TermExprNode<Span> {
         let span: Span = body.span.into();
         let mut body_node = self.resolve_surface_expr(body);
@@ -198,9 +199,12 @@ impl Resolver {
         let mut remaining = after;
         let mut annos: Vec<(String, TypeExpr)> = Vec::new();
         for p in params.iter() {
-            let (arg_ty, ret_ty) = self
-                .peel_arrow(remaining)
-                .unwrap_or_else(|| panic!("parameter mismatch for {:#?}", *p));
+            let (arg_ty, ret_ty) = self.peel_arrow(remaining).unwrap_or_else(|| {
+                panic!(
+                    "parameter mismatch for '{}'. The number of parameters doesn't match the function signaure",
+                    name
+                )
+            });
             annos.push((p.to_string(), arg_ty.clone()));
             remaining = ret_ty;
         }
@@ -303,7 +307,9 @@ impl Resolver {
                 let sig = func_types.get(&fn_name).cloned();
 
                 let wrapped = match &sig {
-                    Some(sig) => self.wrap_function_body_with_signature(sig, body, params),
+                    Some(sig) => {
+                        self.wrap_function_body_with_signature(sig, body, params, &fn_name)
+                    }
                     None => self.wrap_function_body_without_signature(body, params),
                 };
 

@@ -14,6 +14,7 @@ base = { path = "base", version = "0.1.0" }
 chumsky = { version = "0.12.0", features = ["pratt"] }
 slab = "0.4.12"
 petgraph = "0.8.3"
+clap = { version = "4.6.0", features = ["derive"] }
 
 
 [workspace]

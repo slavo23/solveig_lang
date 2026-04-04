@@ -95,10 +95,10 @@ pub fn lexer<'src>()
                 "if" => Token::If,
                 "then" => Token::Then,
                 "else" => Token::Else,
-                "class" => Token::Class,       // NEW
-                "instance" => Token::Instance, // NEW
-                "where" => Token::Where,       // NEW
-                "end" => Token::End,
+                "class" => Token::Class,
+                "instance" => Token::Instance,
+                "where" => Token::Where,
+                "#end" => Token::End, // remove later
                 s => {
                     let is_upper = s.chars().nth(0).unwrap().is_uppercase();
                     if is_upper {
