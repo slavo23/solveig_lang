@@ -531,12 +531,13 @@ pub fn dependency_analysis(defs: &[RawDataDef]) -> Vec<Vec<usize>> {
     tarjan_scc(n, &adj)
 }
 
-pub fn infer_all_data_kinds(
+pub fn infer_all_data_kinds_with_env(
     raw_defs: Vec<RawDataDef>,
+    initial_tycon_env: HashMap<String, Kind>,
 ) -> Result<(Vec<InferredDataDef>, HashMap<String, Kind>), KindError> {
     let groups = dependency_analysis(&raw_defs);
 
-    let mut tycon_env: HashMap<String, Kind> = HashMap::new();
+    let mut tycon_env: HashMap<String, Kind> = initial_tycon_env;
     let mut all_results: Vec<InferredDataDef> = Vec::new();
 
     for group_indices in &groups {
@@ -552,4 +553,10 @@ pub fn infer_all_data_kinds(
     }
 
     Ok((all_results, tycon_env))
+}
+
+pub fn infer_all_data_kinds(
+    raw_defs: Vec<RawDataDef>,
+) -> Result<(Vec<InferredDataDef>, HashMap<String, Kind>), KindError> {
+    infer_all_data_kinds_with_env(raw_defs, HashMap::new())
 }

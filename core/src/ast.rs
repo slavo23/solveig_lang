@@ -181,9 +181,8 @@ impl Pretty<TypeExpr> for TypeExpr {
             let curr_precedence = TypeExpr::get_precedence(t);
             let type_fmt = match t {
                 TypeExpr::TyUnit => "()".into(),
-                TypeExpr::TyVar(name) | TypeExpr::TyExVar(name) | TypeExpr::TyCon(name) => {
-                    name.clone()
-                }
+                TypeExpr::TyVar(name) | TypeExpr::TyExVar(name) => name.clone(),
+                TypeExpr::TyCon(name) => name.split(".").last().unwrap().to_string(),
                 TypeExpr::TyArr(lhs, rhs) => {
                     let lhs_fmt = traverse_helper(lhs, PRECEDENCE_APP);
                     let rhs_fmt = traverse_helper(rhs, PRECEDENCE_ARR);

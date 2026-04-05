@@ -94,9 +94,8 @@ impl TypeChecker {
                 .insert(evar_name.clone(), solution.clone());
         }
     }
-
     fn bool_type(&self) -> TypeExpr {
-        TypeExpr::TyCon("Bool".to_string())
+        TypeExpr::TyCon("prelude.builtins.Bool".to_string())
     }
 
     fn collect_exvars_in_type(ty: &TypeExpr, acc: &mut Vec<String>) {
@@ -875,7 +874,7 @@ impl TypeChecker {
                 Ok((delta.until(&typed_var_entry), elaborated))
             }
             (TermExpr::IfThenElse(cond, then_branch, else_branch), _) => {
-                let bool_type = TypeExpr::TyCon("Bool".to_string());
+                let bool_type = self.bool_type();
                 let (gamma, elaborated_cond) = self.solve_checking(ctx, cond, &bool_type)?;
                 let (gamma, elaborated_then) =
                     self.solve_checking(gamma, then_branch, expected_type)?;
@@ -954,7 +953,7 @@ impl TypeChecker {
     }
 
     fn int_type(&self) -> TypeExpr {
-        TypeExpr::TyCon("Int".to_string())
+        TypeExpr::TyCon("prelude.builtins.Int".to_string())
     }
 
     fn solve_unary_operator_inference(

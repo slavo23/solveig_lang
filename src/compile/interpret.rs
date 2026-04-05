@@ -108,6 +108,45 @@ impl fmt::Display for DisplayValue<'_> {
     }
 }
 
+fn base_name(name: &str) -> &str {
+    name.rsplit('.').next().unwrap_or(name)
+}
+
+fn constructor_name_by_tag<'a>(program: &'a IRProgram, tag: u16) -> &'a str {
+    program
+        .constructor_name(tag)
+        .unwrap_or("<unknown-constructor>")
+}
+
+fn constructor_has_base_name(program: &IRProgram, tag: u16, expected: &str) -> bool {
+    base_name(constructor_name_by_tag(program, tag)) == expected
+}
+
+fn constructor_tag_by_full_name(program: &IRProgram, expected: &str) -> Option<u16> {
+    program.constructor_tag(expected)
+}
+
+fn constructor_tag_by_base_name(program: &IRProgram, expected: &str) -> Option<u16> {
+    let mut found: Option<u16> = None;
+
+    for (name, tag, _) in &program.constructor_arities {
+        if base_name(name) == expected {
+            if let Some(prev) = found {
+                if prev != *tag {
+                    panic!(
+                        "ambiguous constructor base name '{}': multiple qualified constructors share it",
+                        expected
+                    );
+                }
+            } else {
+                found = Some(*tag);
+            }
+        }
+    }
+
+    found
+}
+
 struct Renderer<'a> {
     store: &'a Store,
     program: &'a IRProgram,
@@ -132,10 +171,7 @@ impl Renderer<'_> {
             Value::Int(n) => n.to_string(),
             Value::Closure { .. } => "<closure>".to_string(),
             Value::Constructor { tag, arity, fields } => {
-                let name = self
-                    .program
-                    .constructor_name(*tag)
-                    .unwrap_or("<unknown-constructor>");
+                let name = base_name(constructor_name_by_tag(self.program, *tag));
 
                 if fields.is_empty() {
                     return name.to_string();
@@ -180,7 +216,7 @@ impl Renderer<'_> {
         loop {
             match self.store.get(current) {
                 Value::Constructor { tag, arity, fields }
-                    if self.program.constructor_name(*tag) == Some("Z")
+                    if constructor_has_base_name(self.program, *tag, "Z")
                         && *arity == 0
                         && fields.is_empty() =>
                 {
@@ -188,7 +224,7 @@ impl Renderer<'_> {
                 }
 
                 Value::Constructor { tag, arity, fields }
-                    if self.program.constructor_name(*tag) == Some("S")
+                    if constructor_has_base_name(self.program, *tag, "S")
                         && *arity == 1
                         && fields.len() == 1 =>
                 {
@@ -208,7 +244,7 @@ impl Renderer<'_> {
         loop {
             match self.store.get(current) {
                 Value::Constructor { tag, arity, fields }
-                    if self.program.constructor_name(*tag) == Some("Nil")
+                    if constructor_has_base_name(self.program, *tag, "Nil")
                         && *arity == 0
                         && fields.is_empty() =>
                 {
@@ -216,7 +252,7 @@ impl Renderer<'_> {
                 }
 
                 Value::Constructor { tag, arity, fields }
-                    if self.program.constructor_name(*tag) == Some("Cons")
+                    if constructor_has_base_name(self.program, *tag, "Cons")
                         && *arity == 2
                         && fields.len() == 2 =>
                 {
@@ -233,8 +269,8 @@ impl Renderer<'_> {
         match self.store.get(addr) {
             Value::Constructor { tag, arity, fields }
                 if *arity == 2
-                    && (self.program.constructor_name(*tag) == Some("Pair")
-                        || self.program.constructor_name(*tag) == Some("MkPair"))
+                    && (constructor_has_base_name(self.program, *tag, "Pair")
+                        || constructor_has_base_name(self.program, *tag, "MkPair"))
                     && fields.len() == 2 =>
             {
                 Some(format!(
@@ -330,12 +366,13 @@ impl Machine {
             .position(|global_def| global_def.name == entry_name)
             .unwrap_or_else(|| panic!("entry point '{}' not found", entry_name));
 
-        let true_tag = program
-            .constructor_tag("True")
-            .unwrap_or_else(|| panic!("constructor 'True' not found"));
-        let false_tag = program
-            .constructor_tag("False")
-            .unwrap_or_else(|| panic!("constructor 'False' not found"));
+        let true_tag = constructor_tag_by_full_name(program, "prelude.builtins.True")
+            .or_else(|| constructor_tag_by_base_name(program, "True"))
+            .unwrap_or_else(|| panic!("constructor 'prelude.builtins.True' not found"));
+
+        let false_tag = constructor_tag_by_full_name(program, "prelude.builtins.False")
+            .or_else(|| constructor_tag_by_base_name(program, "False"))
+            .unwrap_or_else(|| panic!("constructor 'prelude.builtins.False' not found"));
 
         let max_tag = program
             .constructor_arities
