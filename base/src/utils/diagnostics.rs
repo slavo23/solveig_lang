@@ -1,20 +1,20 @@
-use std::ops::Range;
 use std::error::Error;
+use std::ops::Range;
 
-use ariadne::{Label, Report, ReportKind, Source};
 use crate::utils::span::Span;
+use ariadne::{Label, Report, ReportKind, Source};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct FileSpan {
     pub file_id: String,
-    pub span: Span
+    pub span: Span,
 }
 
 impl FileSpan {
     pub fn new(file_id: impl Into<String>, span: Span) -> Self {
         Self {
             file_id: file_id.into(),
-            span
+            span,
         }
     }
 
@@ -123,6 +123,7 @@ pub enum TypeError {
     },
     NonFunctionApplication {
         span: FileSpan,
+        arg_span: FileSpan,
         actual: String,
     },
     NonPolymorphicTypeApplication {
@@ -218,14 +219,15 @@ impl TypeError {
                 format!("expected a function-like constructor, got `{}`", actual),
             )),
 
-            TypeError::NonFunctionApplication { span, actual } => CompilerDiagnostic::new(
+            TypeError::NonFunctionApplication { span, actual, arg_span } => CompilerDiagnostic::new(
                 "TC0009",
                 "application of a non-function",
             )
             .with_label(DiagnosticLabel::primary(
                 span.clone(),
                 format!("this expression is applied like a function, but has type `{}`", actual),
-            )),
+            )).with_label(DiagnosticLabel::secondary(arg_span.clone(), format!("unexpected argument encountered here")))
+            ,
 
             TypeError::NonPolymorphicTypeApplication {
                 span,

@@ -4,4 +4,6 @@ sumEvenBigList =
     let evenList = filter even bigList in
     foldl (fun acc x => acc + x) 0 evenList;
 
-main = sumEvenBigList;
+twoArg x y = x;
+
+main = twoArg 1 2 3;

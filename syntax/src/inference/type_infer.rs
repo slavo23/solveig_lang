@@ -268,7 +268,6 @@ impl TypeChecker {
         let left = &ctx.apply(left);
         let right = &ctx.apply(right);
 
-        // Reflexivity
         if left == right {
             return Ok(ctx);
         }
@@ -350,7 +349,6 @@ impl TypeChecker {
         }
 
         match target {
-            // InstLReach: α̂ :=< β̂  where α̂ is before β̂
             TypeExpr::TyExVar(other_evar) if ctx.evar_before(evar_name, other_evar) => {
                 let solution = ContextEntry::SolvedEVar {
                     lhs: other_evar.clone(),
@@ -366,8 +364,6 @@ impl TypeChecker {
                     &solution,
                 ))
             }
-
-            // InstLReach (reversed): β̂ before α̂ → solve α̂ = β̂
             TypeExpr::TyExVar(other_evar) => {
                 let solution = ContextEntry::SolvedEVar {
                     lhs: evar_name.to_string(),
@@ -376,8 +372,6 @@ impl TypeChecker {
                 self.record_solution(&solution);
                 Ok(ctx.replace(&evar_entry, &solution))
             }
-
-            // InstLArr: α̂ :=< A → B
             TypeExpr::TyArr(domain, codomain) => {
                 let domain_evar = self.fresh_evar_name();
                 let codomain_evar = self.fresh_evar_name();
@@ -390,20 +384,15 @@ impl TypeChecker {
                 };
                 self.record_solution(&arrow_solution);
 
-                // Insert: ..., α̂₂, α̂₁, α̂ = α̂₁ → α̂₂, ...
                 left_entries.push(ContextEntry::ExVar(codomain_evar.clone(), Kind::Star));
                 left_entries.push(ContextEntry::ExVar(domain_evar.clone(), Kind::Star));
                 left_entries.push(arrow_solution);
                 let new_ctx = Context::from_halves(left_entries, right_entries);
 
-                // Contravariant: B₁ =:> α̂₁
                 let theta = self.instantiate_right(new_ctx, domain, &domain_evar)?;
-                // Covariant: α̂₂ :=< [Θ]B₂
                 let codomain_applied = theta.apply(codomain);
                 self.instantiate_left(theta, &codomain_evar, &codomain_applied)
             }
-
-            // InstLApp: α̂ :=< F X
             TypeExpr::TyApp(func_part, arg_part) => {
                 let func_evar = self.fresh_evar_name();
                 let arg_evar = self.fresh_evar_name();
@@ -425,8 +414,6 @@ impl TypeChecker {
                 let arg_applied = theta.apply(arg_part);
                 self.instantiate_left(theta, &arg_evar, &arg_applied)
             }
-
-            // InstLAllR: α̂ :=< ∀b. B
             TypeExpr::TyForAll(quantifier, kind, body) => {
                 let universal_entry = ContextEntry::UniVar(quantifier.clone(), kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
@@ -450,8 +437,6 @@ impl TypeChecker {
                 .unwrap_or_else(|| panic!("missing evar kind for {}", evar_name)),
         );
         let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
-
-        // InstRSolve: if source is a well-formed monotype in the left context
         let left_ctx = Context::from_entries(left_entries.clone());
         if left_ctx.type_well_formed(source) && source.is_mono() {
             let solution = ContextEntry::SolvedEVar {
@@ -465,7 +450,6 @@ impl TypeChecker {
         }
 
         match source {
-            // InstRReach: β̂ =:> α̂  (earlier solves to later)
             TypeExpr::TyExVar(other_evar) if ctx.evar_before(evar_name, other_evar) => {
                 let solution = ContextEntry::SolvedEVar {
                     lhs: other_evar.clone(),
@@ -490,8 +474,6 @@ impl TypeChecker {
                 self.record_solution(&solution);
                 Ok(ctx.replace(&evar_entry, &solution))
             }
-
-            // InstRArr: A → B =:> α̂
             TypeExpr::TyArr(domain, codomain) => {
                 let domain_evar = self.fresh_evar_name();
                 let codomain_evar = self.fresh_evar_name();
@@ -508,14 +490,10 @@ impl TypeChecker {
                 left_entries.push(ContextEntry::ExVar(domain_evar.clone(), Kind::Star));
                 left_entries.push(arrow_solution);
                 let new_ctx = Context::from_halves(left_entries, right_entries);
-
-                // Note: flipped direction compared to InstLArr
                 let theta = self.instantiate_left(new_ctx, &domain_evar, domain)?;
                 let codomain_applied = theta.apply(codomain);
                 self.instantiate_right(theta, &codomain_applied, &codomain_evar)
             }
-
-            // InstRApp: F X =:> α̂
             TypeExpr::TyApp(func_part, arg_part) => {
                 let func_evar = self.fresh_evar_name();
                 let arg_evar = self.fresh_evar_name();
@@ -537,8 +515,6 @@ impl TypeChecker {
                 let arg_applied = theta.apply(arg_part);
                 self.instantiate_right(theta, &arg_applied, &arg_evar)
             }
-
-            // InstRAllL: ∀b. B =:> α̂
             TypeExpr::TyForAll(quantifier, kind, body) => {
                 let fresh_evar = self.fresh_evar_name();
                 let marker = ContextEntry::Marker {
@@ -1019,13 +995,10 @@ impl TypeChecker {
         let span = expr.anno.clone();
 
         match &expr.node {
-            // Unit⇒
             TermExpr::Unit => {
                 let elaborated = elab_node(TermExpr::Unit, span, TypeExpr::TyUnit);
                 Ok((ctx, elaborated, TypeExpr::TyUnit))
             }
-
-            // Var⇒
             TermExpr::Var(name) => {
                 let var_type =
                     self.lookup_term_var(&ctx, name)
@@ -1037,8 +1010,6 @@ impl TypeChecker {
                 let elaborated = elab_node(TermExpr::Var(name.clone()), span, var_type.clone());
                 Ok((ctx, elaborated, var_type))
             }
-
-            // Con⇒
             TermExpr::Con(name) => {
                 let constructor_type =
                     self.constructor_types.get(name).cloned().ok_or_else(|| {
@@ -1051,8 +1022,6 @@ impl TypeChecker {
                     elab_node(TermExpr::Con(name.clone()), span, constructor_type.clone());
                 Ok((ctx, elaborated, constructor_type))
             }
-
-            // →I⇒: λx. e  (infer mode — create evars for param and return)
             TermExpr::Abs(param, maybe_annotation, body) => {
                 let (ctx, param_type) =
                     self.infer_lambda_param_type(ctx, param, maybe_annotation, span.clone())?;
@@ -1114,8 +1083,6 @@ impl TypeChecker {
 
                 Ok((delta.until(&typed_var_entry), elaborated, result_type))
             }
-
-            // →E⇒: e₁ e₂  (application — infer function, then app-infer)
             TermExpr::App(function, argument) => {
                 let (gamma, elaborated_function, function_type) =
                     self.solve_inference(ctx, function)?;
@@ -1125,11 +1092,10 @@ impl TypeChecker {
                     &function_type_applied,
                     argument,
                     &elaborated_function,
-                    span,
+                    function.anno.clone(),
+                    argument.anno.clone(),
                 )
             }
-
-            // Anno⇒: (e : A)
             TermExpr::Anno(inner, annotation_type) => {
                 let (delta, elaborated_inner) = self.solve_checking(ctx, inner, annotation_type)?;
                 let result_type = delta.apply(annotation_type);
@@ -1140,8 +1106,6 @@ impl TypeChecker {
                 );
                 Ok((delta, elaborated, result_type))
             }
-
-            // TyAbs⇒: Λα. e
             TermExpr::TyAbs(param, kind, body) => {
                 let universal_entry = ContextEntry::UniVar(param.clone(), kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
@@ -1157,8 +1121,6 @@ impl TypeChecker {
                 );
                 Ok((delta.until(&universal_entry), elaborated, forall_type))
             }
-
-            // TyApp⇒: e @A
             TermExpr::TyApp(inner, ty_arg) => {
                 let (delta, elaborated_inner, inner_type) = self.solve_inference(ctx, inner)?;
                 let inner_type_applied = delta.apply(&inner_type);
@@ -1180,8 +1142,6 @@ impl TypeChecker {
                     }),
                 }
             }
-
-            // Case⇒
             TermExpr::Case(scrutinee, arms) => {
                 self.solve_case_inference(ctx, scrutinee, arms, span)
             }
@@ -1236,6 +1196,7 @@ impl TypeChecker {
         argument: &TermExprNode<Span>,
         elaborated_function: &TermExprNode<TcMetadata, Span>,
         span: Span,
+        arg_span: Span
     ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
         let function_type = ctx.apply(function_type);
 
@@ -1248,7 +1209,6 @@ impl TypeChecker {
                 let ty_arg = TypeExpr::TyExVar(fresh_evar.clone());
                 let instantiated_type = body.substitute(&quantifier, &ty_arg);
 
-                // Wrap function in TyApp for elaboration
                 let wrapped_function = TermExprNode::new(
                     TermExpr::TyApp(Box::new(elaborated_function.clone()), ty_arg),
                     TcMetadata::new(span.clone(), instantiated_type.clone()),
@@ -1260,10 +1220,9 @@ impl TypeChecker {
                     argument,
                     &wrapped_function,
                     span,
+                    arg_span,
                 )
             }
-
-            // →App: function is A → B — check argument against A
             TypeExpr::TyArr(domain, codomain) => {
                 let (delta, elaborated_argument) = self.solve_checking(ctx, argument, &domain)?;
 
@@ -1320,6 +1279,7 @@ impl TypeChecker {
 
             other => Err(TypeError::NonFunctionApplication {
                 span: self.get_file_span(span.clone()),
+                arg_span: self.get_file_span(arg_span.clone()),
                 actual: other.pretty(),
             }),
         }
