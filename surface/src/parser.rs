@@ -26,6 +26,7 @@ pub enum Token<'src> {
     Dot,
     Colon,
     Semicolon,
+    SemiSemi,
     EqBind,
     Arrow,
     FatArrow,
@@ -114,6 +115,7 @@ pub fn lexer<'src>()
 
         choice((
             int_lit,
+            just("#end").to(Token::End),
             text::ident().map(|s| match s {
                 "let" => Token::Let,
                 "in" => Token::In,
@@ -129,7 +131,6 @@ pub fn lexer<'src>()
                 "class" => Token::Class,
                 "instance" => Token::Instance,
                 "where" => Token::Where,
-                "#end" => Token::End, // remove later
                 "import" => Token::Import,
                 "as" => Token::As,
                 s => {
@@ -153,6 +154,7 @@ pub fn lexer<'src>()
             just(":").to(Token::Colon),
             just(".").to(Token::Dot),
             just(";").to(Token::Semicolon),
+            just(";;").to(Token::SemiSemi),
             just("|").to(Token::Pipe),
             just("_").to(Token::Uns),
             just(",").to(Token::Comma),
@@ -271,83 +273,86 @@ fn mk_cons_expr<'src>(
     .with_span(span)
 }
 
-// pub fn class_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
-//     'tokens,
-//     MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
-//     Spanned<SurfaceDefinition<'src>>,
-//     extra::Err<Rich<'tokens, Token<'src>>>,
-// > {
-//     let ident = select_ref! { Token::Ident(x) => *x };
-//     let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
+pub fn class_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<SurfaceDefinition<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    let ident = select_ref! { Token::Ident(x) => *x };
+    let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
 
-//     let method_sig = ident
-//         .spanned()
-//         .then_ignore(just(Token::Colon))
-//         .then(ty_parser())
-//         .map(|(name, ty)| ClassMethod { name, ty });
+    let method_sig = ident
+        .spanned()
+        .then_ignore(just(Token::Colon))
+        .then(ty_parser())
+        .map(|(name, ty)| ClassMethod { name, ty });
 
-//     just(Token::Class)
-//         .ignore_then(upper_ident.spanned())
-//         .then(ident.spanned())
-//         .then_ignore(just(Token::Where))
-//         .then(
-//             method_sig
-//                 .separated_by(just(Token::Semicolon))
-//                 .allow_trailing()
-//                 .collect::<Vec<_>>(),
-//         )
-//         .then_ignore(just(Token::End))
-//         .map(|((name, ty_param), methods)| SurfaceDefinition::ClassDef {
-//             name,
-//             ty_param,
-//             methods,
-//         })
-//         .spanned()
-// }
+    just(Token::Class)
+        .ignore_then(upper_ident.spanned())
+        .then(ident.spanned())
+        .then_ignore(just(Token::Where))
+        .then(
+            method_sig
+                .separated_by(just(Token::Semicolon))
+                .allow_trailing()
+                .collect::<Vec<_>>(),
+        )
+        .then_ignore(just(Token::End))
+        .map(|((name, ty_param), methods)| SurfaceDefinition::ClassDef {
+            name,
+            ty_param,
+            methods,
+        })
+        .spanned()
+}
 
-// pub fn instance_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
-//     'tokens,
-//     MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
-//     Spanned<SurfaceDefinition<'src>>,
-//     extra::Err<Rich<'tokens, Token<'src>>>,
-// > {
-//     let ident = select_ref! { Token::Ident(x) => *x };
-//     let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
+pub fn instance_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
+    'tokens,
+    MappedInput<'tokens, Token<'src>, SimpleSpan, &'tokens [Spanned<Token<'src>>]>,
+    Spanned<SurfaceDefinition<'src>>,
+    extra::Err<Rich<'tokens, Token<'src>>>,
+> {
+    let ident = select_ref! { Token::Ident(x) => *x };
+    let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
 
-//     let method_def = ident
-//         .spanned()
-//         .then(ident.spanned().repeated().collect::<Vec<_>>())
-//         .then_ignore(just(Token::EqBind))
-//         .then(expr_parser())
-//         .map(|((name, params), body)| InstanceMethod { name, params, body });
+    let method_def = ident
+        .spanned()
+        .then(ident.spanned().repeated().collect::<Vec<_>>())
+        .then_ignore(just(Token::EqBind))
+        .then(expr_parser())
+        .map(|((name, params), body)| InstanceMethod { name, params, body });
 
-//     let ty_arg = choice((
-//         upper_ident.spanned().map(SurfaceTy::Con).spanned(),
-//         ty_parser().nested_in(select_ref! {
-//             Token::Parens(ts) = e => ts.split_spanned(e.span())
-//         }),
-//     ));
+    let ty_arg = choice((
+        ctor_ref_parser()
+            .spanned()
+            .map(|ctor| SurfaceTy::Con(ctor))
+            .spanned(),
+        ty_parser().nested_in(select_ref! {
+            Token::Parens(ts) = e => ts.split_spanned(e.span())
+        }),
+    ));
 
-//     just(Token::Instance)
-//         .ignore_then(upper_ident.spanned())
-//         .then(ty_arg)
-//         .then_ignore(just(Token::Where))
-//         .then(
-//             method_def
-//                 .separated_by(just(Token::Semicolon))
-//                 .allow_trailing()
-//                 .collect::<Vec<_>>(),
-//         )
-//         .then_ignore(just(Token::End))
-//         .map(
-//             |((class_name, ty_arg), methods)| SurfaceDefinition::InstanceDef {
-//                 class_name,
-//                 ty_arg,
-//                 methods,
-//             },
-//         )
-//         .spanned()
-// }
+    just(Token::Instance)
+        .ignore_then(upper_ident.spanned())
+        .then(ty_arg)
+        .then_ignore(just(Token::Where))
+        .then(
+            method_def
+                .separated_by(just(Token::Semicolon))
+                .allow_trailing()
+                .collect::<Vec<_>>(),
+        )
+        .then_ignore(just(Token::End))
+        .map(
+            |((class_name, ty_arg), methods)| SurfaceDefinition::InstanceDef {
+                class_name,
+                ty_arg,
+                methods,
+            },
+        )
+        .spanned()
+}
 
 fn ty_atom_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     'tokens,
@@ -356,8 +361,6 @@ fn ty_atom_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
     let ident = select_ref! { Token::Ident(x) => *x };
-    // let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
-
     let var_ty = ident.map(SurfaceTy::Var).spanned();
     let con_ty = ctor_ref_parser().spanned().map(SurfaceTy::Con).spanned();
 
@@ -527,7 +530,6 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
 > {
     recursive(|expr| {
         let ident = select_ref! { Token::Ident(x) => *x };
-        // let upper_ident = select_ref! { Token::UpperIdent(x) => *x };
         let unit_expr = select_ref! {
             Token::Parens(ts) if ts.is_empty() => SurfaceExpr::Unit
         };
@@ -806,8 +808,8 @@ pub fn toplevel_defition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     extra::Err<Rich<'tokens, Token<'src>>>,
 > {
     choice((
-        // class_definition_parser(),
-        // instance_definition_parser(),
+        class_definition_parser(),
+        instance_definition_parser(),
         func_definition_parser(),
         signature_definition_parser(),
         data_definition_parser(),
@@ -824,16 +826,6 @@ pub fn program_parser<'tokens, 'src: 'tokens>() -> impl Parser<
         .separated_by(just(Token::Semicolon))
         .allow_trailing()
         .collect()
-}
-
-fn plain_ref<'src>(name: &'src str) -> NameRef<'src> {
-    NameRef {
-        segments: vec![name],
-    }
-}
-
-fn plain_ref_spanned<'src>(name: &'src str, span: SimpleSpan) -> Spanned<NameRef<'src>> {
-    plain_ref(name).with_span(span)
 }
 
 fn qref<'src>(segments: &[&'src str]) -> NameRef<'src> {
