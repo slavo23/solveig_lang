@@ -23,3 +23,7 @@ members = ["core", "syntax"]
 [workspace.dependencies]
 slab = "0.4.12"
 petgraph = "0.8.3"
+
+[profile.samply]
+inherits = "release"
+debug = 2

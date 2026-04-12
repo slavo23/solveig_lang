@@ -2,3 +2,5 @@
 /syntax/target
 /core_lang/target
 .DS_Store
+profile.json.gz
+bytecode.txt

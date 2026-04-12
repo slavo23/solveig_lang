@@ -7,42 +7,70 @@ use super::lower_ast::{IRCaseArm, IRExpr, IRPattern, IRProgram};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct Addr(usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Value {
+    Unit,
+    Int(i64),
+    Heap(Addr),
+}
+
 #[derive(Debug, Clone)]
-struct Env(Rc<[Addr]>);
+enum Env {
+    Empty,
+    Extend { value: Value, parent: Rc<Env> },
+}
 
 impl Env {
+    #[inline]
     fn empty() -> Self {
-        Self(Rc::from(Vec::<Addr>::new().into_boxed_slice()))
+        Env::Empty
     }
 
-    fn extend(&self, value: Addr) -> Self {
-        let mut values = Vec::with_capacity(self.0.len() + 1);
-        values.extend_from_slice(&self.0);
-        values.push(value);
-        Self(Rc::from(values.into_boxed_slice()))
+    #[inline]
+    fn extend(&self, value: Value) -> Self {
+        Env::Extend {
+            value,
+            parent: Rc::new(self.clone()),
+        }
     }
 
-    fn extend_many(&self, values: &[Addr]) -> Self {
-        let mut out = Vec::with_capacity(self.0.len() + values.len());
-        out.extend_from_slice(&self.0);
-        out.extend_from_slice(values);
-        Self(Rc::from(out.into_boxed_slice()))
+    fn extend_many(&self, values: &[Value]) -> Self {
+        let mut env = self.clone();
+
+        // Keep forward order.
+        // If values are [x, y], then y must become the most recent binder,
+        // so that BVar(0) still resolves to y.
+        for &value in values {
+            env = env.extend(value);
+        }
+
+        env
     }
 
-    fn lookup(&self, index: usize) -> Addr {
-        let rev_index = self
-            .0
-            .len()
-            .checked_sub(index + 1)
-            .unwrap_or_else(|| panic!("unbound variable at index {}", index));
-        self.0[rev_index]
+    #[inline]
+    fn lookup(&self, index: usize) -> Value {
+        let mut current = self;
+        let mut remaining = index;
+
+        loop {
+            match current {
+                Env::Empty => {
+                    panic!("unbound variable at index {}", index);
+                }
+                Env::Extend { value, parent } => {
+                    if remaining == 0 {
+                        return *value;
+                    }
+                    remaining -= 1;
+                    current = parent.as_ref();
+                }
+            }
+        }
     }
 }
 
 #[derive(Debug, Clone)]
-pub enum Value {
-    Unit,
-    Int(i64),
+enum HeapObject {
     Closure {
         env: Env,
         body: Rc<IRExpr>,
@@ -50,35 +78,38 @@ pub enum Value {
     Constructor {
         tag: u16,
         arity: u16,
-        fields: Box<[Addr]>,
+        fields: Box<[Value]>,
     },
 }
 
 #[derive(Debug, Default)]
-pub struct Store {
-    objects: Vec<Value>,
+struct Store {
+    objects: Vec<HeapObject>,
 }
 
 impl Store {
-    fn alloc(&mut self, value: Value) -> Addr {
+    #[inline]
+    fn alloc(&mut self, object: HeapObject) -> Addr {
         let addr = Addr(self.objects.len());
-        self.objects.push(value);
+        self.objects.push(object);
         addr
     }
 
-    fn get(&self, addr: Addr) -> &Value {
+    #[inline]
+    fn get(&self, addr: Addr) -> &HeapObject {
         self.objects
             .get(addr.0)
             .unwrap_or_else(|| panic!("invalid store address {}", addr.0))
     }
 
+    #[inline]
     fn len(&self) -> usize {
         self.objects.len()
     }
 }
 
 pub struct EvalResult {
-    root: Addr,
+    root: Value,
     store: Store,
 }
 
@@ -93,7 +124,7 @@ impl EvalResult {
 }
 
 pub struct DisplayValue<'a> {
-    root: Addr,
+    root: Value,
     store: &'a Store,
     program: &'a IRProgram,
 }
@@ -153,132 +184,144 @@ struct Renderer<'a> {
 }
 
 impl Renderer<'_> {
-    fn render(&self, addr: Addr) -> String {
-        if let Some(rendered) = self.try_render_nat(addr) {
+    fn render(&self, value: Value) -> String {
+        if let Some(rendered) = self.try_render_nat(value) {
             return rendered;
         }
 
-        if let Some(rendered) = self.try_render_list(addr) {
+        if let Some(rendered) = self.try_render_list(value) {
             return rendered;
         }
 
-        if let Some(rendered) = self.try_render_pair(addr) {
+        if let Some(rendered) = self.try_render_pair(value) {
             return rendered;
         }
 
-        match self.store.get(addr) {
+        match value {
             Value::Unit => "()".to_string(),
             Value::Int(n) => n.to_string(),
-            Value::Closure { .. } => "<closure>".to_string(),
-            Value::Constructor { tag, arity, fields } => {
-                let name = base_name(constructor_name_by_tag(self.program, *tag));
+            Value::Heap(addr) => match self.store.get(addr) {
+                HeapObject::Closure { .. } => "<closure>".to_string(),
+                HeapObject::Constructor { tag, arity, fields } => {
+                    let name = base_name(constructor_name_by_tag(self.program, *tag));
 
-                if fields.is_empty() {
-                    return name.to_string();
+                    if fields.is_empty() {
+                        return name.to_string();
+                    }
+
+                    let rendered_args = fields
+                        .iter()
+                        .map(|&field| self.render_atomic(field))
+                        .collect::<Vec<_>>()
+                        .join(" ");
+
+                    if fields.len() < *arity as usize {
+                        format!("<partial {name} {rendered_args}>")
+                    } else {
+                        format!("{name} {rendered_args}")
+                    }
                 }
-
-                let rendered_args = fields
-                    .iter()
-                    .map(|&field| self.render_atomic(field))
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                if fields.len() < *arity as usize {
-                    format!("<partial {name} {rendered_args}>")
-                } else {
-                    format!("{name} {rendered_args}")
-                }
-            }
+            },
         }
     }
 
-    fn render_atomic(&self, addr: Addr) -> String {
-        if self.try_render_nat(addr).is_some()
-            || self.try_render_list(addr).is_some()
-            || self.try_render_pair(addr).is_some()
+    fn render_atomic(&self, value: Value) -> String {
+        if self.try_render_nat(value).is_some()
+            || self.try_render_list(value).is_some()
+            || self.try_render_pair(value).is_some()
         {
-            return self.render(addr);
+            return self.render(value);
         }
 
-        match self.store.get(addr) {
-            Value::Unit => self.render(addr),
-            Value::Int(_) => self.render(addr),
-            Value::Closure { .. } => self.render(addr),
-            Value::Constructor { fields, .. } if fields.is_empty() => self.render(addr),
-            _ => format!("({})", self.render(addr)),
+        match value {
+            Value::Unit | Value::Int(_) => self.render(value),
+            Value::Heap(addr) => match self.store.get(addr) {
+                HeapObject::Closure { .. } => self.render(value),
+                HeapObject::Constructor { fields, .. } if fields.is_empty() => self.render(value),
+                _ => format!("({})", self.render(value)),
+            },
         }
     }
 
-    fn try_render_nat(&self, addr: Addr) -> Option<String> {
+    fn try_render_nat(&self, value: Value) -> Option<String> {
         let mut n: usize = 0;
-        let mut current = addr;
+        let mut current = value;
 
         loop {
-            match self.store.get(current) {
-                Value::Constructor { tag, arity, fields }
-                    if constructor_has_base_name(self.program, *tag, "Z")
-                        && *arity == 0
-                        && fields.is_empty() =>
-                {
-                    return Some(n.to_string());
-                }
+            match current {
+                Value::Heap(addr) => match self.store.get(addr) {
+                    HeapObject::Constructor { tag, arity, fields }
+                        if constructor_has_base_name(self.program, *tag, "Z")
+                            && *arity == 0
+                            && fields.is_empty() =>
+                    {
+                        return Some(n.to_string());
+                    }
 
-                Value::Constructor { tag, arity, fields }
-                    if constructor_has_base_name(self.program, *tag, "S")
-                        && *arity == 1
-                        && fields.len() == 1 =>
-                {
-                    n += 1;
-                    current = fields[0];
-                }
+                    HeapObject::Constructor { tag, arity, fields }
+                        if constructor_has_base_name(self.program, *tag, "S")
+                            && *arity == 1
+                            && fields.len() == 1 =>
+                    {
+                        n += 1;
+                        current = fields[0];
+                    }
 
+                    _ => return None,
+                },
                 _ => return None,
             }
         }
     }
 
-    fn try_render_list(&self, addr: Addr) -> Option<String> {
+    fn try_render_list(&self, value: Value) -> Option<String> {
         let mut items = Vec::new();
-        let mut current = addr;
+        let mut current = value;
 
         loop {
-            match self.store.get(current) {
-                Value::Constructor { tag, arity, fields }
-                    if constructor_has_base_name(self.program, *tag, "Nil")
-                        && *arity == 0
-                        && fields.is_empty() =>
-                {
-                    return Some(format!("[{}]", items.join(", ")));
-                }
+            match current {
+                Value::Heap(addr) => match self.store.get(addr) {
+                    HeapObject::Constructor { tag, arity, fields }
+                        if constructor_has_base_name(self.program, *tag, "Nil")
+                            && *arity == 0
+                            && fields.is_empty() =>
+                    {
+                        return Some(format!("[{}]", items.join(", ")));
+                    }
 
-                Value::Constructor { tag, arity, fields }
-                    if constructor_has_base_name(self.program, *tag, "Cons")
-                        && *arity == 2
+                    HeapObject::Constructor { tag, arity, fields }
+                        if constructor_has_base_name(self.program, *tag, "Cons")
+                            && *arity == 2
+                            && fields.len() == 2 =>
+                    {
+                        items.push(self.render(fields[0]));
+                        current = fields[1];
+                    }
+
+                    _ => return None,
+                },
+                _ => return None,
+            }
+        }
+    }
+
+    fn try_render_pair(&self, value: Value) -> Option<String> {
+        match value {
+            Value::Heap(addr) => match self.store.get(addr) {
+                HeapObject::Constructor { tag, arity, fields }
+                    if *arity == 2
+                        && (constructor_has_base_name(self.program, *tag, "Pair")
+                            || constructor_has_base_name(self.program, *tag, "MkPair"))
                         && fields.len() == 2 =>
                 {
-                    items.push(self.render(fields[0]));
-                    current = fields[1];
+                    Some(format!(
+                        "({}, {})",
+                        self.render(fields[0]),
+                        self.render(fields[1])
+                    ))
                 }
-
-                _ => return None,
-            }
-        }
-    }
-
-    fn try_render_pair(&self, addr: Addr) -> Option<String> {
-        match self.store.get(addr) {
-            Value::Constructor { tag, arity, fields }
-                if *arity == 2
-                    && (constructor_has_base_name(self.program, *tag, "Pair")
-                        || constructor_has_base_name(self.program, *tag, "MkPair"))
-                    && fields.len() == 2 =>
-            {
-                Some(format!(
-                    "({}, {})",
-                    self.render(fields[0]),
-                    self.render(fields[1])
-                ))
-            }
+                _ => None,
+            },
             _ => None,
         }
     }
@@ -286,7 +329,7 @@ impl Renderer<'_> {
 
 #[derive(Clone)]
 enum GlobalEntry {
-    Value(Addr),
+    Value(Value),
     Expr(Rc<IRExpr>),
     BlackHole,
 }
@@ -296,7 +339,7 @@ enum Frame {
         arg: Rc<IRExpr>,
         env: Env,
     },
-    Apply(Addr),
+    Apply(Value),
     EvalBinaryR {
         op: BinOp,
         rhs: Rc<IRExpr>,
@@ -304,7 +347,7 @@ enum Frame {
     },
     ApplyBinary {
         op: BinOp,
-        lhs: Addr,
+        lhs: Value,
     },
     ApplyUnary(UnOp),
     CaseOf {
@@ -324,27 +367,37 @@ enum Frame {
 }
 
 struct ConstructorCache {
-    nullary: Vec<Option<Addr>>,
-    true_addr: Addr,
-    false_addr: Addr,
+    nullary: Vec<Option<Value>>,
+    true_value: Option<Value>,
+    false_value: Option<Value>,
 }
 
 impl ConstructorCache {
     fn new(size: usize) -> Self {
         Self {
             nullary: vec![None; size],
-            true_addr: Addr(0),
-            false_addr: Addr(0),
+            true_value: None,
+            false_value: None,
         }
     }
 
-    fn set_nullary(&mut self, tag: u16, addr: Addr) {
-        self.nullary[tag as usize] = Some(addr);
+    fn set_nullary(&mut self, tag: u16, value: Value) {
+        self.nullary[tag as usize] = Some(value);
     }
 
-    fn nullary_addr(&self, tag: u16) -> Addr {
+    fn nullary_value(&self, tag: u16) -> Value {
         self.nullary[tag as usize]
             .unwrap_or_else(|| panic!("missing nullary constructor cache for tag {}", tag))
+    }
+
+    fn true_value(&self) -> Value {
+        self.true_value
+            .unwrap_or_else(|| panic!("missing cached True constructor"))
+    }
+
+    fn false_value(&self) -> Value {
+        self.false_value
+            .unwrap_or_else(|| panic!("missing cached False constructor"))
     }
 }
 
@@ -405,50 +458,52 @@ impl Machine {
     fn init_constructors(&mut self, program: &IRProgram, true_tag: u16, false_tag: u16) {
         for (_, tag, arity) in &program.constructor_arities {
             if *arity == 0 && self.ctors.nullary[*tag as usize].is_none() {
-                let addr = self.alloc(Value::Constructor {
+                let value = self.alloc_heap(HeapObject::Constructor {
                     tag: *tag,
                     arity: *arity,
-                    fields: Vec::<Addr>::new().into_boxed_slice(),
+                    fields: Vec::<Value>::new().into_boxed_slice(),
                 });
-                self.ctors.set_nullary(*tag, addr);
+                self.ctors.set_nullary(*tag, value);
             }
         }
 
-        self.ctors.true_addr = self.ctors.nullary_addr(true_tag);
-        self.ctors.false_addr = self.ctors.nullary_addr(false_tag);
+        self.ctors.true_value = Some(self.ctors.nullary_value(true_tag));
+        self.ctors.false_value = Some(self.ctors.nullary_value(false_tag));
     }
 
     fn init_globals(&mut self, program: &IRProgram) {
         for global_def in &program.globals {
             match global_def.body.as_ref() {
                 IRExpr::Abs(body) => {
-                    let addr = self.alloc(Value::Closure {
+                    let value = self.alloc_heap(HeapObject::Closure {
                         env: Env::empty(),
                         body: body.clone(),
                     });
-                    self.globals.push(GlobalEntry::Value(addr));
+                    self.globals.push(GlobalEntry::Value(value));
                 }
-                _ => self
-                    .globals
-                    .push(GlobalEntry::Expr(global_def.body.clone())),
+                _ => self.globals.push(GlobalEntry::Expr(global_def.body.clone())),
             }
         }
     }
 
-    fn alloc(&mut self, value: Value) -> Addr {
-        let addr = self.store.alloc(value);
+    #[inline]
+    fn alloc_heap(&mut self, object: HeapObject) -> Value {
+        let addr = self.store.alloc(object);
         self.maybe_collect();
-        addr
+        Value::Heap(addr)
     }
 
     fn maybe_collect(&mut self) {
+        // Placeholder hook for a future GC.
+        // Right now this only tracks growth and gives you one place to insert collection later.
         if self.store.len() < self.next_gc_threshold {
             return;
         }
+
         self.next_gc_threshold = (self.next_gc_threshold.max(1024) * 2).max(self.store.len() + 1);
     }
 
-    fn run(&mut self) -> Addr {
+    fn run(&mut self) -> Value {
         loop {
             let value = self.eval_current();
             match self.resume(value) {
@@ -458,20 +513,22 @@ impl Machine {
         }
     }
 
-    fn eval_current(&mut self) -> Addr {
+    fn eval_current(&mut self) -> Value {
         loop {
             match self.control.as_ref() {
-                IRExpr::Unit => return self.alloc(Value::Unit),
-                IRExpr::Int(n) => return self.alloc(Value::Int(*n)),
+                IRExpr::Unit => return Value::Unit,
+                IRExpr::Int(n) => return Value::Int(*n),
                 IRExpr::BVar(index) => return self.env.lookup(*index),
                 IRExpr::FVar(index) => return self.force_global(*index),
                 IRExpr::Con { tag, arity } => return self.eval_constructor(*tag, *arity),
+
                 IRExpr::Abs(body) => {
-                    return self.alloc(Value::Closure {
+                    return self.alloc_heap(HeapObject::Closure {
                         env: self.env.clone(),
                         body: body.clone(),
                     });
                 }
+
                 IRExpr::App(func, arg) => {
                     self.continuation.push(Frame::EvalArg {
                         arg: arg.clone(),
@@ -479,6 +536,7 @@ impl Machine {
                     });
                     self.control = func.clone();
                 }
+
                 IRExpr::Let(binding, body) => {
                     self.continuation.push(Frame::LetBody {
                         body: body.clone(),
@@ -486,6 +544,7 @@ impl Machine {
                     });
                     self.control = binding.clone();
                 }
+
                 IRExpr::Case { scrutinee, arms } => {
                     self.continuation.push(Frame::CaseOf {
                         arms: arms.clone().into(),
@@ -493,6 +552,7 @@ impl Machine {
                     });
                     self.control = scrutinee.clone();
                 }
+
                 IRExpr::IfThenElse {
                     cond,
                     then_br,
@@ -505,6 +565,7 @@ impl Machine {
                     });
                     self.control = cond.clone();
                 }
+
                 IRExpr::BinaryOp(op, lhs, rhs) => {
                     self.continuation.push(Frame::EvalBinaryR {
                         op: op.clone(),
@@ -513,6 +574,7 @@ impl Machine {
                     });
                     self.control = lhs.clone();
                 }
+
                 IRExpr::UnaryOp(op, rhs) => {
                     self.continuation.push(Frame::ApplyUnary(op.clone()));
                     self.control = rhs.clone();
@@ -521,20 +583,23 @@ impl Machine {
         }
     }
 
-    fn resume(&mut self, mut value: Addr) -> Option<Addr> {
+    fn resume(&mut self, mut value: Value) -> Option<Value> {
         loop {
             match self.continuation.pop() {
                 None => return Some(value),
+
                 Some(Frame::EvalArg { arg, env }) => {
                     self.continuation.push(Frame::Apply(value));
                     self.control = arg;
                     self.env = env;
                     return None;
                 }
+
                 Some(Frame::Apply(function)) => match self.apply(function, value) {
                     Some(next_value) => value = next_value,
                     None => return None,
                 },
+
                 Some(Frame::EvalBinaryR { op, rhs, env }) => {
                     self.continuation
                         .push(Frame::ApplyBinary { op, lhs: value });
@@ -542,42 +607,51 @@ impl Machine {
                     self.env = env;
                     return None;
                 }
+
                 Some(Frame::ApplyBinary { op, lhs }) => {
                     value = self.eval_binary_prim(&op, lhs, value);
                 }
+
                 Some(Frame::ApplyUnary(op)) => {
                     value = self.eval_unary_prim(&op, value);
                 }
+
                 Some(Frame::LetBody { body, env }) => {
                     self.env = env.extend(value);
                     self.control = body;
                     return None;
                 }
+
                 Some(Frame::CaseOf { arms, env }) => {
                     for arm in arms.iter() {
-                        let mut bindings = Vec::new();
+                        let mut bindings = Vec::with_capacity(arm.pattern.binder_count());
                         if self.match_pattern(&arm.pattern, value, &mut bindings) {
                             self.env = env.extend_many(&bindings);
                             self.control = arm.body.clone();
                             return None;
                         }
                     }
+
                     panic!("non-exhaustive case");
                 }
+
                 Some(Frame::IfBranch {
                     then_br,
                     else_br,
                     env,
                 }) => {
                     self.env = env;
-                    if value == self.ctors.true_addr {
+
+                    if value == self.ctors.true_value() {
                         self.control = then_br;
                         return None;
                     }
-                    if value == self.ctors.false_addr {
+
+                    if value == self.ctors.false_value() {
                         self.control = else_br;
                         return None;
                     }
+
                     panic!("if-condition is not a boolean");
                 }
 
@@ -588,9 +662,9 @@ impl Machine {
         }
     }
 
-    fn force_global(&mut self, index: usize) -> Addr {
+    fn force_global(&mut self, index: usize) -> Value {
         match self.globals[index].clone() {
-            GlobalEntry::Value(addr) => addr,
+            GlobalEntry::Value(value) => value,
             GlobalEntry::Expr(expr) => {
                 self.globals[index] = GlobalEntry::BlackHole;
                 self.continuation.push(Frame::UpdateGlobal(index));
@@ -604,27 +678,33 @@ impl Machine {
         }
     }
 
-    fn eval_constructor(&mut self, tag: u16, arity: u16) -> Addr {
+    #[inline]
+    fn eval_constructor(&mut self, tag: u16, arity: u16) -> Value {
         if arity == 0 {
-            return self.ctors.nullary_addr(tag);
+            return self.ctors.nullary_value(tag);
         }
 
-        self.alloc(Value::Constructor {
+        self.alloc_heap(HeapObject::Constructor {
             tag,
             arity,
-            fields: Vec::<Addr>::new().into_boxed_slice(),
+            fields: Vec::<Value>::new().into_boxed_slice(),
         })
     }
 
-    fn apply(&mut self, function: Addr, argument: Addr) -> Option<Addr> {
-        match self.store.get(function) {
-            Value::Closure { env, body } => {
+    fn apply(&mut self, function: Value, argument: Value) -> Option<Value> {
+        let addr = match function {
+            Value::Heap(addr) => addr,
+            _ => panic!("cannot apply non-function"),
+        };
+
+        match self.store.get(addr) {
+            HeapObject::Closure { env, body } => {
                 self.env = env.extend(argument);
                 self.control = body.clone();
                 None
             }
 
-            Value::Constructor { tag, arity, fields } => {
+            HeapObject::Constructor { tag, arity, fields } => {
                 if fields.len() >= *arity as usize {
                     panic!("cannot over-apply constructor tag {}", tag);
                 }
@@ -633,80 +713,96 @@ impl Machine {
                 new_fields.extend_from_slice(fields);
                 new_fields.push(argument);
 
-                Some(self.alloc(Value::Constructor {
+                Some(self.alloc_heap(HeapObject::Constructor {
                     tag: *tag,
                     arity: *arity,
                     fields: new_fields.into_boxed_slice(),
                 }))
             }
-
-            _ => panic!("cannot apply non-function"),
         }
     }
 
-    fn expect_int(&self, addr: Addr) -> i64 {
-        match self.store.get(addr) {
-            Value::Int(n) => *n,
+    #[inline]
+    fn expect_int(&self, value: Value) -> i64 {
+        match value {
+            Value::Int(n) => n,
             _ => panic!("expected Int value"),
         }
     }
 
-    fn eval_unary_prim(&mut self, op: &UnOp, rhs: Addr) -> Addr {
+    #[inline]
+    fn eval_unary_prim(&mut self, op: &UnOp, rhs: Value) -> Value {
         let rhs = self.expect_int(rhs);
 
         match op {
-            UnOp::Neg => self.alloc(Value::Int(-rhs)),
+            UnOp::Neg => Value::Int(-rhs),
         }
     }
 
-    fn eval_binary_prim(&mut self, op: &BinOp, lhs: Addr, rhs: Addr) -> Addr {
+    #[inline]
+    fn eval_binary_prim(&mut self, op: &BinOp, lhs: Value, rhs: Value) -> Value {
         let lhs = self.expect_int(lhs);
         let rhs = self.expect_int(rhs);
 
         match op {
-            BinOp::Plus => self.alloc(Value::Int(lhs + rhs)),
-            BinOp::Minus => self.alloc(Value::Int(lhs - rhs)),
-            BinOp::Mult => self.alloc(Value::Int(lhs * rhs)),
-            BinOp::Div => self.alloc(Value::Int(lhs / rhs)),
+            BinOp::Plus => Value::Int(lhs + rhs),
+            BinOp::Minus => Value::Int(lhs - rhs),
+            BinOp::Mult => Value::Int(lhs * rhs),
+            BinOp::Div => Value::Int(lhs / rhs),
 
-            BinOp::Less => self.bool_addr(lhs < rhs),
-            BinOp::Greater => self.bool_addr(lhs > rhs),
-            BinOp::LessOrEqual => self.bool_addr(lhs <= rhs),
-            BinOp::GreaterOrEqual => self.bool_addr(lhs >= rhs),
-            BinOp::Equal => self.bool_addr(lhs == rhs),
+            BinOp::Less => self.bool_value(lhs < rhs),
+            BinOp::Greater => self.bool_value(lhs > rhs),
+            BinOp::LessOrEqual => self.bool_value(lhs <= rhs),
+            BinOp::GreaterOrEqual => self.bool_value(lhs >= rhs),
+            BinOp::Equal => self.bool_value(lhs == rhs),
         }
     }
 
-    fn bool_addr(&self, value: bool) -> Addr {
+    #[inline]
+    fn bool_value(&self, value: bool) -> Value {
         if value {
-            self.ctors.true_addr
+            self.ctors.true_value()
         } else {
-            self.ctors.false_addr
+            self.ctors.false_value()
         }
     }
 
-    fn match_pattern(&self, pattern: &IRPattern, value: Addr, bindings: &mut Vec<Addr>) -> bool {
-        let mut work: Vec<(&IRPattern, Addr)> = vec![(pattern, value)];
+    fn match_pattern(
+        &self,
+        pattern: &IRPattern,
+        value: Value,
+        bindings: &mut Vec<Value>,
+    ) -> bool {
+        let mut work: Vec<(&IRPattern, Value)> = vec![(pattern, value)];
 
-        while let Some((pat, addr)) = work.pop() {
-            match (pat, self.store.get(addr)) {
-                (IRPattern::Var, _) => bindings.push(addr),
-                (IRPattern::Wild, _) => {}
-                (
-                    IRPattern::Con(expected_tag, sub_patterns),
-                    Value::Constructor { tag, fields, .. },
-                ) => {
-                    if *expected_tag != *tag || sub_patterns.len() != fields.len() {
-                        return false;
-                    }
+        while let Some((pat, value)) = work.pop() {
+            match pat {
+                IRPattern::Var => bindings.push(value),
+                IRPattern::Wild => {}
+                IRPattern::Con(expected_tag, sub_patterns) => {
+                    let addr = match value {
+                        Value::Heap(addr) => addr,
+                        _ => return false,
+                    };
 
-                    for (sub_pat, &field_addr) in sub_patterns.iter().zip(fields.iter()).rev() {
-                        work.push((sub_pat, field_addr));
+                    match self.store.get(addr) {
+                        HeapObject::Constructor { tag, fields, .. } => {
+                            if *expected_tag != *tag || sub_patterns.len() != fields.len() {
+                                return false;
+                            }
+
+                            for (sub_pat, &field_value) in
+                                sub_patterns.iter().zip(fields.iter()).rev()
+                            {
+                                work.push((sub_pat, field_value));
+                            }
+                        }
+                        HeapObject::Closure { .. } => return false,
                     }
                 }
-                _ => return false,
             }
         }
+
         true
     }
 }

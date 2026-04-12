@@ -1,1 +1,1 @@
-bigList = range 1 10000 True;
+bigList = range 1 30000 True;

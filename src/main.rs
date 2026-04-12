@@ -11,7 +11,7 @@ use resolver::{Resolver, ResolverImports};
 use syntax::inference::type_infer::{check_and_elab_module, CheckedModule};
 
 pub mod compile;
-use compile::{interpret::Machine, lowering::lower_module};
+use compile::{closure_lower::lower_to_closure_ir, lowering::lower_module, vm::Machine};
 
 use project::{
     build_module_api, build_module_graph, build_typed_module_api, ensure_acyclic_modules,
@@ -29,14 +29,16 @@ struct Cli {
 
     #[arg(short, long, default_value = "main")]
     entry: String,
+
+    #[arg(long, default_value = "false")]
+    dump_bytecode: bool,
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    if let Err(err) = compile_and_run_project(&cli.project_root, &cli.entry) {
+    if let Err(err) = compile_and_run_project(&cli.project_root, &cli.entry, cli.dump_bytecode) {
         eprintln!("{err}");
-        std::process::exit(1);
     }
 }
 
@@ -110,7 +112,11 @@ fn retain_only_local_symbols(
     checked
 }
 
-fn compile_and_run_project(project_root: &Path, entry_name: &str) -> Result<(), String> {
+fn compile_and_run_project(
+    project_root: &Path,
+    entry_name: &str,
+    dump_bytecode: bool,
+) -> Result<(), String> {
     let entry_file = find_entry_file(project_root)?;
 
     let (_root, project) = load_project(&entry_file)?;
@@ -255,10 +261,15 @@ fn compile_and_run_project(project_root: &Path, entry_name: &str) -> Result<(), 
 
     let merged = merge_checked_modules(checked_modules)?;
     let ir = lower_module(&merged);
+    let cc = lower_to_closure_ir(&ir);
 
     let entry_fq = format!("main.{}", entry_name);
-    let result = Machine::exec(&ir, &entry_fq);
+    if dump_bytecode {
+        Machine::dump_bytecode(&cc, "bytecode.txt").expect("failed to dump bytecode");
+    }
 
-    println!("{}", result.display(&ir));
+    let result = Machine::exec(&cc, &entry_fq);
+
+    println!("{}", result.display());
     Ok(())
 }
