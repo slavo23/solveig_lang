@@ -38,22 +38,55 @@ enum HeapObject {
     },
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Heap {
-    objects: Vec<HeapObject>,
+    objects: Vec<Option<HeapObject>>,
+    mark_bits: Vec<bool>,
+    free_list: Vec<u32>,
+    allocations_since_gc: usize,
+    next_gc_at: usize,
+}
+
+impl Default for Heap {
+    fn default() -> Self {
+        Self {
+            objects: Vec::new(),
+            mark_bits: Vec::new(),
+            free_list: Vec::new(),
+            allocations_since_gc: 0,
+            next_gc_at: 32_768,
+        }
+    }
 }
 
 impl Heap {
     #[inline]
     fn alloc(&mut self, obj: HeapObject) -> Value {
-        let id = ObjId(self.objects.len() as u32);
-        self.objects.push(obj);
-        Value::Obj(id)
+        self.allocations_since_gc += 1;
+
+        if let Some(id) = self.free_list.pop() {
+            let idx = id as usize;
+            self.objects[idx] = Some(obj);
+            self.mark_bits[idx] = false;
+            Value::Obj(ObjId(id))
+        } else {
+            let id = ObjId(self.objects.len() as u32);
+            self.objects.push(Some(obj));
+            self.mark_bits.push(false);
+            Value::Obj(id)
+        }
     }
 
     #[inline]
     fn get(&self, id: ObjId) -> &HeapObject {
-        &self.objects[id.0 as usize]
+        self.objects[id.0 as usize]
+            .as_ref()
+            .unwrap_or_else(|| panic!("dangling heap object {}", id.0))
+    }
+
+    #[inline]
+    fn live_count(&self) -> usize {
+        self.objects.iter().filter(|slot| slot.is_some()).count()
     }
 }
 
@@ -157,7 +190,7 @@ impl Vm {
     fn init_nullary(&mut self, arities: &[(String, u16, u16)]) {
         for &(_, tag, arity) in arities {
             if arity == 0 {
-                let val = self.heap.alloc(HeapObject::Data {
+                let val = self.alloc_heap(HeapObject::Data {
                     tag,
                     fields: Box::new([]),
                 });
@@ -169,6 +202,106 @@ impl Vm {
         let false_tag = find_bool_tag(arities, "False");
         self.bools.true_val = self.nullary.get(true_tag);
         self.bools.false_val = self.nullary.get(false_tag);
+    }
+
+    #[inline]
+    fn alloc_heap(&mut self, obj: HeapObject) -> Value {
+        if self.heap.allocations_since_gc >= self.heap.next_gc_at {
+            self.collect_garbage();
+        }
+        self.heap.alloc(obj)
+    }
+
+    fn collect_garbage(&mut self) {
+        let mut worklist = Vec::new();
+        let stack_roots: Vec<Value> = self.stack.clone();
+        for value in stack_roots {
+            self.mark_value(value, &mut worklist);
+        }
+        let global_roots: Vec<Value> = self
+            .globals
+            .iter()
+            .filter_map(|slot| match slot {
+                GlobalSlot::Evaluated(v) => Some(*v),
+                GlobalSlot::Thunk { .. } | GlobalSlot::BlackHole => None,
+            })
+            .collect();
+
+        for value in global_roots {
+            self.mark_value(value, &mut worklist);
+        }
+
+        let nullary_roots: Vec<Value> = self.nullary.tags.iter().filter_map(|slot| *slot).collect();
+        for value in nullary_roots {
+            self.mark_value(value, &mut worklist);
+        }
+
+        self.mark_value(self.bools.true_val, &mut worklist);
+        self.mark_value(self.bools.false_val, &mut worklist);
+
+
+        while let Some(id) = worklist.pop() {
+            self.trace_object_children(id, &mut worklist);
+        }
+
+        println!("{} objects will be garbage collected", self.heap.free_list.len());
+        self.heap.free_list.clear();
+
+        for idx in 0..self.heap.objects.len() {
+            if self.heap.objects[idx].is_some() {
+                if self.heap.mark_bits[idx] {
+                    self.heap.mark_bits[idx] = false;
+                } else {
+                    self.heap.objects[idx] = None;
+                    self.heap.free_list.push(idx as u32);
+                }
+            }
+        }
+
+        self.heap.allocations_since_gc = 0;
+        let live = self.heap.live_count();
+        self.heap.next_gc_at = (live.max(16_384)) * 2;
+    }
+
+    fn mark_value(&mut self, value: Value, worklist: &mut Vec<ObjId>) {
+        let id = match value {
+            Value::Obj(id) => id,
+            Value::Unit | Value::Int(_) | Value::CtorFn { .. } => return,
+        };
+
+        let idx = id.0 as usize;
+        if idx >= self.heap.objects.len() {
+            return;
+        }
+        if self.heap.objects[idx].is_none() {
+            return;
+        }
+        if self.heap.mark_bits[idx] {
+            return;
+        }
+
+        self.heap.mark_bits[idx] = true;
+        worklist.push(id);
+    }
+
+    fn trace_object_children(&mut self, id: ObjId, worklist: &mut Vec<ObjId>) {
+        let children: Vec<Value> = match self.heap.get(id) {
+            HeapObject::Closure { captures, .. } => captures.iter().copied().collect(),
+            HeapObject::PartialApp {
+                captures, supplied, ..
+            } => {
+                let mut out = Vec::with_capacity(captures.len() + supplied.len());
+                out.extend(captures.iter().copied());
+                out.extend(supplied.iter().copied());
+                out
+            }
+            HeapObject::PartialCtor { supplied, .. } => supplied.iter().copied().collect(),
+            HeapObject::Data { fields, .. } => fields.iter().copied().collect(),
+        };
+
+        for value in children {
+            self.mark_value(value, worklist);
+        }
     }
 
     #[inline]
@@ -318,7 +451,7 @@ impl Vm {
                 self.stack[self.frame_base + capture_count + i] = self.stack[self.frame_base + i];
             }
             // Write captures — disjoint field access: heap (read) vs stack (write).
-            match &self.heap.objects[capture_source.0 as usize] {
+            match self.heap.get(capture_source) {
                 HeapObject::Closure { captures, .. } | HeapObject::PartialApp { captures, .. } => {
                     for (i, &cap) in captures.iter().enumerate() {
                         self.stack[self.frame_base + i] = cap;
@@ -414,7 +547,7 @@ impl Vm {
                 self.stack[self.frame_base + capture_count + i] = self.stack[self.frame_base + i];
             }
 
-            match &self.heap.objects[capture_source.0 as usize] {
+            match self.heap.get(capture_source) {
                 HeapObject::Closure { captures, .. } | HeapObject::PartialApp { captures, .. } => {
                     for (i, &cap) in captures.iter().enumerate() {
                         self.stack[self.frame_base + i] = cap;
@@ -520,7 +653,7 @@ impl Vm {
                     let new_args = self.pop_box(arg_count);
                     let captures = self.clone_captures(id);
 
-                    Some(self.heap.alloc(HeapObject::PartialApp {
+                    Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
                         supplied: new_args,
@@ -557,7 +690,7 @@ impl Vm {
                     all.extend_from_slice(&supplied);
                     all.extend_from_slice(&new_args);
 
-                    Some(self.heap.alloc(HeapObject::PartialApp {
+                    Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
                         supplied: all.into_boxed_slice(),
@@ -654,7 +787,7 @@ impl Vm {
                 } else if arg_count < arity {
                     let new_args = self.pop_box(arg_count);
                     let captures = self.clone_captures(id);
-                    Some(self.heap.alloc(HeapObject::PartialApp {
+                    Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
                         supplied: new_args,
@@ -692,7 +825,7 @@ impl Vm {
                     all.extend_from_slice(&supplied);
                     all.extend_from_slice(&new_args);
 
-                    Some(self.heap.alloc(HeapObject::PartialApp {
+                    Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
                         supplied: all.into_boxed_slice(),
@@ -729,12 +862,12 @@ impl Vm {
         all.extend_from_slice(&new_fields);
 
         if total == arity as usize {
-            self.heap.alloc(HeapObject::Data {
+            self.alloc_heap(HeapObject::Data {
                 tag,
                 fields: all.into_boxed_slice(),
             })
         } else if total < arity as usize {
-            self.heap.alloc(HeapObject::PartialCtor {
+            self.alloc_heap(HeapObject::PartialCtor {
                 tag,
                 arity,
                 supplied: all.into_boxed_slice(),
@@ -883,7 +1016,7 @@ impl Vm {
                     capture_count,
                 } => {
                     let captures = self.pop_box(*capture_count as usize);
-                    let val = self.heap.alloc(HeapObject::Closure {
+                    let val = self.alloc_heap(HeapObject::Closure {
                         chunk: *chunk as usize,
                         captures,
                     });
@@ -922,7 +1055,7 @@ impl Vm {
                         self.push(self.nullary.get(*tag));
                     } else {
                         let fields = self.pop_box(*field_count as usize);
-                        let val = self.heap.alloc(HeapObject::Data { tag: *tag, fields });
+                        let val = self.alloc_heap(HeapObject::Data { tag: *tag, fields });
                         self.push(val);
                     }
                 }
