@@ -1,16 +1,14 @@
-makeGarbage : Int -> [Int];
-makeGarbage n =
-    filter (fun x => x > 1) (range 1 n True);
+sumOf : Int -> Int;
+sumOf n = foldl (fun acc x => x + acc) 0 (range 1 n True);
 
-loop : Int -> Int -> Int;
-loop k n =
-    if k == 0 then
-        0
-    else
-        let xs = makeGarbage n in
-        let s = foldl (fun acc x => acc + 1) 0 xs in
-        s + loop (k - 1) n;
+stressTestFunc : Int -> Int;
+stressTestFunc k = 
+    let sumOne = sumOf k in
+    let sumTwo = sumOf k + 1 in
+    let sumThree = sumOf k + 2 in 
+        sumOne + sumTwo + sumThree;
 
-runStressTest : Int;
-runStressTest =
-    loop 6 5000;
+
+runStressTest : ();
+runStressTest = 
+    let s = map stressTestFunc (range 1 10000 True) in ();

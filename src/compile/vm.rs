@@ -79,14 +79,17 @@ impl Heap {
 
     #[inline]
     fn get(&self, id: ObjId) -> &HeapObject {
-        self.objects[id.0 as usize]
-            .as_ref()
-            .unwrap_or_else(|| panic!("dangling heap object {}", id.0))
-    }
-
-    #[inline]
-    fn live_count(&self) -> usize {
-        self.objects.iter().filter(|slot| slot.is_some()).count()
+        debug_assert!(
+            (id.0 as usize) < self.objects.len() && self.objects[id.0 as usize].is_some(),
+            "dangling heap ref {}",
+            id.0
+        );
+        unsafe {
+            self.objects
+                .get_unchecked(id.0 as usize)
+                .as_ref()
+                .unwrap_unchecked()
+        }
     }
 }
 
@@ -155,6 +158,15 @@ struct Vm {
     bools: BoolCache,
 }
 
+#[inline]
+fn mark_bit(mark_bits: &mut [bool], id: ObjId, worklist: &mut Vec<ObjId>) {
+    let idx = id.0 as usize;
+    if idx < mark_bits.len() && !mark_bits[idx] {
+        mark_bits[idx] = true;
+        worklist.push(id);
+    }
+}
+
 impl Vm {
     fn new(program: &BytecodeProgram) -> Self {
         let max_tag = program
@@ -213,44 +225,58 @@ impl Vm {
     }
 
     fn collect_garbage(&mut self) {
-        let mut worklist = Vec::new();
-        let stack_roots: Vec<Value> = self.stack.clone();
-        for value in stack_roots {
-            self.mark_value(value, &mut worklist);
+        let mut worklist: Vec<ObjId> = Vec::new();
+
+        for i in 0..self.stack.len() {
+            if let Value::Obj(id) = self.stack[i] {
+                mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
+            }
         }
-        let global_roots: Vec<Value> = self
-            .globals
-            .iter()
-            .filter_map(|slot| match slot {
-                GlobalSlot::Evaluated(v) => Some(*v),
-                GlobalSlot::Thunk { .. } | GlobalSlot::BlackHole => None,
-            })
-            .collect();
-
-        for value in global_roots {
-            self.mark_value(value, &mut worklist);
+        for i in 0..self.globals.len() {
+            if let GlobalSlot::Evaluated(Value::Obj(id)) = self.globals[i] {
+                mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
+            }
         }
-
-        let nullary_roots: Vec<Value> = self.nullary.tags.iter().filter_map(|slot| *slot).collect();
-        for value in nullary_roots {
-            self.mark_value(value, &mut worklist);
+        for slot in &self.nullary.tags {
+            if let Some(Value::Obj(id)) = slot {
+                mark_bit(&mut self.heap.mark_bits, *id, &mut worklist);
+            }
         }
-
-        self.mark_value(self.bools.true_val, &mut worklist);
-        self.mark_value(self.bools.false_val, &mut worklist);
-
+        if let Value::Obj(id) = self.bools.true_val {
+            mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
+        }
+        if let Value::Obj(id) = self.bools.false_val {
+            mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
+        }
 
         while let Some(id) = worklist.pop() {
-            self.trace_object_children(id, &mut worklist);
+            let obj = &self.heap.objects[id.0 as usize];
+            if let Some(obj) = obj {
+                let slices: [&[Value]; 2] = match obj {
+                    HeapObject::Closure { captures, .. } => [captures, &[]],
+                    HeapObject::PartialApp {
+                        captures, supplied, ..
+                    } => [captures, supplied],
+                    HeapObject::PartialCtor { supplied, .. } => [supplied, &[]],
+                    HeapObject::Data { fields, .. } => [fields, &[]],
+                };
+                for slice in slices {
+                    for v in slice.iter() {
+                        if let Value::Obj(child) = v {
+                            mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
+                        }
+                    }
+                }
+            }
         }
 
-        println!("{} objects will be garbage collected", self.heap.free_list.len());
         self.heap.free_list.clear();
-
+        let mut live = 0usize;
         for idx in 0..self.heap.objects.len() {
             if self.heap.objects[idx].is_some() {
                 if self.heap.mark_bits[idx] {
                     self.heap.mark_bits[idx] = false;
+                    live += 1;
                 } else {
                     self.heap.objects[idx] = None;
                     self.heap.free_list.push(idx as u32);
@@ -259,49 +285,7 @@ impl Vm {
         }
 
         self.heap.allocations_since_gc = 0;
-        let live = self.heap.live_count();
-        self.heap.next_gc_at = (live.max(16_384)) * 2;
-    }
-
-    fn mark_value(&mut self, value: Value, worklist: &mut Vec<ObjId>) {
-        let id = match value {
-            Value::Obj(id) => id,
-            Value::Unit | Value::Int(_) | Value::CtorFn { .. } => return,
-        };
-
-        let idx = id.0 as usize;
-        if idx >= self.heap.objects.len() {
-            return;
-        }
-        if self.heap.objects[idx].is_none() {
-            return;
-        }
-        if self.heap.mark_bits[idx] {
-            return;
-        }
-
-        self.heap.mark_bits[idx] = true;
-        worklist.push(id);
-    }
-
-    fn trace_object_children(&mut self, id: ObjId, worklist: &mut Vec<ObjId>) {
-        let children: Vec<Value> = match self.heap.get(id) {
-            HeapObject::Closure { captures, .. } => captures.iter().copied().collect(),
-            HeapObject::PartialApp {
-                captures, supplied, ..
-            } => {
-                let mut out = Vec::with_capacity(captures.len() + supplied.len());
-                out.extend(captures.iter().copied());
-                out.extend(supplied.iter().copied());
-                out
-            }
-            HeapObject::PartialCtor { supplied, .. } => supplied.iter().copied().collect(),
-            HeapObject::Data { fields, .. } => fields.iter().copied().collect(),
-        };
-
-        for value in children {
-            self.mark_value(value, worklist);
-        }
+        self.heap.next_gc_at = live.max(16_384) * 2;
     }
 
     #[inline]
