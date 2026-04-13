@@ -501,7 +501,7 @@ impl Vm {
     #[inline]
     fn alloc_heap(&mut self, obj: HeapObject) -> Value {
         if self.heap.allocations_since_gc >= self.heap.next_gc_at {
-            self.collect_garbage();
+            // self.collect_garbage();
         }
         self.heap.alloc(obj)
     }
