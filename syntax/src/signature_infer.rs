@@ -58,9 +58,7 @@ impl SignatureKindInferencer {
                     Kind::Var(v.clone())
                 }
             }
-            Kind::Arrow(lhs, rhs) => {
-                Kind::make_arrow(self.apply_kind(lhs), self.apply_kind(rhs))
-            }
+            Kind::Arrow(lhs, rhs) => Kind::make_arrow(self.apply_kind(lhs), self.apply_kind(rhs)),
         }
     }
 
@@ -179,18 +177,18 @@ impl SignatureKindInferencer {
                 self.unify(body_kind, Kind::Star)?;
 
                 match old {
-                    Some(prev) => { env.insert(var_name.clone(), prev); }
-                    None => { env.remove(var_name); }
+                    Some(prev) => {
+                        env.insert(var_name.clone(), prev);
+                    }
+                    None => {
+                        env.remove(var_name);
+                    }
                 }
 
                 let solved_binder_kind = self.zonk_kind_for_binder(&fresh);
                 Ok((
                     Kind::Star,
-                    TypeExpr::TyForAll(
-                        var_name.clone(),
-                        solved_binder_kind,
-                        Box::new(body_kinded),
-                    ),
+                    TypeExpr::TyForAll(var_name.clone(), solved_binder_kind, Box::new(body_kinded)),
                 ))
             }
         }

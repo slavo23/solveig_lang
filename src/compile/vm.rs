@@ -16,25 +16,185 @@ enum Value {
     Obj(ObjId),
 }
 
+use std::ops::Range;
+
+type PayloadRef = Range<usize>;
+
+#[derive(Debug, Default)]
+struct PayloadStore {
+    values: Vec<Value>,
+    free: Vec<PayloadRef>,
+}
+
+impl PayloadStore {
+    #[inline]
+    fn empty() -> PayloadRef {
+        0..0
+    }
+
+    #[inline]
+    fn len(span: &PayloadRef) -> usize {
+        span.end - span.start
+    }
+
+    #[inline]
+    fn is_empty(span: &PayloadRef) -> bool {
+        span.start == span.end
+    }
+
+    #[inline]
+    fn as_slice(&self, span: PayloadRef) -> &[Value] {
+        &self.values[span]
+    }
+
+    fn take_free_span(&mut self, len: usize) -> Option<PayloadRef> {
+        let idx = self.free.iter().position(|r| Self::len(r) >= len)?;
+        let span = self.free[idx].clone();
+
+        if Self::len(&span) == len {
+            self.free.swap_remove(idx);
+            Some(span)
+        } else {
+            let out = span.start..(span.start + len);
+            self.free[idx] = (span.start + len)..span.end;
+            Some(out)
+        }
+    }
+
+    fn reserve_span(&mut self, len: usize) -> PayloadRef {
+        if len == 0 {
+            return Self::empty();
+        }
+
+        if let Some(span) = self.take_free_span(len) {
+            return span;
+        }
+
+        if !self.free.is_empty() {
+            self.coalesce_free();
+
+            if let Some(span) = self.take_free_span(len) {
+                return span;
+            }
+        }
+
+        let start = self.values.len();
+        self.values.resize(start + len, Value::Unit);
+        start..(start + len)
+    }
+
+    fn alloc_from_slice(&mut self, values: &[Value]) -> PayloadRef {
+        if values.is_empty() {
+            return Self::empty();
+        }
+
+        let span = self.reserve_span(values.len());
+        self.values[span.clone()].copy_from_slice(values);
+        span
+    }
+
+    fn alloc_from_stack_tail(&mut self, stack: &mut Vec<Value>, n: usize) -> PayloadRef {
+        if n == 0 {
+            return Self::empty();
+        }
+
+        let stack_start = stack.len() - n;
+        let span = self.reserve_span(n);
+
+        self.values[span.clone()].copy_from_slice(&stack[stack_start..]);
+        stack.truncate(stack_start);
+
+        span
+    }
+
+    fn alloc_clone(&mut self, src: PayloadRef) -> PayloadRef {
+        let len = Self::len(&src);
+        if len == 0 {
+            return Self::empty();
+        }
+
+        let dst = self.reserve_span(len);
+        self.values.copy_within(src, dst.start);
+        dst
+    }
+
+    fn alloc_concat_from_payload_and_stack_tail(
+        &mut self,
+        prefix: PayloadRef,
+        stack: &mut Vec<Value>,
+        suffix_len: usize,
+    ) -> PayloadRef {
+        let prefix_len = Self::len(&prefix);
+        let total = prefix_len + suffix_len;
+
+        if total == 0 {
+            return Self::empty();
+        }
+
+        let dst = self.reserve_span(total);
+
+        if prefix_len > 0 {
+            self.values.copy_within(prefix, dst.start);
+        }
+
+        if suffix_len > 0 {
+            let stack_start = stack.len() - suffix_len;
+            let dst_start = dst.start + prefix_len;
+            let dst_end = dst_start + suffix_len;
+
+            self.values[dst_start..dst_end].copy_from_slice(&stack[stack_start..]);
+            stack.truncate(stack_start);
+        }
+
+        dst
+    }
+
+    fn free_span(&mut self, span: PayloadRef) {
+        if !Self::is_empty(&span) {
+            self.free.push(span);
+        }
+    }
+
+    fn coalesce_free(&mut self) {
+        if self.free.len() <= 1 {
+            return;
+        }
+
+        self.free.sort_unstable_by_key(|r| r.start);
+
+        let mut merged: Vec<Range<usize>> = Vec::with_capacity(self.free.len());
+        for span in self.free.drain(..) {
+            if let Some(last) = merged.last_mut() {
+                if last.end == span.start {
+                    last.end = span.end;
+                    continue;
+                }
+            }
+            merged.push(span);
+        }
+
+        self.free = merged;
+    }
+}
 #[derive(Debug, Clone)]
 enum HeapObject {
     Closure {
         chunk: usize,
-        captures: Box<[Value]>,
+        captures: PayloadRef,
     },
     PartialApp {
         chunk: usize,
-        captures: Box<[Value]>,
-        supplied: Box<[Value]>,
+        captures: PayloadRef,
+        supplied: PayloadRef,
     },
     PartialCtor {
         tag: u16,
         arity: u16,
-        supplied: Box<[Value]>,
+        supplied: PayloadRef,
     },
     Data {
         tag: u16,
-        fields: Box<[Value]>,
+        fields: PayloadRef,
     },
 }
 
@@ -43,6 +203,7 @@ struct Heap {
     objects: Vec<Option<HeapObject>>,
     mark_bits: Vec<bool>,
     free_list: Vec<u32>,
+    payloads: PayloadStore,
     allocations_since_gc: usize,
     next_gc_at: usize,
 }
@@ -53,13 +214,51 @@ impl Default for Heap {
             objects: Vec::new(),
             mark_bits: Vec::new(),
             free_list: Vec::new(),
+            payloads: PayloadStore::default(),
             allocations_since_gc: 0,
             next_gc_at: 32_768,
         }
     }
 }
 
+#[derive(Debug, Clone)]
+enum HeapTarget {
+    Closure {
+        chunk: usize,
+        captures: PayloadRef,
+    },
+    PartialApp {
+        chunk: usize,
+        captures: PayloadRef,
+        supplied: PayloadRef,
+    },
+    PartialCtor {
+        tag: u16,
+        arity: u16,
+        supplied: PayloadRef,
+    },
+    Data {
+        tag: u16,
+        fields: PayloadRef,
+    },
+}
+
 impl Heap {
+    #[inline]
+    fn get(&self, id: ObjId) -> &HeapObject {
+        debug_assert!(
+            (id.0 as usize) < self.objects.len() && self.objects[id.0 as usize].is_some(),
+            "dangling heap ref {}",
+            id.0
+        );
+        unsafe {
+            self.objects
+                .get_unchecked(id.0 as usize)
+                .as_ref()
+                .unwrap_unchecked()
+        }
+    }
+
     #[inline]
     fn alloc(&mut self, obj: HeapObject) -> Value {
         self.allocations_since_gc += 1;
@@ -77,18 +276,85 @@ impl Heap {
         }
     }
 
+    fn clone_payload(&mut self, span: PayloadRef) -> PayloadRef {
+        self.payloads.alloc_clone(span)
+    }
+
     #[inline]
-    fn get(&self, id: ObjId) -> &HeapObject {
-        debug_assert!(
-            (id.0 as usize) < self.objects.len() && self.objects[id.0 as usize].is_some(),
-            "dangling heap ref {}",
-            id.0
-        );
-        unsafe {
-            self.objects
-                .get_unchecked(id.0 as usize)
-                .as_ref()
-                .unwrap_unchecked()
+    fn target(&self, id: ObjId) -> HeapTarget {
+        match self.get(id) {
+            HeapObject::Closure { chunk, captures } => HeapTarget::Closure {
+                chunk: *chunk,
+                captures: captures.clone(),
+            },
+            HeapObject::PartialApp {
+                chunk,
+                captures,
+                supplied,
+            } => HeapTarget::PartialApp {
+                chunk: *chunk,
+                captures: captures.clone(),
+                supplied: supplied.clone(),
+            },
+            HeapObject::PartialCtor {
+                tag,
+                arity,
+                supplied,
+            } => HeapTarget::PartialCtor {
+                tag: *tag,
+                arity: *arity,
+                supplied: supplied.clone(),
+            },
+            HeapObject::Data { tag, fields } => HeapTarget::Data {
+                tag: *tag,
+                fields: fields.clone(),
+            },
+        }
+    }
+
+    #[inline]
+    fn payload_len(&self, span: &PayloadRef) -> usize {
+        PayloadStore::len(span)
+    }
+
+    #[inline]
+    fn copy_payload_to_stack(&self, span: PayloadRef, stack: &mut [Value], dst_start: usize) {
+        let src = self.payloads.as_slice(span);
+        stack[dst_start..dst_start + src.len()].copy_from_slice(src);
+    }
+
+    #[inline]
+    fn alloc_payload_from_stack_tail(&mut self, stack: &mut Vec<Value>, n: usize) -> PayloadRef {
+        self.payloads.alloc_from_stack_tail(stack, n)
+    }
+
+    fn alloc_concat_payload_and_stack_tail(
+        &mut self,
+        prefix: PayloadRef,
+        stack: &mut Vec<Value>,
+        suffix_len: usize,
+    ) -> PayloadRef {
+        self.payloads
+            .alloc_concat_from_payload_and_stack_tail(prefix, stack, suffix_len)
+    }
+
+    fn free_object_payloads(&mut self, obj: &HeapObject) {
+        match obj {
+            HeapObject::Closure { captures, .. } => {
+                self.payloads.free_span(captures.clone());
+            }
+            HeapObject::PartialApp {
+                captures, supplied, ..
+            } => {
+                self.payloads.free_span(captures.clone());
+                self.payloads.free_span(supplied.clone());
+            }
+            HeapObject::PartialCtor { supplied, .. } => {
+                self.payloads.free_span(supplied.clone());
+            }
+            HeapObject::Data { fields, .. } => {
+                self.payloads.free_span(fields.clone());
+            }
         }
     }
 }
@@ -151,6 +417,7 @@ struct Vm {
 
     stack: Vec<Value>,
     returns: Vec<ReturnTo>,
+    match_buffer: Vec<Value>,
 
     heap: Heap,
     globals: Vec<GlobalSlot>,
@@ -164,6 +431,20 @@ fn mark_bit(mark_bits: &mut [bool], id: ObjId, worklist: &mut Vec<ObjId>) {
     if idx < mark_bits.len() && !mark_bits[idx] {
         mark_bits[idx] = true;
         worklist.push(id);
+    }
+}
+
+#[inline]
+fn mark_payload(
+    payloads: &PayloadStore,
+    mark_bits: &mut [bool],
+    span: &PayloadRef,
+    worklist: &mut Vec<ObjId>,
+) {
+    for &v in payloads.as_slice(span.clone()) {
+        if let Value::Obj(id) = v {
+            mark_bit(mark_bits, id, worklist);
+        }
     }
 }
 
@@ -182,6 +463,7 @@ impl Vm {
             frame_base: 0,
             stack: Vec::with_capacity(4096),
             returns: Vec::with_capacity(512),
+            match_buffer: Vec::with_capacity(8),
             heap: Heap::default(),
             globals: program
                 .globals
@@ -204,7 +486,7 @@ impl Vm {
             if arity == 0 {
                 let val = self.alloc_heap(HeapObject::Data {
                     tag,
-                    fields: Box::new([]),
+                    fields: PayloadStore::empty(),
                 });
                 self.nullary.set(tag, val);
             }
@@ -232,16 +514,19 @@ impl Vm {
                 mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
             }
         }
+
         for i in 0..self.globals.len() {
             if let GlobalSlot::Evaluated(Value::Obj(id)) = self.globals[i] {
                 mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
             }
         }
+
         for slot in &self.nullary.tags {
             if let Some(Value::Obj(id)) = slot {
                 mark_bit(&mut self.heap.mark_bits, *id, &mut worklist);
             }
         }
+
         if let Value::Obj(id) = self.bools.true_val {
             mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
         }
@@ -250,27 +535,39 @@ impl Vm {
         }
 
         while let Some(id) = worklist.pop() {
-            let obj = &self.heap.objects[id.0 as usize];
-            if let Some(obj) = obj {
-                let slices: [&[Value]; 2] = match obj {
-                    HeapObject::Closure { captures, .. } => [captures, &[]],
-                    HeapObject::PartialApp {
-                        captures, supplied, ..
-                    } => [captures, supplied],
-                    HeapObject::PartialCtor { supplied, .. } => [supplied, &[]],
-                    HeapObject::Data { fields, .. } => [fields, &[]],
-                };
-                for slice in slices {
-                    for v in slice.iter() {
-                        if let Value::Obj(child) = v {
-                            mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
-                        }
-                    }
+            enum Children {
+                None,
+                One(PayloadRef),
+                Two(PayloadRef, PayloadRef),
+            }
+
+            let children = match self.heap.objects[id.0 as usize].as_ref() {
+                Some(HeapObject::Closure { captures, .. }) => Children::One(captures.clone()),
+                Some(HeapObject::PartialApp {
+                    captures, supplied, ..
+                }) => Children::Two(captures.clone(), supplied.clone()),
+                Some(HeapObject::PartialCtor { supplied, .. }) => Children::One(supplied.clone()),
+                Some(HeapObject::Data { fields, .. }) => Children::One(fields.clone()),
+                None => Children::None,
+            };
+
+            let payloads = &self.heap.payloads;
+            let mark_bits = &mut self.heap.mark_bits;
+
+            match children {
+                Children::None => {}
+                Children::One(span) => {
+                    mark_payload(payloads, mark_bits, &span, &mut worklist);
+                }
+                Children::Two(a, b) => {
+                    mark_payload(payloads, mark_bits, &a, &mut worklist);
+                    mark_payload(payloads, mark_bits, &b, &mut worklist);
                 }
             }
         }
 
         self.heap.free_list.clear();
+
         let mut live = 0usize;
         for idx in 0..self.heap.objects.len() {
             if self.heap.objects[idx].is_some() {
@@ -278,7 +575,8 @@ impl Vm {
                     self.heap.mark_bits[idx] = false;
                     live += 1;
                 } else {
-                    self.heap.objects[idx] = None;
+                    let dead = self.heap.objects[idx].take().unwrap();
+                    self.heap.free_object_payloads(&dead);
                     self.heap.free_list.push(idx as u32);
                 }
             }
@@ -287,7 +585,6 @@ impl Vm {
         self.heap.allocations_since_gc = 0;
         self.heap.next_gc_at = live.max(16_384) * 2;
     }
-
     #[inline]
     fn push(&mut self, val: Value) {
         self.stack.push(val);
@@ -307,11 +604,8 @@ impl Vm {
     }
 
     #[inline]
-    fn pop_box(&mut self, n: usize) -> Box<[Value]> {
-        let start = self.stack.len() - n;
-        let result: Box<[Value]> = self.stack[start..].into();
-        self.stack.truncate(start);
-        result
+    fn pop_payload(&mut self, n: usize) -> PayloadRef {
+        self.heap.alloc_payload_from_stack_tail(&mut self.stack, n)
     }
 
     #[inline]
@@ -407,8 +701,6 @@ impl Vm {
             .resize(self.frame_base + meta.slot_count as usize, Value::Unit);
     }
 
-    /// Enter a function.  `arg_count` arguments are on top of the stack.
-    /// Captures are read from the heap object at `capture_source`.
     fn enter_closure(
         &mut self,
         program: &BytecodeProgram,
@@ -423,50 +715,63 @@ impl Vm {
             _ => panic!("entering thunk as closure"),
         };
 
+        let captures = match self.heap.target(capture_source) {
+            HeapTarget::Closure { captures, .. } | HeapTarget::PartialApp { captures, .. } => {
+                captures
+            }
+            _ => panic!("capture source is not a closure"),
+        };
+
+        debug_assert_eq!(capture_count, self.heap.payload_len(&captures));
+
         let args_start = self.stack.len() - arg_count;
         self.chunk = chunk_id;
         self.pc = 0;
         self.frame_base = args_start;
         self.ensure_slots(slot_count);
 
-        // Shift args right to make room for captures at the front of the frame.
         if capture_count > 0 {
             for i in (0..arg_count).rev() {
                 self.stack[self.frame_base + capture_count + i] = self.stack[self.frame_base + i];
             }
-            // Write captures — disjoint field access: heap (read) vs stack (write).
-            match self.heap.get(capture_source) {
-                HeapObject::Closure { captures, .. } | HeapObject::PartialApp { captures, .. } => {
-                    for (i, &cap) in captures.iter().enumerate() {
-                        self.stack[self.frame_base + i] = cap;
-                    }
-                }
-                _ => panic!("capture source is not a closure"),
-            }
+
+            let frame_base = self.frame_base;
+            let (heap, stack) = (&self.heap, &mut self.stack);
+            heap.copy_payload_to_stack(captures, stack, frame_base);
         }
     }
 
-    fn enter_with_args(
+    fn enter_with_prefix_and_stack_tail(
         &mut self,
         program: &BytecodeProgram,
         chunk_id: usize,
-        captures: &[Value],
-        args: &[Value],
+        captures: PayloadRef,
+        supplied: PayloadRef,
+        new_arg_count: usize,
     ) {
         let meta = program.chunk(chunk_id);
         let slot_count = meta.slot_count as usize;
 
+        let capture_len = self.heap.payload_len(&captures);
+        let supplied_len = self.heap.payload_len(&supplied);
+        let prefix_len = capture_len + supplied_len;
+
+        let args_start = self.stack.len() - new_arg_count;
         self.chunk = chunk_id;
         self.pc = 0;
-        self.frame_base = self.stack.len();
+        self.frame_base = args_start;
         self.ensure_slots(slot_count);
 
-        for (i, &cap) in captures.iter().enumerate() {
-            self.stack[self.frame_base + i] = cap;
-        }
-        let offset = captures.len();
-        for (i, &arg) in args.iter().enumerate() {
-            self.stack[self.frame_base + offset + i] = arg;
+        if prefix_len > 0 {
+            for i in (0..new_arg_count).rev() {
+                self.stack[self.frame_base + prefix_len + i] = self.stack[self.frame_base + i];
+            }
+
+            let frame_base = self.frame_base;
+            let (heap, stack) = (&self.heap, &mut self.stack);
+
+            heap.copy_payload_to_stack(captures, stack, frame_base);
+            heap.copy_payload_to_stack(supplied, stack, frame_base + capture_len);
         }
     }
 
@@ -513,6 +818,15 @@ impl Vm {
             _ => panic!("tail-entering thunk as closure"),
         };
 
+        let captures = match self.heap.target(capture_source) {
+            HeapTarget::Closure { captures, .. } | HeapTarget::PartialApp { captures, .. } => {
+                captures
+            }
+            _ => panic!("capture source is not a closure"),
+        };
+
+        debug_assert_eq!(capture_count, self.heap.payload_len(&captures));
+
         let args_start = self.stack.len() - arg_count;
 
         if args_start != self.frame_base {
@@ -531,39 +845,49 @@ impl Vm {
                 self.stack[self.frame_base + capture_count + i] = self.stack[self.frame_base + i];
             }
 
-            match self.heap.get(capture_source) {
-                HeapObject::Closure { captures, .. } | HeapObject::PartialApp { captures, .. } => {
-                    for (i, &cap) in captures.iter().enumerate() {
-                        self.stack[self.frame_base + i] = cap;
-                    }
-                }
-                _ => panic!("capture source is not a closure"),
-            }
+            let frame_base = self.frame_base;
+            let (heap, stack) = (&self.heap, &mut self.stack);
+            heap.copy_payload_to_stack(captures, stack, frame_base);
         }
     }
 
-    fn tail_enter_with_args(
+    fn tail_enter_with_prefix_and_stack_tail(
         &mut self,
         program: &BytecodeProgram,
         chunk_id: usize,
-        captures: &[Value],
-        args: &[Value],
+        captures: PayloadRef,
+        supplied: PayloadRef,
+        new_arg_count: usize,
     ) {
         let meta = program.chunk(chunk_id);
         let slot_count = meta.slot_count as usize;
 
-        self.stack.truncate(self.frame_base);
+        let capture_len = self.heap.payload_len(&captures);
+        let supplied_len = self.heap.payload_len(&supplied);
+        let prefix_len = capture_len + supplied_len;
+
+        let args_start = self.stack.len() - new_arg_count;
+
+        if args_start != self.frame_base {
+            for i in 0..new_arg_count {
+                self.stack[self.frame_base + i] = self.stack[args_start + i];
+            }
+        }
+
+        self.stack.truncate(self.frame_base + new_arg_count);
         self.chunk = chunk_id;
         self.pc = 0;
         self.ensure_slots(slot_count);
 
-        for (i, &cap) in captures.iter().enumerate() {
-            self.stack[self.frame_base + i] = cap;
-        }
+        if prefix_len > 0 {
+            for i in (0..new_arg_count).rev() {
+                self.stack[self.frame_base + prefix_len + i] = self.stack[self.frame_base + i];
+            }
 
-        let offset = captures.len();
-        for (i, &arg) in args.iter().enumerate() {
-            self.stack[self.frame_base + offset + i] = arg;
+            let frame_base = self.frame_base;
+            let (heap, stack) = (&self.heap, &mut self.stack);
+            heap.copy_payload_to_stack(captures, stack, frame_base);
+            heap.copy_payload_to_stack(supplied, stack, frame_base + capture_len);
         }
     }
 
@@ -574,7 +898,9 @@ impl Vm {
         arg_count: usize,
     ) -> Option<Value> {
         match callee {
-            Value::CtorFn { tag, arity } => Some(self.build_ctor(tag, arity, &[], arg_count)),
+            Value::CtorFn { tag, arity } => {
+                Some(self.build_ctor(tag, arity, PayloadStore::empty(), arg_count))
+            }
 
             Value::Obj(id) => self.tail_apply_heap_callee(program, id, arg_count),
 
@@ -588,59 +914,21 @@ impl Vm {
         id: ObjId,
         arg_count: usize,
     ) -> Option<Value> {
-        enum Target {
-            Closure {
-                chunk: usize,
-            },
-            Partial {
-                chunk: usize,
-                n_supplied: usize,
-            },
-            Ctor {
-                tag: u16,
-                arity: u16,
-                n_supplied: usize,
-            },
-            Saturated {
-                tag: u16,
-            },
-        }
-
-        let target = match self.heap.get(id) {
-            HeapObject::Closure { chunk, .. } => Target::Closure { chunk: *chunk },
-            HeapObject::PartialApp {
-                chunk, supplied, ..
-            } => Target::Partial {
-                chunk: *chunk,
-                n_supplied: supplied.len(),
-            },
-            HeapObject::PartialCtor {
-                tag,
-                arity,
-                supplied,
-            } => Target::Ctor {
-                tag: *tag,
-                arity: *arity,
-                n_supplied: supplied.len(),
-            },
-            HeapObject::Data { tag, .. } => Target::Saturated { tag: *tag },
-        };
-
-        match target {
-            Target::Closure { chunk } => {
+        match self.heap.target(id) {
+            HeapTarget::Closure { chunk, captures } => {
                 let arity = chunk_arity(program, chunk);
 
                 if arg_count == arity {
                     self.tail_enter_closure(program, chunk, id, arg_count);
                     None
                 } else if arg_count < arity {
-                    let new_args = self.pop_box(arg_count);
-                    let captures = self.clone_captures(id);
+                    let supplied = self.pop_payload(arg_count);
+                    let captures = self.heap.clone_payload(captures);
 
                     Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
-                        supplied: new_args,
+                        supplied,
                     }))
                 } else {
                     panic!(
@@ -650,34 +938,31 @@ impl Vm {
                 }
             }
 
-            Target::Partial { chunk, n_supplied } => {
+            HeapTarget::PartialApp {
+                chunk,
+                captures,
+                supplied,
+            } => {
                 let arity = chunk_arity(program, chunk);
-                let total = n_supplied + arg_count;
+                let total = self.heap.payload_len(&supplied) + arg_count;
 
                 if total == arity {
-                    let new_args = self.pop_box(arg_count);
-                    let captures = self.clone_captures(id);
-                    let supplied = self.clone_supplied(id);
-
-                    let mut all_args = Vec::with_capacity(total);
-                    all_args.extend_from_slice(&supplied);
-                    all_args.extend_from_slice(&new_args);
-
-                    self.tail_enter_with_args(program, chunk, &captures, &all_args);
+                    self.tail_enter_with_prefix_and_stack_tail(
+                        program, chunk, captures, supplied, arg_count,
+                    );
                     None
                 } else if total < arity {
-                    let new_args = self.pop_box(arg_count);
-                    let captures = self.clone_captures(id);
-                    let supplied = self.clone_supplied(id);
-
-                    let mut all = Vec::with_capacity(total);
-                    all.extend_from_slice(&supplied);
-                    all.extend_from_slice(&new_args);
+                    let captures = self.heap.clone_payload(captures);
+                    let supplied = self.heap.alloc_concat_payload_and_stack_tail(
+                        supplied,
+                        &mut self.stack,
+                        arg_count,
+                    );
 
                     Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
-                        supplied: all.into_boxed_slice(),
+                        supplied,
                     }))
                 } else {
                     panic!(
@@ -687,17 +972,13 @@ impl Vm {
                 }
             }
 
-            Target::Ctor {
+            HeapTarget::PartialCtor {
                 tag,
                 arity,
-                n_supplied,
-            } => {
-                let supplied = self.clone_supplied(id);
-                debug_assert_eq!(n_supplied, supplied.len());
-                Some(self.build_ctor(tag, arity, &supplied, arg_count))
-            }
+                supplied,
+            } => Some(self.build_ctor(tag, arity, supplied, arg_count)),
 
-            Target::Saturated { tag } => {
+            HeapTarget::Data { tag, .. } => {
                 panic!("cannot apply saturated constructor tag {}", tag);
             }
         }
@@ -710,7 +991,9 @@ impl Vm {
         arg_count: usize,
     ) -> Option<Value> {
         match callee {
-            Value::CtorFn { tag, arity } => Some(self.build_ctor(tag, arity, &[], arg_count)),
+            Value::CtorFn { tag, arity } => {
+                Some(self.build_ctor(tag, arity, PayloadStore::empty(), arg_count))
+            }
 
             Value::Obj(id) => self.apply_heap_callee(program, id, arg_count),
 
@@ -724,57 +1007,22 @@ impl Vm {
         id: ObjId,
         arg_count: usize,
     ) -> Option<Value> {
-        enum Target {
-            Closure {
-                chunk: usize,
-            },
-            Partial {
-                chunk: usize,
-                n_supplied: usize,
-            },
-            Ctor {
-                tag: u16,
-                arity: u16,
-                n_supplied: usize,
-            },
-            Saturated {
-                tag: u16,
-            },
-        }
-
-        let target = match self.heap.get(id) {
-            HeapObject::Closure { chunk, .. } => Target::Closure { chunk: *chunk },
-            HeapObject::PartialApp {
-                chunk, supplied, ..
-            } => Target::Partial {
-                chunk: *chunk,
-                n_supplied: supplied.len(),
-            },
-            HeapObject::PartialCtor {
-                tag,
-                arity,
-                supplied,
-            } => Target::Ctor {
-                tag: *tag,
-                arity: *arity,
-                n_supplied: supplied.len(),
-            },
-            HeapObject::Data { tag, .. } => Target::Saturated { tag: *tag },
-        };
-        match target {
-            Target::Closure { chunk } => {
+        match self.heap.target(id) {
+            HeapTarget::Closure { chunk, captures } => {
                 let arity = chunk_arity(program, chunk);
+
                 if arg_count == arity {
                     self.push_return();
                     self.enter_closure(program, chunk, id, arg_count);
                     None
                 } else if arg_count < arity {
-                    let new_args = self.pop_box(arg_count);
-                    let captures = self.clone_captures(id);
+                    let supplied = self.pop_payload(arg_count);
+                    let captures = self.heap.clone_payload(captures);
+
                     Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
-                        supplied: new_args,
+                        supplied,
                     }))
                 } else {
                     panic!(
@@ -784,35 +1032,32 @@ impl Vm {
                 }
             }
 
-            Target::Partial { chunk, n_supplied } => {
+            HeapTarget::PartialApp {
+                chunk,
+                captures,
+                supplied,
+            } => {
                 let arity = chunk_arity(program, chunk);
-                let total = n_supplied + arg_count;
+                let total = self.heap.payload_len(&supplied) + arg_count;
 
                 if total == arity {
-                    let new_args = self.pop_box(arg_count);
-                    let captures = self.clone_captures(id);
-                    let supplied = self.clone_supplied(id);
-
-                    let mut all_args = Vec::with_capacity(total);
-                    all_args.extend_from_slice(&supplied);
-                    all_args.extend_from_slice(&new_args);
-
                     self.push_return();
-                    self.enter_with_args(program, chunk, &captures, &all_args);
+                    self.enter_with_prefix_and_stack_tail(
+                        program, chunk, captures, supplied, arg_count,
+                    );
                     None
                 } else if total < arity {
-                    let new_args = self.pop_box(arg_count);
-                    let captures = self.clone_captures(id);
-                    let supplied = self.clone_supplied(id);
-
-                    let mut all = Vec::with_capacity(total);
-                    all.extend_from_slice(&supplied);
-                    all.extend_from_slice(&new_args);
+                    let captures = self.heap.clone_payload(captures);
+                    let supplied = self.heap.alloc_concat_payload_and_stack_tail(
+                        supplied,
+                        &mut self.stack,
+                        arg_count,
+                    );
 
                     Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
-                        supplied: all.into_boxed_slice(),
+                        supplied,
                     }))
                 } else {
                     panic!(
@@ -822,108 +1067,73 @@ impl Vm {
                 }
             }
 
-            Target::Ctor {
+            HeapTarget::PartialCtor {
                 tag,
                 arity,
-                n_supplied,
-            } => {
-                let supplied = self.clone_supplied(id);
-                Some(self.build_ctor(tag, arity, &supplied, arg_count))
-            }
+                supplied,
+            } => Some(self.build_ctor(tag, arity, supplied, arg_count)),
 
-            Target::Saturated { tag } => {
+            HeapTarget::Data { tag, .. } => {
                 panic!("cannot apply saturated constructor tag {}", tag);
             }
         }
     }
 
-    fn build_ctor(&mut self, tag: u16, arity: u16, existing: &[Value], n_new: usize) -> Value {
-        let new_fields = self.pop_box(n_new);
-        let total = existing.len() + new_fields.len();
-
-        let mut all = Vec::with_capacity(total);
-        all.extend_from_slice(existing);
-        all.extend_from_slice(&new_fields);
+    fn build_ctor(&mut self, tag: u16, arity: u16, existing: PayloadRef, n_new: usize) -> Value {
+        let total = self.heap.payload_len(&existing) + n_new;
+        let fields =
+            self.heap
+                .alloc_concat_payload_and_stack_tail(existing, &mut self.stack, n_new);
 
         if total == arity as usize {
-            self.alloc_heap(HeapObject::Data {
-                tag,
-                fields: all.into_boxed_slice(),
-            })
+            self.alloc_heap(HeapObject::Data { tag, fields })
         } else if total < arity as usize {
             self.alloc_heap(HeapObject::PartialCtor {
                 tag,
                 arity,
-                supplied: all.into_boxed_slice(),
+                supplied: fields,
             })
         } else {
             panic!("over-applied constructor tag {}", tag);
         }
     }
 
-    fn clone_captures(&self, id: ObjId) -> Box<[Value]> {
-        match self.heap.get(id) {
-            HeapObject::Closure { captures, .. } | HeapObject::PartialApp { captures, .. } => {
-                captures.clone()
-            }
-            _ => panic!("expected closure/partial"),
-        }
-    }
-
-    fn clone_supplied(&self, id: ObjId) -> Box<[Value]> {
-        match self.heap.get(id) {
-            HeapObject::PartialApp { supplied, .. } | HeapObject::PartialCtor { supplied, .. } => {
-                supplied.clone()
-            }
-            _ => panic!("expected partial app/ctor"),
-        }
-    }
-
     fn dispatch_match(&mut self, arms: &[MatchArm], scrutinee: Value, else_pc: u32) {
-        let mut bindings = Vec::new();
-        for arm in arms {
-            bindings.clear();
-            if self.match_pattern(&arm.pattern, scrutinee, &mut bindings) {
-                for (&slot, &val) in arm.bind_slots.iter().zip(bindings.iter()) {
-                    self.store(slot, val);
-                }
-                self.pc = arm.target as usize;
-                return;
-            }
-        }
-        self.pc = else_pc as usize;
-    }
+        let matched_arm_idx = {
+            let heap = &self.heap;
+            let bindings = &mut self.match_buffer;
 
-    fn match_pattern(
-        &self,
-        pattern: &BytePattern,
-        value: Value,
-        bindings: &mut Vec<Value>,
-    ) -> bool {
-        let mut work = vec![(pattern, value)];
-        while let Some((pat, val)) = work.pop() {
-            match pat {
-                BytePattern::Var => bindings.push(val),
-                BytePattern::Wild => {}
-                BytePattern::Con(expected_tag, subs) => {
-                    let id = match val {
-                        Value::Obj(id) => id,
-                        _ => return false,
-                    };
-                    match self.heap.get(id) {
-                        HeapObject::Data { tag, fields }
-                            if *tag == *expected_tag && fields.len() == subs.len() =>
-                        {
-                            for (sub, &field) in subs.iter().zip(fields.iter()).rev() {
-                                work.push((sub, field));
-                            }
-                        }
-                        _ => return false,
-                    }
+            let mut matched = None;
+
+            for (arm_idx, arm) in arms.iter().enumerate() {
+                bindings.clear();
+
+                if bindings.capacity() < arm.bind_slots.len() {
+                    bindings.reserve(arm.bind_slots.len() - bindings.capacity());
+                }
+
+                if match_pattern(heap, &arm.pattern, scrutinee, bindings) {
+                    matched = Some(arm_idx);
+                    break;
                 }
             }
+
+            matched
+        };
+
+        if let Some(arm_idx) = matched_arm_idx {
+            let arm = &arms[arm_idx];
+
+            for i in 0..arm.bind_slots.len() {
+                let slot = arm.bind_slots[i];
+                let val = self.match_buffer[i];
+                self.store(slot, val);
+            }
+
+            self.pc = arm.target as usize;
+        } else {
+            self.pc = else_pc as usize;
         }
-        true
     }
 
     fn finish_return(&mut self, result: Value) -> Option<Value> {
@@ -999,7 +1209,7 @@ impl Vm {
                     chunk,
                     capture_count,
                 } => {
-                    let captures = self.pop_box(*capture_count as usize);
+                    let captures = self.pop_payload(*capture_count as usize);
                     let val = self.alloc_heap(HeapObject::Closure {
                         chunk: *chunk as usize,
                         captures,
@@ -1038,7 +1248,7 @@ impl Vm {
                     if *arity == 0 {
                         self.push(self.nullary.get(*tag));
                     } else {
-                        let fields = self.pop_box(*field_count as usize);
+                        let fields = self.pop_payload(*field_count as usize);
                         let val = self.alloc_heap(HeapObject::Data { tag: *tag, fields });
                         self.push(val);
                     }
@@ -1129,6 +1339,65 @@ impl Vm {
                 }
                 Instr::Trap(msg) => panic!("{}", msg),
             }
+        }
+    }
+}
+
+fn match_pattern(
+    heap: &Heap,
+    pattern: &BytePattern,
+    value: Value,
+    bindings: &mut Vec<Value>,
+) -> bool {
+    let checkpoint = bindings.len();
+
+    if match_pattern_inner(heap, pattern, value, bindings) {
+        true
+    } else {
+        bindings.truncate(checkpoint);
+        false
+    }
+}
+
+fn match_pattern_inner(
+    heap: &Heap,
+    pattern: &BytePattern,
+    value: Value,
+    bindings: &mut Vec<Value>,
+) -> bool {
+    match pattern {
+        BytePattern::Var => {
+            bindings.push(value);
+            true
+        }
+
+        BytePattern::Wild => true,
+
+        BytePattern::Con(expected_tag, subs) => {
+            let id = match value {
+                Value::Obj(id) => id,
+                _ => return false,
+            };
+
+            let (tag, fields) = match heap.get(id) {
+                HeapObject::Data { tag, fields } => (*tag, heap.payloads.as_slice(fields.clone())),
+                _ => return false,
+            };
+
+            if tag != *expected_tag || fields.len() != subs.len() {
+                return false;
+            }
+
+            let checkpoint = bindings.len();
+
+            for (sub, &field) in subs.iter().zip(fields.iter()) {
+                if !match_pattern_inner(heap, sub, field, bindings) {
+                    bindings.truncate(checkpoint);
+                    return false;
+                }
+            }
+
+            true
         }
     }
 }
@@ -1246,6 +1515,8 @@ impl DisplayValue<'_> {
                 HeapObject::Closure { .. } | HeapObject::PartialApp { .. } => "<closure>".into(),
                 HeapObject::PartialCtor { tag, supplied, .. } => {
                     let name = tag_name(self.arities, *tag);
+                    let supplied = self.heap.payloads.as_slice(supplied.clone());
+
                     if supplied.is_empty() {
                         format!("<partial {}>", name)
                     } else {
@@ -1254,6 +1525,8 @@ impl DisplayValue<'_> {
                 }
                 HeapObject::Data { tag, fields } => {
                     let name = tag_name(self.arities, *tag);
+                    let fields = self.heap.payloads.as_slice(fields.clone());
+
                     if fields.is_empty() {
                         name.into()
                     } else {
@@ -1282,19 +1555,24 @@ impl DisplayValue<'_> {
 
     fn try_nat(&self, mut val: Value) -> Option<String> {
         let mut n = 0usize;
+
         loop {
             match val {
                 Value::Obj(id) => match self.heap.get(id) {
-                    HeapObject::Data { tag, fields }
-                        if fields.is_empty() && tag_is(self.arities, *tag, "Z") =>
-                    {
-                        return Some(n.to_string());
-                    }
-                    HeapObject::Data { tag, fields }
-                        if fields.len() == 1 && tag_is(self.arities, *tag, "S") =>
-                    {
-                        n += 1;
-                        val = fields[0];
+                    HeapObject::Data { tag, fields } => {
+                        let fields = self.heap.payloads.as_slice(fields.clone());
+
+                        if fields.is_empty() && tag_is(self.arities, *tag, "Z") {
+                            return Some(n.to_string());
+                        }
+
+                        if fields.len() == 1 && tag_is(self.arities, *tag, "S") {
+                            n += 1;
+                            val = fields[0];
+                            continue;
+                        }
+
+                        return None;
                     }
                     _ => return None,
                 },
@@ -1305,19 +1583,24 @@ impl DisplayValue<'_> {
 
     fn try_list(&self, mut val: Value) -> Option<String> {
         let mut items = Vec::new();
+
         loop {
             match val {
                 Value::Obj(id) => match self.heap.get(id) {
-                    HeapObject::Data { tag, fields }
-                        if fields.is_empty() && tag_is(self.arities, *tag, "Nil") =>
-                    {
-                        return Some(format!("[{}]", items.join(", ")));
-                    }
-                    HeapObject::Data { tag, fields }
-                        if fields.len() == 2 && tag_is(self.arities, *tag, "Cons") =>
-                    {
-                        items.push(self.render(fields[0]));
-                        val = fields[1];
+                    HeapObject::Data { tag, fields } => {
+                        let fields = self.heap.payloads.as_slice(fields.clone());
+
+                        if fields.is_empty() && tag_is(self.arities, *tag, "Nil") {
+                            return Some(format!("[{}]", items.join(", ")));
+                        }
+
+                        if fields.len() == 2 && tag_is(self.arities, *tag, "Cons") {
+                            items.push(self.render(fields[0]));
+                            val = fields[1];
+                            continue;
+                        }
+
+                        return None;
                     }
                     _ => return None,
                 },
@@ -1329,14 +1612,20 @@ impl DisplayValue<'_> {
     fn try_pair(&self, val: Value) -> Option<String> {
         match val {
             Value::Obj(id) => match self.heap.get(id) {
-                HeapObject::Data { tag, fields } if fields.len() == 2 => {
-                    let name = tag_name(self.arities, *tag);
-                    if name == "Pair" || name == "MkPair" {
-                        Some(format!(
-                            "({}, {})",
-                            self.render(fields[0]),
-                            self.render(fields[1])
-                        ))
+                HeapObject::Data { tag, fields } => {
+                    let fields = self.heap.payloads.as_slice(fields.clone());
+
+                    if fields.len() == 2 {
+                        let name = tag_name(self.arities, *tag);
+                        if name == "Pair" || name == "MkPair" {
+                            Some(format!(
+                                "({}, {})",
+                                self.render(fields[0]),
+                                self.render(fields[1])
+                            ))
+                        } else {
+                            None
+                        }
                     } else {
                         None
                     }

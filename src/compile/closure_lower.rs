@@ -329,7 +329,7 @@ impl<'a> ExprLowerer<'a> {
             }
         }
 
-          if let IRExpr::FVar(global_index) = head.as_ref() {
+        if let IRExpr::FVar(global_index) = head.as_ref() {
             if let Some(info) = self.state.known_global_func(*global_index) {
                 if args.len() == info.arity {
                     let lowered_args = args.iter().map(|arg| self.lower_expr(arg)).collect();

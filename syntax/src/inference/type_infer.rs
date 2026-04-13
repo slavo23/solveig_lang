@@ -1196,7 +1196,7 @@ impl TypeChecker {
         argument: &TermExprNode<Span>,
         elaborated_function: &TermExprNode<TcMetadata, Span>,
         span: Span,
-        arg_span: Span
+        arg_span: Span,
     ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
         let function_type = ctx.apply(function_type);
 

@@ -62,9 +62,7 @@ impl CCPattern {
         match self {
             CCPattern::Var => 1,
             CCPattern::Wild => 0,
-            CCPattern::Con(_, sub_patterns) => {
-                sub_patterns.iter().map(|p| p.binder_count()).sum()
-            }
+            CCPattern::Con(_, sub_patterns) => sub_patterns.iter().map(|p| p.binder_count()).sum(),
         }
     }
 }

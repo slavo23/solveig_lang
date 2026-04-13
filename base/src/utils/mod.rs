@@ -1,2 +1,2 @@
-pub mod span;
 pub mod diagnostics;
+pub mod span;

@@ -481,7 +481,9 @@ impl Machine {
                     });
                     self.globals.push(GlobalEntry::Value(value));
                 }
-                _ => self.globals.push(GlobalEntry::Expr(global_def.body.clone())),
+                _ => self
+                    .globals
+                    .push(GlobalEntry::Expr(global_def.body.clone())),
             }
         }
     }
@@ -767,12 +769,7 @@ impl Machine {
         }
     }
 
-    fn match_pattern(
-        &self,
-        pattern: &IRPattern,
-        value: Value,
-        bindings: &mut Vec<Value>,
-    ) -> bool {
+    fn match_pattern(&self, pattern: &IRPattern, value: Value, bindings: &mut Vec<Value>) -> bool {
         let mut work: Vec<(&IRPattern, Value)> = vec![(pattern, value)];
 
         while let Some((pat, value)) = work.pop() {
