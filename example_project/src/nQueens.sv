@@ -46,9 +46,7 @@ solveNQueens n =
 
 countLists : forall a. [[a]] -> Int;
 countLists xss =
-    case xss of
-        [] => 0
-      | _ :: rest => 1 + countLists rest;
+    foldl (fun acc x => acc + 1) 0 xss;
 
 solveNQueensCount : Int -> Int;
 solveNQueensCount n =

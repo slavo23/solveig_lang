@@ -51,6 +51,7 @@ pub enum Token<'src> {
     Plus,
     Multiply,
     Divide,
+    Mod,
     Less,
     Greater,
     GreaterOrEqual,
@@ -165,6 +166,7 @@ pub fn lexer<'src>()
             just("-").to(Token::Minus),
             just("*").to(Token::Multiply),
             just("/").to(Token::Divide),
+            just("%").to(Token::Mod),
             parens,
             brackets,
         ))
@@ -717,6 +719,11 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
                 .with_span(e.span())
         });
 
+        let mod_infix = infix(left(4), just(Token::Mod), |lhs, _, rhs, e| {
+            SurfaceExpr::BinaryOperator(SurfaceBinOp::Mod, Box::new(lhs), Box::new(rhs))
+                .with_span(e.span())
+        });
+
         let neg_prefix = prefix(5, just(Token::Minus), |_, rhs, e| {
             SurfaceExpr::UnaryOperator(SurfaceUnOp::Neg, Box::new(rhs)).with_span(e.span())
         });
@@ -725,6 +732,7 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             neg_prefix,
             mul_infix,
             div_infix,
+            mod_infix,
             add_infix,
             sub_infix,
             less_infix,
@@ -971,7 +979,6 @@ pub fn module_parser<'tokens, 'src: 'tokens>() -> impl Parser<
         .then(program_parser())
         .map(|(imports, defs)| ParsedModule { imports, defs })
 }
-
 
 use chumsky::{error::Rich, span::SimpleSpan};
 

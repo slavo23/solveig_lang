@@ -266,6 +266,7 @@ impl Resolver {
                     SurfaceBinOp::Minus => BinOp::Minus,
                     SurfaceBinOp::Mult => BinOp::Mult,
                     SurfaceBinOp::Div => BinOp::Div,
+                    SurfaceBinOp::Mod => BinOp::Mod,
                     SurfaceBinOp::Less => BinOp::Less,
                     SurfaceBinOp::Greater => BinOp::Greater,
                     SurfaceBinOp::LessOrEqual => BinOp::LessOrEqual,

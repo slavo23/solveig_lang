@@ -751,6 +751,7 @@ impl Machine {
             BinOp::Minus => Value::Int(lhs - rhs),
             BinOp::Mult => Value::Int(lhs * rhs),
             BinOp::Div => Value::Int(lhs / rhs),
+            BinOp::Mod => Value::Int(lhs % rhs),
 
             BinOp::Less => self.bool_value(lhs < rhs),
             BinOp::Greater => self.bool_value(lhs > rhs),

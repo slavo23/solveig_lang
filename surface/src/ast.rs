@@ -127,6 +127,7 @@ pub enum SurfaceBinOp {
     Minus,
     Mult,
     Div,
+    Mod,
 
     Less,
     Greater,

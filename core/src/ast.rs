@@ -246,6 +246,7 @@ pub enum BinOp {
     Minus,
     Mult,
     Div,
+    Mod,
 
     Less,
     Greater,

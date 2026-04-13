@@ -8,7 +8,7 @@ use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use surface::ast::{ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition};
-use surface::parser::{imports_parser, render_rich_errors, lexer, module_parser};
+use surface::parser::{imports_parser, lexer, module_parser, render_rich_errors};
 
 use core::ast::{Kind, TypeExpr};
 use syntax::inference::type_infer::CheckedModule;

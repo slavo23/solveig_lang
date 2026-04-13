@@ -14,7 +14,7 @@ countDownSumGo n acc =
     else
         countDownSumGo (n - 1) (acc + n);
 
-div = 2 /2;
+div = 2 / 2;
 
 benchScalar : Int;
 benchScalar =
@@ -23,7 +23,7 @@ benchScalar =
 
 benchRangeFold : Int;
 benchRangeFold =
-    sumList (range 1 50000 True);
+    sumList (range 1 500000 True);
 
 
 benchPipeline : Int;

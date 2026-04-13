@@ -2,7 +2,7 @@ use core::ast::{BinOp, UnOp};
 use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
 
-use super::closure_ir::{CCCaseArm, CCExpr, CCFunction, CCGlobalDef, CCPattern, CCProgram};
+use super::closure_ir::{CCExpr, CCFunction, CCGlobalDef, CCPattern, CCProgram};
 
 const NON_EXHAUSTIVE_CASE_TRAP: u16 = 1;
 

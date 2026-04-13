@@ -582,22 +582,22 @@ impl Vm {
         self.heap.allocations_since_gc = 0;
         self.heap.next_gc_at = live.max(65_536) * 4;
     }
-    
-    #[inline]
+
+    #[inline(always)]
     fn push(&mut self, val: Value) {
         self.stack.push(val);
     }
 
-    #[inline]
+    #[inline(always)]
     fn pop(&mut self) -> Value {
-        self.stack.pop().expect("stack underflow")
+        unsafe { self.stack.pop().unwrap_unchecked() }
     }
 
-    #[inline]
+    #[inline(always)]
     fn pop_int(&mut self) -> i64 {
         match self.pop() {
             Value::Int(n) => n,
-            other => panic!("expected Int, got {:?}", other),
+            _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
 
@@ -615,14 +615,18 @@ impl Vm {
         });
     }
 
-    #[inline]
+    #[inline(always)]
     fn load(&self, slot: u16) -> Value {
-        self.stack[self.frame_base + slot as usize]
+        unsafe { *self.stack.get_unchecked(self.frame_base + slot as usize) }
     }
 
-    #[inline]
+    #[inline(always)]
     fn store(&mut self, slot: u16, val: Value) {
-        self.stack[self.frame_base + slot as usize] = val;
+        unsafe {
+            *self
+                .stack
+                .get_unchecked_mut(self.frame_base + slot as usize) = val;
+        }
     }
 
     fn ensure_slots(&mut self, count: usize) {
@@ -767,35 +771,6 @@ impl Vm {
             heap.copy_payload_to_stack(captures, stack, frame_base);
             heap.copy_payload_to_stack(supplied, stack, frame_base + capture_len);
         }
-    }
-
-    fn tail_enter_known(&mut self, program: &BytecodeProgram, chunk_id: usize, arg_count: usize) {
-        let meta = program.chunk(chunk_id);
-        let slot_count = meta.slot_count as usize;
-        let capture_count = match meta.kind {
-            ChunkKind::Function { capture_count, .. } => capture_count as usize,
-            _ => panic!("tail-entering thunk as function"),
-        };
-
-        if capture_count != 0 {
-            panic!(
-                "TailCallKnown currently expects zero-capture functions, got {} captures",
-                capture_count
-            );
-        }
-
-        let args_start = self.stack.len() - arg_count;
-
-        if args_start != self.frame_base {
-            for i in 0..arg_count {
-                self.stack[self.frame_base + i] = self.stack[args_start + i];
-            }
-        }
-
-        self.stack.truncate(self.frame_base + arg_count);
-        self.chunk = chunk_id;
-        self.pc = 0;
-        self.ensure_slots(slot_count);
     }
 
     fn tail_enter_closure(
@@ -1172,28 +1147,21 @@ impl Vm {
     fn dispatch(&mut self, program: &BytecodeProgram) -> Value {
         let mut code = &program.chunks[self.chunk].code;
         loop {
-            // if self.heap.allocations_since_gc >= self.heap.next_gc_at {
-            //     self.collect_garbage();
-            // }
-
-            let instr = code[self.pc];
+            let instr = unsafe { *code.get_unchecked(self.pc) };
             self.pc += 1;
 
             match instr {
                 Instr::PushUnit => self.push(Value::Unit),
                 Instr::PushInt(n) => self.push(Value::Int(n)),
-
                 Instr::LoadLocal(slot) => self.push(self.load(slot)),
                 Instr::StoreLocal(slot) => {
                     let val = self.pop();
                     self.store(slot, val);
                 }
-
                 Instr::LoadGlobal(index) => {
                     self.force_global_inline(program, index as usize);
                     code = &program.chunks[self.chunk].code;
                 }
-
                 Instr::PushCtorFn { tag, arity } => {
                     if arity == 0 {
                         self.push(self.nullary.get(tag));
@@ -1204,7 +1172,6 @@ impl Vm {
                         });
                     }
                 }
-
                 Instr::MakeClosure {
                     chunk,
                     capture_count,
@@ -1217,14 +1184,12 @@ impl Vm {
                     });
                     self.push(val);
                 }
-
                 Instr::Unary(op) => {
                     let rhs = self.pop_int();
                     self.push(match op {
                         core::ast::UnOp::Neg => Value::Int(-rhs),
                     });
                 }
-
                 Instr::Binary(op) => {
                     let rhs = self.pop_int();
                     let lhs = self.pop_int();
@@ -1238,9 +1203,9 @@ impl Vm {
                         core::ast::BinOp::LessOrEqual => self.push_bool(lhs <= rhs),
                         core::ast::BinOp::GreaterOrEqual => self.push_bool(lhs >= rhs),
                         core::ast::BinOp::Equal => self.push_bool(lhs == rhs),
+                        core::ast::BinOp::Mod => self.push(Value::Int(lhs % rhs)),
                     }
                 }
-
                 Instr::Pack {
                     tag,
                     arity,
@@ -1261,9 +1226,6 @@ impl Vm {
                     let callee_pos = self.stack.len() - n - 1;
                     let callee = self.stack[callee_pos];
 
-                    // Remove the callee from under the args by shifting
-                    // args down one slot.  For n=1 (curried language common
-                    // case) this is a single copy.
                     for i in callee_pos..self.stack.len() - 1 {
                         self.stack[i] = self.stack[i + 1];
                     }
@@ -1326,14 +1288,12 @@ impl Vm {
                     let n = arg_count as usize;
                     let args_start = self.stack.len() - n;
 
-                    // Move args to frame base
                     if args_start != self.frame_base {
                         for i in 0..n {
                             self.stack[self.frame_base + i] = self.stack[args_start + i];
                         }
                     }
 
-                    // Truncate and reset
                     self.stack.truncate(self.frame_base + n);
                     self.pc = 0;
 
@@ -1341,9 +1301,8 @@ impl Vm {
                         self.chunk = chunk_id;
                         let slot_count = program.chunks[chunk_id].slot_count as usize;
                         self.ensure_slots(slot_count);
-                        code = &program.chunks[self.chunk].code;
+                        code = &program.chunks[chunk_id].code;
                     } else {
-                        // Self-tail-call: chunk and slot_count unchanged, skip ensure_slots
                         let slot_count = program.chunks[chunk_id].slot_count as usize;
                         self.ensure_slots(slot_count);
                     }
@@ -1431,7 +1390,6 @@ fn match_pattern_inner(
         }
 
         BytePattern::Wild => true,
-
         BytePattern::Con(expected_tag, subs) => {
             let id = match value {
                 Value::Obj(id) => id,
