@@ -24,6 +24,9 @@ type PayloadRef = Range<usize>;
 struct PayloadStore {
     values: Vec<Value>,
     free: Vec<PayloadRef>,
+    bucket1: Vec<usize>,
+    bucket2: Vec<usize>,
+    bucket3: Vec<usize>,
 }
 
 impl PayloadStore {
@@ -66,31 +69,27 @@ impl PayloadStore {
             return Self::empty();
         }
 
+        let start = match len {
+            1 => self.bucket1.pop(),
+            2 => self.bucket2.pop(),
+            3 => self.bucket3.pop(),
+            _ => None,
+        };
+
+        if let Some(start) = start {
+            return start..(start + len);
+        }
+
         if let Some(span) = self.take_free_span(len) {
             return span;
         }
 
-        if !self.free.is_empty() {
-            self.coalesce_free();
-
-            if let Some(span) = self.take_free_span(len) {
-                return span;
-            }
-        }
-
         let start = self.values.len();
-        self.values.resize(start + len, Value::Unit);
-        start..(start + len)
-    }
-
-    fn alloc_from_slice(&mut self, values: &[Value]) -> PayloadRef {
-        if values.is_empty() {
-            return Self::empty();
+        self.values.reserve(len);
+        unsafe {
+            self.values.set_len(start + len);
         }
-
-        let span = self.reserve_span(values.len());
-        self.values[span.clone()].copy_from_slice(values);
-        span
+        start..(start + len)
     }
 
     fn alloc_from_stack_tail(&mut self, stack: &mut Vec<Value>, n: usize) -> PayloadRef {
@@ -150,32 +149,17 @@ impl PayloadStore {
     }
 
     fn free_span(&mut self, span: PayloadRef) {
-        if !Self::is_empty(&span) {
-            self.free.push(span);
+        let len = Self::len(&span);
+        match len {
+            0 => {}
+            1 => self.bucket1.push(span.start),
+            2 => self.bucket2.push(span.start),
+            3 => self.bucket3.push(span.start),
+            _ => self.free.push(span),
         }
-    }
-
-    fn coalesce_free(&mut self) {
-        if self.free.len() <= 1 {
-            return;
-        }
-
-        self.free.sort_unstable_by_key(|r| r.start);
-
-        let mut merged: Vec<Range<usize>> = Vec::with_capacity(self.free.len());
-        for span in self.free.drain(..) {
-            if let Some(last) = merged.last_mut() {
-                if last.end == span.start {
-                    last.end = span.end;
-                    continue;
-                }
-            }
-            merged.push(span);
-        }
-
-        self.free = merged;
     }
 }
+
 #[derive(Debug, Clone)]
 enum HeapObject {
     Closure {
@@ -500,10 +484,13 @@ impl Vm {
 
     #[inline]
     fn alloc_heap(&mut self, obj: HeapObject) -> Value {
-        if self.heap.allocations_since_gc >= self.heap.next_gc_at {
-            // self.collect_garbage();
-        }
         self.heap.alloc(obj)
+    }
+
+    fn maybe_gc(&mut self) {
+        if self.heap.allocations_since_gc >= self.heap.next_gc_at {
+            self.collect_garbage();
+        }
     }
 
     fn collect_garbage(&mut self) {
@@ -511,6 +498,12 @@ impl Vm {
 
         for i in 0..self.stack.len() {
             if let Value::Obj(id) = self.stack[i] {
+                mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
+            }
+        }
+
+        for &val in &self.match_buffer {
+            if let Value::Obj(id) = val {
                 mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
             }
         }
@@ -566,6 +559,10 @@ impl Vm {
             }
         }
 
+        self.heap.payloads.bucket1.clear();
+        self.heap.payloads.bucket2.clear();
+        self.heap.payloads.bucket3.clear();
+        self.heap.payloads.free.clear();
         self.heap.free_list.clear();
 
         let mut live = 0usize;
@@ -583,8 +580,9 @@ impl Vm {
         }
 
         self.heap.allocations_since_gc = 0;
-        self.heap.next_gc_at = live.max(16_384) * 2;
+        self.heap.next_gc_at = live.max(65_536) * 4;
     }
+    
     #[inline]
     fn push(&mut self, val: Value) {
         self.stack.push(val);
@@ -663,8 +661,6 @@ impl Vm {
         self.dispatch(program)
     }
 
-    /// Inline global forcing during execution: either pushes the value
-    /// or enters the thunk with an update continuation.
     fn force_global_inline(&mut self, program: &BytecodeProgram, index: usize) {
         match &self.globals[index] {
             GlobalSlot::Evaluated(val) => {
@@ -689,8 +685,6 @@ impl Vm {
         });
         self.enter_thunk(program, thunk_chunk);
     }
-
-    // ── Function entry ──────────────────────────────────────────
 
     fn enter_thunk(&mut self, program: &BytecodeProgram, chunk_id: usize) {
         let meta = program.chunk(chunk_id);
@@ -825,8 +819,6 @@ impl Vm {
             _ => panic!("capture source is not a closure"),
         };
 
-        debug_assert_eq!(capture_count, self.heap.payload_len(&captures));
-
         let args_start = self.stack.len() - arg_count;
 
         if args_start != self.frame_base {
@@ -897,6 +889,7 @@ impl Vm {
         callee: Value,
         arg_count: usize,
     ) -> Option<Value> {
+        self.maybe_gc();
         match callee {
             Value::CtorFn { tag, arity } => {
                 Some(self.build_ctor(tag, arity, PayloadStore::empty(), arg_count))
@@ -990,6 +983,7 @@ impl Vm {
         callee: Value,
         arg_count: usize,
     ) -> Option<Value> {
+        self.maybe_gc();
         match callee {
             Value::CtorFn { tag, arity } => {
                 Some(self.build_ctor(tag, arity, PayloadStore::empty(), arg_count))
@@ -1176,31 +1170,37 @@ impl Vm {
     }
 
     fn dispatch(&mut self, program: &BytecodeProgram) -> Value {
+        let mut code = &program.chunks[self.chunk].code;
         loop {
-            let instr = &program.chunk(self.chunk).code[self.pc];
+            // if self.heap.allocations_since_gc >= self.heap.next_gc_at {
+            //     self.collect_garbage();
+            // }
+
+            let instr = code[self.pc];
             self.pc += 1;
 
             match instr {
                 Instr::PushUnit => self.push(Value::Unit),
-                Instr::PushInt(n) => self.push(Value::Int(*n)),
+                Instr::PushInt(n) => self.push(Value::Int(n)),
 
-                Instr::LoadLocal(slot) => self.push(self.load(*slot)),
+                Instr::LoadLocal(slot) => self.push(self.load(slot)),
                 Instr::StoreLocal(slot) => {
                     let val = self.pop();
-                    self.store(*slot, val);
+                    self.store(slot, val);
                 }
 
                 Instr::LoadGlobal(index) => {
-                    self.force_global_inline(program, *index as usize);
+                    self.force_global_inline(program, index as usize);
+                    code = &program.chunks[self.chunk].code;
                 }
 
                 Instr::PushCtorFn { tag, arity } => {
-                    if *arity == 0 {
-                        self.push(self.nullary.get(*tag));
+                    if arity == 0 {
+                        self.push(self.nullary.get(tag));
                     } else {
                         self.push(Value::CtorFn {
-                            tag: *tag,
-                            arity: *arity,
+                            tag: tag,
+                            arity: arity,
                         });
                     }
                 }
@@ -1209,9 +1209,10 @@ impl Vm {
                     chunk,
                     capture_count,
                 } => {
-                    let captures = self.pop_payload(*capture_count as usize);
+                    self.maybe_gc();
+                    let captures = self.pop_payload(capture_count as usize);
                     let val = self.alloc_heap(HeapObject::Closure {
-                        chunk: *chunk as usize,
+                        chunk: chunk as usize,
                         captures,
                     });
                     self.push(val);
@@ -1245,17 +1246,18 @@ impl Vm {
                     arity,
                     field_count,
                 } => {
-                    if *arity == 0 {
-                        self.push(self.nullary.get(*tag));
+                    if arity == 0 {
+                        self.push(self.nullary.get(tag));
                     } else {
-                        let fields = self.pop_payload(*field_count as usize);
-                        let val = self.alloc_heap(HeapObject::Data { tag: *tag, fields });
+                        self.maybe_gc();
+                        let fields = self.pop_payload(field_count as usize);
+                        let val = self.alloc_heap(HeapObject::Data { tag: tag, fields });
                         self.push(val);
                     }
                 }
 
                 Instr::CallN { arg_count } => {
-                    let n = *arg_count as usize;
+                    let n = arg_count as usize;
                     let callee_pos = self.stack.len() - n - 1;
                     let callee = self.stack[callee_pos];
 
@@ -1270,11 +1272,12 @@ impl Vm {
                     if let Some(val) = self.apply_callee(program, callee, n) {
                         self.push(val);
                     }
+                    code = &program.chunks[self.chunk].code;
                 }
 
                 Instr::CallKnown { chunk, arg_count } => {
-                    let chunk_id = *chunk as usize;
-                    let n = *arg_count as usize;
+                    let chunk_id = chunk as usize;
+                    let n = arg_count as usize;
 
                     self.push_return();
 
@@ -1297,9 +1300,11 @@ impl Vm {
                                 self.stack[self.frame_base + i];
                         }
                     }
+
+                    code = &program.chunks[self.chunk].code;
                 }
                 Instr::TailCallN { arg_count } => {
-                    let n = *arg_count as usize;
+                    let n = arg_count as usize;
                     let callee_pos = self.stack.len() - n - 1;
                     let callee = self.stack[callee_pos];
 
@@ -1313,29 +1318,83 @@ impl Vm {
                             return done;
                         }
                     }
+                    code = &program.chunks[self.chunk].code;
                 }
 
                 Instr::TailCallKnown { chunk, arg_count } => {
-                    let chunk_id = *chunk as usize;
-                    let n = *arg_count as usize;
-                    self.tail_enter_known(program, chunk_id, n);
+                    let chunk_id = chunk as usize;
+                    let n = arg_count as usize;
+                    let args_start = self.stack.len() - n;
+
+                    // Move args to frame base
+                    if args_start != self.frame_base {
+                        for i in 0..n {
+                            self.stack[self.frame_base + i] = self.stack[args_start + i];
+                        }
+                    }
+
+                    // Truncate and reset
+                    self.stack.truncate(self.frame_base + n);
+                    self.pc = 0;
+
+                    if chunk_id != self.chunk {
+                        self.chunk = chunk_id;
+                        let slot_count = program.chunks[chunk_id].slot_count as usize;
+                        self.ensure_slots(slot_count);
+                        code = &program.chunks[self.chunk].code;
+                    } else {
+                        // Self-tail-call: chunk and slot_count unchanged, skip ensure_slots
+                        let slot_count = program.chunks[chunk_id].slot_count as usize;
+                        self.ensure_slots(slot_count);
+                    }
                 }
                 Instr::Return => {
                     let result = self.pop();
-                    if let Some(done) = self.finish_return(result) {
-                        return done;
+                    self.stack.truncate(self.frame_base);
+
+                    match self.returns.pop().expect("empty return stack") {
+                        ReturnTo::Halt => return result,
+                        ReturnTo::Caller {
+                            chunk,
+                            pc,
+                            frame_base,
+                        } => {
+                            self.chunk = chunk;
+                            self.pc = pc;
+                            self.frame_base = frame_base;
+                            self.push(result);
+                            code = &program.chunks[chunk].code;
+                        }
+                        ReturnTo::UpdateThenHalt { global_index } => {
+                            self.globals[global_index] = GlobalSlot::Evaluated(result);
+                            return result;
+                        }
+                        ReturnTo::UpdateThenResume {
+                            global_index,
+                            chunk,
+                            pc,
+                            frame_base,
+                        } => {
+                            self.globals[global_index] = GlobalSlot::Evaluated(result);
+                            self.chunk = chunk;
+                            self.pc = pc;
+                            self.frame_base = frame_base;
+                            self.push(result);
+                            code = &program.chunks[chunk].code;
+                        }
                     }
                 }
-                Instr::Jump(target) => self.pc = *target as usize,
+                Instr::Jump(target) => self.pc = target as usize,
                 Instr::JumpIfFalse(target) => {
                     let cond = self.pop();
                     if cond == self.bools.false_val {
-                        self.pc = *target as usize;
+                        self.pc = target as usize;
                     }
                 }
-                Instr::Match { arms, else_target } => {
+                Instr::Match(table_idx) => {
                     let scrutinee = self.pop();
-                    self.dispatch_match(arms, scrutinee, *else_target);
+                    let table = &program.chunks[self.chunk].match_tables[table_idx as usize];
+                    self.dispatch_match(&table.arms, scrutinee, table.else_target);
                 }
                 Instr::Trap(msg) => panic!("{}", msg),
             }

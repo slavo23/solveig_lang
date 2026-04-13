@@ -240,7 +240,7 @@ pub enum Literal {
     Int(i64),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub enum BinOp {
     Plus,
     Minus,
@@ -254,7 +254,7 @@ pub enum BinOp {
     Equal,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Copy)]
 pub enum UnOp {
     Neg,
 }

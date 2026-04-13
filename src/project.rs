@@ -8,7 +8,7 @@ use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use surface::ast::{ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition};
-use surface::parser::{imports_parser, lexer, module_parser};
+use surface::parser::{imports_parser, render_rich_errors, lexer, module_parser};
 
 use core::ast::{Kind, TypeExpr};
 use syntax::inference::type_infer::CheckedModule;
@@ -39,33 +39,27 @@ fn prelude_module(module: &ModuleName) -> Option<&'static str> {
         _ => None,
     }
 }
-
 fn mk_virtual_prelude_file(module: &ModuleName) -> Result<ModuleFile, String> {
     let source = prelude_module(module)
         .ok_or_else(|| format!("unknown compiler prelude module {}", module.as_string()))?
         .to_string();
 
+    let path = PathBuf::from(format!("<compiler-prelude>/{}.sv", module.as_string()));
+
     let tokens = lexer()
         .parse(source.as_str())
         .into_result()
-        .map_err(|errs| {
-            format!(
-                "lex error in compiler prelude {}:\n{errs:#?}",
-                module.as_string()
-            )
-        })?;
+        .map_err(|errs| render_rich_errors(&path, &source, "lex", &errs))?;
 
     let input = tokens[..].split_spanned((0..tokens.len()).into());
-    let parsed = module_parser().parse(input).into_result().map_err(|errs| {
-        format!(
-            "parse error in compiler prelude {}:\n{errs:#?}",
-            module.as_string()
-        )
-    })?;
+    let parsed = module_parser()
+        .parse(input)
+        .into_result()
+        .map_err(|errs| render_rich_errors(&path, &source, "parse", &errs))?;
 
     Ok(ModuleFile {
         name: module.clone(),
-        path: PathBuf::from(format!("<compiler-prelude>/{}.sv", module.as_string())),
+        path,
         source: source.clone(),
         imports: parsed.imports.clone(),
     })
@@ -249,13 +243,13 @@ fn scan_module_file(root: &Path, file: &Path) -> Result<ModuleFile, String> {
     let tokens = lexer()
         .parse(source.as_str())
         .into_result()
-        .map_err(|errs| format!("lex error in {}:\n{errs:#?}", file.display()))?;
+        .map_err(|errs| render_rich_errors(file, &source, "lex", &errs))?;
 
     let input = tokens[..].split_spanned((0..tokens.len()).into());
     let parsed = module_parser()
         .parse(input)
         .into_result()
-        .map_err(|errs| format!("parse error in {}:\n{errs:#?}", file.display()))?;
+        .map_err(|errs| render_rich_errors(file, &source, "parse", &errs))?;
 
     let name = module_name_from_file(root, file)?;
 
@@ -271,13 +265,13 @@ pub fn parse_module<'src>(file: &'src ModuleFile) -> Result<ParsedModule<'src>, 
     let tokens = lexer()
         .parse(file.source.as_str())
         .into_result()
-        .map_err(|errs| format!("lex error in {}:\n{errs:#?}", file.path.display()))?;
+        .map_err(|errs| render_rich_errors(&file.path, &file.source, "lex", &errs))?;
 
     let input = tokens[..].split_spanned((0..tokens.len()).into());
     let parsed = module_parser()
         .parse(input)
         .into_result()
-        .map_err(|errs| format!("parse error in {}:\n{errs:#?}", file.path.display()))?;
+        .map_err(|errs| render_rich_errors(&file.path, &file.source, "parse", &errs))?;
 
     Ok(parsed)
 }

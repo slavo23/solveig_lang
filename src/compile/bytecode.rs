@@ -4,7 +4,9 @@ use std::{collections::HashMap, path::Path};
 
 use super::closure_ir::{CCCaseArm, CCExpr, CCFunction, CCGlobalDef, CCPattern, CCProgram};
 
-#[derive(Debug, Clone)]
+const NON_EXHAUSTIVE_CASE_TRAP: u16 = 1;
+
+#[derive(Debug, Clone, Copy)]
 pub enum Instr {
     PushUnit,
     PushInt(i64),
@@ -43,12 +45,8 @@ pub enum Instr {
     Return,
     Jump(u32),
     JumpIfFalse(u32),
-    Match {
-        arms: Box<[MatchArm]>,
-        else_target: u32,
-    },
-
-    Trap(&'static str),
+    Match(u16),
+    Trap(u16),
 }
 
 #[derive(Debug, Clone)]
@@ -90,6 +88,13 @@ pub struct Chunk {
     pub kind: ChunkKind,
     pub slot_count: u16,
     pub code: Vec<Instr>,
+    pub match_tables: Vec<MatchTable>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MatchTable {
+    pub arms: Box<[MatchArm]>,
+    pub else_target: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -161,7 +166,35 @@ impl BytecodeProgram {
             ));
 
             for (pc, instr) in chunk.code.iter().enumerate() {
-                out.push_str(&format!("{pc:04}: {}\n", format_instr(instr)));
+                match instr {
+                    Instr::Match(table_ix) => {
+                        let table_ix = *table_ix as usize;
+                        let table = chunk.match_tables.get(table_ix).unwrap_or_else(|| {
+                            panic!(
+                                "chunk '{}' references missing match table {}",
+                                chunk.name, table_ix
+                            )
+                        });
+
+                        out.push_str(&format!(
+                            "{pc:04}: Match table={} else_target={}\n",
+                            table_ix, table.else_target
+                        ));
+
+                        for (arm_ix, arm) in table.arms.iter().enumerate() {
+                            out.push_str(&format!(
+                                "      arm[{arm_ix}] target={} binds={:?} pattern={}\n",
+                                arm.target,
+                                arm.bind_slots,
+                                format_pattern(&arm.pattern),
+                            ));
+                        }
+                    }
+
+                    _ => {
+                        out.push_str(&format!("{pc:04}: {}\n", format_instr(instr)));
+                    }
+                }
             }
         }
 
@@ -346,7 +379,7 @@ impl BytecodeLowerer {
                 }
 
                 let else_target = builder.current_pc();
-                builder.emit(Instr::Trap("non-exhaustive case"));
+                builder.emit(Instr::Trap(NON_EXHAUSTIVE_CASE_TRAP));
 
                 builder.patch_match(match_pos, compiled_arms.into_boxed_slice(), else_target);
             }
@@ -517,7 +550,7 @@ impl BytecodeLowerer {
                 }
 
                 let else_target = builder.current_pc();
-                builder.emit(Instr::Trap("non-exhaustive case"));
+                builder.emit(Instr::Trap(NON_EXHAUSTIVE_CASE_TRAP));
 
                 let end_target = builder.current_pc();
                 for jump in arm_jumps_to_end {
@@ -554,6 +587,7 @@ struct ChunkBuilder {
 
     next_slot: u16,
     max_slot_exclusive: u16,
+    match_tables: Vec<MatchTable>,
 }
 
 impl ChunkBuilder {
@@ -563,6 +597,7 @@ impl ChunkBuilder {
             name,
             kind: ChunkKind::GlobalThunk,
             code: Vec::new(),
+            match_tables: Vec::new(),
             next_slot: 0,
             max_slot_exclusive: 0,
         }
@@ -581,6 +616,7 @@ impl ChunkBuilder {
                 arity,
             },
             code: Vec::new(),
+            match_tables: Vec::new(),
             next_slot,
             max_slot_exclusive: next_slot,
         }
@@ -621,25 +657,17 @@ impl ChunkBuilder {
     }
 
     fn emit_placeholder_match(&mut self) -> usize {
-        let pos = self.code.len();
-        self.code.push(Instr::Match {
+        let table_idx = self.match_tables.len();
+        self.match_tables.push(MatchTable {
             arms: Box::new([]),
             else_target: u32::MAX,
         });
-        pos
+        self.code.push(Instr::Match(table_idx as u16));
+        table_idx
     }
 
-    fn patch_match(&mut self, pos: usize, arms: Box<[MatchArm]>, else_target: u32) {
-        match &mut self.code[pos] {
-            Instr::Match {
-                arms: arm_slot,
-                else_target: target_slot,
-            } => {
-                *arm_slot = arms;
-                *target_slot = else_target;
-            }
-            other => panic!("expected Match at patch site, found {:?}", other),
-        }
+    fn patch_match(&mut self, table_idx: usize, arms: Box<[MatchArm]>, else_target: u32) {
+        self.match_tables[table_idx] = MatchTable { arms, else_target };
     }
 
     fn alloc_local_slot(&mut self) -> u16 {
@@ -663,6 +691,7 @@ impl ChunkBuilder {
             kind: self.kind,
             slot_count: self.max_slot_exclusive,
             code: self.code,
+            match_tables: self.match_tables,
         }
     }
 }
@@ -705,23 +734,19 @@ fn format_instr(instr: &Instr) -> String {
         Instr::Return => "Return".to_string(),
         Instr::Jump(target) => format!("Jump {target}"),
         Instr::JumpIfFalse(target) => format!("JumpIfFalse {target}"),
-        Instr::Match { arms, else_target } => {
-            let mut s = format!("Match else_target={else_target}");
-            for (i, arm) in arms.iter().enumerate() {
-                s.push_str(&format!(
-                    "\n      arm[{i}] target={} binds={:?} pattern={}",
-                    arm.target,
-                    arm.bind_slots,
-                    format_pattern(&arm.pattern)
-                ));
-            }
-            s
-        }
+        Instr::Match(table_ix) => format!("Match table={table_ix}"),
         Instr::TailCallN { arg_count } => format!("TailCallN arg_count={arg_count}"),
         Instr::TailCallKnown { chunk, arg_count } => {
             format!("TailCallKnown chunk={chunk} arg_count={arg_count}")
         }
-        Instr::Trap(msg) => format!("Trap {:?}", msg),
+        Instr::Trap(code) => format!("Trap {}", format_trap(*code)),
+    }
+}
+
+fn format_trap(code: u16) -> String {
+    match code {
+        NON_EXHAUSTIVE_CASE_TRAP => "\"non-exhaustive case\"".to_string(),
+        other => format!("code={other}"),
     }
 }
 

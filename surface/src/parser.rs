@@ -1,3 +1,6 @@
+use std::path::Path;
+
+use ariadne::{Color, Label, Report, ReportKind, Source};
 use chumsky::{
     input::{Input as _, MappedInput},
     pratt::*,
@@ -967,4 +970,36 @@ pub fn module_parser<'tokens, 'src: 'tokens>() -> impl Parser<
     imports_parser()
         .then(program_parser())
         .map(|(imports, defs)| ParsedModule { imports, defs })
+}
+
+
+use chumsky::{error::Rich, span::SimpleSpan};
+
+pub fn render_rich_errors<T: std::fmt::Debug>(
+    path: &Path,
+    source: &str,
+    phase: &str,
+    errs: &[Rich<'_, T, SimpleSpan>],
+) -> String {
+    let file_id = path.display().to_string();
+    let mut out = Vec::<u8>::new();
+
+    for err in errs {
+        let span = err.span();
+        let range = span.start..span.end;
+
+        let _ = Report::build(ReportKind::Error, (file_id.clone(), range.clone()))
+            .with_message(format!("{phase} error"))
+            .with_label(
+                Label::new((file_id.clone(), range))
+                    .with_color(Color::Red)
+                    .with_message(format!("{err:?}")),
+            )
+            .finish()
+            .write((file_id.clone(), Source::from(source)), &mut out);
+
+        out.extend_from_slice(b"\n");
+    }
+
+    String::from_utf8_lossy(&out).into_owned()
 }

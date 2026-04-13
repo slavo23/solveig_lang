@@ -1,8 +1,12 @@
-import stressTest(runStressTest);
+import nQueens(solveNQueensCount);
+import sudoku(solveBoard, samplePuzzle);
+import binaryTree(sampleTree);
+import brainfuck(sampleAddOutput);
 
-bigList = range 1 10000 True;
+runSudokuReadyExample = solveBoard samplePuzzle;
+runNQueensReadyExample = solveNQueensCount 12;
+runBinaryTreeExample = sampleTree;
+runBrainfuckExample = sampleAddOutput;
 
-sumEvenBigList = foldl (fun acc x => acc + x) 0 (filter even bigList);
 
-
-main = runStressTest;
+main = runBrainfuckExample;
