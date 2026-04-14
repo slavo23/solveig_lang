@@ -9,12 +9,12 @@ pub enum HeapObject {
     PartialApp {
         chunk: usize,
         captures: PayloadRef,
-        supplied: PayloadRef,
+        applied_args: PayloadRef,
     },
     PartialCtor {
         tag: u16,
         arity: u16,
-        supplied: PayloadRef,
+        applied_args: PayloadRef,
     },
     Data {
         tag: u16,
@@ -78,6 +78,31 @@ impl Heap {
         }
     }
 
+    #[inline(always)]
+    pub fn alloc_data2(&mut self, tag: u16, a: Value, b: Value) -> Value {
+        let fields = if let Some(start) = self.payloads.bucket2.pop() {
+            PayloadRef {
+                start,
+                end: start + 2,
+            }
+        } else {
+            let start = self.payloads.values.len();
+            self.payloads.values.reserve(2);
+            unsafe {
+                self.payloads.values.set_len(start + 2);
+            }
+            PayloadRef {
+                start,
+                end: start + 2,
+            }
+        };
+
+        self.payloads.values[fields.start] = a;
+        self.payloads.values[fields.start + 1] = b;
+
+        self.alloc(HeapObject::Data { tag, fields })
+    }
+
     pub fn clone_payload(&mut self, span: PayloadRef) -> PayloadRef {
         self.payloads.alloc_clone(span)
     }
@@ -118,13 +143,15 @@ impl Heap {
                 self.payloads.free_span(*captures);
             }
             HeapObject::PartialApp {
-                captures, supplied, ..
+                captures,
+                applied_args,
+                ..
             } => {
                 self.payloads.free_span(*captures);
-                self.payloads.free_span(*supplied);
+                self.payloads.free_span(*applied_args);
             }
-            HeapObject::PartialCtor { supplied, .. } => {
-                self.payloads.free_span(*supplied);
+            HeapObject::PartialCtor { applied_args, .. } => {
+                self.payloads.free_span(*applied_args);
             }
             HeapObject::Data { fields, .. } => {
                 self.payloads.free_span(*fields);
@@ -137,6 +164,41 @@ impl Heap {
 pub struct PayloadRef {
     pub start: usize,
     pub end: usize,
+}
+
+impl PayloadRef {
+    #[inline(always)]
+    pub fn len(self) -> usize {
+        self.end - self.start
+    }
+
+    #[inline(always)]
+    pub fn is_empty(self) -> bool {
+        self.start == self.end
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BoundPrefix {
+    pub captures: PayloadRef,
+    pub applied_args: PayloadRef,
+}
+
+impl BoundPrefix {
+    pub const EMPTY: Self = Self {
+        captures: PayloadRef { start: 0, end: 0 },
+        applied_args: PayloadRef { start: 0, end: 0 },
+    };
+
+    #[inline(always)]
+    pub fn total_len(self) -> usize {
+        self.captures.len() + self.applied_args.len()
+    }
+
+    #[inline(always)]
+    pub fn is_empty(self) -> bool {
+        self.captures.is_empty() && self.applied_args.is_empty()
+    }
 }
 
 #[derive(Debug, Default)]

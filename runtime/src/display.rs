@@ -49,14 +49,16 @@ impl DisplayValue<'_> {
             }
             Value::Obj(id) => match self.heap.get(id) {
                 HeapObject::Closure { .. } | HeapObject::PartialApp { .. } => "<closure>".into(),
-                HeapObject::PartialCtor { tag, supplied, .. } => {
+                HeapObject::PartialCtor {
+                    tag, applied_args, ..
+                } => {
                     let name = tag_name(self.arities, *tag);
-                    let supplied = self.heap.payloads.as_slice(*supplied);
+                    let applied_args = self.heap.payloads.as_slice(*applied_args);
 
-                    if supplied.is_empty() {
+                    if applied_args.is_empty() {
                         format!("<partial {}>", name)
                     } else {
-                        format!("<partial {} {}>", name, self.render_args(supplied))
+                        format!("<partial {} {}>", name, self.render_args(applied_args))
                     }
                 }
                 HeapObject::Data { tag, fields } => {

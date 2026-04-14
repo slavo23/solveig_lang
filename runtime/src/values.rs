@@ -13,21 +13,21 @@ pub enum Value {
 pub enum GlobalSlot {
     Evaluated(Value),
     Thunk { chunk: usize },
-    BlackHole,
+    Evaluating,
 }
 
 #[derive(Clone, Copy)]
-pub enum ReturnTo {
+pub enum Continuation {
     Halt,
-    Caller {
+    CallerFrame {
         chunk: usize,
         pc: usize,
         frame_base: usize,
     },
-    UpdateThenHalt {
+    PublishGlobalThenHalt {
         global_index: usize,
     },
-    UpdateThenResume {
+    PublishGlobalThenResume {
         global_index: usize,
         chunk: usize,
         pc: usize,
@@ -40,11 +40,11 @@ pub struct BoolCache {
     pub false_val: Value,
 }
 
-pub struct NullaryCache {
+pub struct NullaryCtorCache {
     pub tags: Vec<Option<Value>>,
 }
 
-impl NullaryCache {
+impl NullaryCtorCache {
     pub fn new(max_tag: usize) -> Self {
         Self {
             tags: vec![None; max_tag + 1],
