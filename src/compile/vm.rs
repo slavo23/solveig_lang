@@ -16,9 +16,11 @@ enum Value {
     Obj(ObjId),
 }
 
-use std::ops::Range;
-
-type PayloadRef = Range<usize>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PayloadRef {
+    start: usize,
+    end: usize,
+}
 
 #[derive(Debug, Default)]
 struct PayloadStore {
@@ -32,7 +34,7 @@ struct PayloadStore {
 impl PayloadStore {
     #[inline]
     fn empty() -> PayloadRef {
-        0..0
+        PayloadRef { start: 0, end: 0 }
     }
 
     #[inline]
@@ -47,19 +49,24 @@ impl PayloadStore {
 
     #[inline]
     fn as_slice(&self, span: PayloadRef) -> &[Value] {
-        &self.values[span]
+        &self.values[span.start..span.end]
     }
 
     fn take_free_span(&mut self, len: usize) -> Option<PayloadRef> {
         let idx = self.free.iter().position(|r| Self::len(r) >= len)?;
-        let span = self.free[idx].clone();
-
+        let span = self.free[idx];
         if Self::len(&span) == len {
             self.free.swap_remove(idx);
             Some(span)
         } else {
-            let out = span.start..(span.start + len);
-            self.free[idx] = (span.start + len)..span.end;
+            let out = PayloadRef {
+                start: span.start,
+                end: span.start + len,
+            };
+            self.free[idx] = PayloadRef {
+                start: span.start + len,
+                end: span.end,
+            };
             Some(out)
         }
     }
@@ -77,7 +84,10 @@ impl PayloadStore {
         };
 
         if let Some(start) = start {
-            return start..(start + len);
+            return PayloadRef {
+                start,
+                end: start + len,
+            };
         }
 
         if let Some(span) = self.take_free_span(len) {
@@ -89,7 +99,10 @@ impl PayloadStore {
         unsafe {
             self.values.set_len(start + len);
         }
-        start..(start + len)
+        PayloadRef {
+            start,
+            end: start + len,
+        }
     }
 
     fn alloc_from_stack_tail(&mut self, stack: &mut Vec<Value>, n: usize) -> PayloadRef {
@@ -99,10 +112,8 @@ impl PayloadStore {
 
         let stack_start = stack.len() - n;
         let span = self.reserve_span(n);
-
-        self.values[span.clone()].copy_from_slice(&stack[stack_start..]);
+        self.values[span.start..span.end].copy_from_slice(&stack[stack_start..]);
         stack.truncate(stack_start);
-
         span
     }
 
@@ -113,7 +124,7 @@ impl PayloadStore {
         }
 
         let dst = self.reserve_span(len);
-        self.values.copy_within(src, dst.start);
+        self.values.copy_within(src.start..src.end, dst.start);
         dst
     }
 
@@ -133,14 +144,13 @@ impl PayloadStore {
         let dst = self.reserve_span(total);
 
         if prefix_len > 0 {
-            self.values.copy_within(prefix, dst.start);
+            self.values.copy_within(prefix.start..prefix.end, dst.start);
         }
 
         if suffix_len > 0 {
             let stack_start = stack.len() - suffix_len;
             let dst_start = dst.start + prefix_len;
             let dst_end = dst_start + suffix_len;
-
             self.values[dst_start..dst_end].copy_from_slice(&stack[stack_start..]);
             stack.truncate(stack_start);
         }
@@ -703,24 +713,12 @@ impl Vm {
         &mut self,
         program: &BytecodeProgram,
         chunk_id: usize,
-        capture_source: ObjId,
+        captures: PayloadRef,
         arg_count: usize,
     ) {
         let meta = program.chunk(chunk_id);
         let slot_count = meta.slot_count as usize;
-        let capture_count = match meta.kind {
-            ChunkKind::Function { capture_count, .. } => capture_count as usize,
-            _ => panic!("entering thunk as closure"),
-        };
-
-        let captures = match self.heap.target(capture_source) {
-            HeapTarget::Closure { captures, .. } | HeapTarget::PartialApp { captures, .. } => {
-                captures
-            }
-            _ => panic!("capture source is not a closure"),
-        };
-
-        debug_assert_eq!(capture_count, self.heap.payload_len(&captures));
+        let capture_count = PayloadStore::len(&captures);
 
         let args_start = self.stack.len() - arg_count;
         self.chunk = chunk_id;
@@ -732,7 +730,6 @@ impl Vm {
             for i in (0..arg_count).rev() {
                 self.stack[self.frame_base + capture_count + i] = self.stack[self.frame_base + i];
             }
-
             let frame_base = self.frame_base;
             let (heap, stack) = (&self.heap, &mut self.stack);
             heap.copy_payload_to_stack(captures, stack, frame_base);
@@ -772,30 +769,18 @@ impl Vm {
             heap.copy_payload_to_stack(supplied, stack, frame_base + capture_len);
         }
     }
-
     fn tail_enter_closure(
         &mut self,
         program: &BytecodeProgram,
         chunk_id: usize,
-        capture_source: ObjId,
+        captures: PayloadRef,
         arg_count: usize,
     ) {
         let meta = program.chunk(chunk_id);
         let slot_count = meta.slot_count as usize;
-        let capture_count = match meta.kind {
-            ChunkKind::Function { capture_count, .. } => capture_count as usize,
-            _ => panic!("tail-entering thunk as closure"),
-        };
-
-        let captures = match self.heap.target(capture_source) {
-            HeapTarget::Closure { captures, .. } | HeapTarget::PartialApp { captures, .. } => {
-                captures
-            }
-            _ => panic!("capture source is not a closure"),
-        };
+        let capture_count = PayloadStore::len(&captures);
 
         let args_start = self.stack.len() - arg_count;
-
         if args_start != self.frame_base {
             for i in 0..arg_count {
                 self.stack[self.frame_base + i] = self.stack[args_start + i];
@@ -811,7 +796,6 @@ impl Vm {
             for i in (0..arg_count).rev() {
                 self.stack[self.frame_base + capture_count + i] = self.stack[self.frame_base + i];
             }
-
             let frame_base = self.frame_base;
             let (heap, stack) = (&self.heap, &mut self.stack);
             heap.copy_payload_to_stack(captures, stack, frame_base);
@@ -882,17 +866,18 @@ impl Vm {
         id: ObjId,
         arg_count: usize,
     ) -> Option<Value> {
-        match self.heap.target(id) {
-            HeapTarget::Closure { chunk, captures } => {
+        match self.heap.get(id) {
+            HeapObject::Closure { chunk, captures } => {
+                let chunk = *chunk;
+                let captures = captures.clone();
                 let arity = chunk_arity(program, chunk);
-
                 if arg_count == arity {
-                    self.tail_enter_closure(program, chunk, id, arg_count);
+                    self.tail_enter_closure(program, chunk, captures, arg_count);
                     None
                 } else if arg_count < arity {
+                    self.maybe_gc();
                     let supplied = self.pop_payload(arg_count);
                     let captures = self.heap.clone_payload(captures);
-
                     Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
@@ -905,28 +890,29 @@ impl Vm {
                     );
                 }
             }
-
-            HeapTarget::PartialApp {
+            HeapObject::PartialApp {
                 chunk,
                 captures,
                 supplied,
             } => {
+                let chunk = *chunk;
+                let captures = captures.clone();
+                let supplied = supplied.clone();
                 let arity = chunk_arity(program, chunk);
-                let total = self.heap.payload_len(&supplied) + arg_count;
-
+                let total = PayloadStore::len(&supplied) + arg_count;
                 if total == arity {
                     self.tail_enter_with_prefix_and_stack_tail(
                         program, chunk, captures, supplied, arg_count,
                     );
                     None
                 } else if total < arity {
+                    self.maybe_gc();
                     let captures = self.heap.clone_payload(captures);
                     let supplied = self.heap.alloc_concat_payload_and_stack_tail(
                         supplied,
                         &mut self.stack,
                         arg_count,
                     );
-
                     Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
@@ -939,14 +925,17 @@ impl Vm {
                     );
                 }
             }
-
-            HeapTarget::PartialCtor {
+            HeapObject::PartialCtor {
                 tag,
                 arity,
                 supplied,
-            } => Some(self.build_ctor(tag, arity, supplied, arg_count)),
-
-            HeapTarget::Data { tag, .. } => {
+            } => {
+                let tag = *tag;
+                let arity = *arity;
+                let supplied = supplied.clone();
+                Some(self.build_ctor(tag, arity, supplied, arg_count))
+            }
+            HeapObject::Data { tag, .. } => {
                 panic!("cannot apply saturated constructor tag {}", tag);
             }
         }
@@ -976,18 +965,19 @@ impl Vm {
         id: ObjId,
         arg_count: usize,
     ) -> Option<Value> {
-        match self.heap.target(id) {
-            HeapTarget::Closure { chunk, captures } => {
+        match self.heap.get(id) {
+            HeapObject::Closure { chunk, captures } => {
+                let chunk = *chunk;
+                let captures = captures.clone();
                 let arity = chunk_arity(program, chunk);
-
                 if arg_count == arity {
                     self.push_return();
-                    self.enter_closure(program, chunk, id, arg_count);
+                    self.enter_closure(program, chunk, captures, arg_count);
                     None
                 } else if arg_count < arity {
+                    self.maybe_gc();
                     let supplied = self.pop_payload(arg_count);
                     let captures = self.heap.clone_payload(captures);
-
                     Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
@@ -1000,15 +990,16 @@ impl Vm {
                     );
                 }
             }
-
-            HeapTarget::PartialApp {
+            HeapObject::PartialApp {
                 chunk,
                 captures,
                 supplied,
             } => {
+                let chunk = *chunk;
+                let captures = captures.clone();
+                let supplied = supplied.clone();
                 let arity = chunk_arity(program, chunk);
-                let total = self.heap.payload_len(&supplied) + arg_count;
-
+                let total = PayloadStore::len(&supplied) + arg_count;
                 if total == arity {
                     self.push_return();
                     self.enter_with_prefix_and_stack_tail(
@@ -1016,13 +1007,13 @@ impl Vm {
                     );
                     None
                 } else if total < arity {
+                    self.maybe_gc();
                     let captures = self.heap.clone_payload(captures);
                     let supplied = self.heap.alloc_concat_payload_and_stack_tail(
                         supplied,
                         &mut self.stack,
                         arg_count,
                     );
-
                     Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
                         captures,
@@ -1035,14 +1026,17 @@ impl Vm {
                     );
                 }
             }
-
-            HeapTarget::PartialCtor {
+            HeapObject::PartialCtor {
                 tag,
                 arity,
                 supplied,
-            } => Some(self.build_ctor(tag, arity, supplied, arg_count)),
-
-            HeapTarget::Data { tag, .. } => {
+            } => {
+                let tag = *tag;
+                let arity = *arity;
+                let supplied = supplied.clone();
+                Some(self.build_ctor(tag, arity, supplied, arg_count))
+            }
+            HeapObject::Data { tag, .. } => {
                 panic!("cannot apply saturated constructor tag {}", tag);
             }
         }
@@ -1068,41 +1062,63 @@ impl Vm {
     }
 
     fn dispatch_match(&mut self, arms: &[MatchArm], scrutinee: Value, else_pc: u32) {
-        let matched_arm_idx = {
-            let heap = &self.heap;
-            let bindings = &mut self.match_buffer;
-
-            let mut matched = None;
-
-            for (arm_idx, arm) in arms.iter().enumerate() {
-                bindings.clear();
-
-                if bindings.capacity() < arm.bind_slots.len() {
-                    bindings.reserve(arm.bind_slots.len() - bindings.capacity());
+        for arm in arms {
+            match &arm.pattern {
+                BytePattern::Var => {
+                    self.store(arm.bind_slots[0], scrutinee);
+                    self.pc = arm.target as usize;
+                    return;
                 }
+                BytePattern::Wild => {
+                    self.pc = arm.target as usize;
+                    return;
+                }
+                BytePattern::Con(expected_tag, subs) => {
+                    let id = match scrutinee {
+                        Value::Obj(id) => id,
+                        _ => continue,
+                    };
+                    let (tag, fields_ref) = match self.heap.get(id) {
+                        HeapObject::Data { tag, fields } => (*tag, fields.clone()),
+                        _ => continue,
+                    };
+                    if tag != *expected_tag {
+                        continue;
+                    }
 
-                if match_pattern(heap, &arm.pattern, scrutinee, bindings) {
-                    matched = Some(arm_idx);
-                    break;
+                    if let Some(bind_count) = try_flat_bind(subs) {
+                        let fields = self.heap.payloads.as_slice(fields_ref);
+                        if fields.len() != subs.len() {
+                            continue;
+                        }
+
+                        self.match_buffer.clear();
+                        for (i, sub) in subs.iter().enumerate() {
+                            if matches!(sub, BytePattern::Var) {
+                                self.match_buffer.push(fields[i]);
+                            }
+                        }
+
+                        debug_assert_eq!(self.match_buffer.len(), bind_count);
+                        for i in 0..bind_count {
+                            self.store(arm.bind_slots[i], self.match_buffer[i]);
+                        }
+                        self.pc = arm.target as usize;
+                        return;
+                    }
+
+                    self.match_buffer.clear();
+                    if match_pattern(&self.heap, &arm.pattern, scrutinee, &mut self.match_buffer) {
+                        for i in 0..arm.bind_slots.len() {
+                            self.store(arm.bind_slots[i], self.match_buffer[i]);
+                        }
+                        self.pc = arm.target as usize;
+                        return;
+                    }
                 }
             }
-
-            matched
-        };
-
-        if let Some(arm_idx) = matched_arm_idx {
-            let arm = &arms[arm_idx];
-
-            for i in 0..arm.bind_slots.len() {
-                let slot = arm.bind_slots[i];
-                let val = self.match_buffer[i];
-                self.store(slot, val);
-            }
-
-            self.pc = arm.target as usize;
-        } else {
-            self.pc = else_pc as usize;
         }
+        self.pc = else_pc as usize;
     }
 
     fn finish_return(&mut self, result: Value) -> Option<Value> {
@@ -1213,10 +1229,34 @@ impl Vm {
                 } => {
                     if arity == 0 {
                         self.push(self.nullary.get(tag));
+                    } else if field_count == 2 {
+                        self.maybe_gc();
+                        let b = self.pop();
+                        let a = self.pop();
+                        let span = if let Some(start) = self.heap.payloads.bucket2.pop() {
+                            start..(start + 2)
+                        } else {
+                            let start = self.heap.payloads.values.len();
+                            self.heap.payloads.values.reserve(2);
+                            unsafe {
+                                self.heap.payloads.values.set_len(start + 2);
+                            }
+                            start..(start + 2)
+                        };
+                        self.heap.payloads.values[span.start] = a;
+                        self.heap.payloads.values[span.start + 1] = b;
+                        let val = self.heap.alloc(HeapObject::Data {
+                            tag,
+                            fields: PayloadRef {
+                                start: span.start,
+                                end: span.end,
+                            },
+                        });
+                        self.push(val);
                     } else {
                         self.maybe_gc();
                         let fields = self.pop_payload(field_count as usize);
-                        let val = self.alloc_heap(HeapObject::Data { tag: tag, fields });
+                        let val = self.alloc_heap(HeapObject::Data { tag, fields });
                         self.push(val);
                     }
                 }
@@ -1359,6 +1399,19 @@ impl Vm {
             }
         }
     }
+}
+
+#[inline]
+fn try_flat_bind(subs: &[BytePattern]) -> Option<usize> {
+    let mut count = 0;
+    for sub in subs {
+        match sub {
+            BytePattern::Var => count += 1,
+            BytePattern::Wild => {}
+            BytePattern::Con(..) => return None,
+        }
+    }
+    Some(count)
 }
 
 fn match_pattern(

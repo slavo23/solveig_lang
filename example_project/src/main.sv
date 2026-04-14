@@ -8,7 +8,7 @@ import quicksort(sampleSortedQuickSort);
 import mergesort(sampleSortedMergeSort);
 
 runSudokuReadyExample = solveBoard samplePuzzle;
-runNQueensReadyExample = solveNQueensCount 8;
+runNQueensReadyExample = solveNQueensCount 10;
 runBinaryTreeExample = sampleTree;
 runBrainfuckExample = sampleAddOutput;
 runQuicksortExample = sampleSortedQuickSort 1000000;
