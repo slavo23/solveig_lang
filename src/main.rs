@@ -10,8 +10,9 @@ use clap::Parser;
 use resolver::{Resolver, ResolverImports};
 use syntax::inference::type_infer::{check_and_elab_module, CheckedModule};
 
-pub mod compile;
-use compile::{closure_lower::lower_to_closure_ir, lowering::lower_module, vm::Machine};
+use lowering::closure_lower::lower_to_closure_ir;
+use lowering::lowering::lower_module;
+use runtime::vm::Machine;
 
 use project::{
     build_module_api, build_module_graph, build_typed_module_api, ensure_acyclic_modules,

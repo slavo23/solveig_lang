@@ -25,6 +25,12 @@ pub struct SignatureKindInferencer {
     tycon_env: HashMap<String, Kind>,
 }
 
+impl Default for SignatureKindInferencer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SignatureKindInferencer {
     pub fn new() -> Self {
         Self {
@@ -194,7 +200,7 @@ impl SignatureKindInferencer {
         }
     }
 
-    fn collect_outer_foralls<'a>(ty: &'a TypeExpr, out: &mut Vec<(String, Kind)>) {
+    fn collect_outer_foralls(ty: &TypeExpr, out: &mut Vec<(String, Kind)>) {
         if let TypeExpr::TyForAll(name, kind, body) = ty {
             out.push((name.clone(), kind.clone()));
             Self::collect_outer_foralls(body, out);

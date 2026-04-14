@@ -38,6 +38,12 @@ pub struct DataKindInferencer {
     next_meta: usize,
 }
 
+impl Default for DataKindInferencer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DataKindInferencer {
     pub fn new() -> Self {
         Self {
@@ -151,9 +157,7 @@ impl DataKindInferencer {
                         var: target.to_string(),
                         in_kind: kind.clone(),
                     })
-                } else if !self.is_meta(v) {
-                    Ok(kind.clone())
-                } else if self.is_before(v, target) {
+                } else if !self.is_meta(v) || self.is_before(v, target) {
                     Ok(kind.clone())
                 } else {
                     let v = v.clone();
@@ -520,10 +524,10 @@ pub fn dependency_analysis(defs: &[RawDataDef]) -> Vec<Vec<usize>> {
             }
         }
         for r in refs {
-            if let Some(&j) = idx.get(r.as_str()) {
-                if !adj[i].contains(&j) {
-                    adj[i].push(j);
-                }
+            if let Some(&j) = idx.get(r.as_str())
+                && !adj[i].contains(&j)
+            {
+                adj[i].push(j);
             }
         }
     }

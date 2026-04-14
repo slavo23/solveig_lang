@@ -226,7 +226,7 @@ impl TypeError {
             .with_label(DiagnosticLabel::primary(
                 span.clone(),
                 format!("this expression is applied like a function, but has type `{}`", actual),
-            )).with_label(DiagnosticLabel::secondary(arg_span.clone(), format!("unexpected argument encountered here")))
+            )).with_label(DiagnosticLabel::secondary(arg_span.clone(), "unexpected argument encountered here".to_string()))
             ,
 
             TypeError::NonPolymorphicTypeApplication {

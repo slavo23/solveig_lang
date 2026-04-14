@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use super::closure_ir::{CCCaseArm, CCExpr, CCFunction, CCGlobalDef, CCPattern, CCProgram};
-use super::lower_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
+use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
 
 #[derive(Debug, Clone, Copy)]
 enum VisibleBinding {
@@ -161,13 +161,6 @@ impl ClosureLowerer {
         format!("{owner_name}$lambda{serial}")
     }
 
-    fn global_index_by_name(&self, name: &str) -> usize {
-        self.global_indices
-            .get(name)
-            .copied()
-            .unwrap_or_else(|| panic!("unknown global '{}' during closure lowering", name))
-    }
-
     fn known_global_func(&self, global_index: usize) -> Option<KnownGlobalFunc> {
         self.known_global_funcs.get(global_index).copied().flatten()
     }
@@ -240,9 +233,9 @@ impl<'a> ExprLowerer<'a> {
                 tag: *tag,
                 arity: *arity,
             }),
-            IRExpr::UnaryOp(op, rhs) => Rc::new(CCExpr::UnaryOp(op.clone(), self.lower_expr(rhs))),
+            IRExpr::UnaryOp(op, rhs) => Rc::new(CCExpr::UnaryOp(*op, self.lower_expr(rhs))),
             IRExpr::BinaryOp(op, lhs, rhs) => Rc::new(CCExpr::BinaryOp(
-                op.clone(),
+                *op,
                 self.lower_expr(lhs),
                 self.lower_expr(rhs),
             )),

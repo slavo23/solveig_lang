@@ -2,7 +2,7 @@ use core::ast::{BinOp, UnOp};
 use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
 
-use super::closure_ir::{CCExpr, CCFunction, CCGlobalDef, CCPattern, CCProgram};
+use lowering::closure_ir::{CCExpr, CCFunction, CCGlobalDef, CCPattern, CCProgram};
 
 const NON_EXHAUSTIVE_CASE_TRAP: u16 = 1;
 
@@ -422,13 +422,13 @@ impl BytecodeLowerer {
 
             CCExpr::UnaryOp(op, rhs) => {
                 self.compile_expr(builder, env, rhs);
-                builder.emit(Instr::Unary(op.clone()));
+                builder.emit(Instr::Unary(*op));
             }
 
             CCExpr::BinaryOp(op, lhs, rhs) => {
                 self.compile_expr(builder, env, lhs);
                 self.compile_expr(builder, env, rhs);
-                builder.emit(Instr::Binary(op.clone()));
+                builder.emit(Instr::Binary(*op));
             }
 
             CCExpr::MakeClosure { func, captures } => {

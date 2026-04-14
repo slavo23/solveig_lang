@@ -5,7 +5,7 @@ use core::ast::{
     CaseArm, DataDefinition, Literal, Pattern, PatternNode, ResolvedModule, TermExpr, TermExprNode,
 };
 
-use super::lower_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
+use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
 
 struct LowerCtx {
     scope: Vec<String>,
@@ -119,12 +119,12 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
         TermExpr::BinaryOperator(op, lhs, rhs) => {
             let lowered_lhs = lower_expr(ctx, lhs);
             let lowered_rhs = lower_expr(ctx, rhs);
-            Rc::new(IRExpr::BinaryOp(op.clone(), lowered_lhs, lowered_rhs))
+            Rc::new(IRExpr::BinaryOp(*op, lowered_lhs, lowered_rhs))
         }
 
         TermExpr::UnaryOperator(op, rhs) => {
             let lowered_rhs = lower_expr(ctx, rhs);
-            Rc::new(IRExpr::UnaryOp(op.clone(), lowered_rhs))
+            Rc::new(IRExpr::UnaryOp(*op, lowered_rhs))
         }
         TermExpr::Let(name, binder, in_expr) => {
             let lowered_binder = lower_expr(ctx, binder);

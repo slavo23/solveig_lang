@@ -41,6 +41,12 @@ pub struct TypeChecker {
     evar_solutions: HashMap<String, TypeExpr>,
 }
 
+impl Default for TypeChecker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TypeChecker {
     pub fn new() -> Self {
         Self {
@@ -55,7 +61,7 @@ impl TypeChecker {
 
     pub fn with_module_context(module: &ResolvedModule<Span>, file_id: String) -> Self {
         Self {
-            file_id: file_id,
+            file_id,
             counter: 0,
             constructor_types: module.constructor_types.clone(),
             func_types: module.func_types.clone(),
@@ -217,12 +223,12 @@ impl TypeChecker {
                 Box::new(self.zonk_expr(else_branch)),
             ),
             TermExpr::BinaryOperator(op, lhs, rhs) => TermExpr::BinaryOperator(
-                op.clone(),
+                *op,
                 Box::new(self.zonk_expr(lhs)),
                 Box::new(self.zonk_expr(rhs)),
             ),
             TermExpr::UnaryOperator(op, rhs) => {
-                TermExpr::UnaryOperator(op.clone(), Box::new(self.zonk_expr(rhs)))
+                TermExpr::UnaryOperator(*op, Box::new(self.zonk_expr(rhs)))
             }
             TermExpr::Let(binder_name, binder_expr, in_expr) => TermExpr::Let(
                 binder_name.clone(),
@@ -311,12 +317,12 @@ impl TypeChecker {
             (TypeExpr::TyExVar(evar_name), _)
                 if ctx.has_unsolved_evar(evar_name) && !right.occurs_check(evar_name.clone()) =>
             {
-                self.instantiate_left(ctx, &evar_name, right)
+                self.instantiate_left(ctx, evar_name, right)
             }
             (_, TypeExpr::TyExVar(evar_name))
                 if ctx.has_unsolved_evar(evar_name) && !left.occurs_check(evar_name.clone()) =>
             {
-                self.instantiate_right(ctx, left, &evar_name)
+                self.instantiate_right(ctx, left, evar_name)
             }
 
             _ => Err(()),
@@ -944,7 +950,7 @@ impl TypeChecker {
 
         let result_type = int_type.clone();
         let elaborated = elab_node(
-            TermExpr::UnaryOperator(op.clone(), Box::new(elaborated_rhs)),
+            TermExpr::UnaryOperator(*op, Box::new(elaborated_rhs)),
             span,
             result_type.clone(),
         );
@@ -975,11 +981,7 @@ impl TypeChecker {
         };
 
         let elaborated = elab_node(
-            TermExpr::BinaryOperator(
-                op.clone(),
-                Box::new(elaborated_lhs),
-                Box::new(elaborated_rhs),
-            ),
+            TermExpr::BinaryOperator(*op, Box::new(elaborated_lhs), Box::new(elaborated_rhs)),
             span,
             result_type.clone(),
         );
@@ -1207,7 +1209,7 @@ impl TypeChecker {
                 let extended_ctx = ctx.add_entry(evar_entry);
 
                 let ty_arg = TypeExpr::TyExVar(fresh_evar.clone());
-                let instantiated_type = body.substitute(&quantifier, &ty_arg);
+                let instantiated_type = body.substitute(quantifier, &ty_arg);
 
                 let wrapped_function = TermExprNode::new(
                     TermExpr::TyApp(Box::new(elaborated_function.clone()), ty_arg),
@@ -1224,7 +1226,7 @@ impl TypeChecker {
                 )
             }
             TypeExpr::TyArr(domain, codomain) => {
-                let (delta, elaborated_argument) = self.solve_checking(ctx, argument, &domain)?;
+                let (delta, elaborated_argument) = self.solve_checking(ctx, argument, domain)?;
 
                 let result_type = delta.apply(codomain);
                 let elaborated = elab_node(

@@ -138,7 +138,7 @@ pub fn lexer<'src>()
                 "import" => Token::Import,
                 "as" => Token::As,
                 s => {
-                    let is_upper = s.chars().nth(0).unwrap().is_uppercase();
+                    let is_upper = s.chars().next().unwrap().is_uppercase();
                     if is_upper {
                         Token::UpperIdent(s)
                     } else {
@@ -186,19 +186,19 @@ fn mk_list_expr<'src>(
     list_span: SimpleSpan,
 ) -> Spanned<SurfaceExpr<'src>> {
     elems.into_iter().rev().fold(
-        SurfaceExpr::Con(qref_spanned(&["prelude", "list", "Nil"], list_span.clone()))
-            .with_span(list_span.clone()),
+        SurfaceExpr::Con(qref_spanned(&["prelude", "list", "Nil"], list_span))
+            .with_span(list_span),
         |acc, elem| {
-            let head_span = elem.span.clone();
+            let head_span = elem.span;
             let full_span = merge_spans(&head_span, &acc.span);
 
             let cons_head = SurfaceExpr::App(
                 Box::new(
                     SurfaceExpr::Con(qref_spanned(
                         &["prelude", "list", "Cons"],
-                        head_span.clone(),
+                        head_span,
                     ))
-                    .with_span(head_span.clone()),
+                    .with_span(head_span),
                 ),
                 Box::new(elem),
             )
@@ -210,13 +210,10 @@ fn mk_list_expr<'src>(
 }
 
 fn mk_list_ty<'src>(elem_ty: Spanned<SurfaceTy<'src>>) -> Spanned<SurfaceTy<'src>> {
-    let span = elem_ty.span.clone();
+    let span = elem_ty.span;
 
     SurfaceTy::App(
-        Box::new(
-            SurfaceTy::Con(qref_spanned(&["prelude", "list", "List"], span.clone()))
-                .with_span(span.clone()),
-        ),
+        Box::new(SurfaceTy::Con(qref_spanned(&["prelude", "list", "List"], span)).with_span(span)),
         Box::new(elem_ty),
     )
     .with_span(span)
@@ -226,9 +223,9 @@ fn mk_cons_pattern<'src>(
     head: Spanned<SurfacePattern<'src>>,
     tail: Spanned<SurfacePattern<'src>>,
 ) -> Spanned<SurfacePattern<'src>> {
-    let span = head.span.clone();
+    let span = head.span;
     SurfacePattern::Con(
-        qref_spanned(&["prelude", "list", "Cons"], span.clone()),
+        qref_spanned(&["prelude", "list", "Cons"], span),
         vec![head, tail],
     )
     .with_span(span)
@@ -240,16 +237,16 @@ fn mk_list_pattern<'src>(
 ) -> Spanned<SurfacePattern<'src>> {
     elems.into_iter().rev().fold(
         SurfacePattern::Con(
-            qref_spanned(&["prelude", "list", "Nil"], list_span.clone()),
+            qref_spanned(&["prelude", "list", "Nil"], list_span),
             vec![],
         )
-        .with_span(list_span.clone()),
+        .with_span(list_span),
         |acc, elem| {
-            let head_span = elem.span.clone();
+            let head_span = elem.span;
             let full_span = merge_spans(&head_span, &acc.span);
 
             SurfacePattern::Con(
-                qref_spanned(&["prelude", "list", "Cons"], full_span.clone()),
+                qref_spanned(&["prelude", "list", "Cons"], full_span),
                 vec![elem, acc],
             )
             .with_span(full_span)
@@ -266,12 +263,12 @@ fn mk_cons_expr<'src>(
         Box::new(
             SurfaceExpr::App(
                 Box::new(
-                    SurfaceExpr::Con(qref_spanned(&["prelude", "list", "Cons"], span.clone()))
-                        .with_span(span.clone()),
+                    SurfaceExpr::Con(qref_spanned(&["prelude", "list", "Cons"], span))
+                        .with_span(span),
                 ),
                 Box::new(head),
             )
-            .with_span(span.clone()),
+            .with_span(span),
         ),
         Box::new(tail),
     )
@@ -329,10 +326,7 @@ pub fn instance_definition_parser<'tokens, 'src: 'tokens>() -> impl Parser<
         .map(|((name, params), body)| InstanceMethod { name, params, body });
 
     let ty_arg = choice((
-        ctor_ref_parser()
-            .spanned()
-            .map(|ctor| SurfaceTy::Con(ctor))
-            .spanned(),
+        ctor_ref_parser().spanned().map(SurfaceTy::Con).spanned(),
         ty_parser().nested_in(select_ref! {
             Token::Parens(ts) = e => ts.split_spanned(e.span())
         }),
@@ -430,7 +424,7 @@ fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .map(|(head, rest)| {
                 let mut t = head;
                 for arg in rest {
-                    let span = t.span.clone();
+                    let span = t.span;
                     t = SurfaceTy::App(Box::new(t), Box::new(arg)).with_span(span);
                 }
                 t
@@ -443,7 +437,7 @@ fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .map(|(lhs, rhs_opt)| match rhs_opt {
                 None => lhs,
                 Some(rhs) => {
-                    let span = lhs.span.clone();
+                    let span = lhs.span;
                     SurfaceTy::Arr(Box::new(lhs), Box::new(rhs)).with_span(span)
                 }
             })
@@ -454,7 +448,7 @@ fn ty_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .then_ignore(just(Token::Dot))
             .then(ty.clone())
             .map(|(quants, body)| {
-                let span = body.span.clone();
+                let span = body.span;
                 SurfaceTy::ForAll(quants, Box::new(body)).with_span(span)
             })
             .boxed();
@@ -560,7 +554,7 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             .then_ignore(just(Token::FatArrow))
             .then(expr.clone())
             .map(|(pattern, body)| SurfaceMatchArm {
-                pattern: pattern,
+                pattern,
                 expr: body,
             });
 

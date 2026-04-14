@@ -16,6 +16,12 @@ pub struct Context {
     entries: Vec<ContextEntry>,
 }
 
+impl Default for Context {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Context {
     pub fn new() -> Context {
         Context { entries: vec![] }

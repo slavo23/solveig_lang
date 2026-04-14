@@ -1,9 +1,9 @@
 use std::fmt;
 
 use super::bytecode::{
-    lower_to_bytecode, BytePattern, BytecodeProgram, ChunkKind, Instr, MatchArm,
+    BytePattern, BytecodeProgram, ChunkKind, Instr, MatchArm, lower_to_bytecode,
 };
-use super::closure_ir::CCProgram;
+use lowering::closure_ir::CCProgram;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 struct ObjId(u32);
@@ -40,11 +40,6 @@ impl PayloadStore {
     #[inline]
     fn len(span: &PayloadRef) -> usize {
         span.end - span.start
-    }
-
-    #[inline]
-    fn is_empty(span: &PayloadRef) -> bool {
-        span.start == span.end
     }
 
     #[inline]
@@ -275,38 +270,6 @@ impl Heap {
     }
 
     #[inline]
-    fn target(&self, id: ObjId) -> HeapTarget {
-        match self.get(id) {
-            HeapObject::Closure { chunk, captures } => HeapTarget::Closure {
-                chunk: *chunk,
-                captures: captures.clone(),
-            },
-            HeapObject::PartialApp {
-                chunk,
-                captures,
-                supplied,
-            } => HeapTarget::PartialApp {
-                chunk: *chunk,
-                captures: captures.clone(),
-                supplied: supplied.clone(),
-            },
-            HeapObject::PartialCtor {
-                tag,
-                arity,
-                supplied,
-            } => HeapTarget::PartialCtor {
-                tag: *tag,
-                arity: *arity,
-                supplied: supplied.clone(),
-            },
-            HeapObject::Data { tag, fields } => HeapTarget::Data {
-                tag: *tag,
-                fields: fields.clone(),
-            },
-        }
-    }
-
-    #[inline]
     fn payload_len(&self, span: &PayloadRef) -> usize {
         PayloadStore::len(span)
     }
@@ -335,19 +298,19 @@ impl Heap {
     fn free_object_payloads(&mut self, obj: &HeapObject) {
         match obj {
             HeapObject::Closure { captures, .. } => {
-                self.payloads.free_span(captures.clone());
+                self.payloads.free_span(*captures);
             }
             HeapObject::PartialApp {
                 captures, supplied, ..
             } => {
-                self.payloads.free_span(captures.clone());
-                self.payloads.free_span(supplied.clone());
+                self.payloads.free_span(*captures);
+                self.payloads.free_span(*supplied);
             }
             HeapObject::PartialCtor { supplied, .. } => {
-                self.payloads.free_span(supplied.clone());
+                self.payloads.free_span(*supplied);
             }
             HeapObject::Data { fields, .. } => {
-                self.payloads.free_span(fields.clone());
+                self.payloads.free_span(*fields);
             }
         }
     }
@@ -435,7 +398,7 @@ fn mark_payload(
     span: &PayloadRef,
     worklist: &mut Vec<ObjId>,
 ) {
-    for &v in payloads.as_slice(span.clone()) {
+    for &v in payloads.as_slice(*span) {
         if let Value::Obj(id) = v {
             mark_bit(mark_bits, id, worklist);
         }
@@ -545,12 +508,12 @@ impl Vm {
             }
 
             let children = match self.heap.objects[id.0 as usize].as_ref() {
-                Some(HeapObject::Closure { captures, .. }) => Children::One(captures.clone()),
+                Some(HeapObject::Closure { captures, .. }) => Children::One(*captures),
                 Some(HeapObject::PartialApp {
                     captures, supplied, ..
-                }) => Children::Two(captures.clone(), supplied.clone()),
-                Some(HeapObject::PartialCtor { supplied, .. }) => Children::One(supplied.clone()),
-                Some(HeapObject::Data { fields, .. }) => Children::One(fields.clone()),
+                }) => Children::Two(*captures, *supplied),
+                Some(HeapObject::PartialCtor { supplied, .. }) => Children::One(*supplied),
+                Some(HeapObject::Data { fields, .. }) => Children::One(*fields),
                 None => Children::None,
             };
 
@@ -869,7 +832,7 @@ impl Vm {
         match self.heap.get(id) {
             HeapObject::Closure { chunk, captures } => {
                 let chunk = *chunk;
-                let captures = captures.clone();
+                let captures = *captures;
                 let arity = chunk_arity(program, chunk);
                 if arg_count == arity {
                     self.tail_enter_closure(program, chunk, captures, arg_count);
@@ -896,8 +859,8 @@ impl Vm {
                 supplied,
             } => {
                 let chunk = *chunk;
-                let captures = captures.clone();
-                let supplied = supplied.clone();
+                let captures = *captures;
+                let supplied = *supplied;
                 let arity = chunk_arity(program, chunk);
                 let total = PayloadStore::len(&supplied) + arg_count;
                 if total == arity {
@@ -932,7 +895,7 @@ impl Vm {
             } => {
                 let tag = *tag;
                 let arity = *arity;
-                let supplied = supplied.clone();
+                let supplied = *supplied;
                 Some(self.build_ctor(tag, arity, supplied, arg_count))
             }
             HeapObject::Data { tag, .. } => {
@@ -968,7 +931,7 @@ impl Vm {
         match self.heap.get(id) {
             HeapObject::Closure { chunk, captures } => {
                 let chunk = *chunk;
-                let captures = captures.clone();
+                let captures = *captures;
                 let arity = chunk_arity(program, chunk);
                 if arg_count == arity {
                     self.push_return();
@@ -996,8 +959,8 @@ impl Vm {
                 supplied,
             } => {
                 let chunk = *chunk;
-                let captures = captures.clone();
-                let supplied = supplied.clone();
+                let captures = *captures;
+                let supplied = *supplied;
                 let arity = chunk_arity(program, chunk);
                 let total = PayloadStore::len(&supplied) + arg_count;
                 if total == arity {
@@ -1030,12 +993,7 @@ impl Vm {
                 tag,
                 arity,
                 supplied,
-            } => {
-                let tag = *tag;
-                let arity = *arity;
-                let supplied = supplied.clone();
-                Some(self.build_ctor(tag, arity, supplied, arg_count))
-            }
+            } => Some(self.build_ctor(*tag, *arity, *supplied, arg_count)),
             HeapObject::Data { tag, .. } => {
                 panic!("cannot apply saturated constructor tag {}", tag);
             }
@@ -1079,7 +1037,7 @@ impl Vm {
                         _ => continue,
                     };
                     let (tag, fields_ref) = match self.heap.get(id) {
-                        HeapObject::Data { tag, fields } => (*tag, fields.clone()),
+                        HeapObject::Data { tag, fields } => (*tag, *fields),
                         _ => continue,
                     };
                     if tag != *expected_tag {
@@ -1182,10 +1140,7 @@ impl Vm {
                     if arity == 0 {
                         self.push(self.nullary.get(tag));
                     } else {
-                        self.push(Value::CtorFn {
-                            tag: tag,
-                            arity: arity,
-                        });
+                        self.push(Value::CtorFn { tag, arity });
                     }
                 }
                 Instr::MakeClosure {
@@ -1315,10 +1270,10 @@ impl Vm {
                     }
                     self.stack.pop();
 
-                    if let Some(val) = self.tail_apply_callee(program, callee, n) {
-                        if let Some(done) = self.finish_return(val) {
-                            return done;
-                        }
+                    if let Some(val) = self.tail_apply_callee(program, callee, n)
+                        && let Some(done) = self.finish_return(val)
+                    {
+                        return done;
                     }
                     code = &program.chunks[self.chunk].code;
                 }
@@ -1450,7 +1405,7 @@ fn match_pattern_inner(
             };
 
             let (tag, fields) = match heap.get(id) {
-                HeapObject::Data { tag, fields } => (*tag, heap.payloads.as_slice(fields.clone())),
+                HeapObject::Data { tag, fields } => (*tag, heap.payloads.as_slice(*fields)),
                 _ => return false,
             };
 
@@ -1551,7 +1506,7 @@ fn base_name(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
-fn tag_name<'a>(arities: &'a [(String, u16, u16)], tag: u16) -> &'a str {
+fn tag_name(arities: &[(String, u16, u16)], tag: u16) -> &str {
     arities
         .iter()
         .find(|(_, t, _)| *t == tag)
@@ -1585,7 +1540,7 @@ impl DisplayValue<'_> {
                 HeapObject::Closure { .. } | HeapObject::PartialApp { .. } => "<closure>".into(),
                 HeapObject::PartialCtor { tag, supplied, .. } => {
                     let name = tag_name(self.arities, *tag);
-                    let supplied = self.heap.payloads.as_slice(supplied.clone());
+                    let supplied = self.heap.payloads.as_slice(*supplied);
 
                     if supplied.is_empty() {
                         format!("<partial {}>", name)
@@ -1595,7 +1550,7 @@ impl DisplayValue<'_> {
                 }
                 HeapObject::Data { tag, fields } => {
                     let name = tag_name(self.arities, *tag);
-                    let fields = self.heap.payloads.as_slice(fields.clone());
+                    let fields = self.heap.payloads.as_slice(*fields);
 
                     if fields.is_empty() {
                         name.into()
@@ -1630,7 +1585,7 @@ impl DisplayValue<'_> {
             match val {
                 Value::Obj(id) => match self.heap.get(id) {
                     HeapObject::Data { tag, fields } => {
-                        let fields = self.heap.payloads.as_slice(fields.clone());
+                        let fields = self.heap.payloads.as_slice(*fields);
 
                         if fields.is_empty() && tag_is(self.arities, *tag, "Z") {
                             return Some(n.to_string());
@@ -1658,7 +1613,7 @@ impl DisplayValue<'_> {
             match val {
                 Value::Obj(id) => match self.heap.get(id) {
                     HeapObject::Data { tag, fields } => {
-                        let fields = self.heap.payloads.as_slice(fields.clone());
+                        let fields = self.heap.payloads.as_slice(*fields);
 
                         if fields.is_empty() && tag_is(self.arities, *tag, "Nil") {
                             return Some(format!("[{}]", items.join(", ")));
@@ -1683,7 +1638,7 @@ impl DisplayValue<'_> {
         match val {
             Value::Obj(id) => match self.heap.get(id) {
                 HeapObject::Data { tag, fields } => {
-                    let fields = self.heap.payloads.as_slice(fields.clone());
+                    let fields = self.heap.payloads.as_slice(*fields);
 
                     if fields.len() == 2 {
                         let name = tag_name(self.arities, *tag);
