@@ -7,10 +7,9 @@ use chumsky::{input::Input as _, Parser as _};
 use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
+use core::ast::{Kind, TypeExpr};
 use surface::ast::{ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition};
 use surface::parser::{lexer, module_parser, render_rich_errors};
-
-use core::ast::{Kind, TypeExpr};
 use syntax::inference::type_infer::CheckedModule;
 
 const PRELUDE_BUILTINS_SRC: &str = include_str!("./prelude/builtins.sv");
@@ -32,55 +31,36 @@ impl SymbolId {
     }
 }
 
-fn prelude_module(module: &ModuleName) -> Option<&'static str> {
-    match module.as_string().as_str() {
-        "prelude.builtins" => Some(PRELUDE_BUILTINS_SRC),
-        "prelude.list" => Some(PRELUDE_LIST_SRC),
-        _ => None,
-    }
-}
-fn mk_virtual_prelude_file(module: &ModuleName) -> Result<ModuleFile, String> {
-    let source = prelude_module(module)
-        .ok_or_else(|| format!("unknown compiler prelude module {}", module.as_string()))?
-        .to_string();
-
-    let path = PathBuf::from(format!("<compiler-prelude>/{}.sv", module.as_string()));
-
-    let tokens = lexer()
-        .parse(source.as_str())
-        .into_result()
-        .map_err(|errs| render_rich_errors(&path, &source, "lex", &errs))?;
-
-    let input = tokens[..].split_spanned((0..tokens.len()).into());
-    let parsed = module_parser()
-        .parse(input)
-        .into_result()
-        .map_err(|errs| render_rich_errors(&path, &source, "parse", &errs))?;
-
-    Ok(ModuleFile {
-        name: module.clone(),
-        path,
-        source: source.clone(),
-        imports: parsed.imports.clone(),
-    })
-}
-
-fn implicit_prelude_modules(module: &ModuleName) -> Vec<ModuleName> {
-    if module.as_string().starts_with("prelude.") {
-        vec![]
-    } else {
-        vec![
-            ModuleName(vec!["prelude".into(), "builtins".into()]),
-            ModuleName(vec!["prelude".into(), "list".into()]),
-        ]
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct ModuleApi {
     pub terms: HashMap<String, SymbolId>,
     pub types: HashMap<String, SymbolId>,
     pub constructors: HashMap<String, SymbolId>,
+}
+
+impl ModuleApi {
+    pub fn filtered(&self, spec: &ImportSpec) -> Self {
+        match spec {
+            ImportSpec::All => self.clone(),
+            ImportSpec::Only(names) => {
+                let mut out = Self::default();
+
+                for name in names {
+                    if let Some(v) = self.terms.get(name) {
+                        out.terms.insert(name.clone(), v.clone());
+                    }
+                    if let Some(v) = self.types.get(name) {
+                        out.types.insert(name.clone(), v.clone());
+                    }
+                    if let Some(v) = self.constructors.get(name) {
+                        out.constructors.insert(name.clone(), v.clone());
+                    }
+                }
+
+                out
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default)]
@@ -90,22 +70,66 @@ pub struct TypedModuleApi {
     pub constructor_types: HashMap<SymbolId, TypeExpr>,
 }
 
+impl TypedModuleApi {
+    pub fn filtered(&self, spec: &ImportSpec) -> Self {
+        match spec {
+            ImportSpec::All => self.clone(),
+            ImportSpec::Only(names) => {
+                let mut out = Self::default();
+
+                for name in names {
+                    for (sym, ty) in &self.term_types {
+                        if &sym.name == name {
+                            out.term_types.insert(sym.clone(), ty.clone());
+                        }
+                    }
+                    for (sym, kind) in &self.type_kinds {
+                        if &sym.name == name {
+                            out.type_kinds.insert(sym.clone(), kind.clone());
+                        }
+                    }
+                    for (sym, ty) in &self.constructor_types {
+                        if &sym.name == name {
+                            out.constructor_types.insert(sym.clone(), ty.clone());
+                        }
+                    }
+                }
+
+                out
+            }
+        }
+    }
+
+    pub fn extend_display_maps(
+        &self,
+        func_types: &mut HashMap<String, TypeExpr>,
+        tycon_kinds: &mut HashMap<String, Kind>,
+        constructor_types: &mut HashMap<String, TypeExpr>,
+    ) {
+        for (sym, ty) in &self.term_types {
+            func_types.insert(sym.display(), ty.clone());
+        }
+        for (sym, kind) in &self.type_kinds {
+            tycon_kinds.insert(sym.display(), kind.clone());
+        }
+        for (sym, ty) in &self.constructor_types {
+            constructor_types.insert(sym.display(), ty.clone());
+        }
+    }
+}
+
 pub type SharedModuleApi = Rc<ModuleApi>;
 pub type SharedTypedModuleApi = Rc<TypedModuleApi>;
 
 #[derive(Debug, Clone)]
-pub struct ImportedApi {
+pub struct Imported<T> {
     pub alias: String,
-    pub api: SharedModuleApi,
+    pub api: Rc<T>,
     pub spec: ImportSpec,
 }
 
-#[derive(Debug, Clone)]
-pub struct ImportedTypedApi {
-    pub alias: String,
-    pub api: SharedTypedModuleApi,
-    pub spec: ImportSpec,
-}
+pub type ImportedApi = Imported<ModuleApi>;
+pub type ImportedTypedApi = Imported<TypedModuleApi>;
 
 #[derive(Debug, Clone, Default)]
 pub struct BuiltinApi {
@@ -135,76 +159,128 @@ pub struct Project {
     pub modules: HashMap<ModuleName, ModuleFile>,
 }
 
+pub struct ParsedProject<'a> {
+    pub modules: HashMap<ModuleName, ParsedModule<'a>>,
+}
+
+impl<'a> ParsedProject<'a> {
+    pub fn get(&self, module: &ModuleName) -> &ParsedModule<'a> {
+        self.modules
+            .get(module)
+            .unwrap_or_else(|| panic!("missing parsed module {}", module.as_string()))
+    }
+}
+
 #[derive(Debug)]
 pub struct ModuleGraph {
     pub graph: DiGraph<ModuleName, ()>,
     pub indices: HashMap<ModuleName, NodeIndex>,
 }
 
-pub fn build_module_graph(project: &Project) -> Result<ModuleGraph, String> {
-    let mut graph = DiGraph::<ModuleName, ()>::new();
-    let mut indices = HashMap::new();
-
-    for module_name in project.modules.keys() {
-        let ix = graph.add_node(module_name.clone());
-        indices.insert(module_name.clone(), ix);
-    }
-
-    for (module_name, module_file) in &project.modules {
-        let from = indices[module_name];
-
-        for imp in &module_file.imports {
-            let to = *indices.get(&imp.module).ok_or_else(|| {
-                format!(
-                    "module {} imports missing module {}",
-                    module_name.as_string(),
-                    imp.module.as_string()
-                )
-            })?;
-            graph.add_edge(from, to, ());
-        }
-
-        for implicit in implicit_prelude_modules(module_name) {
-            if let Some(to) = indices.get(&implicit) {
-                graph.add_edge(from, *to, ());
-            }
-        }
-    }
-
-    Ok(ModuleGraph { graph, indices })
+#[derive(Debug, Clone)]
+pub struct EffectiveImport {
+    pub alias: String,
+    pub module: ModuleName,
+    pub spec: ImportSpec,
 }
 
-pub fn ensure_acyclic_modules(graph: &ModuleGraph) -> Result<(), String> {
-    for scc in tarjan_scc(&graph.graph) {
-        if scc.len() > 1 {
-            let names = scc
-                .iter()
-                .map(|ix| graph.graph[*ix].as_string())
-                .collect::<Vec<_>>();
-            return Err(format!("cyclic module imports: {}", names.join(" -> ")));
-        }
-
-        let ix = scc[0];
-        if graph.graph.contains_edge(ix, ix) {
-            return Err(format!(
-                "module {} imports itself",
-                graph.graph[ix].as_string()
-            ));
-        }
-    }
-    Ok(())
+pub fn is_prelude_module(module: &ModuleName) -> bool {
+    module.as_string().starts_with("prelude.")
 }
 
-pub fn module_order(graph: &ModuleGraph) -> Result<Vec<ModuleName>, String> {
-    let mut order = toposort(&graph.graph, None)
-        .map_err(|c| format!("cycle involving {}", graph.graph[c.node_id()].as_string()))?
-        .into_iter()
-        .map(|ix| graph.graph[ix].clone())
+fn prelude_module(module: &ModuleName) -> Option<&'static str> {
+    match module.as_string().as_str() {
+        "prelude.builtins" => Some(PRELUDE_BUILTINS_SRC),
+        "prelude.list" => Some(PRELUDE_LIST_SRC),
+        _ => None,
+    }
+}
+
+fn implicit_prelude_modules(module: &ModuleName) -> Vec<ModuleName> {
+    if is_prelude_module(module) {
+        vec![]
+    } else {
+        vec![
+            ModuleName(vec!["prelude".into(), "builtins".into()]),
+            ModuleName(vec!["prelude".into(), "list".into()]),
+        ]
+    }
+}
+
+pub fn effective_imports(module: &ModuleName, explicit: &[ImportDecl]) -> Vec<EffectiveImport> {
+    let mut out = explicit
+        .iter()
+        .map(|imp| EffectiveImport {
+            alias: imp.alias.clone(),
+            module: imp.module.clone(),
+            spec: imp.spec.clone(),
+        })
         .collect::<Vec<_>>();
 
-    // A -> B means A imports B, so B must be processed first.
-    order.reverse();
-    Ok(order)
+    for implicit in implicit_prelude_modules(module) {
+        out.push(EffectiveImport {
+            alias: implicit.0.last().unwrap().clone(),
+            module: implicit,
+            spec: ImportSpec::All,
+        });
+    }
+
+    out
+}
+
+fn parse_source<'src>(path: &Path, source: &'src str) -> Result<ParsedModule<'src>, String> {
+    let tokens = lexer()
+        .parse(source)
+        .into_result()
+        .map_err(|errs| render_rich_errors(path, source, "lex", &errs))?;
+
+    let input = tokens[..].split_spanned((0..tokens.len()).into());
+
+    let parsed = module_parser()
+        .parse(input)
+        .into_result()
+        .map_err(|errs| render_rich_errors(path, source, "parse", &errs))?;
+
+    Ok(parsed)
+}
+
+fn mk_virtual_prelude_file(module: &ModuleName) -> Result<ModuleFile, String> {
+    let source = prelude_module(module)
+        .ok_or_else(|| format!("unknown compiler prelude module {}", module.as_string()))?
+        .to_string();
+
+    let path = PathBuf::from(format!("<compiler-prelude>/{}.sv", module.as_string()));
+
+    let imports = {
+        let parsed = parse_source(&path, &source)?;
+        parsed.imports.clone()
+    };
+
+    Ok(ModuleFile {
+        name: module.clone(),
+        path,
+        source,
+        imports,
+    })
+}
+
+fn scan_module_file(root: &Path, file: &Path) -> Result<ModuleFile, String> {
+    let source = fs::read_to_string(file)
+        .map_err(|e| format!("failed to read {}: {}", file.display(), e))?;
+
+    let imports = {
+        let parsed = parse_source(file, &source)?;
+        parsed.imports.clone()
+    };
+
+    let name = module_name_from_file(root, file)?;
+
+    Ok(ModuleFile {
+        name,
+        path: file.to_path_buf(),
+        source,
+        imports,
+    })
 }
 
 pub fn module_name_from_file(root: &Path, file: &Path) -> Result<ModuleName, String> {
@@ -236,44 +312,14 @@ pub fn file_from_module_name(root: &Path, module: &ModuleName) -> PathBuf {
     out
 }
 
-fn scan_module_file(root: &Path, file: &Path) -> Result<ModuleFile, String> {
-    let source = fs::read_to_string(file)
-        .map_err(|e| format!("failed to read {}: {}", file.display(), e))?;
+pub fn parse_project<'a>(project: &'a Project) -> Result<ParsedProject<'a>, String> {
+    let mut modules = HashMap::new();
 
-    let tokens = lexer()
-        .parse(source.as_str())
-        .into_result()
-        .map_err(|errs| render_rich_errors(file, &source, "lex", &errs))?;
+    for (name, file) in &project.modules {
+        modules.insert(name.clone(), parse_source(&file.path, &file.source)?);
+    }
 
-    let input = tokens[..].split_spanned((0..tokens.len()).into());
-    let parsed = module_parser()
-        .parse(input)
-        .into_result()
-        .map_err(|errs| render_rich_errors(file, &source, "parse", &errs))?;
-
-    let name = module_name_from_file(root, file)?;
-
-    Ok(ModuleFile {
-        name,
-        path: file.to_path_buf(),
-        source: source.clone(),
-        imports: parsed.imports.clone(),
-    })
-}
-
-pub fn parse_module<'src>(file: &'src ModuleFile) -> Result<ParsedModule<'src>, String> {
-    let tokens = lexer()
-        .parse(file.source.as_str())
-        .into_result()
-        .map_err(|errs| render_rich_errors(&file.path, &file.source, "lex", &errs))?;
-
-    let input = tokens[..].split_spanned((0..tokens.len()).into());
-    let parsed = module_parser()
-        .parse(input)
-        .into_result()
-        .map_err(|errs| render_rich_errors(&file.path, &file.source, "parse", &errs))?;
-
-    Ok(parsed)
+    Ok(ParsedProject { modules })
 }
 
 pub fn load_project(entry_file: &Path) -> Result<(PathBuf, Project), String> {
@@ -293,21 +339,13 @@ pub fn load_project(entry_file: &Path) -> Result<(PathBuf, Project), String> {
 
         let module_name = module_file.name.clone();
 
-        for imp in &module_file.imports {
+        for imp in effective_imports(&module_name, &module_file.imports) {
             if prelude_module(&imp.module).is_some() {
                 if !modules.contains_key(&imp.module) {
-                    let prelude_file = mk_virtual_prelude_file(&imp.module)?;
-                    modules.insert(imp.module.clone(), prelude_file);
+                    modules.insert(imp.module.clone(), mk_virtual_prelude_file(&imp.module)?);
                 }
             } else {
                 stack.push(file_from_module_name(&root, &imp.module));
-            }
-        }
-
-        for implicit in implicit_prelude_modules(&module_name) {
-            if !modules.contains_key(&implicit) {
-                let prelude_file = mk_virtual_prelude_file(&implicit)?;
-                modules.insert(implicit.clone(), prelude_file);
             }
         }
 
@@ -317,10 +355,72 @@ pub fn load_project(entry_file: &Path) -> Result<(PathBuf, Project), String> {
     Ok((root, Project { modules }))
 }
 
-pub fn build_module_api<'src>(
-    module_name: &ModuleName,
-    parsed: &ParsedModule<'src>,
-) -> Result<ModuleApi, String> {
+pub fn build_module_graph(project: &Project) -> Result<ModuleGraph, String> {
+    let mut graph = DiGraph::<ModuleName, ()>::new();
+    let mut indices = HashMap::new();
+
+    for module_name in project.modules.keys() {
+        let ix = graph.add_node(module_name.clone());
+        indices.insert(module_name.clone(), ix);
+    }
+
+    for (module_name, module_file) in &project.modules {
+        let from = indices[module_name];
+
+        for imp in effective_imports(module_name, &module_file.imports) {
+            let to = *indices.get(&imp.module).ok_or_else(|| {
+                format!(
+                    "module {} imports missing module {}",
+                    module_name.as_string(),
+                    imp.module.as_string()
+                )
+            })?;
+            graph.add_edge(from, to, ());
+        }
+    }
+
+    Ok(ModuleGraph { graph, indices })
+}
+
+pub fn module_order_checked(project: &Project) -> Result<Vec<ModuleName>, String> {
+    let graph = build_module_graph(project)?;
+    ensure_acyclic_modules(&graph)?;
+    module_order(&graph)
+}
+
+pub fn ensure_acyclic_modules(graph: &ModuleGraph) -> Result<(), String> {
+    for scc in tarjan_scc(&graph.graph) {
+        if scc.len() > 1 {
+            let names = scc
+                .iter()
+                .map(|ix| graph.graph[*ix].as_string())
+                .collect::<Vec<_>>();
+            return Err(format!("cyclic module imports: {}", names.join(" -> ")));
+        }
+
+        let ix = scc[0];
+        if graph.graph.contains_edge(ix, ix) {
+            return Err(format!(
+                "module {} imports itself",
+                graph.graph[ix].as_string()
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub fn module_order(graph: &ModuleGraph) -> Result<Vec<ModuleName>, String> {
+    let mut order = toposort(&graph.graph, None)
+        .map_err(|c| format!("cycle involving {}", graph.graph[c.node_id()].as_string()))?
+        .into_iter()
+        .map(|ix| graph.graph[ix].clone())
+        .collect::<Vec<_>>();
+
+    order.reverse();
+    Ok(order)
+}
+
+pub fn build_module_api<'src>(module_name: &ModuleName, parsed: &ParsedModule<'src>) -> ModuleApi {
     let mut api = ModuleApi::default();
 
     for def in &parsed.defs {
@@ -365,30 +465,7 @@ pub fn build_module_api<'src>(
         }
     }
 
-    Ok(api)
-}
-
-pub fn filter_api(api: &ModuleApi, spec: &ImportSpec) -> ModuleApi {
-    match spec {
-        ImportSpec::All => api.clone(),
-        ImportSpec::Only(names) => {
-            let mut out = ModuleApi::default();
-
-            for name in names {
-                if let Some(v) = api.terms.get(name) {
-                    out.terms.insert(name.clone(), v.clone());
-                }
-                if let Some(v) = api.types.get(name) {
-                    out.types.insert(name.clone(), v.clone());
-                }
-                if let Some(v) = api.constructors.get(name) {
-                    out.constructors.insert(name.clone(), v.clone());
-                }
-            }
-
-            out
-        }
-    }
+    api
 }
 
 pub fn build_typed_module_api(module_name: &ModuleName, checked: &CheckedModule) -> TypedModuleApi {
@@ -432,57 +509,4 @@ pub fn build_typed_module_api(module_name: &ModuleName, checked: &CheckedModule)
     }
 
     api
-}
-
-pub fn gather_imported_type_info(
-    imports: &[ImportedTypedApi],
-) -> (
-    HashMap<String, TypeExpr>,
-    HashMap<String, Kind>,
-    HashMap<String, TypeExpr>,
-) {
-    let mut func_types = HashMap::new();
-    let mut tycon_kinds = HashMap::new();
-    let mut constructor_types = HashMap::new();
-
-    for imp in imports {
-        let filtered = match &imp.spec {
-            ImportSpec::All => imp.api.as_ref().clone(),
-            ImportSpec::Only(names) => {
-                let mut out = TypedModuleApi::default();
-
-                for name in names {
-                    for (sym, ty) in &imp.api.term_types {
-                        if &sym.name == name {
-                            out.term_types.insert(sym.clone(), ty.clone());
-                        }
-                    }
-                    for (sym, kind) in &imp.api.type_kinds {
-                        if &sym.name == name {
-                            out.type_kinds.insert(sym.clone(), kind.clone());
-                        }
-                    }
-                    for (sym, ty) in &imp.api.constructor_types {
-                        if &sym.name == name {
-                            out.constructor_types.insert(sym.clone(), ty.clone());
-                        }
-                    }
-                }
-
-                out
-            }
-        };
-
-        for (sym, ty) in filtered.term_types {
-            func_types.insert(sym.display(), ty);
-        }
-        for (sym, kind) in filtered.type_kinds {
-            tycon_kinds.insert(sym.display(), kind);
-        }
-        for (sym, ty) in filtered.constructor_types {
-            constructor_types.insert(sym.display(), ty);
-        }
-    }
-
-    (func_types, tycon_kinds, constructor_types)
 }

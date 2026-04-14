@@ -186,19 +186,15 @@ fn mk_list_expr<'src>(
     list_span: SimpleSpan,
 ) -> Spanned<SurfaceExpr<'src>> {
     elems.into_iter().rev().fold(
-        SurfaceExpr::Con(qref_spanned(&["prelude", "list", "Nil"], list_span))
-            .with_span(list_span),
+        SurfaceExpr::Con(qref_spanned(&["prelude", "list", "Nil"], list_span)).with_span(list_span),
         |acc, elem| {
             let head_span = elem.span;
             let full_span = merge_spans(&head_span, &acc.span);
 
             let cons_head = SurfaceExpr::App(
                 Box::new(
-                    SurfaceExpr::Con(qref_spanned(
-                        &["prelude", "list", "Cons"],
-                        head_span,
-                    ))
-                    .with_span(head_span),
+                    SurfaceExpr::Con(qref_spanned(&["prelude", "list", "Cons"], head_span))
+                        .with_span(head_span),
                 ),
                 Box::new(elem),
             )
@@ -236,11 +232,8 @@ fn mk_list_pattern<'src>(
     list_span: SimpleSpan,
 ) -> Spanned<SurfacePattern<'src>> {
     elems.into_iter().rev().fold(
-        SurfacePattern::Con(
-            qref_spanned(&["prelude", "list", "Nil"], list_span),
-            vec![],
-        )
-        .with_span(list_span),
+        SurfacePattern::Con(qref_spanned(&["prelude", "list", "Nil"], list_span), vec![])
+            .with_span(list_span),
         |acc, elem| {
             let head_span = elem.span;
             let full_span = merge_spans(&head_span, &acc.span);
