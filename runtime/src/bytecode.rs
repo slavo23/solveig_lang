@@ -1,4 +1,5 @@
 use core::ast::{BinOp, UnOp};
+use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
 
@@ -169,7 +170,15 @@ impl BytecodeProgram {
                 chunk.slot_count
             ));
 
+            let labels = collect_chunk_labels(chunk);
+
             for (pc, instr) in chunk.code.iter().enumerate() {
+                let pc_u32 = pc as u32;
+
+                if labels.contains(&pc_u32) {
+                    out.push_str(&format_label_line(pc_u32));
+                }
+
                 match instr {
                     Instr::Match(table_ix) => {
                         let table_ix = *table_ix as usize;
@@ -180,23 +189,27 @@ impl BytecodeProgram {
                             )
                         });
 
-                        out.push_str(&format!(
-                            "{pc:04}: Match table={} else_target={}\n",
-                            table_ix, table.else_target
+                        out.push_str(&format_code_line(
+                            pc,
+                            format!(
+                                "Match table={} else_label={}",
+                                table_ix,
+                                format_target(table.else_target)
+                            ),
                         ));
 
                         for (arm_ix, arm) in table.arms.iter().enumerate() {
-                            out.push_str(&format!(
-                                "      arm[{arm_ix}] target={} binds={:?} pattern={}\n",
-                                arm.target,
+                            out.push_str(&format_detail_line(format!(
+                                "arm[{arm_ix}] target_label={} binds={:?} pattern={}",
+                                format_target(arm.target),
                                 arm.bind_slots,
                                 format_pattern(&arm.pattern),
-                            ));
+                            )));
                         }
                     }
 
                     _ => {
-                        out.push_str(&format!("{pc:04}: {}\n", format_instr(instr)));
+                        out.push_str(&format_code_line(pc, format_instr(instr)));
                     }
                 }
             }
@@ -709,6 +722,51 @@ impl ChunkBuilder {
     }
 }
 
+const LABEL_COL_WIDTH: usize = 8;
+
+fn format_label_def(pc: u32) -> String {
+    format!("L{pc:04}:")
+}
+
+fn format_target(pc: u32) -> String {
+    format!("L{pc:04}")
+}
+
+fn format_label_line(pc: u32) -> String {
+    let label = format_label_def(pc);
+    format!("{label:<LABEL_COL_WIDTH$}\n")
+}
+
+fn format_code_line(pc: usize, body: impl std::fmt::Display) -> String {
+    format!("{:LABEL_COL_WIDTH$} {pc:04} {body}\n", "")
+}
+
+fn format_detail_line(body: impl std::fmt::Display) -> String {
+    format!("{:LABEL_COL_WIDTH$}      {body}\n", "")
+}
+
+fn collect_chunk_labels(chunk: &Chunk) -> BTreeSet<u32> {
+    let mut labels = BTreeSet::new();
+
+    for instr in &chunk.code {
+        match instr {
+            Instr::Jump(target) | Instr::JumpIfFalse(target) => {
+                labels.insert(*target);
+            }
+            Instr::Match(table_ix) => {
+                let table = &chunk.match_tables[*table_ix as usize];
+                labels.insert(table.else_target);
+                for arm in &table.arms {
+                    labels.insert(arm.target);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    labels
+}
+
 fn format_chunk_kind(kind: ChunkKind) -> String {
     match kind {
         ChunkKind::GlobalThunk => "GlobalThunk".to_string(),
@@ -748,8 +806,8 @@ fn format_instr(instr: &Instr) -> String {
             format!("CallKnown chunk={chunk} arg_count={arg_count}")
         }
         Instr::Return => "Return".to_string(),
-        Instr::Jump(target) => format!("Jump {target}"),
-        Instr::JumpIfFalse(target) => format!("JumpIfFalse {target}"),
+        Instr::Jump(target) => format!("Jump {}", format_target(*target)),
+        Instr::JumpIfFalse(target) => format!("JumpIfFalse {}", format_target(*target)),
         Instr::Match(table_ix) => format!("Match table={table_ix}"),
         Instr::TailCallN { arg_count } => format!("TailCallN arg_count={arg_count}"),
         Instr::TailCallKnown { chunk, arg_count } => {
