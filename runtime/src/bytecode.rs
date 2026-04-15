@@ -20,6 +20,10 @@ pub enum Instr {
         chunk: u32,
         capture_count: u16,
     },
+    PushFunctionRef {
+        chunk: u32,
+        arity: u16,
+    },
     Unary(UnOp),
     Binary(BinOp),
     Pack {
@@ -448,6 +452,15 @@ impl BytecodeLowerer {
                     capture_count,
                 });
             }
+            CCExpr::FunctionRef { func, arity } => {
+                let chunk = self.function_chunk_ids[func];
+                let chunk = u32::try_from(chunk)
+                    .unwrap_or_else(|_| panic!("chunk id {} does not fit in u32", chunk));
+                let arity = u16::try_from(*arity)
+                    .unwrap_or_else(|_| panic!("arity {} does not fit in u16", arity));
+
+                builder.emit(Instr::PushFunctionRef { chunk, arity });
+            }
 
             CCExpr::Call { callee, args } => {
                 self.compile_expr(builder, env, callee);
@@ -719,6 +732,9 @@ fn format_instr(instr: &Instr) -> String {
             chunk,
             capture_count,
         } => format!("MakeClosure chunk={chunk} capture_count={capture_count}"),
+        Instr::PushFunctionRef { chunk, arity } => {
+            format!("PushFunctionRef chunk={chunk} arity={arity}")
+        }
         Instr::Unary(op) => format!("Unary {:?}", op),
         Instr::Binary(op) => format!("Binary {:?}", op),
         Instr::Pack {

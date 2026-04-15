@@ -47,6 +47,7 @@ impl DisplayValue<'_> {
             Value::CtorFn { tag, .. } => {
                 format!("<ctor {}>", tag_name(self.arities, tag))
             }
+            Value::FunctionRef { .. } => "<function>".into(),
             Value::Obj(id) => match self.heap.get(id) {
                 HeapObject::Closure { .. } | HeapObject::PartialApp { .. } => "<closure>".into(),
                 HeapObject::PartialCtor {
@@ -61,7 +62,25 @@ impl DisplayValue<'_> {
                         format!("<partial {} {}>", name, self.render_args(applied_args))
                     }
                 }
-                HeapObject::Data { tag, fields } => {
+                HeapObject::Data0 { tag } => tag_name(self.arities, *tag).into(),
+                HeapObject::Data1 { tag, field } => {
+                    let name = tag_name(self.arities, *tag);
+                    format!("{} {}", name, self.render_atom(*field))
+                }
+                HeapObject::Data2 {
+                    tag,
+                    field0,
+                    field1,
+                } => {
+                    let name = tag_name(self.arities, *tag);
+                    format!(
+                        "{} {} {}",
+                        name,
+                        self.render_atom(*field0),
+                        self.render_atom(*field1)
+                    )
+                }
+                HeapObject::DataN { tag, fields } => {
                     let name = tag_name(self.arities, *tag);
                     let fields = self.heap.payloads.as_slice(*fields);
 
@@ -97,49 +116,52 @@ impl DisplayValue<'_> {
         loop {
             match val {
                 Value::Obj(id) => match self.heap.get(id) {
-                    HeapObject::Data { tag, fields } => {
-                        let fields = self.heap.payloads.as_slice(*fields);
-
-                        if fields.is_empty() && tag_is(self.arities, *tag, "Z") {
+                    HeapObject::Data0 { tag } => {
+                        if tag_is(self.arities, *tag, "Z") {
                             return Some(n.to_string());
                         }
-
-                        if fields.len() == 1 && tag_is(self.arities, *tag, "S") {
-                            n += 1;
-                            val = fields[0];
-                            continue;
-                        }
-
                         return None;
                     }
+                    HeapObject::Data1 { tag, field } => {
+                        if tag_is(self.arities, *tag, "S") {
+                            n += 1;
+                            val = *field;
+                            continue;
+                        }
+                        return None;
+                    }
+                    HeapObject::Data2 { .. } | HeapObject::DataN { .. } => return None,
                     _ => return None,
                 },
                 _ => return None,
             }
         }
     }
-
     fn try_list(&self, mut val: Value) -> Option<String> {
         let mut items = Vec::new();
 
         loop {
             match val {
                 Value::Obj(id) => match self.heap.get(id) {
-                    HeapObject::Data { tag, fields } => {
-                        let fields = self.heap.payloads.as_slice(*fields);
-
-                        if fields.is_empty() && tag_is(self.arities, *tag, "Nil") {
+                    HeapObject::Data0 { tag } => {
+                        if tag_is(self.arities, *tag, "Nil") {
                             return Some(format!("[{}]", items.join(", ")));
                         }
-
-                        if fields.len() == 2 && tag_is(self.arities, *tag, "Cons") {
-                            items.push(self.render(fields[0]));
-                            val = fields[1];
-                            continue;
-                        }
-
                         return None;
                     }
+                    HeapObject::Data2 {
+                        tag,
+                        field0,
+                        field1,
+                    } => {
+                        if tag_is(self.arities, *tag, "Cons") {
+                            items.push(self.render(*field0));
+                            val = *field1;
+                            continue;
+                        }
+                        return None;
+                    }
+                    HeapObject::Data1 { .. } | HeapObject::DataN { .. } => return None,
                     _ => return None,
                 },
                 _ => return None,
@@ -150,20 +172,18 @@ impl DisplayValue<'_> {
     fn try_pair(&self, val: Value) -> Option<String> {
         match val {
             Value::Obj(id) => match self.heap.get(id) {
-                HeapObject::Data { tag, fields } => {
-                    let fields = self.heap.payloads.as_slice(*fields);
-
-                    if fields.len() == 2 {
-                        let name = tag_name(self.arities, *tag);
-                        if name == "Pair" || name == "MkPair" {
-                            Some(format!(
-                                "({}, {})",
-                                self.render(fields[0]),
-                                self.render(fields[1])
-                            ))
-                        } else {
-                            None
-                        }
+                HeapObject::Data2 {
+                    tag,
+                    field0,
+                    field1,
+                } => {
+                    let name = tag_name(self.arities, *tag);
+                    if name == "Pair" || name == "MkPair" {
+                        Some(format!(
+                            "({}, {})",
+                            self.render(*field0),
+                            self.render(*field1)
+                        ))
                     } else {
                         None
                     }

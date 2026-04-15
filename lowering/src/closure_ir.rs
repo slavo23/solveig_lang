@@ -12,12 +12,15 @@ pub enum CCExpr {
         tag: u16,
         arity: u16,
     },
-
     UnaryOp(UnOp, Rc<CCExpr>),
     BinaryOp(BinOp, Rc<CCExpr>, Rc<CCExpr>),
     MakeClosure {
         func: usize,
         captures: Vec<Rc<CCExpr>>,
+    },
+    FunctionRef {
+        func: usize,
+        arity: usize,
     },
     Call {
         callee: Rc<CCExpr>,

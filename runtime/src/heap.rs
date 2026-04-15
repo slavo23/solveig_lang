@@ -16,7 +16,19 @@ pub enum HeapObject {
         arity: u16,
         applied_args: PayloadRef,
     },
-    Data {
+    Data0 {
+        tag: u16,
+    },
+    Data1 {
+        tag: u16,
+        field: Value,
+    },
+    Data2 {
+        tag: u16,
+        field0: Value,
+        field1: Value,
+    },
+    DataN {
         tag: u16,
         fields: PayloadRef,
     },
@@ -80,27 +92,11 @@ impl Heap {
 
     #[inline(always)]
     pub fn alloc_data2(&mut self, tag: u16, a: Value, b: Value) -> Value {
-        let fields = if let Some(start) = self.payloads.bucket2.pop() {
-            PayloadRef {
-                start,
-                end: start + 2,
-            }
-        } else {
-            let start = self.payloads.values.len();
-            self.payloads.values.reserve(2);
-            unsafe {
-                self.payloads.values.set_len(start + 2);
-            }
-            PayloadRef {
-                start,
-                end: start + 2,
-            }
-        };
-
-        self.payloads.values[fields.start] = a;
-        self.payloads.values[fields.start + 1] = b;
-
-        self.alloc(HeapObject::Data { tag, fields })
+        self.alloc(HeapObject::Data2 {
+            tag,
+            field0: a,
+            field1: b,
+        })
     }
 
     pub fn clone_payload(&mut self, span: PayloadRef) -> PayloadRef {
@@ -139,9 +135,7 @@ impl Heap {
 
     pub fn free_object_payloads(&mut self, obj: &HeapObject) {
         match obj {
-            HeapObject::Closure { captures, .. } => {
-                self.payloads.free_span(*captures);
-            }
+            HeapObject::Closure { captures, .. } => self.payloads.free_span(*captures),
             HeapObject::PartialApp {
                 captures,
                 applied_args,
@@ -150,12 +144,9 @@ impl Heap {
                 self.payloads.free_span(*captures);
                 self.payloads.free_span(*applied_args);
             }
-            HeapObject::PartialCtor { applied_args, .. } => {
-                self.payloads.free_span(*applied_args);
-            }
-            HeapObject::Data { fields, .. } => {
-                self.payloads.free_span(*fields);
-            }
+            HeapObject::PartialCtor { applied_args, .. } => self.payloads.free_span(*applied_args),
+            HeapObject::DataN { fields, .. } => self.payloads.free_span(*fields),
+            HeapObject::Data0 { .. } | HeapObject::Data1 { .. } | HeapObject::Data2 { .. } => {}
         }
     }
 }

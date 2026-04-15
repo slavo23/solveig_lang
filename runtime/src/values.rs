@@ -6,6 +6,7 @@ pub enum Value {
     Unit,
     Int(i64),
     CtorFn { tag: u16, arity: u16 },
+    FunctionRef { chunk: u32, arity: u16 },
     Obj(ObjId),
 }
 

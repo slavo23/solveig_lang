@@ -86,10 +86,7 @@ impl Vm {
     fn init_nullary(&mut self, arities: &[(String, u16, u16)]) {
         for &(_, tag, arity) in arities {
             if arity == 0 {
-                let val = self.alloc_heap(HeapObject::Data {
-                    tag,
-                    fields: PayloadStore::empty(),
-                });
+                let val = self.alloc_heap(HeapObject::Data0 { tag });
                 self.nullary_ctors.set(tag, val);
             }
         }
@@ -160,7 +157,23 @@ impl Vm {
                     ..
                 }) => Children::Two(*captures, *applied_args),
                 Some(HeapObject::PartialCtor { applied_args, .. }) => Children::One(*applied_args),
-                Some(HeapObject::Data { fields, .. }) => Children::One(*fields),
+                Some(HeapObject::DataN { fields, .. }) => Children::One(*fields),
+                Some(HeapObject::Data0 { .. }) => Children::None,
+                Some(HeapObject::Data1 { field, .. }) => {
+                    if let Value::Obj(child) = field {
+                        mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
+                    }
+                    Children::None
+                }
+                Some(HeapObject::Data2 { field0, field1, .. }) => {
+                    if let Value::Obj(child) = field0 {
+                        mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
+                    }
+                    if let Value::Obj(child) = field1 {
+                        mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
+                    }
+                    Children::None
+                }
                 None => Children::None,
             };
 
@@ -424,13 +437,38 @@ impl Vm {
         callee: Value,
         arg_count: usize,
     ) -> Option<Value> {
-        self.maybe_gc();
-
         match callee {
             Value::CtorFn { tag, arity } => {
+                self.maybe_gc();
                 Some(self.apply_constructor(tag, arity, PayloadStore::empty(), arg_count))
             }
+
+            Value::FunctionRef { chunk, arity } => {
+                let chunk_id = chunk as usize;
+                let arity = arity as usize;
+
+                if arg_count == arity {
+                    self.enter_known_function(program, mode, chunk_id, arg_count);
+                    None
+                } else if arg_count < arity {
+                    self.maybe_gc();
+                    let applied_args = self.pop_payload(arg_count);
+
+                    Some(self.alloc_heap(HeapObject::PartialApp {
+                        chunk: chunk_id,
+                        captures: PayloadStore::empty(),
+                        applied_args,
+                    }))
+                } else {
+                    panic!(
+                        "over-application of function reference (arity {}, got {})",
+                        arity, arg_count
+                    );
+                }
+            }
+
             Value::Obj(id) => self.invoke_heap_object(program, mode, id, arg_count),
+
             _ => panic!(
                 "cannot {}call {:?}",
                 if matches!(mode, InvokeMode::TailCall) {
@@ -537,7 +575,10 @@ impl Vm {
                 applied_args,
             } => Some(self.apply_constructor(*tag, *arity, *applied_args, arg_count)),
 
-            HeapObject::Data { tag, .. } => {
+            HeapObject::Data0 { tag }
+            | HeapObject::Data1 { tag, .. }
+            | HeapObject::Data2 { tag, .. }
+            | HeapObject::DataN { tag, .. } => {
                 panic!("cannot apply saturated constructor tag {}", tag);
             }
         }
@@ -551,17 +592,44 @@ impl Vm {
         n_new: usize,
     ) -> Value {
         let total = existing.len() + n_new;
-        let fields =
-            self.heap
-                .alloc_concat_payload_and_stack_tail(existing, &mut self.stack, n_new);
 
         if total == arity as usize {
-            self.alloc_heap(HeapObject::Data { tag, fields })
+            if existing.is_empty() {
+                return match n_new {
+                    0 => self.alloc_heap(HeapObject::Data0 { tag }),
+                    1 => {
+                        let field = self.pop();
+                        self.alloc_heap(HeapObject::Data1 { tag, field })
+                    }
+                    2 => {
+                        let field1 = self.pop();
+                        let field0 = self.pop();
+                        self.alloc_heap(HeapObject::Data2 {
+                            tag,
+                            field0,
+                            field1,
+                        })
+                    }
+                    _ => {
+                        let fields = self.pop_payload(n_new);
+                        self.alloc_heap(HeapObject::DataN { tag, fields })
+                    }
+                };
+            }
+
+            let fields =
+                self.heap
+                    .alloc_concat_payload_and_stack_tail(existing, &mut self.stack, n_new);
+            self.alloc_heap(HeapObject::DataN { tag, fields })
         } else if total < arity as usize {
+            let applied_args =
+                self.heap
+                    .alloc_concat_payload_and_stack_tail(existing, &mut self.stack, n_new);
+
             self.alloc_heap(HeapObject::PartialCtor {
                 tag,
                 arity,
-                applied_args: fields,
+                applied_args,
             })
         } else {
             panic!("over-applied constructor tag {}", tag);
@@ -576,45 +644,97 @@ impl Vm {
                     self.pc = arm.target as usize;
                     return;
                 }
+
                 BytePattern::Wild => {
                     self.pc = arm.target as usize;
                     return;
                 }
+
                 BytePattern::Con(expected_tag, subs) => {
                     let id = match scrutinee {
                         Value::Obj(id) => id,
                         _ => continue,
                     };
 
-                    let (tag, fields_ref) = match self.heap.get(id) {
-                        HeapObject::Data { tag, fields } => (*tag, *fields),
-                        _ => continue,
-                    };
+                    let obj = self.heap.get(id);
 
-                    if tag != *expected_tag {
-                        continue;
-                    }
-
-                    if let Some(bind_count) = try_flat_bind(subs) {
-                        let fields = self.heap.payloads.as_slice(fields_ref);
-                        if fields.len() != subs.len() {
-                            continue;
+                    match obj {
+                        HeapObject::Data0 { tag } if *tag == *expected_tag && subs.is_empty() => {
+                            self.pc = arm.target as usize;
+                            return;
                         }
 
-                        self.binding_buffer.clear();
-                        for (i, sub) in subs.iter().enumerate() {
-                            if matches!(sub, BytePattern::Var) {
-                                self.binding_buffer.push(fields[i]);
+                        HeapObject::Data1 { tag, field }
+                            if *tag == *expected_tag && subs.len() == 1 =>
+                        {
+                            let field = *field;
+
+                            if let Some(bind_count) = try_flat_bind(subs) {
+                                debug_assert!(bind_count <= 1);
+
+                                if bind_count == 1 {
+                                    self.store(arm.bind_slots[0], field);
+                                }
+
+                                self.pc = arm.target as usize;
+                                return;
                             }
                         }
 
-                        debug_assert_eq!(self.binding_buffer.len(), bind_count);
-                        for i in 0..bind_count {
-                            self.store(arm.bind_slots[i], self.binding_buffer[i]);
+                        HeapObject::Data2 {
+                            tag,
+                            field0,
+                            field1,
+                        } if *tag == *expected_tag && subs.len() == 2 => {
+                            let f0 = *field0;
+                            let f1 = *field1;
+
+                            if let Some(_bind_count) = try_flat_bind(subs) {
+                                let mut si = 0;
+
+                                if matches!(subs[0], BytePattern::Var) {
+                                    self.store(arm.bind_slots[si], f0);
+                                    si += 1;
+                                }
+
+                                if matches!(subs[1], BytePattern::Var) {
+                                    self.store(arm.bind_slots[si], f1);
+                                }
+
+                                self.pc = arm.target as usize;
+                                return;
+                            }
                         }
 
-                        self.pc = arm.target as usize;
-                        return;
+                        HeapObject::DataN { tag, fields } => {
+                            if *tag != *expected_tag {
+                                continue;
+                            }
+
+                            if let Some(bind_count) = try_flat_bind(subs) {
+                                let fields = self.heap.payloads.as_slice(*fields);
+                                if fields.len() != subs.len() {
+                                    continue;
+                                }
+
+                                self.binding_buffer.clear();
+                                for (i, sub) in subs.iter().enumerate() {
+                                    if matches!(sub, BytePattern::Var) {
+                                        self.binding_buffer.push(fields[i]);
+                                    }
+                                }
+
+                                debug_assert_eq!(self.binding_buffer.len(), bind_count);
+                                for i in 0..bind_count {
+                                    self.store(arm.bind_slots[i], self.binding_buffer[i]);
+                                }
+
+                                self.pc = arm.target as usize;
+                                return;
+                            }
+                        }
+
+                        _ => {}
                     }
 
                     self.binding_buffer.clear();
@@ -636,7 +756,6 @@ impl Vm {
 
         self.pc = else_pc as usize;
     }
-
     fn resume_after_return(&mut self, result: Value) -> Option<Value> {
         self.stack.truncate(self.frame_base);
 
@@ -717,6 +836,9 @@ impl Vm {
                     });
                     self.push(val);
                 }
+                Instr::PushFunctionRef { chunk, arity } => {
+                    self.push(Value::FunctionRef { chunk, arity });
+                }
                 Instr::Unary(op) => {
                     let rhs = self.pop_int();
                     self.push(match op {
@@ -750,12 +872,21 @@ impl Vm {
                         self.maybe_gc();
                         let b = self.pop();
                         let a = self.pop();
-                        let allocated = self.heap.alloc_data2(tag, a, b);
-                        self.push(allocated);
+                        let val = self.heap.alloc(HeapObject::Data2 {
+                            tag,
+                            field0: a,
+                            field1: b,
+                        });
+                        self.push(val);
+                    } else if field_count == 1 {
+                        self.maybe_gc();
+                        let a = self.pop();
+                        let val = self.heap.alloc(HeapObject::Data1 { tag, field: a });
+                        self.push(val);
                     } else {
                         self.maybe_gc();
                         let fields = self.pop_payload(field_count as usize);
-                        let val = self.alloc_heap(HeapObject::Data { tag, fields });
+                        let val = self.alloc_heap(HeapObject::DataN { tag, fields });
                         self.push(val);
                     }
                 }
@@ -872,25 +1003,49 @@ fn match_pattern_inner(
                 _ => return false,
             };
 
-            let (tag, fields) = match heap.get(id) {
-                HeapObject::Data { tag, fields } => (*tag, heap.payloads.as_slice(*fields)),
-                _ => return false,
-            };
-
-            if tag != *expected_tag || fields.len() != subs.len() {
-                return false;
-            }
-
-            let checkpoint = bindings.len();
-
-            for (sub, &field) in subs.iter().zip(fields.iter()) {
-                if !match_pattern_inner(heap, sub, field, bindings) {
-                    bindings.truncate(checkpoint);
-                    return false;
+            match heap.get(id) {
+                HeapObject::Data0 { tag } => *tag == *expected_tag && subs.is_empty(),
+                HeapObject::Data1 { tag, field } => {
+                    if *tag != *expected_tag || subs.len() != 1 {
+                        return false;
+                    }
+                    match_pattern_inner(heap, &subs[0], *field, bindings)
                 }
+                HeapObject::Data2 {
+                    tag,
+                    field0,
+                    field1,
+                } => {
+                    if *tag != *expected_tag || subs.len() != 2 {
+                        return false;
+                    }
+                    let cp = bindings.len();
+                    if !match_pattern_inner(heap, &subs[0], *field0, bindings) {
+                        bindings.truncate(cp);
+                        return false;
+                    }
+                    if !match_pattern_inner(heap, &subs[1], *field1, bindings) {
+                        bindings.truncate(cp);
+                        return false;
+                    }
+                    true
+                }
+                HeapObject::DataN { tag, fields } => {
+                    let fields = heap.payloads.as_slice(*fields);
+                    if *tag != *expected_tag || fields.len() != subs.len() {
+                        return false;
+                    }
+                    let cp = bindings.len();
+                    for (sub, &field) in subs.iter().zip(fields.iter()) {
+                        if !match_pattern_inner(heap, sub, field, bindings) {
+                            bindings.truncate(cp);
+                            return false;
+                        }
+                    }
+                    true
+                }
+                _ => false,
             }
-
-            true
         }
     }
 }

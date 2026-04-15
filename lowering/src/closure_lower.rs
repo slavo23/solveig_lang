@@ -92,28 +92,21 @@ impl ClosureLowerer {
         if let Some(info) = self.known_global_funcs[global_index] {
             let (_, lambda_body) = collect_lambda_chain(&global.body);
 
-            let (lowered_body, capture_sources, capture_count) = {
+            let (lowered_body, _capture_sources, capture_count) = {
                 let mut child = ExprLowerer::new_lambda(self, global.name.clone(), 0, info.arity);
 
                 let lowered_body = child.lower_expr(&lambda_body);
-                let capture_sources = child.capture_sources_in_slot_order();
                 let capture_count = child.capture_slots.len();
 
-                (lowered_body, capture_sources, capture_count)
+                (
+                    lowered_body,
+                    child.capture_sources_in_slot_order(),
+                    capture_count,
+                )
             };
 
-            let captures: Vec<Rc<CCExpr>> = capture_sources
-                .into_iter()
-                .map(|visible_pos| {
-                    panic!(
-                        "top-level function '{}' unexpectedly captured visible slot {}",
-                        global.name, visible_pos
-                    )
-                })
-                .collect();
-
-            assert!(
-                captures.is_empty(),
+            assert_eq!(
+                capture_count, 0,
                 "top-level function '{}' unexpectedly captured locals",
                 global.name
             );
@@ -128,9 +121,9 @@ impl ClosureLowerer {
 
             return CCGlobalDef {
                 name: global.name.clone(),
-                body: Rc::new(CCExpr::MakeClosure {
+                body: Rc::new(CCExpr::FunctionRef {
                     func: info.func_id,
-                    captures: vec![],
+                    arity: info.arity,
                 }),
             };
         }
@@ -296,15 +289,22 @@ impl<'a> ExprLowerer<'a> {
             body: lowered_body,
         });
 
-        let captures = capture_sources
-            .into_iter()
-            .map(|parent_visible_pos| self.expr_for_visible_position(parent_visible_pos))
-            .collect();
+        if capture_count == 0 {
+            Rc::new(CCExpr::FunctionRef {
+                func: func_id,
+                arity,
+            })
+        } else {
+            let captures = capture_sources
+                .into_iter()
+                .map(|parent_visible_pos| self.expr_for_visible_position(parent_visible_pos))
+                .collect();
 
-        Rc::new(CCExpr::MakeClosure {
-            func: func_id,
-            captures,
-        })
+            Rc::new(CCExpr::MakeClosure {
+                func: func_id,
+                captures,
+            })
+        }
     }
 
     fn lower_application(&mut self, expr: &Rc<IRExpr>) -> Rc<CCExpr> {
