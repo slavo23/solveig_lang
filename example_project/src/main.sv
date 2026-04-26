@@ -25,7 +25,10 @@ getEqFn dict =
         MkEqDict f => f;
 
 same : forall a b. EqDict a b -> a -> b -> Bool;
-same dict a b = (getEqFn dict) a b;
+same dict x y = (getEqFn dict) x y;
+
+intEqDict : EqDict Int Int;
+intEqDict = MkEqDict (fun x y => x == y);
 
 treeFromList : Map Int Int;
 treeFromList =
@@ -41,8 +44,5 @@ runAllExamplesAndDiscardResult =
     let five = runQuicksortExample in
     let six = runMergeSortExample in
     let seven = runKnapsackExample in ();
-
-intEqDict : EqDict Int Int;
-intEqDict = MkEqDict (fun x y => x == y);
 
 main = runAllExamplesAndDiscardResult;

@@ -220,6 +220,7 @@ impl Resolver {
 
         let node = match &**sf {
             SurfaceExpr::Unit => TermExpr::Unit,
+            SurfaceExpr::Hole => TermExpr::Hole,
             SurfaceExpr::Var(v) => TermExpr::Var(self.resolve_term_ref(&v.inner, cx)),
             SurfaceExpr::Con(c) => TermExpr::Con(self.resolve_ctor_ref(&c.inner, cx)),
             SurfaceExpr::Literal(lit) => match lit {

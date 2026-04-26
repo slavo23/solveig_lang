@@ -31,6 +31,10 @@ impl Context {
         Context { entries }
     }
 
+    pub fn get_entries(&self) -> Vec<ContextEntry> {
+        self.entries.clone()
+    }
+
     fn apply_once(&self, ty: &TypeExpr) -> TypeExpr {
         match ty {
             TypeExpr::TyVar(_) | TypeExpr::TyCon(_) | TypeExpr::TyUnit => ty.clone(),

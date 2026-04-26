@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use crate::inference::holes::HoleInfo;
 use crate::inference::inference_ctx::{Context, ContextEntry};
 use base::utils::diagnostics::{FileSpan, TypeError};
 use base::utils::span::Span;
@@ -39,6 +40,7 @@ pub struct TypeChecker {
     func_types: HashMap<String, TypeExpr>,
     tycon_kinds: HashMap<String, Kind>,
     evar_solutions: HashMap<String, TypeExpr>,
+    holes: Vec<HoleInfo>,
 }
 
 impl Default for TypeChecker {
@@ -56,6 +58,7 @@ impl TypeChecker {
             func_types: HashMap::new(),
             tycon_kinds: HashMap::new(),
             evar_solutions: HashMap::new(),
+            holes: Vec::new(),
         }
     }
 
@@ -67,6 +70,7 @@ impl TypeChecker {
             func_types: module.func_types.clone(),
             tycon_kinds: module.tycon_kinds.clone(),
             evar_solutions: HashMap::new(),
+            holes: Vec::new(),
         }
     }
 
@@ -100,6 +104,39 @@ impl TypeChecker {
                 .insert(evar_name.clone(), solution.clone());
         }
     }
+
+    fn context_bindings(&self, ctx: &Context) -> Vec<(String, TypeExpr)> {
+        ctx.get_entries()
+            .iter()
+            .filter_map(|entry| {
+                if let ContextEntry::TypedVar { var_name, ty } = entry {
+                    Some((var_name.clone(), self.zonk_type(&ctx.apply(&ty))))
+                } else {
+                    None
+                }
+            })
+            .collect()
+    }
+
+    fn report_hole(&mut self, ctx: &Context, span: Span, ty: &TypeExpr) {
+        self.holes.push(HoleInfo {
+            span: self.get_file_span(span),
+            expected_type: self.zonk_type(&ctx.apply(ty)),
+            context: self.context_bindings(ctx),
+        });
+    }
+
+    pub fn finalize_holes(&mut self) {
+        let mut holes = std::mem::take(&mut self.holes);
+        for hole in &mut holes {
+            hole.expected_type = self.zonk_type(&hole.expected_type);
+            for (_, ty) in &mut hole.context {
+                *ty = self.zonk_type(ty);
+            }
+        }
+        self.holes = holes;
+    }
+
     fn bool_type(&self) -> TypeExpr {
         TypeExpr::TyCon("prelude.builtins.Bool".to_string())
     }
@@ -181,6 +218,7 @@ impl TypeChecker {
             self.zonk_type(&expr.anno.inferred_type),
         );
         let zonked_node = match &expr.node {
+            TermExpr::Hole => TermExpr::Hole,
             TermExpr::Unit => TermExpr::Unit,
             TermExpr::Var(name) => TermExpr::Var(name.clone()),
             TermExpr::Lit(lit_val) => TermExpr::Lit(lit_val.clone()),
@@ -876,6 +914,12 @@ impl TypeChecker {
                 Ok((gamma, elaborated))
             }
 
+            (TermExpr::Hole, _) => {
+                self.report_hole(&ctx, span.clone(), expected_type);
+                let elaborated = elab_node(TermExpr::Hole, span, expected_type.clone());
+                Ok((ctx, elaborated))
+            }
+
             (_, TypeExpr::TyForAll(quantifier, kind, body_type)) => {
                 let universal_entry = ContextEntry::UniVar(quantifier.clone(), kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
@@ -1188,6 +1232,14 @@ impl TypeChecker {
             TermExpr::UnaryOperator(op, rhs) => {
                 self.solve_unary_operator_inference(ctx, op, rhs, span)
             }
+            TermExpr::Hole => {
+                let evar_name = self.fresh_evar_name();
+                let evar_type = TypeExpr::TyExVar(evar_name.clone());
+                let extended_ctx = ctx.add_entry(ContextEntry::ExVar(evar_name, Kind::Star));
+                self.report_hole(&extended_ctx, span.clone(), &evar_type);
+                let elaborated = elab_node(TermExpr::Hole, span, evar_type.clone());
+                Ok((extended_ctx, elaborated, evar_type))
+            }
         }
     }
 
@@ -1290,14 +1342,20 @@ impl TypeChecker {
 
 pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
 
+pub struct TCOutput {
+    pub module: CheckedModule,
+    pub holes: Vec<HoleInfo>,
+}
+
 pub fn check_and_elab_module(
     module: &ResolvedModule<Span>,
     file_id: impl Into<String>,
-) -> Result<CheckedModule, Vec<TypeError>> {
+) -> Result<TCOutput, Vec<TypeError>> {
     let file_id = file_id.into();
     let mut errors = Vec::new();
     let mut checked_defs = Vec::new();
     let mut available_func_types = module.func_types.clone();
+    let mut all_holes = Vec::new();
 
     for func_def in &module.func_defs {
         let mut checker = TypeChecker::with_module_context(module, file_id.clone());
@@ -1316,6 +1374,9 @@ pub fn check_and_elab_module(
                         signature: Some(final_sig),
                         body: zonked_expr,
                     });
+
+                    checker.finalize_holes();
+                    all_holes.extend(checker.holes);
                 }
                 Err(err) => errors.push(err),
             },
@@ -1323,7 +1384,6 @@ pub fn check_and_elab_module(
             None => match checker.solve_inference(Context::new(), &func_def.body) {
                 Ok((final_ctx, elaborated, inferred_ty)) => {
                     let zonked_expr = checker.zonk_expr(&elaborated);
-
                     let final_sig = checker.generalize_top_level_type(&final_ctx, &inferred_ty);
                     println!("(inferred) {} : {}", func_def.name, final_sig.pretty());
 
@@ -1334,6 +1394,9 @@ pub fn check_and_elab_module(
                         signature: Some(final_sig),
                         body: zonked_expr,
                     });
+
+                    checker.finalize_holes();
+                    all_holes.extend(checker.holes);
                 }
                 Err(err) => errors.push(err),
             },
@@ -1344,11 +1407,14 @@ pub fn check_and_elab_module(
         return Err(errors);
     }
 
-    Ok(ResolvedModule {
-        data_defs: module.data_defs.clone(),
-        tycon_kinds: module.tycon_kinds.clone(),
-        constructor_types: module.constructor_types.clone(),
-        func_types: available_func_types,
-        func_defs: checked_defs,
+    Ok(TCOutput {
+        module: ResolvedModule {
+            data_defs: module.data_defs.clone(),
+            tycon_kinds: module.tycon_kinds.clone(),
+            constructor_types: module.constructor_types.clone(),
+            func_types: available_func_types,
+            func_defs: checked_defs,
+        },
+        holes: all_holes,
     })
 }

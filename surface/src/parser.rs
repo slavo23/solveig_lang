@@ -59,6 +59,7 @@ pub enum Token<'src> {
     Equal,
     Import,
     As,
+    Hole,
 }
 
 pub fn lexer<'src>()
@@ -116,10 +117,34 @@ pub fn lexer<'src>()
             .labelled("token tree")
             .as_context()
             .map(Token::Brackets);
+        let symbols = choice((
+            just(">=").to(Token::GreaterOrEqual),
+            just(">").to(Token::Greater),
+            just("<=").to(Token::LessOrEqual),
+            just("<").to(Token::Less),
+            just("=>").to(Token::FatArrow),
+            just("==").to(Token::Equal),
+            just("=").to(Token::EqBind),
+            just("->").to(Token::Arrow),
+            just("::").to(Token::ConsSep),
+            just(":").to(Token::Colon),
+            just(".").to(Token::Dot),
+            just(";;").to(Token::SemiSemi),
+            just(";").to(Token::Semicolon),
+            just("|").to(Token::Pipe),
+            just("_").to(Token::Uns),
+            just(",").to(Token::Comma),
+            just("+").to(Token::Plus),
+            just("-").to(Token::Minus),
+            just("*").to(Token::Multiply),
+            just("/").to(Token::Divide),
+            just("%").to(Token::Mod),
+        ));
 
         choice((
             int_lit,
             just("#end").to(Token::End),
+            just("??").to(Token::Hole),
             text::ident().map(|s| match s {
                 "let" => Token::Let,
                 "in" => Token::In,
@@ -146,27 +171,7 @@ pub fn lexer<'src>()
                     }
                 }
             }),
-            just(">=").to(Token::GreaterOrEqual),
-            just(">").to(Token::Greater),
-            just("<=").to(Token::LessOrEqual),
-            just("<").to(Token::Less),
-            just("=>").to(Token::FatArrow),
-            just("==").to(Token::Equal),
-            just("=").to(Token::EqBind),
-            just("->").to(Token::Arrow),
-            just("::").to(Token::ConsSep),
-            just(":").to(Token::Colon),
-            just(".").to(Token::Dot),
-            just(";").to(Token::Semicolon),
-            just(";;").to(Token::SemiSemi),
-            just("|").to(Token::Pipe),
-            just("_").to(Token::Uns),
-            just(",").to(Token::Comma),
-            just("+").to(Token::Plus),
-            just("-").to(Token::Minus),
-            just("*").to(Token::Multiply),
-            just("/").to(Token::Divide),
-            just("%").to(Token::Mod),
+            symbols,
             parens,
             brackets,
         ))
@@ -522,6 +527,7 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
 > {
     recursive(|expr| {
         let ident = select_ref! { Token::Ident(x) => *x };
+        let expr_hole = just(Token::Hole).map(|_| SurfaceExpr::Hole);
         let unit_expr = select_ref! {
             Token::Parens(ts) if ts.is_empty() => SurfaceExpr::Unit
         };
@@ -637,6 +643,7 @@ pub fn expr_parser<'tokens, 'src: 'tokens>() -> impl Parser<
             variable.spanned(),
             expr_case.spanned(),
             expr_if.spanned(),
+            expr_hole.spanned(),
             expr_list,
             expr.nested_in(select_ref! {
                 Token::Parens(ts) = e => ts.split_spanned(e.span())

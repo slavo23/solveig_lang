@@ -265,6 +265,7 @@ pub enum TermExpr<A, P = A> {
     Unit,
     Var(String),
     Lit(Literal),
+    Hole,
     App(Box<TermExprNode<A, P>>, Box<TermExprNode<A, P>>),
     Abs(String, Option<TypeExpr>, Box<TermExprNode<A, P>>),
     TyAbs(String, Kind, Box<TermExprNode<A, P>>),

@@ -135,6 +135,7 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
 
             Rc::new(IRExpr::Let(lowered_binder, lowered_in_expr))
         }
+        TermExpr::Hole => panic!("Program is incomplete and contains holes. Aborting compilation."),
     }
 }
 

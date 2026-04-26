@@ -150,6 +150,7 @@ pub enum SurfaceLiteral {
 pub enum SurfaceExpr<'src> {
     Unit,
     Literal(SurfaceLiteral),
+    Hole,
     Var(Spanned<NameRef<'src>>),
     App(
         Box<Spanned<SurfaceExpr<'src>>>,

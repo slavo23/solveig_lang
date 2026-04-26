@@ -7,6 +7,7 @@ use lowering::closure_lower::lower_to_closure_ir;
 use lowering::lowering::lower_module;
 use runtime::vm::Machine;
 use surface::ast::ModuleName;
+use syntax::inference::holes::emit_holes;
 use syntax::inference::type_infer::{check_and_elab_module, CheckedModule};
 
 use crate::project::{
@@ -133,7 +134,16 @@ impl<'a> FrontendState<'a> {
                 }
             };
 
-        Ok(retain_only_local_symbols(module_name, checked_raw))
+        if !checked_raw.holes.is_empty() {
+            emit_holes(
+                &checked_raw.holes,
+                &module_file.source,
+                &resolved.constructor_types,
+            );
+            return Err("Program has unfilled holes. Aborting compilation".to_string());
+        }
+
+        Ok(retain_only_local_symbols(module_name, checked_raw.module))
     }
 
     fn build_imported_apis(&self, imports: &[crate::project::EffectiveImport]) -> Vec<ImportedApi> {
