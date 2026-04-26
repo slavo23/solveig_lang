@@ -10,12 +10,22 @@ import knapsack(sampleTreeDp);
 import treeMap(fromList, Map, intComparator, Entry, size);
 
 runSudokuReadyExample = solveBoard samplePuzzle;
-runNQueensReadyExample = solveNQueensCount 10;
+runNQueensReadyExample = solveNQueensCount 8;
 runBinaryTreeExample = sampleTree;
 runBrainfuckExample = sampleAddOutput;
-runQuicksortExample = sampleSortedQuickSort 1000000;
-runMergeSortExample = sampleSortedMergeSort 1000000;
+runQuicksortExample = sampleSortedQuickSort 500000;
+runMergeSortExample = sampleSortedMergeSort 500000;
 runKnapsackExample = sampleTreeDp;
+
+data EqDict a b = MkEqDict (a -> b -> Bool);
+
+getEqFn : forall a b. EqDict a b -> (a -> b -> Bool);
+getEqFn dict = 
+    case dict of
+        MkEqDict f => f;
+
+same : forall a b. EqDict a b -> a -> b -> Bool;
+same dict a b = (getEqFn dict) a b;
 
 treeFromList : Map Int Int;
 treeFromList =
@@ -31,5 +41,8 @@ runAllExamplesAndDiscardResult =
     let five = runQuicksortExample in
     let six = runMergeSortExample in
     let seven = runKnapsackExample in ();
+
+intEqDict : EqDict Int Int;
+intEqDict = MkEqDict (fun x y => x == y);
 
 main = runAllExamplesAndDiscardResult;

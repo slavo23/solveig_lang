@@ -41,8 +41,6 @@ impl ClosureLowerer {
         let mut functions = Vec::new();
         let mut next_func_id = 0;
 
-        // Reserve function ids for top-level lambda chains up front so that
-        // saturated global calls can target them directly during lowering.
         for (global_idx, global) in program.globals.iter().enumerate() {
             let (arity, _) = collect_lambda_chain(&global.body);
             if arity > 0 {
@@ -324,12 +322,22 @@ impl<'a> ExprLowerer<'a> {
 
         if let IRExpr::FVar(global_index) = head.as_ref() {
             if let Some(info) = self.state.known_global_func(*global_index) {
-                if args.len() == info.arity {
+                if args.len() <= info.arity {
                     let lowered_args = args.iter().map(|arg| self.lower_expr(arg)).collect();
-
                     return Rc::new(CCExpr::CallKnown {
                         func: info.func_id,
                         args: lowered_args,
+                    });
+                } else {
+                    let lowered_args: Vec<_> =
+                        args.iter().map(|arg| self.lower_expr(arg)).collect();
+                    let (sat, rest) = lowered_args.split_at(info.arity);
+                    return Rc::new(CCExpr::Call {
+                        callee: Rc::new(CCExpr::CallKnown {
+                            func: info.func_id,
+                            args: sat.to_vec(),
+                        }),
+                        args: rest.to_vec(),
                     });
                 }
             }
