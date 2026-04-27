@@ -1,0 +1,226 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "Solveig",
+  "scopeName": "source.solveig",
+  "patterns": [
+    {
+      "include": "#block_comment"
+    },
+    {
+      "include": "#line_comment"
+    },
+    {
+      "include": "#type_signature"
+    },
+    {
+      "include": "#data_declaration"
+    },
+    {
+      "include": "#function_definition"
+    },
+    {
+      "include": "#keywords"
+    },
+    {
+      "include": "#numbers"
+    },
+    {
+      "include": "#strings"
+    },
+    {
+      "include": "#operators"
+    },
+    {
+      "include": "#holes"
+    },
+    {
+      "include": "#constructors"
+    },
+    {
+      "include": "#type_variables"
+    },
+    {
+      "include": "#identifiers"
+    }
+  ],
+  "repository": {
+    "line_comment": {
+      "match": "--.*$",
+      "name": "comment.line.double-dash.solveig"
+    },
+    "block_comment": {
+      "begin": "\\{-",
+      "end": "-\\}",
+      "name": "comment.block.solveig",
+      "patterns": [
+        {
+          "include": "#block_comment"
+        }
+      ]
+    },
+    "type_signature": {
+      "match": "^([a-z_][a-zA-Z0-9_']*)\\s*(:)\\s*(.*);\\s*$",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.solveig"
+        },
+        "2": {
+          "name": "keyword.operator.type.solveig"
+        },
+        "3": {
+          "patterns": [
+            {
+              "include": "#type_content"
+            }
+          ]
+        }
+      }
+    },
+    "type_content": {
+      "patterns": [
+        {
+          "match": "\\bforall\\b",
+          "name": "keyword.control.solveig"
+        },
+        {
+          "match": "->",
+          "name": "keyword.operator.arrow.solveig"
+        },
+        {
+          "match": "\\b[A-Z][a-zA-Z0-9]*\\b",
+          "name": "storage.type.solveig"
+        },
+        {
+          "match": "\\b[a-z][a-zA-Z0-9']*\\b",
+          "name": "variable.parameter.type.solveig"
+        }
+      ]
+    },
+    "data_declaration": {
+      "match": "\\b(data)\\s+([A-Z][a-zA-Z0-9]*)",
+      "captures": {
+        "1": {
+          "name": "keyword.control.data.solveig"
+        },
+        "2": {
+          "name": "entity.name.type.declaration.solveig"
+        }
+      }
+    },
+    "function_definition": {
+      "match": "^([a-z_][a-zA-Z0-9_']*)(?=\\s+[a-z_].*=|\\s*=)",
+      "captures": {
+        "1": {
+          "name": "entity.name.function.solveig"
+        }
+      }
+    },
+    "keywords": {
+      "patterns": [
+        {
+          "match": "\\b(case|of|if|then|else)\\b",
+          "name": "keyword.control.conditional.solveig"
+        },
+        {
+          "match": "\\b(let|in|where)\\b",
+          "name": "keyword.control.local.solveig"
+        },
+        {
+          "match": "\\b(fun)\\b",
+          "name": "keyword.control.lambda.solveig"
+        },
+        {
+          "match": "\\b(forall)\\b",
+          "name": "keyword.other.forall.solveig"
+        },
+        {
+          "match": "\\b(data|sig|class|instance)\\b",
+          "name": "keyword.declaration.solveig"
+        },
+        {
+          "match": "\\b(import|as)\\b",
+          "name": "keyword.control.import.solveig"
+        },
+        {
+          "match": "\\b(True|False)\\b",
+          "name": "constant.language.boolean.solveig"
+        }
+      ]
+    },
+    "operators": {
+      "patterns": [
+        {
+          "match": "=>",
+          "name": "keyword.operator.fat-arrow.solveig"
+        },
+        {
+          "match": "->",
+          "name": "keyword.operator.arrow.solveig"
+        },
+        {
+          "match": "::",
+          "name": "keyword.operator.cons.solveig"
+        },
+        {
+          "match": ":",
+          "name": "keyword.operator.type.solveig"
+        },
+        {
+          "match": "==",
+          "name": "keyword.operator.comparison.solveig"
+        },
+        {
+          "match": ">=|<=|>|<",
+          "name": "keyword.operator.comparison.solveig"
+        },
+        {
+          "match": "=",
+          "name": "keyword.operator.assignment.solveig"
+        },
+        {
+          "match": "[+\\-*/%]",
+          "name": "keyword.operator.arithmetic.solveig"
+        },
+        {
+          "match": "\\|",
+          "name": "keyword.operator.pipe.solveig"
+        },
+        {
+          "match": "\\\\",
+          "name": "keyword.operator.lambda.solveig"
+        }
+      ]
+    },
+    "numbers": {
+      "match": "\\b[0-9]+\\b",
+      "name": "constant.numeric.integer.solveig"
+    },
+    "strings": {
+      "begin": "\"",
+      "end": "\"",
+      "name": "string.quoted.double.solveig",
+      "patterns": [
+        {
+          "match": "\\\\.",
+          "name": "constant.character.escape.solveig"
+        }
+      ]
+    },
+    "holes": {
+      "match": "\\?\\?|\\?[a-z][a-zA-Z0-9]*",
+      "name": "markup.underline.hole.solveig"
+    },
+    "constructors": {
+      "match": "\\b[A-Z][a-zA-Z0-9]*\\b",
+      "name": "constant.other.constructor.solveig"
+    },
+    "type_variables": {
+      "match": "(?<=forall\\s)([a-z][a-zA-Z0-9']*\\s*)+(?=\\.)",
+      "name": "variable.other.type.solveig"
+    },
+    "identifiers": {
+      "match": "\\b[a-z_][a-zA-Z0-9_']*\\b",
+      "name": "variable.other.solveig"
+    }
+  }
+}

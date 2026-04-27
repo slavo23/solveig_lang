@@ -1,0 +1,40 @@
+{
+  "name": "solveig",
+  "displayName": "Solveig",
+  "version": "0.1.0",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [
+      {
+        "id": "solveig",
+        "extensions": [
+          ".sv"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "solveig",
+        "scopeName": "source.solveig",
+        "path": "./syntaxes/solveig.tmLanguage.json"
+      }
+    ]
+  },
+  "main": "extension.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "@vscode/vsce": "^3.9.1"
+  }
+}
