@@ -51,6 +51,12 @@ pub struct ParsedModule<'src> {
     pub defs: SurfaceProgram<'src>,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfacePredicate<'src> {
+    pub class_name: Spanned<NameRef<'src>>,
+    pub args: Vec<Spanned<SurfaceTy<'src>>>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ClassMethod<'src> {
     pub name: Spanned<&'src str>,
@@ -82,12 +88,14 @@ pub enum SurfaceDefinition<'src> {
     },
     ClassDef {
         name: Spanned<&'src str>,
-        ty_param: Spanned<&'src str>,
+        ty_params: Vec<Spanned<&'src str>>,
+        superclasses: Vec<Spanned<SurfacePredicate<'src>>>,
         methods: Vec<ClassMethod<'src>>,
     },
     InstanceDef {
+        context: Vec<Spanned<SurfacePredicate<'src>>>,
         class_name: Spanned<&'src str>,
-        ty_arg: Spanned<SurfaceTy<'src>>,
+        args: Vec<Spanned<SurfaceTy<'src>>>,
         methods: Vec<InstanceMethod<'src>>,
     },
 }
@@ -106,10 +114,13 @@ pub enum SurfaceTy<'src> {
     Var(&'src str),
     Arr(Box<Spanned<SurfaceTy<'src>>>, Box<Spanned<SurfaceTy<'src>>>),
     ForAll(Vec<Spanned<&'src str>>, Box<Spanned<SurfaceTy<'src>>>),
+    Qualified(
+        Vec<Spanned<SurfacePredicate<'src>>>,
+        Box<Spanned<SurfaceTy<'src>>>,
+    ),
     Con(Spanned<NameRef<'src>>),
     App(Box<Spanned<SurfaceTy<'src>>>, Box<Spanned<SurfaceTy<'src>>>),
 }
-
 #[derive(Clone, Debug, PartialEq)]
 pub enum SurfacePattern<'src> {
     Var(&'src str),

@@ -93,6 +93,13 @@ impl DataKindInferencer {
         self.solutions.insert(meta.to_string(), kind);
     }
 
+    fn apply_predicate(&self, pred: &core::ast::Predicate) -> core::ast::Predicate {
+        core::ast::Predicate {
+            class_name: pred.class_name.clone(),
+            args: pred.args.iter().map(|arg| self.apply_type(arg)).collect(),
+        }
+    }
+
     fn apply_kind(&self, kind: &Kind) -> Kind {
         match kind {
             Kind::Star => Kind::Star,
@@ -118,6 +125,10 @@ impl DataKindInferencer {
             TypeExpr::TyForAll(name, kind, body) => {
                 TypeExpr::make_forall(name.clone(), self.zonk(kind), self.apply_type(body))
             }
+            TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
+                preds.iter().map(|p| self.apply_predicate(p)).collect(),
+                self.apply_type(body),
+            ),
         }
     }
 
@@ -266,6 +277,35 @@ impl DataKindInferencer {
                 Ok((
                     Kind::Star,
                     TypeExpr::TyForAll(v.clone(), solved_k, Box::new(br)),
+                ))
+            }
+
+            TypeExpr::Qualified(preds, body) => {
+                let mut rebuilt_preds = Vec::with_capacity(preds.len());
+
+                for pred in preds {
+                    let rebuilt_args = pred
+                        .args
+                        .iter()
+                        .map(|arg| {
+                            let (arg_kind, arg_r) = self.infer_kind(arg, tycon_env, var_env)?;
+                            self.unify(arg_kind, Kind::Star)?;
+                            Ok(arg_r)
+                        })
+                        .collect::<Result<Vec<_>, KindError>>()?;
+
+                    rebuilt_preds.push(core::ast::Predicate {
+                        class_name: pred.class_name.clone(),
+                        args: rebuilt_args,
+                    });
+                }
+
+                let (body_kind, body_r) = self.infer_kind(body, tycon_env, var_env)?;
+                self.unify(body_kind, Kind::Star)?;
+
+                Ok((
+                    Kind::Star,
+                    TypeExpr::Qualified(rebuilt_preds, Box::new(body_r)),
                 ))
             }
         }

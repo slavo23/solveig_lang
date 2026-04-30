@@ -5,8 +5,9 @@ use crate::inference::inference_ctx::{Context, ContextEntry};
 use base::utils::diagnostics::{FileSpan, TypeError};
 use base::utils::span::Span;
 use core::ast::{
-    BinOp, CaseArm, CaseArmNode, Kind, Literal, Pattern, PatternNode, Pretty, ResolvedModule,
-    TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
+    BinOp, CaseArm, CaseArmNode, ClassDefinition, InstanceDefinition, InstanceMethodDef, Kind,
+    Literal, Pattern, PatternNode, Predicate, Pretty, ResolvedModule, Scheme, TermDefinition,
+    TermExpr, TermExprNode, TypeExpr, UnOp,
 };
 
 #[derive(Clone, Debug)]
@@ -16,6 +17,13 @@ pub struct TcMetadata {
 }
 
 type TcResult<T> = Result<T, TypeError>;
+
+#[derive(Clone, Debug)]
+struct Wanted {
+    pred: Predicate,
+    span: Span,
+    givens: Vec<Predicate>,
+}
 
 impl TcMetadata {
     pub fn new(span: Span, inferred_type: TypeExpr) -> Self {
@@ -37,8 +45,12 @@ pub struct TypeChecker {
     file_id: String,
     counter: usize,
     constructor_types: HashMap<String, TypeExpr>,
-    func_types: HashMap<String, TypeExpr>,
+    func_schemes: HashMap<String, Scheme>,
+    class_defs: Vec<ClassDefinition>,
+    instance_defs: Vec<InstanceDefinition<Span>>,
     tycon_kinds: HashMap<String, Kind>,
+    givens: Vec<Predicate>,
+    wanteds: Vec<Wanted>,
     evar_solutions: HashMap<String, TypeExpr>,
     holes: Vec<HoleInfo>,
 }
@@ -55,8 +67,12 @@ impl TypeChecker {
             file_id: "todo_file.sol".into(),
             counter: 0,
             constructor_types: HashMap::new(),
-            func_types: HashMap::new(),
+            func_schemes: HashMap::new(),
+            class_defs: Vec::new(),
+            instance_defs: Vec::new(),
             tycon_kinds: HashMap::new(),
+            givens: Vec::new(),
+            wanteds: Vec::new(),
             evar_solutions: HashMap::new(),
             holes: Vec::new(),
         }
@@ -67,8 +83,12 @@ impl TypeChecker {
             file_id,
             counter: 0,
             constructor_types: module.constructor_types.clone(),
-            func_types: module.func_types.clone(),
+            func_schemes: module.func_schemes.clone(),
+            class_defs: module.class_defs.clone(),
+            instance_defs: module.instance_defs.clone(),
             tycon_kinds: module.tycon_kinds.clone(),
+            givens: Vec::new(),
+            wanteds: Vec::new(),
             evar_solutions: HashMap::new(),
             holes: Vec::new(),
         }
@@ -92,6 +112,262 @@ impl TypeChecker {
 
     fn fresh_universal_name(&mut self, base: &str) -> String {
         format!("{}{}", base, self.fresh_id())
+    }
+
+    fn scheme_to_type(scheme: &Scheme) -> TypeExpr {
+        let mut ty = scheme.ty.clone();
+
+        if !scheme.predicates.is_empty() {
+            ty = TypeExpr::make_qualified(scheme.predicates.clone(), ty);
+        }
+
+        for (name, kind) in scheme.quantifiers.iter().rev() {
+            ty = TypeExpr::make_forall(name.clone(), kind.clone(), ty);
+        }
+
+        ty
+    }
+
+    fn type_to_scheme(ty: &TypeExpr) -> Scheme {
+        let (quantifiers, predicates, body) = ty.peel_scheme_like();
+        Scheme {
+            quantifiers,
+            predicates,
+            ty: body,
+        }
+    }
+
+    fn zonk_scheme(&self, scheme: &Scheme) -> Scheme {
+        Scheme {
+            quantifiers: scheme.quantifiers.clone(),
+            predicates: scheme
+                .predicates
+                .iter()
+                .map(|pred| core::ast::Predicate {
+                    class_name: pred.class_name.clone(),
+                    args: pred.args.iter().map(|arg| self.zonk_type(arg)).collect(),
+                })
+                .collect(),
+            ty: self.zonk_type(&scheme.ty),
+        }
+    }
+
+    fn zonk_predicate(&self, pred: &Predicate) -> Predicate {
+        Predicate {
+            class_name: pred.class_name.clone(),
+            args: pred.args.iter().map(|arg| self.zonk_type(arg)).collect(),
+        }
+    }
+
+    fn instantiate_predicate_with_subst(
+        pred: &Predicate,
+        subst: &HashMap<String, TypeExpr>,
+    ) -> Predicate {
+        Predicate {
+            class_name: pred.class_name.clone(),
+            args: pred
+                .args
+                .iter()
+                .map(|arg| {
+                    subst
+                        .iter()
+                        .fold(arg.clone(), |acc, (name, ty)| acc.substitute(name, ty))
+                })
+                .collect(),
+        }
+    }
+
+    fn instantiate_scheme(
+        &mut self,
+        ctx: Context,
+        scheme: &Scheme,
+    ) -> (Context, Vec<Predicate>, TypeExpr) {
+        let mut ctx = ctx;
+        let mut subst = HashMap::<String, TypeExpr>::new();
+
+        for (name, kind) in &scheme.quantifiers {
+            let fresh = self.fresh_evar_name();
+            ctx = ctx.add_entry(ContextEntry::ExVar(fresh.clone(), kind.clone()));
+            subst.insert(name.clone(), TypeExpr::TyExVar(fresh));
+        }
+
+        let instantiated_preds = scheme
+            .predicates
+            .iter()
+            .map(|pred| Self::instantiate_predicate_with_subst(pred, &subst))
+            .collect::<Vec<_>>();
+
+        let instantiated_ty = subst.iter().fold(scheme.ty.clone(), |acc, (name, ty)| {
+            acc.substitute(name, ty)
+        });
+
+        (ctx, instantiated_preds, instantiated_ty)
+    }
+
+    fn lookup_class_method_scheme(&self, name: &str) -> Option<&Scheme> {
+        self.class_defs.iter().find_map(|class_def| {
+            class_def.methods.iter().find_map(|method| {
+                let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
+                if short_name == name {
+                    Some(&method.scheme)
+                } else {
+                    None
+                }
+            })
+        })
+    }
+
+    fn add_wanteds(&mut self, preds: Vec<Predicate>, span: Span) {
+        let givens = self
+            .givens
+            .iter()
+            .map(|pred| self.zonk_predicate(pred))
+            .collect::<Vec<_>>();
+
+        let zonked = preds
+            .into_iter()
+            .map(|pred| Wanted {
+                pred: self.zonk_predicate(&pred),
+                span: span.clone(),
+                givens: givens.clone(),
+            })
+            .collect::<Vec<_>>();
+
+        self.wanteds.extend(zonked);
+    }
+
+    fn with_givens<R>(&mut self, preds: Vec<Predicate>, f: impl FnOnce(&mut Self) -> R) -> R {
+        let old_len = self.givens.len();
+        self.givens.extend(preds);
+        let result = f(self);
+        self.givens.truncate(old_len);
+        result
+    }
+
+    fn match_instance_type(
+        pattern: &TypeExpr,
+        target: &TypeExpr,
+        subst: &mut HashMap<String, TypeExpr>,
+    ) -> bool {
+        match pattern {
+            TypeExpr::TyVar(name) => match subst.get(name) {
+                Some(existing) => existing == target,
+                None => {
+                    subst.insert(name.clone(), target.clone());
+                    true
+                }
+            },
+
+            TypeExpr::TyCon(a) => matches!(target, TypeExpr::TyCon(b) if a == b),
+            TypeExpr::TyUnit => matches!(target, TypeExpr::TyUnit),
+
+            TypeExpr::TyApp(f1, a1) => match target {
+                TypeExpr::TyApp(f2, a2) => {
+                    Self::match_instance_type(f1, f2, subst)
+                        && Self::match_instance_type(a1, a2, subst)
+                }
+                _ => false,
+            },
+
+            TypeExpr::TyArr(a1, b1) => match target {
+                TypeExpr::TyArr(a2, b2) => {
+                    Self::match_instance_type(a1, a2, subst)
+                        && Self::match_instance_type(b1, b2, subst)
+                }
+                _ => false,
+            },
+
+            TypeExpr::TyForAll(_, _, body) => Self::match_instance_type(body, target, subst),
+            TypeExpr::Qualified(_, body) => Self::match_instance_type(body, target, subst),
+
+            TypeExpr::TyExVar(name) => matches!(target, TypeExpr::TyExVar(other) if name == other),
+        }
+    }
+
+    fn discharge_predicate_with_givens(&self, pred: &Predicate, givens: &[Predicate]) -> bool {
+        let pred = self.zonk_predicate(pred);
+
+        if givens
+            .iter()
+            .any(|given| self.zonk_predicate(given) == pred)
+        {
+            return true;
+        }
+
+        for inst in &self.instance_defs {
+            if inst.head.class_name != pred.class_name || inst.head.args.len() != pred.args.len() {
+                continue;
+            }
+
+            let mut subst = HashMap::<String, TypeExpr>::new();
+
+            let head_matches =
+                inst.head
+                    .args
+                    .iter()
+                    .zip(pred.args.iter())
+                    .all(|(head_arg, wanted_arg)| {
+                        let wanted_arg = self.zonk_type(wanted_arg);
+                        Self::match_instance_type(head_arg, &wanted_arg, &mut subst)
+                    });
+
+            if !head_matches {
+                continue;
+            }
+
+            let all_context_ok = inst.context.iter().all(|ctx_pred| {
+                let instantiated = Self::instantiate_predicate_with_subst(ctx_pred, &subst);
+                self.discharge_predicate_with_givens(&instantiated, givens)
+            });
+
+            if all_context_ok {
+                return true;
+            }
+        }
+
+        false
+    }
+
+    fn discharge_predicate(&self, pred: &Predicate) -> bool {
+        self.discharge_predicate_with_givens(pred, &self.givens)
+    }
+
+    fn unresolved_wanteds(&self) -> Vec<Wanted> {
+        for wanted in &self.wanteds {
+            eprintln!(
+                "wanted full = {:?}, givens full = {:?}",
+                self.zonk_predicate(&wanted.pred),
+                wanted
+                    .givens
+                    .iter()
+                    .map(|g| self.zonk_predicate(g))
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        for inst in &self.instance_defs {
+            eprintln!("instance head full = {:?}", self.zonk_predicate(&inst.head));
+        }
+        self.wanteds
+            .iter()
+            .cloned()
+            .filter(|wanted| !self.discharge_predicate_with_givens(&wanted.pred, &wanted.givens))
+            .collect()
+    }
+
+    fn wanteds_error(&self, wanteds: Vec<Wanted>) -> TypeError {
+        let span = wanteds
+            .first()
+            .map(|w| self.get_file_span(w.span.clone()))
+            .unwrap_or_else(|| self.get_file_span(0..0));
+
+        TypeError::UnsatisfiedConstraints {
+            span,
+            predicates: wanteds
+                .into_iter()
+                .map(|w| self.zonk_predicate(&w.pred).pretty())
+                .collect(),
+        }
     }
 
     fn record_solution(&mut self, solved_entry: &ContextEntry) {
@@ -155,6 +431,14 @@ impl TypeChecker {
             TypeExpr::TyForAll(_, _, body) => {
                 Self::collect_exvars_in_type(body, acc);
             }
+            TypeExpr::Qualified(preds, body) => {
+                for pred in preds {
+                    for arg in &pred.args {
+                        Self::collect_exvars_in_type(arg, acc);
+                    }
+                }
+                Self::collect_exvars_in_type(body, acc);
+            }
             TypeExpr::TyUnit | TypeExpr::TyVar(_) | TypeExpr::TyCon(_) => {}
         }
     }
@@ -205,6 +489,16 @@ impl TypeChecker {
             TypeExpr::TyForAll(quantifier, kind, body) => {
                 TypeExpr::make_forall(quantifier.clone(), kind.clone(), self.zonk_type(body))
             }
+            TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
+                preds
+                    .iter()
+                    .map(|pred| core::ast::Predicate {
+                        class_name: pred.class_name.clone(),
+                        args: pred.args.iter().map(|arg| self.zonk_type(arg)).collect(),
+                    })
+                    .collect(),
+                self.zonk_type(body),
+            ),
             _ => ty.clone(),
         }
     }
@@ -277,9 +571,8 @@ impl TypeChecker {
         TermExprNode::new(zonked_node, zonked_meta)
     }
 
-    fn lookup_term_var(&self, ctx: &Context, name: &str) -> Option<TypeExpr> {
+    fn lookup_local_term_var(&self, ctx: &Context, name: &str) -> Option<TypeExpr> {
         ctx.lookup_term_var(name)
-            .or_else(|| self.func_types.get(name).cloned())
             .or_else(|| self.constructor_types.get(name).cloned())
     }
 
@@ -302,7 +595,6 @@ impl TypeChecker {
             }),
         }
     }
-
     pub fn solve_subtype_inner(
         &mut self,
         ctx: Context,
@@ -317,22 +609,28 @@ impl TypeChecker {
         }
 
         match (left, right) {
+            (TypeExpr::Qualified(_, body), _) => self.solve_subtype_inner(ctx, body, right),
+            (_, TypeExpr::Qualified(_, body)) => self.solve_subtype_inner(ctx, left, body),
+
             (TypeExpr::TyUnit, TypeExpr::TyUnit) => Ok(ctx),
             (TypeExpr::TyVar(name_a), TypeExpr::TyVar(name_b)) if name_a == name_b => Ok(ctx),
             (TypeExpr::TyExVar(name_a), TypeExpr::TyExVar(name_b)) if name_a == name_b => Ok(ctx),
             (TypeExpr::TyCon(name_a), TypeExpr::TyCon(name_b)) if name_a == name_b => Ok(ctx),
+
             (TypeExpr::TyArr(domain_a, codomain_a), TypeExpr::TyArr(domain_b, codomain_b)) => {
                 let theta = self.solve_subtype_inner(ctx, domain_b, domain_a)?;
                 let codomain_a_applied = theta.apply(codomain_a);
                 let codomain_b_applied = theta.apply(codomain_b);
                 self.solve_subtype_inner(theta, &codomain_a_applied, &codomain_b_applied)
             }
+
             (TypeExpr::TyApp(func_a, arg_a), TypeExpr::TyApp(func_b, arg_b)) => {
                 let theta = self.solve_subtype_inner(ctx, func_b, func_a)?;
                 let arg_a_applied = theta.apply(arg_a);
                 let arg_b_applied = theta.apply(arg_b);
                 self.solve_subtype_inner(theta, &arg_a_applied, &arg_b_applied)
             }
+
             (TypeExpr::TyForAll(quantifier, kind, body), _) => {
                 let fresh_evar = self.fresh_evar_name();
                 let marker = ContextEntry::Marker {
@@ -346,17 +644,20 @@ impl TypeChecker {
                 let theta = self.solve_subtype_inner(extended_ctx, &instantiated_body, right)?;
                 Ok(theta.until(&marker))
             }
+
             (_, TypeExpr::TyForAll(quantifier, kind, body)) => {
                 let universal_entry = ContextEntry::UniVar(quantifier.clone(), kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let theta = self.solve_subtype_inner(extended_ctx, left, body)?;
                 Ok(theta.until(&universal_entry))
             }
+
             (TypeExpr::TyExVar(evar_name), _)
                 if ctx.has_unsolved_evar(evar_name) && !right.occurs_check(evar_name.clone()) =>
             {
                 self.instantiate_left(ctx, evar_name, right)
             }
+
             (_, TypeExpr::TyExVar(evar_name))
                 if ctx.has_unsolved_evar(evar_name) && !left.occurs_check(evar_name.clone()) =>
             {
@@ -464,6 +765,7 @@ impl TypeChecker {
                 let delta = self.instantiate_left(extended_ctx, evar_name, body)?;
                 Ok(delta.until(&universal_entry))
             }
+            TypeExpr::Qualified(_, body) => self.instantiate_left(ctx, evar_name, body),
 
             _ => todo!("instantiate left failed"),
         }
@@ -572,6 +874,7 @@ impl TypeChecker {
                 let delta = self.instantiate_right(extended_ctx, &instantiated, evar_name)?;
                 Ok(delta.until(&marker))
             }
+            TypeExpr::Qualified(_, body) => self.instantiate_right(ctx, body, evar_name),
 
             _ => todo!("instantiate right failed"),
         }
@@ -595,6 +898,7 @@ impl TypeChecker {
                 let instantiated = body.substitute(quantifier, &TypeExpr::TyExVar(fresh_evar));
                 self.force_arrow(new_ctx, &instantiated)
             }
+            TypeExpr::Qualified(_, body) => self.force_arrow(ctx, body),
 
             TypeExpr::TyExVar(evar_name) if ctx.has_unsolved_evar(evar_name) => {
                 let evar_entry = ContextEntry::ExVar(
@@ -935,6 +1239,10 @@ impl TypeChecker {
                 );
                 Ok((delta.until(&universal_entry), elaborated))
             }
+            (_, TypeExpr::Qualified(preds, body)) => {
+                let preds = preds.clone();
+                self.with_givens(preds, |checker| checker.solve_checking(ctx, expr, body))
+            }
 
             _ => {
                 let (inferred_ctx, elaborated_expr, inferred_type) =
@@ -1046,15 +1354,49 @@ impl TypeChecker {
                 Ok((ctx, elaborated, TypeExpr::TyUnit))
             }
             TermExpr::Var(name) => {
-                let var_type =
-                    self.lookup_term_var(&ctx, name)
-                        .ok_or_else(|| TypeError::UnboundVariable {
-                            span: self.get_file_span(span.clone()),
-                            name: name.clone(),
-                        })?;
-                let var_type = ctx.apply(&var_type);
-                let elaborated = elab_node(TermExpr::Var(name.clone()), span, var_type.clone());
-                Ok((ctx, elaborated, var_type))
+                if let Some(var_type) = self.lookup_local_term_var(&ctx, name) {
+                    let var_type = ctx.apply(&var_type);
+                    let elaborated = elab_node(TermExpr::Var(name.clone()), span, var_type.clone());
+                    return Ok((ctx, elaborated, var_type));
+                }
+
+                if let Some(scheme) = self.func_schemes.get(name).cloned() {
+                    let (ctx, preds, instantiated_ty) = self.instantiate_scheme(ctx, &scheme);
+                    self.add_wanteds(preds, span.clone());
+
+                    let instantiated_ty = ctx.apply(&instantiated_ty);
+                    let elaborated =
+                        elab_node(TermExpr::Var(name.clone()), span, instantiated_ty.clone());
+                    return Ok((ctx, elaborated, instantiated_ty));
+                }
+                if let Some(method_scheme) = self.lookup_class_method_scheme(name).cloned() {
+                    eprintln!("class method {} : {}", name, method_scheme.pretty());
+
+                    let (ctx, preds, instantiated_ty) =
+                        self.instantiate_scheme(ctx, &method_scheme);
+                    eprintln!(
+                        "instantiated {} => preds [{}], ty {}",
+                        name,
+                        preds
+                            .iter()
+                            .map(|p| p.pretty())
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        instantiated_ty.pretty()
+                    );
+
+                    self.add_wanteds(preds, span.clone());
+
+                    let instantiated_ty = ctx.apply(&instantiated_ty);
+                    let elaborated =
+                        elab_node(TermExpr::Var(name.clone()), span, instantiated_ty.clone());
+                    return Ok((ctx, elaborated, instantiated_ty));
+                }
+
+                Err(TypeError::UnboundVariable {
+                    span: self.get_file_span(span.clone()),
+                    name: name.clone(),
+                })
             }
             TermExpr::Con(name) => {
                 let constructor_type =
@@ -1347,6 +1689,105 @@ pub struct TCOutput {
     pub holes: Vec<HoleInfo>,
 }
 
+fn lift_span_expr_to_tcmeta(expr: &TermExprNode<Span, Span>) -> TermExprNode<TcMetadata, Span> {
+    let anno = TcMetadata {
+        span: expr.anno.clone(),
+        inferred_type: TypeExpr::TyUnit,
+    };
+
+    let node = match &expr.node {
+        TermExpr::Var(name) => TermExpr::Var(name.clone()),
+        TermExpr::Con(name) => TermExpr::Con(name.clone()),
+        TermExpr::Unit => TermExpr::Unit,
+        TermExpr::Lit(lit) => TermExpr::Lit(lit.clone()),
+        TermExpr::Hole => TermExpr::Hole,
+
+        TermExpr::Abs(param, ann, body) => TermExpr::Abs(
+            param.clone(),
+            ann.clone(),
+            Box::new(lift_span_expr_to_tcmeta(body)),
+        ),
+
+        TermExpr::App(f, x) => TermExpr::App(
+            Box::new(lift_span_expr_to_tcmeta(f)),
+            Box::new(lift_span_expr_to_tcmeta(x)),
+        ),
+
+        TermExpr::TyAbs(name, kind, body) => TermExpr::TyAbs(
+            name.clone(),
+            kind.clone(),
+            Box::new(lift_span_expr_to_tcmeta(body)),
+        ),
+
+        TermExpr::TyApp(inner, ty) => {
+            TermExpr::TyApp(Box::new(lift_span_expr_to_tcmeta(inner)), ty.clone())
+        }
+
+        TermExpr::Anno(inner, ty) => {
+            TermExpr::Anno(Box::new(lift_span_expr_to_tcmeta(inner)), ty.clone())
+        }
+
+        TermExpr::Case(scrutinee, arms) => TermExpr::Case(
+            Box::new(lift_span_expr_to_tcmeta(scrutinee)),
+            arms.iter()
+                .map(|arm| {
+                    CaseArmNode::new(
+                        CaseArm {
+                            pattern: arm.node.pattern.clone(),
+                            expr: lift_span_expr_to_tcmeta(&arm.node.expr),
+                        },
+                        arm.anno.clone(),
+                    )
+                })
+                .collect(),
+        ),
+
+        TermExpr::IfThenElse(c, t, e) => TermExpr::IfThenElse(
+            Box::new(lift_span_expr_to_tcmeta(c)),
+            Box::new(lift_span_expr_to_tcmeta(t)),
+            Box::new(lift_span_expr_to_tcmeta(e)),
+        ),
+
+        TermExpr::BinaryOperator(op, l, r) => TermExpr::BinaryOperator(
+            *op,
+            Box::new(lift_span_expr_to_tcmeta(l)),
+            Box::new(lift_span_expr_to_tcmeta(r)),
+        ),
+
+        TermExpr::UnaryOperator(op, rhs) => {
+            TermExpr::UnaryOperator(*op, Box::new(lift_span_expr_to_tcmeta(rhs)))
+        }
+
+        TermExpr::Let(name, binder, in_expr) => TermExpr::Let(
+            name.clone(),
+            Box::new(lift_span_expr_to_tcmeta(binder)),
+            Box::new(lift_span_expr_to_tcmeta(in_expr)),
+        ),
+    };
+
+    TermExprNode::new(node, anno)
+}
+
+fn lift_instance_defs_to_tcmeta(
+    instance_defs: &[InstanceDefinition<Span, Span>],
+) -> Vec<InstanceDefinition<TcMetadata, Span>> {
+    instance_defs
+        .iter()
+        .map(|inst| InstanceDefinition {
+            context: inst.context.clone(),
+            head: inst.head.clone(),
+            methods: inst
+                .methods
+                .iter()
+                .map(|m| InstanceMethodDef {
+                    name: m.name.clone(),
+                    body: lift_span_expr_to_tcmeta(&m.body),
+                })
+                .collect(),
+        })
+        .collect()
+}
+
 pub fn check_and_elab_module(
     module: &ResolvedModule<Span>,
     file_id: impl Into<String>,
@@ -1354,67 +1795,85 @@ pub fn check_and_elab_module(
     let file_id = file_id.into();
     let mut errors = Vec::new();
     let mut checked_defs = Vec::new();
-    let mut available_func_types = module.func_types.clone();
+    let mut available_func_schemes = module.func_schemes.clone();
     let mut all_holes = Vec::new();
 
     for func_def in &module.func_defs {
         let mut checker = TypeChecker::with_module_context(module, file_id.clone());
-        checker.func_types = available_func_types.clone();
+        checker.func_schemes = available_func_schemes.clone();
 
         match &func_def.signature {
-            Some(sig) => match checker.solve_checking(Context::new(), &func_def.body, sig) {
-                Ok((final_ctx, elaborated)) => {
-                    let zonked_expr = checker.zonk_expr(&elaborated);
-                    let final_sig = checker.zonk_type(&final_ctx.apply(sig));
+            Some(sig) => {
+                let expected_type = TypeChecker::scheme_to_type(sig);
 
-                    available_func_types.insert(func_def.name.clone(), final_sig.clone());
+                match checker.solve_checking(Context::new(), &func_def.body, &expected_type) {
+                    Ok((final_ctx, elaborated)) => {
+                        let unresolved = checker.unresolved_wanteds();
+                        if !unresolved.is_empty() {
+                            errors.push(checker.wanteds_error(unresolved));
+                        } else {
+                            let zonked_expr = checker.zonk_expr(&elaborated);
+                            let final_scheme = checker.zonk_scheme(sig);
 
-                    checked_defs.push(TermDefinition {
-                        name: func_def.name.clone(),
-                        signature: Some(final_sig),
-                        body: zonked_expr,
-                    });
+                            checked_defs.push(TermDefinition {
+                                name: func_def.name.clone(),
+                                signature: Some(final_scheme.clone()),
+                                body: zonked_expr,
+                            });
 
-                    checker.finalize_holes();
-                    all_holes.extend(checker.holes);
+                            available_func_schemes.insert(func_def.name.clone(), final_scheme);
+                        }
+                    }
+                    Err(err) => {
+                        errors.push(err);
+                    }
                 }
-                Err(err) => errors.push(err),
-            },
+            }
 
             None => match checker.solve_inference(Context::new(), &func_def.body) {
-                Ok((final_ctx, elaborated, inferred_ty)) => {
-                    let zonked_expr = checker.zonk_expr(&elaborated);
-                    let final_sig = checker.generalize_top_level_type(&final_ctx, &inferred_ty);
-                    println!("(inferred) {} : {}", func_def.name, final_sig.pretty());
+                Ok((final_ctx, elaborated, inferred_type)) => {
+                    let unresolved = checker.unresolved_wanteds();
+                    if !unresolved.is_empty() {
+                        errors.push(checker.wanteds_error(unresolved));
+                    } else {
+                        let zonked_expr = checker.zonk_expr(&elaborated);
+                        let final_sig =
+                            checker.generalize_top_level_type(&final_ctx, &inferred_type);
+                        let final_scheme = TypeChecker::type_to_scheme(&final_sig);
 
-                    available_func_types.insert(func_def.name.clone(), final_sig.clone());
+                        checked_defs.push(TermDefinition {
+                            name: func_def.name.clone(),
+                            signature: Some(final_scheme.clone()),
+                            body: zonked_expr,
+                        });
 
-                    checked_defs.push(TermDefinition {
-                        name: func_def.name.clone(),
-                        signature: Some(final_sig),
-                        body: zonked_expr,
-                    });
-
-                    checker.finalize_holes();
-                    all_holes.extend(checker.holes);
+                        available_func_schemes.insert(func_def.name.clone(), final_scheme);
+                    }
                 }
-                Err(err) => errors.push(err),
+                Err(err) => {
+                    errors.push(err);
+                }
             },
         }
+
+        checker.finalize_holes();
+        all_holes.extend(checker.holes);
     }
 
-    if !errors.is_empty() {
-        return Err(errors);
+    if errors.is_empty() {
+        Ok(TCOutput {
+            module: ResolvedModule {
+                data_defs: module.data_defs.clone(),
+                class_defs: module.class_defs.clone(),
+                instance_defs: lift_instance_defs_to_tcmeta(&module.instance_defs.clone()),
+                tycon_kinds: module.tycon_kinds.clone(),
+                constructor_types: module.constructor_types.clone(),
+                func_schemes: available_func_schemes,
+                func_defs: checked_defs,
+            },
+            holes: all_holes,
+        })
+    } else {
+        Err(errors)
     }
-
-    Ok(TCOutput {
-        module: ResolvedModule {
-            data_defs: module.data_defs.clone(),
-            tycon_kinds: module.tycon_kinds.clone(),
-            constructor_types: module.constructor_types.clone(),
-            func_types: available_func_types,
-            func_defs: checked_defs,
-        },
-        holes: all_holes,
-    })
 }

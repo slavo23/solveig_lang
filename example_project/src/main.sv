@@ -8,6 +8,7 @@ import quicksort(sampleSortedQuickSort)
 import mergesort(sampleSortedMergeSort)
 import knapsack(sampleTreeDp)
 import treeMap(fromList, Map, intComparator, Entry, size)
+import classes(eqIntExample, useEq)
 
 runSudokuReadyExample = solveBoard samplePuzzle
 runNQueensReadyExample = solveNQueensCount 8

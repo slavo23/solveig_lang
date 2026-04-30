@@ -470,54 +470,175 @@ impl<'src> Parser<'src> {
         })
     }
 
+    fn parse_predicate(&mut self) -> Result<S<SurfacePredicate<'src>>, ParseError> {
+        let start = self.current_start();
+
+        let class_name = self.parse_name_path()?;
+        if !is_ctor_like(class_name.0.last()) {
+            return Err(self.error(format!(
+                "expected class name, got {}",
+                class_name.0.segments.join(".")
+            )));
+        }
+
+        let mut args = Vec::new();
+        while self.is_type_atom_start() {
+            args.push(self.parse_type_atom()?);
+        }
+
+        if args.is_empty() {
+            return Err(self.error("expected at least one type argument in predicate".to_string()));
+        }
+
+        let end = args.last().map(|a| a.1.end).unwrap_or(class_name.1.end);
+
+        Ok(sp(SurfacePredicate { class_name, args }, start, end))
+    }
+
+    fn parse_predicate_list(&mut self) -> Result<Vec<S<SurfacePredicate<'src>>>, ParseError> {
+        if self.at(&Token::LParen) {
+            self.advance();
+
+            let mut preds = vec![self.parse_predicate()?];
+            while self.at(&Token::Comma) {
+                self.advance();
+                preds.push(self.parse_predicate()?);
+            }
+
+            self.expect(&Token::RParen)?;
+            Ok(preds)
+        } else {
+            Ok(vec![self.parse_predicate()?])
+        }
+    }
+
     fn parse_class_def(&mut self) -> Result<SurfaceDefinition<'src>, ParseError> {
         self.expect(&Token::Class)?;
-        let (name, start, end) = self.expect_upper()?;
-        let (ty_param, ty_start, ty_end) = self.expect_ident()?;
+
+        let checkpoint = self.pos;
+        let superclasses = if let Ok(preds) = self.parse_predicate_list() {
+            if self.at(&Token::FatArrow) {
+                self.advance();
+                preds
+            } else {
+                self.pos = checkpoint;
+                Vec::new()
+            }
+        } else {
+            self.pos = checkpoint;
+            Vec::new()
+        };
+
+        let (name, ns, ne) = self.expect_upper()?;
+
+        let mut ty_params = Vec::new();
+        while matches!(self.current_kind(), Token::Ident(_)) {
+            let (p, ps, pe) = self.expect_ident()?;
+            ty_params.push(sp(p, ps, pe));
+        }
+
+        if ty_params.is_empty() {
+            return Err(
+                self.error("class declaration needs at least one type parameter".to_string())
+            );
+        }
+
         self.expect(&Token::Where)?;
 
-        let methods = self.parse_layout_block(|parser| {
-            let (name, start, end) = parser.expect_ident()?;
-            parser.expect(&Token::Colon)?;
-            let ty = parser.parse_type()?;
-            Ok(ClassMethod {
-                name: sp(name, start, end),
-                ty,
-            })
-        })?;
+        if self.at(&Token::VOpen) {
+            self.advance();
+        }
+
+        let mut methods = Vec::new();
+        loop {
+            self.skip_separators();
+            if self.at(&Token::VClose) || self.at_eof() {
+                break;
+            }
+            let (mname, ms, me) = self.expect_ident()?;
+            self.expect(&Token::Colon)?;
+            let mty = self.parse_type()?;
+            methods.push(ClassMethod {
+                name: sp(mname, ms, me),
+                ty: mty,
+            });
+        }
+
+        if self.at(&Token::VClose) {
+            self.advance();
+        }
 
         Ok(SurfaceDefinition::ClassDef {
-            name: sp(name, start, end),
-            ty_param: sp(ty_param, ty_start, ty_end),
+            name: sp(name, ns, ne),
+            ty_params,
+            superclasses,
             methods,
         })
     }
 
     fn parse_instance_def(&mut self) -> Result<SurfaceDefinition<'src>, ParseError> {
         self.expect(&Token::Instance)?;
-        let (class_name, start, end) = self.expect_upper()?;
-        let ty_arg = self.parse_type_atom()?;
+
+        let checkpoint = self.pos;
+        let context = if let Ok(preds) = self.parse_predicate_list() {
+            if self.at(&Token::FatArrow) {
+                self.advance();
+                preds
+            } else {
+                self.pos = checkpoint;
+                Vec::new()
+            }
+        } else {
+            self.pos = checkpoint;
+            Vec::new()
+        };
+
+        let (cname, cs, ce) = self.expect_upper()?;
+
+        let mut args = Vec::new();
+        while self.is_type_atom_start() {
+            args.push(self.parse_type_atom()?);
+        }
+
+        if args.is_empty() {
+            return Err(self.error("instance head needs at least one type argument".to_string()));
+        }
+
         self.expect(&Token::Where)?;
 
-        let methods = self.parse_layout_block(|parser| {
-            let (name, start, end) = parser.expect_ident()?;
-            let mut params = Vec::new();
-            while matches!(parser.current_kind(), Token::Ident(_) | Token::Underscore) {
-                let (param, start, end) = parser.expect_binder()?;
-                params.push(sp(param, start, end));
+        if self.at(&Token::VOpen) {
+            self.advance();
+        }
+
+        let mut methods = Vec::new();
+        loop {
+            self.skip_separators();
+            if self.at(&Token::VClose) || self.at_eof() {
+                break;
             }
-            parser.expect(&Token::Eq)?;
-            let body = parser.parse_expr()?;
-            Ok(InstanceMethod {
-                name: sp(name, start, end),
-                params,
-                body,
-            })
-        })?;
+            let (mname, ms, me) = self.expect_ident()?;
+            let mut mparams = Vec::new();
+            while matches!(self.current_kind(), Token::Ident(_) | Token::Underscore) {
+                let (p, ps, pe) = self.expect_binder()?;
+                mparams.push(sp(p, ps, pe));
+            }
+            self.expect(&Token::Eq)?;
+            let mbody = self.parse_expr()?;
+            methods.push(InstanceMethod {
+                name: sp(mname, ms, me),
+                params: mparams,
+                body: mbody,
+            });
+        }
+
+        if self.at(&Token::VClose) {
+            self.advance();
+        }
 
         Ok(SurfaceDefinition::InstanceDef {
-            class_name: sp(class_name, start, end),
-            ty_arg,
+            context,
+            class_name: sp(cname, cs, ce),
+            args,
             methods,
         })
     }
@@ -546,6 +667,23 @@ impl<'src> Parser<'src> {
         Ok(items)
     }
 
+    fn parse_qualified_type(&mut self) -> Result<S<SurfaceTy<'src>>, ParseError> {
+        let checkpoint = self.pos;
+
+        if let Ok(preds) = self.parse_predicate_list() {
+            if self.at(&Token::FatArrow) {
+                self.advance();
+                let body = self.parse_type_arrow()?;
+                let start = preds.first().map(|p| p.1.start).unwrap_or(body.1.start);
+                let end = body.1.end;
+                return Ok(sp(SurfaceTy::Qualified(preds, Box::new(body)), start, end));
+            }
+        }
+
+        self.pos = checkpoint;
+        self.parse_type_arrow()
+    }
+
     fn parse_type(&mut self) -> Result<S<SurfaceTy<'src>>, ParseError> {
         let start = self.current_start();
 
@@ -553,16 +691,16 @@ impl<'src> Parser<'src> {
             self.advance();
             let mut vars = Vec::new();
             while matches!(self.current_kind(), Token::Ident(_)) {
-                let (name, start, end) = self.expect_ident()?;
-                vars.push(sp(name, start, end));
+                let (v, vs, ve) = self.expect_ident()?;
+                vars.push(sp(v, vs, ve));
             }
             self.expect(&Token::Dot)?;
             let body = self.parse_type()?;
-            let end = span_end(&body);
+            let end = body.1.end;
             return Ok(sp(SurfaceTy::ForAll(vars, Box::new(body)), start, end));
         }
 
-        self.parse_type_arrow()
+        self.parse_qualified_type()
     }
 
     fn parse_type_arrow(&mut self) -> Result<S<SurfaceTy<'src>>, ParseError> {

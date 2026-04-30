@@ -1,11 +1,18 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use core::ast::{Kind, TypeExpr};
+use core::ast::{Kind, Predicate, Scheme, TypeExpr};
 
 #[derive(Debug, Clone)]
 pub struct SignatureKindInfo {
     pub kinded_signature: TypeExpr,
     pub quantified_var_kinds: Vec<(String, Kind)>,
+    pub signature_kind: Kind,
+    pub kind_subst: HashMap<String, Kind>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SchemeKindInfo {
+    pub scheme: Scheme,
     pub signature_kind: Kind,
     pub kind_subst: HashMap<String, Kind>,
 }
@@ -118,6 +125,25 @@ impl SignatureKindInferencer {
         Self::default_unsolved(self.apply_kind(kind))
     }
 
+    fn infer_predicate(
+        &mut self,
+        pred: &Predicate,
+        env: &mut HashMap<String, Kind>,
+    ) -> Result<Predicate, KindError> {
+        let mut rebuilt_args = Vec::with_capacity(pred.args.len());
+
+        for arg in &pred.args {
+            let (arg_kind, arg_kinded) = self.infer_and_rebuild(arg, env)?;
+            self.unify(arg_kind, Kind::Star)?;
+            rebuilt_args.push(arg_kinded);
+        }
+
+        Ok(Predicate {
+            class_name: pred.class_name.clone(),
+            args: rebuilt_args,
+        })
+    }
+
     fn infer_and_rebuild(
         &mut self,
         ty: &TypeExpr,
@@ -197,6 +223,21 @@ impl SignatureKindInferencer {
                     TypeExpr::TyForAll(var_name.clone(), solved_binder_kind, Box::new(body_kinded)),
                 ))
             }
+
+            TypeExpr::Qualified(preds, body) => {
+                let rebuilt_preds = preds
+                    .iter()
+                    .map(|pred| self.infer_predicate(pred, env))
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                let (body_kind, body_kinded) = self.infer_and_rebuild(body, env)?;
+                self.unify(body_kind, Kind::Star)?;
+
+                Ok((
+                    Kind::Star,
+                    TypeExpr::Qualified(rebuilt_preds, Box::new(body_kinded)),
+                ))
+            }
         }
     }
 
@@ -205,6 +246,62 @@ impl SignatureKindInferencer {
             out.push((name.clone(), kind.clone()));
             Self::collect_outer_foralls(body, out);
         }
+    }
+
+    fn collect_free_tyvars_in_type(
+        ty: &TypeExpr,
+        bound: &mut Vec<String>,
+        seen: &mut HashSet<String>,
+        out: &mut Vec<String>,
+    ) {
+        match ty {
+            TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}
+
+            TypeExpr::TyVar(name) => {
+                if !bound.contains(name) && seen.insert(name.clone()) {
+                    out.push(name.clone());
+                }
+            }
+
+            TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
+                Self::collect_free_tyvars_in_type(lhs, bound, seen, out);
+                Self::collect_free_tyvars_in_type(rhs, bound, seen, out);
+            }
+
+            TypeExpr::TyForAll(name, _, body) => {
+                bound.push(name.clone());
+                Self::collect_free_tyvars_in_type(body, bound, seen, out);
+                bound.pop();
+            }
+
+            TypeExpr::Qualified(preds, body) => {
+                for pred in preds {
+                    for arg in &pred.args {
+                        Self::collect_free_tyvars_in_type(arg, bound, seen, out);
+                    }
+                }
+                Self::collect_free_tyvars_in_type(body, bound, seen, out);
+            }
+        }
+    }
+
+    fn collect_implicit_quantifiers(&self, scheme: &Scheme) -> Vec<String> {
+        let mut bound = scheme
+            .quantifiers
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        let mut seen = bound.iter().cloned().collect::<HashSet<_>>();
+        let mut out = Vec::new();
+
+        for pred in &scheme.predicates {
+            for arg in &pred.args {
+                Self::collect_free_tyvars_in_type(arg, &mut bound, &mut seen, &mut out);
+            }
+        }
+
+        Self::collect_free_tyvars_in_type(&scheme.ty, &mut bound, &mut seen, &mut out);
+        out
     }
 
     pub fn infer_signature(mut self, ty: &TypeExpr) -> Result<SignatureKindInfo, KindError> {
@@ -222,6 +319,56 @@ impl SignatureKindInferencer {
         Ok(SignatureKindInfo {
             kinded_signature: kinded_sig,
             quantified_var_kinds: quants,
+            signature_kind: Kind::Star,
+            kind_subst: self.subst,
+        })
+    }
+
+    pub fn infer_scheme(mut self, scheme: &Scheme) -> Result<SchemeKindInfo, KindError> {
+        let implicit_quants = self.collect_implicit_quantifiers(scheme);
+
+        let mut quantifier_names = Vec::new();
+        let mut env = HashMap::<String, Kind>::new();
+
+        for (name, _old_kind) in &scheme.quantifiers {
+            let fresh = self.fresh_meta();
+            env.insert(name.clone(), fresh);
+            quantifier_names.push(name.clone());
+        }
+
+        for name in implicit_quants {
+            let fresh = self.fresh_meta();
+            env.insert(name.clone(), fresh);
+            quantifier_names.push(name);
+        }
+
+        let rebuilt_preds = scheme
+            .predicates
+            .iter()
+            .map(|pred| self.infer_predicate(pred, &mut env))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let (body_kind, rebuilt_ty) = self.infer_and_rebuild(&scheme.ty, &mut env)?;
+        let body_kind = self.apply_kind(&body_kind);
+
+        if body_kind != Kind::Star {
+            return Err(KindError::SignatureMustHaveKindStar { got: body_kind });
+        }
+
+        let quantifiers = quantifier_names
+            .into_iter()
+            .map(|name| {
+                let kind = env.get(&name).cloned().unwrap_or(Kind::Star);
+                (name, self.zonk_kind_for_binder(&kind))
+            })
+            .collect::<Vec<_>>();
+
+        Ok(SchemeKindInfo {
+            scheme: Scheme {
+                quantifiers,
+                predicates: rebuilt_preds,
+                ty: rebuilt_ty,
+            },
             signature_kind: Kind::Star,
             kind_subst: self.subst,
         })

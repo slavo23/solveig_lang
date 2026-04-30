@@ -1,4 +1,4 @@
-use core::ast::{Kind, Pretty, TypeExpr};
+use core::ast::{Kind, Predicate, Pretty, TypeExpr};
 use std::collections::HashMap;
 use std::iter::successors;
 
@@ -35,11 +35,21 @@ impl Context {
         self.entries.clone()
     }
 
+    fn apply_predicate(&self, pred: &Predicate) -> Predicate {
+        Predicate {
+            class_name: pred.class_name.clone(),
+            args: pred.args.iter().map(|arg| self.apply(arg)).collect(),
+        }
+    }
+
     fn apply_once(&self, ty: &TypeExpr) -> TypeExpr {
         match ty {
             TypeExpr::TyVar(_) | TypeExpr::TyCon(_) | TypeExpr::TyUnit => ty.clone(),
+
             TypeExpr::TyArr(lhs, rhs) => TypeExpr::make_arr(self.apply(lhs), self.apply(rhs)),
+
             TypeExpr::TyApp(lhs, rhs) => TypeExpr::make_app(self.apply(lhs), self.apply(rhs)),
+
             TypeExpr::TyExVar(evar_name) => {
                 if let Some(ContextEntry::SolvedEVar { rhs: solved, .. }) =
                     self.find_solved_evar(evar_name)
@@ -48,9 +58,15 @@ impl Context {
                 }
                 ty.clone()
             }
+
             TypeExpr::TyForAll(quantifier, kind, body) => {
                 TypeExpr::make_forall(quantifier.clone(), kind.clone(), self.apply(body))
             }
+
+            TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
+                preds.iter().map(|p| self.apply_predicate(p)).collect(),
+                self.apply(body),
+            ),
         }
     }
 
@@ -184,18 +200,24 @@ impl Context {
         let ty = self.apply(ty);
         match &ty {
             TypeExpr::TyUnit => Ok(Kind::Star),
+
             TypeExpr::TyCon(name) => tycon_kinds
                 .get(name)
                 .cloned()
                 .ok_or_else(|| format!("unknown type constructor: {}", name)),
+
             TypeExpr::TyVar(name) => self
                 .universal_kind(name)
                 .ok_or_else(|| format!("unbound type variable: {}", name)),
+
             TypeExpr::TyExVar(name) => self
                 .evar_kind(name)
                 .ok_or_else(|| format!("unknown existential: {}", name)),
+
             TypeExpr::TyArr(_, _) => Ok(Kind::Star),
+
             TypeExpr::TyForAll(_, _, _) => Ok(Kind::Star),
+
             TypeExpr::TyApp(func, arg) => {
                 let func_kind = self.kind_of_type(func, tycon_kinds)?;
                 let arg_kind = self.kind_of_type(arg, tycon_kinds)?;
@@ -207,6 +229,30 @@ impl Context {
                         arg_kind.pretty()
                     )),
                     other => Err(format!("cannot apply non-arrow kind: {}", other.pretty())),
+                }
+            }
+
+            TypeExpr::Qualified(preds, body) => {
+                for pred in preds {
+                    for arg in &pred.args {
+                        let arg_kind = self.kind_of_type(arg, tycon_kinds)?;
+                        if arg_kind != Kind::Star {
+                            return Err(format!(
+                                "predicate argument must have kind *, got {}",
+                                arg_kind.pretty()
+                            ));
+                        }
+                    }
+                }
+
+                let body_kind = self.kind_of_type(body, tycon_kinds)?;
+                if body_kind == Kind::Star {
+                    Ok(Kind::Star)
+                } else {
+                    Err(format!(
+                        "qualified type body must have kind *, got {}",
+                        body_kind.pretty()
+                    ))
                 }
             }
         }
@@ -225,6 +271,12 @@ impl Context {
                     .clone()
                     .add_entry(ContextEntry::UniVar(quantifier.clone(), kind.clone()));
                 extended.type_well_formed(body)
+            }
+            TypeExpr::Qualified(preds, body) => {
+                preds
+                    .iter()
+                    .all(|pred| pred.args.iter().all(|arg| self.type_well_formed(arg)))
+                    && self.type_well_formed(body)
             }
         }
     }

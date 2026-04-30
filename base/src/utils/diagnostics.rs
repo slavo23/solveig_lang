@@ -141,6 +141,10 @@ pub enum TypeError {
         evar: String,
         arm_index: usize,
     },
+    UnsatisfiedConstraints {
+        span: FileSpan,
+        predicates: Vec<String>,
+    },
 }
 
 impl TypeError {
@@ -273,6 +277,29 @@ impl TypeError {
             .with_note(
                 "this is reported as a user-facing type error here, but it usually points to a bug in the checker",
             ),
+            TypeError::UnsatisfiedConstraints { span, predicates } => {
+                let summary = if predicates.len() == 1 {
+                    format!("unsatisfied constraint `{}`", predicates[0])
+                } else {
+                    "unsatisfied constraints".to_string()
+                };
+
+                let details = predicates
+                    .iter()
+                    .map(|p| format!("`{}`", p))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+
+                CompilerDiagnostic::new("TC0013", summary)
+                    .with_label(DiagnosticLabel::primary(
+                        span.clone(),
+                        "this expression requires class evidence that could not be found",
+                    ))
+                    .with_note(format!("missing evidence for {}", details))
+                    .with_note(
+                        "try adding the required constraint to the surrounding signature or defining a matching instance",
+                    )
+            }
         }
     }
 }

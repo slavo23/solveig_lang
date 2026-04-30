@@ -2,12 +2,14 @@ use std::collections::HashMap;
 
 use base::utils::span::Span;
 use core::ast::{
-    BinOp, CaseArm, CaseArmNode, ConstructorDef, DataDefinition, Kind, Literal, Pattern,
-    PatternNode, ResolvedModule, TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
+    BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, ConstructorDef, DataDefinition,
+    InstanceDefinition, InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate,
+    ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
 };
 use surface::ast::{
     ModuleName, NameRef, ParsedModule, SpannedWrapper, SurfaceBinOp, SurfaceDefinition,
-    SurfaceExpr, SurfaceLiteral, SurfaceMatchArm, SurfacePattern, SurfaceTy, SurfaceUnOp,
+    SurfaceExpr, SurfaceLiteral, SurfaceMatchArm, SurfacePattern, SurfacePredicate, SurfaceTy,
+    SurfaceUnOp,
 };
 
 use syntax::data_kind_infer::{infer_all_data_kinds_with_env, RawConstructorDef, RawDataDef};
@@ -121,6 +123,48 @@ impl Resolver {
         }
     }
 
+    fn resolve_class_ref<'src>(&self, r: &NameRef<'src>, cx: &ModuleContext) -> String {
+        match r.segments.as_slice() {
+            [name] => {
+                if let Some(sym) = cx.local_api.classes.get(*name) {
+                    return sym.display();
+                }
+
+                let mut found: Option<String> = None;
+                for imp in &cx.imported_apis {
+                    if let Some(sym) = imp.api.classes.get(*name) {
+                        let disp = sym.display();
+                        if let Some(prev) = &found {
+                            if prev != &disp {
+                                panic!("ambiguous imported class '{}'", name);
+                            }
+                        } else {
+                            found = Some(disp);
+                        }
+                    }
+                }
+
+                found.unwrap_or_else(|| name.to_string())
+            }
+
+            [first, rest @ ..] => {
+                if let Some(imp) = cx.imported_apis.iter().find(|i| i.alias == *first) {
+                    let local_name = *rest.last().unwrap();
+                    if let Some(sym) = imp.api.classes.get(local_name) {
+                        return sym.display();
+                    }
+                    panic!("unknown imported class {}.{}", first, local_name);
+                }
+
+                let module = r.segments[..r.segments.len() - 1].join(".");
+                let name = r.last();
+                format!("{}.{}", module, name)
+            }
+
+            [] => panic!("empty name ref"),
+        }
+    }
+
     fn resolve_ctor_ref<'src>(&self, r: &NameRef<'src>, cx: &ModuleContext) -> String {
         match r.segments.as_slice() {
             [name] => {
@@ -166,6 +210,37 @@ impl Resolver {
         }
     }
 
+    fn resolve_surface_predicate<'src>(
+        &self,
+        pred: &SpannedWrapper<SurfacePredicate<'src>>,
+        cx: &ModuleContext,
+    ) -> Predicate {
+        Predicate {
+            class_name: self.resolve_class_ref(&pred.0.class_name.0, cx),
+            args: pred
+                .0
+                .args
+                .iter()
+                .map(|arg| self.resolve_surface_type_in_module(arg, cx))
+                .collect(),
+        }
+    }
+
+    fn resolve_surface_scheme<'src>(
+        &self,
+        ty: &SpannedWrapper<SurfaceTy<'src>>,
+        cx: &ModuleContext,
+    ) -> Scheme {
+        let raw = self.resolve_surface_type_in_module(ty, cx);
+        let (quantifiers, predicates, body_ty) = raw.peel_scheme_like();
+
+        Scheme {
+            quantifiers,
+            predicates,
+            ty: body_ty,
+        }
+    }
+
     pub fn resolve_surface_type_in_module<'src>(
         &self,
         sf: &SpannedWrapper<SurfaceTy<'src>>,
@@ -173,19 +248,32 @@ impl Resolver {
     ) -> TypeExpr {
         match &sf.0 {
             SurfaceTy::Var(var_name) => TypeExpr::make_var(var_name.to_string()),
+
             SurfaceTy::Arr(lhs, rhs) => TypeExpr::make_arr(
-                self.resolve_surface_type_in_module(&lhs, cx),
-                self.resolve_surface_type_in_module(&rhs, cx),
+                self.resolve_surface_type_in_module(lhs, cx),
+                self.resolve_surface_type_in_module(rhs, cx),
             ),
+
             SurfaceTy::ForAll(quants, body) => quants.iter().rev().fold(
-                self.resolve_surface_type_in_module(&body, cx),
+                self.resolve_surface_type_in_module(body, cx),
                 |acc, quant| TypeExpr::make_forall((*quant).0.to_string(), Kind::Star, acc),
             ),
+
+            SurfaceTy::Qualified(preds, body) => TypeExpr::make_qualified(
+                preds
+                    .iter()
+                    .map(|p| self.resolve_surface_predicate(p, cx))
+                    .collect(),
+                self.resolve_surface_type_in_module(body, cx),
+            ),
+
             SurfaceTy::Unit => TypeExpr::TyUnit,
+
             SurfaceTy::Con(c) => TypeExpr::TyCon(self.resolve_tycon_ref(&c.0, cx)),
+
             SurfaceTy::App(l, r) => TypeExpr::make_app(
-                self.resolve_surface_type_in_module(&l, cx),
-                self.resolve_surface_type_in_module(&r, cx),
+                self.resolve_surface_type_in_module(l, cx),
+                self.resolve_surface_type_in_module(r, cx),
             ),
         }
     }
@@ -319,16 +407,6 @@ impl Resolver {
         )
     }
 
-    fn peel_foralls<'a>(&self, ty: &'a TypeExpr) -> (Vec<(String, Kind)>, &'a TypeExpr) {
-        let mut bs = Vec::new();
-        let mut cur = ty;
-        while let TypeExpr::TyForAll(n, k, body) = cur {
-            bs.push((n.clone(), k.clone()));
-            cur = body;
-        }
-        (bs, cur)
-    }
-
     fn peel_arrow<'a>(&self, ty: &'a TypeExpr) -> Option<(&'a TypeExpr, &'a TypeExpr)> {
         match ty {
             TypeExpr::TyArr(l, r) => Some((l, r)),
@@ -357,7 +435,7 @@ impl Resolver {
 
     fn wrap_function_body_with_signature_in_module<'src>(
         &mut self,
-        sig: &TypeExpr,
+        sig: &Scheme,
         body: &SpannedWrapper<SurfaceExpr<'src>>,
         params: &Vec<SpannedWrapper<&'src str>>,
         name: &'src str,
@@ -365,17 +443,18 @@ impl Resolver {
     ) -> TermExprNode<Span> {
         let span: Span = body.1.into();
         let mut body_node = self.resolve_surface_expr_in_module(body, cx);
-        let (quants, after) = self.peel_foralls(sig);
 
-        let mut remaining = after;
+        let quants = sig.quantifiers.clone();
+        let mut remaining = &sig.ty;
         let mut annos: Vec<(String, TypeExpr)> = Vec::new();
+
         for p in params.iter() {
             let (arg_ty, ret_ty) = self.peel_arrow(remaining).unwrap_or_else(|| {
-                panic!(
-                    "parameter mismatch for '{}'. The number of parameters doesn't match the function signaure",
-                    name
-                )
-            });
+            panic!(
+                "parameter mismatch for '{}'. The number of parameters doesn't match the function signature",
+                name
+            )
+        });
             annos.push((p.0.to_string(), arg_ty.clone()));
             remaining = ret_ty;
         }
@@ -386,10 +465,12 @@ impl Resolver {
                 span.clone(),
             );
         }
+
         for (qn, qk) in quants.into_iter().rev() {
             body_node =
                 TermExprNode::new(TermExpr::TyAbs(qn, qk, Box::new(body_node)), span.clone());
         }
+
         body_node
     }
 
@@ -409,7 +490,7 @@ impl Resolver {
                 constructors,
             } = &defn.0
             {
-                let (name, span) = spanned_name;
+                let (name, _span) = spanned_name;
                 raw_data_defs.push(RawDataDef {
                     name: qualify(module_name, name),
                     ty_params: ty_params.iter().map(|p| p.0.to_string()).collect(),
@@ -456,7 +537,112 @@ impl Resolver {
             });
         }
 
-        let mut func_types: HashMap<String, TypeExpr> = HashMap::new();
+        let mut class_defs = Vec::new();
+
+        for defn in parsed.defs.iter() {
+            if let SurfaceDefinition::ClassDef {
+                name,
+                ty_params,
+                superclasses,
+                methods,
+            } = &defn.0
+            {
+                let class_name = qualify(module_name, name.0);
+
+                let class_params = ty_params
+                    .iter()
+                    .map(|p| (p.0.to_string(), Kind::Star))
+                    .collect::<Vec<_>>();
+
+                let class_head_pred = Predicate {
+                    class_name: class_name.clone(),
+                    args: ty_params
+                        .iter()
+                        .map(|p| TypeExpr::TyVar(p.0.to_string()))
+                        .collect(),
+                };
+
+                let resolved_superclasses = superclasses
+                    .iter()
+                    .map(|p| self.resolve_surface_predicate(p, cx))
+                    .collect::<Vec<_>>();
+
+                let resolved_methods = methods
+                    .iter()
+                    .map(|m| {
+                        let raw_method_scheme = self.resolve_surface_scheme(&m.ty, cx);
+
+                        let mut quantifiers = class_params.clone();
+                        quantifiers.extend(raw_method_scheme.quantifiers.clone());
+
+                        let mut predicates = Vec::new();
+                        predicates.push(class_head_pred.clone());
+                        predicates.extend(raw_method_scheme.predicates.clone());
+
+                        ClassMethodDef {
+                            name: qualify(module_name, m.name.0),
+                            scheme: Scheme {
+                                quantifiers,
+                                predicates,
+                                ty: raw_method_scheme.ty,
+                            },
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                class_defs.push(ClassDefinition {
+                    name: class_name,
+                    params: class_params,
+                    superclasses: resolved_superclasses,
+                    methods: resolved_methods,
+                });
+            }
+        }
+
+        let mut instance_defs = Vec::new();
+
+        for defn in parsed.defs.iter() {
+            if let SurfaceDefinition::InstanceDef {
+                context,
+                class_name,
+                args,
+                methods,
+            } = &defn.0
+            {
+                let head = Predicate {
+                    class_name: self.resolve_class_ref(
+                        &NameRef {
+                            segments: vec![class_name.0],
+                        },
+                        cx,
+                    ),
+                    args: args
+                        .iter()
+                        .map(|arg| self.resolve_surface_type_in_module(arg, cx))
+                        .collect(),
+                };
+
+                let resolved_methods = methods
+                    .iter()
+                    .map(|m| InstanceMethodDef {
+                        name: m.name.0.to_string(),
+                        body: self
+                            .wrap_function_body_without_signature_in_module(&m.body, &m.params, cx),
+                    })
+                    .collect::<Vec<_>>();
+
+                instance_defs.push(InstanceDefinition {
+                    context: context
+                        .iter()
+                        .map(|p| self.resolve_surface_predicate(p, cx))
+                        .collect(),
+                    head,
+                    methods: resolved_methods,
+                });
+            }
+        }
+
+        let mut func_schemes: HashMap<String, Scheme> = HashMap::new();
 
         for defn in parsed.defs.iter() {
             if let SurfaceDefinition::SigDef {
@@ -464,15 +650,15 @@ impl Resolver {
                 ty,
             } = &defn.0
             {
-                let (name, span) = spanned_name;
-                let raw_sig = self.resolve_surface_type_in_module(&ty, cx);
+                let (name, _span) = spanned_name;
+                let raw_scheme = self.resolve_surface_scheme(ty, cx);
 
                 let mut sig_tycon_env = imported.tycon_kinds.clone();
                 sig_tycon_env.extend(tycon_kinds.clone());
 
                 let inf = SignatureKindInferencer::with_tycon_env(sig_tycon_env);
-                let info = inf.infer_signature(&raw_sig)?;
-                func_types.insert(qualify(module_name, name), info.kinded_signature.clone());
+                let info = inf.infer_scheme(&raw_scheme)?;
+                func_schemes.insert(qualify(module_name, name), info.scheme.clone());
             }
         }
 
@@ -485,15 +671,14 @@ impl Resolver {
                 params,
             } = &defn.0
             {
-                let (name, span) = spanned_name;
+                let (name, _span) = spanned_name;
                 let fn_name = qualify(module_name, name);
-                let sig = func_types.get(&fn_name).cloned();
+                let sig = func_schemes.get(&fn_name).cloned();
 
                 let wrapped = match &sig {
-                    Some(sig) => self.wrap_function_body_with_signature_in_module(
-                        sig, &body, &params, &fn_name, cx,
-                    ),
-                    None => self.wrap_function_body_without_signature_in_module(&body, &params, cx),
+                    Some(sig) => self
+                        .wrap_function_body_with_signature_in_module(sig, body, params, name, cx),
+                    None => self.wrap_function_body_without_signature_in_module(body, params, cx),
                 };
 
                 func_defs.push(TermDefinition {
@@ -506,9 +691,11 @@ impl Resolver {
 
         Ok(ResolvedModule {
             data_defs,
+            class_defs,
+            instance_defs,
             tycon_kinds,
             constructor_types,
-            func_types,
+            func_schemes,
             func_defs,
         })
     }

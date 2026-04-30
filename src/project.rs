@@ -6,7 +6,7 @@ use std::rc::Rc;
 use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
-use core::ast::{Kind, TypeExpr};
+use core::ast::{ClassDefinition, Kind, Scheme, TypeExpr};
 use surface::ast::{ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition};
 use surface::parser;
 use syntax::inference::type_infer::CheckedModule;
@@ -35,6 +35,7 @@ pub struct ModuleApi {
     pub terms: HashMap<String, SymbolId>,
     pub types: HashMap<String, SymbolId>,
     pub constructors: HashMap<String, SymbolId>,
+    pub classes: HashMap<String, SymbolId>,
 }
 
 impl ModuleApi {
@@ -54,6 +55,9 @@ impl ModuleApi {
                     if let Some(v) = self.constructors.get(name) {
                         out.constructors.insert(name.clone(), v.clone());
                     }
+                    if let Some(v) = self.classes.get(name) {
+                        out.classes.insert(name.clone(), v.clone());
+                    }
                 }
 
                 out
@@ -64,9 +68,16 @@ impl ModuleApi {
 
 #[derive(Debug, Clone, Default)]
 pub struct TypedModuleApi {
-    pub term_types: HashMap<SymbolId, TypeExpr>,
+    pub term_schemes: HashMap<SymbolId, core::ast::Scheme>,
     pub type_kinds: HashMap<SymbolId, Kind>,
     pub constructor_types: HashMap<SymbolId, TypeExpr>,
+    pub class_defs: HashMap<SymbolId, core::ast::ClassDefinition>,
+    pub instance_defs: Vec<
+        core::ast::InstanceDefinition<
+            syntax::inference::type_infer::TcMetadata,
+            std::ops::Range<usize>,
+        >,
+    >,
 }
 
 impl TypedModuleApi {
@@ -77,9 +88,9 @@ impl TypedModuleApi {
                 let mut out = Self::default();
 
                 for name in names {
-                    for (sym, ty) in &self.term_types {
+                    for (sym, scheme) in &self.term_schemes {
                         if &sym.name == name {
-                            out.term_types.insert(sym.clone(), ty.clone());
+                            out.term_schemes.insert(sym.clone(), scheme.clone());
                         }
                     }
                     for (sym, kind) in &self.type_kinds {
@@ -92,8 +103,14 @@ impl TypedModuleApi {
                             out.constructor_types.insert(sym.clone(), ty.clone());
                         }
                     }
+                    for (sym, class_def) in &self.class_defs {
+                        if &sym.name == name {
+                            out.class_defs.insert(sym.clone(), class_def.clone());
+                        }
+                    }
                 }
 
+                out.instance_defs = self.instance_defs.clone();
                 out
             }
         }
@@ -101,12 +118,19 @@ impl TypedModuleApi {
 
     pub fn extend_display_maps(
         &self,
-        func_types: &mut HashMap<String, TypeExpr>,
+        func_schemes: &mut HashMap<String, core::ast::Scheme>,
         tycon_kinds: &mut HashMap<String, Kind>,
         constructor_types: &mut HashMap<String, TypeExpr>,
+        class_defs: &mut HashMap<String, core::ast::ClassDefinition>,
+        instance_defs: &mut Vec<
+            core::ast::InstanceDefinition<
+                syntax::inference::type_infer::TcMetadata,
+                std::ops::Range<usize>,
+            >,
+        >,
     ) {
-        for (sym, ty) in &self.term_types {
-            func_types.insert(sym.display(), ty.clone());
+        for (sym, scheme) in &self.term_schemes {
+            func_schemes.insert(sym.display(), scheme.clone());
         }
         for (sym, kind) in &self.type_kinds {
             tycon_kinds.insert(sym.display(), kind.clone());
@@ -114,6 +138,11 @@ impl TypedModuleApi {
         for (sym, ty) in &self.constructor_types {
             constructor_types.insert(sym.display(), ty.clone());
         }
+        for (sym, class_def) in &self.class_defs {
+            class_defs.insert(sym.display(), class_def.clone());
+        }
+
+        instance_defs.extend(self.instance_defs.clone());
     }
 }
 
@@ -135,6 +164,7 @@ pub struct BuiltinApi {
     pub terms: HashMap<String, SymbolId>,
     pub types: HashMap<String, SymbolId>,
     pub constructors: HashMap<String, SymbolId>,
+    pub classes: HashMap<String, SymbolId>,
 }
 
 #[derive(Debug, Clone)]
@@ -421,12 +451,14 @@ pub fn build_module_api<'src>(module_name: &ModuleName, parsed: &ParsedModule<'s
                     },
                 );
             }
+
             SurfaceDefinition::SigDef { name, .. } => {
                 api.terms.entry(name.0.to_string()).or_insert(SymbolId {
                     module: module_name.clone(),
                     name: name.0.to_string(),
                 });
             }
+
             SurfaceDefinition::DataDef {
                 name, constructors, ..
             } => {
@@ -448,7 +480,18 @@ pub fn build_module_api<'src>(module_name: &ModuleName, parsed: &ParsedModule<'s
                     );
                 }
             }
-            _ => {}
+
+            SurfaceDefinition::ClassDef { name, .. } => {
+                api.classes.insert(
+                    name.0.to_string(),
+                    SymbolId {
+                        module: module_name.clone(),
+                        name: name.0.to_string(),
+                    },
+                );
+            }
+
+            SurfaceDefinition::InstanceDef { .. } => {}
         }
     }
 
@@ -459,14 +502,14 @@ pub fn build_typed_module_api(module_name: &ModuleName, checked: &CheckedModule)
     let mut api = TypedModuleApi::default();
     let prefix = module_name.as_string() + ".";
 
-    for (name, ty) in &checked.func_types {
+    for (name, scheme) in &checked.func_schemes {
         if let Some(stripped) = name.strip_prefix(&prefix) {
-            api.term_types.insert(
+            api.term_schemes.insert(
                 SymbolId {
                     module: module_name.clone(),
                     name: stripped.to_string(),
                 },
-                ty.clone(),
+                scheme.clone(),
             );
         }
     }
@@ -494,6 +537,23 @@ pub fn build_typed_module_api(module_name: &ModuleName, checked: &CheckedModule)
             );
         }
     }
+
+    for class_def in &checked.class_defs {
+        let stripped = class_def
+            .name
+            .strip_prefix(&prefix)
+            .unwrap_or(&class_def.name);
+
+        api.class_defs.insert(
+            SymbolId {
+                module: module_name.clone(),
+                name: stripped.to_string(),
+            },
+            class_def.clone(),
+        );
+    }
+
+    api.instance_defs = checked.instance_defs.clone();
 
     api
 }

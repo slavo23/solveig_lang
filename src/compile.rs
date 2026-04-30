@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use base::utils::diagnostics::emit_type_errors;
+use core::ast::{ClassDefinition, Scheme};
 use lowering::closure_lower::lower_to_closure_ir;
 use lowering::lowering::lower_module;
 use runtime::vm::Machine;
@@ -31,7 +32,8 @@ pub fn compile_and_run_project(
     state.check_all(&order)?;
 
     let merged = merge_checked_modules(state.checked_modules)?;
-    let ir = lower_module(&merged);
+    let elaborated = syntax::inference::class_elab::elaborate_typeclasses(&merged);
+    let ir = lower_module(&elaborated);
     let cc = lower_to_closure_ir(&ir);
 
     if dump_bytecode {
@@ -43,6 +45,107 @@ pub fn compile_and_run_project(
     let result = Machine::exec(&cc, &entry_fq);
     println!("{}", result.display());
     Ok(())
+}
+
+fn erase_tc_expr_to_span_expr(
+    expr: core::ast::TermExprNode<
+        syntax::inference::type_infer::TcMetadata,
+        std::ops::Range<usize>,
+    >,
+) -> core::ast::TermExprNode<std::ops::Range<usize>, std::ops::Range<usize>> {
+    let anno = expr.anno.span.clone();
+
+    let node = match expr.node {
+        core::ast::TermExpr::Var(name) => core::ast::TermExpr::Var(name),
+        core::ast::TermExpr::Con(name) => core::ast::TermExpr::Con(name),
+        core::ast::TermExpr::Unit => core::ast::TermExpr::Unit,
+        core::ast::TermExpr::Lit(lit) => core::ast::TermExpr::Lit(lit),
+        core::ast::TermExpr::Hole => core::ast::TermExpr::Hole,
+
+        core::ast::TermExpr::Abs(param, ann, body) => {
+            core::ast::TermExpr::Abs(param, ann, Box::new(erase_tc_expr_to_span_expr(*body)))
+        }
+
+        core::ast::TermExpr::App(f, x) => core::ast::TermExpr::App(
+            Box::new(erase_tc_expr_to_span_expr(*f)),
+            Box::new(erase_tc_expr_to_span_expr(*x)),
+        ),
+
+        core::ast::TermExpr::TyAbs(name, kind, body) => {
+            core::ast::TermExpr::TyAbs(name, kind, Box::new(erase_tc_expr_to_span_expr(*body)))
+        }
+
+        core::ast::TermExpr::TyApp(inner, ty) => {
+            core::ast::TermExpr::TyApp(Box::new(erase_tc_expr_to_span_expr(*inner)), ty)
+        }
+
+        core::ast::TermExpr::Anno(inner, ty) => {
+            core::ast::TermExpr::Anno(Box::new(erase_tc_expr_to_span_expr(*inner)), ty)
+        }
+
+        core::ast::TermExpr::Case(scrutinee, arms) => core::ast::TermExpr::Case(
+            Box::new(erase_tc_expr_to_span_expr(*scrutinee)),
+            arms.into_iter()
+                .map(|arm| {
+                    core::ast::CaseArmNode::new(
+                        core::ast::CaseArm {
+                            pattern: arm.node.pattern,
+                            expr: erase_tc_expr_to_span_expr(arm.node.expr),
+                        },
+                        arm.anno,
+                    )
+                })
+                .collect(),
+        ),
+
+        core::ast::TermExpr::IfThenElse(c, t, e) => core::ast::TermExpr::IfThenElse(
+            Box::new(erase_tc_expr_to_span_expr(*c)),
+            Box::new(erase_tc_expr_to_span_expr(*t)),
+            Box::new(erase_tc_expr_to_span_expr(*e)),
+        ),
+
+        core::ast::TermExpr::BinaryOperator(op, l, r) => core::ast::TermExpr::BinaryOperator(
+            op,
+            Box::new(erase_tc_expr_to_span_expr(*l)),
+            Box::new(erase_tc_expr_to_span_expr(*r)),
+        ),
+
+        core::ast::TermExpr::UnaryOperator(op, rhs) => {
+            core::ast::TermExpr::UnaryOperator(op, Box::new(erase_tc_expr_to_span_expr(*rhs)))
+        }
+
+        core::ast::TermExpr::Let(name, binder, in_expr) => core::ast::TermExpr::Let(
+            name,
+            Box::new(erase_tc_expr_to_span_expr(*binder)),
+            Box::new(erase_tc_expr_to_span_expr(*in_expr)),
+        ),
+    };
+
+    core::ast::TermExprNode::new(node, anno)
+}
+
+fn erase_checked_instance_defs_to_resolved(
+    defs: Vec<
+        core::ast::InstanceDefinition<
+            syntax::inference::type_infer::TcMetadata,
+            std::ops::Range<usize>,
+        >,
+    >,
+) -> Vec<core::ast::InstanceDefinition<std::ops::Range<usize>, std::ops::Range<usize>>> {
+    defs.into_iter()
+        .map(|inst| core::ast::InstanceDefinition {
+            context: inst.context,
+            head: inst.head,
+            methods: inst
+                .methods
+                .into_iter()
+                .map(|m| core::ast::InstanceMethodDef {
+                    name: m.name,
+                    body: erase_tc_expr_to_span_expr(m.body),
+                })
+                .collect(),
+        })
+        .collect()
 }
 
 struct FrontendState<'a> {
@@ -117,12 +220,27 @@ impl<'a> FrontendState<'a> {
             })?;
 
         let imported_typed = self.build_imported_typed_apis(&imports);
-        let (func_types, tycon_kinds, constructor_types) =
-            collect_imported_type_info(&imported_typed);
+        let (
+            func_schemes,
+            tycon_kinds,
+            constructor_types,
+            imported_class_defs,
+            imported_instance_defs,
+        ) = collect_imported_type_info(&imported_typed);
 
-        resolved.func_types.extend(func_types);
+        resolved.func_schemes.extend(func_schemes);
         resolved.tycon_kinds.extend(tycon_kinds);
         resolved.constructor_types.extend(constructor_types);
+        resolved
+            .class_defs
+            .extend(imported_class_defs.into_values());
+        resolved
+            .instance_defs
+            .extend(erase_checked_instance_defs_to_resolved(
+                imported_instance_defs,
+            ));
+
+
 
         let checked_raw =
             match check_and_elab_module(&resolved, module_file.path.display().to_string()) {
@@ -196,23 +314,40 @@ impl<'a> FrontendState<'a> {
 fn collect_imported_type_info(
     imports: &[ImportedTypedApi],
 ) -> (
-    HashMap<String, core::ast::TypeExpr>,
+    HashMap<String, Scheme>,
     HashMap<String, core::ast::Kind>,
     HashMap<String, core::ast::TypeExpr>,
+    HashMap<String, ClassDefinition>,
+    Vec<
+        core::ast::InstanceDefinition<
+            syntax::inference::type_infer::TcMetadata,
+            std::ops::Range<usize>,
+        >,
+    >,
 ) {
-    let mut func_types = HashMap::new();
+    let mut func_schemes = HashMap::new();
     let mut tycon_kinds = HashMap::new();
     let mut constructor_types = HashMap::new();
+    let mut class_defs = HashMap::new();
+    let mut instance_defs = Vec::new();
 
     for imp in imports {
         imp.api.filtered(&imp.spec).extend_display_maps(
-            &mut func_types,
+            &mut func_schemes,
             &mut tycon_kinds,
             &mut constructor_types,
+            &mut class_defs,
+            &mut instance_defs,
         );
     }
 
-    (func_types, tycon_kinds, constructor_types)
+    (
+        func_schemes,
+        tycon_kinds,
+        constructor_types,
+        class_defs,
+        instance_defs,
+    )
 }
 
 fn find_entry_file(project_root: &Path) -> Result<PathBuf, String> {
@@ -237,32 +372,50 @@ fn retain_only_local_symbols(
         .constructor_types
         .retain(|name, _| name.starts_with(&prefix));
     checked
-        .func_types
+        .func_schemes
         .retain(|name, _| name.starts_with(&prefix));
+
+    checked
+        .class_defs
+        .retain(|class_def| class_def.name.starts_with(&prefix));
+
+    checked
+        .instance_defs
+        .retain(|inst_def| inst_def.head.class_name.starts_with(&prefix));
+
+    checked
+        .func_defs
+        .retain(|def| def.name.starts_with(&prefix));
 
     checked
 }
 
 fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, String> {
     let mut data_defs = Vec::new();
+    let mut class_defs = Vec::new();
+    let mut instance_defs = Vec::new();
     let mut tycon_kinds = HashMap::new();
     let mut constructor_types = HashMap::new();
-    let mut func_types = HashMap::new();
+    let mut func_schemes = HashMap::new();
     let mut func_defs = Vec::new();
 
     for m in mods {
         data_defs.extend(m.data_defs);
+        class_defs.extend(m.class_defs);
+        instance_defs.extend(m.instance_defs);
         extend_unique(&mut tycon_kinds, m.tycon_kinds, "type constructor")?;
         extend_unique(&mut constructor_types, m.constructor_types, "constructor")?;
-        extend_unique(&mut func_types, m.func_types, "function")?;
+        extend_unique(&mut func_schemes, m.func_schemes, "function")?;
         func_defs.extend(m.func_defs);
     }
 
     Ok(core::ast::ResolvedModule {
         data_defs,
+        class_defs,
+        instance_defs,
         tycon_kinds,
         constructor_types,
-        func_types,
+        func_schemes,
         func_defs,
     })
 }

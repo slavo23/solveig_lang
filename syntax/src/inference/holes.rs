@@ -64,6 +64,14 @@ fn collect_evars_inner(ty: &TypeExpr, acc: &mut Vec<String>) {
             collect_evars_inner(b, acc);
         }
         TypeExpr::TyForAll(_, _, body) => collect_evars_inner(body, acc),
+        TypeExpr::Qualified(preds, body) => {
+            for pred in preds {
+                for arg in &pred.args {
+                    collect_evars_inner(arg, acc);
+                }
+            }
+            collect_evars_inner(body, acc);
+        }
         TypeExpr::TyUnit | TypeExpr::TyVar(_) | TypeExpr::TyCon(_) => {}
     }
 }
@@ -71,38 +79,52 @@ fn collect_evars_inner(ty: &TypeExpr, acc: &mut Vec<String>) {
 fn types_match(candidate: &TypeExpr, goal: &TypeExpr) -> bool {
     match (candidate, goal) {
         (TypeExpr::TyExVar(_), _) | (_, TypeExpr::TyExVar(_)) => true,
+
         (TypeExpr::TyForAll(_, _, body), _) => types_match(body, goal),
         (_, TypeExpr::TyForAll(_, _, body)) => types_match(candidate, body),
+
+        (TypeExpr::Qualified(_, body), _) => types_match(body, goal),
+        (_, TypeExpr::Qualified(_, body)) => types_match(candidate, body),
+
         (TypeExpr::TyUnit, TypeExpr::TyUnit) => true,
         (TypeExpr::TyVar(a), TypeExpr::TyVar(b)) => a == b,
         (TypeExpr::TyCon(a), TypeExpr::TyCon(b)) => a == b,
+
         (TypeExpr::TyArr(a1, b1), TypeExpr::TyArr(a2, b2)) => {
             types_match(a1, a2) && types_match(b1, b2)
         }
+
         (TypeExpr::TyApp(f1, a1), TypeExpr::TyApp(f2, a2)) => {
             types_match(f1, f2) && types_match(a1, a2)
         }
+
         _ => false,
     }
 }
 
 fn heads_match(a: &TypeExpr, b: &TypeExpr) -> bool {
     match (a, b) {
+        (TypeExpr::Qualified(_, body), rhs) => heads_match(body, rhs),
+        (lhs, TypeExpr::Qualified(_, body)) => heads_match(lhs, body),
+
         (TypeExpr::TyCon(x), TypeExpr::TyCon(y)) => x == y,
         (TypeExpr::TyApp(f, _), TypeExpr::TyApp(g, _)) => heads_match(f, g),
         (TypeExpr::TyApp(f, _), rhs) | (rhs, TypeExpr::TyApp(f, _)) => heads_match(f, rhs),
+
         _ => false,
     }
 }
 
 fn peel_arrows(ty: &TypeExpr) -> (Vec<TypeExpr>, TypeExpr) {
-    let (_, body) = ty.peel_forall();
+    let (_, _, body) = ty.peel_scheme_like();
     let mut params = Vec::new();
     let mut current = body;
+
     while let TypeExpr::TyArr(domain, codomain) = current {
         params.push(*domain);
         current = *codomain;
     }
+
     (params, current)
 }
 

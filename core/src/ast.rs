@@ -10,7 +10,7 @@ pub trait Pretty<T> {
     fn get_precedence(t: &T) -> u8;
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Eq, Hash)]
 pub enum Kind {
     Var(String),
     Star,
@@ -63,7 +63,7 @@ impl Pretty<Kind> for Kind {
     }
 }
 
-#[derive(Clone, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug, Eq, Hash)]
 pub enum TypeExpr {
     TyUnit,
     TyVar(String),
@@ -72,6 +72,7 @@ pub enum TypeExpr {
     TyForAll(String, Kind, Box<TypeExpr>),
     TyCon(String),
     TyApp(Box<TypeExpr>, Box<TypeExpr>),
+    Qualified(Vec<Predicate>, Box<TypeExpr>),
 }
 
 impl TypeExpr {
@@ -86,14 +87,38 @@ impl TypeExpr {
     pub fn occurs_check(&self, var_name: String) -> bool {
         match self {
             Self::TyExVar(name) | Self::TyVar(name) if *name == var_name => true,
-            Self::TyArr(lhs, rhs) => {
+
+            Self::TyArr(lhs, rhs) | Self::TyApp(lhs, rhs) => {
                 lhs.occurs_check(var_name.clone()) || rhs.occurs_check(var_name)
             }
+
             Self::TyForAll(quantifier, _kind, body) => {
                 var_name == *quantifier || body.occurs_check(var_name)
             }
+
+            Self::Qualified(preds, body) => {
+                preds.iter().any(|pred| {
+                    pred.args
+                        .iter()
+                        .any(|arg| arg.occurs_check(var_name.clone()))
+                }) || body.occurs_check(var_name)
+            }
+
             _ => false,
         }
+    }
+
+    pub fn peel_qualified(&self) -> (Vec<Predicate>, TypeExpr) {
+        match self {
+            TypeExpr::Qualified(preds, body) => (preds.clone(), (**body).clone()),
+            other => (Vec::new(), other.clone()),
+        }
+    }
+
+    pub fn peel_scheme_like(&self) -> (Vec<(String, Kind)>, Vec<Predicate>, TypeExpr) {
+        let (quants, rest) = self.peel_forall();
+        let (preds, ty) = rest.peel_qualified();
+        (quants, preds, ty)
     }
 
     pub fn peel_forall(&self) -> (Vec<(String, Kind)>, TypeExpr) {
@@ -130,6 +155,10 @@ impl TypeExpr {
         TypeExpr::TyForAll(quant_name, kind, Box::new(body))
     }
 
+    pub fn make_qualified(predicates: Vec<Predicate>, body: TypeExpr) -> TypeExpr {
+        TypeExpr::Qualified(predicates, Box::new(body))
+    }
+
     pub fn substitute(&self, var_name: &str, with_type: &TypeExpr) -> TypeExpr {
         match self {
             Self::TyVar(sub_var_name) | Self::TyExVar(sub_var_name) => {
@@ -139,16 +168,19 @@ impl TypeExpr {
                     self.clone()
                 }
             }
-            Self::TyCon(_) => self.clone(),
-            Self::TyUnit => self.clone(),
+
+            Self::TyCon(_) | Self::TyUnit => self.clone(),
+
             Self::TyArr(lhs, rhs) => Self::make_arr(
                 lhs.substitute(var_name, with_type),
                 rhs.substitute(var_name, with_type),
             ),
+
             Self::TyApp(lhs, rhs) => Self::make_app(
                 lhs.substitute(var_name, with_type),
                 rhs.substitute(var_name, with_type),
             ),
+
             Self::TyForAll(quantifier, kind, body) => {
                 if quantifier == var_name {
                     Self::make_forall(quantifier.clone(), kind.clone(), (**body).clone())
@@ -160,6 +192,22 @@ impl TypeExpr {
                     )
                 }
             }
+
+            Self::Qualified(preds, body) => {
+                let new_preds = preds
+                    .iter()
+                    .map(|pred| Predicate {
+                        class_name: pred.class_name.clone(),
+                        args: pred
+                            .args
+                            .iter()
+                            .map(|arg| arg.substitute(var_name, with_type))
+                            .collect(),
+                    })
+                    .collect();
+
+                Self::make_qualified(new_preds, body.substitute(var_name, with_type))
+            }
         }
     }
 }
@@ -167,7 +215,7 @@ impl TypeExpr {
 impl Pretty<TypeExpr> for TypeExpr {
     fn get_precedence(t: &TypeExpr) -> u8 {
         match t {
-            TypeExpr::TyForAll(_, _, _) => PRECEDENCE_LOOSE,
+            TypeExpr::TyForAll(_, _, _) | TypeExpr::Qualified(_, _) => PRECEDENCE_LOOSE,
             TypeExpr::TyArr(_, _) => PRECEDENCE_ARR,
             TypeExpr::TyApp(_, _) => PRECEDENCE_APP,
             TypeExpr::TyUnit | TypeExpr::TyVar(_) | TypeExpr::TyExVar(_) | TypeExpr::TyCon(_) => {
@@ -179,17 +227,21 @@ impl Pretty<TypeExpr> for TypeExpr {
     fn pretty(&self) -> String {
         fn traverse_helper(t: &TypeExpr, parent_precedence: u8) -> String {
             let curr_precedence = TypeExpr::get_precedence(t);
+
             let type_fmt = match t {
                 TypeExpr::TyUnit => "()".into(),
                 TypeExpr::TyVar(name) | TypeExpr::TyExVar(name) => name.clone(),
-                TypeExpr::TyCon(name) => name.split(".").last().unwrap().to_string(),
+                TypeExpr::TyCon(name) => name.split('.').last().unwrap().to_string(),
+
                 TypeExpr::TyArr(lhs, rhs) => {
                     let lhs_fmt = traverse_helper(lhs, PRECEDENCE_APP);
                     let rhs_fmt = traverse_helper(rhs, PRECEDENCE_ARR);
                     format!("{lhs_fmt} -> {rhs_fmt}")
                 }
+
                 TypeExpr::TyForAll(_, _, _) => {
-                    let (kinded_quants, ty_body) = t.peel_forall();
+                    let (kinded_quants, rest) = t.peel_forall();
+
                     let peeled_quants = kinded_quants
                         .iter()
                         .map(|(name, kind)| format!("({name} : {})", kind.pretty()))
@@ -198,9 +250,27 @@ impl Pretty<TypeExpr> for TypeExpr {
                     format!(
                         "∀ {}. {}",
                         peeled_quants.join(" "),
-                        traverse_helper(&ty_body, PRECEDENCE_LOOSE)
+                        traverse_helper(&rest, PRECEDENCE_LOOSE)
                     )
                 }
+
+                TypeExpr::Qualified(preds, body) => {
+                    let preds_fmt = if preds.len() == 1 {
+                        preds[0].pretty()
+                    } else {
+                        format!(
+                            "({})",
+                            preds
+                                .iter()
+                                .map(|p| p.pretty())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    };
+
+                    format!("{preds_fmt} => {}", traverse_helper(body, PRECEDENCE_LOOSE))
+                }
+
                 TypeExpr::TyApp(f, x) => {
                     let f_s = traverse_helper(f, PRECEDENCE_APP);
                     let x_s = traverse_helper(x, PRECEDENCE_ATOM);
@@ -216,6 +286,61 @@ impl Pretty<TypeExpr> for TypeExpr {
         }
 
         traverse_helper(self, PRECEDENCE_LOOSE)
+    }
+}
+
+impl Predicate {
+    pub fn pretty(&self) -> String {
+        let class_name = self
+            .class_name
+            .split('.')
+            .last()
+            .unwrap_or(&self.class_name);
+
+        let args = self
+            .args
+            .iter()
+            .map(|arg| {
+                let s = arg.pretty();
+                match arg {
+                    TypeExpr::TyArr(_, _)
+                    | TypeExpr::TyForAll(_, _, _)
+                    | TypeExpr::Qualified(_, _) => format!("({s})"),
+                    _ => s,
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        if args.is_empty() {
+            class_name.to_string()
+        } else {
+            format!("{class_name} {args}")
+        }
+    }
+}
+
+impl Scheme {
+    pub fn pretty(&self) -> String {
+        let mut ty = self.ty.clone();
+
+        if !self.predicates.is_empty() {
+            ty = TypeExpr::make_qualified(self.predicates.clone(), ty);
+        }
+
+        for (name, kind) in self.quantifiers.iter().rev() {
+            ty = TypeExpr::make_forall(name.clone(), kind.clone(), ty);
+        }
+
+        ty.pretty()
+    }
+
+    pub fn mono(ty: TypeExpr) -> Self {
+        Self {
+            quantifiers: Vec::new(),
+            predicates: Vec::new(),
+            ty,
+        }
     }
 }
 
@@ -299,20 +424,22 @@ pub struct CaseArm<A, P = A> {
 #[derive(Clone, Debug)]
 pub struct TermDefinition<A, P = A> {
     pub name: String,
-    pub signature: Option<TypeExpr>,
+    pub signature: Option<Scheme>,
     pub body: TermExprNode<A, P>,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ResolvedModule<A, P = A> {
     pub data_defs: Vec<DataDefinition>,
+    pub class_defs: Vec<ClassDefinition>,
+    pub instance_defs: Vec<InstanceDefinition<A, P>>,
     pub tycon_kinds: HashMap<String, Kind>,
     pub constructor_types: HashMap<String, TypeExpr>,
-    pub func_types: HashMap<String, TypeExpr>,
+    pub func_schemes: HashMap<String, Scheme>,
     pub func_defs: Vec<TermDefinition<A, P>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct DataDefinition {
     pub name: String,
     pub ty_params: Vec<(String, Kind)>,
@@ -320,9 +447,49 @@ pub struct DataDefinition {
     pub constructors: Vec<ConstructorDef>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ConstructorDef {
     pub name: String,
     pub fields: Vec<TypeExpr>,
     pub full_type: TypeExpr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Predicate {
+    pub class_name: String,
+    pub args: Vec<TypeExpr>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Scheme {
+    pub quantifiers: Vec<(String, Kind)>,
+    pub predicates: Vec<Predicate>,
+    pub ty: TypeExpr,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClassMethodDef {
+    pub name: String,
+    pub scheme: Scheme,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClassDefinition {
+    pub name: String,
+    pub params: Vec<(String, Kind)>,
+    pub superclasses: Vec<Predicate>,
+    pub methods: Vec<ClassMethodDef>,
+}
+
+#[derive(Clone, Debug)]
+pub struct InstanceMethodDef<A, P = A> {
+    pub name: String,
+    pub body: TermExprNode<A, P>,
+}
+
+#[derive(Clone, Debug)]
+pub struct InstanceDefinition<A, P = A> {
+    pub context: Vec<Predicate>,
+    pub head: Predicate,
+    pub methods: Vec<InstanceMethodDef<A, P>>,
 }
