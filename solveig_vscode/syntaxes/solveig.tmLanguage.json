@@ -3,116 +3,263 @@
   "name": "Solveig",
   "scopeName": "source.solveig",
   "patterns": [
-    {
-      "include": "#block_comment"
-    },
-    {
-      "include": "#line_comment"
-    },
-    {
-      "include": "#type_signature"
-    },
-    {
-      "include": "#data_declaration"
-    },
-    {
-      "include": "#function_definition"
-    },
-    {
-      "include": "#keywords"
-    },
-    {
-      "include": "#numbers"
-    },
-    {
-      "include": "#strings"
-    },
-    {
-      "include": "#operators"
-    },
-    {
-      "include": "#holes"
-    },
-    {
-      "include": "#constructors"
-    },
-    {
-      "include": "#type_variables"
-    },
-    {
-      "include": "#identifiers"
-    }
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#numeric_literals" },
+    { "include": "#special_constants" },
+    { "include": "#imports" },
+    { "include": "#class_declaration" },
+    { "include": "#instance_declaration" },
+    { "include": "#data_declaration" },
+    { "include": "#type_signature_declaration" },
+    { "include": "#function_definition" },
+    { "include": "#keywords" },
+    { "include": "#holes" },
+    { "include": "#operators" },
+    { "include": "#qualified_type_constructor" },
+    { "include": "#qualified_constructor" },
+    { "include": "#qualified_identifier" },
+    { "include": "#punctuation" }
   ],
   "repository": {
-    "line_comment": {
-      "match": "--.*$",
-      "name": "comment.line.double-dash.solveig"
-    },
-    "block_comment": {
-      "begin": "\\{-",
-      "end": "-\\}",
-      "name": "comment.block.solveig",
+    "comments": {
       "patterns": [
         {
-          "include": "#block_comment"
+          "begin": "\\{-",
+          "beginCaptures": {
+            "0": { "name": "punctuation.definition.comment.begin.solveig" }
+          },
+          "end": "-\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.definition.comment.end.solveig" }
+          },
+          "name": "comment.block.solveig",
+          "patterns": [
+            { "include": "#comments" }
+          ]
+        },
+        {
+          "begin": "(^[ \\t]+)?(?=--)",
+          "beginCaptures": {
+            "1": { "name": "punctuation.whitespace.comment.leading.solveig" }
+          },
+          "end": "\\n",
+          "name": "comment.line.double-dash.solveig",
+          "patterns": [
+            {
+              "match": "--.*$",
+              "name": "comment.line.double-dash.solveig"
+            }
+          ]
+        },
+        {
+          "match": "(?<!@|#)-\\}",
+          "name": "invalid.illegal.stray-comment-end.solveig"
         }
       ]
     },
-    "type_signature": {
-      "match": "^([a-z_][a-zA-Z0-9_']*)\\s*(:)\\s*(.*);\\s*$",
-      "captures": {
-        "1": {
-          "name": "entity.name.function.solveig"
-        },
-        "2": {
-          "name": "keyword.operator.type.solveig"
-        },
-        "3": {
-          "patterns": [
-            {
-              "include": "#type_content"
-            }
-          ]
-        }
-      }
-    },
-    "type_content": {
+    "strings": {
+      "begin": "\"",
+      "beginCaptures": {
+        "0": { "name": "punctuation.definition.string.begin.solveig" }
+      },
+      "end": "\"",
+      "endCaptures": {
+        "0": { "name": "punctuation.definition.string.end.solveig" }
+      },
+      "name": "string.quoted.double.solveig",
       "patterns": [
         {
-          "match": "\\bforall\\b",
-          "name": "keyword.control.solveig"
+          "match": "\\\\.",
+          "name": "constant.character.escape.solveig"
+        }
+      ]
+    },
+    "numeric_literals": {
+      "patterns": [
+        {
+          "match": "\\b(?:0[xX][0-9A-Fa-f_]+|0[oO][0-7_]+|0[bB][01_]+|[0-9][0-9_]*)\\b",
+          "name": "constant.numeric.integer.solveig"
+        }
+      ]
+    },
+    "special_constants": {
+      "patterns": [
+        {
+          "match": "(\\()\\s*(\\))",
+          "name": "constant.language.unit.solveig",
+          "captures": {
+            "1": { "name": "punctuation.paren.begin.solveig" },
+            "2": { "name": "punctuation.paren.end.solveig" }
+          }
+        },
+        {
+          "match": "(\\[)\\s*(\\])",
+          "name": "constant.language.empty-list.solveig",
+          "captures": {
+            "1": { "name": "punctuation.bracket.begin.solveig" },
+            "2": { "name": "punctuation.bracket.end.solveig" }
+          }
+        }
+      ]
+    },
+    "imports": {
+      "begin": "^(\\s*)(import)\\b",
+      "beginCaptures": {
+        "2": { "name": "keyword.control.import.solveig" }
+      },
+      "end": "$",
+      "name": "meta.import.solveig",
+      "patterns": [
+        {
+          "match": "\\b(as|qualified|hiding)\\b",
+          "name": "keyword.control.import.solveig"
+        },
+        { "include": "#qualified_type_constructor" },
+        { "include": "#qualified_constructor" },
+        { "include": "#qualified_identifier" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "type_signature_declaration": {
+      "begin": "^(\\s*)([a-z_][A-Za-z0-9_']*)(\\s*:\\s*)",
+      "beginCaptures": {
+        "2": { "name": "entity.name.function.solveig" },
+        "3": { "name": "keyword.operator.type.solveig" }
+      },
+      "end": "(?:;\\s*)?$",
+      "name": "meta.type-signature.solveig",
+      "patterns": [
+        { "include": "#type_expression" }
+      ]
+    },
+    "type_expression": {
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#forall" },
+        {
+          "match": "=>",
+          "name": "keyword.operator.big-arrow.solveig"
         },
         {
           "match": "->",
           "name": "keyword.operator.arrow.solveig"
         },
         {
-          "match": "\\b[A-Z][a-zA-Z0-9]*\\b",
-          "name": "storage.type.solveig"
-        },
-        {
-          "match": "\\b[a-z][a-zA-Z0-9']*\\b",
+          "match": "\\b[a-z_][A-Za-z0-9_']*\\b",
           "name": "variable.parameter.type.solveig"
-        }
+        },
+        { "include": "#qualified_type_constructor" },
+        { "include": "#operators" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "forall": {
+      "begin": "\\b(forall)\\b",
+      "beginCaptures": {
+        "1": { "name": "keyword.other.forall.solveig" }
+      },
+      "end": "(\\.)|(->)",
+      "endCaptures": {
+        "1": { "name": "keyword.operator.period.solveig" },
+        "2": { "name": "keyword.operator.arrow.solveig" }
+      },
+      "name": "meta.forall.solveig",
+      "patterns": [
+        {
+          "match": "\\b[a-z_][A-Za-z0-9_']*\\b",
+          "name": "variable.parameter.type.solveig"
+        },
+        { "include": "#comments" }
       ]
     },
     "data_declaration": {
-      "match": "\\b(data)\\s+([A-Z][a-zA-Z0-9]*)",
-      "captures": {
-        "1": {
-          "name": "keyword.control.data.solveig"
+      "begin": "^(\\s*)(data)\\s+([A-Z][A-Za-z0-9_']*)",
+      "beginCaptures": {
+        "2": { "name": "keyword.declaration.data.solveig" },
+        "3": { "name": "entity.name.type.declaration.solveig" }
+      },
+      "end": "(?x) (?=\\}|;) | ^(?! \\1(?:\\s+\\S|\\s*(?:$|--|\\{-).*$) )",
+      "name": "meta.declaration.data.solveig",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#forall" },
+        {
+          "match": "\\b(sig|where|class|instance|data|import)\\b",
+          "name": "keyword.declaration.solveig"
         },
-        "2": {
-          "name": "entity.name.type.declaration.solveig"
+        { "include": "#qualified_type_constructor" },
+        { "include": "#qualified_constructor" },
+        {
+          "match": "\\b[a-z_][A-Za-z0-9_']*\\b",
+          "name": "variable.parameter.type.solveig"
+        },
+        { "include": "#operators" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "class_declaration": {
+      "begin": "^(\\s*)(class)\\b",
+      "beginCaptures": {
+        "2": { "name": "keyword.declaration.class.solveig" }
+      },
+      "end": "(?x) (?=\\}|;) | ^(?! \\1(?:\\s+\\S|\\s*(?:$|--|\\{-).*$) )",
+      "name": "meta.declaration.class.solveig",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#where_keyword" },
+        { "include": "#type_expression" },
+        { "include": "#qualified_identifier" },
+        { "include": "#qualified_type_constructor" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "instance_declaration": {
+      "begin": "^(\\s*)(instance)\\b",
+      "beginCaptures": {
+        "2": { "name": "keyword.declaration.instance.solveig" }
+      },
+      "end": "(?x) (?=\\}|;) | ^(?! \\1(?:\\s+\\S|\\s*(?:$|--|\\{-).*$) )",
+      "name": "meta.declaration.instance.solveig",
+      "patterns": [
+        { "include": "#comments" },
+        { "include": "#where_keyword" },
+        { "include": "#type_expression" },
+        { "include": "#qualified_identifier" },
+        { "include": "#qualified_type_constructor" },
+        { "include": "#punctuation" }
+      ]
+    },
+    "where_keyword": {
+      "patterns": [
+        {
+          "begin": "\\b(where)\\s*(\\{)",
+          "beginCaptures": {
+            "1": { "name": "keyword.control.local.solveig" },
+            "2": { "name": "punctuation.brace.begin.solveig" }
+          },
+          "end": "(\\})",
+          "endCaptures": {
+            "1": { "name": "punctuation.brace.end.solveig" }
+          },
+          "patterns": [
+            { "include": "$self" },
+            {
+              "match": ";",
+              "name": "punctuation.separator.semicolon.solveig"
+            }
+          ]
+        },
+        {
+          "match": "\\b(where)\\b",
+          "name": "keyword.control.local.solveig"
         }
-      }
+      ]
     },
     "function_definition": {
-      "match": "^([a-z_][a-zA-Z0-9_']*)(?=\\s+[a-z_].*=|\\s*=)",
+      "match": "^\\s*([a-z_][A-Za-z0-9_']*)\\b(?=.*=)",
       "captures": {
-        "1": {
-          "name": "entity.name.function.solveig"
-        }
+        "1": { "name": "entity.name.function.solveig" }
       }
     },
     "keywords": {
@@ -130,15 +277,11 @@
           "name": "keyword.control.lambda.solveig"
         },
         {
-          "match": "\\b(forall)\\b",
-          "name": "keyword.other.forall.solveig"
-        },
-        {
           "match": "\\b(data|sig|class|instance)\\b",
           "name": "keyword.declaration.solveig"
         },
         {
-          "match": "\\b(import|as)\\b",
+          "match": "\\b(import|as|qualified|hiding)\\b",
           "name": "keyword.control.import.solveig"
         },
         {
@@ -146,6 +289,10 @@
           "name": "constant.language.boolean.solveig"
         }
       ]
+    },
+    "holes": {
+      "match": "\\?\\?|\\?[a-z_][A-Za-z0-9_']*|\\?\\b",
+      "name": "markup.underline.hole.solveig"
     },
     "operators": {
       "patterns": [
@@ -166,11 +313,7 @@
           "name": "keyword.operator.type.solveig"
         },
         {
-          "match": "==",
-          "name": "keyword.operator.comparison.solveig"
-        },
-        {
-          "match": ">=|<=|>|<",
+          "match": "==|>=|<=|>|<",
           "name": "keyword.operator.comparison.solveig"
         },
         {
@@ -186,41 +329,58 @@
           "name": "keyword.operator.pipe.solveig"
         },
         {
-          "match": "\\\\",
-          "name": "keyword.operator.lambda.solveig"
+          "match": "\\.",
+          "name": "keyword.operator.period.solveig"
         }
       ]
     },
-    "numbers": {
-      "match": "\\b[0-9]+\\b",
-      "name": "constant.numeric.integer.solveig"
+    "qualified_type_constructor": {
+      "match": "(?x) ((')?)( ((?:[a-z_][A-Za-z0-9_']*\\.)*) ) ([A-Z][A-Za-z0-9_']*)",
+      "captures": {
+        "2": { "name": "keyword.operator.promotion.solveig" },
+        "3": { "name": "entity.name.namespace.solveig" },
+        "4": { "name": "storage.type.solveig" }
+      }
     },
-    "strings": {
-      "begin": "\"",
-      "end": "\"",
-      "name": "string.quoted.double.solveig",
+    "qualified_constructor": {
+      "match": "(?x) ( ((?:[a-z_][A-Za-z0-9_']*\\.)*) ) ([A-Z][A-Za-z0-9_']*)",
+      "captures": {
+        "2": { "name": "entity.name.namespace.solveig" },
+        "3": { "name": "constant.other.constructor.solveig" }
+      }
+    },
+    "qualified_identifier": {
+      "match": "(?x) ( ((?:[a-z_][A-Za-z0-9_']*\\.)*) ) ([a-z_][A-Za-z0-9_']*)",
+      "captures": {
+        "2": { "name": "entity.name.namespace.solveig" },
+        "3": { "name": "variable.other.solveig" }
+      }
+    },
+    "punctuation": {
       "patterns": [
         {
-          "match": "\\\\.",
-          "name": "constant.character.escape.solveig"
+          "match": "(\\()|(\\))",
+          "captures": {
+            "1": { "name": "punctuation.paren.begin.solveig" },
+            "2": { "name": "punctuation.paren.end.solveig" }
+          }
+        },
+        {
+          "match": "(\\[)|(\\])",
+          "captures": {
+            "1": { "name": "punctuation.bracket.begin.solveig" },
+            "2": { "name": "punctuation.bracket.end.solveig" }
+          }
+        },
+        {
+          "match": ",",
+          "name": "punctuation.separator.comma.solveig"
+        },
+        {
+          "match": ";",
+          "name": "punctuation.separator.semicolon.solveig"
         }
       ]
-    },
-    "holes": {
-      "match": "\\?\\?|\\?[a-z][a-zA-Z0-9]*",
-      "name": "markup.underline.hole.solveig"
-    },
-    "constructors": {
-      "match": "\\b[A-Z][a-zA-Z0-9]*\\b",
-      "name": "constant.other.constructor.solveig"
-    },
-    "type_variables": {
-      "match": "(?<=forall\\s)([a-z][a-zA-Z0-9']*\\s*)+(?=\\.)",
-      "name": "variable.other.type.solveig"
-    },
-    "identifiers": {
-      "match": "\\b[a-z_][a-zA-Z0-9_']*\\b",
-      "name": "variable.other.solveig"
     }
   }
 }

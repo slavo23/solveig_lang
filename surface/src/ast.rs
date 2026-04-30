@@ -1,6 +1,8 @@
-use chumsky::span::{SimpleSpan, Spanned};
+use chumsky::span::SimpleSpan;
 
-pub type SpannedWrapper<T, S = SimpleSpan> = Spanned<T, S>;
+pub type Spanned<T> = (T, SimpleSpan);
+
+pub type SpannedWrapper<T> = Spanned<T>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NameRef<'src> {

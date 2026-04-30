@@ -171,21 +171,21 @@ impl Resolver {
         sf: &SpannedWrapper<SurfaceTy<'src>>,
         cx: &ModuleContext,
     ) -> TypeExpr {
-        match &**sf {
+        match &sf.0 {
             SurfaceTy::Var(var_name) => TypeExpr::make_var(var_name.to_string()),
             SurfaceTy::Arr(lhs, rhs) => TypeExpr::make_arr(
-                self.resolve_surface_type_in_module(lhs, cx),
-                self.resolve_surface_type_in_module(rhs, cx),
+                self.resolve_surface_type_in_module(&lhs, cx),
+                self.resolve_surface_type_in_module(&rhs, cx),
             ),
             SurfaceTy::ForAll(quants, body) => quants.iter().rev().fold(
-                self.resolve_surface_type_in_module(body, cx),
-                |acc, quant| TypeExpr::make_forall((*quant).to_string(), Kind::Star, acc),
+                self.resolve_surface_type_in_module(&body, cx),
+                |acc, quant| TypeExpr::make_forall((*quant).0.to_string(), Kind::Star, acc),
             ),
             SurfaceTy::Unit => TypeExpr::TyUnit,
-            SurfaceTy::Con(c) => TypeExpr::TyCon(self.resolve_tycon_ref(&c.inner, cx)),
+            SurfaceTy::Con(c) => TypeExpr::TyCon(self.resolve_tycon_ref(&c.0, cx)),
             SurfaceTy::App(l, r) => TypeExpr::make_app(
-                self.resolve_surface_type_in_module(l, cx),
-                self.resolve_surface_type_in_module(r, cx),
+                self.resolve_surface_type_in_module(&l, cx),
+                self.resolve_surface_type_in_module(&r, cx),
             ),
         }
     }
@@ -195,13 +195,13 @@ impl Resolver {
         sf: &SpannedWrapper<SurfacePattern<'src>>,
         cx: &ModuleContext,
     ) -> PatternNode<Span> {
-        let span: Span = sf.span.into();
+        let span: Span = sf.1.into();
 
-        let node = match &**sf {
+        let node = match &sf.0 {
             SurfacePattern::Var(v) => Pattern::Var(v.to_string()),
             SurfacePattern::Wild => Pattern::Wild,
             SurfacePattern::Con(con_name, args) => Pattern::Con(
-                self.resolve_ctor_ref(&con_name.inner, cx),
+                self.resolve_ctor_ref(&con_name.0, cx),
                 args.iter()
                     .map(|arg| self.resolve_surface_pattern_in_module(arg, cx))
                     .collect(),
@@ -216,26 +216,26 @@ impl Resolver {
         sf: &SpannedWrapper<SurfaceExpr<'src>>,
         cx: &ModuleContext,
     ) -> TermExprNode<Span> {
-        let span: Span = sf.span.into();
+        let span: Span = sf.1.into();
 
-        let node = match &**sf {
+        let node = match &sf.0 {
             SurfaceExpr::Unit => TermExpr::Unit,
             SurfaceExpr::Hole => TermExpr::Hole,
-            SurfaceExpr::Var(v) => TermExpr::Var(self.resolve_term_ref(&v.inner, cx)),
-            SurfaceExpr::Con(c) => TermExpr::Con(self.resolve_ctor_ref(&c.inner, cx)),
+            SurfaceExpr::Var(v) => TermExpr::Var(self.resolve_term_ref(&v.0, cx)),
+            SurfaceExpr::Con(c) => TermExpr::Con(self.resolve_ctor_ref(&c.0, cx)),
             SurfaceExpr::Literal(lit) => match lit {
-                SurfaceLiteral::Int(i_val) => TermExpr::Lit(Literal::Int(*i_val)),
+                SurfaceLiteral::Int(i_val) => TermExpr::Lit(Literal::Int(i_val.clone())),
             },
             SurfaceExpr::App(l, r) => TermExpr::App(
-                Box::new(self.resolve_surface_expr_in_module(l, cx)),
-                Box::new(self.resolve_surface_expr_in_module(r, cx)),
+                Box::new(self.resolve_surface_expr_in_module(&l, cx)),
+                Box::new(self.resolve_surface_expr_in_module(&r, cx)),
             ),
             SurfaceExpr::Ann(e, t) => TermExpr::Anno(
-                Box::new(self.resolve_surface_expr_in_module(e, cx)),
-                self.resolve_surface_type_in_module(t, cx),
+                Box::new(self.resolve_surface_expr_in_module(&e, cx)),
+                self.resolve_surface_type_in_module(&t, cx),
             ),
             SurfaceExpr::Abs(params, body) => {
-                let mut body_node = self.resolve_surface_expr_in_module(body, cx);
+                let mut body_node = self.resolve_surface_expr_in_module(&body, cx);
 
                 for (param_name, param_ty_anno) in params.iter().rev() {
                     let param_ty = param_ty_anno
@@ -243,7 +243,7 @@ impl Resolver {
                         .map(|ty| self.resolve_surface_type_in_module(ty, cx));
 
                     body_node = TermExprNode::new(
-                        TermExpr::Abs(param_name.to_string(), param_ty, Box::new(body_node)),
+                        TermExpr::Abs(param_name.0.to_string(), param_ty, Box::new(body_node)),
                         span.clone(),
                     );
                 }
@@ -251,12 +251,12 @@ impl Resolver {
                 return body_node;
             }
             SurfaceExpr::IfThenElse(c, t, e) => TermExpr::IfThenElse(
-                Box::new(self.resolve_surface_expr_in_module(c, cx)),
-                Box::new(self.resolve_surface_expr_in_module(t, cx)),
-                Box::new(self.resolve_surface_expr_in_module(e, cx)),
+                Box::new(self.resolve_surface_expr_in_module(&c, cx)),
+                Box::new(self.resolve_surface_expr_in_module(&t, cx)),
+                Box::new(self.resolve_surface_expr_in_module(&e, cx)),
             ),
             SurfaceExpr::Case(scr, arms) => TermExpr::Case(
-                Box::new(self.resolve_surface_expr_in_module(scr, cx)),
+                Box::new(self.resolve_surface_expr_in_module(&scr, cx)),
                 arms.iter()
                     .map(|a| self.resolve_surface_case_arm_in_module(a, cx))
                     .collect(),
@@ -277,8 +277,8 @@ impl Resolver {
 
                 TermExpr::BinaryOperator(
                     core_binop,
-                    Box::new(self.resolve_surface_expr_in_module(lhs, cx)),
-                    Box::new(self.resolve_surface_expr_in_module(rhs, cx)),
+                    Box::new(self.resolve_surface_expr_in_module(&lhs, cx)),
+                    Box::new(self.resolve_surface_expr_in_module(&rhs, cx)),
                 )
             }
             SurfaceExpr::UnaryOperator(op, rhs) => {
@@ -287,15 +287,15 @@ impl Resolver {
                 };
                 TermExpr::UnaryOperator(
                     core_unop,
-                    Box::new(self.resolve_surface_expr_in_module(rhs, cx)),
+                    Box::new(self.resolve_surface_expr_in_module(&rhs, cx)),
                 )
             }
             SurfaceExpr::Let(binder_name, binder_expr, in_expr) => {
-                let resolved_binder = self.resolve_surface_expr_in_module(binder_expr, cx);
-                let resolved_in_expr = self.resolve_surface_expr_in_module(in_expr, cx);
+                let resolved_binder = self.resolve_surface_expr_in_module(&binder_expr, cx);
+                let resolved_in_expr = self.resolve_surface_expr_in_module(&in_expr, cx);
 
                 TermExpr::Let(
-                    binder_name.to_string(),
+                    binder_name.0.to_string(),
                     Box::new(resolved_binder),
                     Box::new(resolved_in_expr),
                 )
@@ -312,10 +312,10 @@ impl Resolver {
     ) -> CaseArmNode<Span> {
         CaseArmNode::new(
             CaseArm {
-                pattern: self.resolve_surface_pattern_in_module(&sf.pattern, cx),
-                expr: self.resolve_surface_expr_in_module(&sf.expr, cx),
+                pattern: self.resolve_surface_pattern_in_module(&sf.0.pattern, cx),
+                expr: self.resolve_surface_expr_in_module(&sf.0.expr, cx),
             },
-            sf.span.into(),
+            sf.1.into(),
         )
     }
 
@@ -342,12 +342,12 @@ impl Resolver {
         params: &Vec<SpannedWrapper<&'src str>>,
         cx: &ModuleContext,
     ) -> TermExprNode<Span> {
-        let span: Span = body.span.into();
+        let span: Span = body.1.into();
         let mut body_node = self.resolve_surface_expr_in_module(body, cx);
 
         for p in params.iter().rev() {
             body_node = TermExprNode::new(
-                TermExpr::Abs(p.to_string(), None, Box::new(body_node)),
+                TermExpr::Abs(p.0.to_string(), None, Box::new(body_node)),
                 span.clone(),
             );
         }
@@ -363,7 +363,7 @@ impl Resolver {
         name: &'src str,
         cx: &ModuleContext,
     ) -> TermExprNode<Span> {
-        let span: Span = body.span.into();
+        let span: Span = body.1.into();
         let mut body_node = self.resolve_surface_expr_in_module(body, cx);
         let (quants, after) = self.peel_foralls(sig);
 
@@ -376,7 +376,7 @@ impl Resolver {
                     name
                 )
             });
-            annos.push((p.to_string(), arg_ty.clone()));
+            annos.push((p.0.to_string(), arg_ty.clone()));
             remaining = ret_ty;
         }
 
@@ -404,19 +404,21 @@ impl Resolver {
 
         for defn in parsed.defs.iter() {
             if let SurfaceDefinition::DataDef {
-                name,
+                name: spanned_name,
                 ty_params,
                 constructors,
-            } = &**defn
+            } = &defn.0
             {
+                let (name, span) = spanned_name;
                 raw_data_defs.push(RawDataDef {
                     name: qualify(module_name, name),
-                    ty_params: ty_params.iter().map(|p| (*p).to_string()).collect(),
+                    ty_params: ty_params.iter().map(|p| p.0.to_string()).collect(),
                     constructors: constructors
                         .iter()
                         .map(|c| RawConstructorDef {
-                            name: qualify(module_name, &c.name),
+                            name: qualify(module_name, c.0.name.0),
                             fields: c
+                                .0
                                 .params
                                 .iter()
                                 .map(|t| self.resolve_surface_type_in_module(t, cx))
@@ -457,8 +459,13 @@ impl Resolver {
         let mut func_types: HashMap<String, TypeExpr> = HashMap::new();
 
         for defn in parsed.defs.iter() {
-            if let SurfaceDefinition::SigDef { name, ty } = &**defn {
-                let raw_sig = self.resolve_surface_type_in_module(ty, cx);
+            if let SurfaceDefinition::SigDef {
+                name: spanned_name,
+                ty,
+            } = &defn.0
+            {
+                let (name, span) = spanned_name;
+                let raw_sig = self.resolve_surface_type_in_module(&ty, cx);
 
                 let mut sig_tycon_env = imported.tycon_kinds.clone();
                 sig_tycon_env.extend(tycon_kinds.clone());
@@ -472,15 +479,21 @@ impl Resolver {
         let mut func_defs = Vec::new();
 
         for defn in parsed.defs.iter() {
-            if let SurfaceDefinition::FunDef { name, body, params } = &**defn {
+            if let SurfaceDefinition::FunDef {
+                name: spanned_name,
+                body,
+                params,
+            } = &defn.0
+            {
+                let (name, span) = spanned_name;
                 let fn_name = qualify(module_name, name);
                 let sig = func_types.get(&fn_name).cloned();
 
                 let wrapped = match &sig {
                     Some(sig) => self.wrap_function_body_with_signature_in_module(
-                        sig, body, params, &fn_name, cx,
+                        sig, &body, &params, &fn_name, cx,
                     ),
-                    None => self.wrap_function_body_without_signature_in_module(body, params, cx),
+                    None => self.wrap_function_body_without_signature_in_module(&body, &params, cx),
                 };
 
                 func_defs.push(TermDefinition {

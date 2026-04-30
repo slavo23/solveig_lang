@@ -3,13 +3,12 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use chumsky::{input::Input as _, Parser as _};
 use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use core::ast::{Kind, TypeExpr};
 use surface::ast::{ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition};
-use surface::parser::{lexer, module_parser, render_rich_errors};
+use surface::parser;
 use syntax::inference::type_infer::CheckedModule;
 
 const PRELUDE_BUILTINS_SRC: &str = include_str!("./prelude/builtins.sv");
@@ -229,19 +228,7 @@ pub fn effective_imports(module: &ModuleName, explicit: &[ImportDecl]) -> Vec<Ef
 }
 
 fn parse_source<'src>(path: &Path, source: &'src str) -> Result<ParsedModule<'src>, String> {
-    let tokens = lexer()
-        .parse(source)
-        .into_result()
-        .map_err(|errs| render_rich_errors(path, source, "lex", &errs))?;
-
-    let input = tokens[..].split_spanned((0..tokens.len()).into());
-
-    let parsed = module_parser()
-        .parse(input)
-        .into_result()
-        .map_err(|errs| render_rich_errors(path, source, "parse", &errs))?;
-
-    Ok(parsed)
+    parser::parse_source(source).map_err(|errs| parser::render_errors(path, source, &errs))
 }
 
 fn mk_virtual_prelude_file(module: &ModuleName) -> Result<ModuleFile, String> {
@@ -424,39 +411,39 @@ pub fn build_module_api<'src>(module_name: &ModuleName, parsed: &ParsedModule<'s
     let mut api = ModuleApi::default();
 
     for def in &parsed.defs {
-        match &def.inner {
+        match &def.0 {
             SurfaceDefinition::FunDef { name, .. } => {
                 api.terms.insert(
-                    name.to_string(),
+                    name.0.to_string(),
                     SymbolId {
                         module: module_name.clone(),
-                        name: name.to_string(),
+                        name: name.0.to_string(),
                     },
                 );
             }
             SurfaceDefinition::SigDef { name, .. } => {
-                api.terms.entry(name.to_string()).or_insert(SymbolId {
+                api.terms.entry(name.0.to_string()).or_insert(SymbolId {
                     module: module_name.clone(),
-                    name: name.to_string(),
+                    name: name.0.to_string(),
                 });
             }
             SurfaceDefinition::DataDef {
                 name, constructors, ..
             } => {
                 api.types.insert(
-                    name.to_string(),
+                    name.0.to_string(),
                     SymbolId {
                         module: module_name.clone(),
-                        name: name.to_string(),
+                        name: name.0.to_string(),
                     },
                 );
 
                 for ctor in constructors {
                     api.constructors.insert(
-                        ctor.name.to_string(),
+                        ctor.0.name.0.to_string(),
                         SymbolId {
                             module: module_name.clone(),
-                            name: ctor.name.to_string(),
+                            name: ctor.0.name.0.to_string(),
                         },
                     );
                 }

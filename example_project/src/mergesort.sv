@@ -11,44 +11,41 @@ mergeRevBy lt xs ys acc =
     case xs of
         [] => reverseAppend acc ys
       | x :: xsRest =>
-            (case ys of
+            case ys of
                 [] => reverseAppend acc (x :: xsRest)
               | y :: ysRest =>
-                    if lt x y then
-                        mergeRevBy lt xsRest ys (x :: acc)
-                    else if lt y x then
-                        mergeRevBy lt xs ysRest (y :: acc)
-                    else
-                        mergeRevBy lt xsRest ys (x :: acc)
-            );
+                    if lt x y then mergeRevBy lt xsRest ys (x :: acc)
+                    else if lt y x then mergeRevBy lt xs ysRest (y :: acc)
+                    else mergeRevBy lt xsRest ys (x :: acc)
+            
 
-mergeBy : forall a. (a -> a -> Bool) -> [a] -> [a] -> [a];
+mergeBy : forall a. (a -> a -> Bool) -> [a] -> [a] -> [a]
 mergeBy lt xs ys =
-    mergeRevBy lt xs ys [];
+    mergeRevBy lt xs ys []
 
-splitAlt : forall a. [a] -> [a] -> [a] -> Split a;
+splitAlt : forall a. [a] -> [a] -> [a] -> Split a
 splitAlt xs left right =
     case xs of
         [] => Split left right
       | x :: [] => Split (x :: left) right
-      | x :: y :: zs => splitAlt zs (x :: left) (y :: right);
+      | x :: y :: zs => splitAlt zs (x :: left) (y :: right)
 
-mergesortBy : forall a. (a -> a -> Bool) -> [a] -> [a];
+mergesortBy : forall a. (a -> a -> Bool) -> [a] -> [a]
 mergesortBy lt xs =
     case xs of
         [] => []
       | x :: [] => x :: []
       | _ =>
-            (case splitAlt xs [] [] of
+            case splitAlt xs [] [] of
                 Split left right =>
                     mergeBy lt (mergesortBy lt left) (mergesortBy lt right)
-            );
+            
 
-ltInt : Int -> Int -> Bool;
+ltInt : Int -> Int -> Bool
 ltInt x y =
     x < y;
 
-mergesortInt : [Int] -> [Int];
+mergesortInt : [Int] -> [Int]
 mergesortInt xs =
     mergesortBy ltInt xs;
 
@@ -56,16 +53,16 @@ sumList : [Int] -> Int;
 sumList xs =
     case xs of
         [] => 0
-      | x :: xsRest => x + sumList xsRest;
+      | x :: xsRest => x + sumList xsRest
 
 makeInput : Int -> [Int];
 makeInput n =
-    reverse (range 1 n True);
+    reverse (range 1 n True)
 
 benchMergesort : Int -> Int;
 benchMergesort n =
-    sumList (mergesortInt (makeInput n));
+    sumList (mergesortInt (makeInput n))
 
-sampleSortedMergeSort : Int -> [Int];
+sampleSortedMergeSort : Int -> [Int]
 sampleSortedMergeSort n =
-    mergesortInt (makeInput n);
+    mergesortInt (makeInput n)

@@ -1,32 +1,27 @@
-data Partition3 a = Partition3 [a] [a] [a];
+data Partition3 a = Partition3 [a] [a] [a]
 
-{-
- the grammar is broken currently,
- so nested cases without parens
- might not always be parsed correctly
--}
-middleFrom : forall a. a -> [a] -> [a] -> a;
+middleFrom : forall a. a -> [a] -> [a] -> a
 middleFrom fallback slow fast =
     case fast of
         [] =>
-            (case slow of 
+            case slow of 
                 [] => fallback
-              | y :: _ => y)
+              | y :: _ => y
       | _ :: [] =>
-            (case slow of
+            case slow of
                 [] => fallback
-              | y :: _ => y)
+              | y :: _ => y
       | _ :: _ :: fastRest =>
-            (case slow of
+            case slow of
                 [] => fallback
               | _ :: slowRest =>
-                    middleFrom fallback slowRest fastRest);
+                    middleFrom fallback slowRest fastRest
 
-middleOr : forall a. a -> [a] -> a;
+middleOr : forall a. a -> [a] -> a
 middleOr fallback xs =
-    middleFrom fallback xs xs;
+    middleFrom fallback xs xs
 
-partition3By : forall a. (a -> a -> Bool) -> a -> [a] -> [a] -> [a] -> [a] -> Partition3 a;
+partition3By : forall a. (a -> a -> Bool) -> a -> [a] -> [a] -> [a] -> [a] -> Partition3 a
 partition3By lt pivot xs less equal greater =
     case xs of
         [] => Partition3 less equal greater
@@ -36,9 +31,9 @@ partition3By lt pivot xs less equal greater =
             else if lt pivot y then
                 partition3By lt pivot ys less equal (y :: greater)
             else
-                partition3By lt pivot ys less (y :: equal) greater;
+                partition3By lt pivot ys less (y :: equal) greater
 
-quicksortByGo : forall a. (a -> a -> Bool) -> [a] -> [a] -> [a];
+quicksortByGo : forall a. (a -> a -> Bool) -> [a] -> [a] -> [a]
 quicksortByGo lt xs acc =
     case xs of
         [] => acc
@@ -46,23 +41,23 @@ quicksortByGo lt xs acc =
             let pivot = middleOr x xs in
                 case partition3By lt pivot xs [] [] [] of
                     Partition3 less equal greater =>
-                        quicksortByGo lt less (append (reverse equal) (quicksortByGo lt greater acc));
+                        quicksortByGo lt less (append (reverse equal) (quicksortByGo lt greater acc))
 
-quicksortBy : forall a. (a -> a -> Bool) -> [a] -> [a];
+quicksortBy : forall a. (a -> a -> Bool) -> [a] -> [a]
 quicksortBy lt xs =
-    quicksortByGo lt xs [];
+    quicksortByGo lt xs []
 
-ltInt : Int -> Int -> Bool;
-ltInt x y = x < y;
+ltInt : Int -> Int -> Bool
+ltInt x y = x < y
 
-quicksortInt : [Int] -> [Int];
+quicksortInt : [Int] -> [Int]
 quicksortInt xs =
-    quicksortBy ltInt xs;
+    quicksortBy ltInt xs
 
-sampleInput : Int -> [Int];
+sampleInput : Int -> [Int]
 sampleInput howMany =
-    reverse (range 1 howMany True);
+    reverse (range 1 howMany True)
 
-sampleSortedQuickSort : Int -> [Int];
+sampleSortedQuickSort : Int -> [Int]
 sampleSortedQuickSort n =
-    quicksortInt (sampleInput n);
+    quicksortInt (sampleInput n)
