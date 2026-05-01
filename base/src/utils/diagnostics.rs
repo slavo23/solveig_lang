@@ -21,6 +21,10 @@ impl FileSpan {
     pub fn range(&self) -> Range<usize> {
         self.span.clone()
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.span.start == self.span.end
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -73,6 +77,15 @@ impl CompilerDiagnostic {
 
     pub fn with_note(mut self, note: impl Into<String>) -> Self {
         self.notes.push(note.into());
+        self
+    }
+
+    pub fn with_notes<I, S>(mut self, notes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.notes.extend(notes.into_iter().map(Into::into));
         self
     }
 
@@ -144,6 +157,25 @@ pub enum TypeError {
     UnsatisfiedConstraints {
         span: FileSpan,
         predicates: Vec<String>,
+    },
+    OverlappingInstances {
+        span: FileSpan,
+        class_name: String,
+        instance_type: String,
+    },
+
+    /// Contextual wrapper around the real error that happened while checking an
+    /// instance method body against the specialized class method type.
+    ///
+    /// Do not pre-render the inner error into a string here. Keeping the cause
+    /// structured lets diagnostics underline the precise expression that failed
+    /// and add instance/class context as notes.
+    InstanceMethodTypeMismatch {
+        span: FileSpan,
+        method: String,
+        class_name: String,
+        expected: String,
+        cause: Box<TypeError>,
     },
 }
 
@@ -223,15 +255,22 @@ impl TypeError {
                 format!("expected a function-like constructor, got `{}`", actual),
             )),
 
-            TypeError::NonFunctionApplication { span, actual, arg_span } => CompilerDiagnostic::new(
-                "TC0009",
-                "application of a non-function",
-            )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
-                format!("this expression is applied like a function, but has type `{}`", actual),
-            )).with_label(DiagnosticLabel::secondary(arg_span.clone(), "unexpected argument encountered here".to_string()))
-            ,
+            TypeError::NonFunctionApplication {
+                span,
+                actual,
+                arg_span,
+            } => CompilerDiagnostic::new("TC0009", "application of a non-function")
+                .with_label(DiagnosticLabel::primary(
+                    span.clone(),
+                    format!(
+                        "this expression is applied like a function, but has type `{}`",
+                        actual
+                    ),
+                ))
+                .with_label(DiagnosticLabel::secondary(
+                    arg_span.clone(),
+                    "unexpected argument encountered here",
+                )),
 
             TypeError::NonPolymorphicTypeApplication {
                 span,
@@ -277,31 +316,257 @@ impl TypeError {
             .with_note(
                 "this is reported as a user-facing type error here, but it usually points to a bug in the checker",
             ),
+
             TypeError::UnsatisfiedConstraints { span, predicates } => {
-                let summary = if predicates.len() == 1 {
-                    format!("unsatisfied constraint `{}`", predicates[0])
-                } else {
-                    "unsatisfied constraints".to_string()
-                };
+                let preds = predicates.join(", ");
 
-                let details = predicates
-                    .iter()
-                    .map(|p| format!("`{}`", p))
-                    .collect::<Vec<_>>()
-                    .join(", ");
+                CompilerDiagnostic::new(
+                    "TC0013",
+                    format!("unsatisfied type class constraints: {}", preds),
+                )
+                .with_label(DiagnosticLabel::primary(
+                    span.clone(),
+                    "constraints arise from this expression",
+                ))
+                .with_note(format!(
+                    "no matching instance found for:\n  {}",
+                    predicates.join("\n  ")
+                ))
+            }
 
-                CompilerDiagnostic::new("TC0013", summary)
-                    .with_label(DiagnosticLabel::primary(
-                        span.clone(),
-                        "this expression requires class evidence that could not be found",
-                    ))
-                    .with_note(format!("missing evidence for {}", details))
-                    .with_note(
-                        "try adding the required constraint to the surrounding signature or defining a matching instance",
-                    )
+            TypeError::OverlappingInstances {
+                span,
+                class_name,
+                instance_type,
+            } => CompilerDiagnostic::new(
+                "TC0014",
+                format!("overlapping instance for `{} {}`", class_name, instance_type),
+            )
+            .with_label(DiagnosticLabel::primary(
+                span.clone(),
+                "duplicate instance defined here",
+            ))
+            .with_note("an instance for this type already exists"),
+
+            TypeError::InstanceMethodTypeMismatch {
+                span,
+                method,
+                class_name,
+                expected,
+                cause,
+            } => Self::instance_method_diagnostic(span, method, class_name, expected, cause),
+        }
+    }
+
+    fn instance_method_diagnostic(
+        method_span: &FileSpan,
+        method: &str,
+        class_name: &str,
+        expected: &str,
+        cause: &TypeError,
+    ) -> CompilerDiagnostic {
+        let mut diagnostic = CompilerDiagnostic::new(
+            "TC0015",
+            format!(
+                "type mismatch in instance method `{}` of `{}`",
+                method, class_name
+            ),
+        );
+
+        for label in cause.primary_labels_for_context() {
+            diagnostic = diagnostic.with_label(label);
+        }
+
+        if !span_same_location(method_span, cause.primary_span()) && !method_span.is_empty() {
+            diagnostic = diagnostic.with_label(DiagnosticLabel::secondary(
+                method_span.clone(),
+                format!("while checking this implementation of `{}`", method),
+            ));
+        }
+
+        diagnostic
+            .with_notes(cause.notes_for_context())
+            .with_note(format!("the class requires `{}`", expected))
+    }
+
+    fn primary_span(&self) -> &FileSpan {
+        match self {
+            TypeError::UnboundVariable { span, .. }
+            | TypeError::UnknownConstructor { span, .. }
+            | TypeError::UnknownPatternConstructor { span, .. }
+            | TypeError::EmptyCaseExpression { span }
+            | TypeError::SubtypeMismatch { span, .. }
+            | TypeError::InstantiateLeftFailed { span, .. }
+            | TypeError::InstantiateRightFailed { span, .. }
+            | TypeError::ConstructorNotApplicable { span, .. }
+            | TypeError::NonFunctionApplication { span, .. }
+            | TypeError::NonPolymorphicTypeApplication { span, .. }
+            | TypeError::IllFormedAnnotation { span, .. }
+            | TypeError::MissingCaseResultExistential { span, .. }
+            | TypeError::UnsatisfiedConstraints { span, .. }
+            | TypeError::OverlappingInstances { span, .. } => span,
+
+            TypeError::InstanceMethodTypeMismatch { cause, .. } => cause.primary_span(),
+        }
+    }
+
+    fn primary_labels_for_context(&self) -> Vec<DiagnosticLabel> {
+        match self {
+            TypeError::UnboundVariable { span, name } => vec![DiagnosticLabel::primary(
+                span.clone(),
+                format!("`{}` is used here, but no binding was found", name),
+            )],
+
+            TypeError::UnknownConstructor { span, name } => vec![DiagnosticLabel::primary(
+                span.clone(),
+                format!("constructor `{}` is not known here", name),
+            )],
+
+            TypeError::UnknownPatternConstructor { span, name } => {
+                vec![DiagnosticLabel::primary(
+                    span.clone(),
+                    format!("pattern uses unknown constructor `{}`", name),
+                )]
+            }
+
+            TypeError::EmptyCaseExpression { span } => vec![DiagnosticLabel::primary(
+                span.clone(),
+                "this case expression needs at least one arm",
+            )],
+
+            TypeError::SubtypeMismatch { span, left, .. } => vec![DiagnosticLabel::primary(
+                span.clone(),
+                format!("this expression has type `{}`", left),
+            )],
+
+            TypeError::InstantiateLeftFailed { span, evar, target } => {
+                vec![DiagnosticLabel::primary(
+                    span.clone(),
+                    format!("could not solve `{}` as a subtype of `{}`", evar, target),
+                )]
+            }
+
+            TypeError::InstantiateRightFailed { span, source, evar } => {
+                vec![DiagnosticLabel::primary(
+                    span.clone(),
+                    format!("could not solve `{}` as a subtype of `{}`", source, evar),
+                )]
+            }
+
+            TypeError::ConstructorNotApplicable { span, actual } => {
+                vec![DiagnosticLabel::primary(
+                    span.clone(),
+                    format!("expected a function-like constructor, got `{}`", actual),
+                )]
+            }
+
+            TypeError::NonFunctionApplication {
+                span,
+                arg_span,
+                actual,
+            } => vec![
+                DiagnosticLabel::primary(
+                    span.clone(),
+                    format!(
+                        "this expression is applied like a function, but has type `{}`",
+                        actual
+                    ),
+                ),
+                DiagnosticLabel::secondary(
+                    arg_span.clone(),
+                    "unexpected argument encountered here",
+                ),
+            ],
+
+            TypeError::NonPolymorphicTypeApplication { span, actual, .. } => {
+                vec![DiagnosticLabel::primary(
+                    span.clone(),
+                    format!("this expression has type `{}`", actual),
+                )]
+            }
+
+            TypeError::IllFormedAnnotation { span, ty, target } => {
+                vec![DiagnosticLabel::primary(
+                    span.clone(),
+                    format!("annotation `{}` is not well-formed for {}", ty, target),
+                )]
+            }
+
+            TypeError::MissingCaseResultExistential {
+                span,
+                evar,
+                arm_index,
+            } => vec![DiagnosticLabel::primary(
+                span.clone(),
+                format!(
+                    "result existential `{}` was missing while checking case arm {}",
+                    evar, arm_index
+                ),
+            )],
+
+            TypeError::UnsatisfiedConstraints { span, .. } => vec![DiagnosticLabel::primary(
+                span.clone(),
+                "constraints arise from this expression",
+            )],
+
+            TypeError::OverlappingInstances { span, .. } => vec![DiagnosticLabel::primary(
+                span.clone(),
+                "duplicate instance defined here",
+            )],
+
+            TypeError::InstanceMethodTypeMismatch { cause, .. } => {
+                cause.primary_labels_for_context()
             }
         }
     }
+
+    fn notes_for_context(&self) -> Vec<String> {
+        match self {
+            TypeError::SubtypeMismatch { right, .. } => {
+                vec![format!("but it was required to have type `{}`", right)]
+            }
+
+            TypeError::NonPolymorphicTypeApplication { ty_arg, .. } => vec![format!(
+                "type argument `{}` can only be applied to a `forall` type",
+                ty_arg
+            )],
+
+            TypeError::MissingCaseResultExistential { .. } => vec![
+                "this is reported as a user-facing type error here, but it usually points to a bug in the checker".to_string(),
+            ],
+
+            TypeError::UnsatisfiedConstraints { predicates, .. } => vec![format!(
+                "no matching instance found for:\n  {}",
+                predicates.join("\n  ")
+            )],
+
+            TypeError::OverlappingInstances { .. } => {
+                vec!["an instance for this type already exists".to_string()]
+            }
+
+            TypeError::InstanceMethodTypeMismatch {
+                method,
+                class_name,
+                expected,
+                cause,
+                ..
+            } => {
+                let mut notes = cause.notes_for_context();
+                notes.push(format!(
+                    "while checking instance method `{}` of `{}`",
+                    method, class_name
+                ));
+                notes.push(format!("the class requires `{}`", expected));
+                notes
+            }
+
+            _ => Vec::new(),
+        }
+    }
+}
+
+fn span_same_location(a: &FileSpan, b: &FileSpan) -> bool {
+    a.file_id == b.file_id && a.span == b.span
 }
 
 pub fn emit_diagnostic(diag: &CompilerDiagnostic, src: &str) -> Result<(), Box<dyn Error>> {

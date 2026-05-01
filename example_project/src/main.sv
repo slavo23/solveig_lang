@@ -8,32 +8,20 @@ import quicksort(sampleSortedQuickSort)
 import mergesort(sampleSortedMergeSort)
 import knapsack(sampleTreeDp)
 import treeMap(fromList, Map, intComparator, Entry, size)
-import classes(eqIntExample, useEq)
+import classes(advancedTypeclassRegressionMain)
 
 runSudokuReadyExample = solveBoard samplePuzzle
 runNQueensReadyExample = solveNQueensCount 8
 runBinaryTreeExample = sampleTree
 runBrainfuckExample = sampleAddOutput
-runQuicksortExample = sampleSortedQuickSort 500000
-runMergeSortExample = sampleSortedMergeSort 500000
+runQuicksortExample = sampleSortedQuickSort 20000
+runMergeSortExample = sampleSortedMergeSort 20000
 runKnapsackExample = sampleTreeDp
 
-data EqDict a b = MkEqDict (a -> b -> Bool)
-
-getEqFn : forall a b. EqDict a b -> (a -> b -> Bool)
-getEqFn dict = 
-    case dict of
-        MkEqDict f => f
-
-same : forall a b. EqDict a b -> a -> b -> Bool
-same dict x y = (getEqFn dict) x y
-
-intEqDict : EqDict Int Int;
-intEqDict = MkEqDict (fun x y => x == y)
 
 treeFromList : Map Int Int
 treeFromList =
-    let intEntries = (map (fun iVal => Entry iVal iVal) (range 1 100000 True)) in 
+    let intEntries = (map (fun iVal => Entry iVal iVal) (range 1 20000 True)) in 
         fromList intComparator intEntries
 
 {- if you want the results, just copy-paste the particular example directly into main -}
@@ -44,6 +32,7 @@ runAllExamplesAndDiscardResult =
     let four = runBrainfuckExample in
     let five = runQuicksortExample in
     let six = runMergeSortExample in
-    let seven = runKnapsackExample in ()
+    let seven = runKnapsackExample in
+    let eight = advancedTypeclassRegressionMain in ()
 
 main = runAllExamplesAndDiscardResult

@@ -65,7 +65,8 @@ fn mangle_type(ty: &TypeExpr) -> String {
         }
         TypeExpr::Qualified(preds, body) => format!(
             "Qual_{}_{}",
-            preds.iter()
+            preds
+                .iter()
                 .map(mangle_predicate)
                 .collect::<Vec<_>>()
                 .join("_"),
@@ -76,7 +77,12 @@ fn mangle_type(ty: &TypeExpr) -> String {
 
 fn mangle_predicate(pred: &Predicate) -> String {
     let class = sanitize_name(&pred.class_name);
-    let args = pred.args.iter().map(mangle_type).collect::<Vec<_>>().join("_");
+    let args = pred
+        .args
+        .iter()
+        .map(mangle_type)
+        .collect::<Vec<_>>()
+        .join("_");
     if args.is_empty() {
         class
     } else {
@@ -255,14 +261,14 @@ fn build_class_runtime_info(
                 .unwrap_or(&method.name)
                 .to_string();
 
-            methods.insert(
-                short_name,
-                MethodRuntimeInfo {
-                    selector_name: selector_name(&method.name),
-                    class_head_pred: class_head_pred.clone(),
-                    method_body_ty: method.scheme.ty.clone(),
-                },
-            );
+            let method_info = MethodRuntimeInfo {
+                selector_name: selector_name(&method.name),
+                class_head_pred: class_head_pred.clone(),
+                method_body_ty: method.scheme.ty.clone(),
+            };
+
+            methods.insert(short_name.clone(), method_info.clone());
+            methods.insert(method.name.clone(), method_info);
         }
 
         out.insert(
@@ -391,10 +397,7 @@ fn synthesize_selector_defs(
             out.push(TermDefinition {
                 name: selector,
                 signature: Some(selector_scheme),
-                body: TermExprNode::new(
-                    TermExpr::Abs(dict_arg, None, Box::new(body)),
-                    mk_anno(),
-                ),
+                body: TermExprNode::new(TermExpr::Abs(dict_arg, None, Box::new(body)), mk_anno()),
             });
         }
     }
@@ -420,9 +423,12 @@ fn rewrite_expr(
                     .get(class_name)
                     .unwrap_or_else(|| panic!("missing class runtime info for {}", class_name));
 
+                let short_name = name.rsplit('.').next().unwrap_or(name);
+
                 let method_rt = class_rt
                     .methods
                     .get(name)
+                    .or_else(|| class_rt.methods.get(short_name))
                     .unwrap_or_else(|| panic!("missing method runtime info for {}", name));
 
                 let mut subst = HashMap::new();
@@ -467,9 +473,7 @@ fn rewrite_expr(
 
             let rewritten_args = args
                 .iter()
-                .map(|arg| {
-                    rewrite_expr(arg, env, class_info, method_to_class, constrained_funcs)
-                })
+                .map(|arg| rewrite_expr(arg, env, class_info, method_to_class, constrained_funcs))
                 .collect::<Vec<_>>();
 
             let rebuilt = if let TermExpr::Var(name) = &head.node {
@@ -481,8 +485,7 @@ fn rewrite_expr(
                         let mut dict_args = Vec::new();
 
                         for pred in &info.predicates {
-                            let instantiated_pred =
-                                instantiate_predicate_with_subst(pred, &subst);
+                            let instantiated_pred = instantiate_predicate_with_subst(pred, &subst);
 
                             if let Some(dict_expr) = env.lookup(&instantiated_pred) {
                                 dict_args.push(dict_expr);
@@ -665,6 +668,7 @@ fn elaborate_func_defs(
                 .to_string();
 
             method_to_class.insert(short_name, class_def.name.clone());
+            method_to_class.insert(method.name.clone(), class_def.name.clone());
         }
     }
 
@@ -679,12 +683,7 @@ fn elaborate_func_defs(
 
                 constrained_funcs.insert(def.name.clone(), info.clone());
 
-                let short_name = def
-                    .name
-                    .rsplit('.')
-                    .next()
-                    .unwrap_or(&def.name)
-                    .to_string();
+                let short_name = def.name.rsplit('.').next().unwrap_or(&def.name).to_string();
 
                 constrained_funcs.insert(short_name, info);
             }

@@ -50,4 +50,4 @@ benchTreeDp depth =
 
 sampleTreeDp : Int;
 sampleTreeDp =
-    benchTreeDp 21;
+    benchTreeDp 10;

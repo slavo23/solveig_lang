@@ -30,6 +30,7 @@ pub struct SignatureKindInferencer {
     next_meta: usize,
     subst: HashMap<String, Kind>,
     tycon_env: HashMap<String, Kind>,
+    class_env: HashMap<String, Vec<Kind>>,
 }
 
 impl Default for SignatureKindInferencer {
@@ -44,6 +45,7 @@ impl SignatureKindInferencer {
             next_meta: 0,
             subst: HashMap::new(),
             tycon_env: HashMap::new(),
+            class_env: HashMap::new(),
         }
     }
 
@@ -52,6 +54,19 @@ impl SignatureKindInferencer {
             next_meta: 0,
             subst: HashMap::new(),
             tycon_env,
+            class_env: HashMap::new(),
+        }
+    }
+
+    pub fn with_envs(
+        tycon_env: HashMap<String, Kind>,
+        class_env: HashMap<String, Vec<Kind>>,
+    ) -> Self {
+        Self {
+            next_meta: 0,
+            subst: HashMap::new(),
+            tycon_env,
+            class_env,
         }
     }
 
@@ -130,11 +145,24 @@ impl SignatureKindInferencer {
         pred: &Predicate,
         env: &mut HashMap<String, Kind>,
     ) -> Result<Predicate, KindError> {
+        let expected_kinds = self
+            .class_env
+            .get(&pred.class_name)
+            .cloned()
+            .ok_or_else(|| KindError::UnboundTypeConstructor(pred.class_name.clone()))?;
+
+        if expected_kinds.len() != pred.args.len() {
+            return Err(KindError::CannotUnify {
+                lhs: Kind::Star,
+                rhs: Kind::make_arrow(Kind::Star, Kind::Star),
+            });
+        }
+
         let mut rebuilt_args = Vec::with_capacity(pred.args.len());
 
-        for arg in &pred.args {
+        for (arg, expected_kind) in pred.args.iter().zip(expected_kinds.iter()) {
             let (arg_kind, arg_kinded) = self.infer_and_rebuild(arg, env)?;
-            self.unify(arg_kind, Kind::Star)?;
+            self.unify(arg_kind, expected_kind.clone())?;
             rebuilt_args.push(arg_kinded);
         }
 

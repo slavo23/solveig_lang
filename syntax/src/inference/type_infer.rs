@@ -5,9 +5,9 @@ use crate::inference::inference_ctx::{Context, ContextEntry};
 use base::utils::diagnostics::{FileSpan, TypeError};
 use base::utils::span::Span;
 use core::ast::{
-    BinOp, CaseArm, CaseArmNode, ClassDefinition, InstanceDefinition, InstanceMethodDef, Kind,
-    Literal, Pattern, PatternNode, Predicate, Pretty, ResolvedModule, Scheme, TermDefinition,
-    TermExpr, TermExprNode, TypeExpr, UnOp,
+    BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, InstanceDefinition,
+    InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate, Pretty, ResolvedModule,
+    Scheme, TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
 };
 
 #[derive(Clone, Debug)]
@@ -77,21 +77,25 @@ impl TypeChecker {
             holes: Vec::new(),
         }
     }
-
-    pub fn with_module_context(module: &ResolvedModule<Span>, file_id: String) -> Self {
+    pub fn with_env(env: &TypeCheckEnv, file_id: String) -> Self {
         Self {
             file_id,
             counter: 0,
-            constructor_types: module.constructor_types.clone(),
-            func_schemes: module.func_schemes.clone(),
-            class_defs: module.class_defs.clone(),
-            instance_defs: module.instance_defs.clone(),
-            tycon_kinds: module.tycon_kinds.clone(),
+            constructor_types: env.constructor_types.clone(),
+            func_schemes: env.func_schemes.clone(),
+            class_defs: env.class_defs.clone(),
+            instance_defs: env.instance_defs.clone(),
+            tycon_kinds: env.tycon_kinds.clone(),
             givens: Vec::new(),
             wanteds: Vec::new(),
             evar_solutions: HashMap::new(),
             holes: Vec::new(),
         }
+    }
+
+    pub fn with_module_context(module: &ResolvedModule<Span>, file_id: String) -> Self {
+        let env = TypeCheckEnv::from_module(module);
+        Self::with_env(&env, file_id)
     }
 
     fn get_file_span(&self, span: Span) -> FileSpan {
@@ -204,12 +208,32 @@ impl TypeChecker {
         (ctx, instantiated_preds, instantiated_ty)
     }
 
-    fn lookup_class_method_scheme(&self, name: &str) -> Option<&Scheme> {
+    fn class_method_scheme_for_term_lookup(
+        class_def: &ClassDefinition,
+        method: &ClassMethodDef,
+    ) -> Scheme {
+        let mut quantifiers = class_def.params.clone();
+
+        for (name, kind) in &method.scheme.quantifiers {
+            if !quantifiers.iter().any(|(existing, _)| existing == name) {
+                quantifiers.push((name.clone(), kind.clone()));
+            }
+        }
+
+        Scheme {
+            quantifiers,
+            predicates: method.scheme.predicates.clone(),
+            ty: method.scheme.ty.clone(),
+        }
+    }
+
+    fn lookup_class_method_scheme(&self, name: &str) -> Option<Scheme> {
         self.class_defs.iter().find_map(|class_def| {
             class_def.methods.iter().find_map(|method| {
                 let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
-                if short_name == name {
-                    Some(&method.scheme)
+
+                if method.name == name || short_name == name {
+                    Some(Self::class_method_scheme_for_term_lookup(class_def, method))
                 } else {
                     None
                 }
@@ -242,6 +266,123 @@ impl TypeChecker {
         let result = f(self);
         self.givens.truncate(old_len);
         result
+    }
+
+    fn substitute_predicate(pred: &Predicate, subst: &HashMap<String, TypeExpr>) -> Predicate {
+        Predicate {
+            class_name: pred.class_name.clone(),
+            args: pred
+                .args
+                .iter()
+                .map(|arg| {
+                    subst
+                        .iter()
+                        .fold(arg.clone(), |acc, (name, ty)| acc.substitute(name, ty))
+                })
+                .collect(),
+        }
+    }
+
+    fn substitute_scheme(scheme: &Scheme, subst: &HashMap<String, TypeExpr>) -> Scheme {
+        Scheme {
+            quantifiers: scheme.quantifiers.clone(),
+
+            predicates: scheme
+                .predicates
+                .iter()
+                .map(|pred| Self::substitute_predicate(pred, subst))
+                .collect(),
+
+            ty: subst.iter().fold(scheme.ty.clone(), |acc, (name, ty)| {
+                acc.substitute(name, ty)
+            }),
+        }
+    }
+
+    fn predicate_same_shape(a: &Predicate, b: &Predicate) -> bool {
+        a.class_name == b.class_name && a.args == b.args
+    }
+
+    fn specialize_class_method_for_instance(
+        class_def: &ClassDefinition,
+        method_scheme: &Scheme,
+        instance_head: &Predicate,
+    ) -> Scheme {
+        let mut subst = HashMap::<String, TypeExpr>::new();
+
+        for ((param_name, _), instance_arg) in
+            class_def.params.iter().zip(instance_head.args.iter())
+        {
+            subst.insert(param_name.clone(), instance_arg.clone());
+        }
+
+        let specialized = Self::substitute_scheme(method_scheme, &subst);
+
+        let specialized_class_head = Predicate {
+            class_name: class_def.name.clone(),
+            args: class_def
+                .params
+                .iter()
+                .map(|(name, _)| {
+                    subst
+                        .get(name)
+                        .cloned()
+                        .unwrap_or_else(|| TypeExpr::TyVar(name.clone()))
+                })
+                .collect(),
+        };
+
+        Scheme {
+            quantifiers: specialized.quantifiers,
+
+            predicates: specialized
+                .predicates
+                .into_iter()
+                .filter(|pred| !Self::predicate_same_shape(pred, &specialized_class_head))
+                .collect(),
+
+            ty: specialized.ty,
+        }
+    }
+
+    fn check_instance_overlaps(&self) -> Vec<TypeError> {
+        let mut errors = Vec::new();
+        let instances = &self.instance_defs;
+
+        for (i, inst_a) in instances.iter().enumerate() {
+            for inst_b in instances.iter().skip(i + 1) {
+                if inst_a.head.class_name != inst_b.head.class_name {
+                    continue;
+                }
+                if inst_a.head.args.len() != inst_b.head.args.len() {
+                    continue;
+                }
+
+                let mut subst = HashMap::new();
+                let overlaps = inst_a
+                    .head
+                    .args
+                    .iter()
+                    .zip(inst_b.head.args.iter())
+                    .all(|(a, b)| Self::match_instance_type(a, b, &mut subst));
+
+                if overlaps {
+                    errors.push(TypeError::OverlappingInstances {
+                        span: self.get_file_span(0..0),
+                        class_name: inst_a.head.class_name.clone(),
+                        instance_type: inst_b
+                            .head
+                            .args
+                            .iter()
+                            .map(|a| a.pretty())
+                            .collect::<Vec<_>>()
+                            .join(" "),
+                    });
+                }
+            }
+        }
+
+        errors
     }
 
     fn match_instance_type(
@@ -333,21 +474,6 @@ impl TypeChecker {
     }
 
     fn unresolved_wanteds(&self) -> Vec<Wanted> {
-        for wanted in &self.wanteds {
-            eprintln!(
-                "wanted full = {:?}, givens full = {:?}",
-                self.zonk_predicate(&wanted.pred),
-                wanted
-                    .givens
-                    .iter()
-                    .map(|g| self.zonk_predicate(g))
-                    .collect::<Vec<_>>()
-            );
-        }
-
-        for inst in &self.instance_defs {
-            eprintln!("instance head full = {:?}", self.zonk_predicate(&inst.head));
-        }
         self.wanteds
             .iter()
             .cloned()
@@ -668,6 +794,25 @@ impl TypeChecker {
         }
     }
 
+    fn tyapp_split_kinds(
+        &self,
+        ctx: &Context,
+        result_evar_name: &str,
+        arg_part: &TypeExpr,
+    ) -> Result<(Kind, Kind), ()> {
+        let arg_kind = ctx
+            .kind_of_type(arg_part, &self.tycon_kinds)
+            .map_err(|_| ())?;
+
+        let result_kind = ctx
+            .evar_kind(result_evar_name)
+            .unwrap_or_else(|| panic!("missing evar kind for {}", result_evar_name));
+
+        let func_kind = Kind::make_arrow(arg_kind.clone(), result_kind);
+
+        Ok((func_kind, arg_kind))
+    }
+
     fn instantiate_left(
         &mut self,
         ctx: Context,
@@ -739,8 +884,11 @@ impl TypeChecker {
                 self.instantiate_left(theta, &codomain_evar, &codomain_applied)
             }
             TypeExpr::TyApp(func_part, arg_part) => {
+                let (func_kind, arg_kind) = self.tyapp_split_kinds(&ctx, evar_name, arg_part)?;
+
                 let func_evar = self.fresh_evar_name();
                 let arg_evar = self.fresh_evar_name();
+
                 let app_solution = ContextEntry::SolvedEVar {
                     lhs: evar_name.to_string(),
                     rhs: TypeExpr::make_app(
@@ -748,15 +896,18 @@ impl TypeChecker {
                         TypeExpr::TyExVar(arg_evar.clone()),
                     ),
                 };
+
                 self.record_solution(&app_solution);
 
-                left_entries.push(ContextEntry::ExVar(arg_evar.clone(), Kind::Star));
-                left_entries.push(ContextEntry::ExVar(func_evar.clone(), Kind::Star));
+                left_entries.push(ContextEntry::ExVar(arg_evar.clone(), arg_kind));
+                left_entries.push(ContextEntry::ExVar(func_evar.clone(), func_kind));
                 left_entries.push(app_solution);
+
                 let new_ctx = Context::from_halves(left_entries, right_entries);
 
                 let theta = self.instantiate_left(new_ctx, &func_evar, func_part)?;
                 let arg_applied = theta.apply(arg_part);
+
                 self.instantiate_left(theta, &arg_evar, &arg_applied)
             }
             TypeExpr::TyForAll(quantifier, kind, body) => {
@@ -767,7 +918,11 @@ impl TypeChecker {
             }
             TypeExpr::Qualified(_, body) => self.instantiate_left(ctx, evar_name, body),
 
-            _ => todo!("instantiate left failed"),
+            _ => todo!(
+                "instantiate left failed {} <: {}",
+                evar_name,
+                target.pretty()
+            ),
         }
     }
 
@@ -841,8 +996,11 @@ impl TypeChecker {
                 self.instantiate_right(theta, &codomain_applied, &codomain_evar)
             }
             TypeExpr::TyApp(func_part, arg_part) => {
+                let (func_kind, arg_kind) = self.tyapp_split_kinds(&ctx, evar_name, arg_part)?;
+
                 let func_evar = self.fresh_evar_name();
                 let arg_evar = self.fresh_evar_name();
+
                 let app_solution = ContextEntry::SolvedEVar {
                     lhs: evar_name.to_string(),
                     rhs: TypeExpr::make_app(
@@ -850,15 +1008,18 @@ impl TypeChecker {
                         TypeExpr::TyExVar(arg_evar.clone()),
                     ),
                 };
+
                 self.record_solution(&app_solution);
 
-                left_entries.push(ContextEntry::ExVar(arg_evar.clone(), Kind::Star));
-                left_entries.push(ContextEntry::ExVar(func_evar.clone(), Kind::Star));
+                left_entries.push(ContextEntry::ExVar(arg_evar.clone(), arg_kind));
+                left_entries.push(ContextEntry::ExVar(func_evar.clone(), func_kind));
                 left_entries.push(app_solution);
+
                 let new_ctx = Context::from_halves(left_entries, right_entries);
 
                 let theta = self.instantiate_right(new_ctx, func_part, &func_evar)?;
                 let arg_applied = theta.apply(arg_part);
+
                 self.instantiate_right(theta, &arg_applied, &arg_evar)
             }
             TypeExpr::TyForAll(quantifier, kind, body) => {
@@ -1369,7 +1530,7 @@ impl TypeChecker {
                         elab_node(TermExpr::Var(name.clone()), span, instantiated_ty.clone());
                     return Ok((ctx, elaborated, instantiated_ty));
                 }
-                if let Some(method_scheme) = self.lookup_class_method_scheme(name).cloned() {
+                if let Some(method_scheme) = self.lookup_class_method_scheme(name) {
                     eprintln!("class method {} : {}", name, method_scheme.pretty());
 
                     let (ctx, preds, instantiated_ty) =
@@ -1684,6 +1845,27 @@ impl TypeChecker {
 
 pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
 
+#[derive(Clone, Debug)]
+pub struct TypeCheckEnv {
+    pub constructor_types: HashMap<String, TypeExpr>,
+    pub func_schemes: HashMap<String, Scheme>,
+    pub class_defs: Vec<ClassDefinition>,
+    pub instance_defs: Vec<InstanceDefinition<Span>>,
+    pub tycon_kinds: HashMap<String, Kind>,
+}
+
+impl TypeCheckEnv {
+    pub fn from_module(module: &ResolvedModule<Span>) -> Self {
+        Self {
+            constructor_types: module.constructor_types.clone(),
+            func_schemes: module.func_schemes.clone(),
+            class_defs: module.class_defs.clone(),
+            instance_defs: module.instance_defs.clone(),
+            tycon_kinds: module.tycon_kinds.clone(),
+        }
+    }
+}
+
 pub struct TCOutput {
     pub module: CheckedModule,
     pub holes: Vec<HoleInfo>,
@@ -1790,16 +1972,135 @@ fn lift_instance_defs_to_tcmeta(
 
 pub fn check_and_elab_module(
     module: &ResolvedModule<Span>,
+    env: &TypeCheckEnv,
     file_id: impl Into<String>,
 ) -> Result<TCOutput, Vec<TypeError>> {
     let file_id = file_id.into();
     let mut errors = Vec::new();
+
     let mut checked_defs = Vec::new();
-    let mut available_func_schemes = module.func_schemes.clone();
+    let mut checked_instance_defs = Vec::new();
+
+    let mut available_func_schemes = env.func_schemes.clone();
+    let mut checked_func_schemes = HashMap::<String, Scheme>::new();
+
     let mut all_holes = Vec::new();
 
+    {
+        let checker = TypeChecker::with_env(env, file_id.clone());
+        let overlap_errors = checker.check_instance_overlaps();
+        if !overlap_errors.is_empty() {
+            return Err(overlap_errors);
+        }
+    }
+
+    // Check only local instance declarations.
+    //
+    // Imported instances live in `env.instance_defs` and are visible to
+    // constraint solving, but they are not rechecked as declarations of this
+    // module.
+    for inst in &module.instance_defs {
+        let class_def = env
+            .class_defs
+            .iter()
+            .find(|class_def| class_def.name == inst.head.class_name);
+
+        let class_def = match class_def {
+            Some(class_def) => class_def,
+            None => {
+                errors.push(TypeError::UnboundVariable {
+                    span: FileSpan::new(file_id.clone(), 0..0),
+                    name: format!("unknown class `{}` in instance", inst.head.class_name),
+                });
+                continue;
+            }
+        };
+
+        let mut checked_methods = Vec::new();
+
+        for inst_method in &inst.methods {
+            let class_method = class_def.methods.iter().find(|method| {
+                let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
+                method.name == inst_method.name || short_name == inst_method.name
+            });
+
+            let class_method = match class_method {
+                Some(class_method) => class_method,
+                None => {
+                    errors.push(TypeError::UnboundVariable {
+                        span: FileSpan::new(file_id.clone(), inst_method.body.anno.clone()),
+                        name: format!(
+                            "instance method `{}` not found in class `{}`",
+                            inst_method.name, inst.head.class_name
+                        ),
+                    });
+                    continue;
+                }
+            };
+
+            let expected_scheme = TypeChecker::specialize_class_method_for_instance(
+                class_def,
+                &class_method.scheme,
+                &inst.head,
+            );
+
+            let expected_type = TypeChecker::scheme_to_type(&expected_scheme);
+
+            let mut checker = TypeChecker::with_env(env, file_id.clone());
+            checker.func_schemes = available_func_schemes.clone();
+
+            let givens = inst.context.clone();
+
+            match checker.with_givens(givens, |checker| {
+                checker.solve_checking(Context::new(), &inst_method.body, &expected_type)
+            }) {
+                Ok((_final_ctx, elaborated_method)) => {
+                    let unresolved = checker.unresolved_wanteds();
+
+                    if unresolved.is_empty() {
+                        let zonked_method = checker.zonk_expr(&elaborated_method);
+
+                        checked_methods.push(InstanceMethodDef {
+                            name: inst_method.name.clone(),
+                            body: zonked_method,
+                        });
+                    } else {
+                        let cause = checker.wanteds_error(unresolved);
+
+                        errors.push(TypeError::InstanceMethodTypeMismatch {
+                            span: FileSpan::new(file_id.clone(), inst_method.body.anno.clone()),
+                            method: inst_method.name.clone(),
+                            class_name: inst.head.class_name.clone(),
+                            expected: expected_scheme.pretty(),
+                            cause: Box::new(cause),
+                        });
+                    }
+                }
+
+                Err(cause) => {
+                    errors.push(TypeError::InstanceMethodTypeMismatch {
+                        span: FileSpan::new(file_id.clone(), inst_method.body.anno.clone()),
+                        method: inst_method.name.clone(),
+                        class_name: inst.head.class_name.clone(),
+                        expected: expected_scheme.pretty(),
+                        cause: Box::new(cause),
+                    });
+                }
+            }
+
+            checker.finalize_holes();
+            all_holes.extend(checker.holes);
+        }
+
+        checked_instance_defs.push(InstanceDefinition {
+            context: inst.context.clone(),
+            head: inst.head.clone(),
+            methods: checked_methods,
+        });
+    }
+
     for func_def in &module.func_defs {
-        let mut checker = TypeChecker::with_module_context(module, file_id.clone());
+        let mut checker = TypeChecker::with_env(env, file_id.clone());
         checker.func_schemes = available_func_schemes.clone();
 
         match &func_def.signature {
@@ -1809,6 +2110,7 @@ pub fn check_and_elab_module(
                 match checker.solve_checking(Context::new(), &func_def.body, &expected_type) {
                     Ok((final_ctx, elaborated)) => {
                         let unresolved = checker.unresolved_wanteds();
+
                         if !unresolved.is_empty() {
                             errors.push(checker.wanteds_error(unresolved));
                         } else {
@@ -1821,9 +2123,14 @@ pub fn check_and_elab_module(
                                 body: zonked_expr,
                             });
 
-                            available_func_schemes.insert(func_def.name.clone(), final_scheme);
+                            available_func_schemes
+                                .insert(func_def.name.clone(), final_scheme.clone());
+                            checked_func_schemes.insert(func_def.name.clone(), final_scheme);
                         }
+
+                        let _ = final_ctx;
                     }
+
                     Err(err) => {
                         errors.push(err);
                     }
@@ -1833,6 +2140,7 @@ pub fn check_and_elab_module(
             None => match checker.solve_inference(Context::new(), &func_def.body) {
                 Ok((final_ctx, elaborated, inferred_type)) => {
                     let unresolved = checker.unresolved_wanteds();
+
                     if !unresolved.is_empty() {
                         errors.push(checker.wanteds_error(unresolved));
                     } else {
@@ -1847,9 +2155,11 @@ pub fn check_and_elab_module(
                             body: zonked_expr,
                         });
 
-                        available_func_schemes.insert(func_def.name.clone(), final_scheme);
+                        available_func_schemes.insert(func_def.name.clone(), final_scheme.clone());
+                        checked_func_schemes.insert(func_def.name.clone(), final_scheme);
                     }
                 }
+
                 Err(err) => {
                     errors.push(err);
                 }
@@ -1865,10 +2175,10 @@ pub fn check_and_elab_module(
             module: ResolvedModule {
                 data_defs: module.data_defs.clone(),
                 class_defs: module.class_defs.clone(),
-                instance_defs: lift_instance_defs_to_tcmeta(&module.instance_defs.clone()),
+                instance_defs: checked_instance_defs,
                 tycon_kinds: module.tycon_kinds.clone(),
                 constructor_types: module.constructor_types.clone(),
-                func_schemes: available_func_schemes,
+                func_schemes: checked_func_schemes,
                 func_defs: checked_defs,
             },
             holes: all_holes,

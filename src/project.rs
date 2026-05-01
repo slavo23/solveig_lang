@@ -13,6 +13,7 @@ use syntax::inference::type_infer::CheckedModule;
 
 const PRELUDE_BUILTINS_SRC: &str = include_str!("./prelude/builtins.sv");
 const PRELUDE_LIST_SRC: &str = include_str!("./prelude/list.sv");
+const PRELUDE_TYPECLASS_SRC: &str = include_str!("./prelude/typeclasses.sv");
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SymbolId {
@@ -84,6 +85,7 @@ impl TypedModuleApi {
     pub fn filtered(&self, spec: &ImportSpec) -> Self {
         match spec {
             ImportSpec::All => self.clone(),
+
             ImportSpec::Only(names) => {
                 let mut out = Self::default();
 
@@ -93,18 +95,27 @@ impl TypedModuleApi {
                             out.term_schemes.insert(sym.clone(), scheme.clone());
                         }
                     }
+
                     for (sym, kind) in &self.type_kinds {
                         if &sym.name == name {
                             out.type_kinds.insert(sym.clone(), kind.clone());
                         }
                     }
+
                     for (sym, ty) in &self.constructor_types {
                         if &sym.name == name {
                             out.constructor_types.insert(sym.clone(), ty.clone());
                         }
                     }
+
                     for (sym, class_def) in &self.class_defs {
-                        if &sym.name == name {
+                        let class_selected = &sym.name == name;
+
+                        let method_selected = class_def.methods.iter().any(|method| {
+                            method.name.rsplit('.').next().unwrap_or(&method.name) == name
+                        });
+
+                        if class_selected || method_selected {
                             out.class_defs.insert(sym.clone(), class_def.clone());
                         }
                     }
@@ -132,12 +143,15 @@ impl TypedModuleApi {
         for (sym, scheme) in &self.term_schemes {
             func_schemes.insert(sym.display(), scheme.clone());
         }
+
         for (sym, kind) in &self.type_kinds {
             tycon_kinds.insert(sym.display(), kind.clone());
         }
+
         for (sym, ty) in &self.constructor_types {
             constructor_types.insert(sym.display(), ty.clone());
         }
+
         for (sym, class_def) in &self.class_defs {
             class_defs.insert(sym.display(), class_def.clone());
         }
@@ -221,6 +235,7 @@ fn prelude_module(module: &ModuleName) -> Option<&'static str> {
     match module.as_string().as_str() {
         "prelude.builtins" => Some(PRELUDE_BUILTINS_SRC),
         "prelude.list" => Some(PRELUDE_LIST_SRC),
+        "prelude.typeclasses" => Some(PRELUDE_TYPECLASS_SRC),
         _ => None,
     }
 }
@@ -232,6 +247,7 @@ fn implicit_prelude_modules(module: &ModuleName) -> Vec<ModuleName> {
         vec![
             ModuleName(vec!["prelude".into(), "builtins".into()]),
             ModuleName(vec!["prelude".into(), "list".into()]),
+            ModuleName(vec!["prelude".into(), "typeclasses".into()]),
         ]
     }
 }
@@ -481,7 +497,7 @@ pub fn build_module_api<'src>(module_name: &ModuleName, parsed: &ParsedModule<'s
                 }
             }
 
-            SurfaceDefinition::ClassDef { name, .. } => {
+            SurfaceDefinition::ClassDef { name, methods, .. } => {
                 api.classes.insert(
                     name.0.to_string(),
                     SymbolId {
@@ -489,6 +505,15 @@ pub fn build_module_api<'src>(module_name: &ModuleName, parsed: &ParsedModule<'s
                         name: name.0.to_string(),
                     },
                 );
+
+                for method in methods {
+                    api.terms
+                        .entry(method.name.0.to_string())
+                        .or_insert(SymbolId {
+                            module: module_name.clone(),
+                            name: method.name.0.to_string(),
+                        });
+                }
             }
 
             SurfaceDefinition::InstanceDef { .. } => {}

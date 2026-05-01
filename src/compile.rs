@@ -9,7 +9,7 @@ use lowering::lowering::lower_module;
 use runtime::vm::Machine;
 use surface::ast::ModuleName;
 use syntax::inference::holes::emit_holes;
-use syntax::inference::type_infer::{check_and_elab_module, CheckedModule};
+use syntax::inference::type_infer::{check_and_elab_module, CheckedModule, TypeCheckEnv};
 
 use crate::project::{
     build_module_api, build_typed_module_api, effective_imports, load_project,
@@ -192,6 +192,30 @@ impl<'a> FrontendState<'a> {
         Ok(())
     }
 
+    fn collect_imported_class_param_kinds(
+        &self,
+        imports: &[crate::project::EffectiveImport],
+    ) -> HashMap<String, Vec<core::ast::Kind>> {
+        let mut out = HashMap::new();
+
+        for imp in imports {
+            if let Some(api) = self.typed_apis.get(&imp.module) {
+                for (sym, class_def) in &api.filtered(&imp.spec).class_defs {
+                    out.insert(
+                        sym.display(),
+                        class_def
+                            .params
+                            .iter()
+                            .map(|(_, kind)| kind.clone())
+                            .collect(),
+                    );
+                }
+            }
+        }
+
+        out
+    }
+
     fn check_module(&self, module_name: &ModuleName) -> Result<CheckedModule, String> {
         let module_file = &self.project.modules[module_name];
         let parsed = self.parsed.get(module_name);
@@ -207,10 +231,11 @@ impl<'a> FrontendState<'a> {
 
         let resolver_imports = ResolverImports {
             tycon_kinds: self.collect_imported_kinds(&imports),
+            class_param_kinds: self.collect_imported_class_param_kinds(&imports),
         };
 
         let resolver = Resolver::new();
-        let mut resolved = resolver
+        let resolved = resolver
             .resolve_module(module_name, parsed, &cx, &resolver_imports)
             .map_err(|errs| {
                 format!(
@@ -228,40 +253,43 @@ impl<'a> FrontendState<'a> {
             imported_instance_defs,
         ) = collect_imported_type_info(&imported_typed);
 
-        resolved.func_schemes.extend(func_schemes);
-        resolved.tycon_kinds.extend(tycon_kinds);
-        resolved.constructor_types.extend(constructor_types);
-        resolved
+        let mut check_env = TypeCheckEnv::from_module(&resolved);
+
+        check_env.func_schemes.extend(func_schemes);
+        check_env.tycon_kinds.extend(tycon_kinds);
+        check_env.constructor_types.extend(constructor_types);
+        check_env
             .class_defs
             .extend(imported_class_defs.into_values());
-        resolved
+        check_env
             .instance_defs
             .extend(erase_checked_instance_defs_to_resolved(
                 imported_instance_defs,
             ));
 
-
-
-        let checked_raw =
-            match check_and_elab_module(&resolved, module_file.path.display().to_string()) {
-                Ok(c) => c,
-                Err(errors) => {
-                    emit_type_errors(&errors, &module_file.source)
-                        .map_err(|err| format!("failed to print type errors: {err}"))?;
-                    return Err("type error".to_string());
-                }
-            };
+        let checked_raw = match check_and_elab_module(
+            &resolved,
+            &check_env,
+            module_file.path.display().to_string(),
+        ) {
+            Ok(c) => c,
+            Err(errors) => {
+                emit_type_errors(&errors, &module_file.source)
+                    .map_err(|err| format!("failed to print type errors: {err}"))?;
+                return Err("type error".to_string());
+            }
+        };
 
         if !checked_raw.holes.is_empty() {
             emit_holes(
                 &checked_raw.holes,
                 &module_file.source,
-                &resolved.constructor_types,
+                &check_env.constructor_types,
             );
             return Err("Program has unfilled holes. Aborting compilation".to_string());
         }
 
-        Ok(retain_only_local_symbols(module_name, checked_raw.module))
+        Ok(checked_raw.module)
     }
 
     fn build_imported_apis(&self, imports: &[crate::project::EffectiveImport]) -> Vec<ImportedApi> {
