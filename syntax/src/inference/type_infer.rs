@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::inference::holes::HoleInfo;
 use crate::inference::inference_ctx::{Context, ContextEntry};
@@ -163,6 +163,59 @@ impl TypeChecker {
         }
     }
 
+    fn free_type_vars_in_type(ty: &TypeExpr, out: &mut BTreeSet<String>) {
+        match ty {
+            TypeExpr::TyVar(name) => {
+                out.insert(name.clone());
+            }
+
+            TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
+                Self::free_type_vars_in_type(lhs, out);
+                Self::free_type_vars_in_type(rhs, out);
+            }
+
+            TypeExpr::TyForAll(name, _, body) => {
+                Self::free_type_vars_in_type(body, out);
+                out.remove(name);
+            }
+
+            TypeExpr::Qualified(preds, body) => {
+                for pred in preds {
+                    Self::free_type_vars_in_predicate(pred, out);
+                }
+
+                Self::free_type_vars_in_type(body, out);
+            }
+
+            TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}
+        }
+    }
+
+    fn free_type_vars_in_predicate(pred: &Predicate, out: &mut BTreeSet<String>) {
+        for arg in &pred.args {
+            Self::free_type_vars_in_type(arg, out);
+        }
+    }
+
+    fn free_type_vars_in_instance(inst: &InstanceDefinition<Span>) -> Vec<String> {
+        let mut out = BTreeSet::new();
+
+        for pred in &inst.context {
+            Self::free_type_vars_in_predicate(pred, &mut out);
+        }
+
+        Self::free_type_vars_in_predicate(&inst.head, &mut out);
+
+        out.into_iter().collect()
+    }
+
+    fn instance_quantifiers(inst: &InstanceDefinition<Span>) -> Vec<(String, Kind)> {
+        Self::free_type_vars_in_instance(inst)
+            .into_iter()
+            .map(|name| (name, Kind::Star))
+            .collect()
+    }
+
     fn instantiate_predicate_with_subst(
         pred: &Predicate,
         subst: &HashMap<String, TypeExpr>,
@@ -303,10 +356,88 @@ impl TypeChecker {
         a.class_name == b.class_name && a.args == b.args
     }
 
+    fn superclass_predicates_for_given(&self, given: &Predicate) -> Vec<Predicate> {
+        let given = self.zonk_predicate(given);
+
+        let Some(class_def) = self
+            .class_defs
+            .iter()
+            .find(|class_def| class_def.name == given.class_name)
+        else {
+            return Vec::new();
+        };
+
+        if class_def.params.len() != given.args.len() {
+            return Vec::new();
+        }
+
+        let subst = class_def
+            .params
+            .iter()
+            .zip(given.args.iter())
+            .map(|((param_name, _), arg)| (param_name.clone(), arg.clone()))
+            .collect::<HashMap<_, _>>();
+
+        class_def
+            .superclasses
+            .iter()
+            .map(|pred| Self::instantiate_predicate_with_subst(pred, &subst))
+            .map(|pred| self.zonk_predicate(&pred))
+            .collect()
+    }
+
+    fn predicate_entails(
+        &self,
+        given: &Predicate,
+        wanted: &Predicate,
+        seen: &mut HashSet<Predicate>,
+    ) -> bool {
+        let given = self.zonk_predicate(given);
+        let wanted = self.zonk_predicate(wanted);
+
+        if given == wanted {
+            return true;
+        }
+
+        if !seen.insert(given.clone()) {
+            return false;
+        }
+
+        for superclass_pred in self.superclass_predicates_for_given(&given) {
+            if self.predicate_entails(&superclass_pred, &wanted, seen) {
+                seen.remove(&given);
+                return true;
+            }
+        }
+
+        seen.remove(&given);
+        false
+    }
+
+    fn specialize_superclasses_for_instance(
+        class_def: &ClassDefinition,
+        instance_head: &Predicate,
+    ) -> Vec<Predicate> {
+        let subst = class_def
+            .params
+            .iter()
+            .zip(instance_head.args.iter())
+            .map(|((param_name, _), instance_arg)| (param_name.clone(), instance_arg.clone()))
+            .collect::<HashMap<_, _>>();
+
+        class_def
+            .superclasses
+            .iter()
+            .map(|pred| Self::instantiate_predicate_with_subst(pred, &subst))
+            .collect()
+    }
+
     fn specialize_class_method_for_instance(
         class_def: &ClassDefinition,
         method_scheme: &Scheme,
         instance_head: &Predicate,
+        instance_context: &[Predicate],
+        instance_quantifiers: &[(String, Kind)],
     ) -> Scheme {
         let mut subst = HashMap::<String, TypeExpr>::new();
 
@@ -332,15 +463,25 @@ impl TypeChecker {
                 .collect(),
         };
 
+        let mut predicates = specialized
+            .predicates
+            .into_iter()
+            .filter(|pred| !Self::predicate_same_shape(pred, &specialized_class_head))
+            .collect::<Vec<_>>();
+
+        predicates.extend(instance_context.iter().cloned());
+
+        let mut quantifiers = instance_quantifiers.to_vec();
+
+        for (name, kind) in specialized.quantifiers {
+            if !quantifiers.iter().any(|(existing, _)| existing == &name) {
+                quantifiers.push((name, kind));
+            }
+        }
+
         Scheme {
-            quantifiers: specialized.quantifiers,
-
-            predicates: specialized
-                .predicates
-                .into_iter()
-                .filter(|pred| !Self::predicate_same_shape(pred, &specialized_class_head))
-                .collect(),
-
+            quantifiers,
+            predicates,
             ty: specialized.ty,
         }
     }
@@ -426,13 +567,26 @@ impl TypeChecker {
     }
 
     fn discharge_predicate_with_givens(&self, pred: &Predicate, givens: &[Predicate]) -> bool {
+        self.discharge_predicate_with_givens_inner(pred, givens, &mut HashSet::new())
+    }
+
+    fn discharge_predicate_with_givens_inner(
+        &self,
+        pred: &Predicate,
+        givens: &[Predicate],
+        seen: &mut HashSet<Predicate>,
+    ) -> bool {
         let pred = self.zonk_predicate(pred);
 
         if givens
             .iter()
-            .any(|given| self.zonk_predicate(given) == pred)
+            .any(|given| self.predicate_entails(given, &pred, &mut HashSet::new()))
         {
             return true;
+        }
+
+        if !seen.insert(pred.clone()) {
+            return false;
         }
 
         for inst in &self.instance_defs {
@@ -458,19 +612,17 @@ impl TypeChecker {
 
             let all_context_ok = inst.context.iter().all(|ctx_pred| {
                 let instantiated = Self::instantiate_predicate_with_subst(ctx_pred, &subst);
-                self.discharge_predicate_with_givens(&instantiated, givens)
+                self.discharge_predicate_with_givens_inner(&instantiated, givens, seen)
             });
 
             if all_context_ok {
+                seen.remove(&pred);
                 return true;
             }
         }
 
+        seen.remove(&pred);
         false
-    }
-
-    fn discharge_predicate(&self, pred: &Predicate) -> bool {
-        self.discharge_predicate_with_givens(pred, &self.givens)
     }
 
     fn unresolved_wanteds(&self) -> Vec<Wanted> {
@@ -1531,20 +1683,8 @@ impl TypeChecker {
                     return Ok((ctx, elaborated, instantiated_ty));
                 }
                 if let Some(method_scheme) = self.lookup_class_method_scheme(name) {
-                    eprintln!("class method {} : {}", name, method_scheme.pretty());
-
                     let (ctx, preds, instantiated_ty) =
                         self.instantiate_scheme(ctx, &method_scheme);
-                    eprintln!(
-                        "instantiated {} => preds [{}], ty {}",
-                        name,
-                        preds
-                            .iter()
-                            .map(|p| p.pretty())
-                            .collect::<Vec<_>>()
-                            .join(", "),
-                        instantiated_ty.pretty()
-                    );
 
                     self.add_wanteds(preds, span.clone());
 
@@ -1871,105 +2011,6 @@ pub struct TCOutput {
     pub holes: Vec<HoleInfo>,
 }
 
-fn lift_span_expr_to_tcmeta(expr: &TermExprNode<Span, Span>) -> TermExprNode<TcMetadata, Span> {
-    let anno = TcMetadata {
-        span: expr.anno.clone(),
-        inferred_type: TypeExpr::TyUnit,
-    };
-
-    let node = match &expr.node {
-        TermExpr::Var(name) => TermExpr::Var(name.clone()),
-        TermExpr::Con(name) => TermExpr::Con(name.clone()),
-        TermExpr::Unit => TermExpr::Unit,
-        TermExpr::Lit(lit) => TermExpr::Lit(lit.clone()),
-        TermExpr::Hole => TermExpr::Hole,
-
-        TermExpr::Abs(param, ann, body) => TermExpr::Abs(
-            param.clone(),
-            ann.clone(),
-            Box::new(lift_span_expr_to_tcmeta(body)),
-        ),
-
-        TermExpr::App(f, x) => TermExpr::App(
-            Box::new(lift_span_expr_to_tcmeta(f)),
-            Box::new(lift_span_expr_to_tcmeta(x)),
-        ),
-
-        TermExpr::TyAbs(name, kind, body) => TermExpr::TyAbs(
-            name.clone(),
-            kind.clone(),
-            Box::new(lift_span_expr_to_tcmeta(body)),
-        ),
-
-        TermExpr::TyApp(inner, ty) => {
-            TermExpr::TyApp(Box::new(lift_span_expr_to_tcmeta(inner)), ty.clone())
-        }
-
-        TermExpr::Anno(inner, ty) => {
-            TermExpr::Anno(Box::new(lift_span_expr_to_tcmeta(inner)), ty.clone())
-        }
-
-        TermExpr::Case(scrutinee, arms) => TermExpr::Case(
-            Box::new(lift_span_expr_to_tcmeta(scrutinee)),
-            arms.iter()
-                .map(|arm| {
-                    CaseArmNode::new(
-                        CaseArm {
-                            pattern: arm.node.pattern.clone(),
-                            expr: lift_span_expr_to_tcmeta(&arm.node.expr),
-                        },
-                        arm.anno.clone(),
-                    )
-                })
-                .collect(),
-        ),
-
-        TermExpr::IfThenElse(c, t, e) => TermExpr::IfThenElse(
-            Box::new(lift_span_expr_to_tcmeta(c)),
-            Box::new(lift_span_expr_to_tcmeta(t)),
-            Box::new(lift_span_expr_to_tcmeta(e)),
-        ),
-
-        TermExpr::BinaryOperator(op, l, r) => TermExpr::BinaryOperator(
-            *op,
-            Box::new(lift_span_expr_to_tcmeta(l)),
-            Box::new(lift_span_expr_to_tcmeta(r)),
-        ),
-
-        TermExpr::UnaryOperator(op, rhs) => {
-            TermExpr::UnaryOperator(*op, Box::new(lift_span_expr_to_tcmeta(rhs)))
-        }
-
-        TermExpr::Let(name, binder, in_expr) => TermExpr::Let(
-            name.clone(),
-            Box::new(lift_span_expr_to_tcmeta(binder)),
-            Box::new(lift_span_expr_to_tcmeta(in_expr)),
-        ),
-    };
-
-    TermExprNode::new(node, anno)
-}
-
-fn lift_instance_defs_to_tcmeta(
-    instance_defs: &[InstanceDefinition<Span, Span>],
-) -> Vec<InstanceDefinition<TcMetadata, Span>> {
-    instance_defs
-        .iter()
-        .map(|inst| InstanceDefinition {
-            context: inst.context.clone(),
-            head: inst.head.clone(),
-            methods: inst
-                .methods
-                .iter()
-                .map(|m| InstanceMethodDef {
-                    name: m.name.clone(),
-                    body: lift_span_expr_to_tcmeta(&m.body),
-                })
-                .collect(),
-        })
-        .collect()
-}
-
 pub fn check_and_elab_module(
     module: &ResolvedModule<Span>,
     env: &TypeCheckEnv,
@@ -1994,11 +2035,6 @@ pub fn check_and_elab_module(
         }
     }
 
-    // Check only local instance declarations.
-    //
-    // Imported instances live in `env.instance_defs` and are visible to
-    // constraint solving, but they are not rechecked as declarations of this
-    // module.
     for inst in &module.instance_defs {
         let class_def = env
             .class_defs
@@ -2015,6 +2051,50 @@ pub fn check_and_elab_module(
                 continue;
             }
         };
+
+        let superclass_obligations =
+            TypeChecker::specialize_superclasses_for_instance(class_def, &inst.head);
+
+        if !superclass_obligations.is_empty() {
+            let mut checker = TypeChecker::with_env(env, file_id.clone());
+
+            // While validating `instance C t`, do not use that same instance as evidence
+            // for its own superclass obligations. This avoids accepting recursive proofs
+            // such as constructing `Eq Int` through the `Ord Int` dictionary currently
+            // being checked.
+            checker.instance_defs = checker
+                .instance_defs
+                .into_iter()
+                .filter(|candidate| {
+                    candidate.head != inst.head || candidate.context != inst.context
+                })
+                .collect();
+
+            let missing_superclasses = superclass_obligations
+                .iter()
+                .filter(|pred| !checker.discharge_predicate_with_givens(pred, &inst.context))
+                .map(|pred| {
+                    format!(
+                        "{} required by superclass of {}",
+                        pred.pretty(),
+                        inst.head.pretty()
+                    )
+                })
+                .collect::<Vec<_>>();
+
+            if !missing_superclasses.is_empty() {
+                let span = inst
+                    .methods
+                    .first()
+                    .map(|method| method.body.anno.clone())
+                    .unwrap_or(0..0);
+
+                errors.push(TypeError::UnsatisfiedConstraints {
+                    span: FileSpan::new(file_id.clone(), span),
+                    predicates: missing_superclasses,
+                });
+            }
+        }
 
         let mut checked_methods = Vec::new();
 
@@ -2038,10 +2118,14 @@ pub fn check_and_elab_module(
                 }
             };
 
+            let instance_quantifiers = TypeChecker::instance_quantifiers(inst);
+
             let expected_scheme = TypeChecker::specialize_class_method_for_instance(
                 class_def,
                 &class_method.scheme,
                 &inst.head,
+                &inst.context,
+                &instance_quantifiers,
             );
 
             let expected_type = TypeChecker::scheme_to_type(&expected_scheme);
@@ -2049,11 +2133,7 @@ pub fn check_and_elab_module(
             let mut checker = TypeChecker::with_env(env, file_id.clone());
             checker.func_schemes = available_func_schemes.clone();
 
-            let givens = inst.context.clone();
-
-            match checker.with_givens(givens, |checker| {
-                checker.solve_checking(Context::new(), &inst_method.body, &expected_type)
-            }) {
+            match checker.solve_checking(Context::new(), &inst_method.body, &expected_type) {
                 Ok((_final_ctx, elaborated_method)) => {
                     let unresolved = checker.unresolved_wanteds();
 

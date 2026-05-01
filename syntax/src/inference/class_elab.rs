@@ -2,8 +2,9 @@ use std::collections::HashMap;
 
 use base::utils::span::Span;
 use core::ast::{
-    CaseArm, CaseArmNode, ConstructorDef, DataDefinition, Kind, Pattern, PatternNode, Predicate,
-    ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TypeExpr,
+    CaseArm, CaseArmNode, ConstructorDef, DataDefinition, InstanceDefinition, Kind, Pattern,
+    PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode,
+    TypeExpr,
 };
 
 use crate::inference::type_infer::TcMetadata;
@@ -19,7 +20,12 @@ struct MethodRuntimeInfo {
 struct ClassRuntimeInfo {
     dict_tycon: String,
     dict_ctor: String,
-    methods: HashMap<String, MethodRuntimeInfo>, // short method name -> runtime info
+
+    params: Vec<(String, Kind)>,
+    superclasses: Vec<Predicate>,
+    field_count: usize,
+
+    methods: HashMap<String, MethodRuntimeInfo>,
 }
 
 #[derive(Clone, Debug)]
@@ -35,9 +41,11 @@ struct EvidenceEnv {
 
 impl EvidenceEnv {
     fn lookup(&self, pred: &Predicate) -> Option<TermExprNode<TcMetadata, Span>> {
+        // Givens are already in the current type scope, so evidence lookup should be exact.
+        // Pattern matching is reserved for instance heads.
         self.by_pred
             .iter()
-            .find(|(p, _)| predicate_matches(p, pred))
+            .find(|(p, _)| p == pred)
             .map(|(_, expr)| expr.clone())
     }
 
@@ -141,6 +149,54 @@ fn mk_app(
     TermExprNode::new(TermExpr::App(Box::new(f), Box::new(x)), mk_anno())
 }
 
+fn mk_dict_field_projection(
+    dict_expr: TermExprNode<TcMetadata, Span>,
+    class_rt: &ClassRuntimeInfo,
+    field_ix: usize,
+) -> TermExprNode<TcMetadata, Span> {
+    let selected_name = "selected".to_string();
+
+    let field_patterns = (0..class_rt.field_count)
+        .map(|ix| {
+            if ix == field_ix {
+                PatternNode::new(Pattern::Var(selected_name.clone()), 0..0)
+            } else {
+                PatternNode::new(Pattern::Wild, 0..0)
+            }
+        })
+        .collect::<Vec<_>>();
+
+    let dict_pat = PatternNode::new(
+        Pattern::Con(class_rt.dict_ctor.clone(), field_patterns),
+        0..0,
+    );
+
+    TermExprNode::new(
+        TermExpr::Case(
+            Box::new(dict_expr),
+            vec![CaseArmNode::new(
+                CaseArm {
+                    pattern: dict_pat,
+                    expr: mk_var(&selected_name),
+                },
+                0..0,
+            )],
+        ),
+        mk_anno(),
+    )
+}
+
+fn subst_from_class_head(
+    params: &[(String, Kind)],
+    args: &[TypeExpr],
+) -> HashMap<String, TypeExpr> {
+    params
+        .iter()
+        .zip(args.iter())
+        .map(|((param_name, _), arg)| (param_name.clone(), arg.clone()))
+        .collect()
+}
+
 fn collect_app_spine<'a>(
     expr: &'a TermExprNode<TcMetadata, Span>,
 ) -> (
@@ -219,6 +275,25 @@ fn predicate_matches(pattern: &Predicate, actual: &Predicate) -> bool {
         .all(|(p, a)| match_type_pattern(p, a, &mut subst))
 }
 
+fn match_predicate_pattern(
+    pattern: &Predicate,
+    actual: &Predicate,
+) -> Option<HashMap<String, TypeExpr>> {
+    if pattern.class_name != actual.class_name || pattern.args.len() != actual.args.len() {
+        return None;
+    }
+
+    let mut subst = HashMap::<String, TypeExpr>::new();
+
+    for (pattern_arg, actual_arg) in pattern.args.iter().zip(actual.args.iter()) {
+        if !match_type_pattern(pattern_arg, actual_arg, &mut subst) {
+            return None;
+        }
+    }
+
+    Some(subst)
+}
+
 fn instantiate_predicate_with_subst(
     pred: &Predicate,
     subst: &HashMap<String, TypeExpr>,
@@ -237,6 +312,112 @@ fn instantiate_predicate_with_subst(
     }
 }
 
+fn resolve_superclass_evidence_from_given(
+    wanted: &Predicate,
+    given: &Predicate,
+    given_expr: TermExprNode<TcMetadata, Span>,
+    classes: &HashMap<String, ClassRuntimeInfo>,
+    seen: &mut Vec<String>,
+) -> Option<TermExprNode<TcMetadata, Span>> {
+    if given == wanted {
+        return Some(given_expr);
+    }
+
+    let key = format!("{}=>{}", mangle_predicate(given), mangle_predicate(wanted));
+
+    if seen.contains(&key) {
+        return None;
+    }
+
+    seen.push(key);
+
+    let Some(class_rt) = classes.get(&given.class_name) else {
+        seen.pop();
+        return None;
+    };
+
+    if class_rt.params.len() != given.args.len() {
+        seen.pop();
+        return None;
+    }
+
+    let subst = subst_from_class_head(&class_rt.params, &given.args);
+
+    for (super_ix, superclass_pred) in class_rt.superclasses.iter().enumerate() {
+        let instantiated_superclass = instantiate_predicate_with_subst(superclass_pred, &subst);
+
+        let superclass_expr = mk_dict_field_projection(given_expr.clone(), class_rt, super_ix);
+
+        if let Some(evidence) = resolve_superclass_evidence_from_given(
+            wanted,
+            &instantiated_superclass,
+            superclass_expr,
+            classes,
+            seen,
+        ) {
+            seen.pop();
+            return Some(evidence);
+        }
+    }
+
+    seen.pop();
+    None
+}
+
+fn resolve_evidence(
+    pred: &Predicate,
+    env: &EvidenceEnv,
+    classes: &HashMap<String, ClassRuntimeInfo>,
+    instances: &[InstanceDefinition<TcMetadata, Span>],
+    seen: &mut Vec<String>,
+) -> Option<TermExprNode<TcMetadata, Span>> {
+    if let Some(given) = env.lookup(pred) {
+        return Some(given);
+    }
+
+    for (given_pred, given_expr) in env.by_pred.iter().rev() {
+        if let Some(evidence) = resolve_superclass_evidence_from_given(
+            pred,
+            given_pred,
+            given_expr.clone(),
+            classes,
+            &mut Vec::new(),
+        ) {
+            return Some(evidence);
+        }
+    }
+
+    let key = mangle_predicate(pred);
+
+    if seen.contains(&key) {
+        return None;
+    }
+
+    seen.push(key);
+
+    for inst in instances {
+        let Some(subst) = match_predicate_pattern(&inst.head, pred) else {
+            continue;
+        };
+
+        let mut dict_expr = mk_var(&instance_dict_name(&inst.head));
+
+        for ctx_pred in &inst.context {
+            let needed_pred = instantiate_predicate_with_subst(ctx_pred, &subst);
+
+            let ctx_evidence = resolve_evidence(&needed_pred, env, classes, instances, seen)?;
+
+            dict_expr = mk_app(dict_expr, ctx_evidence);
+        }
+
+        seen.pop();
+        return Some(dict_expr);
+    }
+
+    seen.pop();
+    None
+}
+
 fn build_class_runtime_info(
     module: &ResolvedModule<TcMetadata, Span>,
 ) -> HashMap<String, ClassRuntimeInfo> {
@@ -253,6 +434,7 @@ fn build_class_runtime_info(
         };
 
         let mut methods = HashMap::new();
+
         for method in &class_def.methods {
             let short_name = method
                 .name
@@ -276,6 +458,9 @@ fn build_class_runtime_info(
             ClassRuntimeInfo {
                 dict_tycon: dict_tycon_name(&class_def.name),
                 dict_ctor: dict_ctor_name(&class_def.name),
+                params: class_def.params.clone(),
+                superclasses: class_def.superclasses.clone(),
+                field_count: class_def.superclasses.len() + class_def.methods.len(),
                 methods,
             },
         );
@@ -294,10 +479,22 @@ fn synthesize_dict_data_defs(
         .map(|class_def| {
             let info = classes.get(&class_def.name).unwrap();
 
-            let field_types = class_def
-                .methods
+            let superclass_field_types = class_def
+                .superclasses
                 .iter()
-                .map(|m| m.scheme.ty.clone())
+                .map(|pred| dict_type_for_pred(pred, classes));
+
+            let method_field_types = class_def.methods.iter().map(|m| m.scheme.ty.clone());
+
+            // Dictionary layout:
+            //
+            //   MkOrdDict
+            //       superEq
+            //       less
+            //
+            // Superclass dictionaries always come before method fields.
+            let field_types = superclass_field_types
+                .chain(method_field_types)
                 .collect::<Vec<_>>();
 
             let dict_ty = class_def.params.iter().cloned().fold(
@@ -343,16 +540,17 @@ fn synthesize_selector_defs(
             let selector = info.methods.get(short_name).unwrap().selector_name.clone();
             let dict_arg = "dict".to_string();
 
-            let field_patterns = class_def
-                .methods
-                .iter()
-                .enumerate()
-                .map(|(ix, _)| {
-                    let name = if ix == method_ix {
+            // Superclass dictionaries are stored before method fields.
+            let selected_field_ix = class_def.superclasses.len() + method_ix;
+
+            let field_patterns = (0..info.field_count)
+                .map(|ix| {
+                    let name = if ix == selected_field_ix {
                         "selected".to_string()
                     } else {
-                        format!("_m{ix}")
+                        format!("_field{ix}")
                     };
+
                     PatternNode::new(Pattern::Var(name), 0..0)
                 })
                 .collect::<Vec<_>>();
@@ -411,6 +609,7 @@ fn rewrite_expr(
     class_info: &HashMap<String, ClassRuntimeInfo>,
     method_to_class: &HashMap<String, String>,
     constrained_funcs: &HashMap<String, ConstrainedFuncInfo>,
+    instances: &[InstanceDefinition<TcMetadata, Span>],
 ) -> TermExprNode<TcMetadata, Span> {
     let anno = expr.anno.clone();
 
@@ -437,13 +636,18 @@ fn rewrite_expr(
                     let needed_pred =
                         instantiate_predicate_with_subst(&method_rt.class_head_pred, &subst);
 
-                    if let Some(dict_expr) = env.lookup(&needed_pred) {
+                    if let Some(dict_expr) =
+                        resolve_evidence(&needed_pred, env, class_info, instances, &mut Vec::new())
+                    {
                         TermExpr::App(
                             Box::new(mk_var(&method_rt.selector_name)),
                             Box::new(dict_expr),
                         )
                     } else {
-                        TermExpr::Var(name.clone())
+                        panic!(
+                            "missing evidence during class elaboration for method {} and predicate {:?}",
+                            name, needed_pred
+                        );
                     }
                 } else {
                     TermExpr::Var(name.clone())
@@ -462,18 +666,34 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
         ),
 
         TermExpr::App(_, _) => {
             let (head, args) = collect_app_spine(expr);
 
-            let rewritten_head =
-                rewrite_expr(head, env, class_info, method_to_class, constrained_funcs);
+            let rewritten_head = rewrite_expr(
+                head,
+                env,
+                class_info,
+                method_to_class,
+                constrained_funcs,
+                instances,
+            );
 
             let rewritten_args = args
                 .iter()
-                .map(|arg| rewrite_expr(arg, env, class_info, method_to_class, constrained_funcs))
+                .map(|arg| {
+                    rewrite_expr(
+                        arg,
+                        env,
+                        class_info,
+                        method_to_class,
+                        constrained_funcs,
+                        instances,
+                    )
+                })
                 .collect::<Vec<_>>();
 
             let rebuilt = if let TermExpr::Var(name) = &head.node {
@@ -487,7 +707,13 @@ fn rewrite_expr(
                         for pred in &info.predicates {
                             let instantiated_pred = instantiate_predicate_with_subst(pred, &subst);
 
-                            if let Some(dict_expr) = env.lookup(&instantiated_pred) {
+                            if let Some(dict_expr) = resolve_evidence(
+                                &instantiated_pred,
+                                env,
+                                class_info,
+                                instances,
+                                &mut Vec::new(),
+                            ) {
                                 dict_args.push(dict_expr);
                             } else {
                                 panic!(
@@ -524,6 +750,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
         ),
 
@@ -534,6 +761,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
             ty.clone(),
         ),
@@ -545,6 +773,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
             ty.clone(),
         ),
@@ -556,6 +785,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
             arms.iter()
                 .map(|arm| {
@@ -568,6 +798,7 @@ fn rewrite_expr(
                                 class_info,
                                 method_to_class,
                                 constrained_funcs,
+                                instances,
                             ),
                         },
                         arm.anno.clone(),
@@ -583,6 +814,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
             Box::new(rewrite_expr(
                 t,
@@ -590,6 +822,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
             Box::new(rewrite_expr(
                 e,
@@ -597,6 +830,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
         ),
 
@@ -608,6 +842,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
             Box::new(rewrite_expr(
                 r,
@@ -615,6 +850,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
         ),
 
@@ -626,6 +862,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
         ),
 
@@ -637,6 +874,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
             Box::new(rewrite_expr(
                 in_expr,
@@ -644,6 +882,7 @@ fn rewrite_expr(
                 class_info,
                 method_to_class,
                 constrained_funcs,
+                instances,
             )),
         ),
 
@@ -653,11 +892,9 @@ fn rewrite_expr(
     TermExprNode::new(node, anno)
 }
 
-fn elaborate_func_defs(
-    module: &ResolvedModule<TcMetadata, Span>,
-    classes: &HashMap<String, ClassRuntimeInfo>,
-) -> Vec<TermDefinition<TcMetadata, Span>> {
+fn build_method_to_class(module: &ResolvedModule<TcMetadata, Span>) -> HashMap<String, String> {
     let mut method_to_class = HashMap::<String, String>::new();
+
     for class_def in &module.class_defs {
         for method in &class_def.methods {
             let short_name = method
@@ -672,7 +909,14 @@ fn elaborate_func_defs(
         }
     }
 
+    method_to_class
+}
+
+fn build_constrained_func_info(
+    module: &ResolvedModule<TcMetadata, Span>,
+) -> HashMap<String, ConstrainedFuncInfo> {
     let mut constrained_funcs = HashMap::<String, ConstrainedFuncInfo>::new();
+
     for def in &module.func_defs {
         if let Some(sig) = &def.signature {
             if !sig.predicates.is_empty() {
@@ -689,6 +933,16 @@ fn elaborate_func_defs(
             }
         }
     }
+
+    constrained_funcs
+}
+
+fn elaborate_func_defs(
+    module: &ResolvedModule<TcMetadata, Span>,
+    classes: &HashMap<String, ClassRuntimeInfo>,
+) -> Vec<TermDefinition<TcMetadata, Span>> {
+    let method_to_class = build_method_to_class(module);
+    let constrained_funcs = build_constrained_func_info(module);
 
     module
         .func_defs
@@ -712,19 +966,13 @@ fn elaborate_func_defs(
                 );
             }
 
-            for inst in &module.instance_defs {
-                if inst.context.is_empty() {
-                    let dict_name = instance_dict_name(&inst.head);
-                    evidence_env.extend(inst.head.clone(), mk_var(&dict_name));
-                }
-            }
-
             new_body = rewrite_expr(
                 &new_body,
                 &evidence_env,
                 classes,
                 &method_to_class,
                 &constrained_funcs,
+                &module.instance_defs,
             );
 
             let new_ty = sig
@@ -748,18 +996,66 @@ fn elaborate_func_defs(
         .collect()
 }
 
+fn free_type_vars_in_type(ty: &TypeExpr, out: &mut Vec<String>) {
+    match ty {
+        TypeExpr::TyVar(name) => {
+            if !out.contains(name) {
+                out.push(name.clone());
+            }
+        }
+
+        TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
+            free_type_vars_in_type(lhs, out);
+            free_type_vars_in_type(rhs, out);
+        }
+
+        TypeExpr::TyForAll(name, _, body) => {
+            free_type_vars_in_type(body, out);
+            out.retain(|v| v != name);
+        }
+
+        TypeExpr::Qualified(preds, body) => {
+            for pred in preds {
+                free_type_vars_in_predicate(pred, out);
+            }
+
+            free_type_vars_in_type(body, out);
+        }
+
+        TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}
+    }
+}
+
+fn free_type_vars_in_predicate(pred: &Predicate, out: &mut Vec<String>) {
+    for arg in &pred.args {
+        free_type_vars_in_type(arg, out);
+    }
+}
+
+fn free_type_vars_in_instance(inst: &InstanceDefinition<TcMetadata, Span>) -> Vec<String> {
+    let mut out = Vec::new();
+
+    for pred in &inst.context {
+        free_type_vars_in_predicate(pred, &mut out);
+    }
+
+    free_type_vars_in_predicate(&inst.head, &mut out);
+
+    out
+}
+
 fn synthesize_instance_dict_defs(
     module: &ResolvedModule<TcMetadata, Span>,
     classes: &HashMap<String, ClassRuntimeInfo>,
 ) -> Vec<TermDefinition<TcMetadata, Span>> {
     let mut out = Vec::new();
 
-    for inst in &module.instance_defs {
-        if !inst.context.is_empty() {
-            continue;
-        }
+    let method_to_class = build_method_to_class(module);
+    let constrained_funcs = build_constrained_func_info(module);
 
+    for inst in &module.instance_defs {
         let dict_name = instance_dict_name(&inst.head);
+
         let class_rt = classes
             .get(&inst.head.class_name)
             .unwrap_or_else(|| panic!("missing runtime class info for {}", inst.head.class_name));
@@ -770,7 +1066,49 @@ fn synthesize_instance_dict_defs(
             .find(|c| c.name == inst.head.class_name)
             .unwrap_or_else(|| panic!("missing class definition for {}", inst.head.class_name));
 
+        let mut evidence_env = EvidenceEnv::default();
+        let mut context_dict_names = Vec::new();
+
+        for pred in &inst.context {
+            let dict_arg_name = format!("arg${}", instance_dict_name(pred));
+            context_dict_names.push(dict_arg_name.clone());
+            evidence_env.extend(pred.clone(), mk_var(&dict_arg_name));
+        }
+
         let mut field_exprs = Vec::new();
+
+        let class_subst = subst_from_class_head(&class_def.params, &inst.head.args);
+
+        // First synthesize superclass dictionary fields.
+        //
+        // For:
+        //
+        //   class Eq a => Ord a where ...
+        //   instance Ord Int where ...
+        //
+        // the Ord Int dictionary begins with evidence for Eq Int.
+        for superclass_pred in &class_def.superclasses {
+            let needed_superclass = instantiate_predicate_with_subst(superclass_pred, &class_subst);
+
+            let superclass_evidence = resolve_evidence(
+                &needed_superclass,
+                &evidence_env,
+                classes,
+                &module.instance_defs,
+                &mut Vec::new(),
+            )
+            .unwrap_or_else(|| {
+                panic!(
+                    "missing superclass evidence during class elaboration: instance {} requires {}",
+                    inst.head.pretty(),
+                    needed_superclass.pretty(),
+                )
+            });
+
+            field_exprs.push(superclass_evidence);
+        }
+
+        // Then synthesize ordinary method fields.
         for class_method in &class_def.methods {
             let short_name = class_method
                 .name
@@ -790,18 +1128,48 @@ fn synthesize_instance_dict_defs(
                     )
                 });
 
-            field_exprs.push(impl_method.body.clone());
+            let rewritten_method = rewrite_expr(
+                &impl_method.body,
+                &evidence_env,
+                classes,
+                &method_to_class,
+                &constrained_funcs,
+                &module.instance_defs,
+            );
+
+            field_exprs.push(rewritten_method);
         }
 
-        let dict_expr = field_exprs
+        let mut dict_expr = field_exprs
             .into_iter()
             .fold(mk_con(&class_rt.dict_ctor), |acc, field| mk_app(acc, field));
 
+        for dict_arg_name in context_dict_names.iter().rev() {
+            let anno = dict_expr.anno.clone();
+            dict_expr = TermExprNode::new(
+                TermExpr::Abs(dict_arg_name.clone(), None, Box::new(dict_expr)),
+                anno,
+            );
+        }
+
         let dict_ty = dict_type_for_pred(&inst.head, classes);
+
+        let final_ty = inst.context.iter().rev().fold(dict_ty, |acc, pred| {
+            TypeExpr::make_arr(dict_type_for_pred(pred, classes), acc)
+        });
+
+        let quantifiers = free_type_vars_in_instance(inst)
+            .into_iter()
+            .map(|name| (name, Kind::Star))
+            .collect::<Vec<_>>();
 
         out.push(TermDefinition {
             name: dict_name,
-            signature: Some(Scheme::mono(dict_ty)),
+            signature: Some(Scheme {
+                quantifiers,
+                predicates: Vec::new(),
+                ty: final_ty,
+            }),
             body: dict_expr,
         });
     }

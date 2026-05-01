@@ -37,27 +37,49 @@ pub struct ModuleApi {
     pub types: HashMap<String, SymbolId>,
     pub constructors: HashMap<String, SymbolId>,
     pub classes: HashMap<String, SymbolId>,
-}
 
+    pub class_methods: HashMap<String, Vec<String>>,
+}
 impl ModuleApi {
     pub fn filtered(&self, spec: &ImportSpec) -> Self {
         match spec {
             ImportSpec::All => self.clone(),
+
             ImportSpec::Only(names) => {
                 let mut out = Self::default();
 
                 for name in names {
-                    if let Some(v) = self.terms.get(name) {
-                        out.terms.insert(name.clone(), v.clone());
+                    if let Some(sym) = self.terms.get(name) {
+                        out.terms.insert(name.clone(), sym.clone());
                     }
-                    if let Some(v) = self.types.get(name) {
-                        out.types.insert(name.clone(), v.clone());
+
+                    if let Some(sym) = self.types.get(name) {
+                        out.types.insert(name.clone(), sym.clone());
                     }
-                    if let Some(v) = self.constructors.get(name) {
-                        out.constructors.insert(name.clone(), v.clone());
+
+                    if let Some(sym) = self.constructors.get(name) {
+                        out.constructors.insert(name.clone(), sym.clone());
                     }
-                    if let Some(v) = self.classes.get(name) {
-                        out.classes.insert(name.clone(), v.clone());
+
+                    if let Some(sym) = self.classes.get(name) {
+                        out.classes.insert(name.clone(), sym.clone());
+
+                        // Solveig's current simple import rule is:
+                        //
+                        //   import M(Eq)
+                        //
+                        // makes the class and its methods available. We do not have
+                        // Haskell-style C / C(..) / C(method) import syntax yet, so
+                        // selecting a class imports all of its method terms.
+                        if let Some(method_names) = self.class_methods.get(name) {
+                            out.class_methods.insert(name.clone(), method_names.clone());
+
+                            for method_name in method_names {
+                                if let Some(method_sym) = self.terms.get(method_name) {
+                                    out.terms.insert(method_name.clone(), method_sym.clone());
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -82,6 +104,49 @@ pub struct TypedModuleApi {
 }
 
 impl TypedModuleApi {
+    fn include_class_with_superclasses(&self, out: &mut Self, sym: &SymbolId) {
+        if out.class_defs.contains_key(sym) {
+            return;
+        }
+
+        let Some(class_def) = self.class_defs.get(sym) else {
+            return;
+        };
+
+        out.class_defs.insert(sym.clone(), class_def.clone());
+
+        // Keep superclass definitions from the same typed API if they are present.
+        // This is what lets `import M(BoundedLike)` internally retain `OrdLike`
+        // and `EqLike` when all three are defined in M.
+        //
+        // If a superclass comes from another module, that module must still be
+        // imported in the usual way. Prelude classes are already imported
+        // implicitly for ordinary user modules.
+        for superclass in &class_def.superclasses {
+            let Some((super_sym, _)) = self
+                .class_defs
+                .iter()
+                .find(|(_, candidate)| candidate.name == superclass.class_name)
+            else {
+                continue;
+            };
+
+            self.include_class_with_superclasses(out, super_sym);
+        }
+    }
+
+    fn include_class_methods(&self, out: &mut Self, class_def: &ClassDefinition) {
+        for method in &class_def.methods {
+            let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
+
+            for (sym, scheme) in &self.term_schemes {
+                if sym.name == short_name {
+                    out.term_schemes.insert(sym.clone(), scheme.clone());
+                }
+            }
+        }
+    }
+
     pub fn filtered(&self, spec: &ImportSpec) -> Self {
         match spec {
             ImportSpec::All => self.clone(),
@@ -107,21 +172,41 @@ impl TypedModuleApi {
                             out.constructor_types.insert(sym.clone(), ty.clone());
                         }
                     }
+                }
 
-                    for (sym, class_def) in &self.class_defs {
-                        let class_selected = &sym.name == name;
+                let mut selected_classes = Vec::<(SymbolId, bool)>::new();
 
-                        let method_selected = class_def.methods.iter().any(|method| {
-                            method.name.rsplit('.').next().unwrap_or(&method.name) == name
-                        });
+                for (sym, class_def) in &self.class_defs {
+                    let class_selected = names.iter().any(|name| name == &sym.name);
 
-                        if class_selected || method_selected {
-                            out.class_defs.insert(sym.clone(), class_def.clone());
+                    let method_selected = class_def.methods.iter().any(|method| {
+                        let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
+
+                        names.iter().any(|name| name == short_name)
+                    });
+
+                    if class_selected || method_selected {
+                        // If the class itself was selected, expose its method terms too.
+                        // If only one method was selected, keep the owning class definition
+                        // internally, but do not implicitly expose the rest of the methods.
+                        selected_classes.push((sym.clone(), class_selected));
+                    }
+                }
+
+                for (sym, include_methods) in selected_classes {
+                    self.include_class_with_superclasses(&mut out, &sym);
+
+                    if include_methods {
+                        if let Some(class_def) = self.class_defs.get(&sym) {
+                            self.include_class_methods(&mut out, class_def);
                         }
                     }
                 }
 
+                // Importing a module makes its instances available. The explicit
+                // import list controls names, not instance availability.
                 out.instance_defs = self.instance_defs.clone();
+
                 out
             }
         }
@@ -498,22 +583,30 @@ pub fn build_module_api<'src>(module_name: &ModuleName, parsed: &ParsedModule<'s
             }
 
             SurfaceDefinition::ClassDef { name, methods, .. } => {
+                let class_name = name.0.to_string();
+
                 api.classes.insert(
-                    name.0.to_string(),
+                    class_name.clone(),
                     SymbolId {
                         module: module_name.clone(),
-                        name: name.0.to_string(),
+                        name: class_name.clone(),
                     },
                 );
 
+                let mut method_names = Vec::new();
+
                 for method in methods {
-                    api.terms
-                        .entry(method.name.0.to_string())
-                        .or_insert(SymbolId {
-                            module: module_name.clone(),
-                            name: method.name.0.to_string(),
-                        });
+                    let method_name = method.name.0.to_string();
+
+                    api.terms.entry(method_name.clone()).or_insert(SymbolId {
+                        module: module_name.clone(),
+                        name: method_name.clone(),
+                    });
+
+                    method_names.push(method_name);
                 }
+
+                api.class_methods.insert(class_name, method_names);
             }
 
             SurfaceDefinition::InstanceDef { .. } => {}

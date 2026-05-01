@@ -90,6 +90,30 @@ nestedEqUse =
     let b = BoxInt 100 in
     sameTwice a b
 
+eqMaybeIntExample : Bool
+eqMaybeIntExample = eq (Just 1) (Just 1)
+
+eqMaybeBoolExample : Bool
+eqMaybeBoolExample = eq (Just True) (Just True)
+
+eqNestedMaybeIntExample : Bool
+eqNestedMaybeIntExample = eq (Just (Just 1)) (Just (Just 1))
+
+eqListIntExample : Bool
+eqListIntExample = eq [1, 2, 3] [1, 2, 3]
+
+eqListMaybeIntExample : Bool
+eqListMaybeIntExample = eq [Just 1, Nothing] [Just 1, Nothing]
+
+eqListInt : Bool
+eqListInt = eq [1, 2, 3] [1, 2, 3]
+
+eqListMaybeInt : Bool
+eqListMaybeInt = eq [Just 1, Nothing] [Just 1, Nothing]
+
+eqMaybeListInt : Bool
+eqMaybeListInt = eq (Just [1, 2]) (Just [1, 2])
+
 
 advancedTypeclassRegressionMain : Int
 advancedTypeclassRegressionMain =
@@ -110,4 +134,10 @@ advancedTypeclassRegressionMain =
     let o = mapBoxConst in
     let p = nestedBoxMaybe in
     let q = nestedEqUse in
+    let q2 = eqMaybeIntExample in 
+    let q3 = eqMaybeBoolExample in 
+    let q4 = eqNestedMaybeIntExample in
+    let q5 = eqListIntExample in 
+    let q6 = eqListMaybeIntExample in
+    let q7 = [eqListInt, eqListMaybeInt, eqMaybeListInt] in
     123

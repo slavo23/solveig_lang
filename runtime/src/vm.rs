@@ -417,6 +417,51 @@ impl Vm {
         self.enter_function(program, mode, chunk_id, BoundPrefix::EMPTY, arg_count);
     }
 
+    fn invoke_known_function(
+        &mut self,
+        program: &BytecodeProgram,
+        mode: InvokeMode,
+        chunk_id: usize,
+        arg_count: usize,
+    ) -> Option<Value> {
+        let (capture_count, arity) = chunk_function_shape(program, chunk_id);
+
+        if capture_count != 0 {
+            panic!(
+                "known call to captured function chunk {} (captures {}, arity {})",
+                chunk_id, capture_count, arity
+            );
+        }
+
+        if arg_count == arity {
+            self.enter_known_function(program, mode, chunk_id, arg_count);
+            None
+        } else if arg_count < arity {
+            if arg_count == 0 {
+                let chunk = u32::try_from(chunk_id)
+                    .unwrap_or_else(|_| panic!("chunk id {} does not fit in u32", chunk_id));
+                let arity = u16::try_from(arity)
+                    .unwrap_or_else(|_| panic!("arity {} does not fit in u16", arity));
+
+                Some(Value::FunctionRef { chunk, arity })
+            } else {
+                self.maybe_gc();
+                let applied_args = self.pop_payload(arg_count);
+
+                Some(self.alloc_heap(HeapObject::PartialApp {
+                    chunk: chunk_id,
+                    captures: PayloadStore::empty(),
+                    applied_args,
+                }))
+            }
+        } else {
+            panic!(
+                "over-application of known function chunk {} (arity {}, got {})",
+                chunk_id, arity, arg_count
+            );
+        }
+    }
+
     #[inline(always)]
     fn take_callee_under_args(&mut self, arg_count: usize) -> Value {
         let callee_pos = self.stack.len() - arg_count - 1;
@@ -906,7 +951,12 @@ impl Vm {
                     let chunk_id = chunk as usize;
                     let n = arg_count as usize;
 
-                    self.enter_known_function(program, InvokeMode::Call, chunk_id, n);
+                    if let Some(val) =
+                        self.invoke_known_function(program, InvokeMode::Call, chunk_id, n)
+                    {
+                        self.push(val);
+                    }
+
                     code = &program.chunks[self.chunk].code;
                 }
                 Instr::TailCallN { arg_count } => {
@@ -925,7 +975,13 @@ impl Vm {
                     let chunk_id = chunk as usize;
                     let n = arg_count as usize;
 
-                    self.enter_known_function(program, InvokeMode::TailCall, chunk_id, n);
+                    if let Some(val) =
+                        self.invoke_known_function(program, InvokeMode::TailCall, chunk_id, n)
+                        && let Some(done) = self.resume_after_return(val)
+                    {
+                        return done;
+                    }
+
                     code = &program.chunks[self.chunk].code;
                 }
                 Instr::Return => {
@@ -1050,11 +1106,19 @@ fn match_pattern_inner(
     }
 }
 
-fn chunk_arity(program: &BytecodeProgram, chunk_id: usize) -> usize {
+fn chunk_function_shape(program: &BytecodeProgram, chunk_id: usize) -> (usize, usize) {
     match program.chunk(chunk_id).kind {
-        ChunkKind::Function { arity, .. } => arity as usize,
+        ChunkKind::Function {
+            capture_count,
+            arity,
+        } => (capture_count as usize, arity as usize),
         ChunkKind::GlobalThunk => panic!("thunk has no arity"),
     }
+}
+
+fn chunk_arity(program: &BytecodeProgram, chunk_id: usize) -> usize {
+    let (_, arity) = chunk_function_shape(program, chunk_id);
+    arity
 }
 
 fn find_bool_tag(arities: &[(String, u16, u16)], name: &str) -> u16 {

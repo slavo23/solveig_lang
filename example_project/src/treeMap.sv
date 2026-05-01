@@ -1,11 +1,11 @@
 data Ord3 = Lt | Eq | Gt
-data Comparator a = Comparator (a -> a -> Ord3)
+
+class OrdKey k where
+    cmp : k -> k -> Ord3
 
 data Map k v =
     Empty
   | Node Int k v (Map k v) (Map k v)
-
-data Option a = None | Some a
 
 data Entry k v = Entry k v
 
@@ -17,13 +17,8 @@ max2 : Int -> Int -> Int
 max2 a b =
     if a < b then b else a
 
-compareWith : forall a. Comparator a -> a -> a -> Ord3
-compareWith cmp x y =
-    case cmp of
-        Comparator f => f x y
-
 empty : forall k v. Map k v
-empty = Empty;
+empty = Empty
 
 singleton : forall k v. k -> v -> Map k v
 singleton key value =
@@ -48,9 +43,8 @@ rotateLeft tree =
                 Empty => tree
               | Node _ rKey rValue rLeft rRight =>
                     mkNode rKey rValue (mkNode key value left rLeft) rRight
-            
 
-rotateRight : forall k v. Map k v -> Map k v;
+rotateRight : forall k v. Map k v -> Map k v
 rotateRight tree =
     case tree of
         Empty => Empty
@@ -59,7 +53,6 @@ rotateRight tree =
                 Empty => tree
               | Node _ lKey lValue lLeft lRight =>
                     mkNode lKey lValue lLeft (mkNode key value lRight right)
-            
 
 rebalance : forall k v. k -> v -> Map k v -> Map k v -> Map k v
 rebalance key value left right =
@@ -73,7 +66,6 @@ rebalance key value left right =
                     rotateRight (mkNode key value left right)
                 else
                     rotateRight (mkNode key value (rotateLeft left) right)
-        
     else if hr > hl + 1 then
         case right of
             Empty => mkNode key value left right
@@ -82,40 +74,37 @@ rebalance key value left right =
                     rotateLeft (mkNode key value left right)
                 else
                     rotateLeft (mkNode key value left (rotateRight right))
-        
     else
         mkNode key value left right
 
-lookup : forall k v. Comparator k -> k -> Map k v -> Option v;
-lookup cmp key tree =
+lookup : forall k v. OrdKey k => k -> Map k v -> Maybe v
+lookup key tree =
     case tree of
-        Empty => None
+        Empty => Nothing
       | Node _ nodeKey nodeValue left right =>
-            case compareWith cmp key nodeKey of
-                Lt => lookup cmp key left
-              | Eq => Some nodeValue
-              | Gt => lookup cmp key right
-            
+            case cmp key nodeKey of
+                Lt => lookup key left
+              | Eq => Just nodeValue
+              | Gt => lookup key right
 
-member : forall k v. Comparator k -> k -> Map k v -> Bool
-member cmp key tree =
-    case lookup cmp key tree of
-        None => False
-      | Some _ => True
+member : forall k v. OrdKey k => k -> Map k v -> Bool
+member key tree =
+    case lookup key tree of
+        Nothing => False
+      | Just _ => True
 
-insert : forall k v. Comparator k -> k -> v -> Map k v -> Map k v
-insert cmp key value tree =
+insert : forall k v. OrdKey k => k -> v -> Map k v -> Map k v
+insert key value tree =
     case tree of
         Empty => singleton key value
       | Node _ nodeKey nodeValue left right =>
-            case compareWith cmp key nodeKey of
+            case cmp key nodeKey of
                 Lt =>
-                    rebalance nodeKey nodeValue (insert cmp key value left) right
+                    rebalance nodeKey nodeValue (insert key value left) right
               | Eq =>
                     mkNode key value left right
               | Gt =>
-                    rebalance nodeKey nodeValue left (insert cmp key value right)
-            
+                    rebalance nodeKey nodeValue left (insert key value right)
 
 popMin : forall k v. Map k v -> PopMin k v
 popMin tree =
@@ -130,8 +119,6 @@ popMin tree =
                             PoppedMin key value right
                       | PoppedMin minKey minValue newLeft =>
                             PoppedMin minKey minValue (rebalance key value newLeft right)
-                    
-            
 
 joinMaps : forall k v. Map k v -> Map k v -> Map k v
 joinMaps left right =
@@ -145,22 +132,19 @@ joinMaps left right =
                         NoPopMin => left
                       | PoppedMin minKey minValue rightRest =>
                             rebalance minKey minValue left rightRest
-                    
-            
 
-delete : forall k v. Comparator k -> k -> Map k v -> Map k v
-delete cmp key tree =
+delete : forall k v. OrdKey k => k -> Map k v -> Map k v
+delete key tree =
     case tree of
         Empty => Empty
       | Node _ nodeKey nodeValue left right =>
-            case compareWith cmp key nodeKey of
+            case cmp key nodeKey of
                 Lt =>
-                    rebalance nodeKey nodeValue (delete cmp key left) right
+                    rebalance nodeKey nodeValue (delete key left) right
               | Eq =>
                     joinMaps left right
               | Gt =>
-                    rebalance nodeKey nodeValue left (delete cmp key right)
-            
+                    rebalance nodeKey nodeValue left (delete key right)
 
 size : forall k v. Map k v -> Int
 size tree =
@@ -179,16 +163,16 @@ toAscList : forall k v. Map k v -> [Entry k v]
 toAscList tree =
     toAscListGo tree []
 
-fromListGo : forall k v. Comparator k -> Map k v -> [Entry k v] -> Map k v
-fromListGo cmp acc xs =
+fromListGo : forall k v. OrdKey k => Map k v -> [Entry k v] -> Map k v
+fromListGo acc xs =
     case xs of
         [] => acc
       | Entry key value :: rest =>
-            fromListGo cmp (insert cmp key value acc) rest
+            fromListGo (insert key value acc) rest
 
-fromList : forall k v. Comparator k -> [Entry k v] -> Map k v
-fromList cmp xs =
-    fromListGo cmp Empty xs
+fromList : forall k v. OrdKey k => [Entry k v] -> Map k v
+fromList xs =
+    fromListGo Empty xs
 
 keysGo : forall k v. Map k v -> [k] -> [k]
 keysGo tree acc =
@@ -199,7 +183,7 @@ keysGo tree acc =
 
 keys : forall k v. Map k v -> [k]
 keys tree =
-    keysGo tree [];
+    keysGo tree []
 
 valuesGo : forall k v. Map k v -> [v] -> [v]
 valuesGo tree acc =
@@ -212,40 +196,36 @@ values : forall k v. Map k v -> [v]
 values tree =
     valuesGo tree []
 
-intCompare : Int -> Int -> Ord3
-intCompare x y =
-    if x < y then
-        Lt
-    else if x > y then
-        Gt
-    else
-        Eq
-
-intComparator : Comparator Int
-intComparator =
-    Comparator intCompare
+instance OrdKey Int where
+    cmp x y =
+        if x < y then
+            Lt
+        else if x > y then
+            Gt
+        else
+            Eq
 
 exampleMap : Map Int Int
 exampleMap =
-    fromList intComparator
+    fromList
         [ Entry 3 300
         , Entry 1 100
         , Entry 4 400
         , Entry 2 200
         ]
 
-exampleLookupHit : Option Int
+exampleLookupHit : Maybe Int
 exampleLookupHit =
-    lookup intComparator 3 exampleMap;
+    lookup 3 exampleMap
 
-exampleLookupMiss : Option Int
+exampleLookupMiss : Maybe Int
 exampleLookupMiss =
-    lookup intComparator 9 exampleMap;
+    lookup 9 exampleMap
 
 exampleMember : Bool
 exampleMember =
-    member intComparator 2 exampleMap;
+    member 2 exampleMap
 
 exampleDelete : Map Int Int
 exampleDelete =
-    delete intComparator 3 exampleMap;
+    delete 3 exampleMap

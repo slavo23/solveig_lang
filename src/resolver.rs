@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::env;
 
 use base::utils::span::Span;
@@ -503,18 +503,50 @@ impl Resolver {
         PatternNode::new(node, span)
     }
 
+    fn collect_surface_pattern_binders<'src>(
+        pat: &SpannedWrapper<SurfacePattern<'src>>,
+        out: &mut HashSet<String>,
+    ) {
+        match &pat.0 {
+            SurfacePattern::Var(name) => {
+                out.insert(name.to_string());
+            }
+            SurfacePattern::Wild => {}
+            SurfacePattern::Con(_, args) => {
+                for arg in args {
+                    Self::collect_surface_pattern_binders(arg, out);
+                }
+            }
+        }
+    }
+
+    fn resolve_term_ref_with_binders<'src>(
+        &self,
+        r: &NameRef<'src>,
+        cx: &ModuleContext,
+        bound_terms: &HashSet<String>,
+    ) -> String {
+        match r.segments.as_slice() {
+            [name] if bound_terms.contains(*name) => name.to_string(),
+            _ => self.resolve_term_ref(r, cx),
+        }
+    }
+
     fn resolve_surface_expr_in_module<'src>(
         &mut self,
         sf: &SpannedWrapper<SurfaceExpr<'src>>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
+        bound_terms: &HashSet<String>,
     ) -> TermExprNode<Span> {
         let span: Span = sf.1.into();
 
         let node = match &sf.0 {
             SurfaceExpr::Unit => TermExpr::Unit,
             SurfaceExpr::Hole => TermExpr::Hole,
-            SurfaceExpr::Var(var_name) => TermExpr::Var(self.resolve_term_ref(&var_name.0, cx)),
+            SurfaceExpr::Var(var_name) => {
+                TermExpr::Var(self.resolve_term_ref_with_binders(&var_name.0, cx, bound_terms))
+            }
             SurfaceExpr::Con(con_name) => TermExpr::Con(self.resolve_ctor_ref(&con_name.0, cx)),
 
             SurfaceExpr::Literal(lit) => match lit {
@@ -522,17 +554,24 @@ impl Resolver {
             },
 
             SurfaceExpr::App(lhs, rhs) => TermExpr::App(
-                Box::new(self.resolve_surface_expr_in_module(lhs, cx, local)),
-                Box::new(self.resolve_surface_expr_in_module(rhs, cx, local)),
+                Box::new(self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms)),
+                Box::new(self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms)),
             ),
 
             SurfaceExpr::Ann(expr, ty) => TermExpr::Anno(
-                Box::new(self.resolve_surface_expr_in_module(expr, cx, local)),
+                Box::new(self.resolve_surface_expr_in_module(expr, cx, local, bound_terms)),
                 self.resolve_surface_type_in_module(ty, cx, local),
             ),
 
             SurfaceExpr::Abs(params, body) => {
-                let mut body_node = self.resolve_surface_expr_in_module(body, cx, local);
+                let mut body_bound_terms = bound_terms.clone();
+
+                for (param_name, _) in params {
+                    body_bound_terms.insert(param_name.0.to_string());
+                }
+
+                let mut body_node =
+                    self.resolve_surface_expr_in_module(body, cx, local, &body_bound_terms);
 
                 for (param_name, param_ty_anno) in params.iter().rev() {
                     let param_ty = param_ty_anno
@@ -549,15 +588,15 @@ impl Resolver {
             }
 
             SurfaceExpr::IfThenElse(cond, then_branch, else_branch) => TermExpr::IfThenElse(
-                Box::new(self.resolve_surface_expr_in_module(cond, cx, local)),
-                Box::new(self.resolve_surface_expr_in_module(then_branch, cx, local)),
-                Box::new(self.resolve_surface_expr_in_module(else_branch, cx, local)),
+                Box::new(self.resolve_surface_expr_in_module(cond, cx, local, bound_terms)),
+                Box::new(self.resolve_surface_expr_in_module(then_branch, cx, local, bound_terms)),
+                Box::new(self.resolve_surface_expr_in_module(else_branch, cx, local, bound_terms)),
             ),
 
             SurfaceExpr::Case(scrutinee, arms) => TermExpr::Case(
-                Box::new(self.resolve_surface_expr_in_module(scrutinee, cx, local)),
+                Box::new(self.resolve_surface_expr_in_module(scrutinee, cx, local, bound_terms)),
                 arms.iter()
-                    .map(|arm| self.resolve_surface_case_arm_in_module(arm, cx, local))
+                    .map(|arm| self.resolve_surface_case_arm_in_module(arm, cx, local, bound_terms))
                     .collect(),
             ),
 
@@ -577,8 +616,8 @@ impl Resolver {
 
                 TermExpr::BinaryOperator(
                     core_binop,
-                    Box::new(self.resolve_surface_expr_in_module(lhs, cx, local)),
-                    Box::new(self.resolve_surface_expr_in_module(rhs, cx, local)),
+                    Box::new(self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms)),
+                    Box::new(self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms)),
                 )
             }
 
@@ -589,13 +628,19 @@ impl Resolver {
 
                 TermExpr::UnaryOperator(
                     core_unop,
-                    Box::new(self.resolve_surface_expr_in_module(rhs, cx, local)),
+                    Box::new(self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms)),
                 )
             }
 
             SurfaceExpr::Let(binder_name, binder_expr, in_expr) => {
-                let resolved_binder = self.resolve_surface_expr_in_module(binder_expr, cx, local);
-                let resolved_in_expr = self.resolve_surface_expr_in_module(in_expr, cx, local);
+                let resolved_binder =
+                    self.resolve_surface_expr_in_module(binder_expr, cx, local, bound_terms);
+
+                let mut body_bound_terms = bound_terms.clone();
+                body_bound_terms.insert(binder_name.0.to_string());
+
+                let resolved_in_expr =
+                    self.resolve_surface_expr_in_module(in_expr, cx, local, &body_bound_terms);
 
                 TermExpr::Let(
                     binder_name.0.to_string(),
@@ -613,11 +658,17 @@ impl Resolver {
         sf: &SpannedWrapper<SurfaceMatchArm<'src>>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
+        bound_terms: &HashSet<String>,
     ) -> CaseArmNode<Span> {
+        let pattern = self.resolve_surface_pattern_in_module(&sf.0.pattern, cx);
+
+        let mut arm_bound_terms = bound_terms.clone();
+        Self::collect_surface_pattern_binders(&sf.0.pattern, &mut arm_bound_terms);
+
         CaseArmNode::new(
             CaseArm {
-                pattern: self.resolve_surface_pattern_in_module(&sf.0.pattern, cx),
-                expr: self.resolve_surface_expr_in_module(&sf.0.expr, cx, local),
+                pattern,
+                expr: self.resolve_surface_expr_in_module(&sf.0.expr, cx, local, &arm_bound_terms),
             },
             sf.1.into(),
         )
@@ -638,7 +689,13 @@ impl Resolver {
         local: &LocalResolverEnv,
     ) -> TermExprNode<Span> {
         let span: Span = body.1.into();
-        let mut body_node = self.resolve_surface_expr_in_module(body, cx, local);
+        let mut bound_terms = HashSet::new();
+
+        for param in params {
+            bound_terms.insert(param.0.to_string());
+        }
+
+        let mut body_node = self.resolve_surface_expr_in_module(body, cx, local, &bound_terms);
 
         for param in params.iter().rev() {
             body_node = TermExprNode::new(
@@ -660,7 +717,13 @@ impl Resolver {
         local: &LocalResolverEnv,
     ) -> TermExprNode<Span> {
         let span: Span = body.1.into();
-        let mut body_node = self.resolve_surface_expr_in_module(body, cx, local);
+        let mut bound_terms = HashSet::new();
+
+        for param in params {
+            bound_terms.insert(param.0.to_string());
+        }
+
+        let mut body_node = self.resolve_surface_expr_in_module(body, cx, local, &bound_terms);
 
         let mut remaining = &sig.ty;
         let mut annos: Vec<(String, TypeExpr)> = Vec::new();

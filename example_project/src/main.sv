@@ -8,7 +8,10 @@ import quicksort(sampleSortedQuickSort)
 import mergesort(sampleSortedMergeSort)
 import knapsack(sampleTreeDp)
 import treeMap(fromList, Map, intComparator, Entry, size)
-import classes(advancedTypeclassRegressionMain)
+import tcTests.classes(advancedTypeclassRegressionMain)
+import tcTests.tcStressTest(typeclassSuperclassSuccessMain);
+import tcTests.tcImportClient(importSmokeMain)
+import tcTests.coolStuff(coolTypeclassExamplesMain)
 
 runSudokuReadyExample = solveBoard samplePuzzle
 runNQueensReadyExample = solveNQueensCount 8
@@ -22,7 +25,7 @@ runKnapsackExample = sampleTreeDp
 treeFromList : Map Int Int
 treeFromList =
     let intEntries = (map (fun iVal => Entry iVal iVal) (range 1 20000 True)) in 
-        fromList intComparator intEntries
+        fromList intEntries
 
 {- if you want the results, just copy-paste the particular example directly into main -}
 runAllExamplesAndDiscardResult = 
@@ -33,6 +36,9 @@ runAllExamplesAndDiscardResult =
     let five = runQuicksortExample in
     let six = runMergeSortExample in
     let seven = runKnapsackExample in
-    let eight = advancedTypeclassRegressionMain in ()
+    let eight = advancedTypeclassRegressionMain in
+    let nine = typeclassSuperclassSuccessMain in
+    let ten = importSmokeMain in
+    let eleven = coolTypeclassExamplesMain in ()
 
 main = runAllExamplesAndDiscardResult

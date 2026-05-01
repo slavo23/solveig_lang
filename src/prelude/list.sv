@@ -26,6 +26,9 @@ foldl f acc xs =
         [] => acc
         | y :: ys => foldl f (f acc y) ys;
 
+concat : forall a. [[a]] -> [a]
+concat xss = foldr append [] xss
+
 append : forall a. [a] -> [a] -> [a];
 append xs ys =
     case xs of
