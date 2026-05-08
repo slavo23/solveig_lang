@@ -1,5 +1,6 @@
 data Bool = True | False;
 data Maybe a = Just a | Nothing;
+data Either a b = Left a | Right b
 data Pair a b = MkPair a b;
 data Int = MkInt;
 

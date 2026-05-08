@@ -262,18 +262,6 @@ fn match_type_pattern(
     }
 }
 
-fn predicate_matches(pattern: &Predicate, actual: &Predicate) -> bool {
-    if pattern.class_name != actual.class_name || pattern.args.len() != actual.args.len() {
-        return false;
-    }
-
-    let mut subst = HashMap::<String, TypeExpr>::new();
-    pattern
-        .args
-        .iter()
-        .zip(actual.args.iter())
-        .all(|(p, a)| match_type_pattern(p, a, &mut subst))
-}
 
 fn match_predicate_pattern(
     pattern: &Predicate,
@@ -486,13 +474,6 @@ fn synthesize_dict_data_defs(
 
             let method_field_types = class_def.methods.iter().map(|m| m.scheme.ty.clone());
 
-            // Dictionary layout:
-            //
-            //   MkOrdDict
-            //       superEq
-            //       less
-            //
-            // Superclass dictionaries always come before method fields.
             let field_types = superclass_field_types
                 .chain(method_field_types)
                 .collect::<Vec<_>>();
@@ -1079,14 +1060,7 @@ fn synthesize_instance_dict_defs(
 
         let class_subst = subst_from_class_head(&class_def.params, &inst.head.args);
 
-        // First synthesize superclass dictionary fields.
-        //
-        // For:
-        //
-        //   class Eq a => Ord a where ...
-        //   instance Ord Int where ...
-        //
-        // the Ord Int dictionary begins with evidence for Eq Int.
+
         for superclass_pred in &class_def.superclasses {
             let needed_superclass = instantiate_predicate_with_subst(superclass_pred, &class_subst);
 
