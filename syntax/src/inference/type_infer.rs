@@ -1,5 +1,6 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
 
+use crate::inference::exhaustiveness;
 use crate::inference::holes::HoleInfo;
 use crate::inference::inference_ctx::{Context, ContextEntry};
 use base::utils::diagnostics::{FileSpan, TypeError};
@@ -1362,6 +1363,16 @@ impl TypeChecker {
                 arm.anno.clone(),
             ));
         }
+
+        let scrutinee_type_for_exhaustiveness = self.zonk_type(&theta.apply(&scrutinee_type));
+
+        exhaustiveness::check_case(
+            &self.file_id,
+            &self.constructor_types,
+            &scrutinee_type_for_exhaustiveness,
+            arms,
+            span.clone(),
+        )?;
 
         let final_type = theta.apply(&result_type);
         let elaborated = elab_node(

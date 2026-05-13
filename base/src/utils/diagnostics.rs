@@ -177,6 +177,29 @@ pub enum TypeError {
         expected: String,
         cause: Box<TypeError>,
     },
+    NonExhaustivePatterns {
+        span: FileSpan,
+        scrutinee_type: String,
+        missing: Vec<String>,
+    },
+}
+
+fn format_missing_patterns_note(scrutinee_type: &str, missing: &[String]) -> String {
+    match missing {
+        [] => format!(
+            "scrutinee type: `{}`\nmissing pattern:\n  _",
+            scrutinee_type
+        ),
+        [one] => format!(
+            "scrutinee type: `{}`\nmissing pattern:\n  {}",
+            scrutinee_type, one
+        ),
+        many => format!(
+            "scrutinee type: `{}`\nmissing pattern examples:\n  {}",
+            scrutinee_type,
+            many.join("\n  ")
+        ),
+    }
 }
 
 impl TypeError {
@@ -217,6 +240,19 @@ impl TypeError {
                 span.clone(),
                 "this case expression needs at least one arm",
             )),
+            TypeError::NonExhaustivePatterns {
+                span,
+                scrutinee_type,
+                missing,
+            } => CompilerDiagnostic::new("TC0016", "non-exhaustive pattern match")
+                .with_label(DiagnosticLabel::primary(
+                    span.clone(),
+                    format!(
+                        "this case expression does not cover all values of type `{}`",
+                        scrutinee_type
+                    ),
+                ))
+                .with_note(format_missing_patterns_note(scrutinee_type, missing)),
 
             TypeError::SubtypeMismatch { span, left, right } => CompilerDiagnostic::new(
                 "TC0005",
@@ -395,6 +431,7 @@ impl TypeError {
             | TypeError::UnknownConstructor { span, .. }
             | TypeError::UnknownPatternConstructor { span, .. }
             | TypeError::EmptyCaseExpression { span }
+            | TypeError::NonExhaustivePatterns { span, .. }
             | TypeError::SubtypeMismatch { span, .. }
             | TypeError::InstantiateLeftFailed { span, .. }
             | TypeError::InstantiateRightFailed { span, .. }
@@ -432,6 +469,10 @@ impl TypeError {
             TypeError::EmptyCaseExpression { span } => vec![DiagnosticLabel::primary(
                 span.clone(),
                 "this case expression needs at least one arm",
+            )],
+            TypeError::NonExhaustivePatterns { span, .. } => vec![DiagnosticLabel::primary(
+                span.clone(),
+                "this case expression does not cover all possible inputs",
             )],
 
             TypeError::SubtypeMismatch { span, left, .. } => vec![DiagnosticLabel::primary(
@@ -559,6 +600,11 @@ impl TypeError {
                 notes.push(format!("the class requires `{}`", expected));
                 notes
             }
+            TypeError::NonExhaustivePatterns {
+                    scrutinee_type,
+                    missing,
+                    ..
+                } => vec![format_missing_patterns_note(scrutinee_type, missing)],
 
             _ => Vec::new(),
         }

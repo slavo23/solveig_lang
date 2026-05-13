@@ -444,7 +444,7 @@ impl Resolver {
         )
     }
 
-    pub fn resolve_surface_type_in_module<'src>(
+    fn resolve_surface_type_in_module<'src>(
         &self,
         sf: &SpannedWrapper<SurfaceTy<'src>>,
         cx: &ModuleContext,

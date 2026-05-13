@@ -1,0 +1,690 @@
+use std::collections::{HashMap, HashSet};
+
+use base::utils::diagnostics::{FileSpan, TypeError};
+use base::utils::span::Span;
+use core::ast::{CaseArmNode, Literal, Pattern, PatternNode, Predicate, Pretty, TypeExpr};
+
+const MAX_MISSING_EXAMPLES: usize = 3;
+
+/// Maranget-style exhaustiveness checking.
+///
+/// This checker implements the standard usefulness idea:
+///
+///   A case expression is exhaustive iff the wildcard vector is not useful
+///   with respect to the pattern matrix formed by the case arms.
+///
+/// Current Solveig patterns:
+///
+///   - constructor patterns
+///   - variable patterns
+///   - wildcard patterns
+///
+/// The internal representation already has a literal head so adding literal
+/// patterns later is local:
+///
+///   1. add `Pattern::Lit(Literal)` to the AST
+///   2. lower it in `lower_pattern`
+///   3. decide how precise literal domains should be
+pub fn check_case(
+    file_id: &str,
+    constructor_types: &HashMap<String, TypeExpr>,
+    scrutinee_type: &TypeExpr,
+    arms: &[CaseArmNode<Span>],
+    case_span: Span,
+) -> Result<(), TypeError> {
+    let constructor_env = ConstructorEnv::from_constructor_types(constructor_types);
+    let checker = ExhaustivenessChecker { constructor_env };
+
+    let scrutinee_type = normalize_type(scrutinee_type);
+
+    let mut matrix = arms
+        .iter()
+        .map(|arm| vec![lower_pattern(&arm.node.pattern)])
+        .collect::<Vec<_>>();
+
+    let vector = vec![Pat::Wild];
+    let types = vec![scrutinee_type.clone()];
+
+    let mut missing = Vec::new();
+
+    for _ in 0..MAX_MISSING_EXAMPLES {
+        let Some(witness) = checker.useful(&matrix, &vector, &types) else {
+            break;
+        };
+
+        let rendered = pretty_witness_row(&witness);
+
+        if missing.contains(&rendered) {
+            break;
+        }
+
+        missing.push(rendered);
+        matrix.push(witness_to_pattern_row(&witness));
+    }
+
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(TypeError::NonExhaustivePatterns {
+            span: FileSpan::new(file_id, case_span),
+            scrutinee_type: scrutinee_type.pretty(),
+            missing,
+        })
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum LitPat {
+    Int(i64),
+}
+
+impl LitPat {
+    #[allow(dead_code)]
+    fn from_literal(lit: &Literal) -> Self {
+        match lit {
+            Literal::Int(value) => LitPat::Int(*value),
+        }
+    }
+
+    fn pretty(&self) -> String {
+        match self {
+            LitPat::Int(value) => value.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+enum Head {
+    Constructor(String),
+    Literal(LitPat),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Pat {
+    Wild,
+    Head(Head, Vec<Pat>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Witness {
+    Wild,
+    Head(Head, Vec<Witness>),
+}
+
+impl Witness {
+    fn pretty(&self) -> String {
+        match self {
+            Witness::Wild => "_".to_string(),
+
+            Witness::Head(Head::Constructor(name), args) => {
+                let name = short_name(name);
+
+                if name == "Nil" && args.is_empty() {
+                    return "[]".to_string();
+                }
+
+                if name == "Cons" && args.len() == 2 {
+                    return format!("{} :: {}", args[0].pretty_atom(), args[1].pretty());
+                }
+
+                if args.is_empty() {
+                    name.to_string()
+                } else {
+                    format!(
+                        "{} {}",
+                        name,
+                        args.iter()
+                            .map(Witness::pretty_atom)
+                            .collect::<Vec<_>>()
+                            .join(" ")
+                    )
+                }
+            }
+
+            Witness::Head(Head::Literal(lit), args) => {
+                debug_assert!(args.is_empty());
+                lit.pretty()
+            }
+        }
+    }
+
+    fn pretty_atom(&self) -> String {
+        match self {
+            Witness::Wild => self.pretty(),
+            Witness::Head(_, args) if args.is_empty() => self.pretty(),
+            Witness::Head(_, _) => format!("({})", self.pretty()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+struct ConstructorSig {
+    arg_types: Vec<TypeExpr>,
+    result_type: TypeExpr,
+}
+
+#[derive(Clone, Debug, Default)]
+struct ConstructorEnv {
+    by_name: HashMap<String, ConstructorSig>,
+    by_tycon: HashMap<String, Vec<String>>,
+}
+
+impl ConstructorEnv {
+    fn from_constructor_types(constructor_types: &HashMap<String, TypeExpr>) -> Self {
+        let mut env = ConstructorEnv::default();
+
+        for (constructor_name, constructor_type) in constructor_types {
+            let Some((arg_types, result_type)) = constructor_shape(constructor_type) else {
+                continue;
+            };
+
+            let Some(result_tycon) = type_head_tycon(&result_type) else {
+                continue;
+            };
+
+            env.by_name.insert(
+                constructor_name.clone(),
+                ConstructorSig {
+                    arg_types,
+                    result_type,
+                },
+            );
+
+            env.by_tycon
+                .entry(result_tycon)
+                .or_default()
+                .push(constructor_name.clone());
+        }
+
+        for constructors in env.by_tycon.values_mut() {
+            constructors.sort_by(|left, right| {
+                short_name(left)
+                    .cmp(short_name(right))
+                    .then_with(|| left.cmp(right))
+            });
+        }
+
+        env
+    }
+
+    fn constructors_for_type(&self, ty: &TypeExpr) -> Option<Vec<String>> {
+        let tycon = type_head_tycon(ty)?;
+        self.by_tycon.get(&tycon).cloned()
+    }
+
+    fn field_types_for_constructor(
+        &self,
+        constructor_name: &str,
+        scrutinee_type: &TypeExpr,
+    ) -> Option<Vec<TypeExpr>> {
+        let sig = self.by_name.get(constructor_name)?;
+
+        let mut subst = HashMap::<String, TypeExpr>::new();
+
+        if !match_type_template(&sig.result_type, scrutinee_type, &mut subst) {
+            return None;
+        }
+
+        Some(
+            sig.arg_types
+                .iter()
+                .map(|field_type| subst_type_vars(field_type, &subst))
+                .collect(),
+        )
+    }
+}
+
+struct ExhaustivenessChecker {
+    constructor_env: ConstructorEnv,
+}
+
+impl ExhaustivenessChecker {
+    fn useful(
+        &self,
+        matrix: &[Vec<Pat>],
+        vector: &[Pat],
+        types: &[TypeExpr],
+    ) -> Option<Vec<Witness>> {
+        if matrix.is_empty() {
+            return Some(vec![Witness::Wild; vector.len()]);
+        }
+
+        if vector.is_empty() {
+            return None;
+        }
+
+        let first_type = normalize_type(&types[0]);
+
+        match &vector[0] {
+            Pat::Head(head, args) => {
+                let field_types = self.field_types_for_head(head, &first_type)?;
+                let field_count = field_types.len();
+
+                let specialized_matrix = self.specialize_matrix(matrix, head, field_count);
+
+                let mut specialized_vector = args.clone();
+                specialized_vector.extend_from_slice(&vector[1..]);
+
+                let mut specialized_types = field_types;
+                specialized_types.extend_from_slice(&types[1..]);
+
+                let witness =
+                    self.useful(&specialized_matrix, &specialized_vector, &specialized_types)?;
+
+                if witness.len() < field_count {
+                    return None;
+                }
+
+                let (fields, rest) = witness.split_at(field_count);
+
+                let mut out = Vec::with_capacity(1 + rest.len());
+                out.push(Witness::Head(head.clone(), fields.to_vec()));
+                out.extend_from_slice(rest);
+                Some(out)
+            }
+
+            Pat::Wild => self.useful_wild(matrix, vector, types, &first_type),
+        }
+    }
+
+    fn useful_wild(
+        &self,
+        matrix: &[Vec<Pat>],
+        vector: &[Pat],
+        types: &[TypeExpr],
+        first_type: &TypeExpr,
+    ) -> Option<Vec<Witness>> {
+        let Some(constructors) = self.constructor_env.constructors_for_type(first_type) else {
+            let rest = self.useful_default_tail(matrix, vector, types)?;
+
+            let mut out = Vec::with_capacity(1 + rest.len());
+            out.push(Witness::Wild);
+            out.extend(rest);
+            return Some(out);
+        };
+
+        let present_constructors = self.present_constructors(matrix);
+        let has_complete_signature = constructors
+            .iter()
+            .all(|constructor| present_constructors.contains(constructor));
+
+        if has_complete_signature {
+            self.useful_wild_complete_signature(matrix, vector, types, first_type, constructors)
+        } else {
+            self.useful_wild_incomplete_signature(
+                matrix,
+                vector,
+                types,
+                first_type,
+                constructors,
+                &present_constructors,
+            )
+        }
+    }
+
+    fn useful_wild_complete_signature(
+        &self,
+        matrix: &[Vec<Pat>],
+        vector: &[Pat],
+        types: &[TypeExpr],
+        first_type: &TypeExpr,
+        constructors: Vec<String>,
+    ) -> Option<Vec<Witness>> {
+        for constructor_name in constructors {
+            let head = Head::Constructor(constructor_name);
+
+            let Some(field_types) = self.field_types_for_head(&head, first_type) else {
+                continue;
+            };
+
+            let field_count = field_types.len();
+            let specialized_matrix = self.specialize_matrix(matrix, &head, field_count);
+
+            let mut specialized_vector = vec![Pat::Wild; field_count];
+            specialized_vector.extend_from_slice(&vector[1..]);
+
+            let mut specialized_types = field_types;
+            specialized_types.extend_from_slice(&types[1..]);
+
+            if let Some(witness) =
+                self.useful(&specialized_matrix, &specialized_vector, &specialized_types)
+            {
+                if witness.len() < field_count {
+                    continue;
+                }
+
+                let (fields, rest) = witness.split_at(field_count);
+
+                let mut out = Vec::with_capacity(1 + rest.len());
+                out.push(Witness::Head(head, fields.to_vec()));
+                out.extend_from_slice(rest);
+                return Some(out);
+            }
+        }
+
+        None
+    }
+
+    fn useful_wild_incomplete_signature(
+        &self,
+        matrix: &[Vec<Pat>],
+        vector: &[Pat],
+        types: &[TypeExpr],
+        first_type: &TypeExpr,
+        constructors: Vec<String>,
+        present_constructors: &HashSet<String>,
+    ) -> Option<Vec<Witness>> {
+        // This is the important Maranget default-matrix rule.
+        //
+        // We must first check the default matrix. Wildcard rows in the matrix
+        // cover every constructor in this column, even if those constructors
+        // are not explicitly present.
+        //
+        // This is what makes this exhaustive:
+        //
+        //   case xs of
+        //       [] => ...
+        //       | y :: ys => ...
+        //
+        // After specializing the `Cons` branch, the tail column contains `_`.
+        // That wildcard row covers both `[]` and `_ :: _`, so the checker must
+        // not invent `_ :: []` or `_ :: _ :: _`.
+        let rest = self.useful_default_tail(matrix, vector, types)?;
+
+        let head_witness = self
+            .first_missing_constructor(&constructors, present_constructors)
+            .and_then(|missing_constructor| {
+                let head = Head::Constructor(missing_constructor);
+                let field_count = self.field_types_for_head(&head, first_type)?.len();
+
+                Some(Witness::Head(head, vec![Witness::Wild; field_count]))
+            })
+            .unwrap_or(Witness::Wild);
+
+        let mut out = Vec::with_capacity(1 + rest.len());
+        out.push(head_witness);
+        out.extend(rest);
+        Some(out)
+    }
+
+    fn useful_default_tail(
+        &self,
+        matrix: &[Vec<Pat>],
+        vector: &[Pat],
+        types: &[TypeExpr],
+    ) -> Option<Vec<Witness>> {
+        debug_assert!(!vector.is_empty());
+
+        let default_matrix = self.default_matrix(matrix);
+
+        self.useful(&default_matrix, &vector[1..], &types[1..])
+    }
+
+    fn present_constructors(&self, matrix: &[Vec<Pat>]) -> HashSet<String> {
+        let mut present = HashSet::new();
+
+        for row in matrix {
+            let Some((head, _tail)) = row.split_first() else {
+                continue;
+            };
+
+            if let Pat::Head(Head::Constructor(constructor_name), _) = head {
+                present.insert(constructor_name.clone());
+            }
+        }
+
+        present
+    }
+
+    fn first_missing_constructor(
+        &self,
+        constructors: &[String],
+        present_constructors: &HashSet<String>,
+    ) -> Option<String> {
+        constructors
+            .iter()
+            .find(|constructor| !present_constructors.contains(*constructor))
+            .cloned()
+    }
+
+    fn field_types_for_head(
+        &self,
+        head: &Head,
+        scrutinee_type: &TypeExpr,
+    ) -> Option<Vec<TypeExpr>> {
+        match head {
+            Head::Constructor(constructor_name) => self
+                .constructor_env
+                .field_types_for_constructor(constructor_name, scrutinee_type),
+
+            Head::Literal(_) => Some(Vec::new()),
+        }
+    }
+
+    fn specialize_matrix(
+        &self,
+        matrix: &[Vec<Pat>],
+        head: &Head,
+        field_count: usize,
+    ) -> Vec<Vec<Pat>> {
+        let mut out = Vec::new();
+
+        for row in matrix {
+            let Some((row_head, row_tail)) = row.split_first() else {
+                continue;
+            };
+
+            match row_head {
+                Pat::Wild => {
+                    let mut specialized_row = vec![Pat::Wild; field_count];
+                    specialized_row.extend_from_slice(row_tail);
+                    out.push(specialized_row);
+                }
+
+                Pat::Head(row_head, args) if row_head == head => {
+                    let mut specialized_row = args.clone();
+                    specialized_row.extend_from_slice(row_tail);
+                    out.push(specialized_row);
+                }
+
+                Pat::Head(_, _) => {}
+            }
+        }
+
+        out
+    }
+
+    fn default_matrix(&self, matrix: &[Vec<Pat>]) -> Vec<Vec<Pat>> {
+        let mut out = Vec::new();
+
+        for row in matrix {
+            let Some((head, tail)) = row.split_first() else {
+                continue;
+            };
+
+            if matches!(head, Pat::Wild) {
+                out.push(tail.to_vec());
+            }
+        }
+
+        out
+    }
+}
+
+fn lower_pattern(pattern: &PatternNode<Span>) -> Pat {
+    match &pattern.node {
+        Pattern::Wild | Pattern::Var(_) => Pat::Wild,
+
+        Pattern::Con(name, args) => Pat::Head(
+            Head::Constructor(name.clone()),
+            args.iter().map(lower_pattern).collect(),
+        ),
+    }
+}
+
+fn witness_to_pattern_row(witness: &[Witness]) -> Vec<Pat> {
+    witness.iter().map(witness_to_pattern).collect()
+}
+
+fn witness_to_pattern(witness: &Witness) -> Pat {
+    match witness {
+        Witness::Wild => Pat::Wild,
+
+        Witness::Head(head, args) => {
+            Pat::Head(head.clone(), args.iter().map(witness_to_pattern).collect())
+        }
+    }
+}
+
+fn pretty_witness_row(witness: &[Witness]) -> String {
+    match witness {
+        [] => "_".to_string(),
+
+        [one] => one.pretty(),
+
+        many => many
+            .iter()
+            .map(Witness::pretty)
+            .collect::<Vec<_>>()
+            .join(", "),
+    }
+}
+
+fn constructor_shape(ty: &TypeExpr) -> Option<(Vec<TypeExpr>, TypeExpr)> {
+    let mut current = strip_type_prefixes(ty.clone());
+    let mut args = Vec::new();
+
+    loop {
+        match current {
+            TypeExpr::TyArr(arg, result) => {
+                args.push(strip_type_prefixes(*arg));
+                current = strip_type_prefixes(*result);
+            }
+
+            result => return Some((args, result)),
+        }
+    }
+}
+
+fn strip_type_prefixes(mut ty: TypeExpr) -> TypeExpr {
+    loop {
+        match ty {
+            TypeExpr::TyForAll(_, _, body) => {
+                ty = *body;
+            }
+
+            TypeExpr::Qualified(_, body) => {
+                ty = *body;
+            }
+
+            other => return other,
+        }
+    }
+}
+
+fn normalize_type(ty: &TypeExpr) -> TypeExpr {
+    strip_type_prefixes(ty.clone())
+}
+
+fn type_head_tycon(ty: &TypeExpr) -> Option<String> {
+    match normalize_type(ty) {
+        TypeExpr::TyCon(name) => Some(name),
+
+        TypeExpr::TyApp(lhs, _) => type_head_tycon(&lhs),
+
+        TypeExpr::TyUnit
+        | TypeExpr::TyVar(_)
+        | TypeExpr::TyExVar(_)
+        | TypeExpr::TyArr(_, _)
+        | TypeExpr::TyForAll(_, _, _)
+        | TypeExpr::Qualified(_, _) => None,
+    }
+}
+
+fn match_type_template(
+    template: &TypeExpr,
+    actual: &TypeExpr,
+    subst: &mut HashMap<String, TypeExpr>,
+) -> bool {
+    match (normalize_type(template), normalize_type(actual)) {
+        (TypeExpr::TyVar(name), actual) => {
+            if let Some(existing) = subst.get(&name) {
+                *existing == actual
+            } else {
+                subst.insert(name, actual);
+                true
+            }
+        }
+
+        (TypeExpr::TyCon(left), TypeExpr::TyCon(right)) => left == right,
+
+        (TypeExpr::TyUnit, TypeExpr::TyUnit) => true,
+
+        (TypeExpr::TyExVar(left), TypeExpr::TyExVar(right)) => left == right,
+
+        (TypeExpr::TyApp(left_fn, left_arg), TypeExpr::TyApp(right_fn, right_arg)) => {
+            match_type_template(&left_fn, &right_fn, subst)
+                && match_type_template(&left_arg, &right_arg, subst)
+        }
+
+        (TypeExpr::TyArr(left_arg, left_ret), TypeExpr::TyArr(right_arg, right_ret)) => {
+            match_type_template(&left_arg, &right_arg, subst)
+                && match_type_template(&left_ret, &right_ret, subst)
+        }
+
+        _ => false,
+    }
+}
+
+fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<String, TypeExpr>) -> TypeExpr {
+    match ty {
+        TypeExpr::TyVar(name) => subst
+            .get(name)
+            .cloned()
+            .unwrap_or_else(|| TypeExpr::TyVar(name.clone())),
+
+        TypeExpr::TyUnit => TypeExpr::TyUnit,
+
+        TypeExpr::TyCon(name) => TypeExpr::TyCon(name.clone()),
+
+        TypeExpr::TyExVar(name) => TypeExpr::TyExVar(name.clone()),
+
+        TypeExpr::TyArr(lhs, rhs) => {
+            TypeExpr::make_arr(subst_type_vars(lhs, subst), subst_type_vars(rhs, subst))
+        }
+
+        TypeExpr::TyApp(lhs, rhs) => {
+            TypeExpr::make_app(subst_type_vars(lhs, subst), subst_type_vars(rhs, subst))
+        }
+
+        TypeExpr::TyForAll(name, kind, body) => {
+            let mut scoped_subst = subst.clone();
+            scoped_subst.remove(name);
+
+            TypeExpr::make_forall(
+                name.clone(),
+                kind.clone(),
+                subst_type_vars(body, &scoped_subst),
+            )
+        }
+
+        TypeExpr::Qualified(predicates, body) => TypeExpr::make_qualified(
+            predicates
+                .iter()
+                .map(|pred| Predicate {
+                    class_name: pred.class_name.clone(),
+                    args: pred
+                        .args
+                        .iter()
+                        .map(|arg| subst_type_vars(arg, subst))
+                        .collect(),
+                })
+                .collect(),
+            subst_type_vars(body, subst),
+        ),
+    }
+}
+
+fn short_name(name: &str) -> &str {
+    name.rsplit('.').next().unwrap_or(name)
+}
