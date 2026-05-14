@@ -1,3 +1,5 @@
+use core::ast::Literal;
+
 use super::bytecode::{
     BytePattern, BytecodeProgram, ChunkKind, Instr, MatchArm, lower_to_bytecode,
 };
@@ -689,6 +691,20 @@ impl Vm {
                     self.pc = arm.target as usize;
                     return;
                 }
+                BytePattern::Lit(_) => {
+                    self.binding_buffer.clear();
+
+                    if match_pattern(
+                        &self.heap,
+                        &arm.pattern,
+                        scrutinee,
+                        &mut self.binding_buffer,
+                    ) {
+                        debug_assert!(arm.bind_slots.is_empty());
+                        self.pc = arm.target as usize;
+                        return;
+                    }
+                }
 
                 BytePattern::Wild => {
                     self.pc = arm.target as usize;
@@ -1014,13 +1030,15 @@ impl Vm {
 #[inline]
 fn try_flat_bind(subs: &[BytePattern]) -> Option<usize> {
     let mut count = 0;
+
     for sub in subs {
         match sub {
             BytePattern::Var => count += 1,
             BytePattern::Wild => {}
-            BytePattern::Con(..) => return None,
+            BytePattern::Lit(_) | BytePattern::Con(..) => return None,
         }
     }
+
     Some(count)
 }
 
@@ -1051,7 +1069,10 @@ fn match_pattern_inner(
             bindings.push(value);
             true
         }
-
+        BytePattern::Lit(lit_val) => match (lit_val, value) {
+            (Literal::Int(expected), Value::Int(actual)) => *expected == actual,
+            _ => false,
+        },
         BytePattern::Wild => true,
         BytePattern::Con(expected_tag, subs) => {
             let id = match value {

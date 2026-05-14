@@ -124,6 +124,7 @@ pub enum SurfaceTy<'src> {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SurfacePattern<'src> {
     Var(&'src str),
+    Lit(SurfaceLiteral),
     Con(Spanned<NameRef<'src>>, Vec<Spanned<SurfacePattern<'src>>>),
     Wild,
 }

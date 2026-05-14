@@ -1394,9 +1394,21 @@ impl TypeChecker {
 
         match &pattern.node {
             Pattern::Wild => Ok((ctx, vec![])),
-
             Pattern::Var(name) => Ok((ctx, vec![(name.clone(), scrutinee_type)])),
+            Pattern::Lit(lit) => {
+                let literal_type = match lit {
+                    Literal::Int(_) => self.int_type(),
+                };
 
+                let theta = self.solve_subtype(
+                    ctx.clone(),
+                    &literal_type,
+                    &ctx.apply(&scrutinee_type),
+                    self.get_file_span(pattern.anno.clone()),
+                )?;
+
+                Ok((theta, vec![]))
+            }
             Pattern::Con(constructor_name, sub_patterns) => {
                 let constructor_type = self
                     .constructor_types

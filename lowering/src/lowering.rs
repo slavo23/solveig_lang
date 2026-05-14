@@ -40,7 +40,8 @@ impl LowerCtx {
     fn push_pattern_binders<A>(&mut self, pattern: &PatternNode<A>) {
         match &pattern.node {
             Pattern::Var(name) => self.push(name),
-            Pattern::Wild => {}
+            Pattern::Wild => {},
+            Pattern::Lit(_) => {},
             Pattern::Con(_, sub_patterns) => {
                 for sub_pattern in sub_patterns {
                     self.push_pattern_binders(sub_pattern);
@@ -53,7 +54,8 @@ impl LowerCtx {
         match &pattern.node {
             Pattern::Var(_) => {
                 self.pop();
-            }
+            },
+            Pattern::Lit(_) => {},
             Pattern::Wild => {}
             Pattern::Con(_, sub_patterns) => {
                 for sub_pattern in sub_patterns.iter().rev() {
@@ -154,6 +156,7 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> IRPattern {
     match &pattern.node {
         Pattern::Var(_) => IRPattern::Var,
         Pattern::Wild => IRPattern::Wild,
+        Pattern::Lit(lit_val) => IRPattern::Lit(lit_val.clone()),
         Pattern::Con(name, sub_patterns) => {
             let &(tag, _) = ctx
                 .constructors

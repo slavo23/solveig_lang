@@ -1,4 +1,4 @@
-use core::ast::{BinOp, UnOp};
+use core::ast::{BinOp, Literal, UnOp};
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -34,11 +34,13 @@ pub struct IRCaseArm {
     pub body: Rc<IRExpr>,
 }
 
+
 #[derive(Debug, Clone)]
 pub enum IRPattern {
     Var,
     Wild,
     Con(u16, Vec<IRPattern>),
+    Lit(Literal)
 }
 
 impl IRPattern {
@@ -46,6 +48,7 @@ impl IRPattern {
         match self {
             IRPattern::Var => 1,
             IRPattern::Wild => 0,
+            IRPattern::Lit(_) => 0,
             IRPattern::Con(_, sub_patterns) => sub_patterns.iter().map(|p| p.binder_count()).sum(),
         }
     }

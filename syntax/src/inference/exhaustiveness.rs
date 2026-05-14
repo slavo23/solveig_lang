@@ -7,24 +7,7 @@ use core::ast::{CaseArmNode, Literal, Pattern, PatternNode, Predicate, Pretty, T
 const MAX_MISSING_EXAMPLES: usize = 3;
 
 /// Maranget-style exhaustiveness checking.
-///
-/// This checker implements the standard usefulness idea:
-///
-///   A case expression is exhaustive iff the wildcard vector is not useful
-///   with respect to the pattern matrix formed by the case arms.
-///
-/// Current Solveig patterns:
-///
-///   - constructor patterns
-///   - variable patterns
-///   - wildcard patterns
-///
-/// The internal representation already has a literal head so adding literal
-/// patterns later is local:
-///
-///   1. add `Pattern::Lit(Literal)` to the AST
-///   2. lower it in `lower_pattern`
-///   3. decide how precise literal domains should be
+
 pub fn check_case(
     file_id: &str,
     constructor_types: &HashMap<String, TypeExpr>,
@@ -169,6 +152,14 @@ struct ConstructorEnv {
     by_tycon: HashMap<String, Vec<String>>,
 }
 
+fn is_open_primitive_type(ty: &TypeExpr) -> bool {
+    match normalize_type(ty) {
+        TypeExpr::TyCon(name) => matches!(short_name(&name), "Int" | "String"),
+        TypeExpr::TyApp(lhs, _) => is_open_primitive_type(&lhs),
+        _ => false,
+    }
+}
+
 impl ConstructorEnv {
     fn from_constructor_types(constructor_types: &HashMap<String, TypeExpr>) -> Self {
         let mut env = ConstructorEnv::default();
@@ -208,6 +199,10 @@ impl ConstructorEnv {
     }
 
     fn constructors_for_type(&self, ty: &TypeExpr) -> Option<Vec<String>> {
+        if is_open_primitive_type(ty) {
+            return None;
+        }
+
         let tycon = type_head_tycon(ty)?;
         self.by_tycon.get(&tycon).cloned()
     }
@@ -514,6 +509,8 @@ impl ExhaustivenessChecker {
 fn lower_pattern(pattern: &PatternNode<Span>) -> Pat {
     match &pattern.node {
         Pattern::Wild | Pattern::Var(_) => Pat::Wild,
+
+        Pattern::Lit(lit) => Pat::Head(Head::Literal(LitPat::from_literal(lit)), Vec::new()),
 
         Pattern::Con(name, args) => Pat::Head(
             Head::Constructor(name.clone()),

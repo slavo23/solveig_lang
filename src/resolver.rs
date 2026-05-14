@@ -491,6 +491,14 @@ impl Resolver {
 
         let node = match &sf.0 {
             SurfacePattern::Var(var_name) => Pattern::Var(var_name.to_string()),
+            SurfacePattern::Lit(lit) => {
+                let core_lit = match lit {
+                    SurfaceLiteral::Int(int_lit_value) => Literal::Int(*int_lit_value),
+                    _ => todo!("literal pattern type is not supported yet")
+                };
+
+                Pattern::Lit(core_lit)
+            }
             SurfacePattern::Wild => Pattern::Wild,
             SurfacePattern::Con(con_name, args) => Pattern::Con(
                 self.resolve_ctor_ref(&con_name.0, cx),
@@ -510,7 +518,8 @@ impl Resolver {
         match &pat.0 {
             SurfacePattern::Var(name) => {
                 out.insert(name.to_string());
-            }
+            },
+            SurfacePattern::Lit(_) => {},
             SurfacePattern::Wild => {}
             SurfacePattern::Con(_, args) => {
                 for arg in args {

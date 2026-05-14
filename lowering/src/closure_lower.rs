@@ -366,6 +366,7 @@ impl<'a> ExprLowerer<'a> {
         match pattern {
             IRPattern::Var => CCPattern::Var,
             IRPattern::Wild => CCPattern::Wild,
+            IRPattern::Lit(lit_val) => CCPattern::Lit(lit_val.clone()),
             IRPattern::Con(tag, sub_patterns) => CCPattern::Con(
                 *tag,
                 sub_patterns
@@ -451,6 +452,7 @@ impl<'a> ExprLowerer<'a> {
         match pattern {
             IRPattern::Var => self.push_local(),
             IRPattern::Wild => {}
+            IRPattern::Lit(_) => {}
             IRPattern::Con(_, sub_patterns) => {
                 for sub_pattern in sub_patterns {
                     self.push_pattern_binders(sub_pattern);
@@ -463,6 +465,7 @@ impl<'a> ExprLowerer<'a> {
         match pattern {
             IRPattern::Var => self.pop_local(),
             IRPattern::Wild => {}
+            IRPattern::Lit(_) => {}
             IRPattern::Con(_, sub_patterns) => {
                 for sub_pattern in sub_patterns.iter().rev() {
                     self.pop_pattern_binders(sub_pattern);

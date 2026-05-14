@@ -411,6 +411,7 @@ pub enum TermExpr<A, P = A> {
 #[derive(Clone, Debug)]
 pub enum Pattern<A> {
     Con(String, Vec<PatternNode<A>>),
+    Lit(Literal),
     Var(String),
     Wild,
 }

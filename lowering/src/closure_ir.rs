@@ -1,4 +1,4 @@
-use core::ast::{BinOp, UnOp};
+use core::ast::{BinOp, Literal, UnOp};
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -58,6 +58,7 @@ pub enum CCPattern {
     Var,
     Wild,
     Con(u16, Vec<CCPattern>),
+    Lit(Literal)
 }
 
 impl CCPattern {
@@ -65,6 +66,7 @@ impl CCPattern {
         match self {
             CCPattern::Var => 1,
             CCPattern::Wild => 0,
+            CCPattern::Lit(_) => 0,
             CCPattern::Con(_, sub_patterns) => sub_patterns.iter().map(|p| p.binder_count()).sum(),
         }
     }

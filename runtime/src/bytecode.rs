@@ -1,4 +1,4 @@
-use core::ast::{BinOp, UnOp};
+use core::ast::{BinOp, Literal, UnOp};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
@@ -66,6 +66,7 @@ pub enum BytePattern {
     Var,
     Wild,
     Con(u16, Box<[BytePattern]>),
+    Lit(Literal)
 }
 
 impl BytePattern {
@@ -73,6 +74,7 @@ impl BytePattern {
         match self {
             BytePattern::Var => 1,
             BytePattern::Wild => 0,
+            BytePattern::Lit(_) => 0,
             BytePattern::Con(_, sub_patterns) => {
                 sub_patterns.iter().map(|p| p.binder_count()).sum()
             }
@@ -828,6 +830,11 @@ fn format_pattern(pattern: &BytePattern) -> String {
     match pattern {
         BytePattern::Var => "Var".to_string(),
         BytePattern::Wild => "_".to_string(),
+        BytePattern::Lit(lit_val) => {
+            match lit_val {
+                Literal::Int(i_val) => format!("Int({})", i_val.to_string())
+            }
+        }
         BytePattern::Con(tag, sub_patterns) => {
             if sub_patterns.is_empty() {
                 format!("Con({tag})")
@@ -847,6 +854,11 @@ fn lower_pattern(pattern: &CCPattern) -> BytePattern {
     match pattern {
         CCPattern::Var => BytePattern::Var,
         CCPattern::Wild => BytePattern::Wild,
+        CCPattern::Lit(lit_val) => {
+            match lit_val {
+                Literal::Int(i_val) => BytePattern::Lit(Literal::Int(*i_val))
+            }
+        } 
         CCPattern::Con(tag, sub_patterns) => BytePattern::Con(
             *tag,
             sub_patterns

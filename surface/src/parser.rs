@@ -80,6 +80,10 @@ fn list_ty<'src>(elem_ty: S<SurfaceTy<'src>>, start: usize, end: usize) -> S<Sur
     )
 }
 
+fn int_pattern<'src>(value: i64, start: usize, end: usize) -> S<SurfacePattern<'src>> {
+    sp(SurfacePattern::Lit(SurfaceLiteral::Int(value)), start, end)
+}
+
 fn cons_pattern<'src>(
     head: S<SurfacePattern<'src>>,
     tail: S<SurfacePattern<'src>>,
@@ -848,14 +852,43 @@ impl<'src> Parser<'src> {
 
     fn parse_pattern_arg(&mut self) -> Result<S<SurfacePattern<'src>>, ParseError> {
         let start = self.current_start();
+
         match self.current_kind() {
+            Token::Int(value) => {
+                let value = *value;
+                let token = self.advance();
+                Ok(int_pattern(value, token.start, token.end))
+            }
+
+            Token::Minus => {
+                // fix mutable borrow later
+                let minus = self.advance().clone();
+                match self.current_kind() {
+                    Token::Int(value) => {
+                        let value = value
+                            .checked_neg()
+                            .ok_or_else(|| self.error("integer literal pattern is too small"))?;
+
+                        let int_token = self.advance();
+                        Ok(int_pattern(value, minus.start, int_token.end))
+                    }
+
+                    _ => Err(self.error(format!(
+                        "expected integer literal after `-` in pattern, got {:?}",
+                        self.current_kind()
+                    ))),
+                }
+            }
+
             Token::Underscore => {
                 let token = self.advance();
                 Ok(sp(SurfacePattern::Wild, token.start, token.end))
             }
+
             Token::Ident(_) => {
                 let name_ref = self.parse_name_path()?;
                 let end = span_end(&name_ref);
+
                 if name_ref.0.segments.len() == 1 {
                     Ok(sp(SurfacePattern::Var(name_ref.0.last()), start, end))
                 } else {
@@ -865,42 +898,54 @@ impl<'src> Parser<'src> {
                     )))
                 }
             }
+
             Token::UpperIdent(_) => {
                 let name_ref = self.parse_name_path()?;
                 let end = span_end(&name_ref);
                 Ok(sp(SurfacePattern::Con(name_ref, vec![]), start, end))
             }
+
             Token::LParen => {
                 self.advance();
+
                 if self.at(&Token::RParen) {
                     return Err(self.error("unit pattern `()` is not supported yet"));
                 }
+
                 let inner = self.parse_pattern()?;
                 let end = self.expect(&Token::RParen)?.end;
                 Ok(sp(inner.0, start, end))
             }
+
             Token::LBrack => {
                 self.advance();
+
                 if self.at(&Token::RBrack) {
                     let end = self.advance().end;
                     return Ok(list_nil_pattern(start, end));
                 }
+
                 let mut elems = vec![self.parse_pattern()?];
+
                 while self.at(&Token::Comma) {
                     self.advance();
                     elems.push(self.parse_pattern()?);
                 }
+
                 let end = self.expect(&Token::RBrack)?.end;
                 Ok(list_pattern(elems, start, end))
             }
+
             _ => Err(self.error(format!("expected pattern, got {:?}", self.current_kind()))),
         }
     }
-
+    
     fn is_pattern_arg_start(&self) -> bool {
         matches!(
             self.current_kind(),
-            Token::Ident(_)
+            Token::Int(_)
+                | Token::Minus
+                | Token::Ident(_)
                 | Token::UpperIdent(_)
                 | Token::LParen
                 | Token::LBrack
