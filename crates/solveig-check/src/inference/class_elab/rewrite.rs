@@ -299,7 +299,7 @@ pub fn elaborate_typeclasses(
     let mut constructor_types = module.constructor_types.clone();
     for dd in &dict_data_defs {
         for ctor in &dd.constructors {
-            constructor_types.insert(ctor.name.clone(), ctor.full_type.clone());
+            constructor_types.insert(ctor.id, ctor.full_type.clone());
         }
     }
 

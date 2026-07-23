@@ -368,6 +368,7 @@ fn synthesize_dict_data_defs(
                     .iter()
                     .fold(Kind::Star, |acc, (_, k)| Kind::make_arrow(k.clone(), acc)),
                 constructors: vec![ConstructorDef {
+                    id: legacy_ctor_id(&info.dict_ctor),
                     name: info.dict_ctor.clone(),
                     fields: field_types,
                     full_type: ctor_ty,

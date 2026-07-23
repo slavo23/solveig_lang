@@ -725,7 +725,7 @@ pub struct ResolvedModule<A, P = A> {
     pub class_defs: Vec<ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<A, P>>,
     pub tycon_kinds: HashMap<String, Kind>,
-    pub constructor_types: HashMap<String, TypeExpr>,
+    pub constructor_types: HashMap<CtorId, TypeExpr>,
     pub func_schemes: HashMap<String, Scheme>,
     pub func_defs: Vec<TermDefinition<A, P>>,
 }
@@ -781,9 +781,17 @@ impl TyConTable {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ConstructorDef {
+    pub id: CtorId,
     pub name: String,
     pub fields: Vec<TypeExpr>,
     pub full_type: TypeExpr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct CtorRuntimeInfo {
+    pub ctor: CtorId,
+    pub tag: u16,
+    pub arity: u16,
 }
 
 #[derive(Clone, Debug, PartialEq)]

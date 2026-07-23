@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use solveig_ast::ast::{EvarId, Pretty, TypeExpr};
+use solveig_ast::ast::{CtorId, EvarId, Pretty, TypeExpr, ctor_display_name};
 use solveig_base::FileSpan;
 use solveig_base::utils::diagnostics::{Diagnostic, Label};
 
@@ -12,7 +12,7 @@ pub struct HoleInfo {
 }
 
 impl HoleInfo {
-    pub fn suggestions(&self, constructors: &HashMap<String, TypeExpr>) -> Vec<String> {
+    pub fn suggestions(&self, constructors: &HashMap<CtorId, TypeExpr>) -> Vec<String> {
         let mut results = Vec::new();
         results.extend(direct_matches(&self.expected_type, &self.context));
         results.extend(applications(&self.expected_type, &self.context));
@@ -155,17 +155,18 @@ fn applications(goal: &TypeExpr, ctx: &[(String, TypeExpr)]) -> Vec<String> {
 fn constructor_fills(
     goal: &TypeExpr,
     ctx: &[(String, TypeExpr)],
-    constructors: &HashMap<String, TypeExpr>,
+    constructors: &HashMap<CtorId, TypeExpr>,
 ) -> Vec<String> {
     let mut results = Vec::new();
 
-    for (name, cty) in constructors {
+    for (id, cty) in constructors {
         let (params, ret) = peel_arrows(cty);
         if !heads_match(&ret, goal) && !types_match(&ret, goal) {
             continue;
         }
 
-        let short = short_name(name);
+        let name = ctor_display_name(*id);
+        let short = short_name(&name);
         if params.is_empty() {
             results.push(short.to_string());
         } else if let Some(args) = fill_params(&params, ctx) {
@@ -193,7 +194,7 @@ fn short_name(qualified: &str) -> &str {
 
 pub fn hole_diagnostics(
     holes: &[HoleInfo],
-    constructor_types: &HashMap<String, TypeExpr>,
+    constructor_types: &HashMap<CtorId, TypeExpr>,
 ) -> Vec<Diagnostic> {
     holes
         .iter()
@@ -202,7 +203,7 @@ pub fn hole_diagnostics(
 }
 
 impl HoleInfo {
-    pub fn to_diagnostic(&self, constructor_types: &HashMap<String, TypeExpr>) -> Diagnostic {
+    pub fn to_diagnostic(&self, constructor_types: &HashMap<CtorId, TypeExpr>) -> Diagnostic {
         let mut diag = Diagnostic::error(
             "HOLE",
             format!("found hole of type `{}`", self.pretty_type(),),

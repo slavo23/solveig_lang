@@ -1,10 +1,11 @@
 use crate::heap::{Heap, HeapObject};
 use crate::values::Value;
+use solveig_ast::ast::{CtorRuntimeInfo, ctor_display_name};
 
 pub struct DisplayValue<'a> {
     pub root: Value,
     pub heap: &'a Heap,
-    pub arities: &'a [(String, u16, u16)],
+    pub arities: &'a [CtorRuntimeInfo],
 }
 
 impl std::fmt::Display for DisplayValue<'_> {
@@ -17,15 +18,18 @@ fn base_name(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
-fn tag_name(arities: &[(String, u16, u16)], tag: u16) -> &str {
+fn tag_name(arities: &[CtorRuntimeInfo], tag: u16) -> String {
     arities
         .iter()
-        .find(|(_, t, _)| *t == tag)
-        .map(|(n, _, _)| base_name(n))
-        .unwrap_or("<?>")
+        .find(|info| info.tag == tag)
+        .map(|info| {
+            let name = ctor_display_name(info.ctor);
+            base_name(&name).to_string()
+        })
+        .unwrap_or_else(|| "<?>".to_string())
 }
 
-fn tag_is(arities: &[(String, u16, u16)], tag: u16, expected: &str) -> bool {
+fn tag_is(arities: &[CtorRuntimeInfo], tag: u16, expected: &str) -> bool {
     tag_name(arities, tag) == expected
 }
 
@@ -62,7 +66,7 @@ impl DisplayValue<'_> {
                         format!("<partial {} {}>", name, self.render_args(applied_args))
                     }
                 }
-                HeapObject::Data0 { tag } => tag_name(self.arities, *tag).into(),
+                HeapObject::Data0 { tag } => tag_name(self.arities, *tag),
                 HeapObject::Data1 { tag, field } => {
                     let name = tag_name(self.arities, *tag);
                     format!("{} {}", name, self.render_atom(*field))
@@ -85,7 +89,7 @@ impl DisplayValue<'_> {
                     let fields = self.heap.payloads.as_slice(*fields);
 
                     if fields.is_empty() {
-                        name.into()
+                        name
                     } else {
                         format!("{} {}", name, self.render_args(fields))
                     }

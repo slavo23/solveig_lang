@@ -31,7 +31,7 @@ fn file_span(file: FileId, span: Span) -> FileSpan {
 pub struct TypeChecker {
     file: FileId,
     counter: u32,
-    constructor_types: HashMap<String, TypeExpr>,
+    constructor_types: HashMap<CtorId, TypeExpr>,
     func_schemes: HashMap<String, Scheme>,
     class_defs: Vec<ClassDefinition>,
     instance_defs: Vec<InstanceDefinition<Span>>,
@@ -172,7 +172,7 @@ pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
 
 #[derive(Clone, Debug)]
 pub struct TypeCheckEnv {
-    pub constructor_types: HashMap<String, TypeExpr>,
+    pub constructor_types: HashMap<CtorId, TypeExpr>,
     pub func_schemes: HashMap<String, Scheme>,
     pub class_defs: Vec<ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<Span>>,

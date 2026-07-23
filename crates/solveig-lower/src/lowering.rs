@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    CaseArm, DataDefinition, Literal, Pattern, PatternNode, ResolvedModule, TermExpr, TermExprNode,
-    ctor_display_name,
+    CaseArm, CtorId, CtorRuntimeInfo, DataDefinition, Literal, Pattern, PatternNode,
+    ResolvedModule, TermExpr, TermExprNode, ctor_display_name,
 };
 
 use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
@@ -11,7 +11,7 @@ use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
 struct LowerCtx {
     scope: Vec<String>,
     globals: HashMap<String, usize>,
-    constructors: HashMap<String, (u16, u16)>,
+    constructors: HashMap<CtorId, (u16, u16)>,
 }
 
 impl LowerCtx {
@@ -24,7 +24,10 @@ impl LowerCtx {
         if let Some(&global_index) = self.globals.get(name) {
             return Rc::new(IRExpr::FVar(global_index));
         }
-        if let Some(&(tag, arity)) = self.constructors.get(name) {
+        if let Some(&(tag, arity)) = self
+            .constructors
+            .get(&solveig_ast::ast::legacy_ctor_id(name))
+        {
             return Rc::new(IRExpr::Con { tag, arity });
         }
         panic!("unbound variable during lowering: {}", name);
@@ -73,11 +76,12 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
         TermExpr::Var(name) => ctx.resolve_var(name),
         TermExpr::Lit(Literal::Int(n)) => Rc::new(IRExpr::Int(*n)),
         TermExpr::Con(id) => {
-            let name = ctor_display_name(*id);
-            let &(tag, arity) = ctx
-                .constructors
-                .get(&name)
-                .unwrap_or_else(|| panic!("unknown constructor during lowering: {}", name));
+            let &(tag, arity) = ctx.constructors.get(id).unwrap_or_else(|| {
+                panic!(
+                    "unknown constructor during lowering: {}",
+                    ctor_display_name(*id)
+                )
+            });
             Rc::new(IRExpr::Con { tag, arity })
         }
 
@@ -160,11 +164,9 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> IRPattern {
         Pattern::Wild => IRPattern::Wild,
         Pattern::Lit(lit_val) => IRPattern::Lit(lit_val.clone()),
         Pattern::Con(id, sub_patterns) => {
-            let name = ctor_display_name(*id);
-            let &(tag, _) = ctx
-                .constructors
-                .get(&name)
-                .unwrap_or_else(|| panic!("unknown constructor in pattern: {}", name));
+            let &(tag, _) = ctx.constructors.get(id).unwrap_or_else(|| {
+                panic!("unknown constructor in pattern: {}", ctor_display_name(*id))
+            });
             let sub_ir_patterns = sub_patterns
                 .iter()
                 .map(|sub_pattern| lower_pattern(ctx, sub_pattern))
@@ -174,13 +176,13 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> IRPattern {
     }
 }
 
-fn build_constructor_table(data_defs: &[DataDefinition]) -> HashMap<String, (u16, u16)> {
+fn build_constructor_table(data_defs: &[DataDefinition]) -> HashMap<CtorId, (u16, u16)> {
     let mut table = HashMap::new();
     let mut next_tag: u16 = 0;
     for data_def in data_defs {
         for constructor_def in &data_def.constructors {
             let arity = constructor_def.fields.len() as u16;
-            table.insert(constructor_def.name.clone(), (next_tag, arity));
+            table.insert(constructor_def.id, (next_tag, arity));
             next_tag += 1;
         }
     }
@@ -195,8 +197,8 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
         globals.insert(func_def.name.clone(), index);
     }
 
-    for (name, &(_, _)) in &constructors {
-        if !globals.contains_key(name) {
+    for (id, &(_, _)) in &constructors {
+        if !globals.contains_key(&ctor_display_name(*id)) {
             // Don't shadow function names
         }
     }
@@ -221,7 +223,11 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
 
     let constructor_arities = constructors
         .iter()
-        .map(|(name, &(tag, arity))| (name.clone(), tag, arity))
+        .map(|(ctor, &(tag, arity))| CtorRuntimeInfo {
+            ctor: *ctor,
+            tag,
+            arity,
+        })
         .collect();
 
     IRProgram {

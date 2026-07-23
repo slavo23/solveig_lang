@@ -1,7 +1,7 @@
 impl TypeChecker {
     fn lookup_local_term_var(&self, ctx: &Context, name: &str) -> Option<TypeExpr> {
         ctx.lookup_term_var(name)
-            .or_else(|| self.constructor_types.get(name).cloned())
+            .or_else(|| self.constructor_types.get(&legacy_ctor_id(name)).cloned())
     }
     pub fn solve_subtype(
         &mut self,

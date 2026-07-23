@@ -1,4 +1,4 @@
-use solveig_ast::ast::Literal;
+use solveig_ast::ast::{CtorRuntimeInfo, Literal, ctor_display_name};
 
 use super::bytecode::{
     BytePattern, BytecodeProgram, ChunkKind, Instr, MatchArm, lower_to_bytecode,
@@ -57,7 +57,7 @@ impl Vm {
         let max_tag = program
             .constructor_arities
             .iter()
-            .map(|(_, tag, _)| *tag as usize)
+            .map(|info| info.tag as usize)
             .max()
             .unwrap_or(0);
 
@@ -85,11 +85,11 @@ impl Vm {
         vm
     }
 
-    fn init_nullary(&mut self, arities: &[(String, u16, u16)]) {
-        for &(_, tag, arity) in arities {
-            if arity == 0 {
-                let val = self.alloc_heap(HeapObject::Data0 { tag });
-                self.nullary_ctors.set(tag, val);
+    fn init_nullary(&mut self, arities: &[CtorRuntimeInfo]) {
+        for info in arities {
+            if info.arity == 0 {
+                let val = self.alloc_heap(HeapObject::Data0 { tag: info.tag });
+                self.nullary_ctors.set(info.tag, val);
             }
         }
 
@@ -1142,18 +1142,21 @@ fn chunk_arity(program: &BytecodeProgram, chunk_id: usize) -> usize {
     arity
 }
 
-fn find_bool_tag(arities: &[(String, u16, u16)], name: &str) -> u16 {
+fn find_bool_tag(arities: &[CtorRuntimeInfo], name: &str) -> u16 {
     arities
         .iter()
-        .find(|(n, _, a)| *a == 0 && (n.ends_with(&format!(".{}", name)) || n == name))
-        .map(|(_, tag, _)| *tag)
+        .find(|info| {
+            let ctor_name = ctor_display_name(info.ctor);
+            info.arity == 0 && (ctor_name.ends_with(&format!(".{}", name)) || ctor_name == name)
+        })
+        .map(|info| info.tag)
         .unwrap_or_else(|| panic!("'{}' constructor not found", name))
 }
 
 pub struct EvalResult {
     root: Value,
     heap: Heap,
-    constructor_arities: Vec<(String, u16, u16)>,
+    constructor_arities: Vec<CtorRuntimeInfo>,
 }
 
 pub struct Machine;
@@ -1201,7 +1204,7 @@ impl EvalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solveig_ast::ast::BinOp;
+    use solveig_ast::ast::{BinOp, legacy_ctor_id};
     use solveig_lower::closure_ir::{CCCaseArm, CCExpr, CCFunction, CCGlobalDef, CCPattern};
     use std::rc::Rc;
 
@@ -1357,15 +1360,25 @@ mod tests {
         extra_constructors: &[(&str, u16, u16)],
     ) -> CCProgram {
         let mut constructor_arities = vec![
-            ("True".to_string(), TRUE_TAG, 0),
-            ("False".to_string(), FALSE_TAG, 0),
+            CtorRuntimeInfo {
+                ctor: legacy_ctor_id("True"),
+                tag: TRUE_TAG,
+                arity: 0,
+            },
+            CtorRuntimeInfo {
+                ctor: legacy_ctor_id("False"),
+                tag: FALSE_TAG,
+                arity: 0,
+            },
         ];
 
-        constructor_arities.extend(
-            extra_constructors
-                .iter()
-                .map(|(name, tag, arity)| ((*name).to_string(), *tag, *arity)),
-        );
+        constructor_arities.extend(extra_constructors.iter().map(|(name, tag, arity)| {
+            CtorRuntimeInfo {
+                ctor: legacy_ctor_id(name),
+                tag: *tag,
+                arity: *arity,
+            }
+        }));
 
         CCProgram {
             globals,

@@ -216,7 +216,7 @@ impl<'a> Resolver<'a> {
         (
             Vec<DataDefinition>,
             HashMap<String, Kind>,
-            HashMap<String, TypeExpr>,
+            HashMap<CtorId, TypeExpr>,
             HashMap<String, Kind>,
         ),
         KindError,
@@ -232,9 +232,11 @@ impl<'a> Resolver<'a> {
             let mut core_ctors = Vec::new();
 
             for ctor in &idef.constructors {
-                constructor_types.insert(ctor.name.clone(), ctor.full_type.clone());
+                let ctor_id = legacy_ctor_id(&ctor.name);
+                constructor_types.insert(ctor_id, ctor.full_type.clone());
 
                 core_ctors.push(ConstructorDef {
+                    id: ctor_id,
                     name: ctor.name.clone(),
                     fields: ctor.kinded_fields.clone(),
                     full_type: ctor.full_type.clone(),

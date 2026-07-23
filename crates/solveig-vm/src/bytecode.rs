@@ -1,4 +1,4 @@
-use solveig_ast::ast::{BinOp, Literal, UnOp};
+use solveig_ast::ast::{BinOp, CtorRuntimeInfo, Literal, UnOp, ctor_display_name};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
@@ -114,29 +114,29 @@ pub struct CompiledGlobal {
 pub struct BytecodeProgram {
     pub chunks: Vec<Chunk>,
     pub globals: Vec<CompiledGlobal>,
-    pub constructor_arities: Vec<(String, u16, u16)>,
+    pub constructor_arities: Vec<CtorRuntimeInfo>,
 }
 
 impl BytecodeProgram {
-    pub fn constructor_name(&self, tag: u16) -> Option<&str> {
+    pub fn constructor_name(&self, tag: u16) -> Option<String> {
         self.constructor_arities
             .iter()
-            .find(|(_, ctor_tag, _)| *ctor_tag == tag)
-            .map(|(name, _, _)| name.as_str())
+            .find(|info| info.tag == tag)
+            .map(|info| ctor_display_name(info.ctor))
     }
 
     pub fn constructor_tag(&self, name: &str) -> Option<u16> {
         self.constructor_arities
             .iter()
-            .find(|(ctor_name, _, _)| ctor_name == name)
-            .map(|(_, tag, _)| *tag)
+            .find(|info| ctor_display_name(info.ctor) == name)
+            .map(|info| info.tag)
     }
 
     pub fn constructor_arity(&self, tag: u16) -> Option<u16> {
         self.constructor_arities
             .iter()
-            .find(|(_, ctor_tag, _)| *ctor_tag == tag)
-            .map(|(_, _, arity)| *arity)
+            .find(|info| info.tag == tag)
+            .map(|info| info.arity)
     }
 
     pub fn chunk(&self, id: usize) -> &Chunk {
@@ -159,8 +159,13 @@ impl BytecodeProgram {
         }
 
         out.push_str("\n=== Constructors ===\n");
-        for (name, tag, arity) in &self.constructor_arities {
-            out.push_str(&format!("tag {:>3}  arity {:>2}  {}\n", tag, arity, name));
+        for info in &self.constructor_arities {
+            out.push_str(&format!(
+                "tag {:>3}  arity {:>2}  {}\n",
+                info.tag,
+                info.arity,
+                ctor_display_name(info.ctor)
+            ));
         }
 
         out.push_str("\n=== Chunks ===\n");

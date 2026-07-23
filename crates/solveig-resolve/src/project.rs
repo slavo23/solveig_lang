@@ -5,7 +5,9 @@ use std::rc::Rc;
 use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
-use solveig_ast::ast::{ClassDefinition, DefId, Kind, ModuleId, TypeExpr};
+use solveig_ast::ast::{
+    ClassDefinition, CtorId, DefId, Kind, ModuleId, TypeExpr, ctor_display_name, legacy_ctor_id,
+};
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
 use solveig_syntax::ast::{ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition};
@@ -464,8 +466,9 @@ impl TypedModuleApi {
         }
 
         for (sym, ty) in &self.constructor_types {
+            let name = defid_to_legacy_string(session, modules, *sym);
             out.constructor_types
-                .insert(defid_to_legacy_string(session, modules, *sym), ty.clone());
+                .insert(legacy_ctor_id(&name), ty.clone());
         }
 
         for (sym, class_def) in &self.class_defs {
@@ -482,7 +485,7 @@ impl TypedModuleApi {
 pub struct TypedDisplayMaps<'a> {
     pub func_schemes: &'a mut HashMap<String, solveig_ast::ast::Scheme>,
     pub tycon_kinds: &'a mut HashMap<String, Kind>,
-    pub constructor_types: &'a mut HashMap<String, TypeExpr>,
+    pub constructor_types: &'a mut HashMap<CtorId, TypeExpr>,
     pub class_defs: &'a mut HashMap<String, solveig_ast::ast::ClassDefinition>,
     pub instance_defs: &'a mut Vec<
         solveig_ast::ast::InstanceDefinition<
@@ -906,7 +909,8 @@ pub fn build_typed_module_api(
         }
     }
 
-    for (name, ty) in &checked.constructor_types {
+    for (id, ty) in &checked.constructor_types {
+        let name = ctor_display_name(*id);
         if let Some(stripped) = name.strip_prefix(&prefix) {
             api.constructor_types.insert(
                 local_def_id(module_id, session.intern(stripped)),

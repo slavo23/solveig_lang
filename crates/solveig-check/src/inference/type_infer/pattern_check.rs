@@ -161,14 +161,13 @@ impl TypeChecker {
                 Ok((theta, vec![]))
             }
             Pattern::Con(constructor_id, sub_patterns) => {
-                let constructor_name = ctor_display_name(*constructor_id);
                 let constructor_type = self
                     .constructor_types
-                    .get(&constructor_name)
+                    .get(constructor_id)
                     .cloned()
                     .ok_or_else(|| TypeError::UnknownPatternConstructor {
                         span: self.get_file_span(pattern.anno.clone()),
-                        name: constructor_name,
+                        name: ctor_display_name(*constructor_id),
                     })?;
 
                 let (mut theta, field_types, constructor_result_type) = self

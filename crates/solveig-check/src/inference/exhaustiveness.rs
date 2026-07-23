@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use solveig_ast::ast::{
-    CaseArmNode, Literal, Pattern, PatternNode, Predicate, Pretty, TyVarId, TypeExpr,
+    CaseArmNode, CtorId, Literal, Pattern, PatternNode, Predicate, Pretty, TyVarId, TypeExpr,
     ctor_display_name, tycon_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
@@ -14,7 +14,7 @@ type Span = Range<usize>;
 /// Maranget-style exhaustiveness checking.
 pub fn check_case(
     file: FileId,
-    constructor_types: &HashMap<String, TypeExpr>,
+    constructor_types: &HashMap<CtorId, TypeExpr>,
     scrutinee_type: &TypeExpr,
     arms: &[CaseArmNode<Span>],
     case_span: Span,
@@ -82,7 +82,7 @@ impl LitPat {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum Head {
-    Constructor(String),
+    Constructor(CtorId),
     Literal(LitPat),
 }
 
@@ -103,8 +103,9 @@ impl Witness {
         match self {
             Witness::Wild => "_".to_string(),
 
-            Witness::Head(Head::Constructor(name), args) => {
-                let name = short_name(name);
+            Witness::Head(Head::Constructor(id), args) => {
+                let display_name = ctor_display_name(*id);
+                let name = short_name(&display_name);
 
                 if name == "Nil" && args.is_empty() {
                     return "[]".to_string();
@@ -152,8 +153,8 @@ struct ConstructorSig {
 
 #[derive(Clone, Debug, Default)]
 struct ConstructorEnv {
-    by_name: HashMap<String, ConstructorSig>,
-    by_tycon: HashMap<String, Vec<String>>,
+    by_name: HashMap<CtorId, ConstructorSig>,
+    by_tycon: HashMap<String, Vec<CtorId>>,
 }
 
 fn is_open_primitive_type(ty: &TypeExpr) -> bool {
@@ -165,10 +166,10 @@ fn is_open_primitive_type(ty: &TypeExpr) -> bool {
 }
 
 impl ConstructorEnv {
-    fn from_constructor_types(constructor_types: &HashMap<String, TypeExpr>) -> Self {
+    fn from_constructor_types(constructor_types: &HashMap<CtorId, TypeExpr>) -> Self {
         let mut env = ConstructorEnv::default();
 
-        for (constructor_name, constructor_type) in constructor_types {
+        for (constructor_id, constructor_type) in constructor_types {
             let Some((arg_types, result_type)) = constructor_shape(constructor_type) else {
                 continue;
             };
@@ -178,7 +179,7 @@ impl ConstructorEnv {
             };
 
             env.by_name.insert(
-                constructor_name.clone(),
+                *constructor_id,
                 ConstructorSig {
                     arg_types,
                     result_type,
@@ -188,21 +189,23 @@ impl ConstructorEnv {
             env.by_tycon
                 .entry(result_tycon)
                 .or_default()
-                .push(constructor_name.clone());
+                .push(*constructor_id);
         }
 
         for constructors in env.by_tycon.values_mut() {
             constructors.sort_by(|left, right| {
-                short_name(left)
-                    .cmp(short_name(right))
-                    .then_with(|| left.cmp(right))
+                let left_name = ctor_display_name(*left);
+                let right_name = ctor_display_name(*right);
+                short_name(&left_name)
+                    .cmp(short_name(&right_name))
+                    .then_with(|| left_name.cmp(&right_name))
             });
         }
 
         env
     }
 
-    fn constructors_for_type(&self, ty: &TypeExpr) -> Option<Vec<String>> {
+    fn constructors_for_type(&self, ty: &TypeExpr) -> Option<Vec<CtorId>> {
         if is_open_primitive_type(ty) {
             return None;
         }
@@ -213,10 +216,10 @@ impl ConstructorEnv {
 
     fn field_types_for_constructor(
         &self,
-        constructor_name: &str,
+        constructor_id: CtorId,
         scrutinee_type: &TypeExpr,
     ) -> Option<Vec<TypeExpr>> {
-        let sig = self.by_name.get(constructor_name)?;
+        let sig = self.by_name.get(&constructor_id)?;
 
         let mut subst = HashMap::<TyVarId, TypeExpr>::new();
 
@@ -327,10 +330,10 @@ impl ExhaustivenessChecker {
         vector: &[Pat],
         types: &[TypeExpr],
         first_type: &TypeExpr,
-        constructors: Vec<String>,
+        constructors: Vec<CtorId>,
     ) -> Option<Vec<Witness>> {
-        for constructor_name in constructors {
-            let head = Head::Constructor(constructor_name);
+        for constructor_id in constructors {
+            let head = Head::Constructor(constructor_id);
 
             let Some(field_types) = self.field_types_for_head(&head, first_type) else {
                 continue;
@@ -370,8 +373,8 @@ impl ExhaustivenessChecker {
         vector: &[Pat],
         types: &[TypeExpr],
         first_type: &TypeExpr,
-        constructors: Vec<String>,
-        present_constructors: &HashSet<String>,
+        constructors: Vec<CtorId>,
+        present_constructors: &HashSet<CtorId>,
     ) -> Option<Vec<Witness>> {
         // This is the important Maranget default-matrix rule.
         //
@@ -419,7 +422,7 @@ impl ExhaustivenessChecker {
         self.useful(&default_matrix, &vector[1..], &types[1..])
     }
 
-    fn present_constructors(&self, matrix: &[Vec<Pat>]) -> HashSet<String> {
+    fn present_constructors(&self, matrix: &[Vec<Pat>]) -> HashSet<CtorId> {
         let mut present = HashSet::new();
 
         for row in matrix {
@@ -427,8 +430,8 @@ impl ExhaustivenessChecker {
                 continue;
             };
 
-            if let Pat::Head(Head::Constructor(constructor_name), _) = head {
-                present.insert(constructor_name.clone());
+            if let Pat::Head(Head::Constructor(constructor_id), _) = head {
+                present.insert(*constructor_id);
             }
         }
 
@@ -437,13 +440,13 @@ impl ExhaustivenessChecker {
 
     fn first_missing_constructor(
         &self,
-        constructors: &[String],
-        present_constructors: &HashSet<String>,
-    ) -> Option<String> {
+        constructors: &[CtorId],
+        present_constructors: &HashSet<CtorId>,
+    ) -> Option<CtorId> {
         constructors
             .iter()
             .find(|constructor| !present_constructors.contains(*constructor))
-            .cloned()
+            .copied()
     }
 
     fn field_types_for_head(
@@ -452,9 +455,9 @@ impl ExhaustivenessChecker {
         scrutinee_type: &TypeExpr,
     ) -> Option<Vec<TypeExpr>> {
         match head {
-            Head::Constructor(constructor_name) => self
+            Head::Constructor(constructor_id) => self
                 .constructor_env
-                .field_types_for_constructor(constructor_name, scrutinee_type),
+                .field_types_for_constructor(*constructor_id, scrutinee_type),
 
             Head::Literal(_) => Some(Vec::new()),
         }
@@ -517,7 +520,7 @@ fn lower_pattern(pattern: &PatternNode<Span>) -> Pat {
         Pattern::Lit(lit) => Pat::Head(Head::Literal(LitPat::from_literal(lit)), Vec::new()),
 
         Pattern::Con(id, args) => Pat::Head(
-            Head::Constructor(ctor_display_name(*id)),
+            Head::Constructor(*id),
             args.iter().map(lower_pattern).collect(),
         ),
     }
@@ -767,7 +770,7 @@ mod tests {
     }
 
     fn missing_patterns(
-        constructor_types: &HashMap<String, TypeExpr>,
+        constructor_types: &HashMap<CtorId, TypeExpr>,
         scrutinee_type: &TypeExpr,
         patterns: Vec<Pattern<Span>>,
     ) -> Vec<String> {
@@ -780,21 +783,21 @@ mod tests {
         }
     }
 
-    fn test_constructor_types() -> HashMap<String, TypeExpr> {
+    fn test_constructor_types() -> HashMap<CtorId, TypeExpr> {
         let mut constructors = HashMap::new();
 
-        constructors.insert("False".to_string(), bool_ty());
-        constructors.insert("True".to_string(), bool_ty());
+        constructors.insert(legacy_ctor_id("False"), bool_ty());
+        constructors.insert(legacy_ctor_id("True"), bool_ty());
 
-        constructors.insert("Nothing".to_string(), forall("a", maybe_ty(tyvar("a"))));
+        constructors.insert(legacy_ctor_id("Nothing"), forall("a", maybe_ty(tyvar("a"))));
         constructors.insert(
-            "Just".to_string(),
+            legacy_ctor_id("Just"),
             forall("a", arr(tyvar("a"), maybe_ty(tyvar("a")))),
         );
 
-        constructors.insert("Nil".to_string(), forall("a", list_ty(tyvar("a"))));
+        constructors.insert(legacy_ctor_id("Nil"), forall("a", list_ty(tyvar("a"))));
         constructors.insert(
-            "Cons".to_string(),
+            legacy_ctor_id("Cons"),
             forall(
                 "a",
                 arr(tyvar("a"), arr(list_ty(tyvar("a")), list_ty(tyvar("a")))),
@@ -802,7 +805,7 @@ mod tests {
         );
 
         constructors.insert(
-            "MkPair".to_string(),
+            legacy_ctor_id("MkPair"),
             forall(
                 "a",
                 forall(
