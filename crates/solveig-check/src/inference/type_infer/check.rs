@@ -182,17 +182,18 @@ pub fn check_and_elab_module(
     }
 
     for inst in &module.instance_defs {
+        let inst_class_name = class_display_name(inst.head.class_id);
         let class_def = env
             .class_defs
             .iter()
-            .find(|class_def| class_def.name == inst.head.class_name);
+            .find(|class_def| class_def.name == inst_class_name);
 
         let class_def = match class_def {
             Some(class_def) => class_def,
             None => {
                 errors.push(TypeError::UnboundVariable {
                     span: file_span(file, 0..0),
-                    name: format!("unknown class `{}` in instance", inst.head.class_name),
+                    name: format!("unknown class `{}` in instance", inst_class_name),
                 });
                 continue;
             }
@@ -253,7 +254,7 @@ pub fn check_and_elab_module(
                         span: file_span(file, inst_method.body.anno.clone()),
                         name: format!(
                             "instance method `{}` not found in class `{}`",
-                            inst_method.name, inst.head.class_name
+                            inst_method.name, inst_class_name
                         ),
                     });
                     continue;
@@ -292,7 +293,7 @@ pub fn check_and_elab_module(
                         errors.push(TypeError::InstanceMethodTypeMismatch {
                             span: file_span(file, inst_method.body.anno.clone()),
                             method: inst_method.name.clone(),
-                            class_name: inst.head.class_name.clone(),
+                            class_name: inst_class_name.clone(),
                             expected: expected_scheme.pretty(),
                             cause: Box::new(cause),
                         });
@@ -303,7 +304,7 @@ pub fn check_and_elab_module(
                     errors.push(TypeError::InstanceMethodTypeMismatch {
                         span: file_span(file, inst_method.body.anno.clone()),
                         method: inst_method.name.clone(),
-                        class_name: inst.head.class_name.clone(),
+                        class_name: inst_class_name.clone(),
                         expected: expected_scheme.pretty(),
                         cause: Box::new(cause),
                     });

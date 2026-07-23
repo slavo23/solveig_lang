@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use solveig_ast::ast::{
-    Kind, KindMetaId, Predicate, Pretty, Scheme, TyVarId, TypeExpr, tycon_display_name,
-    tyvar_display_name,
+    Kind, KindMetaId, Predicate, Pretty, Scheme, TyVarId, TypeExpr, class_display_name,
+    tycon_display_name, tyvar_display_name,
 };
 use solveig_base::{Diagnostic, FileSpan, IntoDiagnostic, Label};
 
@@ -331,11 +331,12 @@ impl SignatureKindInferencer {
         pred: &Predicate,
         env: &mut HashMap<TyVarId, Kind>,
     ) -> Result<Predicate, KindError> {
+        let class_name = class_display_name(pred.class_id);
         let expected_kinds = self
             .class_env
-            .get(&pred.class_name)
+            .get(&class_name)
             .cloned()
-            .ok_or_else(|| KindError::unbound_type_constructor(pred.class_name.clone()))?;
+            .ok_or_else(|| KindError::unbound_type_constructor(class_name.clone()))?;
 
         if expected_kinds.len() != pred.args.len() {
             return Err(KindError::cannot_unify(
@@ -353,7 +354,7 @@ impl SignatureKindInferencer {
         }
 
         Ok(Predicate {
-            class_name: pred.class_name.clone(),
+            class_id: pred.class_id,
             args: rebuilt_args,
         })
     }

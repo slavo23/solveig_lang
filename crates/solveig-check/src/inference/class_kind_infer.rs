@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use solveig_ast::ast::{
-    ClassDefinition, Kind, KindMetaId, Predicate, Scheme, TyVarId, TypeExpr, legacy_tyvar_id,
-    tycon_display_name, tyvar_display_name,
+    ClassDefinition, Kind, KindMetaId, Predicate, Scheme, TyVarId, TypeExpr, class_display_name,
+    legacy_tyvar_id, tycon_display_name, tyvar_display_name,
 };
 
 use crate::signature_infer::KindError;
@@ -207,7 +207,7 @@ impl ClassKindInferencer {
 
     fn zonk_predicate_with_env(&self, pred: &Predicate, env: &HashMap<TyVarId, Kind>) -> Predicate {
         Predicate {
-            class_name: pred.class_name.clone(),
+            class_id: pred.class_id,
             args: pred
                 .args
                 .iter()
@@ -221,11 +221,12 @@ impl ClassKindInferencer {
         pred: &Predicate,
         env: &mut HashMap<TyVarId, Kind>,
     ) -> Result<Predicate, KindError> {
+        let class_name = class_display_name(pred.class_id);
         let expected_kinds = self
             .class_env
-            .get(&pred.class_name)
+            .get(&class_name)
             .cloned()
-            .ok_or_else(|| KindError::unbound_type_constructor(pred.class_name.clone()))?;
+            .ok_or_else(|| KindError::unbound_type_constructor(class_name.clone()))?;
 
         if expected_kinds.len() != pred.args.len() {
             return Err(KindError::cannot_unify(

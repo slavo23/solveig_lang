@@ -53,7 +53,7 @@ impl TypeChecker {
         subst: &HashMap<TyVarId, TypeExpr>,
     ) -> Predicate {
         Predicate {
-            class_name: pred.class_name.clone(),
+            class_id: pred.class_id,
             args: pred
                 .args
                 .iter()
@@ -118,7 +118,7 @@ impl TypeChecker {
     }
     fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, TypeExpr>) -> Predicate {
         Predicate {
-            class_name: pred.class_name.clone(),
+            class_id: pred.class_id,
             args: pred
                 .args
                 .iter()
@@ -146,15 +146,16 @@ impl TypeChecker {
         }
     }
     fn predicate_same_shape(a: &Predicate, b: &Predicate) -> bool {
-        a.class_name == b.class_name && a.args == b.args
+        a.class_id == b.class_id && a.args == b.args
     }
     fn superclass_predicates_for_given(&self, given: &Predicate) -> Vec<Predicate> {
         let given = self.zonk_predicate(given);
+        let given_class_name = class_display_name(given.class_id);
 
         let Some(class_def) = self
             .class_defs
             .iter()
-            .find(|class_def| class_def.name == given.class_name)
+            .find(|class_def| class_def.name == given_class_name)
         else {
             return Vec::new();
         };
@@ -240,9 +241,9 @@ impl TypeChecker {
 
         let specialized = Self::substitute_scheme(method_scheme, &subst);
 
-        let specialized_class_head = Predicate {
-            class_name: class_def.name.clone(),
-            args: class_def
+        let specialized_class_head = Predicate::legacy(
+            class_def.name.clone(),
+            class_def
                 .params
                 .iter()
                 .map(|(name, _)| {
@@ -252,7 +253,7 @@ impl TypeChecker {
                         .unwrap_or_else(|| TypeExpr::TyVar(legacy_tyvar_id(name)))
                 })
                 .collect(),
-        };
+        );
 
         let mut predicates = specialized
             .predicates
@@ -282,7 +283,7 @@ impl TypeChecker {
 
         for (i, inst_a) in instances.iter().enumerate() {
             for inst_b in instances.iter().skip(i + 1) {
-                if inst_a.head.class_name != inst_b.head.class_name {
+                if inst_a.head.class_id != inst_b.head.class_id {
                     continue;
                 }
                 if inst_a.head.args.len() != inst_b.head.args.len() {
@@ -300,7 +301,7 @@ impl TypeChecker {
                 if overlaps {
                     errors.push(TypeError::OverlappingInstances {
                         span: self.get_file_span(0..0),
-                        class_name: inst_a.head.class_name.clone(),
+                        class_name: class_display_name(inst_a.head.class_id),
                         instance_type: inst_b
                             .head
                             .args
@@ -377,7 +378,7 @@ impl TypeChecker {
         }
 
         for inst in &self.instance_defs {
-            if inst.head.class_name != pred.class_name || inst.head.args.len() != pred.args.len() {
+            if inst.head.class_id != pred.class_id || inst.head.args.len() != pred.args.len() {
                 continue;
             }
 

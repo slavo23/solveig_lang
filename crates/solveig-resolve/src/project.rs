@@ -6,8 +6,8 @@ use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{
-    ClassDefinition, CtorId, DefId, Kind, ModuleId, TypeExpr, ctor_display_name, legacy_ctor_id,
-    legacy_tycon_id,
+    ClassDefinition, CtorId, DefId, Kind, ModuleId, TypeExpr, class_display_name,
+    ctor_display_name, legacy_ctor_id, legacy_tycon_id,
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
@@ -356,10 +356,11 @@ impl TypedModuleApi {
         // imported in the usual way. Prelude classes are already imported
         // implicitly for ordinary user modules.
         for superclass in &class_def.superclasses {
+            let superclass_name = class_display_name(superclass.class_id);
             let Some((super_sym, _)) = self
                 .class_defs
                 .iter()
-                .find(|(_, candidate)| candidate.name == superclass.class_name)
+                .find(|(_, candidate)| candidate.name == superclass_name)
             else {
                 continue;
             };

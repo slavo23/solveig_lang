@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    ClassDefinition, CtorId, DefId, ModuleId, Scheme, TyConId, TypeExpr, ctor_display_name,
-    def_display_name, tycon_display_name,
+    ClassDefinition, CtorId, DefId, ModuleId, Scheme, TyConId, TypeExpr, class_display_name,
+    ctor_display_name, def_display_name, tycon_display_name,
 };
 use solveig_base::{FileSpan, IntoDiagnostic, Session};
 use solveig_check::inference::holes::hole_diagnostics;
@@ -633,7 +633,7 @@ fn retain_only_local_symbols(
 
     checked
         .instance_defs
-        .retain(|inst_def| inst_def.head.class_name.starts_with(&prefix));
+        .retain(|inst_def| class_display_name(inst_def.head.class_id).starts_with(&prefix));
 
     checked
         .func_defs

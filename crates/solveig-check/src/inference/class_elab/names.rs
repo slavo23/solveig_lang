@@ -30,7 +30,7 @@ fn mangle_type(ty: &TypeExpr) -> String {
     }
 }
 fn mangle_predicate(pred: &Predicate) -> String {
-    let class = sanitize_name(&pred.class_name);
+    let class = sanitize_name(&class_display_name(pred.class_id));
     let args = pred
         .args
         .iter()

@@ -669,7 +669,7 @@ fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<TyVarId, TypeExpr>) -> TypeExp
             predicates
                 .iter()
                 .map(|pred| Predicate {
-                    class_name: pred.class_name.clone(),
+                    class_id: pred.class_id,
                     args: pred
                         .args
                         .iter()

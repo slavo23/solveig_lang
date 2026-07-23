@@ -119,6 +119,7 @@ pub fn legacy_evar_name(id: EvarId) -> String {
 
 const LEGACY_TYCON_TAG: u32 = 0x8000_0000;
 const LEGACY_CTOR_TAG: u32 = 0x8000_0000;
+const LEGACY_CLASS_TAG: u32 = 0x8000_0000;
 const LEGACY_SYMBOL_TAG: u32 = 0x8000_0000;
 const LEGACY_DEF_MODULE: ModuleId = ModuleId(0xffff_fffe);
 
@@ -132,6 +133,12 @@ struct LegacyTyConRegistry {
 struct LegacyCtorRegistry {
     names: Vec<String>,
     ids: HashMap<String, CtorId>,
+}
+
+#[derive(Default)]
+struct LegacyClassRegistry {
+    names: Vec<String>,
+    ids: HashMap<String, ClassId>,
 }
 
 #[derive(Default)]
@@ -150,6 +157,11 @@ fn legacy_tycon_registry() -> &'static Mutex<LegacyTyConRegistry> {
 fn legacy_ctor_registry() -> &'static Mutex<LegacyCtorRegistry> {
     static REGISTRY: OnceLock<Mutex<LegacyCtorRegistry>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(LegacyCtorRegistry::default()))
+}
+
+fn legacy_class_registry() -> &'static Mutex<LegacyClassRegistry> {
+    static REGISTRY: OnceLock<Mutex<LegacyClassRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(LegacyClassRegistry::default()))
 }
 
 fn legacy_term_name_registry() -> &'static Mutex<LegacyTermNameRegistry> {
@@ -217,6 +229,37 @@ pub fn ctor_display_name(id: CtorId) -> String {
         .get(index)
         .cloned()
         .unwrap_or_else(|| format!("C{}", id.0))
+}
+
+pub fn legacy_class_id(name: &str) -> ClassId {
+    let mut registry = legacy_class_registry()
+        .lock()
+        .expect("ICE: legacy class registry lock poisoned");
+
+    if let Some(id) = registry.ids.get(name) {
+        return *id;
+    }
+
+    let id = ClassId(LEGACY_CLASS_TAG | registry.names.len() as u32);
+    registry.names.push(name.to_string());
+    registry.ids.insert(name.to_string(), id);
+    id
+}
+
+pub fn class_display_name(id: ClassId) -> String {
+    if id.0 & LEGACY_CLASS_TAG == 0 {
+        return format!("K{}", id.0);
+    }
+
+    let registry = legacy_class_registry()
+        .lock()
+        .expect("ICE: legacy class registry lock poisoned");
+    let index = (id.0 & !LEGACY_CLASS_TAG) as usize;
+    registry
+        .names
+        .get(index)
+        .cloned()
+        .unwrap_or_else(|| format!("K{}", id.0))
 }
 
 pub fn legacy_symbol_id(name: &str) -> Symbol {
@@ -548,7 +591,7 @@ impl Ty {
                 let new_preds = preds
                     .iter()
                     .map(|pred| Predicate {
-                        class_name: pred.class_name.clone(),
+                        class_id: pred.class_id,
                         args: pred
                             .args
                             .iter()
@@ -594,7 +637,7 @@ impl Ty {
                 let new_preds = preds
                     .iter()
                     .map(|pred| Predicate {
-                        class_name: pred.class_name.clone(),
+                        class_id: pred.class_id,
                         args: pred
                             .args
                             .iter()
@@ -695,11 +738,12 @@ impl Pretty<Ty> for Ty {
 
 impl Predicate {
     pub fn pretty(&self) -> String {
-        let class_name = self
-            .class_name
+        let full_class_name = class_display_name(self.class_id);
+        let class_name = full_class_name
             .split('.')
             .next_back()
-            .unwrap_or(&self.class_name);
+            .unwrap_or(&full_class_name)
+            .to_string();
 
         let args = self
             .args
@@ -717,10 +761,21 @@ impl Predicate {
             .join(" ");
 
         if args.is_empty() {
-            class_name.to_string()
+            class_name
         } else {
             format!("{class_name} {args}")
         }
+    }
+
+    pub fn legacy(class_name: String, args: Vec<TypeExpr>) -> Self {
+        Self {
+            class_id: legacy_class_id(&class_name),
+            args,
+        }
+    }
+
+    pub fn class_name(&self) -> String {
+        class_display_name(self.class_id)
     }
 }
 
@@ -948,7 +1003,7 @@ impl CtorTable {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Predicate {
-    pub class_name: String,
+    pub class_id: ClassId,
     pub args: Vec<TypeExpr>,
 }
 
@@ -1143,6 +1198,21 @@ mod tests {
         assert_eq!(legacy_ctor_id(name), id);
         assert_ne!(legacy_ctor_id("test.module.OtherCtor"), id);
         assert_eq!(ctor_display_name(id), name);
+    }
+
+    #[test]
+    fn legacy_class_bridge_preserves_registered_names() {
+        let name = "test.module.EqWidget";
+        let id = legacy_class_id(name);
+
+        assert_eq!(legacy_class_id(name), id);
+        assert_ne!(legacy_class_id("test.module.OtherClass"), id);
+        assert_eq!(class_display_name(id), name);
+        assert_eq!(Predicate::legacy(name.to_string(), Vec::new()).class_id, id);
+        assert_eq!(
+            Predicate::legacy(name.to_string(), Vec::new()).pretty(),
+            "EqWidget"
+        );
     }
 
     #[test]

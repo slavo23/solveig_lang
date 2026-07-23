@@ -275,4 +275,38 @@ mod tests {
                 .is_err()
         );
     }
+
+    #[test]
+    fn superclass_lookup_uses_predicate_class_ids() {
+        let superclass_name = "test.Sup".to_string();
+        let class_name = "test.Sub".to_string();
+        let int_ty = TypeExpr::make_con("test.Int".to_string());
+
+        let env = TypeCheckEnv {
+            constructor_types: HashMap::new(),
+            func_schemes: HashMap::new(),
+            class_defs: vec![ClassDefinition {
+                name: class_name.clone(),
+                params: vec![("a".to_string(), Kind::Star)],
+                superclasses: vec![Predicate::legacy(
+                    superclass_name.clone(),
+                    vec![TypeExpr::make_var("a".to_string())],
+                )],
+                methods: Vec::new(),
+            }],
+            instance_defs: Vec::new(),
+            tycon_kinds: HashMap::new(),
+        };
+
+        let checker = TypeChecker::with_env(&env, FileId(0));
+        let given = Predicate::legacy(class_name, vec![int_ty.clone()]);
+        let superclasses = checker.superclass_predicates_for_given(&given);
+
+        assert_eq!(superclasses.len(), 1);
+        assert_eq!(
+            superclasses[0].class_id,
+            solveig_ast::ast::legacy_class_id(&superclass_name)
+        );
+        assert_eq!(superclasses[0].args, vec![int_ty]);
+    }
 }

@@ -52,7 +52,7 @@ impl Context {
 
     fn apply_predicate(&self, pred: &Predicate) -> Predicate {
         Predicate {
-            class_name: pred.class_name.clone(),
+            class_id: pred.class_id,
             args: pred.args.iter().map(|arg| self.apply(arg)).collect(),
         }
     }

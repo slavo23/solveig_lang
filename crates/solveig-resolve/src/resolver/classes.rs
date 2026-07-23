@@ -98,32 +98,10 @@ impl<'a> Resolver<'a> {
     fn canonicalize_predicate(
         &self,
         pred: Predicate,
-        cx: &ModuleContext,
-        local: &LocalResolverEnv,
+        _cx: &ModuleContext,
+        _local: &LocalResolverEnv,
     ) -> Predicate {
-        let class_name = if pred.class_name.contains('.') {
-            pred.class_name
-        } else {
-            let name = self.session.intern(&pred.class_name);
-            let def_id = local
-                .classes
-                .get(&name)
-                .or_else(|| cx.local_api.classes.get(&name))
-                .or_else(|| {
-                    cx.imported_apis
-                        .iter()
-                        .find_map(|imp| imp.api.classes.get(&name))
-                });
-
-            def_id
-                .map(|def_id| self.legacy_name(*def_id))
-                .unwrap_or(pred.class_name)
-        };
-
-        Predicate {
-            class_name,
-            args: pred.args,
-        }
+        pred
     }
     fn canonicalize_scheme_classes(
         &self,
@@ -215,20 +193,22 @@ impl<'a> Resolver<'a> {
             });
         }
 
-        let resolved = Predicate {
-            class_name: self.resolve_class_ref(
-                &pred.0.class_name.0,
-                self.file_span(cx, pred.0.class_name.1),
-                cx,
-                local,
-            ),
-            args: pred
+        let resolved_class_name = self.resolve_class_ref(
+            &pred.0.class_name.0,
+            self.file_span(cx, pred.0.class_name.1),
+            cx,
+            local,
+        );
+
+        let resolved = Predicate::legacy(
+            resolved_class_name,
+            pred
                 .0
                 .args
                 .iter()
                 .map(|arg| self.resolve_surface_type_in_module(arg, cx, local))
                 .collect(),
-        };
+        );
 
         self.canonicalize_predicate(resolved, cx, local)
     }
@@ -267,13 +247,13 @@ impl<'a> Resolver<'a> {
                         .map(|param| (self.symbol_text(param.0).to_string(), Kind::Star))
                         .collect::<Vec<_>>();
 
-                    let class_head_pred = Predicate {
-                        class_name: class_name.clone(),
-                        args: ty_params
+                    let class_head_pred = Predicate::legacy(
+                        class_name.clone(),
+                        ty_params
                             .iter()
                             .map(|param| TypeExpr::make_var(self.symbol_text(param.0).to_string()))
                             .collect(),
-                    };
+                    );
 
                     let resolved_superclasses = superclasses
                         .iter()
@@ -408,20 +388,21 @@ impl<'a> Resolver<'a> {
                 continue;
             };
 
-            let raw_head = Predicate {
-                class_name: self.resolve_class_ref(
-                    &NameRef {
-                        segments: vec![class_name.0],
-                    },
-                    self.file_span(cx, class_name.1),
-                    cx,
-                    local,
-                ),
-                args: args
-                    .iter()
+            let resolved_class_name = self.resolve_class_ref(
+                &NameRef {
+                    segments: vec![class_name.0],
+                },
+                self.file_span(cx, class_name.1),
+                cx,
+                local,
+            );
+
+            let raw_head = Predicate::legacy(
+                resolved_class_name,
+                args.iter()
                     .map(|arg| self.resolve_surface_type_in_module(arg, cx, local))
                     .collect(),
-            };
+            );
 
             let raw_head = self.canonicalize_predicate(raw_head, cx, local);
 

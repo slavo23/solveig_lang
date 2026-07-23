@@ -14,7 +14,7 @@ impl TypeChecker {
                 .predicates
                 .iter()
                 .map(|pred| solveig_ast::ast::Predicate {
-                    class_name: pred.class_name.clone(),
+                    class_id: pred.class_id,
                     args: pred.args.iter().map(|arg| self.zonk_type(arg)).collect(),
                 })
                 .collect(),
@@ -23,7 +23,7 @@ impl TypeChecker {
     }
     fn zonk_predicate(&self, pred: &Predicate) -> Predicate {
         Predicate {
-            class_name: pred.class_name.clone(),
+            class_id: pred.class_id,
             args: pred.args.iter().map(|arg| self.zonk_type(arg)).collect(),
         }
     }
@@ -88,7 +88,7 @@ impl TypeChecker {
                 preds
                     .iter()
                     .map(|pred| solveig_ast::ast::Predicate {
-                        class_name: pred.class_name.clone(),
+                        class_id: pred.class_id,
                         args: pred.args.iter().map(|arg| self.zonk_type(arg)).collect(),
                     })
                     .collect(),

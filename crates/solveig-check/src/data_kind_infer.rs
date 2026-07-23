@@ -103,7 +103,7 @@ impl DataKindInferencer {
 
     fn apply_predicate(&self, pred: &solveig_ast::ast::Predicate) -> solveig_ast::ast::Predicate {
         solveig_ast::ast::Predicate {
-            class_name: pred.class_name.clone(),
+            class_id: pred.class_id,
             args: pred.args.iter().map(|arg| self.apply_type(arg)).collect(),
         }
     }
@@ -292,7 +292,7 @@ impl DataKindInferencer {
                         .collect::<Result<Vec<_>, KindError>>()?;
 
                     rebuilt_preds.push(solveig_ast::ast::Predicate {
-                        class_name: pred.class_name.clone(),
+                        class_id: pred.class_id,
                         args: rebuilt_args,
                     });
                 }

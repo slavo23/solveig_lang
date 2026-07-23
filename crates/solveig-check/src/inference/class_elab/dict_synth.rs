@@ -1,7 +1,8 @@
 fn dict_type_for_pred(pred: &Predicate, classes: &HashMap<String, ClassRuntimeInfo>) -> TypeExpr {
+    let class_name = class_display_name(pred.class_id);
     let info = classes
-        .get(&pred.class_name)
-        .unwrap_or_else(|| panic!("ICE: missing runtime class info for {}", pred.class_name));
+        .get(&class_name)
+        .unwrap_or_else(|| panic!("ICE: missing runtime class info for {}", class_name));
 
     pred.args
         .iter()
@@ -143,7 +144,7 @@ fn match_predicate_pattern(
     pattern: &Predicate,
     actual: &Predicate,
 ) -> Option<HashMap<TyVarId, TypeExpr>> {
-    if pattern.class_name != actual.class_name || pattern.args.len() != actual.args.len() {
+    if pattern.class_id != actual.class_id || pattern.args.len() != actual.args.len() {
         return None;
     }
 
@@ -162,7 +163,7 @@ fn instantiate_predicate_with_subst(
     subst: &HashMap<TyVarId, TypeExpr>,
 ) -> Predicate {
     Predicate {
-        class_name: pred.class_name.clone(),
+        class_id: pred.class_id,
         args: pred
             .args
             .iter()
@@ -193,7 +194,8 @@ fn resolve_superclass_evidence_from_given(
 
     seen.push(key);
 
-    let Some(class_rt) = classes.get(&given.class_name) else {
+    let given_class_name = class_display_name(given.class_id);
+    let Some(class_rt) = classes.get(&given_class_name) else {
         seen.pop();
         return None;
     };
@@ -284,14 +286,14 @@ fn build_class_runtime_info(
     let mut out = HashMap::new();
 
     for class_def in &module.class_defs {
-        let class_head_pred = Predicate {
-            class_name: class_def.name.clone(),
-            args: class_def
+        let class_head_pred = Predicate::legacy(
+            class_def.name.clone(),
+            class_def
                 .params
                 .iter()
                 .map(|(name, _)| TypeExpr::make_var(name.clone()))
                 .collect(),
-        };
+        );
 
         let mut methods = HashMap::new();
 
@@ -435,14 +437,14 @@ fn synthesize_selector_defs(
                 mk_anno(),
             );
 
-            let dict_pred = Predicate {
-                class_name: class_def.name.clone(),
-                args: class_def
+            let dict_pred = Predicate::legacy(
+                class_def.name.clone(),
+                class_def
                     .params
                     .iter()
                     .map(|(name, _)| TypeExpr::make_var(name.clone()))
                     .collect(),
-            };
+            );
 
             let selector_ty = TypeExpr::make_arr(
                 dict_type_for_pred(&dict_pred, classes),
@@ -628,16 +630,17 @@ fn synthesize_instance_dict_defs(
 
     for inst in &module.instance_defs {
         let dict_name = instance_dict_name(&inst.head);
+        let inst_class_name = class_display_name(inst.head.class_id);
 
         let class_rt = classes
-            .get(&inst.head.class_name)
-            .unwrap_or_else(|| panic!("ICE: missing runtime class info for {}", inst.head.class_name));
+            .get(&inst_class_name)
+            .unwrap_or_else(|| panic!("ICE: missing runtime class info for {}", inst_class_name));
 
         let class_def = module
             .class_defs
             .iter()
-            .find(|c| c.name == inst.head.class_name)
-            .unwrap_or_else(|| panic!("ICE: missing class definition for {}", inst.head.class_name));
+            .find(|c| c.name == inst_class_name)
+            .unwrap_or_else(|| panic!("ICE: missing class definition for {}", inst_class_name));
 
         let mut evidence_env = EvidenceEnv::default();
         let mut context_dict_names = Vec::new();
