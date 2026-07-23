@@ -1,8 +1,5 @@
-mod compile;
-mod project;
-mod resolver;
-
 use clap::Parser;
+use solveig_lang::compile_and_run_project;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -19,9 +16,7 @@ struct Cli {
 fn main() {
     let cli = Cli::parse();
 
-    if let Err(err) =
-        compile::compile_and_run_project(&cli.project_root, &cli.entry, cli.dump_bytecode)
-    {
+    if let Err(err) = compile_and_run_project(&cli.project_root, &cli.entry, cli.dump_bytecode) {
         eprintln!("{err}");
         std::process::exit(1);
     }

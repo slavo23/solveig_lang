@@ -23,6 +23,20 @@ pub fn compile_and_run_project(
     entry_name: &str,
     dump_bytecode: bool,
 ) -> Result<(), String> {
+    let output = compile_project_capture(project_root, entry_name, dump_bytecode)?;
+    println!("{output}");
+    Ok(())
+}
+
+pub fn run_project_capture(project_root: &Path, entry_name: &str) -> Result<String, String> {
+    compile_project_capture(project_root, entry_name, false)
+}
+
+fn compile_project_capture(
+    project_root: &Path,
+    entry_name: &str,
+    dump_bytecode: bool,
+) -> Result<String, String> {
     let entry_file = find_entry_file(project_root)?;
     let (_root, project) = load_project(&entry_file)?;
     let order = module_order_checked(&project)?;
@@ -43,8 +57,7 @@ pub fn compile_and_run_project(
 
     let entry_fq = format!("main.{entry_name}");
     let result = Machine::exec(&cc, &entry_fq);
-    println!("{}", result.display());
-    Ok(())
+    Ok(result.display().to_string())
 }
 
 fn erase_tc_expr_to_span_expr(
