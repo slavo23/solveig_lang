@@ -7,7 +7,7 @@ fn mangle_type(ty: &TypeExpr) -> String {
     match ty {
         TypeExpr::TyUnit => "Unit".to_string(),
         TypeExpr::TyVar(name) => format!("v_{}", sanitize_name(name)),
-        TypeExpr::TyExVar(name) => format!("ev_{}", sanitize_name(name)),
+        TypeExpr::TyExVar(id) => format!("ev_{}", id.0),
         TypeExpr::TyCon(name) => sanitize_name(name),
         TypeExpr::TyApp(f, x) => format!("App_{}_{}", mangle_type(f), mangle_type(x)),
         TypeExpr::TyArr(a, b) => format!("Arr_{}_{}", mangle_type(a), mangle_type(b)),

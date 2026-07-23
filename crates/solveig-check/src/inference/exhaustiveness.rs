@@ -645,7 +645,7 @@ fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<String, TypeExpr>) -> TypeExpr
 
         TypeExpr::TyCon(name) => TypeExpr::TyCon(name.clone()),
 
-        TypeExpr::TyExVar(name) => TypeExpr::TyExVar(name.clone()),
+        TypeExpr::TyExVar(id) => TypeExpr::TyExVar(*id),
 
         TypeExpr::TyArr(lhs, rhs) => {
             TypeExpr::make_arr(subst_type_vars(lhs, subst), subst_type_vars(rhs, subst))

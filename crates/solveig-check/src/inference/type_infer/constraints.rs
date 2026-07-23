@@ -432,10 +432,9 @@ impl TypeChecker {
     }
     fn collect_exvars_in_type(ty: &TypeExpr, acc: &mut Vec<EvarId>) {
         match ty {
-            TypeExpr::TyExVar(name) => {
-                let id = Self::evar_id_from_legacy_name(name);
-                if !acc.contains(&id) {
-                    acc.push(id);
+            TypeExpr::TyExVar(id) => {
+                if !acc.contains(id) {
+                    acc.push(*id);
                 }
             }
             TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
@@ -472,9 +471,8 @@ impl TypeChecker {
         for evar in evars {
             let (universal_id, universal) = self.fresh_universal("t");
             let kind = ctx.evar_kind_id(evar).unwrap_or(Kind::Star);
-            let evar_name = solveig_ast::ast::legacy_evar_name(evar);
 
-            result = result.substitute(&evar_name, &TypeExpr::make_var_id("t", universal_id));
+            result = result.substitute_evar(evar, &TypeExpr::make_var_id("t", universal_id));
             binders.push((universal, kind));
         }
 

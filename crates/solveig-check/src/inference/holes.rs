@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use solveig_ast::ast::{Pretty, TypeExpr};
+use solveig_ast::ast::{EvarId, Pretty, TypeExpr};
 use solveig_base::FileSpan;
 use solveig_base::utils::diagnostics::{Diagnostic, Label};
 
@@ -42,22 +42,22 @@ pub fn prettify_evars(ty: &TypeExpr) -> TypeExpr {
     let mut result = ty.clone();
     for (i, evar) in evars.iter().enumerate() {
         let letter = (b'a' + (i as u8 % 26)) as char;
-        result = result.substitute(evar, &TypeExpr::TyVar(format!("?{}", letter)));
+        result = result.substitute_evar(*evar, &TypeExpr::TyVar(format!("?{}", letter)));
     }
     result
 }
 
-fn collect_evars(ty: &TypeExpr) -> Vec<String> {
+fn collect_evars(ty: &TypeExpr) -> Vec<EvarId> {
     let mut acc = Vec::new();
     collect_evars_inner(ty, &mut acc);
     acc
 }
 
-fn collect_evars_inner(ty: &TypeExpr, acc: &mut Vec<String>) {
+fn collect_evars_inner(ty: &TypeExpr, acc: &mut Vec<EvarId>) {
     match ty {
-        TypeExpr::TyExVar(name) => {
-            if !acc.contains(name) {
-                acc.push(name.clone());
+        TypeExpr::TyExVar(id) => {
+            if !acc.contains(id) {
+                acc.push(*id);
             }
         }
         TypeExpr::TyArr(a, b) | TypeExpr::TyApp(a, b) => {

@@ -103,11 +103,13 @@ impl ClassKindInferencer {
         match ty {
             TypeExpr::TyUnit => Ok(Kind::Star),
 
-            TypeExpr::TyVar(name) | TypeExpr::TyExVar(name) => env
+            TypeExpr::TyVar(name) => env
                 .get(name)
                 .cloned()
                 .map(|k| self.apply_kind(&k))
                 .ok_or_else(|| KindError::unbound_type_variable(name.clone())),
+
+            TypeExpr::TyExVar(_) => Ok(Kind::Star),
 
             TypeExpr::TyCon(name) => self
                 .tycon_env
@@ -169,7 +171,7 @@ impl ClassKindInferencer {
         match ty {
             TypeExpr::TyUnit => TypeExpr::TyUnit,
             TypeExpr::TyVar(name) => TypeExpr::TyVar(name.clone()),
-            TypeExpr::TyExVar(name) => TypeExpr::TyExVar(name.clone()),
+            TypeExpr::TyExVar(id) => TypeExpr::TyExVar(*id),
             TypeExpr::TyCon(name) => TypeExpr::TyCon(name.clone()),
             TypeExpr::TyArr(lhs, rhs) => TypeExpr::make_arr(
                 self.zonk_type_with_env(lhs, env),

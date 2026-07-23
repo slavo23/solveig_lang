@@ -124,7 +124,7 @@ impl DataKindInferencer {
         match ty {
             TypeExpr::TyUnit => TypeExpr::TyUnit,
             TypeExpr::TyVar(n) => TypeExpr::TyVar(n.clone()),
-            TypeExpr::TyExVar(n) => TypeExpr::TyExVar(n.clone()),
+            TypeExpr::TyExVar(id) => TypeExpr::TyExVar(*id),
             TypeExpr::TyCon(n) => TypeExpr::TyCon(n.clone()),
             TypeExpr::TyArr(l, r) => TypeExpr::make_arr(self.apply_type(l), self.apply_type(r)),
             TypeExpr::TyApp(l, r) => TypeExpr::make_app(self.apply_type(l), self.apply_type(r)),
@@ -234,13 +234,7 @@ impl DataKindInferencer {
                 Ok((kind, TypeExpr::TyVar(name.clone())))
             }
 
-            TypeExpr::TyExVar(name) => {
-                let kind = var_env
-                    .get(name)
-                    .map(|k| self.apply_kind(k))
-                    .ok_or_else(|| KindError::unbound_type_variable(name.clone()))?;
-                Ok((kind, TypeExpr::TyExVar(name.clone())))
-            }
+            TypeExpr::TyExVar(id) => Ok((Kind::Star, TypeExpr::TyExVar(*id))),
 
             TypeExpr::TyCon(name) => {
                 let kind = tycon_env

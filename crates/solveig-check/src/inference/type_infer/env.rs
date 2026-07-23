@@ -99,10 +99,6 @@ impl TypeChecker {
     fn evar_type(id: EvarId) -> TypeExpr {
         TypeExpr::make_evar(id)
     }
-    fn evar_id_from_legacy_name(evar_name: &str) -> EvarId {
-        legacy_evar_id(evar_name)
-            .unwrap_or_else(|| panic!("ICE: malformed legacy evar name `{evar_name}`"))
-    }
     fn fresh_universal(&mut self, base: &str) -> (TyVarId, String) {
         let id = self.fresh_tyvar_id();
         (id, legacy_tyvar_name(base, id))

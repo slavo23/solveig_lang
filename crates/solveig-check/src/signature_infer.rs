@@ -372,14 +372,7 @@ impl SignatureKindInferencer {
                 Ok((kind, TypeExpr::TyVar(name.clone())))
             }
 
-            TypeExpr::TyExVar(name) => {
-                let kind = env
-                    .get(name)
-                    .cloned()
-                    .map(|k| self.apply_kind(&k))
-                    .ok_or_else(|| KindError::unbound_type_variable(name.clone()))?;
-                Ok((kind, TypeExpr::TyExVar(name.clone())))
-            }
+            TypeExpr::TyExVar(id) => Ok((Kind::Star, TypeExpr::TyExVar(*id))),
 
             TypeExpr::TyCon(name) => {
                 let kind = self

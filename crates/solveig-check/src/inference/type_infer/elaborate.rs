@@ -68,10 +68,8 @@ impl TypeChecker {
     }
     pub fn zonk_type(&self, ty: &TypeExpr) -> TypeExpr {
         match ty {
-            TypeExpr::TyExVar(name) => {
-                if let Some(solution) =
-                    legacy_evar_id(name).and_then(|id| self.evar_solutions.get(&id))
-                {
+            TypeExpr::TyExVar(id) => {
+                if let Some(solution) = self.evar_solutions.get(id) {
                     self.zonk_type(solution)
                 } else {
                     ty.clone()

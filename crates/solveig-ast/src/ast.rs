@@ -102,7 +102,7 @@ impl Pretty<Kind> for Kind {
 pub enum Ty {
     TyUnit,
     TyVar(String),
-    TyExVar(String),
+    TyExVar(EvarId),
     TyArr(Box<Ty>, Box<Ty>),
     TyForAll(String, Kind, Box<Ty>),
     TyCon(String),
@@ -114,11 +114,6 @@ pub type TypeExpr = Ty;
 
 pub fn legacy_evar_name(id: EvarId) -> String {
     format!("a^{}", id.0)
-}
-
-pub fn legacy_evar_id(name: &str) -> Option<EvarId> {
-    let raw = name.strip_prefix("a^")?;
-    raw.parse::<u32>().ok().map(EvarId)
 }
 
 pub fn legacy_tyvar_name(base: &str, id: TyVarId) -> String {
@@ -134,24 +129,21 @@ impl Ty {
         }
     }
 
-    pub fn occurs_check(&self, var_name: String) -> bool {
+    pub fn occurs_check(&self, evar_id: EvarId) -> bool {
         match self {
-            Self::TyExVar(name) | Self::TyVar(name) if *name == var_name => true,
+            Self::TyExVar(id) if *id == evar_id => true,
 
             Self::TyArr(lhs, rhs) | Self::TyApp(lhs, rhs) => {
-                lhs.occurs_check(var_name.clone()) || rhs.occurs_check(var_name)
+                lhs.occurs_check(evar_id) || rhs.occurs_check(evar_id)
             }
 
-            Self::TyForAll(quantifier, _kind, body) => {
-                var_name == *quantifier || body.occurs_check(var_name)
-            }
+            Self::TyForAll(_, _kind, body) => body.occurs_check(evar_id),
 
             Self::Qualified(preds, body) => {
-                preds.iter().any(|pred| {
-                    pred.args
-                        .iter()
-                        .any(|arg| arg.occurs_check(var_name.clone()))
-                }) || body.occurs_check(var_name)
+                preds
+                    .iter()
+                    .any(|pred| pred.args.iter().any(|arg| arg.occurs_check(evar_id)))
+                    || body.occurs_check(evar_id)
             }
 
             _ => false,
@@ -206,7 +198,7 @@ impl Ty {
     }
 
     pub fn make_evar(id: EvarId) -> TypeExpr {
-        Self::TyExVar(legacy_evar_name(id))
+        Self::TyExVar(id)
     }
 
     pub fn make_forall(quant_name: String, kind: Kind, body: TypeExpr) -> TypeExpr {
@@ -219,7 +211,7 @@ impl Ty {
 
     pub fn substitute(&self, var_name: &str, with_type: &TypeExpr) -> TypeExpr {
         match self {
-            Self::TyVar(sub_var_name) | Self::TyExVar(sub_var_name) => {
+            Self::TyVar(sub_var_name) => {
                 if sub_var_name == var_name {
                     with_type.clone()
                 } else {
@@ -227,7 +219,7 @@ impl Ty {
                 }
             }
 
-            Self::TyCon(_) | Self::TyUnit => self.clone(),
+            Self::TyCon(_) | Self::TyExVar(_) | Self::TyUnit => self.clone(),
 
             Self::TyArr(lhs, rhs) => Self::make_arr(
                 lhs.substitute(var_name, with_type),
@@ -268,6 +260,52 @@ impl Ty {
             }
         }
     }
+
+    pub fn substitute_evar(&self, evar_id: EvarId, with_type: &TypeExpr) -> TypeExpr {
+        match self {
+            Self::TyExVar(id) => {
+                if *id == evar_id {
+                    with_type.clone()
+                } else {
+                    self.clone()
+                }
+            }
+
+            Self::TyVar(_) | Self::TyCon(_) | Self::TyUnit => self.clone(),
+
+            Self::TyArr(lhs, rhs) => Self::make_arr(
+                lhs.substitute_evar(evar_id, with_type),
+                rhs.substitute_evar(evar_id, with_type),
+            ),
+
+            Self::TyApp(lhs, rhs) => Self::make_app(
+                lhs.substitute_evar(evar_id, with_type),
+                rhs.substitute_evar(evar_id, with_type),
+            ),
+
+            Self::TyForAll(quantifier, kind, body) => Self::make_forall(
+                quantifier.clone(),
+                kind.clone(),
+                body.substitute_evar(evar_id, with_type),
+            ),
+
+            Self::Qualified(preds, body) => {
+                let new_preds = preds
+                    .iter()
+                    .map(|pred| Predicate {
+                        class_name: pred.class_name.clone(),
+                        args: pred
+                            .args
+                            .iter()
+                            .map(|arg| arg.substitute_evar(evar_id, with_type))
+                            .collect(),
+                    })
+                    .collect();
+
+                Self::make_qualified(new_preds, body.substitute_evar(evar_id, with_type))
+            }
+        }
+    }
 }
 
 impl Pretty<Ty> for Ty {
@@ -288,7 +326,8 @@ impl Pretty<Ty> for Ty {
 
             let type_fmt = match t {
                 TypeExpr::TyUnit => "()".into(),
-                TypeExpr::TyVar(name) | TypeExpr::TyExVar(name) => name.clone(),
+                TypeExpr::TyVar(name) => name.clone(),
+                TypeExpr::TyExVar(id) => legacy_evar_name(*id),
                 TypeExpr::TyCon(name) => name.split('.').last().unwrap().to_string(),
 
                 TypeExpr::TyArr(lhs, rhs) => {
@@ -747,12 +786,16 @@ mod tests {
         let id = EvarId(42);
 
         assert_eq!(legacy_evar_name(id), "a^42");
-        assert_eq!(legacy_evar_id("a^42"), Some(id));
-        assert_eq!(
-            TypeExpr::make_evar(id),
-            TypeExpr::TyExVar("a^42".to_string())
-        );
-        assert_eq!(legacy_evar_id("user_type_var"), None);
+        assert_eq!(TypeExpr::make_evar(id), TypeExpr::TyExVar(id));
+    }
+
+    #[test]
+    fn occurs_check_only_matches_existential_ids() {
+        let needle = EvarId(2);
+
+        assert!(TypeExpr::make_evar(needle).occurs_check(needle));
+        assert!(!TypeExpr::make_evar(EvarId(3)).occurs_check(needle));
+        assert!(!TypeExpr::TyVar(legacy_evar_name(needle)).occurs_check(needle));
     }
 
     #[test]

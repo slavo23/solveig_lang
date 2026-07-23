@@ -356,19 +356,18 @@ impl TypeChecker {
                 Ok((delta, elaborated, result_type))
             }
 
-            TypeExpr::TyExVar(evar_name) if ctx.has_unsolved_evar(evar_name) => {
-                let evar_id = Self::evar_id_from_legacy_name(evar_name);
+            TypeExpr::TyExVar(evar_id) if ctx.has_unsolved_evar_id(*evar_id) => {
                 let evar_entry = ContextEntry::ExVar(
-                    evar_id,
-                    ctx.evar_kind(evar_name)
-                        .unwrap_or_else(|| panic!("ICE: missing evar kind for {evar_name}")),
+                    *evar_id,
+                    ctx.evar_kind_id(*evar_id)
+                        .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", evar_id.0)),
                 );
                 let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 
                 let domain_evar = self.fresh_evar_id();
                 let codomain_evar = self.fresh_evar_id();
                 let arrow_solution = ContextEntry::SolvedEVar {
-                    lhs: evar_id,
+                    lhs: *evar_id,
                     rhs: TypeExpr::make_arr(
                         Self::evar_type(domain_evar),
                         Self::evar_type(codomain_evar),

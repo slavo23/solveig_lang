@@ -80,16 +80,16 @@ impl TypeChecker {
                 Ok(theta.until(&universal_entry))
             }
 
-            (TypeExpr::TyExVar(evar_name), _)
-                if ctx.has_unsolved_evar(evar_name) && !right.occurs_check(evar_name.clone()) =>
+            (TypeExpr::TyExVar(evar_id), _)
+                if ctx.has_unsolved_evar_id(*evar_id) && !right.occurs_check(*evar_id) =>
             {
-                self.instantiate_left(ctx, Self::evar_id_from_legacy_name(evar_name), right)
+                self.instantiate_left(ctx, *evar_id, right)
             }
 
-            (_, TypeExpr::TyExVar(evar_name))
-                if ctx.has_unsolved_evar(evar_name) && !left.occurs_check(evar_name.clone()) =>
+            (_, TypeExpr::TyExVar(evar_id))
+                if ctx.has_unsolved_evar_id(*evar_id) && !left.occurs_check(*evar_id) =>
             {
-                self.instantiate_right(ctx, left, Self::evar_id_from_legacy_name(evar_name))
+                self.instantiate_right(ctx, left, *evar_id)
             }
 
             _ => Err(()),
@@ -139,29 +139,25 @@ impl TypeChecker {
         }
 
         match target {
-            TypeExpr::TyExVar(other_evar)
-                if ctx.evar_before_id(evar_id, Self::evar_id_from_legacy_name(other_evar)) =>
-            {
-                let other_evar = Self::evar_id_from_legacy_name(other_evar);
+            TypeExpr::TyExVar(other_evar) if ctx.evar_before_id(evar_id, *other_evar) => {
                 let solution = ContextEntry::SolvedEVar {
-                    lhs: other_evar,
+                    lhs: *other_evar,
                     rhs: Self::evar_type(evar_id),
                 };
                 self.record_solution(&solution);
                 Ok(ctx.replace(
                     &ContextEntry::ExVar(
-                        other_evar,
-                        ctx.evar_kind_id(other_evar)
+                        *other_evar,
+                        ctx.evar_kind_id(*other_evar)
                             .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", other_evar.0)),
                     ),
                     &solution,
                 ))
             }
             TypeExpr::TyExVar(other_evar) => {
-                let other_evar = Self::evar_id_from_legacy_name(other_evar);
                 let solution = ContextEntry::SolvedEVar {
                     lhs: evar_id,
-                    rhs: Self::evar_type(other_evar),
+                    rhs: Self::evar_type(*other_evar),
                 };
                 self.record_solution(&solution);
                 Ok(ctx.replace(&evar_entry, &solution))
@@ -251,19 +247,16 @@ impl TypeChecker {
         }
 
         match source {
-            TypeExpr::TyExVar(other_evar)
-                if ctx.evar_before_id(evar_id, Self::evar_id_from_legacy_name(other_evar)) =>
-            {
-                let other_evar = Self::evar_id_from_legacy_name(other_evar);
+            TypeExpr::TyExVar(other_evar) if ctx.evar_before_id(evar_id, *other_evar) => {
                 let solution = ContextEntry::SolvedEVar {
-                    lhs: other_evar,
+                    lhs: *other_evar,
                     rhs: Self::evar_type(evar_id),
                 };
                 self.record_solution(&solution);
                 Ok(ctx.replace(
                     &ContextEntry::ExVar(
-                        other_evar,
-                        ctx.evar_kind_id(other_evar)
+                        *other_evar,
+                        ctx.evar_kind_id(*other_evar)
                             .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", other_evar.0)),
                     ),
                     &solution,
@@ -271,10 +264,9 @@ impl TypeChecker {
             }
 
             TypeExpr::TyExVar(other_evar) => {
-                let other_evar = Self::evar_id_from_legacy_name(other_evar);
                 let solution = ContextEntry::SolvedEVar {
                     lhs: evar_id,
-                    rhs: Self::evar_type(other_evar),
+                    rhs: Self::evar_type(*other_evar),
                 };
                 self.record_solution(&solution);
                 Ok(ctx.replace(&evar_entry, &solution))
@@ -365,19 +357,18 @@ impl TypeChecker {
             }
             TypeExpr::Qualified(_, body) => self.force_arrow(ctx, body, span),
 
-            TypeExpr::TyExVar(evar_name) if ctx.has_unsolved_evar(evar_name) => {
-                let evar_id = Self::evar_id_from_legacy_name(evar_name);
+            TypeExpr::TyExVar(evar_id) if ctx.has_unsolved_evar_id(*evar_id) => {
                 let evar_entry = ContextEntry::ExVar(
-                    evar_id,
-                    ctx.evar_kind(evar_name)
-                        .unwrap_or_else(|| panic!("ICE: missing evar kind for {evar_name}")),
+                    *evar_id,
+                    ctx.evar_kind_id(*evar_id)
+                        .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", evar_id.0)),
                 );
                 let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 
                 let domain_evar = self.fresh_evar_id();
                 let codomain_evar = self.fresh_evar_id();
                 let arrow_solution = ContextEntry::SolvedEVar {
-                    lhs: evar_id,
+                    lhs: *evar_id,
                     rhs: TypeExpr::make_arr(
                         Self::evar_type(domain_evar),
                         Self::evar_type(codomain_evar),

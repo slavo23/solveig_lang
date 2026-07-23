@@ -1,6 +1,4 @@
-use solveig_ast::ast::{
-    EvarId, Kind, Predicate, Pretty, TyVarId, TypeExpr, legacy_evar_id as decode_legacy_evar_id,
-};
+use solveig_ast::ast::{EvarId, Kind, Predicate, Pretty, TyVarId, TypeExpr};
 use std::collections::HashMap;
 use std::iter::successors;
 
@@ -64,9 +62,9 @@ impl Context {
 
             TypeExpr::TyApp(lhs, rhs) => TypeExpr::make_app(self.apply(lhs), self.apply(rhs)),
 
-            TypeExpr::TyExVar(evar_name) => {
+            TypeExpr::TyExVar(evar_id) => {
                 if let Some(ContextEntry::SolvedEVar { rhs: solved, .. }) =
-                    self.find_solved_evar(evar_name)
+                    self.find_solved_evar_id(*evar_id)
                 {
                     return self.apply(&solved);
                 }
@@ -147,15 +145,6 @@ impl Context {
         Self::from_halves(left, right)
     }
 
-    fn legacy_evar_id(evar_name: &str) -> Option<EvarId> {
-        decode_legacy_evar_id(evar_name)
-    }
-
-    pub fn find_solved_evar(&self, evar_name: &str) -> Option<ContextEntry> {
-        let evar_id = Self::legacy_evar_id(evar_name)?;
-        self.find_solved_evar_id(evar_id)
-    }
-
     pub fn find_solved_evar_id(&self, evar_id: EvarId) -> Option<ContextEntry> {
         self.entries
             .iter()
@@ -163,19 +152,8 @@ impl Context {
             .cloned()
     }
 
-    pub fn has_solved_evar(&self, evar_name: &str) -> bool {
-        self.find_solved_evar(evar_name).is_some()
-    }
-
     pub fn has_solved_evar_id(&self, evar_id: EvarId) -> bool {
         self.find_solved_evar_id(evar_id).is_some()
-    }
-
-    pub fn has_unsolved_evar(&self, evar_name: &str) -> bool {
-        let Some(evar_id) = Self::legacy_evar_id(evar_name) else {
-            return false;
-        };
-        self.has_unsolved_evar_id(evar_id)
     }
 
     pub fn has_unsolved_evar_id(&self, evar_id: EvarId) -> bool {
@@ -194,11 +172,6 @@ impl Context {
         self.entries
             .iter()
             .any(|ent| matches!(ent, ContextEntry::UniVar { id, .. } if *id == var_id))
-    }
-
-    pub fn evar_kind(&self, evar_name: &str) -> Option<Kind> {
-        let evar_id = Self::legacy_evar_id(evar_name)?;
-        self.evar_kind_id(evar_id)
     }
 
     pub fn evar_kind_id(&self, evar_id: EvarId) -> Option<Kind> {
@@ -220,15 +193,6 @@ impl Context {
             ContextEntry::UniVar { id, kind, .. } if *id == var_id => Some(kind.clone()),
             _ => None,
         })
-    }
-
-    pub fn evar_before(&self, earlier: &str, later: &str) -> bool {
-        let (Some(earlier), Some(later)) =
-            (Self::legacy_evar_id(earlier), Self::legacy_evar_id(later))
-        else {
-            return false;
-        };
-        self.evar_before_id(earlier, later)
     }
 
     pub fn evar_before_id(&self, earlier: EvarId, later: EvarId) -> bool {
@@ -271,9 +235,9 @@ impl Context {
                 .universal_kind(name)
                 .ok_or_else(|| format!("unbound type variable: {}", name)),
 
-            TypeExpr::TyExVar(name) => self
-                .evar_kind(name)
-                .ok_or_else(|| format!("unknown existential: {}", name)),
+            TypeExpr::TyExVar(id) => self
+                .evar_kind_id(*id)
+                .ok_or_else(|| format!("unknown existential: ?{}", id.0)),
 
             TypeExpr::TyArr(_, _) => Ok(Kind::Star),
 
@@ -323,7 +287,7 @@ impl Context {
         match ty {
             TypeExpr::TyUnit | TypeExpr::TyCon(_) => true,
             TypeExpr::TyVar(name) => self.has_universal(name),
-            TypeExpr::TyExVar(name) => self.has_unsolved_evar(name) || self.has_solved_evar(name),
+            TypeExpr::TyExVar(id) => self.has_unsolved_evar_id(*id) || self.has_solved_evar_id(*id),
             TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
                 self.type_well_formed(lhs) && self.type_well_formed(rhs)
             }
@@ -356,9 +320,8 @@ mod tests {
         let unsolved = ContextEntry::ExVar(evar, Kind::Star);
         let ctx = Context::new().add_entry(unsolved.clone());
 
-        assert!(ctx.has_unsolved_evar("a^7"));
         assert!(ctx.has_unsolved_evar_id(evar));
-        assert!(!ctx.has_unsolved_evar("a^8"));
+        assert!(!ctx.has_unsolved_evar_id(EvarId(8)));
 
         let solved = ContextEntry::SolvedEVar {
             lhs: evar,
@@ -366,7 +329,7 @@ mod tests {
         };
         let ctx = ctx.replace(&unsolved, &solved);
 
-        assert!(ctx.has_solved_evar("a^7"));
+        assert!(ctx.has_solved_evar_id(evar));
         assert_eq!(ctx.apply(&TypeExpr::make_evar(evar)), TypeExpr::TyUnit);
     }
 
