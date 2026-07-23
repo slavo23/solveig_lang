@@ -685,3 +685,230 @@ fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<String, TypeExpr>) -> TypeExpr
 fn short_name(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::ast::{CaseArm, ExprNode, Kind, TermExpr, TermExprNode};
+
+    struct ExhaustivenessCase {
+        name: &'static str,
+        scrutinee_type: TypeExpr,
+        patterns: Vec<Pattern<Span>>,
+        expected_missing: Vec<&'static str>,
+    }
+
+    #[test]
+    fn check_case_table_driven_witnesses() {
+        let constructor_types = test_constructor_types();
+
+        let cases = vec![
+            ExhaustivenessCase {
+                name: "bool_complete",
+                scrutinee_type: bool_ty(),
+                patterns: vec![con("True", vec![]), con("False", vec![])],
+                expected_missing: vec![],
+            },
+            ExhaustivenessCase {
+                name: "bool_missing_false",
+                scrutinee_type: bool_ty(),
+                patterns: vec![con("True", vec![])],
+                expected_missing: vec!["False"],
+            },
+            ExhaustivenessCase {
+                name: "maybe_nested_just_missing_false",
+                scrutinee_type: maybe_ty(maybe_ty(bool_ty())),
+                patterns: vec![
+                    con("Nothing", vec![]),
+                    con("Just", vec![con("Nothing", vec![])]),
+                    con("Just", vec![con("Just", vec![con("True", vec![])])]),
+                ],
+                expected_missing: vec!["Just (Just False)"],
+            },
+            ExhaustivenessCase {
+                name: "list_missing_singleton",
+                scrutinee_type: list_ty(int_ty()),
+                patterns: vec![
+                    con("Nil", vec![]),
+                    con(
+                        "Cons",
+                        vec![wild(), con("Cons", vec![wild(), wild()])],
+                    ),
+                ],
+                expected_missing: vec!["_ :: []"],
+            },
+            ExhaustivenessCase {
+                name: "int_literals_need_wildcard",
+                scrutinee_type: int_ty(),
+                patterns: vec![lit(1), lit(2)],
+                expected_missing: vec!["_"],
+            },
+            ExhaustivenessCase {
+                name: "pair_of_bools_missing_false_false",
+                scrutinee_type: pair_ty(bool_ty(), bool_ty()),
+                patterns: vec![
+                    con("MkPair", vec![con("True", vec![]), con("True", vec![])]),
+                    con("MkPair", vec![con("True", vec![]), con("False", vec![])]),
+                    con("MkPair", vec![con("False", vec![]), con("True", vec![])]),
+                ],
+                expected_missing: vec!["MkPair False False"],
+            },
+            ExhaustivenessCase {
+                name: "wildcard_first_covers_all",
+                scrutinee_type: maybe_ty(bool_ty()),
+                patterns: vec![
+                    wild(),
+                    con("Nothing", vec![]),
+                    con("Just", vec![wild()]),
+                ],
+                expected_missing: vec![],
+            },
+        ];
+
+        for case in cases {
+            let actual = missing_patterns(
+                &constructor_types,
+                &case.scrutinee_type,
+                case.patterns,
+            );
+
+            assert_eq!(
+                actual,
+                case.expected_missing,
+                "unexpected missing patterns for {}",
+                case.name
+            );
+        }
+    }
+
+    fn missing_patterns(
+        constructor_types: &HashMap<String, TypeExpr>,
+        scrutinee_type: &TypeExpr,
+        patterns: Vec<Pattern<Span>>,
+    ) -> Vec<String> {
+        let arms = patterns.into_iter().map(arm).collect::<Vec<_>>();
+
+        match check_case("test.sv", constructor_types, scrutinee_type, &arms, span()) {
+            Ok(()) => Vec::new(),
+            Err(TypeError::NonExhaustivePatterns { missing, .. }) => missing,
+            Err(error) => panic!("expected only exhaustiveness errors, got {error:?}"),
+        }
+    }
+
+    fn test_constructor_types() -> HashMap<String, TypeExpr> {
+        let mut constructors = HashMap::new();
+
+        constructors.insert("False".to_string(), bool_ty());
+        constructors.insert("True".to_string(), bool_ty());
+
+        constructors.insert("Nothing".to_string(), forall("a", maybe_ty(tyvar("a"))));
+        constructors.insert(
+            "Just".to_string(),
+            forall("a", arr(tyvar("a"), maybe_ty(tyvar("a")))),
+        );
+
+        constructors.insert("Nil".to_string(), forall("a", list_ty(tyvar("a"))));
+        constructors.insert(
+            "Cons".to_string(),
+            forall(
+                "a",
+                arr(
+                    tyvar("a"),
+                    arr(list_ty(tyvar("a")), list_ty(tyvar("a"))),
+                ),
+            ),
+        );
+
+        constructors.insert(
+            "MkPair".to_string(),
+            forall(
+                "a",
+                forall(
+                    "b",
+                    arr(
+                        tyvar("a"),
+                        arr(
+                            tyvar("b"),
+                            pair_ty(tyvar("a"), tyvar("b")),
+                        ),
+                    ),
+                ),
+            ),
+        );
+
+        constructors
+    }
+
+    fn arm(pattern: Pattern<Span>) -> CaseArmNode<Span> {
+        ExprNode::new(
+            CaseArm {
+                pattern: pattern_node(pattern),
+                expr: TermExprNode::new(TermExpr::Unit, span()),
+            },
+            span(),
+        )
+    }
+
+    fn pattern_node(pattern: Pattern<Span>) -> PatternNode<Span> {
+        ExprNode::new(pattern, span())
+    }
+
+    fn con(name: &str, args: Vec<Pattern<Span>>) -> Pattern<Span> {
+        Pattern::Con(
+            name.to_string(),
+            args.into_iter().map(pattern_node).collect(),
+        )
+    }
+
+    fn wild() -> Pattern<Span> {
+        Pattern::Wild
+    }
+
+    fn lit(value: i64) -> Pattern<Span> {
+        Pattern::Lit(Literal::Int(value))
+    }
+
+    fn span() -> Span {
+        0..0
+    }
+
+    fn bool_ty() -> TypeExpr {
+        tycon("Bool")
+    }
+
+    fn int_ty() -> TypeExpr {
+        tycon("Int")
+    }
+
+    fn maybe_ty(arg: TypeExpr) -> TypeExpr {
+        app(tycon("Maybe"), arg)
+    }
+
+    fn list_ty(arg: TypeExpr) -> TypeExpr {
+        app(tycon("List"), arg)
+    }
+
+    fn pair_ty(left: TypeExpr, right: TypeExpr) -> TypeExpr {
+        app(app(tycon("Pair"), left), right)
+    }
+
+    fn tycon(name: &str) -> TypeExpr {
+        TypeExpr::TyCon(name.to_string())
+    }
+
+    fn tyvar(name: &str) -> TypeExpr {
+        TypeExpr::TyVar(name.to_string())
+    }
+
+    fn app(func: TypeExpr, arg: TypeExpr) -> TypeExpr {
+        TypeExpr::make_app(func, arg)
+    }
+
+    fn arr(arg: TypeExpr, result: TypeExpr) -> TypeExpr {
+        TypeExpr::make_arr(arg, result)
+    }
+
+    fn forall(name: &str, body: TypeExpr) -> TypeExpr {
+        TypeExpr::make_forall(name.to_string(), Kind::Star, body)
+    }
+}
