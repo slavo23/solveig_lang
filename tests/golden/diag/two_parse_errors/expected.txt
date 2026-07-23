@@ -1,0 +1,15 @@
+[PAR0001] Error: parse error
+   ╭─[ $WORKSPACE/tests/golden/diag/two_parse_errors/src/main.sv:1:10 ]
+   │
+ 1 │ badOne = )
+   │          ┬
+   │          ╰── expected expression, got RParen
+───╯
+[PAR0001] Error: parse error
+   ╭─[ $WORKSPACE/tests/golden/diag/two_parse_errors/src/main.sv:5:10 ]
+   │
+ 5 │ badTwo = ]
+   │          ┬
+   │          ╰── expected expression, got RBrack
+───╯
+parse error

@@ -46,6 +46,7 @@ fn golden_diagnostic_cases() {
                 expected_path.display()
             )
         });
+        let expected = trim_line_end_whitespace(&expected);
 
         assert_eq!(
             actual,
@@ -102,8 +103,23 @@ fn normalize_output(output: &Output) -> String {
     combined.push_str(&String::from_utf8_lossy(&output.stderr));
 
     let normalized_paths = strip_ansi(&combined).replace(env!("CARGO_MANIFEST_DIR"), "$WORKSPACE");
+    let normalized_paths = trim_line_end_whitespace(&normalized_paths);
 
     normalize_cyclic_imports(&normalized_paths)
+}
+
+fn trim_line_end_whitespace(input: &str) -> String {
+    let mut out = input
+        .lines()
+        .map(str::trim_end)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    if input.ends_with('\n') {
+        out.push('\n');
+    }
+
+    out
 }
 
 fn normalize_cyclic_imports(input: &str) -> String {

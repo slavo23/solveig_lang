@@ -2,6 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::ops::Range;
 
+use base::{Session, Span as SourceSpan, Symbol};
 use core::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, ConstructorDef, DataDefinition,
     InstanceDefinition, InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate,
@@ -20,8 +21,20 @@ use crate::project::ModuleContext;
 
 type Span = Range<usize>;
 
-fn qualify(module: &ModuleName, name: &str) -> String {
-    format!("{}.{}", module.as_string(), name)
+fn to_core_span(span: SourceSpan) -> Span {
+    span.to_usize_range()
+}
+
+fn qualify(session: &Session, module: &ModuleName, name: Symbol) -> String {
+    format!("{}.{}", module.as_string(session), session.str(name))
+}
+
+fn module_prefix(session: &Session, segments: &[Symbol]) -> String {
+    segments
+        .iter()
+        .map(|segment| session.str(*segment))
+        .collect::<Vec<_>>()
+        .join(".")
 }
 
 fn resolver_trace_enabled() -> bool {
@@ -34,13 +47,17 @@ fn resolver_trace_enabled() -> bool {
     }
 }
 
-fn trace(module: &ModuleName, message: impl AsRef<str>) {
+fn trace(session: &Session, module: &ModuleName, message: impl AsRef<str>) {
     if resolver_trace_enabled() {
-        eprintln!("[resolver:{}] {}", module.as_string(), message.as_ref());
+        eprintln!(
+            "[resolver:{}] {}",
+            module.as_string(session),
+            message.as_ref()
+        );
     }
 }
 
-fn trace_predicates(module: &ModuleName, label: &str, predicates: &[Predicate]) {
+fn trace_predicates(session: &Session, module: &ModuleName, label: &str, predicates: &[Predicate]) {
     if resolver_trace_enabled() && !predicates.is_empty() {
         let rendered = predicates
             .iter()
@@ -48,7 +65,7 @@ fn trace_predicates(module: &ModuleName, label: &str, predicates: &[Predicate]) 
             .collect::<Vec<_>>()
             .join(", ");
 
-        trace(module, format!("{label}: {rendered}"));
+        trace(session, module, format!("{label}: {rendered}"));
     }
 }
 
@@ -67,17 +84,21 @@ struct LocalResolverEnv {
     /// against the source declarations currently being resolved. Relying only on the
     /// already-built API made local class names like `Functor` leak through as raw
     /// predicate names in some paths.
-    classes: HashMap<String, String>,
+    classes: HashMap<Symbol, String>,
 }
 
 impl LocalResolverEnv {
-    fn from_parsed_module<'src>(module_name: &ModuleName, parsed: &ParsedModule<'src>) -> Self {
+    fn from_parsed_module(
+        session: &Session,
+        module_name: &ModuleName,
+        parsed: &ParsedModule,
+    ) -> Self {
         let classes = parsed
             .defs
             .iter()
             .filter_map(|defn| match &defn.0 {
                 SurfaceDefinition::ClassDef { name, .. } => {
-                    Some((name.0.to_string(), qualify(module_name, name.0)))
+                    Some((name.0, qualify(session, module_name, name.0)))
                 }
                 _ => None,
             })
@@ -87,33 +108,44 @@ impl LocalResolverEnv {
     }
 }
 
-pub struct Resolver;
+pub struct Resolver<'a> {
+    session: &'a Session,
+}
 
-impl Resolver {
-    pub fn new() -> Self {
-        Self
+impl<'a> Resolver<'a> {
+    pub fn new(session: &'a Session) -> Self {
+        Self { session }
     }
 
-    fn resolve_term_ref<'src>(&self, r: &NameRef<'src>, cx: &ModuleContext) -> String {
+    fn symbol_text(&self, symbol: Symbol) -> &'static str {
+        self.session.str(symbol)
+    }
+
+    fn legacy_qualified_ref(&self, r: &NameRef) -> String {
+        let module = module_prefix(self.session, r.prefix());
+        format!("{}.{}", module, r.last_text(self.session))
+    }
+
+    fn resolve_term_ref(&self, r: &NameRef, cx: &ModuleContext) -> String {
         match r.segments.as_slice() {
             [name] => {
-                if let Some(sym) = cx.builtins.terms.get(*name) {
-                    return sym.display();
+                if let Some(sym) = cx.builtins.terms.get(name) {
+                    return sym.display(self.session);
                 }
 
-                if let Some(sym) = cx.local_api.terms.get(*name) {
-                    return sym.display();
+                if let Some(sym) = cx.local_api.terms.get(name) {
+                    return sym.display(self.session);
                 }
 
                 let mut found: Option<String> = None;
 
                 for imp in &cx.imported_apis {
-                    if let Some(sym) = imp.api.terms.get(*name) {
-                        let display = sym.display();
+                    if let Some(sym) = imp.api.terms.get(name) {
+                        let display = sym.display(self.session);
 
                         if let Some(prev) = &found {
                             if prev != &display {
-                                panic!("ambiguous imported term '{}'", name);
+                                panic!("ambiguous imported term '{}'", self.symbol_text(*name));
                             }
                         } else {
                             found = Some(display);
@@ -121,7 +153,7 @@ impl Resolver {
                     }
                 }
 
-                found.unwrap_or_else(|| name.to_string())
+                found.unwrap_or_else(|| self.symbol_text(*name).to_string())
             }
 
             [first, rest @ ..] => {
@@ -130,41 +162,44 @@ impl Resolver {
                         .last()
                         .expect("qualified name must have a last segment");
 
-                    if let Some(sym) = imp.api.terms.get(local_name) {
-                        return sym.display();
+                    if let Some(sym) = imp.api.terms.get(&local_name) {
+                        return sym.display(self.session);
                     }
 
-                    panic!("unknown imported term {}.{}", first, local_name);
+                    panic!(
+                        "unknown imported term {}.{}",
+                        self.symbol_text(*first),
+                        self.symbol_text(local_name)
+                    );
                 }
 
-                let module = r.segments[..r.segments.len() - 1].join(".");
-                format!("{}.{}", module, r.last())
+                self.legacy_qualified_ref(r)
             }
 
-            [] => panic!("empty term name ref"),
+            [] => panic!("ICE: empty term name ref"),
         }
     }
 
-    fn resolve_tycon_ref<'src>(&self, r: &NameRef<'src>, cx: &ModuleContext) -> String {
+    fn resolve_tycon_ref(&self, r: &NameRef, cx: &ModuleContext) -> String {
         match r.segments.as_slice() {
             [name] => {
-                if let Some(sym) = cx.builtins.types.get(*name) {
-                    return sym.display();
+                if let Some(sym) = cx.builtins.types.get(name) {
+                    return sym.display(self.session);
                 }
 
-                if let Some(sym) = cx.local_api.types.get(*name) {
-                    return sym.display();
+                if let Some(sym) = cx.local_api.types.get(name) {
+                    return sym.display(self.session);
                 }
 
                 let mut found: Option<String> = None;
 
                 for imp in &cx.imported_apis {
-                    if let Some(sym) = imp.api.types.get(*name) {
-                        let display = sym.display();
+                    if let Some(sym) = imp.api.types.get(name) {
+                        let display = sym.display(self.session);
 
                         if let Some(prev) = &found {
                             if prev != &display {
-                                panic!("ambiguous imported type '{}'", name);
+                                panic!("ambiguous imported type '{}'", self.symbol_text(*name));
                             }
                         } else {
                             found = Some(display);
@@ -172,7 +207,7 @@ impl Resolver {
                     }
                 }
 
-                found.unwrap_or_else(|| name.to_string())
+                found.unwrap_or_else(|| self.symbol_text(*name).to_string())
             }
 
             [first, rest @ ..] => {
@@ -181,41 +216,47 @@ impl Resolver {
                         .last()
                         .expect("qualified name must have a last segment");
 
-                    if let Some(sym) = imp.api.types.get(local_name) {
-                        return sym.display();
+                    if let Some(sym) = imp.api.types.get(&local_name) {
+                        return sym.display(self.session);
                     }
 
-                    panic!("unknown imported type {}.{}", first, local_name);
+                    panic!(
+                        "unknown imported type {}.{}",
+                        self.symbol_text(*first),
+                        self.symbol_text(local_name)
+                    );
                 }
 
-                let module = r.segments[..r.segments.len() - 1].join(".");
-                format!("{}.{}", module, r.last())
+                self.legacy_qualified_ref(r)
             }
 
-            [] => panic!("empty type constructor name ref"),
+            [] => panic!("ICE: empty type constructor name ref"),
         }
     }
 
-    fn resolve_ctor_ref<'src>(&self, r: &NameRef<'src>, cx: &ModuleContext) -> String {
+    fn resolve_ctor_ref(&self, r: &NameRef, cx: &ModuleContext) -> String {
         match r.segments.as_slice() {
             [name] => {
-                if let Some(sym) = cx.builtins.constructors.get(*name) {
-                    return sym.display();
+                if let Some(sym) = cx.builtins.constructors.get(name) {
+                    return sym.display(self.session);
                 }
 
-                if let Some(sym) = cx.local_api.constructors.get(*name) {
-                    return sym.display();
+                if let Some(sym) = cx.local_api.constructors.get(name) {
+                    return sym.display(self.session);
                 }
 
                 let mut found: Option<String> = None;
 
                 for imp in &cx.imported_apis {
-                    if let Some(sym) = imp.api.constructors.get(*name) {
-                        let display = sym.display();
+                    if let Some(sym) = imp.api.constructors.get(name) {
+                        let display = sym.display(self.session);
 
                         if let Some(prev) = &found {
                             if prev != &display {
-                                panic!("ambiguous imported constructor '{}'", name);
+                                panic!(
+                                    "ambiguous imported constructor '{}'",
+                                    self.symbol_text(*name)
+                                );
                             }
                         } else {
                             found = Some(display);
@@ -223,7 +264,7 @@ impl Resolver {
                     }
                 }
 
-                found.unwrap_or_else(|| name.to_string())
+                found.unwrap_or_else(|| self.symbol_text(*name).to_string())
             }
 
             [first, rest @ ..] => {
@@ -232,24 +273,27 @@ impl Resolver {
                         .last()
                         .expect("qualified name must have a last segment");
 
-                    if let Some(sym) = imp.api.constructors.get(local_name) {
-                        return sym.display();
+                    if let Some(sym) = imp.api.constructors.get(&local_name) {
+                        return sym.display(self.session);
                     }
 
-                    panic!("unknown imported constructor {}.{}", first, local_name);
+                    panic!(
+                        "unknown imported constructor {}.{}",
+                        self.symbol_text(*first),
+                        self.symbol_text(local_name)
+                    );
                 }
 
-                let module = r.segments[..r.segments.len() - 1].join(".");
-                format!("{}.{}", module, r.last())
+                self.legacy_qualified_ref(r)
             }
 
-            [] => panic!("empty constructor name ref"),
+            [] => panic!("ICE: empty constructor name ref"),
         }
     }
 
-    fn resolve_class_ref<'src>(
+    fn resolve_class_ref(
         &self,
-        r: &NameRef<'src>,
+        r: &NameRef,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> String {
@@ -262,24 +306,27 @@ impl Resolver {
                         .last()
                         .expect("qualified name must have a last segment");
 
-                    if let Some(sym) = imp.api.classes.get(local_name) {
-                        return sym.display();
+                    if let Some(sym) = imp.api.classes.get(&local_name) {
+                        return sym.display(self.session);
                     }
 
-                    panic!("unknown imported class {}.{}", first, local_name);
+                    panic!(
+                        "unknown imported class {}.{}",
+                        self.symbol_text(*first),
+                        self.symbol_text(local_name)
+                    );
                 }
 
-                let module = r.segments[..r.segments.len() - 1].join(".");
-                format!("{}.{}", module, r.last())
+                self.legacy_qualified_ref(r)
             }
 
-            [] => panic!("empty class name ref"),
+            [] => panic!("ICE: empty class name ref"),
         }
     }
 
     fn resolve_unqualified_class_name(
         &self,
-        name: &str,
+        name: &Symbol,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> String {
@@ -288,18 +335,18 @@ impl Resolver {
         }
 
         if let Some(sym) = cx.local_api.classes.get(name) {
-            return sym.display();
+            return sym.display(self.session);
         }
 
         let mut found: Option<String> = None;
 
         for imp in &cx.imported_apis {
             if let Some(sym) = imp.api.classes.get(name) {
-                let display = sym.display();
+                let display = sym.display(self.session);
 
                 if let Some(prev) = &found {
                     if prev != &display {
-                        panic!("ambiguous imported class '{}'", name);
+                        panic!("ambiguous imported class '{}'", self.symbol_text(*name));
                     }
                 } else {
                     found = Some(display);
@@ -307,7 +354,7 @@ impl Resolver {
             }
         }
 
-        found.unwrap_or_else(|| name.to_string())
+        found.unwrap_or_else(|| self.symbol_text(*name).to_string())
     }
 
     fn canonicalize_predicate(
@@ -319,7 +366,8 @@ impl Resolver {
         let class_name = if pred.class_name.contains('.') {
             pred.class_name
         } else {
-            self.resolve_unqualified_class_name(&pred.class_name, cx, local)
+            let name = self.session.intern(&pred.class_name);
+            self.resolve_unqualified_class_name(&name, cx, local)
         };
 
         Predicate {
@@ -407,9 +455,9 @@ impl Resolver {
         Ok((predicates, checked_head))
     }
 
-    fn resolve_surface_predicate<'src>(
+    fn resolve_surface_predicate(
         &self,
-        pred: &SpannedWrapper<SurfacePredicate<'src>>,
+        pred: &SpannedWrapper<SurfacePredicate>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> Predicate {
@@ -426,9 +474,9 @@ impl Resolver {
         self.canonicalize_predicate(resolved, cx, local)
     }
 
-    fn resolve_surface_scheme<'src>(
+    fn resolve_surface_scheme(
         &self,
-        ty: &SpannedWrapper<SurfaceTy<'src>>,
+        ty: &SpannedWrapper<SurfaceTy>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> Scheme {
@@ -446,14 +494,14 @@ impl Resolver {
         )
     }
 
-    fn resolve_surface_type_in_module<'src>(
+    fn resolve_surface_type_in_module(
         &self,
-        sf: &SpannedWrapper<SurfaceTy<'src>>,
+        sf: &SpannedWrapper<SurfaceTy>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> TypeExpr {
         match &sf.0 {
-            SurfaceTy::Var(var_name) => TypeExpr::make_var(var_name.to_string()),
+            SurfaceTy::Var(var_name) => TypeExpr::make_var(self.symbol_text(*var_name).to_string()),
 
             SurfaceTy::Arr(lhs, rhs) => TypeExpr::make_arr(
                 self.resolve_surface_type_in_module(lhs, cx, local),
@@ -462,7 +510,9 @@ impl Resolver {
 
             SurfaceTy::ForAll(quants, body) => quants.iter().rev().fold(
                 self.resolve_surface_type_in_module(body, cx, local),
-                |acc, quant| TypeExpr::make_forall((*quant).0.to_string(), Kind::Star, acc),
+                |acc, quant| {
+                    TypeExpr::make_forall(self.symbol_text(quant.0).to_string(), Kind::Star, acc)
+                },
             ),
 
             SurfaceTy::Qualified(preds, body) => TypeExpr::make_qualified(
@@ -484,19 +534,18 @@ impl Resolver {
         }
     }
 
-    fn resolve_surface_pattern_in_module<'src>(
+    fn resolve_surface_pattern_in_module(
         &self,
-        sf: &SpannedWrapper<SurfacePattern<'src>>,
+        sf: &SpannedWrapper<SurfacePattern>,
         cx: &ModuleContext,
     ) -> PatternNode<Span> {
-        let span: Span = sf.1.clone();
+        let span = to_core_span(sf.1);
 
         let node = match &sf.0 {
-            SurfacePattern::Var(var_name) => Pattern::Var(var_name.to_string()),
+            SurfacePattern::Var(var_name) => Pattern::Var(self.symbol_text(*var_name).to_string()),
             SurfacePattern::Lit(lit) => {
                 let core_lit = match lit {
                     SurfaceLiteral::Int(int_lit_value) => Literal::Int(*int_lit_value),
-                    _ => todo!("literal pattern type is not supported yet")
                 };
 
                 Pattern::Lit(core_lit)
@@ -513,15 +562,15 @@ impl Resolver {
         PatternNode::new(node, span)
     }
 
-    fn collect_surface_pattern_binders<'src>(
-        pat: &SpannedWrapper<SurfacePattern<'src>>,
-        out: &mut HashSet<String>,
+    fn collect_surface_pattern_binders(
+        pat: &SpannedWrapper<SurfacePattern>,
+        out: &mut HashSet<Symbol>,
     ) {
         match &pat.0 {
             SurfacePattern::Var(name) => {
-                out.insert(name.to_string());
-            },
-            SurfacePattern::Lit(_) => {},
+                out.insert(*name);
+            }
+            SurfacePattern::Lit(_) => {}
             SurfacePattern::Wild => {}
             SurfacePattern::Con(_, args) => {
                 for arg in args {
@@ -531,26 +580,26 @@ impl Resolver {
         }
     }
 
-    fn resolve_term_ref_with_binders<'src>(
+    fn resolve_term_ref_with_binders(
         &self,
-        r: &NameRef<'src>,
+        r: &NameRef,
         cx: &ModuleContext,
-        bound_terms: &HashSet<String>,
+        bound_terms: &HashSet<Symbol>,
     ) -> String {
         match r.segments.as_slice() {
-            [name] if bound_terms.contains(*name) => name.to_string(),
+            [name] if bound_terms.contains(name) => self.symbol_text(*name).to_string(),
             _ => self.resolve_term_ref(r, cx),
         }
     }
 
-    fn resolve_surface_expr_in_module<'src>(
+    fn resolve_surface_expr_in_module(
         &mut self,
-        sf: &SpannedWrapper<SurfaceExpr<'src>>,
+        sf: &SpannedWrapper<SurfaceExpr>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-        bound_terms: &HashSet<String>,
+        bound_terms: &HashSet<Symbol>,
     ) -> TermExprNode<Span> {
-        let span: Span = sf.1.clone();
+        let span = to_core_span(sf.1);
 
         let node = match &sf.0 {
             SurfaceExpr::Unit => TermExpr::Unit,
@@ -561,7 +610,7 @@ impl Resolver {
             SurfaceExpr::Con(con_name) => TermExpr::Con(self.resolve_ctor_ref(&con_name.0, cx)),
 
             SurfaceExpr::Literal(lit) => match lit {
-                SurfaceLiteral::Int(value) => TermExpr::Lit(Literal::Int(value.clone())),
+                SurfaceLiteral::Int(value) => TermExpr::Lit(Literal::Int(*value)),
             },
 
             SurfaceExpr::App(lhs, rhs) => TermExpr::App(
@@ -578,7 +627,7 @@ impl Resolver {
                 let mut body_bound_terms = bound_terms.clone();
 
                 for (param_name, _) in params {
-                    body_bound_terms.insert(param_name.0.to_string());
+                    body_bound_terms.insert(param_name.0);
                 }
 
                 let mut body_node =
@@ -590,7 +639,11 @@ impl Resolver {
                         .map(|ty| self.resolve_surface_type_in_module(ty, cx, local));
 
                     body_node = TermExprNode::new(
-                        TermExpr::Abs(param_name.0.to_string(), param_ty, Box::new(body_node)),
+                        TermExpr::Abs(
+                            self.symbol_text(param_name.0).to_string(),
+                            param_ty,
+                            Box::new(body_node),
+                        ),
                         span.clone(),
                     );
                 }
@@ -648,13 +701,13 @@ impl Resolver {
                     self.resolve_surface_expr_in_module(binder_expr, cx, local, bound_terms);
 
                 let mut body_bound_terms = bound_terms.clone();
-                body_bound_terms.insert(binder_name.0.to_string());
+                body_bound_terms.insert(binder_name.0);
 
                 let resolved_in_expr =
                     self.resolve_surface_expr_in_module(in_expr, cx, local, &body_bound_terms);
 
                 TermExpr::Let(
-                    binder_name.0.to_string(),
+                    self.symbol_text(binder_name.0).to_string(),
                     Box::new(resolved_binder),
                     Box::new(resolved_in_expr),
                 )
@@ -664,12 +717,12 @@ impl Resolver {
         TermExprNode::new(node, span)
     }
 
-    fn resolve_surface_case_arm_in_module<'src>(
+    fn resolve_surface_case_arm_in_module(
         &mut self,
-        sf: &SpannedWrapper<SurfaceMatchArm<'src>>,
+        sf: &SpannedWrapper<SurfaceMatchArm>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-        bound_terms: &HashSet<String>,
+        bound_terms: &HashSet<Symbol>,
     ) -> CaseArmNode<Span> {
         let pattern = self.resolve_surface_pattern_in_module(&sf.0.pattern, cx);
 
@@ -681,36 +734,40 @@ impl Resolver {
                 pattern,
                 expr: self.resolve_surface_expr_in_module(&sf.0.expr, cx, local, &arm_bound_terms),
             },
-            sf.1.clone(),
+            to_core_span(sf.1),
         )
     }
 
-    fn peel_arrow<'a>(&self, ty: &'a TypeExpr) -> Option<(&'a TypeExpr, &'a TypeExpr)> {
+    fn peel_arrow<'ty>(&self, ty: &'ty TypeExpr) -> Option<(&'ty TypeExpr, &'ty TypeExpr)> {
         match ty {
             TypeExpr::TyArr(lhs, rhs) => Some((lhs, rhs)),
             _ => None,
         }
     }
 
-    fn wrap_function_body_without_signature_in_module<'src>(
+    fn wrap_function_body_without_signature_in_module(
         &mut self,
-        body: &SpannedWrapper<SurfaceExpr<'src>>,
-        params: &[SpannedWrapper<&'src str>],
+        body: &SpannedWrapper<SurfaceExpr>,
+        params: &[SpannedWrapper<Symbol>],
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> TermExprNode<Span> {
-        let span: Span = body.1.clone();
+        let span = to_core_span(body.1);
         let mut bound_terms = HashSet::new();
 
         for param in params {
-            bound_terms.insert(param.0.to_string());
+            bound_terms.insert(param.0);
         }
 
         let mut body_node = self.resolve_surface_expr_in_module(body, cx, local, &bound_terms);
 
         for param in params.iter().rev() {
             body_node = TermExprNode::new(
-                TermExpr::Abs(param.0.to_string(), None, Box::new(body_node)),
+                TermExpr::Abs(
+                    self.symbol_text(param.0).to_string(),
+                    None,
+                    Box::new(body_node),
+                ),
                 span.clone(),
             );
         }
@@ -718,20 +775,20 @@ impl Resolver {
         body_node
     }
 
-    fn wrap_function_body_with_signature_in_module<'src>(
+    fn wrap_function_body_with_signature_in_module(
         &mut self,
         sig: &Scheme,
-        body: &SpannedWrapper<SurfaceExpr<'src>>,
-        params: &[SpannedWrapper<&'src str>],
-        name: &'src str,
+        body: &SpannedWrapper<SurfaceExpr>,
+        params: &[SpannedWrapper<Symbol>],
+        name: Symbol,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> TermExprNode<Span> {
-        let span: Span = body.1.clone();
+        let span = to_core_span(body.1);
         let mut bound_terms = HashSet::new();
 
         for param in params {
-            bound_terms.insert(param.0.to_string());
+            bound_terms.insert(param.0);
         }
 
         let mut body_node = self.resolve_surface_expr_in_module(body, cx, local, &bound_terms);
@@ -743,11 +800,11 @@ impl Resolver {
             let (arg_ty, ret_ty) = self.peel_arrow(remaining).unwrap_or_else(|| {
                 panic!(
                     "parameter mismatch for '{}'. The number of parameters doesn't match the function signature",
-                    name
+                    self.symbol_text(name)
                 )
             });
 
-            annos.push((param.0.to_string(), arg_ty.clone()));
+            annos.push((self.symbol_text(param.0).to_string(), arg_ty.clone()));
             remaining = ret_ty;
         }
 
@@ -768,16 +825,17 @@ impl Resolver {
         body_node
     }
 
-    pub fn resolve_module<'src>(
+    pub fn resolve_module(
         mut self,
         module_name: &ModuleName,
-        parsed: &ParsedModule<'src>,
+        parsed: &ParsedModule,
         cx: &ModuleContext,
         imported: &ResolverImports,
     ) -> Result<ResolvedModule<Span>, KindError> {
-        let local = LocalResolverEnv::from_parsed_module(module_name, parsed);
+        let local = LocalResolverEnv::from_parsed_module(self.session, module_name, parsed);
 
         trace(
+            self.session,
             module_name,
             format!(
                 "start: defs={}, imported_tycons={}, imported_classes={}, local_classes={:?}",
@@ -820,6 +878,7 @@ impl Resolver {
         let func_defs = self.resolve_function_defs(module_name, parsed, cx, &local, &func_schemes);
 
         trace(
+            self.session,
             module_name,
             format!(
                 "done: data={}, classes={}, instances={}, signatures={}, functions={}",
@@ -842,10 +901,10 @@ impl Resolver {
         })
     }
 
-    fn collect_raw_data_defs<'src>(
+    fn collect_raw_data_defs(
         &self,
         module_name: &ModuleName,
-        parsed: &ParsedModule<'src>,
+        parsed: &ParsedModule,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> Vec<RawDataDef> {
@@ -861,12 +920,15 @@ impl Resolver {
                     let (name, _span) = spanned_name;
 
                     Some(RawDataDef {
-                        name: qualify(module_name, name),
-                        ty_params: ty_params.iter().map(|p| p.0.to_string()).collect(),
+                        name: qualify(self.session, module_name, *name),
+                        ty_params: ty_params
+                            .iter()
+                            .map(|p| self.symbol_text(p.0).to_string())
+                            .collect(),
                         constructors: constructors
                             .iter()
                             .map(|constructor| RawConstructorDef {
-                                name: qualify(module_name, constructor.0.name.0),
+                                name: qualify(self.session, module_name, constructor.0.name.0),
                                 fields: constructor
                                     .0
                                     .params
@@ -928,6 +990,7 @@ impl Resolver {
         }
 
         trace(
+            self.session,
             module_name,
             format!(
                 "data: local_tycons={:?}, local_ctors={:?}",
@@ -944,10 +1007,10 @@ impl Resolver {
         ))
     }
 
-    fn resolve_class_defs<'src>(
+    fn resolve_class_defs(
         &self,
         module_name: &ModuleName,
-        parsed: &ParsedModule<'src>,
+        parsed: &ParsedModule,
         cx: &ModuleContext,
         imported: &ResolverImports,
         local: &LocalResolverEnv,
@@ -963,18 +1026,18 @@ impl Resolver {
                     superclasses,
                     methods,
                 } => {
-                    let class_name = qualify(module_name, name.0);
+                    let class_name = qualify(self.session, module_name, name.0);
 
                     let class_params = ty_params
                         .iter()
-                        .map(|param| (param.0.to_string(), Kind::Star))
+                        .map(|param| (self.symbol_text(param.0).to_string(), Kind::Star))
                         .collect::<Vec<_>>();
 
                     let class_head_pred = Predicate {
                         class_name: class_name.clone(),
                         args: ty_params
                             .iter()
-                            .map(|param| TypeExpr::TyVar(param.0.to_string()))
+                            .map(|param| TypeExpr::TyVar(self.symbol_text(param.0).to_string()))
                             .collect(),
                     };
 
@@ -984,6 +1047,7 @@ impl Resolver {
                         .collect::<Vec<_>>();
 
                     trace_predicates(
+                        self.session,
                         module_name,
                         &format!("class {} superclasses", class_name),
                         &resolved_superclasses,
@@ -1007,16 +1071,18 @@ impl Resolver {
                             };
 
                             trace_predicates(
+                                self.session,
                                 module_name,
                                 &format!(
                                     "class method {}.{} predicates",
-                                    class_name, method.name.0
+                                    class_name,
+                                    self.symbol_text(method.name.0)
                                 ),
                                 &scheme.predicates,
                             );
 
                             ClassMethodDef {
-                                name: qualify(module_name, method.name.0),
+                                name: qualify(self.session, module_name, method.name.0),
                                 scheme,
                             }
                         })
@@ -1056,6 +1122,7 @@ impl Resolver {
             .collect::<Result<Vec<_>, _>>()?;
 
         trace(
+            self.session,
             module_name,
             format!(
                 "classes: {:?}",
@@ -1069,10 +1136,10 @@ impl Resolver {
         Ok(kinded_class_defs)
     }
 
-    fn resolve_instance_defs<'src>(
+    fn resolve_instance_defs(
         &mut self,
         module_name: &ModuleName,
-        parsed: &ParsedModule<'src>,
+        parsed: &ParsedModule,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
         all_tycon_kinds: &HashMap<String, Kind>,
@@ -1112,8 +1179,14 @@ impl Resolver {
                 .map(|pred| self.resolve_surface_predicate(pred, cx, local))
                 .collect::<Vec<_>>();
 
-            trace_predicates(module_name, "instance raw context", &raw_context);
             trace_predicates(
+                self.session,
+                module_name,
+                "instance raw context",
+                &raw_context,
+            );
+            trace_predicates(
+                self.session,
                 module_name,
                 "instance raw head",
                 std::slice::from_ref(&raw_head),
@@ -1126,8 +1199,14 @@ impl Resolver {
                 class_env,
             )?;
 
-            trace_predicates(module_name, "instance checked context", &checked_context);
             trace_predicates(
+                self.session,
+                module_name,
+                "instance checked context",
+                &checked_context,
+            );
+            trace_predicates(
+                self.session,
                 module_name,
                 "instance checked head",
                 std::slice::from_ref(&checked_head),
@@ -1136,7 +1215,7 @@ impl Resolver {
             let resolved_methods = methods
                 .iter()
                 .map(|method| InstanceMethodDef {
-                    name: method.name.0.to_string(),
+                    name: self.symbol_text(method.name.0).to_string(),
                     body: self.wrap_function_body_without_signature_in_module(
                         &method.body,
                         &method.params,
@@ -1156,10 +1235,10 @@ impl Resolver {
         Ok(instance_defs)
     }
 
-    fn resolve_signatures<'src>(
+    fn resolve_signatures(
         &self,
         module_name: &ModuleName,
-        parsed: &ParsedModule<'src>,
+        parsed: &ParsedModule,
         cx: &ModuleContext,
         imported: &ResolverImports,
         local: &LocalResolverEnv,
@@ -1183,10 +1262,11 @@ impl Resolver {
             };
 
             let (name, _span) = spanned_name;
-            let fn_name = qualify(module_name, name);
+            let fn_name = qualify(self.session, module_name, *name);
             let raw_scheme = self.resolve_surface_scheme(ty, cx, local);
 
             trace_predicates(
+                self.session,
                 module_name,
                 &format!("signature {} predicates", fn_name),
                 &raw_scheme.predicates,
@@ -1202,10 +1282,10 @@ impl Resolver {
         Ok(func_schemes)
     }
 
-    fn resolve_function_defs<'src>(
+    fn resolve_function_defs(
         &mut self,
         module_name: &ModuleName,
-        parsed: &ParsedModule<'src>,
+        parsed: &ParsedModule,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
         func_schemes: &HashMap<String, Scheme>,
@@ -1220,12 +1300,12 @@ impl Resolver {
                     params,
                 } => {
                     let (name, _span) = spanned_name;
-                    let fn_name = qualify(module_name, name);
+                    let fn_name = qualify(self.session, module_name, *name);
                     let sig = func_schemes.get(&fn_name).cloned();
 
                     let wrapped = match &sig {
                         Some(sig) => self.wrap_function_body_with_signature_in_module(
-                            sig, body, params, name, cx, local,
+                            sig, body, params, *name, cx, local,
                         ),
                         None => self.wrap_function_body_without_signature_in_module(
                             body, params, cx, local,

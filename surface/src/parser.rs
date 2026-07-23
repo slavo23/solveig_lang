@@ -1,22 +1,20 @@
-use std::path::Path;
-
-use ariadne::{Color, Label, Report, ReportKind, Source};
+use base::{Diagnostic, FileId, FileSpan, Label, Session, Span, Symbol};
 
 use crate::ast::*;
 use crate::lexer::{self, Assoc, Fixity, LexError, PosToken, Token, builtin_fixity};
 
 type S<T> = (T, Span);
 
-type NameSpan<'src> = (&'src str, usize, usize);
+type NameSpan = (Symbol, usize, usize);
 
-type LambdaParam<'src> = (S<&'src str>, Option<S<SurfaceTy<'src>>>);
+type LambdaParam = (S<Symbol>, Option<S<SurfaceTy>>);
 
-type BinOpInfo<'src> = (Token<'src>, usize, usize);
+type BinOpInfo = (Token, usize, usize);
 
-type StackedOp<'src> = (Token<'src>, usize, usize, Fixity);
+type StackedOp = (Token, usize, usize, Fixity);
 
 fn mk_span(start: usize, end: usize) -> Span {
-    start..end
+    Span::from_usize_range(start..end)
 }
 
 fn sp<T>(value: T, start: usize, end: usize) -> S<T> {
@@ -24,11 +22,11 @@ fn sp<T>(value: T, start: usize, end: usize) -> S<T> {
 }
 
 fn span_start<T>(spanned: &S<T>) -> usize {
-    spanned.1.start
+    spanned.1.start as usize
 }
 
 fn span_end<T>(spanned: &S<T>) -> usize {
-    spanned.1.end
+    spanned.1.end as usize
 }
 
 fn merge_span<T, U>(start: &S<T>, end: &S<U>) -> (usize, usize) {
@@ -39,35 +37,41 @@ fn is_ctor_like(name: &str) -> bool {
     name.chars().next().is_some_and(char::is_uppercase)
 }
 
-fn qref<'src>(segments: &[&'src str], start: usize, end: usize) -> S<NameRef<'src>> {
+fn qref(session: &Session, segments: &[&str], start: usize, end: usize) -> S<NameRef> {
     sp(
         NameRef {
-            segments: segments.to_vec(),
+            segments: segments
+                .iter()
+                .map(|segment| session.intern(segment))
+                .collect(),
         },
         start,
         end,
     )
 }
 
-fn list_nil_pattern<'src>(start: usize, end: usize) -> S<SurfacePattern<'src>> {
+fn list_nil_pattern(session: &Session, start: usize, end: usize) -> S<SurfacePattern> {
     sp(
-        SurfacePattern::Con(qref(&["prelude", "list", "Nil"], start, end), vec![]),
+        SurfacePattern::Con(
+            qref(session, &["prelude", "list", "Nil"], start, end),
+            vec![],
+        ),
         start,
         end,
     )
 }
 
-fn list_nil_expr<'src>(start: usize, end: usize) -> S<SurfaceExpr<'src>> {
+fn list_nil_expr(session: &Session, start: usize, end: usize) -> S<SurfaceExpr> {
     sp(
-        SurfaceExpr::Con(qref(&["prelude", "list", "Nil"], start, end)),
+        SurfaceExpr::Con(qref(session, &["prelude", "list", "Nil"], start, end)),
         start,
         end,
     )
 }
 
-fn list_ty<'src>(elem_ty: S<SurfaceTy<'src>>, start: usize, end: usize) -> S<SurfaceTy<'src>> {
+fn list_ty(session: &Session, elem_ty: S<SurfaceTy>, start: usize, end: usize) -> S<SurfaceTy> {
     let list_con = sp(
-        SurfaceTy::Con(qref(&["prelude", "list", "List"], start, start)),
+        SurfaceTy::Con(qref(session, &["prelude", "list", "List"], start, start)),
         start,
         start,
     );
@@ -78,18 +82,19 @@ fn list_ty<'src>(elem_ty: S<SurfaceTy<'src>>, start: usize, end: usize) -> S<Sur
     )
 }
 
-fn int_pattern<'src>(value: i64, start: usize, end: usize) -> S<SurfacePattern<'src>> {
+fn int_pattern(value: i64, start: usize, end: usize) -> S<SurfacePattern> {
     sp(SurfacePattern::Lit(SurfaceLiteral::Int(value)), start, end)
 }
 
-fn cons_pattern<'src>(
-    head: S<SurfacePattern<'src>>,
-    tail: S<SurfacePattern<'src>>,
-) -> S<SurfacePattern<'src>> {
+fn cons_pattern(
+    session: &Session,
+    head: S<SurfacePattern>,
+    tail: S<SurfacePattern>,
+) -> S<SurfacePattern> {
     let (start, end) = merge_span(&head, &tail);
     sp(
         SurfacePattern::Con(
-            qref(&["prelude", "list", "Cons"], start, start),
+            qref(session, &["prelude", "list", "Cons"], start, start),
             vec![head, tail],
         ),
         start,
@@ -97,27 +102,29 @@ fn cons_pattern<'src>(
     )
 }
 
-fn list_pattern<'src>(
-    elems: Vec<S<SurfacePattern<'src>>>,
+fn list_pattern(
+    session: &Session,
+    elems: Vec<S<SurfacePattern>>,
     _start: usize,
     end: usize,
-) -> S<SurfacePattern<'src>> {
+) -> S<SurfacePattern> {
     elems
         .into_iter()
         .rev()
-        .fold(list_nil_pattern(end, end), |acc, elem| {
-            cons_pattern(elem, acc)
+        .fold(list_nil_pattern(session, end, end), |acc, elem| {
+            cons_pattern(session, elem, acc)
         })
 }
 
-fn cons_expr<'src>(
-    head: S<SurfaceExpr<'src>>,
-    tail: S<SurfaceExpr<'src>>,
+fn cons_expr(
+    session: &Session,
+    head: S<SurfaceExpr>,
+    tail: S<SurfaceExpr>,
     start: usize,
     end: usize,
-) -> S<SurfaceExpr<'src>> {
+) -> S<SurfaceExpr> {
     let cons = sp(
-        SurfaceExpr::Con(qref(&["prelude", "list", "Cons"], start, start)),
+        SurfaceExpr::Con(qref(session, &["prelude", "list", "Cons"], start, start)),
         start,
         start,
     );
@@ -125,55 +132,66 @@ fn cons_expr<'src>(
     sp(SurfaceExpr::App(Box::new(app), Box::new(tail)), start, end)
 }
 
-fn list_expr<'src>(
-    elems: Vec<S<SurfaceExpr<'src>>>,
+fn list_expr(
+    session: &Session,
+    elems: Vec<S<SurfaceExpr>>,
     _start: usize,
     end: usize,
-) -> S<SurfaceExpr<'src>> {
+) -> S<SurfaceExpr> {
     elems
         .into_iter()
         .rev()
-        .fold(list_nil_expr(end, end), |acc, elem| {
+        .fold(list_nil_expr(session, end, end), |acc, elem| {
             let start = span_start(&elem);
             let end = span_end(&acc);
-            cons_expr(elem, acc, start, end)
+            cons_expr(session, elem, acc, start, end)
         })
 }
 
 #[derive(Debug, Clone)]
 pub struct ParseError {
-    pub offset: usize,
-    pub line: u32,
-    pub col: u32,
+    pub span: FileSpan,
     pub message: String,
 }
 
 impl From<LexError> for ParseError {
     fn from(error: LexError) -> Self {
         Self {
-            offset: error.offset,
-            line: error.line,
-            col: error.col,
+            span: error.span,
             message: error.message,
         }
     }
 }
 
-pub struct Parser<'src> {
-    tokens: Vec<PosToken<'src>>,
+impl ParseError {
+    pub fn to_diagnostic(&self) -> Diagnostic {
+        Diagnostic::error("PAR0001", "parse error")
+            .with_label(Label::primary(self.span, self.message.clone()))
+    }
+}
+
+pub struct Parser<'a> {
+    session: &'a Session,
+    file: FileId,
+    tokens: Vec<PosToken>,
     pos: usize,
 }
 
-impl<'src> Parser<'src> {
-    pub fn new(tokens: Vec<PosToken<'src>>) -> Self {
-        Self { tokens, pos: 0 }
+impl<'a> Parser<'a> {
+    pub fn new(session: &'a Session, file: FileId, tokens: Vec<PosToken>) -> Self {
+        Self {
+            session,
+            file,
+            tokens,
+            pos: 0,
+        }
     }
 
-    fn current(&self) -> &PosToken<'src> {
+    fn current(&self) -> &PosToken {
         &self.tokens[self.pos.min(self.tokens.len().saturating_sub(1))]
     }
 
-    fn current_kind(&self) -> &Token<'src> {
+    fn current_kind(&self) -> &Token {
         &self.current().kind
     }
 
@@ -181,7 +199,7 @@ impl<'src> Parser<'src> {
         self.current().start
     }
 
-    fn at(&self, token: &Token<'src>) -> bool {
+    fn at(&self, token: &Token) -> bool {
         std::mem::discriminant(self.current_kind()) == std::mem::discriminant(token)
     }
 
@@ -189,7 +207,7 @@ impl<'src> Parser<'src> {
         matches!(self.current_kind(), Token::Eof)
     }
 
-    fn advance(&mut self) -> &PosToken<'src> {
+    fn advance(&mut self) -> &PosToken {
         let token = &self.tokens[self.pos];
         if self.pos + 1 < self.tokens.len() {
             self.pos += 1;
@@ -197,29 +215,47 @@ impl<'src> Parser<'src> {
         token
     }
 
-    fn error(&self, message: impl Into<String>) -> ParseError {
+    fn current_span(&self) -> FileSpan {
         let token = self.current();
+        FileSpan::new(self.file, mk_span(token.start, token.end))
+    }
+
+    fn error(&self, message: impl Into<String>) -> ParseError {
         ParseError {
-            offset: token.start,
-            line: token.line,
-            col: token.col,
+            span: self.current_span(),
             message: message.into(),
         }
     }
 
-    fn expect(&mut self, token: &Token<'src>) -> Result<&PosToken<'src>, ParseError> {
+    fn report_error(&self, error: ParseError) {
+        self.session.diagnostics().push(error.to_diagnostic());
+    }
+
+    fn token_text(&self, symbol: Symbol) -> &'static str {
+        self.session.str(symbol)
+    }
+
+    fn describe_current(&self) -> String {
+        match self.current_kind() {
+            Token::Ident(symbol) => format!("identifier `{}`", self.token_text(*symbol)),
+            Token::UpperIdent(symbol) => format!("constructor `{}`", self.token_text(*symbol)),
+            other => format!("{other:?}"),
+        }
+    }
+
+    fn expect(&mut self, token: &Token) -> Result<&PosToken, ParseError> {
         if self.at(token) {
             Ok(self.advance())
         } else {
             Err(self.error(format!(
-                "expected {:?}, got {:?}",
+                "expected {:?}, got {}",
                 token,
-                self.current_kind()
+                self.describe_current()
             )))
         }
     }
 
-    fn expect_ident(&mut self) -> Result<NameSpan<'src>, ParseError> {
+    fn expect_ident(&mut self) -> Result<NameSpan, ParseError> {
         match self.current_kind() {
             Token::Ident(name) => {
                 let name = *name;
@@ -227,13 +263,13 @@ impl<'src> Parser<'src> {
                 Ok((name, token.start, token.end))
             }
             _ => Err(self.error(format!(
-                "expected identifier, got {:?}",
-                self.current_kind()
+                "expected identifier, got {}",
+                self.describe_current()
             ))),
         }
     }
 
-    fn expect_upper(&mut self) -> Result<NameSpan<'src>, ParseError> {
+    fn expect_upper(&mut self) -> Result<NameSpan, ParseError> {
         match self.current_kind() {
             Token::UpperIdent(name) => {
                 let name = *name;
@@ -241,13 +277,13 @@ impl<'src> Parser<'src> {
                 Ok((name, token.start, token.end))
             }
             _ => Err(self.error(format!(
-                "expected constructor, got {:?}",
-                self.current_kind()
+                "expected constructor, got {}",
+                self.describe_current()
             ))),
         }
     }
 
-    fn expect_module_name_segment(&mut self) -> Result<&'src str, ParseError> {
+    fn expect_module_name_segment(&mut self) -> Result<Symbol, ParseError> {
         match self.current_kind() {
             Token::Ident(name) | Token::UpperIdent(name) => {
                 let name = *name;
@@ -255,13 +291,13 @@ impl<'src> Parser<'src> {
                 Ok(name)
             }
             _ => Err(self.error(format!(
-                "expected module name, got {:?}",
-                self.current_kind()
+                "expected module name, got {}",
+                self.describe_current()
             ))),
         }
     }
 
-    fn expect_binder(&mut self) -> Result<NameSpan<'src>, ParseError> {
+    fn expect_binder(&mut self) -> Result<NameSpan, ParseError> {
         match self.current_kind() {
             Token::Ident(name) => {
                 let name = *name;
@@ -269,10 +305,11 @@ impl<'src> Parser<'src> {
                 Ok((name, token.start, token.end))
             }
             Token::Underscore => {
+                let underscore = self.session.intern("_");
                 let token = self.advance();
-                Ok(("_", token.start, token.end))
+                Ok((underscore, token.start, token.end))
             }
-            _ => Err(self.error(format!("expected binder, got {:?}", self.current_kind()))),
+            _ => Err(self.error(format!("expected binder, got {}", self.describe_current()))),
         }
     }
 
@@ -311,43 +348,102 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_module(&mut self) -> Result<ParsedModule<'src>, ParseError> {
+    fn layout_depth_before_current(&self) -> usize {
+        self.tokens[..self.pos.min(self.tokens.len())]
+            .iter()
+            .fold(0usize, |depth, token| match token.kind {
+                Token::VOpen => depth + 1,
+                Token::VClose => depth.saturating_sub(1),
+                _ => depth,
+            })
+    }
+
+    fn is_top_level_sync_keyword(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            Token::Data | Token::Sig | Token::Class | Token::Instance | Token::Import
+        )
+    }
+
+    fn recover_top_level(&mut self) {
+        let mut depth = self.layout_depth_before_current();
+        let start_pos = self.pos;
+
+        while !self.at_eof() {
+            match self.current_kind() {
+                Token::VOpen => {
+                    depth += 1;
+                    self.advance();
+                }
+                Token::VClose => {
+                    if depth <= 1 {
+                        return;
+                    }
+
+                    depth -= 1;
+                    self.advance();
+                }
+                Token::VSemi | Token::Semicolon if depth <= 1 => {
+                    self.advance();
+                    return;
+                }
+                _ if self.pos != start_pos && depth <= 1 && self.is_top_level_sync_keyword() => {
+                    return;
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+    }
+
+    fn parse_module(&mut self) -> ParsedModule {
         if self.at(&Token::VOpen) {
             self.advance();
         }
 
-        let imports = self.parse_imports()?;
-        let defs = self.parse_definitions()?;
+        let imports = self.parse_imports();
+        let defs = self.parse_definitions();
 
         if self.at(&Token::VClose) {
             self.advance();
         }
 
-        Ok(ParsedModule { imports, defs })
+        ParsedModule {
+            file: self.file,
+            imports,
+            defs,
+        }
     }
 
-    fn parse_imports(&mut self) -> Result<Vec<ImportDecl>, ParseError> {
+    fn parse_imports(&mut self) -> Vec<ImportDecl> {
         let mut imports = Vec::new();
         while self.at(&Token::Import) {
-            imports.push(self.parse_import()?);
+            match self.parse_import() {
+                Ok(import) => imports.push(import),
+                Err(error) => {
+                    self.report_error(error);
+                    self.recover_top_level();
+                }
+            }
             self.skip_separators();
         }
-        Ok(imports)
+        imports
     }
 
     fn parse_import(&mut self) -> Result<ImportDecl, ParseError> {
         self.expect(&Token::Import)?;
 
-        let mut segments = vec![self.expect_module_name_segment()?.to_string()];
+        let mut segments = vec![self.expect_module_name_segment()?];
         while self.at(&Token::Dot) {
             self.advance();
-            segments.push(self.expect_module_name_segment()?.to_string());
+            segments.push(self.expect_module_name_segment()?);
         }
 
         let module = ModuleName(segments);
         let alias = if self.at(&Token::As) {
             self.advance();
-            self.expect_upper()?.0.to_string()
+            self.expect_upper()?.0
         } else {
             module.default_alias()
         };
@@ -356,7 +452,7 @@ impl<'src> Parser<'src> {
             self.advance();
             let mut names = Vec::new();
             while !self.at(&Token::RParen) {
-                names.push(self.expect_module_name_segment()?.to_string());
+                names.push(self.expect_module_name_segment()?);
                 if !self.at(&Token::Comma) {
                     break;
                 }
@@ -375,7 +471,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn parse_definitions(&mut self) -> Result<SurfaceProgram<'src>, ParseError> {
+    fn parse_definitions(&mut self) -> SurfaceProgram {
         let mut defs = Vec::new();
 
         loop {
@@ -385,15 +481,22 @@ impl<'src> Parser<'src> {
             }
 
             let start = self.current_start();
-            let def = self.parse_definition()?;
-            let end = self.current_start();
-            defs.push(sp(def, start, end));
+            match self.parse_definition() {
+                Ok(def) => {
+                    let end = self.current_start();
+                    defs.push(sp(def, start, end));
+                }
+                Err(error) => {
+                    self.report_error(error);
+                    self.recover_top_level();
+                }
+            }
         }
 
-        Ok(defs)
+        defs
     }
 
-    fn parse_definition(&mut self) -> Result<SurfaceDefinition<'src>, ParseError> {
+    fn parse_definition(&mut self) -> Result<SurfaceDefinition, ParseError> {
         match self.current_kind() {
             Token::Data => self.parse_data_def(),
             Token::Class => self.parse_class_def(),
@@ -402,7 +505,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_func_or_sig(&mut self) -> Result<SurfaceDefinition<'src>, ParseError> {
+    fn parse_func_or_sig(&mut self) -> Result<SurfaceDefinition, ParseError> {
         let (name, start, end) = self.expect_ident()?;
         let name = sp(name, start, end);
 
@@ -424,7 +527,7 @@ impl<'src> Parser<'src> {
         Ok(SurfaceDefinition::FunDef { name, body, params })
     }
 
-    fn parse_data_def(&mut self) -> Result<SurfaceDefinition<'src>, ParseError> {
+    fn parse_data_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
         self.expect(&Token::Data)?;
         let (name, start, end) = self.expect_upper()?;
         let name = sp(name, start, end);
@@ -460,7 +563,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn parse_constructor(&mut self) -> Result<SufraceConstructor<'src>, ParseError> {
+    fn parse_constructor(&mut self) -> Result<SufraceConstructor, ParseError> {
         let (name, start, end) = self.expect_upper()?;
         let mut params = Vec::new();
         while self.is_type_atom_start() {
@@ -472,14 +575,14 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn parse_predicate(&mut self) -> Result<S<SurfacePredicate<'src>>, ParseError> {
+    fn parse_predicate(&mut self) -> Result<S<SurfacePredicate>, ParseError> {
         let start = self.current_start();
 
         let class_name = self.parse_name_path()?;
-        if !is_ctor_like(class_name.0.last()) {
+        if !is_ctor_like(class_name.0.last_text(self.session)) {
             return Err(self.error(format!(
                 "expected class name, got {}",
-                class_name.0.segments.join(".")
+                class_name.0.display(self.session)
             )));
         }
 
@@ -492,12 +595,15 @@ impl<'src> Parser<'src> {
             return Err(self.error("expected at least one type argument in predicate".to_string()));
         }
 
-        let end = args.last().map(|a| a.1.end).unwrap_or(class_name.1.end);
+        let end = args
+            .last()
+            .map(span_end)
+            .unwrap_or_else(|| span_end(&class_name));
 
         Ok(sp(SurfacePredicate { class_name, args }, start, end))
     }
 
-    fn parse_predicate_list(&mut self) -> Result<Vec<S<SurfacePredicate<'src>>>, ParseError> {
+    fn parse_predicate_list(&mut self) -> Result<Vec<S<SurfacePredicate>>, ParseError> {
         if self.at(&Token::LParen) {
             self.advance();
 
@@ -514,7 +620,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_class_def(&mut self) -> Result<SurfaceDefinition<'src>, ParseError> {
+    fn parse_class_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
         self.expect(&Token::Class)?;
 
         let checkpoint = self.pos;
@@ -578,7 +684,7 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn parse_instance_def(&mut self) -> Result<SurfaceDefinition<'src>, ParseError> {
+    fn parse_instance_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
         self.expect(&Token::Instance)?;
 
         let checkpoint = self.pos;
@@ -645,48 +751,27 @@ impl<'src> Parser<'src> {
         })
     }
 
-    fn parse_layout_block<T>(
-        &mut self,
-        mut parse_item: impl FnMut(&mut Self) -> Result<T, ParseError>,
-    ) -> Result<Vec<T>, ParseError> {
-        if self.at(&Token::VOpen) {
-            self.advance();
-        }
-
-        let mut items = Vec::new();
-        loop {
-            self.skip_separators();
-            if self.at(&Token::VClose) || self.at_eof() {
-                break;
-            }
-            items.push(parse_item(self)?);
-        }
-
-        if self.at(&Token::VClose) {
-            self.advance();
-        }
-
-        Ok(items)
-    }
-
-    fn parse_qualified_type(&mut self) -> Result<S<SurfaceTy<'src>>, ParseError> {
+    fn parse_qualified_type(&mut self) -> Result<S<SurfaceTy>, ParseError> {
         let checkpoint = self.pos;
 
-        if let Ok(preds) = self.parse_predicate_list() {
-            if self.at(&Token::FatArrow) {
-                self.advance();
-                let body = self.parse_type_arrow()?;
-                let start = preds.first().map(|p| p.1.start).unwrap_or(body.1.start);
-                let end = body.1.end;
-                return Ok(sp(SurfaceTy::Qualified(preds, Box::new(body)), start, end));
-            }
+        if let Ok(preds) = self.parse_predicate_list()
+            && self.at(&Token::FatArrow)
+        {
+            self.advance();
+            let body = self.parse_type_arrow()?;
+            let start = preds
+                .first()
+                .map(span_start)
+                .unwrap_or_else(|| span_start(&body));
+            let end = span_end(&body);
+            return Ok(sp(SurfaceTy::Qualified(preds, Box::new(body)), start, end));
         }
 
         self.pos = checkpoint;
         self.parse_type_arrow()
     }
 
-    fn parse_type(&mut self) -> Result<S<SurfaceTy<'src>>, ParseError> {
+    fn parse_type(&mut self) -> Result<S<SurfaceTy>, ParseError> {
         let start = self.current_start();
 
         if self.at(&Token::Forall) {
@@ -698,14 +783,14 @@ impl<'src> Parser<'src> {
             }
             self.expect(&Token::Dot)?;
             let body = self.parse_type()?;
-            let end = body.1.end;
+            let end = span_end(&body);
             return Ok(sp(SurfaceTy::ForAll(vars, Box::new(body)), start, end));
         }
 
         self.parse_qualified_type()
     }
 
-    fn parse_type_arrow(&mut self) -> Result<S<SurfaceTy<'src>>, ParseError> {
+    fn parse_type_arrow(&mut self) -> Result<S<SurfaceTy>, ParseError> {
         let lhs = self.parse_type_app()?;
         if self.at(&Token::Arrow) {
             self.advance();
@@ -717,7 +802,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_type_app(&mut self) -> Result<S<SurfaceTy<'src>>, ParseError> {
+    fn parse_type_app(&mut self) -> Result<S<SurfaceTy>, ParseError> {
         let mut ty = self.parse_type_atom()?;
         while self.is_type_atom_start() {
             let arg = self.parse_type_atom()?;
@@ -734,7 +819,7 @@ impl<'src> Parser<'src> {
         )
     }
 
-    fn parse_name_path(&mut self) -> Result<S<NameRef<'src>>, ParseError> {
+    fn parse_name_path(&mut self) -> Result<S<NameRef>, ParseError> {
         let start = self.current_start();
 
         let first = match self.current_kind() {
@@ -743,7 +828,7 @@ impl<'src> Parser<'src> {
                 self.advance();
                 name
             }
-            _ => return Err(self.error(format!("expected name, got {:?}", self.current_kind()))),
+            _ => return Err(self.error(format!("expected name, got {}", self.describe_current()))),
         };
 
         let mut segments = vec![first];
@@ -782,20 +867,20 @@ impl<'src> Parser<'src> {
         )
     }
 
-    fn parse_type_atom(&mut self) -> Result<S<SurfaceTy<'src>>, ParseError> {
+    fn parse_type_atom(&mut self) -> Result<S<SurfaceTy>, ParseError> {
         let start = self.current_start();
         match self.current_kind() {
             Token::Ident(_) | Token::UpperIdent(_) => {
                 let name_ref = self.parse_name_path()?;
                 let end = span_end(&name_ref);
-                if is_ctor_like(name_ref.0.last()) {
+                if is_ctor_like(name_ref.0.last_text(self.session)) {
                     Ok(sp(SurfaceTy::Con(name_ref), start, end))
                 } else if name_ref.0.segments.len() == 1 {
                     Ok(sp(SurfaceTy::Var(name_ref.0.last()), start, end))
                 } else {
                     Err(self.error(format!(
                         "qualified type variable is not allowed: {}",
-                        name_ref.0.segments.join(".")
+                        name_ref.0.display(self.session)
                     )))
                 }
             }
@@ -813,24 +898,24 @@ impl<'src> Parser<'src> {
                 self.advance();
                 let elem = self.parse_type()?;
                 let end = self.expect(&Token::RBrack)?.end;
-                Ok(list_ty(elem, start, end))
+                Ok(list_ty(self.session, elem, start, end))
             }
-            _ => Err(self.error(format!("expected type, got {:?}", self.current_kind()))),
+            _ => Err(self.error(format!("expected type, got {}", self.describe_current()))),
         }
     }
 
-    fn parse_pattern(&mut self) -> Result<S<SurfacePattern<'src>>, ParseError> {
+    fn parse_pattern(&mut self) -> Result<S<SurfacePattern>, ParseError> {
         let head = self.parse_pattern_head()?;
         if self.at(&Token::Cons) {
             self.advance();
             let tail = self.parse_pattern()?;
-            Ok(cons_pattern(head, tail))
+            Ok(cons_pattern(self.session, head, tail))
         } else {
             Ok(head)
         }
     }
 
-    fn parse_pattern_head(&mut self) -> Result<S<SurfacePattern<'src>>, ParseError> {
+    fn parse_pattern_head(&mut self) -> Result<S<SurfacePattern>, ParseError> {
         if matches!(self.current_kind(), Token::UpperIdent(_)) {
             let start = self.current_start();
             let name_ref = self.parse_name_path()?;
@@ -848,7 +933,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_pattern_arg(&mut self) -> Result<S<SurfacePattern<'src>>, ParseError> {
+    fn parse_pattern_arg(&mut self) -> Result<S<SurfacePattern>, ParseError> {
         let start = self.current_start();
 
         match self.current_kind() {
@@ -872,8 +957,8 @@ impl<'src> Parser<'src> {
                     }
 
                     _ => Err(self.error(format!(
-                        "expected integer literal after `-` in pattern, got {:?}",
-                        self.current_kind()
+                        "expected integer literal after `-` in pattern, got {}",
+                        self.describe_current()
                     ))),
                 }
             }
@@ -892,7 +977,7 @@ impl<'src> Parser<'src> {
                 } else {
                     Err(self.error(format!(
                         "qualified variable patterns are not supported: {}",
-                        name_ref.0.segments.join(".")
+                        name_ref.0.display(self.session)
                     )))
                 }
             }
@@ -920,7 +1005,7 @@ impl<'src> Parser<'src> {
 
                 if self.at(&Token::RBrack) {
                     let end = self.advance().end;
-                    return Ok(list_nil_pattern(start, end));
+                    return Ok(list_nil_pattern(self.session, start, end));
                 }
 
                 let mut elems = vec![self.parse_pattern()?];
@@ -931,10 +1016,10 @@ impl<'src> Parser<'src> {
                 }
 
                 let end = self.expect(&Token::RBrack)?.end;
-                Ok(list_pattern(elems, start, end))
+                Ok(list_pattern(self.session, elems, start, end))
             }
 
-            _ => Err(self.error(format!("expected pattern, got {:?}", self.current_kind()))),
+            _ => Err(self.error(format!("expected pattern, got {}", self.describe_current()))),
         }
     }
 
@@ -951,7 +1036,7 @@ impl<'src> Parser<'src> {
         )
     }
 
-    fn parse_expr(&mut self) -> Result<S<SurfaceExpr<'src>>, ParseError> {
+    fn parse_expr(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
         let start = self.current_start();
 
         let expr = match self.current_kind() {
@@ -972,7 +1057,7 @@ impl<'src> Parser<'src> {
         Ok(expr)
     }
 
-    fn parse_op_chain(&mut self) -> Result<S<SurfaceExpr<'src>>, ParseError> {
+    fn parse_op_chain(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
         let mut items = vec![self.parse_unary()?];
         let mut ops = Vec::new();
 
@@ -987,11 +1072,11 @@ impl<'src> Parser<'src> {
                 .pop()
                 .expect("operator chain always has one expression"))
         } else {
-            rearrange_ops(items, ops)
+            rearrange_ops(self.session, items, ops)
         }
     }
 
-    fn parse_unary(&mut self) -> Result<S<SurfaceExpr<'src>>, ParseError> {
+    fn parse_unary(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
         if self.at(&Token::Minus) {
             let start = self.advance().start;
             let operand = self.parse_app()?;
@@ -1006,7 +1091,7 @@ impl<'src> Parser<'src> {
         }
     }
 
-    fn parse_app(&mut self) -> Result<S<SurfaceExpr<'src>>, ParseError> {
+    fn parse_app(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
         let mut func = self.parse_atom()?;
         while self.is_atom_start() {
             let arg = self.parse_atom()?;
@@ -1029,7 +1114,7 @@ impl<'src> Parser<'src> {
         )
     }
 
-    fn parse_atom(&mut self) -> Result<S<SurfaceExpr<'src>>, ParseError> {
+    fn parse_atom(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
         let start = self.current_start();
         match self.current_kind() {
             Token::Int(value) => {
@@ -1048,7 +1133,7 @@ impl<'src> Parser<'src> {
             Token::Ident(_) | Token::UpperIdent(_) => {
                 let name_ref = self.parse_name_path()?;
                 let end = span_end(&name_ref);
-                let expr = if is_ctor_like(name_ref.0.last()) {
+                let expr = if is_ctor_like(name_ref.0.last_text(self.session)) {
                     SurfaceExpr::Con(name_ref)
                 } else {
                     SurfaceExpr::Var(name_ref)
@@ -1069,7 +1154,7 @@ impl<'src> Parser<'src> {
                 self.advance();
                 if self.at(&Token::RBrack) {
                     let end = self.advance().end;
-                    return Ok(list_nil_expr(start, end));
+                    return Ok(list_nil_expr(self.session, start, end));
                 }
                 let mut elems = vec![self.parse_expr()?];
                 while self.at(&Token::Comma) {
@@ -1077,18 +1162,18 @@ impl<'src> Parser<'src> {
                     elems.push(self.parse_expr()?);
                 }
                 let end = self.expect(&Token::RBrack)?.end;
-                Ok(list_expr(elems, start, end))
+                Ok(list_expr(self.session, elems, start, end))
             }
             _ => Err(self.error(format!(
-                "expected expression, got {:?}",
-                self.current_kind()
+                "expected expression, got {}",
+                self.describe_current()
             ))),
         }
     }
 
-    fn parse_lambda(&mut self) -> Result<S<SurfaceExpr<'src>>, ParseError> {
+    fn parse_lambda(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
         let start = self.expect(&Token::Fun)?.start;
-        let mut params: Vec<LambdaParam<'src>> = Vec::new();
+        let mut params: Vec<LambdaParam> = Vec::new();
 
         while !self.at(&Token::FatArrow) {
             if self.at(&Token::LParen) {
@@ -1110,7 +1195,7 @@ impl<'src> Parser<'src> {
         Ok(sp(SurfaceExpr::Abs(params, Box::new(body)), start, end))
     }
 
-    fn parse_let(&mut self) -> Result<S<SurfaceExpr<'src>>, ParseError> {
+    fn parse_let(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
         let start = self.expect(&Token::Let)?.start;
         let (name, name_start, name_end) = self.expect_ident()?;
         self.expect(&Token::Eq)?;
@@ -1129,7 +1214,7 @@ impl<'src> Parser<'src> {
         ))
     }
 
-    fn parse_if(&mut self) -> Result<S<SurfaceExpr<'src>>, ParseError> {
+    fn parse_if(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
         let start = self.expect(&Token::If)?.start;
         let cond = self.parse_expr()?;
         self.expect(&Token::Then)?;
@@ -1144,7 +1229,7 @@ impl<'src> Parser<'src> {
         ))
     }
 
-    fn parse_case(&mut self) -> Result<S<SurfaceExpr<'src>>, ParseError> {
+    fn parse_case(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
         let start = self.expect(&Token::Case)?.start;
         let scrutinee = self.parse_expr()?;
         self.expect(&Token::Of)?;
@@ -1191,12 +1276,13 @@ impl<'src> Parser<'src> {
     }
 }
 
-fn rearrange_ops<'src>(
-    mut items: Vec<S<SurfaceExpr<'src>>>,
-    ops: Vec<BinOpInfo<'src>>,
-) -> Result<S<SurfaceExpr<'src>>, ParseError> {
+fn rearrange_ops(
+    session: &Session,
+    mut items: Vec<S<SurfaceExpr>>,
+    ops: Vec<BinOpInfo>,
+) -> Result<S<SurfaceExpr>, ParseError> {
     let mut expr_stack = vec![items.remove(0)];
-    let mut op_stack: Vec<StackedOp<'src>> = Vec::new();
+    let mut op_stack: Vec<StackedOp> = Vec::new();
 
     for (op, rhs) in ops.into_iter().zip(items) {
         let fixity = builtin_fixity(&op.0).expect("operator fixity must exist");
@@ -1211,7 +1297,7 @@ fn rearrange_ops<'src>(
             let (top_op, start, end, _) = op_stack.pop().expect("operator stack is non-empty");
             let right = expr_stack.pop().expect("rhs expression exists");
             let left = expr_stack.pop().expect("lhs expression exists");
-            expr_stack.push(make_binop(top_op, left, right, start, end));
+            expr_stack.push(make_binop(session, top_op, left, right, start, end));
         }
 
         op_stack.push((op.0, op.1, op.2, fixity));
@@ -1221,23 +1307,24 @@ fn rearrange_ops<'src>(
     while let Some((op, start, end, _)) = op_stack.pop() {
         let right = expr_stack.pop().expect("rhs expression exists");
         let left = expr_stack.pop().expect("lhs expression exists");
-        expr_stack.push(make_binop(op, left, right, start, end));
+        expr_stack.push(make_binop(session, op, left, right, start, end));
     }
 
     Ok(expr_stack.pop().expect("final expression exists"))
 }
 
-fn make_binop<'src>(
-    op: Token<'src>,
-    lhs: S<SurfaceExpr<'src>>,
-    rhs: S<SurfaceExpr<'src>>,
+fn make_binop(
+    session: &Session,
+    op: Token,
+    lhs: S<SurfaceExpr>,
+    rhs: S<SurfaceExpr>,
     _op_start: usize,
     _op_end: usize,
-) -> S<SurfaceExpr<'src>> {
+) -> S<SurfaceExpr> {
     let (start, end) = merge_span(&lhs, &rhs);
 
     if matches!(op, Token::Cons) {
-        return cons_expr(lhs, rhs, start, end);
+        return cons_expr(session, lhs, rhs, start, end);
     }
 
     let op = match op {
@@ -1261,30 +1348,20 @@ fn make_binop<'src>(
     )
 }
 
-pub fn parse_source<'src>(source: &'src str) -> Result<ParsedModule<'src>, Vec<ParseError>> {
-    let tokens = lexer::lex(source).map_err(|error| vec![ParseError::from(error)])?;
-    Parser::new(tokens)
-        .parse_module()
-        .map_err(|error| vec![error])
-}
+pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
+    let tokens = match lexer::lex(session, file, source) {
+        Ok(tokens) => tokens,
+        Err(error) => {
+            let error = ParseError::from(error);
+            session.diagnostics().push(error.to_diagnostic());
 
-pub fn render_errors(path: &Path, source: &str, errs: &[ParseError]) -> String {
-    let file_id = path.display().to_string();
-    let mut out = Vec::new();
+            return ParsedModule {
+                file,
+                imports: Vec::new(),
+                defs: Vec::new(),
+            };
+        }
+    };
 
-    for error in errs {
-        let range = error.offset..error.offset + 1;
-        let _ = Report::build(ReportKind::Error, (file_id.clone(), range.clone()))
-            .with_message("parse error")
-            .with_label(
-                Label::new((file_id.clone(), range))
-                    .with_color(Color::Red)
-                    .with_message(&error.message),
-            )
-            .finish()
-            .write((file_id.clone(), Source::from(source)), &mut out);
-        out.extend_from_slice(b"\n");
-    }
-
-    String::from_utf8_lossy(&out).into_owned()
+    Parser::new(session, file, tokens).parse_module()
 }

@@ -1,138 +1,158 @@
-pub type Span = std::ops::Range<usize>;
+use base::{FileId, Session, Span, Symbol};
 
 pub type Spanned<T> = (T, Span);
 
 pub type SpannedWrapper<T> = Spanned<T>;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct NameRef<'src> {
-    pub segments: Vec<&'src str>,
+pub struct NameRef {
+    pub segments: Vec<Symbol>,
 }
 
-impl<'src> NameRef<'src> {
-    pub fn last(&self) -> &'src str {
-        self.segments.last().expect("empty NameRef")
+impl NameRef {
+    pub fn last(&self) -> Symbol {
+        *self
+            .segments
+            .last()
+            .expect("ICE: NameRef must have at least one segment")
     }
 
-    pub fn prefix(&self) -> &[&'src str] {
+    pub fn last_text(&self, session: &Session) -> &'static str {
+        session.str(self.last())
+    }
+
+    pub fn prefix(&self) -> &[Symbol] {
         &self.segments[..self.segments.len().saturating_sub(1)]
+    }
+
+    pub fn display(&self, session: &Session) -> String {
+        self.segments
+            .iter()
+            .map(|segment| session.str(*segment))
+            .collect::<Vec<_>>()
+            .join(".")
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ModuleName(pub Vec<String>);
+pub struct ModuleName(pub Vec<Symbol>);
 
 impl ModuleName {
-    pub fn as_string(&self) -> String {
-        self.0.join(".")
+    pub fn as_string(&self, session: &Session) -> String {
+        self.0
+            .iter()
+            .map(|segment| session.str(*segment))
+            .collect::<Vec<_>>()
+            .join(".")
     }
 
-    pub fn default_alias(&self) -> String {
-        self.0.last().unwrap().clone()
+    pub fn default_alias(&self) -> Symbol {
+        *self
+            .0
+            .last()
+            .expect("ICE: ModuleName must have at least one segment")
     }
 }
 
 #[derive(Debug, Clone)]
 pub enum ImportSpec {
     All,
-    Only(Vec<String>),
+    Only(Vec<Symbol>),
 }
 
 #[derive(Debug, Clone)]
 pub struct ImportDecl {
     pub module: ModuleName,
-    pub alias: String,
+    pub alias: Symbol,
     pub spec: ImportSpec,
 }
 
 #[derive(Debug, Clone)]
-pub struct ParsedModule<'src> {
+pub struct ParsedModule {
+    pub file: FileId,
     pub imports: Vec<ImportDecl>,
-    pub defs: SurfaceProgram<'src>,
+    pub defs: SurfaceProgram,
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct SurfacePredicate<'src> {
-    pub class_name: Spanned<NameRef<'src>>,
-    pub args: Vec<Spanned<SurfaceTy<'src>>>,
+pub struct SurfacePredicate {
+    pub class_name: Spanned<NameRef>,
+    pub args: Vec<Spanned<SurfaceTy>>,
 }
 
 #[derive(Debug, Clone)]
-pub struct ClassMethod<'src> {
-    pub name: Spanned<&'src str>,
-    pub ty: Spanned<SurfaceTy<'src>>,
+pub struct ClassMethod {
+    pub name: Spanned<Symbol>,
+    pub ty: Spanned<SurfaceTy>,
 }
 
 #[derive(Debug, Clone)]
-pub struct InstanceMethod<'src> {
-    pub name: Spanned<&'src str>,
-    pub params: Vec<Spanned<&'src str>>,
-    pub body: Spanned<SurfaceExpr<'src>>,
+pub struct InstanceMethod {
+    pub name: Spanned<Symbol>,
+    pub params: Vec<Spanned<Symbol>>,
+    pub body: Spanned<SurfaceExpr>,
 }
 
 #[derive(Debug, Clone)]
-pub enum SurfaceDefinition<'src> {
+pub enum SurfaceDefinition {
     FunDef {
-        name: Spanned<&'src str>,
-        body: Spanned<SurfaceExpr<'src>>,
-        params: Vec<Spanned<&'src str>>,
+        name: Spanned<Symbol>,
+        body: Spanned<SurfaceExpr>,
+        params: Vec<Spanned<Symbol>>,
     },
     SigDef {
-        name: Spanned<&'src str>,
-        ty: Spanned<SurfaceTy<'src>>,
+        name: Spanned<Symbol>,
+        ty: Spanned<SurfaceTy>,
     },
     DataDef {
-        name: Spanned<&'src str>,
-        ty_params: Vec<Spanned<&'src str>>,
-        constructors: Vec<Spanned<SufraceConstructor<'src>>>,
+        name: Spanned<Symbol>,
+        ty_params: Vec<Spanned<Symbol>>,
+        constructors: Vec<Spanned<SufraceConstructor>>,
     },
     ClassDef {
-        name: Spanned<&'src str>,
-        ty_params: Vec<Spanned<&'src str>>,
-        superclasses: Vec<Spanned<SurfacePredicate<'src>>>,
-        methods: Vec<ClassMethod<'src>>,
+        name: Spanned<Symbol>,
+        ty_params: Vec<Spanned<Symbol>>,
+        superclasses: Vec<Spanned<SurfacePredicate>>,
+        methods: Vec<ClassMethod>,
     },
     InstanceDef {
-        context: Vec<Spanned<SurfacePredicate<'src>>>,
-        class_name: Spanned<&'src str>,
-        args: Vec<Spanned<SurfaceTy<'src>>>,
-        methods: Vec<InstanceMethod<'src>>,
+        context: Vec<Spanned<SurfacePredicate>>,
+        class_name: Spanned<Symbol>,
+        args: Vec<Spanned<SurfaceTy>>,
+        methods: Vec<InstanceMethod>,
     },
 }
 
 #[derive(Debug, Clone)]
-pub struct SufraceConstructor<'src> {
-    pub name: Spanned<&'src str>,
-    pub params: Vec<Spanned<SurfaceTy<'src>>>,
+pub struct SufraceConstructor {
+    pub name: Spanned<Symbol>,
+    pub params: Vec<Spanned<SurfaceTy>>,
 }
 
-pub type SurfaceProgram<'src> = Vec<Spanned<SurfaceDefinition<'src>>>;
+pub type SurfaceProgram = Vec<Spanned<SurfaceDefinition>>;
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SurfaceTy<'src> {
+pub enum SurfaceTy {
     Unit,
-    Var(&'src str),
-    Arr(Box<Spanned<SurfaceTy<'src>>>, Box<Spanned<SurfaceTy<'src>>>),
-    ForAll(Vec<Spanned<&'src str>>, Box<Spanned<SurfaceTy<'src>>>),
-    Qualified(
-        Vec<Spanned<SurfacePredicate<'src>>>,
-        Box<Spanned<SurfaceTy<'src>>>,
-    ),
-    Con(Spanned<NameRef<'src>>),
-    App(Box<Spanned<SurfaceTy<'src>>>, Box<Spanned<SurfaceTy<'src>>>),
+    Var(Symbol),
+    Arr(Box<Spanned<SurfaceTy>>, Box<Spanned<SurfaceTy>>),
+    ForAll(Vec<Spanned<Symbol>>, Box<Spanned<SurfaceTy>>),
+    Qualified(Vec<Spanned<SurfacePredicate>>, Box<Spanned<SurfaceTy>>),
+    Con(Spanned<NameRef>),
+    App(Box<Spanned<SurfaceTy>>, Box<Spanned<SurfaceTy>>),
 }
 #[derive(Clone, Debug, PartialEq)]
-pub enum SurfacePattern<'src> {
-    Var(&'src str),
+pub enum SurfacePattern {
+    Var(Symbol),
     Lit(SurfaceLiteral),
-    Con(Spanned<NameRef<'src>>, Vec<Spanned<SurfacePattern<'src>>>),
+    Con(Spanned<NameRef>, Vec<Spanned<SurfacePattern>>),
     Wild,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct SurfaceMatchArm<'src> {
-    pub pattern: Spanned<SurfacePattern<'src>>,
-    pub expr: Spanned<SurfaceExpr<'src>>,
+pub struct SurfaceMatchArm {
+    pub pattern: Spanned<SurfacePattern>,
+    pub expr: Spanned<SurfaceExpr>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,39 +181,33 @@ pub enum SurfaceLiteral {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SurfaceExpr<'src> {
+pub enum SurfaceExpr {
     Unit,
     Literal(SurfaceLiteral),
     Hole,
-    Var(Spanned<NameRef<'src>>),
-    App(
-        Box<Spanned<SurfaceExpr<'src>>>,
-        Box<Spanned<SurfaceExpr<'src>>>,
-    ),
+    Var(Spanned<NameRef>),
+    App(Box<Spanned<SurfaceExpr>>, Box<Spanned<SurfaceExpr>>),
     Abs(
-        Vec<(Spanned<&'src str>, Option<Spanned<SurfaceTy<'src>>>)>,
-        Box<Spanned<SurfaceExpr<'src>>>,
+        Vec<(Spanned<Symbol>, Option<Spanned<SurfaceTy>>)>,
+        Box<Spanned<SurfaceExpr>>,
     ),
-    Ann(Box<Spanned<SurfaceExpr<'src>>>, Spanned<SurfaceTy<'src>>),
+    Ann(Box<Spanned<SurfaceExpr>>, Spanned<SurfaceTy>),
     Let(
-        Spanned<&'src str>,
-        Box<Spanned<SurfaceExpr<'src>>>,
-        Box<Spanned<SurfaceExpr<'src>>>,
+        Spanned<Symbol>,
+        Box<Spanned<SurfaceExpr>>,
+        Box<Spanned<SurfaceExpr>>,
     ),
-    Con(Spanned<NameRef<'src>>),
-    Case(
-        Box<Spanned<SurfaceExpr<'src>>>,
-        Vec<Spanned<SurfaceMatchArm<'src>>>,
-    ),
+    Con(Spanned<NameRef>),
+    Case(Box<Spanned<SurfaceExpr>>, Vec<Spanned<SurfaceMatchArm>>),
     IfThenElse(
-        Box<Spanned<SurfaceExpr<'src>>>,
-        Box<Spanned<SurfaceExpr<'src>>>,
-        Box<Spanned<SurfaceExpr<'src>>>,
+        Box<Spanned<SurfaceExpr>>,
+        Box<Spanned<SurfaceExpr>>,
+        Box<Spanned<SurfaceExpr>>,
     ),
     BinaryOperator(
         SurfaceBinOp,
-        Box<Spanned<SurfaceExpr<'src>>>,
-        Box<Spanned<SurfaceExpr<'src>>>,
+        Box<Spanned<SurfaceExpr>>,
+        Box<Spanned<SurfaceExpr>>,
     ),
-    UnaryOperator(SurfaceUnOp, Box<Spanned<SurfaceExpr<'src>>>),
+    UnaryOperator(SurfaceUnOp, Box<Spanned<SurfaceExpr>>),
 }

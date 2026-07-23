@@ -1,10 +1,6 @@
 use logos::Logos;
 
-pub type Symbol = String;
-
-pub fn intern(text: &str) -> Symbol {
-    text.to_string()
-}
+use base::{FileId, FileSpan, Session, Span, Symbol};
 
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(skip r"[ \t\r]+")]
@@ -116,16 +112,16 @@ enum RawToken {
 // -- Positioned tokens ------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct PosToken<'src> {
-    pub kind: Token<'src>,
+pub struct PosToken {
+    pub kind: Token,
     pub start: usize,
     pub end: usize,
     pub line: u32,
     pub col: u32,
 }
 
-impl<'src> PosToken<'src> {
-    fn new(kind: Token<'src>, start: usize, end: usize, line: u32, col: u32) -> Self {
+impl PosToken {
+    fn new(kind: Token, start: usize, end: usize, line: u32, col: u32) -> Self {
         Self {
             kind,
             start,
@@ -135,16 +131,16 @@ impl<'src> PosToken<'src> {
         }
     }
 
-    fn virtual_at(kind: Token<'src>, anchor: &Self) -> Self {
+    fn virtual_at(kind: Token, anchor: &Self) -> Self {
         Self::new(kind, anchor.start, anchor.start, anchor.line, anchor.col)
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Token<'src> {
+pub enum Token {
     Int(i64),
-    Ident(&'src str),
-    UpperIdent(&'src str),
+    Ident(Symbol),
+    UpperIdent(Symbol),
 
     Let,
     In,
@@ -198,7 +194,7 @@ pub enum Token<'src> {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LexError {
-    pub offset: usize,
+    pub span: FileSpan,
     pub line: u32,
     pub col: u32,
     pub message: String,
@@ -258,21 +254,28 @@ fn offset_to_line_col(line_starts: &[usize], offset: usize) -> (u32, u32) {
     (line_ix as u32, col as u32)
 }
 
-fn lex_error(source: &str, offset: usize, line: u32, col: u32, end: usize) -> LexError {
+fn lex_error(
+    source: &str,
+    file: FileId,
+    offset: usize,
+    line: u32,
+    col: u32,
+    end: usize,
+) -> LexError {
     LexError {
-        offset,
+        span: FileSpan::new(file, Span::from_usize_range(offset..end)),
         line,
         col,
         message: format!("unexpected character '{}'", &source[offset..end]),
     }
 }
 
-fn map_raw_token<'src>(raw: RawToken, slice: &'src str) -> Option<Token<'src>> {
+fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Option<Token> {
     let token = match raw {
         RawToken::Newline | RawToken::LineComment => return None,
         RawToken::Int(n) => Token::Int(n),
-        RawToken::Ident => Token::Ident(slice),
-        RawToken::UpperIdent => Token::UpperIdent(slice),
+        RawToken::Ident => Token::Ident(session.intern(slice)),
+        RawToken::UpperIdent => Token::UpperIdent(session.intern(slice)),
 
         RawToken::KwLet => Token::Let,
         RawToken::KwIn => Token::In,
@@ -322,7 +325,7 @@ fn map_raw_token<'src>(raw: RawToken, slice: &'src str) -> Option<Token<'src>> {
     Some(token)
 }
 
-fn raw_lex<'src>(source: &'src str) -> Result<Vec<PosToken<'src>>, LexError> {
+fn raw_lex(session: &Session, file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
     let cleaned = strip_block_comments(source);
     let line_starts = compute_line_starts(source);
     let mut out = Vec::new();
@@ -334,11 +337,11 @@ fn raw_lex<'src>(source: &'src str) -> Result<Vec<PosToken<'src>>, LexError> {
 
         let raw = match result {
             Ok(token) => token,
-            Err(()) => return Err(lex_error(source, span.start, line, col, span.end)),
+            Err(()) => return Err(lex_error(source, file, span.start, line, col, span.end)),
         };
 
         let slice = &source[span.start..span.end];
-        let Some(kind) = map_raw_token(raw, slice) else {
+        let Some(kind) = map_raw_token(raw, slice, session) else {
             continue;
         };
 
@@ -357,11 +360,11 @@ enum LayoutContext {
     Implicit(u32),
 }
 
-fn opens_layout(tok: &Token<'_>) -> bool {
+fn opens_layout(tok: &Token) -> bool {
     matches!(tok, Token::Of | Token::Where)
 }
 
-fn is_layout_continuation(tok: &Token<'_>) -> bool {
+fn is_layout_continuation(tok: &Token) -> bool {
     matches!(
         tok,
         Token::Then
@@ -376,25 +379,24 @@ fn is_layout_continuation(tok: &Token<'_>) -> bool {
     )
 }
 
-fn effective_layout_col<'src>(tokens: &[PosToken<'src>], index: usize) -> u32 {
+fn effective_layout_col(tokens: &[PosToken], index: usize) -> u32 {
     let token = &tokens[index];
 
-    if matches!(token.kind, Token::Pipe) {
-        if let Some(next) = tokens.get(index + 1) {
-            if next.line == token.line {
-                return next.col;
-            }
-        }
+    if matches!(token.kind, Token::Pipe)
+        && let Some(next) = tokens.get(index + 1)
+        && next.line == token.line
+    {
+        return next.col;
     }
 
     token.col
 }
 
-fn push_virtual<'src>(out: &mut Vec<PosToken<'src>>, kind: Token<'src>, anchor: &PosToken<'src>) {
+fn push_virtual(out: &mut Vec<PosToken>, kind: Token, anchor: &PosToken) {
     out.push(PosToken::virtual_at(kind, anchor));
 }
 
-pub fn insert_layout<'src>(tokens: Vec<PosToken<'src>>) -> Vec<PosToken<'src>> {
+pub fn insert_layout(tokens: Vec<PosToken>) -> Vec<PosToken> {
     let mut out = Vec::new();
     let mut stack: Vec<LayoutContext> = Vec::new();
     let mut pending_layout = false;
@@ -432,24 +434,24 @@ pub fn insert_layout<'src>(tokens: Vec<PosToken<'src>>) -> Vec<PosToken<'src>> {
             }
         }
 
-        if let Some(previous_line) = prev_line {
-            if token.line > previous_line && token.kind != Token::Eof {
-                while let Some(LayoutContext::Implicit(ref_col)) = stack.last().copied() {
-                    if col < ref_col {
-                        stack.pop();
-                        push_virtual(&mut out, Token::VClose, token);
-                    } else {
-                        break;
-                    }
+        if let Some(previous_line) = prev_line
+            && token.line > previous_line
+            && token.kind != Token::Eof
+        {
+            while let Some(LayoutContext::Implicit(ref_col)) = stack.last().copied() {
+                if col < ref_col {
+                    stack.pop();
+                    push_virtual(&mut out, Token::VClose, token);
+                } else {
+                    break;
                 }
+            }
 
-                if !is_layout_continuation(&token.kind) {
-                    if let Some(LayoutContext::Implicit(ref_col)) = stack.last().copied() {
-                        if col == ref_col {
-                            push_virtual(&mut out, Token::VSemi, token);
-                        }
-                    }
-                }
+            if !is_layout_continuation(&token.kind)
+                && let Some(LayoutContext::Implicit(ref_col)) = stack.last().copied()
+                && col == ref_col
+            {
+                push_virtual(&mut out, Token::VSemi, token);
             }
         }
 
@@ -470,8 +472,8 @@ pub fn insert_layout<'src>(tokens: Vec<PosToken<'src>>) -> Vec<PosToken<'src>> {
     out
 }
 
-pub fn lex<'src>(source: &'src str) -> Result<Vec<PosToken<'src>>, LexError> {
-    raw_lex(source).map(insert_layout)
+pub fn lex(session: &Session, file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
+    raw_lex(session, file, source).map(insert_layout)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -487,7 +489,7 @@ pub struct Fixity {
     pub assoc: Assoc,
 }
 
-pub fn builtin_fixity(tok: &Token<'_>) -> Option<Fixity> {
+pub fn builtin_fixity(tok: &Token) -> Option<Fixity> {
     match tok {
         Token::EqEq | Token::Less | Token::Greater | Token::LessEq | Token::GreaterEq => {
             Some(Fixity {

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use base::SourceMap;
+use base::Session;
 use core::ast::{ClassDefinition, Scheme};
 use lowering::closure_lower::lower_to_closure_ir;
 use lowering::lowering::lower_module;
@@ -68,15 +68,30 @@ fn compile_project_capture(
 }
 
 fn check_project_modules(project_root: &Path) -> Result<Vec<CheckedModule>, String> {
+    let session = Session::new();
     let entry_file = find_entry_file(project_root)?;
-    let (_root, project) = load_project(&entry_file)?;
-    let order = module_order_checked(&project)?;
-    let parsed = parse_project(&project)?;
+    let (_root, project) = load_project(&session, &entry_file)?;
 
-    let mut state = FrontendState::new(&project, &parsed, &order)?;
+    if session.diagnostics().has_errors() {
+        emit_session_diagnostics(&session)?;
+        return Err("parse error".to_string());
+    }
+
+    let order = module_order_checked(&session, &project)?;
+    let parsed = parse_project(&project);
+
+    let mut state = FrontendState::new(&session, &project, &parsed, &order)?;
     state.check_all(&order)?;
 
     Ok(state.checked_modules)
+}
+
+fn emit_session_diagnostics(session: &Session) -> Result<(), String> {
+    let diagnostics = session.diagnostics().sorted_by_file_and_span();
+    let source_map = session.source_map();
+
+    emit_diagnostics(&diagnostics, &source_map)
+        .map_err(|err| format!("failed to print diagnostics: {err}"))
 }
 
 fn erase_tc_expr_to_span_expr(
@@ -181,8 +196,9 @@ fn erase_checked_instance_defs_to_resolved(
 }
 
 struct FrontendState<'a> {
+    session: &'a Session,
     project: &'a Project,
-    parsed: &'a ParsedProject<'a>,
+    parsed: &'a ParsedProject,
     builtins: Rc<BuiltinApi>,
     apis: HashMap<ModuleName, SharedModuleApi>,
     typed_apis: HashMap<ModuleName, SharedTypedModuleApi>,
@@ -191,18 +207,20 @@ struct FrontendState<'a> {
 
 impl<'a> FrontendState<'a> {
     fn new(
+        session: &'a Session,
         project: &'a Project,
-        parsed: &'a ParsedProject<'a>,
+        parsed: &'a ParsedProject,
         order: &[ModuleName],
     ) -> Result<Self, String> {
         let mut apis = HashMap::new();
 
         for module_name in order {
-            let api = build_module_api(module_name, parsed.get(module_name));
+            let api = build_module_api(module_name, parsed.get(session, module_name));
             apis.insert(module_name.clone(), Rc::new(api));
         }
 
         Ok(Self {
+            session,
             project,
             parsed,
             builtins: Rc::new(BuiltinApi::default()),
@@ -215,7 +233,7 @@ impl<'a> FrontendState<'a> {
     fn check_all(&mut self, order: &[ModuleName]) -> Result<(), String> {
         for module_name in order {
             let checked = self.check_module(module_name)?;
-            let typed_api = Rc::new(build_typed_module_api(module_name, &checked));
+            let typed_api = Rc::new(build_typed_module_api(self.session, module_name, &checked));
 
             self.typed_apis.insert(module_name.clone(), typed_api);
             self.checked_modules.push(checked);
@@ -232,9 +250,9 @@ impl<'a> FrontendState<'a> {
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
-                for (sym, class_def) in &api.filtered(&imp.spec).class_defs {
+                for (sym, class_def) in &api.filtered(self.session, &imp.spec).class_defs {
                     out.insert(
-                        sym.display(),
+                        sym.display(self.session),
                         class_def
                             .params
                             .iter()
@@ -250,10 +268,9 @@ impl<'a> FrontendState<'a> {
 
     fn check_module(&self, module_name: &ModuleName) -> Result<CheckedModule, String> {
         let module_file = &self.project.modules[module_name];
-        let mut source_map = SourceMap::new();
-        let file = source_map.add_file(module_file.path.clone(), module_file.source.clone());
-        let parsed = self.parsed.get(module_name);
-        let imports = effective_imports(module_name, &parsed.imports);
+        let parsed = self.parsed.get(self.session, module_name);
+        let file = parsed.file;
+        let imports = effective_imports(self.session, module_name, &parsed.imports);
 
         let imported_apis = self.build_imported_apis(&imports);
         let cx = ModuleContext {
@@ -268,7 +285,7 @@ impl<'a> FrontendState<'a> {
             class_param_kinds: self.collect_imported_class_param_kinds(&imports),
         };
 
-        let resolver = Resolver::new();
+        let resolver = Resolver::new(self.session);
         let resolved = resolver
             .resolve_module(module_name, parsed, &cx, &resolver_imports)
             .map_err(|errs| {
@@ -285,7 +302,7 @@ impl<'a> FrontendState<'a> {
             constructor_types,
             imported_class_defs,
             imported_instance_defs,
-        ) = collect_imported_type_info(&imported_typed);
+        ) = collect_imported_type_info(self.session, &imported_typed);
 
         let mut check_env = TypeCheckEnv::from_module(&resolved);
 
@@ -309,6 +326,7 @@ impl<'a> FrontendState<'a> {
                     .map(|error| error.to_diagnostic())
                     .collect::<Vec<_>>();
 
+                let source_map = self.session.source_map();
                 emit_diagnostics(&diagnostics, &source_map)
                     .map_err(|err| format!("failed to print type errors: {err}"))?;
                 return Err("type error".to_string());
@@ -316,11 +334,9 @@ impl<'a> FrontendState<'a> {
         };
 
         if !checked_raw.holes.is_empty() {
-            let diagnostics = hole_diagnostics(
-                &checked_raw.holes,
-                &check_env.constructor_types,
-            );
+            let diagnostics = hole_diagnostics(&checked_raw.holes, &check_env.constructor_types);
 
+            let source_map = self.session.source_map();
             emit_diagnostics(&diagnostics, &source_map)
                 .map_err(|err| format!("failed to print hole diagnostics: {err}"))?;
 
@@ -334,7 +350,7 @@ impl<'a> FrontendState<'a> {
         imports
             .iter()
             .map(|imp| ImportedApi {
-                alias: imp.alias.clone(),
+                alias: imp.alias,
                 api: Rc::new(self.apis[&imp.module].filtered(&imp.spec)),
                 spec: imp.spec.clone(),
             })
@@ -351,7 +367,7 @@ impl<'a> FrontendState<'a> {
                 self.typed_apis
                     .get(&imp.module)
                     .map(|api| ImportedTypedApi {
-                        alias: imp.alias.clone(),
+                        alias: imp.alias,
                         api: api.clone(),
                         spec: imp.spec.clone(),
                     })
@@ -367,8 +383,8 @@ impl<'a> FrontendState<'a> {
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
-                for (sym, kind) in &api.filtered(&imp.spec).type_kinds {
-                    out.insert(sym.display(), kind.clone());
+                for (sym, kind) in &api.filtered(self.session, &imp.spec).type_kinds {
+                    out.insert(sym.display(self.session), kind.clone());
                 }
             }
         }
@@ -378,6 +394,7 @@ impl<'a> FrontendState<'a> {
 }
 
 fn collect_imported_type_info(
+    session: &Session,
     imports: &[ImportedTypedApi],
 ) -> (
     HashMap<String, Scheme>,
@@ -398,7 +415,8 @@ fn collect_imported_type_info(
     let mut instance_defs = Vec::new();
 
     for imp in imports {
-        imp.api.filtered(&imp.spec).extend_display_maps(
+        imp.api.filtered(session, &imp.spec).extend_display_maps(
+            session,
             &mut func_schemes,
             &mut tycon_kinds,
             &mut constructor_types,
@@ -426,10 +444,11 @@ fn find_entry_file(project_root: &Path) -> Result<PathBuf, String> {
 }
 
 fn retain_only_local_symbols(
+    session: &Session,
     module_name: &ModuleName,
     mut checked: CheckedModule,
 ) -> CheckedModule {
-    let prefix = module_name.as_string() + ".";
+    let prefix = module_name.as_string(session) + ".";
 
     checked
         .tycon_kinds
