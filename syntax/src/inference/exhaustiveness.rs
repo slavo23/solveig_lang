@@ -1,16 +1,16 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use base::utils::diagnostics::{LegacyFileSpan, TypeError};
+use base::utils::diagnostics::TypeError;
+use base::{FileId, FileSpan, Span as SourceSpan};
 use core::ast::{CaseArmNode, Literal, Pattern, PatternNode, Predicate, Pretty, TypeExpr};
 
 const MAX_MISSING_EXAMPLES: usize = 3;
 type Span = Range<usize>;
 
 /// Maranget-style exhaustiveness checking.
-
 pub fn check_case(
-    file_id: &str,
+    file: FileId,
     constructor_types: &HashMap<String, TypeExpr>,
     scrutinee_type: &TypeExpr,
     arms: &[CaseArmNode<Span>],
@@ -50,7 +50,7 @@ pub fn check_case(
         Ok(())
     } else {
         Err(TypeError::NonExhaustivePatterns {
-            span: LegacyFileSpan::new(file_id, case_span),
+            span: FileSpan::new(file, SourceSpan::from_usize_range(case_span)),
             scrutinee_type: scrutinee_type.pretty(),
             missing,
         })
@@ -789,7 +789,7 @@ mod tests {
     ) -> Vec<String> {
         let arms = patterns.into_iter().map(arm).collect::<Vec<_>>();
 
-        match check_case("test.sv", constructor_types, scrutinee_type, &arms, span()) {
+        match check_case(FileId(0), constructor_types, scrutinee_type, &arms, span()) {
             Ok(()) => Vec::new(),
             Err(TypeError::NonExhaustivePatterns { missing, .. }) => missing,
             Err(error) => panic!("expected only exhaustiveness errors, got {error:?}"),

@@ -15,6 +15,15 @@ impl Span {
         Self { start, end }
     }
 
+    pub fn from_usize_range(range: Range<usize>) -> Self {
+        let start = u32::try_from(range.start)
+            .expect("ICE: source span start exceeded u32 capacity");
+        let end =
+            u32::try_from(range.end).expect("ICE: source span end exceeded u32 capacity");
+
+        Self { start, end }
+    }
+
     pub fn is_empty(self) -> bool {
         self.start == self.end
     }

@@ -4,7 +4,8 @@ use std::ops::Range;
 use crate::inference::exhaustiveness;
 use crate::inference::holes::HoleInfo;
 use crate::inference::inference_ctx::{Context, ContextEntry};
-use base::utils::diagnostics::{LegacyFileSpan, TypeError};
+use base::utils::diagnostics::TypeError;
+use base::{FileId, FileSpan, Span as SourceSpan};
 use core::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, InstanceDefinition,
     InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate, Pretty, ResolvedModule,
@@ -44,8 +45,13 @@ fn elab_node(
 ) -> TermExprNode<TcMetadata, Span> {
     TermExprNode::new(node, TcMetadata::new(span, ty))
 }
+
+fn file_span(file: FileId, span: Span) -> FileSpan {
+    FileSpan::new(file, SourceSpan::from_usize_range(span))
+}
+
 pub struct TypeChecker {
-    file_id: String,
+    file: FileId,
     counter: usize,
     constructor_types: HashMap<String, TypeExpr>,
     func_schemes: HashMap<String, Scheme>,
@@ -67,7 +73,7 @@ impl Default for TypeChecker {
 impl TypeChecker {
     pub fn new() -> Self {
         Self {
-            file_id: "todo_file.sol".into(),
+            file: FileId(0),
             counter: 0,
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
@@ -80,9 +86,9 @@ impl TypeChecker {
             holes: Vec::new(),
         }
     }
-    pub fn with_env(env: &TypeCheckEnv, file_id: String) -> Self {
+    pub fn with_env(env: &TypeCheckEnv, file: FileId) -> Self {
         Self {
-            file_id,
+            file,
             counter: 0,
             constructor_types: env.constructor_types.clone(),
             func_schemes: env.func_schemes.clone(),
@@ -96,16 +102,13 @@ impl TypeChecker {
         }
     }
 
-    pub fn with_module_context(module: &ResolvedModule<Span>, file_id: String) -> Self {
+    pub fn with_module_context(module: &ResolvedModule<Span>, file: FileId) -> Self {
         let env = TypeCheckEnv::from_module(module);
-        Self::with_env(&env, file_id)
+        Self::with_env(&env, file)
     }
 
-    fn get_file_span(&self, span: Span) -> LegacyFileSpan {
-        LegacyFileSpan {
-            file_id: self.file_id.clone(),
-            span,
-        }
+    fn get_file_span(&self, span: Span) -> FileSpan {
+        file_span(self.file, span)
     }
 
     fn fresh_id(&mut self) -> usize {
@@ -862,7 +865,7 @@ impl TypeChecker {
         ctx: Context,
         left: &TypeExpr,
         right: &TypeExpr,
-        origin_span: LegacyFileSpan,
+        origin_span: FileSpan,
     ) -> Result<Context, TypeError> {
         let original_left = ctx.apply(left);
         let original_right = ctx.apply(right);
@@ -1265,7 +1268,7 @@ impl TypeChecker {
                     ctx.clone(),
                     &ctx.apply(expected_domain),
                     &ctx.apply(annotation),
-                    origin.clone(),
+                    origin,
                 )?;
                 self.solve_subtype(
                     ctx.clone(),
@@ -1369,7 +1372,7 @@ impl TypeChecker {
         let scrutinee_type_for_exhaustiveness = self.zonk_type(&theta.apply(&scrutinee_type));
 
         exhaustiveness::check_case(
-            &self.file_id,
+            self.file,
             &self.constructor_types,
             &scrutinee_type_for_exhaustiveness,
             arms,
@@ -2039,9 +2042,8 @@ pub struct TCOutput {
 pub fn check_and_elab_module(
     module: &ResolvedModule<Span>,
     env: &TypeCheckEnv,
-    file_id: impl Into<String>,
+    file: FileId,
 ) -> Result<TCOutput, Vec<TypeError>> {
-    let file_id = file_id.into();
     let mut errors = Vec::new();
 
     let mut checked_defs = Vec::new();
@@ -2053,7 +2055,7 @@ pub fn check_and_elab_module(
     let mut all_holes = Vec::new();
 
     {
-        let checker = TypeChecker::with_env(env, file_id.clone());
+        let checker = TypeChecker::with_env(env, file);
         let overlap_errors = checker.check_instance_overlaps();
         if !overlap_errors.is_empty() {
             return Err(overlap_errors);
@@ -2070,7 +2072,7 @@ pub fn check_and_elab_module(
             Some(class_def) => class_def,
             None => {
                 errors.push(TypeError::UnboundVariable {
-                    span: LegacyFileSpan::new(file_id.clone(), 0..0),
+                    span: file_span(file, 0..0),
                     name: format!("unknown class `{}` in instance", inst.head.class_name),
                 });
                 continue;
@@ -2081,7 +2083,7 @@ pub fn check_and_elab_module(
             TypeChecker::specialize_superclasses_for_instance(class_def, &inst.head);
 
         if !superclass_obligations.is_empty() {
-            let mut checker = TypeChecker::with_env(env, file_id.clone());
+            let mut checker = TypeChecker::with_env(env, file);
 
             // While validating `instance C t`, do not use that same instance as evidence
             // for its own superclass obligations. This avoids accepting recursive proofs
@@ -2115,7 +2117,7 @@ pub fn check_and_elab_module(
                     .unwrap_or(0..0);
 
                 errors.push(TypeError::UnsatisfiedConstraints {
-                    span: LegacyFileSpan::new(file_id.clone(), span),
+                    span: file_span(file, span),
                     predicates: missing_superclasses,
                 });
             }
@@ -2133,7 +2135,7 @@ pub fn check_and_elab_module(
                 Some(class_method) => class_method,
                 None => {
                     errors.push(TypeError::UnboundVariable {
-                        span: LegacyFileSpan::new(file_id.clone(), inst_method.body.anno.clone()),
+                        span: file_span(file, inst_method.body.anno.clone()),
                         name: format!(
                             "instance method `{}` not found in class `{}`",
                             inst_method.name, inst.head.class_name
@@ -2155,7 +2157,7 @@ pub fn check_and_elab_module(
 
             let expected_type = TypeChecker::scheme_to_type(&expected_scheme);
 
-            let mut checker = TypeChecker::with_env(env, file_id.clone());
+            let mut checker = TypeChecker::with_env(env, file);
             checker.func_schemes = available_func_schemes.clone();
 
             match checker.solve_checking(Context::new(), &inst_method.body, &expected_type) {
@@ -2173,10 +2175,7 @@ pub fn check_and_elab_module(
                         let cause = checker.wanteds_error(unresolved);
 
                         errors.push(TypeError::InstanceMethodTypeMismatch {
-                            span: LegacyFileSpan::new(
-                                file_id.clone(),
-                                inst_method.body.anno.clone(),
-                            ),
+                            span: file_span(file, inst_method.body.anno.clone()),
                             method: inst_method.name.clone(),
                             class_name: inst.head.class_name.clone(),
                             expected: expected_scheme.pretty(),
@@ -2187,10 +2186,7 @@ pub fn check_and_elab_module(
 
                 Err(cause) => {
                     errors.push(TypeError::InstanceMethodTypeMismatch {
-                        span: LegacyFileSpan::new(
-                            file_id.clone(),
-                            inst_method.body.anno.clone(),
-                        ),
+                        span: file_span(file, inst_method.body.anno.clone()),
                         method: inst_method.name.clone(),
                         class_name: inst.head.class_name.clone(),
                         expected: expected_scheme.pretty(),
@@ -2211,7 +2207,7 @@ pub fn check_and_elab_module(
     }
 
     for func_def in &module.func_defs {
-        let mut checker = TypeChecker::with_env(env, file_id.clone());
+        let mut checker = TypeChecker::with_env(env, file);
         checker.func_schemes = available_func_schemes.clone();
 
         match &func_def.signature {

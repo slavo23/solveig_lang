@@ -13,12 +13,13 @@ syntax = { path = "syntax", version = "0.1.0" }
 lowering = { path = "lowering", version = "0.1.0" }
 runtime = { path = "runtime", version = "0.1.0" }
 base = { path = "base", version = "0.1.0" }
+solveig-report = { path = "solveig-report", version = "0.1.0" }
 petgraph = "0.8.3"
 clap = { version = "4.6.0", features = ["derive"] }
 
 
 [workspace]
-members = ["base", "core", "lowering", "runtime", "surface", "syntax"]
+members = ["base", "core", "lowering", "runtime", "solveig-report", "surface", "syntax"]
 
 [workspace.dependencies]
 slab = "0.4.12"

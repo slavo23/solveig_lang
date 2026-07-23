@@ -1,35 +1,94 @@
 use std::cell::RefCell;
-use std::error::Error;
-use std::ops::Range;
 
-use ariadne::{Label, Report, ReportKind, Source};
+use crate::source::FileSpan;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LegacyFileSpan {
-    pub file_id: String,
-    pub span: Range<usize>,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Severity {
+    Error,
+    Warning,
+    Note,
 }
 
-impl LegacyFileSpan {
-    pub fn new(file_id: impl Into<String>, span: Range<usize>) -> Self {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Label {
+    pub span: FileSpan,
+    pub message: String,
+    pub primary: bool,
+}
+
+impl Label {
+    pub fn primary(span: FileSpan, message: impl Into<String>) -> Self {
         Self {
-            file_id: file_id.into(),
             span,
+            message: message.into(),
+            primary: true,
         }
     }
 
-    pub fn range(&self) -> Range<usize> {
-        self.span.clone()
+    pub fn secondary(span: FileSpan, message: impl Into<String>) -> Self {
+        Self {
+            span,
+            message: message.into(),
+            primary: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Diagnostic {
+    pub code: &'static str,
+    pub severity: Severity,
+    pub message: String,
+    pub labels: Vec<Label>,
+    pub notes: Vec<String>,
+}
+
+impl Diagnostic {
+    pub fn new(code: &'static str, severity: Severity, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            severity,
+            message: message.into(),
+            labels: Vec::new(),
+            notes: Vec::new(),
+        }
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.span.start == self.span.end
+    pub fn error(code: &'static str, message: impl Into<String>) -> Self {
+        Self::new(code, Severity::Error, message)
+    }
+
+    pub fn with_label(mut self, label: Label) -> Self {
+        self.labels.push(label);
+        self
+    }
+
+    pub fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.notes.push(note.into());
+        self
+    }
+
+    pub fn with_notes<I, S>(mut self, notes: I) -> Self
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        self.notes.extend(notes.into_iter().map(Into::into));
+        self
+    }
+
+    pub fn anchor_span(&self) -> Option<&FileSpan> {
+        self.labels
+            .iter()
+            .find(|label| label.primary)
+            .map(|label| &label.span)
+            .or_else(|| self.labels.first().map(|label| &label.span))
     }
 }
 
 #[derive(Debug, Default)]
 pub struct DiagnosticSink {
-    diagnostics: RefCell<Vec<CompilerDiagnostic>>,
+    diagnostics: RefCell<Vec<Diagnostic>>,
 }
 
 impl DiagnosticSink {
@@ -37,19 +96,22 @@ impl DiagnosticSink {
         Self::default()
     }
 
-    pub fn push(&self, diagnostic: CompilerDiagnostic) {
+    pub fn push(&self, diagnostic: Diagnostic) {
         self.diagnostics.borrow_mut().push(diagnostic);
     }
 
     pub fn has_errors(&self) -> bool {
-        !self.diagnostics.borrow().is_empty()
+        self.diagnostics
+            .borrow()
+            .iter()
+            .any(|diagnostic| diagnostic.severity == Severity::Error)
     }
 
-    pub fn drain(&self) -> Vec<CompilerDiagnostic> {
+    pub fn drain(&self) -> Vec<Diagnostic> {
         self.diagnostics.borrow_mut().drain(..).collect()
     }
 
-    pub fn sorted_by_file_and_span(&self) -> Vec<CompilerDiagnostic> {
+    pub fn sorted_by_file_and_span(&self) -> Vec<Diagnostic> {
         let mut diagnostics = self.diagnostics.borrow().clone();
 
         diagnostics.sort_by(|left, right| {
@@ -58,8 +120,8 @@ impl DiagnosticSink {
 
             match (left_anchor, right_anchor) {
                 (Some(left), Some(right)) => left
-                    .file_id
-                    .cmp(&right.file_id)
+                    .file
+                    .cmp(&right.file)
                     .then(left.span.start.cmp(&right.span.start))
                     .then(left.span.end.cmp(&right.span.end)),
                 (None, Some(_)) => std::cmp::Ordering::Greater,
@@ -81,138 +143,67 @@ impl DiagnosticSink {
 }
 
 #[derive(Clone, Debug)]
-pub struct DiagnosticLabel {
-    pub span: LegacyFileSpan,
-    pub message: String,
-    pub primary: bool,
-}
-
-impl DiagnosticLabel {
-    pub fn primary(span: LegacyFileSpan, message: impl Into<String>) -> Self {
-        Self {
-            span,
-            message: message.into(),
-            primary: true,
-        }
-    }
-
-    pub fn secondary(span: LegacyFileSpan, message: impl Into<String>) -> Self {
-        Self {
-            span,
-            message: message.into(),
-            primary: false,
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct CompilerDiagnostic {
-    pub code: &'static str,
-    pub message: String,
-    pub labels: Vec<DiagnosticLabel>,
-    pub notes: Vec<String>,
-}
-
-impl CompilerDiagnostic {
-    pub fn new(code: &'static str, message: impl Into<String>) -> Self {
-        Self {
-            code,
-            message: message.into(),
-            labels: Vec::new(),
-            notes: Vec::new(),
-        }
-    }
-
-    pub fn with_label(mut self, label: DiagnosticLabel) -> Self {
-        self.labels.push(label);
-        self
-    }
-
-    pub fn with_note(mut self, note: impl Into<String>) -> Self {
-        self.notes.push(note.into());
-        self
-    }
-
-    pub fn with_notes<I, S>(mut self, notes: I) -> Self
-    where
-        I: IntoIterator<Item = S>,
-        S: Into<String>,
-    {
-        self.notes.extend(notes.into_iter().map(Into::into));
-        self
-    }
-
-    pub fn anchor_span(&self) -> Option<&LegacyFileSpan> {
-        self.labels
-            .iter()
-            .find(|label| label.primary)
-            .map(|label| &label.span)
-            .or_else(|| self.labels.first().map(|label| &label.span))
-    }
-}
-
-#[derive(Clone, Debug)]
 pub enum TypeError {
     UnboundVariable {
-        span: LegacyFileSpan,
+        span: FileSpan,
         name: String,
     },
     UnknownConstructor {
-        span: LegacyFileSpan,
+        span: FileSpan,
         name: String,
     },
     UnknownPatternConstructor {
-        span: LegacyFileSpan,
+        span: FileSpan,
         name: String,
     },
     EmptyCaseExpression {
-        span: LegacyFileSpan,
+        span: FileSpan,
     },
     SubtypeMismatch {
-        span: LegacyFileSpan,
+        span: FileSpan,
         left: String,
         right: String,
     },
     InstantiateLeftFailed {
-        span: LegacyFileSpan,
+        span: FileSpan,
         evar: String,
         target: String,
     },
     InstantiateRightFailed {
-        span: LegacyFileSpan,
+        span: FileSpan,
         source: String,
         evar: String,
     },
     ConstructorNotApplicable {
-        span: LegacyFileSpan,
+        span: FileSpan,
         actual: String,
     },
     NonFunctionApplication {
-        span: LegacyFileSpan,
-        arg_span: LegacyFileSpan,
+        span: FileSpan,
+        arg_span: FileSpan,
         actual: String,
     },
     NonPolymorphicTypeApplication {
-        span: LegacyFileSpan,
+        span: FileSpan,
         actual: String,
         ty_arg: String,
     },
     IllFormedAnnotation {
-        span: LegacyFileSpan,
+        span: FileSpan,
         ty: String,
         target: String,
     },
     MissingCaseResultExistential {
-        span: LegacyFileSpan,
+        span: FileSpan,
         evar: String,
         arm_index: usize,
     },
     UnsatisfiedConstraints {
-        span: LegacyFileSpan,
+        span: FileSpan,
         predicates: Vec<String>,
     },
     OverlappingInstances {
-        span: LegacyFileSpan,
+        span: FileSpan,
         class_name: String,
         instance_type: String,
     },
@@ -224,17 +215,74 @@ pub enum TypeError {
     /// structured lets diagnostics underline the precise expression that failed
     /// and add instance/class context as notes.
     InstanceMethodTypeMismatch {
-        span: LegacyFileSpan,
+        span: FileSpan,
         method: String,
         class_name: String,
         expected: String,
         cause: Box<TypeError>,
     },
     NonExhaustivePatterns {
-        span: LegacyFileSpan,
+        span: FileSpan,
         scrutinee_type: String,
         missing: Vec<String>,
     },
+}
+
+#[derive(Clone, Debug)]
+struct DiagnosticParts {
+    code: &'static str,
+    message: String,
+    labels: Vec<Label>,
+    notes: Vec<String>,
+}
+
+impl DiagnosticParts {
+    fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            labels: Vec::new(),
+            notes: Vec::new(),
+        }
+    }
+
+    fn with_label(mut self, label: Label) -> Self {
+        self.labels.push(label);
+        self
+    }
+
+    fn with_labels(mut self, labels: Vec<Label>) -> Self {
+        self.labels.extend(labels);
+        self
+    }
+
+    fn with_note(mut self, note: impl Into<String>) -> Self {
+        self.notes.push(note.into());
+        self
+    }
+
+    fn with_notes(mut self, notes: Vec<String>) -> Self {
+        self.notes.extend(notes);
+        self
+    }
+
+    fn anchor_span(&self) -> Option<FileSpan> {
+        self.labels
+            .iter()
+            .find(|label| label.primary)
+            .map(|label| label.span)
+            .or_else(|| self.labels.first().map(|label| label.span))
+    }
+
+    fn into_diagnostic(self) -> Diagnostic {
+        Diagnostic {
+            code: self.code,
+            severity: Severity::Error,
+            message: self.message,
+            labels: self.labels,
+            notes: self.notes,
+        }
+    }
 }
 
 fn format_missing_patterns_note(scrutinee_type: &str, missing: &[String]) -> String {
@@ -256,50 +304,51 @@ fn format_missing_patterns_note(scrutinee_type: &str, missing: &[String]) -> Str
 }
 
 impl TypeError {
-    pub fn to_diagnostic(&self) -> CompilerDiagnostic {
+    pub fn to_diagnostic(&self) -> Diagnostic {
+        self.diagnostic_parts().into_diagnostic()
+    }
+
+    fn diagnostic_parts(&self) -> DiagnosticParts {
         match self {
-            TypeError::UnboundVariable { span, name } => CompilerDiagnostic::new(
+            TypeError::UnboundVariable { span, name } => DiagnosticParts::new(
                 "TC0001",
                 format!("variable `{}` is not in scope", name),
             )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
+            .with_label(Label::primary(
+                *span,
                 format!("`{}` is used here, but no binding was found", name),
             )),
 
-            TypeError::UnknownConstructor { span, name } => CompilerDiagnostic::new(
-                "TC0002",
-                format!("unknown constructor `{}`", name),
-            )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
-                format!("constructor `{}` is not known here", name),
-            )),
+            TypeError::UnknownConstructor { span, name } => {
+                DiagnosticParts::new("TC0002", format!("unknown constructor `{}`", name))
+                    .with_label(Label::primary(
+                        *span,
+                        format!("constructor `{}` is not known here", name),
+                    ))
+            }
 
-            TypeError::UnknownPatternConstructor { span, name } => CompilerDiagnostic::new(
+            TypeError::UnknownPatternConstructor { span, name } => DiagnosticParts::new(
                 "TC0003",
                 format!("unknown constructor `{}` in pattern", name),
             )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
+            .with_label(Label::primary(
+                *span,
                 format!("pattern uses unknown constructor `{}`", name),
             )),
 
-            TypeError::EmptyCaseExpression { span } => CompilerDiagnostic::new(
-                "TC0004",
-                "case expression has no arms",
-            )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
-                "this case expression needs at least one arm",
-            )),
+            TypeError::EmptyCaseExpression { span } => {
+                DiagnosticParts::new("TC0004", "case expression has no arms").with_label(
+                    Label::primary(*span, "this case expression needs at least one arm"),
+                )
+            }
+
             TypeError::NonExhaustivePatterns {
                 span,
                 scrutinee_type,
                 missing,
-            } => CompilerDiagnostic::new("TC0016", "non-exhaustive pattern match")
-                .with_label(DiagnosticLabel::primary(
-                    span.clone(),
+            } => DiagnosticParts::new("TC0016", "non-exhaustive pattern match")
+                .with_label(Label::primary(
+                    *span,
                     format!(
                         "this case expression does not cover all values of type `{}`",
                         scrutinee_type
@@ -307,57 +356,56 @@ impl TypeError {
                 ))
                 .with_note(format_missing_patterns_note(scrutinee_type, missing)),
 
-            TypeError::SubtypeMismatch { span, left, right } => CompilerDiagnostic::new(
-                "TC0005",
-                "type mismatch",
-            )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
-                format!("this expression has type `{}`", left),
-            ))
-            .with_note(format!("but it was required to have type `{}`", right)),
+            TypeError::SubtypeMismatch { span, left, right } => {
+                DiagnosticParts::new("TC0005", "type mismatch")
+                    .with_label(Label::primary(
+                        *span,
+                        format!("this expression has type `{}`", left),
+                    ))
+                    .with_note(format!("but it was required to have type `{}`", right))
+            }
 
-            TypeError::InstantiateLeftFailed { span, evar, target } => CompilerDiagnostic::new(
+            TypeError::InstantiateLeftFailed { span, evar, target } => DiagnosticParts::new(
                 "TC0006",
                 "failed to instantiate existential on the left side of subtyping",
             )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
+            .with_label(Label::primary(
+                *span,
                 format!("could not solve `{}` as a subtype of `{}`", evar, target),
             )),
 
-            TypeError::InstantiateRightFailed { span, source, evar } => CompilerDiagnostic::new(
+            TypeError::InstantiateRightFailed { span, source, evar } => DiagnosticParts::new(
                 "TC0007",
                 "failed to instantiate existential on the right side of subtyping",
             )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
+            .with_label(Label::primary(
+                *span,
                 format!("could not solve `{}` as a subtype of `{}`", source, evar),
             )),
 
-            TypeError::ConstructorNotApplicable { span, actual } => CompilerDiagnostic::new(
-                "TC0008",
-                "constructor is not applicable here",
-            )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
-                format!("expected a function-like constructor, got `{}`", actual),
-            )),
+            TypeError::ConstructorNotApplicable { span, actual } => {
+                DiagnosticParts::new("TC0008", "constructor is not applicable here").with_label(
+                    Label::primary(
+                        *span,
+                        format!("expected a function-like constructor, got `{}`", actual),
+                    ),
+                )
+            }
 
             TypeError::NonFunctionApplication {
                 span,
                 actual,
                 arg_span,
-            } => CompilerDiagnostic::new("TC0009", "application of a non-function")
-                .with_label(DiagnosticLabel::primary(
-                    span.clone(),
+            } => DiagnosticParts::new("TC0009", "application of a non-function")
+                .with_label(Label::primary(
+                    *span,
                     format!(
                         "this expression is applied like a function, but has type `{}`",
                         actual
                     ),
                 ))
-                .with_label(DiagnosticLabel::secondary(
-                    arg_span.clone(),
+                .with_label(Label::secondary(
+                    *arg_span,
                     "unexpected argument encountered here",
                 )),
 
@@ -365,12 +413,12 @@ impl TypeError {
                 span,
                 actual,
                 ty_arg,
-            } => CompilerDiagnostic::new(
+            } => DiagnosticParts::new(
                 "TC0010",
                 "type application to a non-polymorphic expression",
             )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
+            .with_label(Label::primary(
+                *span,
                 format!("this expression has type `{}`", actual),
             ))
             .with_note(format!(
@@ -378,25 +426,25 @@ impl TypeError {
                 ty_arg
             )),
 
-            TypeError::IllFormedAnnotation { span, ty, target } => CompilerDiagnostic::new(
-                "TC0011",
-                "ill-formed type annotation",
-            )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
-                format!("annotation `{}` is not well-formed for {}", ty, target),
-            )),
+            TypeError::IllFormedAnnotation { span, ty, target } => {
+                DiagnosticParts::new("TC0011", "ill-formed type annotation").with_label(
+                    Label::primary(
+                        *span,
+                        format!("annotation `{}` is not well-formed for {}", ty, target),
+                    ),
+                )
+            }
 
             TypeError::MissingCaseResultExistential {
                 span,
                 evar,
                 arm_index,
-            } => CompilerDiagnostic::new(
+            } => DiagnosticParts::new(
                 "TC0012",
                 "internal case-arm typing state became inconsistent",
             )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
+            .with_label(Label::primary(
+                *span,
                 format!(
                     "result existential `{}` was missing while checking case arm {}",
                     evar, arm_index
@@ -409,14 +457,11 @@ impl TypeError {
             TypeError::UnsatisfiedConstraints { span, predicates } => {
                 let preds = predicates.join(", ");
 
-                CompilerDiagnostic::new(
+                DiagnosticParts::new(
                     "TC0013",
                     format!("unsatisfied type class constraints: {}", preds),
                 )
-                .with_label(DiagnosticLabel::primary(
-                    span.clone(),
-                    "constraints arise from this expression",
-                ))
+                .with_label(Label::primary(*span, "constraints arise from this expression"))
                 .with_note(format!(
                     "no matching instance found for:\n  {}",
                     predicates.join("\n  ")
@@ -427,14 +472,11 @@ impl TypeError {
                 span,
                 class_name,
                 instance_type,
-            } => CompilerDiagnostic::new(
+            } => DiagnosticParts::new(
                 "TC0014",
                 format!("overlapping instance for `{} {}`", class_name, instance_type),
             )
-            .with_label(DiagnosticLabel::primary(
-                span.clone(),
-                "duplicate instance defined here",
-            ))
+            .with_label(Label::primary(*span, "duplicate instance defined here"))
             .with_note("an instance for this type already exists"),
 
             TypeError::InstanceMethodTypeMismatch {
@@ -443,261 +485,74 @@ impl TypeError {
                 class_name,
                 expected,
                 cause,
-            } => Self::instance_method_diagnostic(span, method, class_name, expected, cause),
+            } => Self::instance_method_parts(*span, method, class_name, expected, cause),
         }
     }
 
-    fn instance_method_diagnostic(
-        method_span: &LegacyFileSpan,
+    fn instance_method_parts(
+        method_span: FileSpan,
         method: &str,
         class_name: &str,
         expected: &str,
         cause: &TypeError,
-    ) -> CompilerDiagnostic {
-        let mut diagnostic = CompilerDiagnostic::new(
+    ) -> DiagnosticParts {
+        let cause_parts = cause.diagnostic_parts();
+        let cause_anchor = cause_parts.anchor_span();
+
+        let mut parts = DiagnosticParts::new(
             "TC0015",
             format!(
                 "type mismatch in instance method `{}` of `{}`",
                 method, class_name
             ),
-        );
+        )
+        .with_labels(cause_parts.labels)
+        .with_notes(cause_parts.notes);
 
-        for label in cause.primary_labels_for_context() {
-            diagnostic = diagnostic.with_label(label);
-        }
-
-        if !span_same_location(method_span, cause.primary_span()) && !method_span.is_empty() {
-            diagnostic = diagnostic.with_label(DiagnosticLabel::secondary(
-                method_span.clone(),
+        if cause_anchor != Some(method_span) && !method_span.is_empty() {
+            parts = parts.with_label(Label::secondary(
+                method_span,
                 format!("while checking this implementation of `{}`", method),
             ));
         }
 
-        diagnostic
-            .with_notes(cause.notes_for_context())
-            .with_note(format!("the class requires `{}`", expected))
-    }
-
-    fn primary_span(&self) -> &LegacyFileSpan {
-        match self {
-            TypeError::UnboundVariable { span, .. }
-            | TypeError::UnknownConstructor { span, .. }
-            | TypeError::UnknownPatternConstructor { span, .. }
-            | TypeError::EmptyCaseExpression { span }
-            | TypeError::NonExhaustivePatterns { span, .. }
-            | TypeError::SubtypeMismatch { span, .. }
-            | TypeError::InstantiateLeftFailed { span, .. }
-            | TypeError::InstantiateRightFailed { span, .. }
-            | TypeError::ConstructorNotApplicable { span, .. }
-            | TypeError::NonFunctionApplication { span, .. }
-            | TypeError::NonPolymorphicTypeApplication { span, .. }
-            | TypeError::IllFormedAnnotation { span, .. }
-            | TypeError::MissingCaseResultExistential { span, .. }
-            | TypeError::UnsatisfiedConstraints { span, .. }
-            | TypeError::OverlappingInstances { span, .. } => span,
-
-            TypeError::InstanceMethodTypeMismatch { cause, .. } => cause.primary_span(),
-        }
-    }
-
-    fn primary_labels_for_context(&self) -> Vec<DiagnosticLabel> {
-        match self {
-            TypeError::UnboundVariable { span, name } => vec![DiagnosticLabel::primary(
-                span.clone(),
-                format!("`{}` is used here, but no binding was found", name),
-            )],
-
-            TypeError::UnknownConstructor { span, name } => vec![DiagnosticLabel::primary(
-                span.clone(),
-                format!("constructor `{}` is not known here", name),
-            )],
-
-            TypeError::UnknownPatternConstructor { span, name } => {
-                vec![DiagnosticLabel::primary(
-                    span.clone(),
-                    format!("pattern uses unknown constructor `{}`", name),
-                )]
-            }
-
-            TypeError::EmptyCaseExpression { span } => vec![DiagnosticLabel::primary(
-                span.clone(),
-                "this case expression needs at least one arm",
-            )],
-            TypeError::NonExhaustivePatterns { span, .. } => vec![DiagnosticLabel::primary(
-                span.clone(),
-                "this case expression does not cover all possible inputs",
-            )],
-
-            TypeError::SubtypeMismatch { span, left, .. } => vec![DiagnosticLabel::primary(
-                span.clone(),
-                format!("this expression has type `{}`", left),
-            )],
-
-            TypeError::InstantiateLeftFailed { span, evar, target } => {
-                vec![DiagnosticLabel::primary(
-                    span.clone(),
-                    format!("could not solve `{}` as a subtype of `{}`", evar, target),
-                )]
-            }
-
-            TypeError::InstantiateRightFailed { span, source, evar } => {
-                vec![DiagnosticLabel::primary(
-                    span.clone(),
-                    format!("could not solve `{}` as a subtype of `{}`", source, evar),
-                )]
-            }
-
-            TypeError::ConstructorNotApplicable { span, actual } => {
-                vec![DiagnosticLabel::primary(
-                    span.clone(),
-                    format!("expected a function-like constructor, got `{}`", actual),
-                )]
-            }
-
-            TypeError::NonFunctionApplication {
-                span,
-                arg_span,
-                actual,
-            } => vec![
-                DiagnosticLabel::primary(
-                    span.clone(),
-                    format!(
-                        "this expression is applied like a function, but has type `{}`",
-                        actual
-                    ),
-                ),
-                DiagnosticLabel::secondary(
-                    arg_span.clone(),
-                    "unexpected argument encountered here",
-                ),
-            ],
-
-            TypeError::NonPolymorphicTypeApplication { span, actual, .. } => {
-                vec![DiagnosticLabel::primary(
-                    span.clone(),
-                    format!("this expression has type `{}`", actual),
-                )]
-            }
-
-            TypeError::IllFormedAnnotation { span, ty, target } => {
-                vec![DiagnosticLabel::primary(
-                    span.clone(),
-                    format!("annotation `{}` is not well-formed for {}", ty, target),
-                )]
-            }
-
-            TypeError::MissingCaseResultExistential {
-                span,
-                evar,
-                arm_index,
-            } => vec![DiagnosticLabel::primary(
-                span.clone(),
-                format!(
-                    "result existential `{}` was missing while checking case arm {}",
-                    evar, arm_index
-                ),
-            )],
-
-            TypeError::UnsatisfiedConstraints { span, .. } => vec![DiagnosticLabel::primary(
-                span.clone(),
-                "constraints arise from this expression",
-            )],
-
-            TypeError::OverlappingInstances { span, .. } => vec![DiagnosticLabel::primary(
-                span.clone(),
-                "duplicate instance defined here",
-            )],
-
-            TypeError::InstanceMethodTypeMismatch { cause, .. } => {
-                cause.primary_labels_for_context()
-            }
-        }
-    }
-
-    fn notes_for_context(&self) -> Vec<String> {
-        match self {
-            TypeError::SubtypeMismatch { right, .. } => {
-                vec![format!("but it was required to have type `{}`", right)]
-            }
-
-            TypeError::NonPolymorphicTypeApplication { ty_arg, .. } => vec![format!(
-                "type argument `{}` can only be applied to a `forall` type",
-                ty_arg
-            )],
-
-            TypeError::MissingCaseResultExistential { .. } => vec![
-                "this is reported as a user-facing type error here, but it usually points to a bug in the checker".to_string(),
-            ],
-
-            TypeError::UnsatisfiedConstraints { predicates, .. } => vec![format!(
-                "no matching instance found for:\n  {}",
-                predicates.join("\n  ")
-            )],
-
-            TypeError::OverlappingInstances { .. } => {
-                vec!["an instance for this type already exists".to_string()]
-            }
-
-            TypeError::InstanceMethodTypeMismatch {
-                method,
-                class_name,
-                expected,
-                cause,
-                ..
-            } => {
-                let mut notes = cause.notes_for_context();
-                notes.push(format!(
-                    "while checking instance method `{}` of `{}`",
-                    method, class_name
-                ));
-                notes.push(format!("the class requires `{}`", expected));
-                notes
-            }
-            TypeError::NonExhaustivePatterns {
-                    scrutinee_type,
-                    missing,
-                    ..
-                } => vec![format_missing_patterns_note(scrutinee_type, missing)],
-
-            _ => Vec::new(),
-        }
+        parts.with_note(format!("the class requires `{}`", expected))
     }
 }
 
-fn span_same_location(a: &LegacyFileSpan, b: &LegacyFileSpan) -> bool {
-    a.file_id == b.file_id && a.span == b.span
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::{FileId, Span};
 
-pub fn emit_diagnostic(diag: &CompilerDiagnostic, src: &str) -> Result<(), Box<dyn Error>> {
-    let anchor = diag
-        .anchor_span()
-        .ok_or("diagnostic has no labels and therefore no anchor span")?;
+    #[test]
+    fn sink_tracks_only_error_severity_as_errors() {
+        let sink = DiagnosticSink::new();
+        sink.push(Diagnostic::new("W0001", Severity::Warning, "heads up"));
 
-    let mut builder = Report::build(ReportKind::Error, (anchor.file_id.clone(), anchor.range()))
-        .with_code(diag.code)
-        .with_message(diag.message.clone());
+        assert!(!sink.has_errors());
 
-    for label in &diag.labels {
-        let ariadne_label = Label::new((label.span.file_id.clone(), label.span.range()))
-            .with_message(label.message.clone());
+        sink.push(Diagnostic::error("E0001", "boom"));
 
-        builder = builder.with_label(ariadne_label);
+        assert!(sink.has_errors());
+        assert_eq!(sink.len(), 2);
     }
 
-    for note in &diag.notes {
-        builder = builder.with_note(note.clone());
+    #[test]
+    fn sink_sorts_by_anchor_location() {
+        let sink = DiagnosticSink::new();
+        let file = FileId(0);
+        let later = FileSpan::new(file, Span::new(10, 11));
+        let earlier = FileSpan::new(file, Span::new(2, 3));
+
+        sink.push(Diagnostic::error("LATER", "later").with_label(Label::primary(later, "later")));
+        sink.push(
+            Diagnostic::error("EARLIER", "earlier").with_label(Label::primary(earlier, "earlier")),
+        );
+
+        let sorted = sink.sorted_by_file_and_span();
+
+        assert_eq!(sorted[0].code, "EARLIER");
+        assert_eq!(sorted[1].code, "LATER");
     }
-
-    builder
-        .finish()
-        .eprint((anchor.file_id.clone(), Source::from(src.to_string())))?;
-
-    Ok(())
-}
-
-pub fn emit_type_errors(errors: &[TypeError], src: &str) -> Result<(), Box<dyn Error>> {
-    for err in errors {
-        emit_diagnostic(&err.to_diagnostic(), src)?;
-    }
-    Ok(())
 }

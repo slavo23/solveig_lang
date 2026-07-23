@@ -6,3 +6,4 @@ pub mod utils;
 pub use session::Session;
 pub use source::{FileId, FileSpan, SourceFile, SourceMap, Span};
 pub use symbol::{Interner, Symbol};
+pub use utils::diagnostics::{Diagnostic, DiagnosticSink, Label, Severity};

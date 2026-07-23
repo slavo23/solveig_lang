@@ -1,13 +1,12 @@
 use std::collections::HashMap;
 
-use base::utils::diagnostics::{
-    CompilerDiagnostic, DiagnosticLabel, LegacyFileSpan, emit_diagnostic,
-};
+use base::utils::diagnostics::{Diagnostic, Label};
+use base::FileSpan;
 use core::ast::{Pretty, TypeExpr};
 
 #[derive(Clone, Debug)]
 pub struct HoleInfo {
-    pub span: LegacyFileSpan,
+    pub span: FileSpan,
     pub expected_type: TypeExpr,
     pub context: Vec<(String, TypeExpr)>,
 }
@@ -192,18 +191,28 @@ fn short_name(qualified: &str) -> &str {
     qualified.rsplit('.').next().unwrap_or(qualified)
 }
 
-pub fn emit_holes(holes: &[HoleInfo], source: &str, constructor_types: &HashMap<String, TypeExpr>) {
-    for hole in holes {
-        let mut diag = CompilerDiagnostic::new(
+pub fn hole_diagnostics(
+    holes: &[HoleInfo],
+    constructor_types: &HashMap<String, TypeExpr>,
+) -> Vec<Diagnostic> {
+    holes
+        .iter()
+        .map(|hole| hole.to_diagnostic(constructor_types))
+        .collect()
+}
+
+impl HoleInfo {
+    pub fn to_diagnostic(&self, constructor_types: &HashMap<String, TypeExpr>) -> Diagnostic {
+        let mut diag = Diagnostic::error(
             "HOLE",
-            format!("found hole of type `{}`", hole.pretty_type(),),
+            format!("found hole of type `{}`", self.pretty_type(),),
         )
-        .with_label(DiagnosticLabel::primary(
-            hole.span.clone(),
-            format!("expects `{}`", hole.pretty_type()),
+        .with_label(Label::primary(
+            self.span,
+            format!("expects `{}`", self.pretty_type()),
         ));
 
-        let ctx = hole.pretty_context();
+        let ctx = self.pretty_context();
         if !ctx.is_empty() {
             let bindings = ctx
                 .iter()
@@ -213,11 +222,11 @@ pub fn emit_holes(holes: &[HoleInfo], source: &str, constructor_types: &HashMap<
             diag = diag.with_note(format!("bindings in scope:\n{}", bindings));
         }
 
-        let suggestions = hole.suggestions(constructor_types);
+        let suggestions = self.suggestions(constructor_types);
         if !suggestions.is_empty() {
             diag = diag.with_note(format!("valid fills include: {}", suggestions.join(", ")));
         }
 
-        let _ = emit_diagnostic(&diag, source);
+        diag
     }
 }

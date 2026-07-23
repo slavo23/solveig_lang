@@ -2,13 +2,14 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use base::utils::diagnostics::emit_type_errors;
+use base::SourceMap;
 use core::ast::{ClassDefinition, Scheme};
 use lowering::closure_lower::lower_to_closure_ir;
 use lowering::lowering::lower_module;
 use runtime::vm::Machine;
+use solveig_report::emit_diagnostics;
 use surface::ast::ModuleName;
-use syntax::inference::holes::emit_holes;
+use syntax::inference::holes::hole_diagnostics;
 use syntax::inference::type_infer::{check_and_elab_module, CheckedModule, TypeCheckEnv};
 
 use crate::project::{
@@ -249,6 +250,8 @@ impl<'a> FrontendState<'a> {
 
     fn check_module(&self, module_name: &ModuleName) -> Result<CheckedModule, String> {
         let module_file = &self.project.modules[module_name];
+        let mut source_map = SourceMap::new();
+        let file = source_map.add_file(module_file.path.clone(), module_file.source.clone());
         let parsed = self.parsed.get(module_name);
         let imports = effective_imports(module_name, &parsed.imports);
 
@@ -298,25 +301,29 @@ impl<'a> FrontendState<'a> {
                 imported_instance_defs,
             ));
 
-        let checked_raw = match check_and_elab_module(
-            &resolved,
-            &check_env,
-            module_file.path.display().to_string(),
-        ) {
+        let checked_raw = match check_and_elab_module(&resolved, &check_env, file) {
             Ok(c) => c,
             Err(errors) => {
-                emit_type_errors(&errors, &module_file.source)
+                let diagnostics = errors
+                    .iter()
+                    .map(|error| error.to_diagnostic())
+                    .collect::<Vec<_>>();
+
+                emit_diagnostics(&diagnostics, &source_map)
                     .map_err(|err| format!("failed to print type errors: {err}"))?;
                 return Err("type error".to_string());
             }
         };
 
         if !checked_raw.holes.is_empty() {
-            emit_holes(
+            let diagnostics = hole_diagnostics(
                 &checked_raw.holes,
-                &module_file.source,
                 &check_env.constructor_types,
             );
+
+            emit_diagnostics(&diagnostics, &source_map)
+                .map_err(|err| format!("failed to print hole diagnostics: {err}"))?;
+
             return Err("Program has unfilled holes. Aborting compilation".to_string());
         }
 
