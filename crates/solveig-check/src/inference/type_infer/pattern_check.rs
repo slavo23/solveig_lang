@@ -1,6 +1,6 @@
 impl TypeChecker {
     fn bool_type(&self) -> TypeExpr {
-        TypeExpr::TyCon("prelude.builtins.Bool".to_string())
+        TypeExpr::make_con("prelude.builtins.Bool".to_string())
     }
     fn check_optional_param_annotation(
         &mut self,

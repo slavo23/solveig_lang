@@ -25,7 +25,7 @@ impl TypeChecker {
         }
     }
     fn int_type(&self) -> TypeExpr {
-        TypeExpr::TyCon("prelude.builtins.Int".to_string())
+        TypeExpr::make_con("prelude.builtins.Int".to_string())
     }
     fn solve_unary_operator_inference(
         &mut self,

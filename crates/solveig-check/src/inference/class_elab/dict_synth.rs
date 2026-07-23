@@ -6,7 +6,7 @@ fn dict_type_for_pred(pred: &Predicate, classes: &HashMap<String, ClassRuntimeIn
     pred.args
         .iter()
         .cloned()
-        .fold(TypeExpr::TyCon(info.dict_tycon.clone()), |acc, arg| {
+        .fold(TypeExpr::make_con(info.dict_tycon.clone()), |acc, arg| {
             TypeExpr::make_app(acc, arg)
         })
 }
@@ -349,7 +349,7 @@ fn synthesize_dict_data_defs(
                 .collect::<Vec<_>>();
 
             let dict_ty = class_def.params.iter().cloned().fold(
-                TypeExpr::TyCon(info.dict_tycon.clone()),
+                TypeExpr::make_con(info.dict_tycon.clone()),
                 |acc, (name, _)| TypeExpr::make_app(acc, TypeExpr::make_var(name)),
             );
 

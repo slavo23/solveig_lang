@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use solveig_base::Symbol;
 
@@ -105,7 +106,7 @@ pub enum Ty {
     TyExVar(EvarId),
     TyArr(Box<Ty>, Box<Ty>),
     TyForAll(TyVarId, Kind, Box<Ty>),
-    TyCon(String),
+    TyCon(TyConId),
     TyApp(Box<Ty>, Box<Ty>),
     Qualified(Vec<Predicate>, Box<Ty>),
 }
@@ -114,6 +115,50 @@ pub type TypeExpr = Ty;
 
 pub fn legacy_evar_name(id: EvarId) -> String {
     format!("a^{}", id.0)
+}
+
+const LEGACY_TYCON_TAG: u32 = 0x8000_0000;
+
+#[derive(Default)]
+struct LegacyTyConRegistry {
+    names: Vec<String>,
+    ids: HashMap<String, TyConId>,
+}
+
+fn legacy_tycon_registry() -> &'static Mutex<LegacyTyConRegistry> {
+    static REGISTRY: OnceLock<Mutex<LegacyTyConRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(LegacyTyConRegistry::default()))
+}
+
+pub fn legacy_tycon_id(name: &str) -> TyConId {
+    let mut registry = legacy_tycon_registry()
+        .lock()
+        .expect("ICE: legacy type constructor registry lock poisoned");
+
+    if let Some(id) = registry.ids.get(name) {
+        return *id;
+    }
+
+    let id = TyConId(LEGACY_TYCON_TAG | registry.names.len() as u32);
+    registry.names.push(name.to_string());
+    registry.ids.insert(name.to_string(), id);
+    id
+}
+
+pub fn tycon_display_name(id: TyConId) -> String {
+    if id.0 & LEGACY_TYCON_TAG == 0 {
+        return format!("T{}", id.0);
+    }
+
+    let registry = legacy_tycon_registry()
+        .lock()
+        .expect("ICE: legacy type constructor registry lock poisoned");
+    let index = (id.0 & !LEGACY_TYCON_TAG) as usize;
+    registry
+        .names
+        .get(index)
+        .cloned()
+        .unwrap_or_else(|| format!("T{}", id.0))
 }
 
 const LEGACY_SOURCE_TYVAR_TAG: u32 = 0x8000_0000;
@@ -288,6 +333,14 @@ impl Ty {
         Self::TyExVar(id)
     }
 
+    pub fn make_con(name: String) -> TypeExpr {
+        Self::TyCon(legacy_tycon_id(&name))
+    }
+
+    pub fn make_con_id(id: TyConId) -> TypeExpr {
+        Self::TyCon(id)
+    }
+
     pub fn make_forall(quant_name: String, kind: Kind, body: TypeExpr) -> TypeExpr {
         TypeExpr::TyForAll(legacy_tyvar_id(&quant_name), kind, Box::new(body))
     }
@@ -419,7 +472,11 @@ impl Pretty<Ty> for Ty {
                 TypeExpr::TyUnit => "()".into(),
                 TypeExpr::TyVar(id) => tyvar_display_name(*id),
                 TypeExpr::TyExVar(id) => legacy_evar_name(*id),
-                TypeExpr::TyCon(name) => name.split('.').next_back().unwrap().to_string(),
+                TypeExpr::TyCon(id) => tycon_display_name(*id)
+                    .split('.')
+                    .next_back()
+                    .unwrap()
+                    .to_string(),
 
                 TypeExpr::TyArr(lhs, rhs) => {
                     let lhs_fmt = traverse_helper(lhs, PRECEDENCE_APP);
@@ -835,14 +892,14 @@ mod tests {
             name: session.intern("False"),
             tycon: bool_id,
             fields: Vec::new(),
-            full_type: TypeExpr::TyCon("Bool".to_string()),
+            full_type: TypeExpr::make_con("Bool".to_string()),
             tag: 0,
         });
         let true_id = ctors.insert(CtorInfo {
             name: session.intern("True"),
             tycon: bool_id,
             fields: Vec::new(),
-            full_type: TypeExpr::TyCon("Bool".to_string()),
+            full_type: TypeExpr::make_con("Bool".to_string()),
             tag: 1,
         });
 
@@ -897,5 +954,17 @@ mod tests {
 
         assert_eq!(legacy_tyvar_name("t", id), "t9");
         assert_eq!(TypeExpr::make_var_id("t", id), TypeExpr::TyVar(id));
+    }
+
+    #[test]
+    fn legacy_tycon_bridge_preserves_registered_names() {
+        let name = "test.module.Widget";
+        let id = legacy_tycon_id(name);
+
+        assert_eq!(legacy_tycon_id(name), id);
+        assert_ne!(legacy_tycon_id("test.module.OtherWidget"), id);
+        assert_eq!(tycon_display_name(id), name);
+        assert_eq!(TypeExpr::make_con(name.to_string()), TypeExpr::TyCon(id));
+        assert_eq!(TypeExpr::make_con(name.to_string()).pretty(), "Widget");
     }
 }

@@ -1,6 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use solveig_ast::ast::{Kind, KindMetaId, TyVarId, TypeExpr, legacy_tyvar_id, tyvar_display_name};
+use solveig_ast::ast::{
+    Kind, KindMetaId, TyVarId, TypeExpr, legacy_tyvar_id, tycon_display_name, tyvar_display_name,
+};
 use solveig_base::FileSpan;
 
 use crate::signature_infer::KindError;
@@ -125,7 +127,7 @@ impl DataKindInferencer {
             TypeExpr::TyUnit => TypeExpr::TyUnit,
             TypeExpr::TyVar(n) => TypeExpr::TyVar(*n),
             TypeExpr::TyExVar(id) => TypeExpr::TyExVar(*id),
-            TypeExpr::TyCon(n) => TypeExpr::TyCon(n.clone()),
+            TypeExpr::TyCon(n) => TypeExpr::TyCon(*n),
             TypeExpr::TyArr(l, r) => TypeExpr::make_arr(self.apply_type(l), self.apply_type(r)),
             TypeExpr::TyApp(l, r) => TypeExpr::make_app(self.apply_type(l), self.apply_type(r)),
             TypeExpr::TyForAll(name, kind, body) => {
@@ -236,12 +238,13 @@ impl DataKindInferencer {
 
             TypeExpr::TyExVar(id) => Ok((Kind::Star, TypeExpr::TyExVar(*id))),
 
-            TypeExpr::TyCon(name) => {
+            TypeExpr::TyCon(id) => {
+                let name = tycon_display_name(*id);
                 let kind = tycon_env
-                    .get(name)
+                    .get(&name)
                     .map(|k| self.apply_kind(k))
                     .ok_or_else(|| KindError::unbound_type_constructor(name.clone()))?;
-                Ok((kind, TypeExpr::TyCon(name.clone())))
+                Ok((kind, TypeExpr::TyCon(*id)))
             }
 
             TypeExpr::TyArr(lhs, rhs) => {
@@ -390,7 +393,7 @@ impl DataKindInferencer {
                 .map(|(n, m)| (legacy_tyvar_id(n), self.apply_kind(m)))
                 .collect();
 
-            let mut ret_ty = TypeExpr::TyCon(def.name.clone());
+            let mut ret_ty = TypeExpr::make_con(def.name.clone());
             for (pn, _) in &param_metas {
                 ret_ty = TypeExpr::make_app(ret_ty, TypeExpr::make_var(pn.clone()));
             }
@@ -450,7 +453,7 @@ fn build_constructor_type(
     ty_params: &[(String, Kind)],
     fields: &[TypeExpr],
 ) -> TypeExpr {
-    let mut ret = TypeExpr::TyCon(tycon.to_string());
+    let mut ret = TypeExpr::make_con(tycon.to_string());
     for (p, _) in ty_params {
         ret = TypeExpr::make_app(ret, TypeExpr::make_var(p.clone()));
     }
@@ -474,8 +477,8 @@ fn default_unsolved(kind: Kind) -> Kind {
 
 fn collect_tycon_refs(ty: &TypeExpr, out: &mut HashSet<String>) {
     match ty {
-        TypeExpr::TyCon(n) => {
-            out.insert(n.clone());
+        TypeExpr::TyCon(id) => {
+            out.insert(tycon_display_name(*id));
         }
         TypeExpr::TyArr(l, r) | TypeExpr::TyApp(l, r) => {
             collect_tycon_refs(l, out);

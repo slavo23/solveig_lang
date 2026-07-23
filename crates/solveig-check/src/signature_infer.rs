@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use solveig_ast::ast::{
-    Kind, KindMetaId, Predicate, Pretty, Scheme, TyVarId, TypeExpr, tyvar_display_name,
+    Kind, KindMetaId, Predicate, Pretty, Scheme, TyVarId, TypeExpr, tycon_display_name,
+    tyvar_display_name,
 };
 use solveig_base::{Diagnostic, FileSpan, IntoDiagnostic, Label};
 
@@ -376,14 +377,15 @@ impl SignatureKindInferencer {
 
             TypeExpr::TyExVar(id) => Ok((Kind::Star, TypeExpr::TyExVar(*id))),
 
-            TypeExpr::TyCon(name) => {
+            TypeExpr::TyCon(id) => {
+                let name = tycon_display_name(*id);
                 let kind = self
                     .tycon_env
-                    .get(name)
+                    .get(&name)
                     .cloned()
                     .map(|k| self.apply_kind(&k))
                     .ok_or_else(|| KindError::unbound_type_constructor(name.clone()))?;
-                Ok((kind, TypeExpr::TyCon(name.clone())))
+                Ok((kind, TypeExpr::TyCon(*id)))
             }
 
             TypeExpr::TyArr(lhs, rhs) => {

@@ -126,7 +126,7 @@ impl<'a> Resolver<'a> {
             SurfaceTy::Unit => TypeExpr::TyUnit,
 
             SurfaceTy::Con(con) => {
-                TypeExpr::TyCon(self.resolve_tycon_ref(&con.0, self.file_span(cx, con.1), cx))
+                TypeExpr::make_con(self.resolve_tycon_ref(&con.0, self.file_span(cx, con.1), cx))
             }
 
             SurfaceTy::App(lhs, rhs) => TypeExpr::make_app(

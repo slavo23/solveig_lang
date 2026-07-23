@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use solveig_ast::ast::{
     ClassDefinition, Kind, KindMetaId, Predicate, Scheme, TyVarId, TypeExpr, legacy_tyvar_id,
-    tyvar_display_name,
+    tycon_display_name, tyvar_display_name,
 };
 
 use crate::signature_infer::KindError;
@@ -114,12 +114,14 @@ impl ClassKindInferencer {
 
             TypeExpr::TyExVar(_) => Ok(Kind::Star),
 
-            TypeExpr::TyCon(name) => self
-                .tycon_env
-                .get(name)
-                .cloned()
-                .map(|k| self.apply_kind(&k))
-                .ok_or_else(|| KindError::unbound_type_constructor(name.clone())),
+            TypeExpr::TyCon(id) => {
+                let name = tycon_display_name(*id);
+                self.tycon_env
+                    .get(&name)
+                    .cloned()
+                    .map(|k| self.apply_kind(&k))
+                    .ok_or_else(|| KindError::unbound_type_constructor(name))
+            }
 
             TypeExpr::TyArr(lhs, rhs) => {
                 let lhs_kind = self.infer_type_kind(lhs, env)?;
@@ -175,7 +177,7 @@ impl ClassKindInferencer {
             TypeExpr::TyUnit => TypeExpr::TyUnit,
             TypeExpr::TyVar(id) => TypeExpr::TyVar(*id),
             TypeExpr::TyExVar(id) => TypeExpr::TyExVar(*id),
-            TypeExpr::TyCon(name) => TypeExpr::TyCon(name.clone()),
+            TypeExpr::TyCon(id) => TypeExpr::TyCon(*id),
             TypeExpr::TyArr(lhs, rhs) => TypeExpr::make_arr(
                 self.zonk_type_with_env(lhs, env),
                 self.zonk_type_with_env(rhs, env),

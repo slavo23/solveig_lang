@@ -3,6 +3,7 @@ use std::ops::Range;
 
 use solveig_ast::ast::{
     CaseArmNode, Literal, Pattern, PatternNode, Predicate, Pretty, TyVarId, TypeExpr,
+    tycon_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -157,7 +158,7 @@ struct ConstructorEnv {
 
 fn is_open_primitive_type(ty: &TypeExpr) -> bool {
     match normalize_type(ty) {
-        TypeExpr::TyCon(name) => matches!(short_name(&name), "Int" | "String"),
+        TypeExpr::TyCon(id) => matches!(short_name(&tycon_display_name(id)), "Int" | "String"),
         TypeExpr::TyApp(lhs, _) => is_open_primitive_type(&lhs),
         _ => false,
     }
@@ -588,7 +589,7 @@ fn normalize_type(ty: &TypeExpr) -> TypeExpr {
 
 fn type_head_tycon(ty: &TypeExpr) -> Option<String> {
     match normalize_type(ty) {
-        TypeExpr::TyCon(name) => Some(name),
+        TypeExpr::TyCon(id) => Some(tycon_display_name(id)),
 
         TypeExpr::TyApp(lhs, _) => type_head_tycon(&lhs),
 
@@ -642,7 +643,7 @@ fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<TyVarId, TypeExpr>) -> TypeExp
 
         TypeExpr::TyUnit => TypeExpr::TyUnit,
 
-        TypeExpr::TyCon(name) => TypeExpr::TyCon(name.clone()),
+        TypeExpr::TyCon(id) => TypeExpr::TyCon(*id),
 
         TypeExpr::TyExVar(id) => TypeExpr::TyExVar(*id),
 
@@ -868,7 +869,7 @@ mod tests {
     }
 
     fn tycon(name: &str) -> TypeExpr {
-        TypeExpr::TyCon(name.to_string())
+        TypeExpr::make_con(name.to_string())
     }
 
     fn tyvar(name: &str) -> TypeExpr {
