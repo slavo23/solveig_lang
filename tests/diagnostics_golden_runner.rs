@@ -57,21 +57,6 @@ fn golden_diagnostic_cases() {
     }
 }
 
-#[test]
-#[ignore = "panics today, fixed in Phase A"]
-fn ambiguous_import_panics_today() {
-    let case_root =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/diag/ambiguous_import");
-    let output = run_cli(&case_root);
-    let actual = normalize_output(&output);
-
-    assert!(
-        actual.contains("panicked at") || actual.contains("thread 'main' panicked"),
-        "ambiguous import no longer panics; promote this fixture into the live diagnostics suite:\n\
-         {actual}"
-    );
-}
-
 fn run_cli_case(case_root: &Path, case_name: &str) -> String {
     let output = run_cli(case_root);
     let actual = normalize_output(&output);

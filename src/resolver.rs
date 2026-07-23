@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 use std::env;
 use std::ops::Range;
 
-use base::{Session, Span as SourceSpan, Symbol};
+use base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use core::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, ConstructorDef, DataDefinition,
     InstanceDefinition, InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate,
@@ -13,28 +13,18 @@ use surface::ast::{
     SurfaceExpr, SurfaceLiteral, SurfaceMatchArm, SurfacePattern, SurfacePredicate, SurfaceTy,
     SurfaceUnOp,
 };
-use syntax::data_kind_infer::{infer_all_data_kinds_with_env, RawConstructorDef, RawDataDef};
+use syntax::data_kind_infer::{RawConstructorDef, RawDataDef, infer_all_data_kinds_with_env};
 use syntax::inference::class_kind_infer::ClassKindInferencer;
 use syntax::signature_infer::{KindError, SignatureKindInferencer};
 
-use crate::project::ModuleContext;
+use crate::project::{
+    DefId, ModuleContext, ModuleTable, ResolveError, ResolveNameKind, defid_to_legacy_string,
+};
 
 type Span = Range<usize>;
 
 fn to_core_span(span: SourceSpan) -> Span {
     span.to_usize_range()
-}
-
-fn qualify(session: &Session, module: &ModuleName, name: Symbol) -> String {
-    format!("{}.{}", module.as_string(session), session.str(name))
-}
-
-fn module_prefix(session: &Session, segments: &[Symbol]) -> String {
-    segments
-        .iter()
-        .map(|segment| session.str(*segment))
-        .collect::<Vec<_>>()
-        .join(".")
 }
 
 fn resolver_trace_enabled() -> bool {
@@ -76,30 +66,48 @@ pub struct ResolverImports {
 }
 
 #[derive(Debug)]
+pub struct ResolvedModuleInfo<A> {
+    pub module: ResolvedModule<A>,
+    pub resolutions: Vec<(FileSpan, DefId)>,
+}
+
+#[derive(Debug)]
+pub enum ResolverError {
+    Resolve(Vec<ResolveError>),
+    Kind(KindError),
+}
+
+impl From<KindError> for ResolverError {
+    fn from(error: KindError) -> Self {
+        Self::Kind(error)
+    }
+}
+
+#[derive(Debug)]
 struct LocalResolverEnv {
-    /// Surface class name -> canonical class name for classes defined in this module.
+    /// Surface class name -> canonical class id for classes defined in this module.
     ///
     /// This is deliberately separate from `ModuleContext.local_api`: while resolving a
     /// module, class predicates in signatures/methods/instances must canonicalize
     /// against the source declarations currently being resolved. Relying only on the
     /// already-built API made local class names like `Functor` leak through as raw
     /// predicate names in some paths.
-    classes: HashMap<Symbol, String>,
+    classes: HashMap<Symbol, DefId>,
 }
 
 impl LocalResolverEnv {
-    fn from_parsed_module(
-        session: &Session,
-        module_name: &ModuleName,
-        parsed: &ParsedModule,
-    ) -> Self {
+    fn from_parsed_module(module_id: crate::project::ModuleId, parsed: &ParsedModule) -> Self {
         let classes = parsed
             .defs
             .iter()
             .filter_map(|defn| match &defn.0 {
-                SurfaceDefinition::ClassDef { name, .. } => {
-                    Some((name.0, qualify(session, module_name, name.0)))
-                }
+                SurfaceDefinition::ClassDef { name, .. } => Some((
+                    name.0,
+                    DefId {
+                        module: module_id,
+                        name: name.0,
+                    },
+                )),
                 _ => None,
             })
             .collect();
@@ -110,181 +118,385 @@ impl LocalResolverEnv {
 
 pub struct Resolver<'a> {
     session: &'a Session,
+    modules: &'a ModuleTable,
+    errors: Vec<ResolveError>,
+    resolutions: Vec<(FileSpan, DefId)>,
 }
 
 impl<'a> Resolver<'a> {
-    pub fn new(session: &'a Session) -> Self {
-        Self { session }
+    pub fn new(session: &'a Session, modules: &'a ModuleTable) -> Self {
+        Self {
+            session,
+            modules,
+            errors: Vec::new(),
+            resolutions: Vec::new(),
+        }
     }
 
     fn symbol_text(&self, symbol: Symbol) -> &'static str {
         self.session.str(symbol)
     }
 
-    fn legacy_qualified_ref(&self, r: &NameRef) -> String {
-        let module = module_prefix(self.session, r.prefix());
-        format!("{}.{}", module, r.last_text(self.session))
+    fn file_span(&self, cx: &ModuleContext, span: SourceSpan) -> FileSpan {
+        FileSpan::new(cx.file, span)
     }
 
-    fn resolve_term_ref(&self, r: &NameRef, cx: &ModuleContext) -> String {
+    fn record_resolution(&mut self, span: FileSpan, def_id: DefId) {
+        self.resolutions.push((span, def_id));
+    }
+
+    fn legacy_name(&self, def_id: DefId) -> String {
+        defid_to_legacy_string(self.session, self.modules, def_id)
+    }
+
+    fn local_def_id(&self, cx: &ModuleContext, name: Symbol) -> DefId {
+        DefId {
+            module: cx.module_id,
+            name,
+        }
+    }
+
+    fn unresolved_name(&self, r: &NameRef) -> String {
+        r.display(self.session)
+    }
+
+    fn imported_by_alias_or_module<'cx>(
+        &self,
+        r: &NameRef,
+        cx: &'cx ModuleContext,
+    ) -> Option<&'cx crate::project::ImportedApi> {
+        let [first, ..] = r.segments.as_slice() else {
+            return None;
+        };
+
+        cx.imported_apis
+            .iter()
+            .find(|import| import.alias == *first)
+            .or_else(|| {
+                cx.imported_apis
+                    .iter()
+                    .find(|import| import.module.0.as_slice() == r.prefix())
+            })
+    }
+
+    fn report_unknown_name(
+        &mut self,
+        span: FileSpan,
+        kind: ResolveNameKind,
+        name: impl Into<String>,
+    ) {
+        self.errors.push(ResolveError::UnknownName {
+            span,
+            kind,
+            name: name.into(),
+        });
+    }
+
+    fn report_ambiguous_import(
+        &mut self,
+        span: FileSpan,
+        kind: ResolveNameKind,
+        name: Symbol,
+        candidates: Vec<DefId>,
+    ) {
+        self.errors.push(ResolveError::AmbiguousImport {
+            span,
+            kind,
+            name,
+            candidates,
+        });
+    }
+
+    fn report_unknown_module(&mut self, span: FileSpan, module: ModuleName) {
+        self.errors
+            .push(ResolveError::UnknownModule { span, module });
+    }
+
+    fn take_errors(&mut self) -> Option<Vec<ResolveError>> {
+        if self.errors.is_empty() {
+            None
+        } else {
+            Some(std::mem::take(&mut self.errors))
+        }
+    }
+
+    fn resolve_term_ref(&mut self, r: &NameRef, span: FileSpan, cx: &ModuleContext) -> String {
+        match self.resolve_term_defid(r, span, cx) {
+            Some(def_id) => {
+                self.record_resolution(span, def_id);
+                self.legacy_name(def_id)
+            }
+            None => self.unresolved_name(r),
+        }
+    }
+
+    fn resolve_term_defid(
+        &mut self,
+        r: &NameRef,
+        span: FileSpan,
+        cx: &ModuleContext,
+    ) -> Option<DefId> {
         match r.segments.as_slice() {
             [name] => {
                 if let Some(sym) = cx.builtins.terms.get(name) {
-                    return sym.display(self.session);
+                    return Some(*sym);
                 }
 
                 if let Some(sym) = cx.local_api.terms.get(name) {
-                    return sym.display(self.session);
+                    return Some(*sym);
                 }
 
-                let mut found: Option<String> = None;
+                let mut candidates = Vec::new();
 
                 for imp in &cx.imported_apis {
-                    if let Some(sym) = imp.api.terms.get(name) {
-                        let display = sym.display(self.session);
-
-                        if let Some(prev) = &found {
-                            if prev != &display {
-                                panic!("ambiguous imported term '{}'", self.symbol_text(*name));
-                            }
-                        } else {
-                            found = Some(display);
-                        }
+                    if let Some(sym) = imp.api.terms.get(name)
+                        && !candidates.contains(sym)
+                    {
+                        candidates.push(*sym);
                     }
                 }
 
-                found.unwrap_or_else(|| self.symbol_text(*name).to_string())
+                match candidates.as_slice() {
+                    [sym] => Some(*sym),
+                    [] => {
+                        self.report_unknown_name(
+                            span,
+                            ResolveNameKind::Term,
+                            self.symbol_text(*name).to_string(),
+                        );
+                        None
+                    }
+                    _ => {
+                        self.report_ambiguous_import(
+                            span,
+                            ResolveNameKind::Term,
+                            *name,
+                            candidates,
+                        );
+                        None
+                    }
+                }
             }
 
-            [first, rest @ ..] => {
-                if let Some(imp) = cx.imported_apis.iter().find(|i| i.alias == *first) {
-                    let local_name = *rest
-                        .last()
-                        .expect("qualified name must have a last segment");
+            [_first, rest @ ..] => {
+                let local_name = *rest
+                    .last()
+                    .expect("ICE: qualified term name must have a last segment");
 
-                    if let Some(sym) = imp.api.terms.get(&local_name) {
-                        return sym.display(self.session);
+                if cx.module.0.as_slice() == r.prefix() {
+                    if let Some(sym) = cx.local_api.terms.get(&local_name) {
+                        return Some(*sym);
                     }
 
-                    panic!(
-                        "unknown imported term {}.{}",
-                        self.symbol_text(*first),
-                        self.symbol_text(local_name)
-                    );
+                    self.report_unknown_name(span, ResolveNameKind::Term, self.unresolved_name(r));
+                    return None;
                 }
 
-                self.legacy_qualified_ref(r)
+                if let Some(imp) = self.imported_by_alias_or_module(r, cx) {
+                    if let Some(sym) = imp.api.terms.get(&local_name) {
+                        return Some(*sym);
+                    }
+
+                    self.report_unknown_name(span, ResolveNameKind::Term, self.unresolved_name(r));
+                    return None;
+                }
+
+                self.report_unknown_module(span, ModuleName(r.prefix().to_vec()));
+                None
             }
 
             [] => panic!("ICE: empty term name ref"),
         }
     }
 
-    fn resolve_tycon_ref(&self, r: &NameRef, cx: &ModuleContext) -> String {
+    fn resolve_tycon_ref(&mut self, r: &NameRef, span: FileSpan, cx: &ModuleContext) -> String {
+        match self.resolve_tycon_defid(r, span, cx) {
+            Some(def_id) => {
+                self.record_resolution(span, def_id);
+                self.legacy_name(def_id)
+            }
+            None => self.unresolved_name(r),
+        }
+    }
+
+    fn resolve_tycon_defid(
+        &mut self,
+        r: &NameRef,
+        span: FileSpan,
+        cx: &ModuleContext,
+    ) -> Option<DefId> {
         match r.segments.as_slice() {
             [name] => {
                 if let Some(sym) = cx.builtins.types.get(name) {
-                    return sym.display(self.session);
+                    return Some(*sym);
                 }
 
                 if let Some(sym) = cx.local_api.types.get(name) {
-                    return sym.display(self.session);
+                    return Some(*sym);
                 }
 
-                let mut found: Option<String> = None;
+                let mut candidates = Vec::new();
 
                 for imp in &cx.imported_apis {
-                    if let Some(sym) = imp.api.types.get(name) {
-                        let display = sym.display(self.session);
-
-                        if let Some(prev) = &found {
-                            if prev != &display {
-                                panic!("ambiguous imported type '{}'", self.symbol_text(*name));
-                            }
-                        } else {
-                            found = Some(display);
-                        }
+                    if let Some(sym) = imp.api.types.get(name)
+                        && !candidates.contains(sym)
+                    {
+                        candidates.push(*sym);
                     }
                 }
 
-                found.unwrap_or_else(|| self.symbol_text(*name).to_string())
+                match candidates.as_slice() {
+                    [sym] => Some(*sym),
+                    [] => {
+                        self.report_unknown_name(
+                            span,
+                            ResolveNameKind::TypeConstructor,
+                            self.symbol_text(*name).to_string(),
+                        );
+                        None
+                    }
+                    _ => {
+                        self.report_ambiguous_import(
+                            span,
+                            ResolveNameKind::TypeConstructor,
+                            *name,
+                            candidates,
+                        );
+                        None
+                    }
+                }
             }
 
-            [first, rest @ ..] => {
-                if let Some(imp) = cx.imported_apis.iter().find(|i| i.alias == *first) {
-                    let local_name = *rest
-                        .last()
-                        .expect("qualified name must have a last segment");
+            [_first, rest @ ..] => {
+                let local_name = *rest
+                    .last()
+                    .expect("ICE: qualified type constructor name must have a last segment");
 
-                    if let Some(sym) = imp.api.types.get(&local_name) {
-                        return sym.display(self.session);
+                if cx.module.0.as_slice() == r.prefix() {
+                    if let Some(sym) = cx.local_api.types.get(&local_name) {
+                        return Some(*sym);
                     }
 
-                    panic!(
-                        "unknown imported type {}.{}",
-                        self.symbol_text(*first),
-                        self.symbol_text(local_name)
+                    self.report_unknown_name(
+                        span,
+                        ResolveNameKind::TypeConstructor,
+                        self.unresolved_name(r),
                     );
+                    return None;
                 }
 
-                self.legacy_qualified_ref(r)
+                if let Some(imp) = self.imported_by_alias_or_module(r, cx) {
+                    if let Some(sym) = imp.api.types.get(&local_name) {
+                        return Some(*sym);
+                    }
+
+                    self.report_unknown_name(
+                        span,
+                        ResolveNameKind::TypeConstructor,
+                        self.unresolved_name(r),
+                    );
+                    return None;
+                }
+
+                self.report_unknown_module(span, ModuleName(r.prefix().to_vec()));
+                None
             }
 
             [] => panic!("ICE: empty type constructor name ref"),
         }
     }
 
-    fn resolve_ctor_ref(&self, r: &NameRef, cx: &ModuleContext) -> String {
+    fn resolve_ctor_ref(&mut self, r: &NameRef, span: FileSpan, cx: &ModuleContext) -> String {
+        match self.resolve_ctor_defid(r, span, cx) {
+            Some(def_id) => {
+                self.record_resolution(span, def_id);
+                self.legacy_name(def_id)
+            }
+            None => self.unresolved_name(r),
+        }
+    }
+
+    fn resolve_ctor_defid(
+        &mut self,
+        r: &NameRef,
+        span: FileSpan,
+        cx: &ModuleContext,
+    ) -> Option<DefId> {
         match r.segments.as_slice() {
             [name] => {
                 if let Some(sym) = cx.builtins.constructors.get(name) {
-                    return sym.display(self.session);
+                    return Some(*sym);
                 }
 
                 if let Some(sym) = cx.local_api.constructors.get(name) {
-                    return sym.display(self.session);
+                    return Some(*sym);
                 }
 
-                let mut found: Option<String> = None;
+                let mut candidates = Vec::new();
 
                 for imp in &cx.imported_apis {
-                    if let Some(sym) = imp.api.constructors.get(name) {
-                        let display = sym.display(self.session);
-
-                        if let Some(prev) = &found {
-                            if prev != &display {
-                                panic!(
-                                    "ambiguous imported constructor '{}'",
-                                    self.symbol_text(*name)
-                                );
-                            }
-                        } else {
-                            found = Some(display);
-                        }
+                    if let Some(sym) = imp.api.constructors.get(name)
+                        && !candidates.contains(sym)
+                    {
+                        candidates.push(*sym);
                     }
                 }
 
-                found.unwrap_or_else(|| self.symbol_text(*name).to_string())
+                match candidates.as_slice() {
+                    [sym] => Some(*sym),
+                    [] => {
+                        self.report_unknown_name(
+                            span,
+                            ResolveNameKind::Constructor,
+                            self.symbol_text(*name).to_string(),
+                        );
+                        None
+                    }
+                    _ => {
+                        self.report_ambiguous_import(
+                            span,
+                            ResolveNameKind::Constructor,
+                            *name,
+                            candidates,
+                        );
+                        None
+                    }
+                }
             }
 
-            [first, rest @ ..] => {
-                if let Some(imp) = cx.imported_apis.iter().find(|i| i.alias == *first) {
-                    let local_name = *rest
-                        .last()
-                        .expect("qualified name must have a last segment");
+            [_first, rest @ ..] => {
+                let local_name = *rest
+                    .last()
+                    .expect("ICE: qualified constructor name must have a last segment");
 
-                    if let Some(sym) = imp.api.constructors.get(&local_name) {
-                        return sym.display(self.session);
+                if cx.module.0.as_slice() == r.prefix() {
+                    if let Some(sym) = cx.local_api.constructors.get(&local_name) {
+                        return Some(*sym);
                     }
 
-                    panic!(
-                        "unknown imported constructor {}.{}",
-                        self.symbol_text(*first),
-                        self.symbol_text(local_name)
+                    self.report_unknown_name(
+                        span,
+                        ResolveNameKind::Constructor,
+                        self.unresolved_name(r),
                     );
+                    return None;
                 }
 
-                self.legacy_qualified_ref(r)
+                if let Some(imp) = self.imported_by_alias_or_module(r, cx) {
+                    if let Some(sym) = imp.api.constructors.get(&local_name) {
+                        return Some(*sym);
+                    }
+
+                    self.report_unknown_name(
+                        span,
+                        ResolveNameKind::Constructor,
+                        self.unresolved_name(r),
+                    );
+                    return None;
+                }
+
+                self.report_unknown_module(span, ModuleName(r.prefix().to_vec()));
+                None
             }
 
             [] => panic!("ICE: empty constructor name ref"),
@@ -292,69 +504,102 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_class_ref(
-        &self,
+        &mut self,
         r: &NameRef,
+        span: FileSpan,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> String {
+        match self.resolve_class_defid(r, span, cx, local) {
+            Some(def_id) => {
+                self.record_resolution(span, def_id);
+                self.legacy_name(def_id)
+            }
+            None => self.unresolved_name(r),
+        }
+    }
+
+    fn resolve_class_defid(
+        &mut self,
+        r: &NameRef,
+        span: FileSpan,
+        cx: &ModuleContext,
+        local: &LocalResolverEnv,
+    ) -> Option<DefId> {
         match r.segments.as_slice() {
-            [name] => self.resolve_unqualified_class_name(name, cx, local),
+            [name] => self.resolve_unqualified_class_defid(name, span, cx, local),
 
-            [first, rest @ ..] => {
-                if let Some(imp) = cx.imported_apis.iter().find(|i| i.alias == *first) {
-                    let local_name = *rest
-                        .last()
-                        .expect("qualified name must have a last segment");
+            [_first, rest @ ..] => {
+                let local_name = *rest
+                    .last()
+                    .expect("ICE: qualified class name must have a last segment");
 
-                    if let Some(sym) = imp.api.classes.get(&local_name) {
-                        return sym.display(self.session);
+                if cx.module.0.as_slice() == r.prefix() {
+                    if let Some(sym) = cx.local_api.classes.get(&local_name) {
+                        return Some(*sym);
                     }
 
-                    panic!(
-                        "unknown imported class {}.{}",
-                        self.symbol_text(*first),
-                        self.symbol_text(local_name)
-                    );
+                    self.report_unknown_name(span, ResolveNameKind::Class, self.unresolved_name(r));
+                    return None;
                 }
 
-                self.legacy_qualified_ref(r)
+                if let Some(imp) = self.imported_by_alias_or_module(r, cx) {
+                    if let Some(sym) = imp.api.classes.get(&local_name) {
+                        return Some(*sym);
+                    }
+
+                    self.report_unknown_name(span, ResolveNameKind::Class, self.unresolved_name(r));
+                    return None;
+                }
+
+                self.report_unknown_module(span, ModuleName(r.prefix().to_vec()));
+                None
             }
 
             [] => panic!("ICE: empty class name ref"),
         }
     }
 
-    fn resolve_unqualified_class_name(
-        &self,
+    fn resolve_unqualified_class_defid(
+        &mut self,
         name: &Symbol,
+        span: FileSpan,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-    ) -> String {
-        if let Some(qualified) = local.classes.get(name) {
-            return qualified.clone();
+    ) -> Option<DefId> {
+        if let Some(def_id) = local.classes.get(name) {
+            return Some(*def_id);
         }
 
         if let Some(sym) = cx.local_api.classes.get(name) {
-            return sym.display(self.session);
+            return Some(*sym);
         }
 
-        let mut found: Option<String> = None;
+        let mut candidates = Vec::new();
 
         for imp in &cx.imported_apis {
-            if let Some(sym) = imp.api.classes.get(name) {
-                let display = sym.display(self.session);
-
-                if let Some(prev) = &found {
-                    if prev != &display {
-                        panic!("ambiguous imported class '{}'", self.symbol_text(*name));
-                    }
-                } else {
-                    found = Some(display);
-                }
+            if let Some(sym) = imp.api.classes.get(name)
+                && !candidates.contains(sym)
+            {
+                candidates.push(*sym);
             }
         }
 
-        found.unwrap_or_else(|| self.symbol_text(*name).to_string())
+        match candidates.as_slice() {
+            [sym] => Some(*sym),
+            [] => {
+                self.report_unknown_name(
+                    span,
+                    ResolveNameKind::Class,
+                    self.symbol_text(*name).to_string(),
+                );
+                None
+            }
+            _ => {
+                self.report_ambiguous_import(span, ResolveNameKind::Class, *name, candidates);
+                None
+            }
+        }
     }
 
     fn canonicalize_predicate(
@@ -367,7 +612,19 @@ impl<'a> Resolver<'a> {
             pred.class_name
         } else {
             let name = self.session.intern(&pred.class_name);
-            self.resolve_unqualified_class_name(&name, cx, local)
+            let def_id = local
+                .classes
+                .get(&name)
+                .or_else(|| cx.local_api.classes.get(&name))
+                .or_else(|| {
+                    cx.imported_apis
+                        .iter()
+                        .find_map(|imp| imp.api.classes.get(&name))
+                });
+
+            def_id
+                .map(|def_id| self.legacy_name(*def_id))
+                .unwrap_or(pred.class_name)
         };
 
         Predicate {
@@ -444,7 +701,7 @@ impl<'a> Resolver<'a> {
         let mut predicates = info.scheme.predicates;
         let checked_head = predicates
             .pop()
-            .expect("instance kind checking lost instance head predicate");
+            .expect("ICE: instance kind checking lost instance head predicate");
 
         debug_assert_eq!(
             predicates.len(),
@@ -456,13 +713,26 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_surface_predicate(
-        &self,
+        &mut self,
         pred: &SpannedWrapper<SurfacePredicate>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> Predicate {
+        if pred.0.args.len() != 1 {
+            self.errors.push(ResolveError::ClassArity {
+                span: self.file_span(cx, pred.1),
+                class_name: pred.0.class_name.0.display(self.session),
+                actual: pred.0.args.len(),
+            });
+        }
+
         let resolved = Predicate {
-            class_name: self.resolve_class_ref(&pred.0.class_name.0, cx, local),
+            class_name: self.resolve_class_ref(
+                &pred.0.class_name.0,
+                self.file_span(cx, pred.0.class_name.1),
+                cx,
+                local,
+            ),
             args: pred
                 .0
                 .args
@@ -475,7 +745,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_surface_scheme(
-        &self,
+        &mut self,
         ty: &SpannedWrapper<SurfaceTy>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
@@ -495,7 +765,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_surface_type_in_module(
-        &self,
+        &mut self,
         sf: &SpannedWrapper<SurfaceTy>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
@@ -525,7 +795,9 @@ impl<'a> Resolver<'a> {
 
             SurfaceTy::Unit => TypeExpr::TyUnit,
 
-            SurfaceTy::Con(con) => TypeExpr::TyCon(self.resolve_tycon_ref(&con.0, cx)),
+            SurfaceTy::Con(con) => {
+                TypeExpr::TyCon(self.resolve_tycon_ref(&con.0, self.file_span(cx, con.1), cx))
+            }
 
             SurfaceTy::App(lhs, rhs) => TypeExpr::make_app(
                 self.resolve_surface_type_in_module(lhs, cx, local),
@@ -535,7 +807,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_surface_pattern_in_module(
-        &self,
+        &mut self,
         sf: &SpannedWrapper<SurfacePattern>,
         cx: &ModuleContext,
     ) -> PatternNode<Span> {
@@ -552,7 +824,7 @@ impl<'a> Resolver<'a> {
             }
             SurfacePattern::Wild => Pattern::Wild,
             SurfacePattern::Con(con_name, args) => Pattern::Con(
-                self.resolve_ctor_ref(&con_name.0, cx),
+                self.resolve_ctor_ref(&con_name.0, self.file_span(cx, con_name.1), cx),
                 args.iter()
                     .map(|arg| self.resolve_surface_pattern_in_module(arg, cx))
                     .collect(),
@@ -581,14 +853,15 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_term_ref_with_binders(
-        &self,
+        &mut self,
         r: &NameRef,
+        span: FileSpan,
         cx: &ModuleContext,
         bound_terms: &HashSet<Symbol>,
     ) -> String {
         match r.segments.as_slice() {
             [name] if bound_terms.contains(name) => self.symbol_text(*name).to_string(),
-            _ => self.resolve_term_ref(r, cx),
+            _ => self.resolve_term_ref(r, span, cx),
         }
     }
 
@@ -604,10 +877,17 @@ impl<'a> Resolver<'a> {
         let node = match &sf.0 {
             SurfaceExpr::Unit => TermExpr::Unit,
             SurfaceExpr::Hole => TermExpr::Hole,
-            SurfaceExpr::Var(var_name) => {
-                TermExpr::Var(self.resolve_term_ref_with_binders(&var_name.0, cx, bound_terms))
-            }
-            SurfaceExpr::Con(con_name) => TermExpr::Con(self.resolve_ctor_ref(&con_name.0, cx)),
+            SurfaceExpr::Var(var_name) => TermExpr::Var(self.resolve_term_ref_with_binders(
+                &var_name.0,
+                self.file_span(cx, var_name.1),
+                cx,
+                bound_terms,
+            )),
+            SurfaceExpr::Con(con_name) => TermExpr::Con(self.resolve_ctor_ref(
+                &con_name.0,
+                self.file_span(cx, con_name.1),
+                cx,
+            )),
 
             SurfaceExpr::Literal(lit) => match lit {
                 SurfaceLiteral::Int(value) => TermExpr::Lit(Literal::Int(*value)),
@@ -780,7 +1060,7 @@ impl<'a> Resolver<'a> {
         sig: &Scheme,
         body: &SpannedWrapper<SurfaceExpr>,
         params: &[SpannedWrapper<Symbol>],
-        name: Symbol,
+        name: SpannedWrapper<Symbol>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> TermExprNode<Span> {
@@ -797,12 +1077,14 @@ impl<'a> Resolver<'a> {
         let mut annos: Vec<(String, TypeExpr)> = Vec::new();
 
         for param in params {
-            let (arg_ty, ret_ty) = self.peel_arrow(remaining).unwrap_or_else(|| {
-                panic!(
-                    "parameter mismatch for '{}'. The number of parameters doesn't match the function signature",
-                    self.symbol_text(name)
-                )
-            });
+            let Some((arg_ty, ret_ty)) = self.peel_arrow(remaining) else {
+                self.errors.push(ResolveError::SignatureArity {
+                    span: self.file_span(cx, name.1),
+                    name: name.0,
+                    params: params.len(),
+                });
+                break;
+            };
 
             annos.push((self.symbol_text(param.0).to_string(), arg_ty.clone()));
             remaining = ret_ty;
@@ -831,8 +1113,8 @@ impl<'a> Resolver<'a> {
         parsed: &ParsedModule,
         cx: &ModuleContext,
         imported: &ResolverImports,
-    ) -> Result<ResolvedModule<Span>, KindError> {
-        let local = LocalResolverEnv::from_parsed_module(self.session, module_name, parsed);
+    ) -> Result<ResolvedModuleInfo<Span>, ResolverError> {
+        let local = LocalResolverEnv::from_parsed_module(cx.module_id, parsed);
 
         trace(
             self.session,
@@ -847,12 +1129,18 @@ impl<'a> Resolver<'a> {
         );
 
         let raw_data_defs = self.collect_raw_data_defs(module_name, parsed, cx, &local);
+        if let Some(errors) = self.take_errors() {
+            return Err(ResolverError::Resolve(errors));
+        }
 
         let (data_defs, local_tycon_kinds, constructor_types, all_tycon_kinds) =
             self.resolve_data_defs(module_name, raw_data_defs, imported)?;
 
         let class_defs =
             self.resolve_class_defs(module_name, parsed, cx, imported, &local, &all_tycon_kinds)?;
+        if let Some(errors) = self.take_errors() {
+            return Err(ResolverError::Resolve(errors));
+        }
 
         let class_env = Self::class_param_kind_env(imported, &class_defs);
 
@@ -864,6 +1152,9 @@ impl<'a> Resolver<'a> {
             &all_tycon_kinds,
             &class_env,
         )?;
+        if let Some(errors) = self.take_errors() {
+            return Err(ResolverError::Resolve(errors));
+        }
 
         let func_schemes = self.resolve_signatures(
             module_name,
@@ -874,8 +1165,14 @@ impl<'a> Resolver<'a> {
             &local_tycon_kinds,
             &class_defs,
         )?;
+        if let Some(errors) = self.take_errors() {
+            return Err(ResolverError::Resolve(errors));
+        }
 
         let func_defs = self.resolve_function_defs(module_name, parsed, cx, &local, &func_schemes);
+        if let Some(errors) = self.take_errors() {
+            return Err(ResolverError::Resolve(errors));
+        }
 
         trace(
             self.session,
@@ -890,20 +1187,23 @@ impl<'a> Resolver<'a> {
             ),
         );
 
-        Ok(ResolvedModule {
-            data_defs,
-            class_defs,
-            instance_defs,
-            tycon_kinds: local_tycon_kinds,
-            constructor_types,
-            func_schemes,
-            func_defs,
+        Ok(ResolvedModuleInfo {
+            module: ResolvedModule {
+                data_defs,
+                class_defs,
+                instance_defs,
+                tycon_kinds: local_tycon_kinds,
+                constructor_types,
+                func_schemes,
+                func_defs,
+            },
+            resolutions: self.resolutions,
         })
     }
 
     fn collect_raw_data_defs(
-        &self,
-        module_name: &ModuleName,
+        &mut self,
+        _module_name: &ModuleName,
         parsed: &ParsedModule,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
@@ -920,7 +1220,7 @@ impl<'a> Resolver<'a> {
                     let (name, _span) = spanned_name;
 
                     Some(RawDataDef {
-                        name: qualify(self.session, module_name, *name),
+                        name: self.legacy_name(self.local_def_id(cx, *name)),
                         ty_params: ty_params
                             .iter()
                             .map(|p| self.symbol_text(p.0).to_string())
@@ -928,7 +1228,7 @@ impl<'a> Resolver<'a> {
                         constructors: constructors
                             .iter()
                             .map(|constructor| RawConstructorDef {
-                                name: qualify(self.session, module_name, constructor.0.name.0),
+                                name: self.legacy_name(self.local_def_id(cx, constructor.0.name.0)),
                                 fields: constructor
                                     .0
                                     .params
@@ -1008,7 +1308,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_class_defs(
-        &self,
+        &mut self,
         module_name: &ModuleName,
         parsed: &ParsedModule,
         cx: &ModuleContext,
@@ -1026,7 +1326,16 @@ impl<'a> Resolver<'a> {
                     superclasses,
                     methods,
                 } => {
-                    let class_name = qualify(self.session, module_name, name.0);
+                    if ty_params.len() != 1 {
+                        self.errors.push(ResolveError::ClassArity {
+                            span: self.file_span(cx, name.1),
+                            class_name: self.symbol_text(name.0).to_string(),
+                            actual: ty_params.len(),
+                        });
+                    }
+
+                    let class_id = self.local_def_id(cx, name.0);
+                    let class_name = self.legacy_name(class_id);
 
                     let class_params = ty_params
                         .iter()
@@ -1082,7 +1391,7 @@ impl<'a> Resolver<'a> {
                             );
 
                             ClassMethodDef {
-                                name: qualify(self.session, module_name, method.name.0),
+                                name: self.legacy_name(self.local_def_id(cx, method.name.0)),
                                 scheme,
                             }
                         })
@@ -1099,6 +1408,10 @@ impl<'a> Resolver<'a> {
                 _ => None,
             })
             .collect::<Vec<_>>();
+
+        if !self.errors.is_empty() {
+            return Ok(Vec::new());
+        }
 
         let mut seed_class_env = imported.class_param_kinds.clone();
 
@@ -1163,6 +1476,7 @@ impl<'a> Resolver<'a> {
                     &NameRef {
                         segments: vec![class_name.0],
                     },
+                    self.file_span(cx, class_name.1),
                     cx,
                     local,
                 ),
@@ -1173,6 +1487,14 @@ impl<'a> Resolver<'a> {
             };
 
             let raw_head = self.canonicalize_predicate(raw_head, cx, local);
+
+            if args.len() != 1 {
+                self.errors.push(ResolveError::ClassArity {
+                    span: self.file_span(cx, class_name.1),
+                    class_name: self.symbol_text(class_name.0).to_string(),
+                    actual: args.len(),
+                });
+            }
 
             let raw_context = context
                 .iter()
@@ -1191,6 +1513,10 @@ impl<'a> Resolver<'a> {
                 "instance raw head",
                 std::slice::from_ref(&raw_head),
             );
+
+            if !self.errors.is_empty() {
+                continue;
+            }
 
             let (checked_context, checked_head) = self.kind_check_instance_predicates(
                 raw_context,
@@ -1236,7 +1562,7 @@ impl<'a> Resolver<'a> {
     }
 
     fn resolve_signatures(
-        &self,
+        &mut self,
         module_name: &ModuleName,
         parsed: &ParsedModule,
         cx: &ModuleContext,
@@ -1262,7 +1588,7 @@ impl<'a> Resolver<'a> {
             };
 
             let (name, _span) = spanned_name;
-            let fn_name = qualify(self.session, module_name, *name);
+            let fn_name = self.legacy_name(self.local_def_id(cx, *name));
             let raw_scheme = self.resolve_surface_scheme(ty, cx, local);
 
             trace_predicates(
@@ -1271,6 +1597,10 @@ impl<'a> Resolver<'a> {
                 &format!("signature {} predicates", fn_name),
                 &raw_scheme.predicates,
             );
+
+            if !self.errors.is_empty() {
+                continue;
+            }
 
             let inf =
                 SignatureKindInferencer::with_envs(sig_tycon_env.clone(), sig_class_env.clone());
@@ -1284,7 +1614,7 @@ impl<'a> Resolver<'a> {
 
     fn resolve_function_defs(
         &mut self,
-        module_name: &ModuleName,
+        _module_name: &ModuleName,
         parsed: &ParsedModule,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
@@ -1300,12 +1630,17 @@ impl<'a> Resolver<'a> {
                     params,
                 } => {
                     let (name, _span) = spanned_name;
-                    let fn_name = qualify(self.session, module_name, *name);
+                    let fn_name = self.legacy_name(self.local_def_id(cx, *name));
                     let sig = func_schemes.get(&fn_name).cloned();
 
                     let wrapped = match &sig {
                         Some(sig) => self.wrap_function_body_with_signature_in_module(
-                            sig, body, params, *name, cx, local,
+                            sig,
+                            body,
+                            params,
+                            *spanned_name,
+                            cx,
+                            local,
                         ),
                         None => self.wrap_function_body_without_signature_in_module(
                             body, params, cx, local,

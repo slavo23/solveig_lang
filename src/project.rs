@@ -6,7 +6,7 @@ use std::rc::Rc;
 use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
-use base::{FileId, Session, Symbol};
+use base::{Diagnostic, FileId, FileSpan, Label, Session, Span, Symbol};
 use core::ast::{ClassDefinition, Kind, TypeExpr};
 use surface::ast::{ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition};
 use surface::parser;
@@ -16,32 +16,272 @@ const PRELUDE_BUILTINS_SRC: &str = include_str!("./prelude/builtins.sv");
 const PRELUDE_LIST_SRC: &str = include_str!("./prelude/list.sv");
 const PRELUDE_TYPECLASS_SRC: &str = include_str!("./prelude/typeclasses.sv");
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct SymbolId {
-    pub module: ModuleName,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModuleId(pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DefId {
+    pub module: ModuleId,
     pub name: Symbol,
 }
 
-impl SymbolId {
-    pub fn display(&self, session: &Session) -> String {
-        if self.module.0.is_empty() {
-            session.str(self.name).to_string()
-        } else {
-            format!(
-                "{}.{}",
-                self.module.as_string(session),
-                session.str(self.name)
-            )
+#[derive(Debug, Clone)]
+pub struct ModuleTable {
+    names: Vec<ModuleName>,
+    ids: HashMap<ModuleName, ModuleId>,
+}
+
+impl ModuleTable {
+    pub fn new<'a>(session: &Session, modules: impl IntoIterator<Item = &'a ModuleName>) -> Self {
+        let mut names = modules.into_iter().cloned().collect::<Vec<_>>();
+        names.sort_by_key(|module| module.as_string(session));
+        names.dedup();
+
+        let ids = names
+            .iter()
+            .enumerate()
+            .map(|(index, name)| {
+                let id = ModuleId(
+                    u32::try_from(index).expect("ICE: module table exceeded u32 capacity"),
+                );
+                (name.clone(), id)
+            })
+            .collect();
+
+        Self { names, ids }
+    }
+
+    pub fn id(&self, module: &ModuleName) -> Option<ModuleId> {
+        self.ids.get(module).copied()
+    }
+
+    pub fn name(&self, id: ModuleId) -> &ModuleName {
+        self.names
+            .get(id.0 as usize)
+            .expect("ICE: ModuleId not present in ModuleTable")
+    }
+}
+
+pub fn defid_to_legacy_string(session: &Session, modules: &ModuleTable, def: DefId) -> String {
+    let module = modules.name(def.module);
+
+    if module.0.is_empty() {
+        session.str(def.name).to_string()
+    } else {
+        format!("{}.{}", module.as_string(session), session.str(def.name))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResolveNameKind {
+    Term,
+    TypeConstructor,
+    Constructor,
+    Class,
+    Signature,
+}
+
+impl ResolveNameKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Term => "term",
+            Self::TypeConstructor => "type constructor",
+            Self::Constructor => "constructor",
+            Self::Class => "class",
+            Self::Signature => "signature",
         }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ResolveError {
+    AmbiguousImport {
+        span: FileSpan,
+        kind: ResolveNameKind,
+        name: Symbol,
+        candidates: Vec<DefId>,
+    },
+    UnknownModule {
+        span: FileSpan,
+        module: ModuleName,
+    },
+    UnknownName {
+        span: FileSpan,
+        kind: ResolveNameKind,
+        name: String,
+    },
+    DuplicateDefinition {
+        span: FileSpan,
+        previous: Option<FileSpan>,
+        kind: ResolveNameKind,
+        name: Symbol,
+    },
+    ClassArity {
+        span: FileSpan,
+        class_name: String,
+        actual: usize,
+    },
+    SignatureArity {
+        span: FileSpan,
+        name: Symbol,
+        params: usize,
+    },
+    CyclicImports {
+        span: FileSpan,
+        modules: Vec<ModuleName>,
+    },
+}
+
+impl ResolveError {
+    pub fn to_diagnostic(&self, session: &Session, modules: Option<&ModuleTable>) -> Diagnostic {
+        match self {
+            Self::AmbiguousImport {
+                span,
+                kind,
+                name,
+                candidates,
+            } => {
+                let mut notes = Vec::new();
+                if let Some(modules) = modules {
+                    let rendered = candidates
+                        .iter()
+                        .map(|candidate| defid_to_legacy_string(session, modules, *candidate))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+
+                    if !rendered.is_empty() {
+                        notes.push(format!("candidates: {rendered}"));
+                    }
+                }
+
+                Diagnostic::error(
+                    "RES0001",
+                    format!(
+                        "ambiguous imported {} `{}`",
+                        kind.as_str(),
+                        session.str(*name)
+                    ),
+                )
+                .with_label(Label::primary(
+                    *span,
+                    format!(
+                        "`{}` is provided by more than one imported module",
+                        session.str(*name)
+                    ),
+                ))
+                .with_notes(notes)
+            }
+            Self::UnknownModule { span, module } => Diagnostic::error(
+                "RES0002",
+                format!("unknown module `{}`", module.as_string(session)),
+            )
+            .with_label(Label::primary(
+                *span,
+                format!("module `{}` could not be found", module.as_string(session)),
+            )),
+            Self::UnknownName { span, kind, name } => {
+                Diagnostic::error("RES0003", format!("unknown {} `{}`", kind.as_str(), name))
+                    .with_label(Label::primary(
+                        *span,
+                        format!("no {} named `{}` is in scope here", kind.as_str(), name),
+                    ))
+            }
+            Self::DuplicateDefinition {
+                span,
+                previous,
+                kind,
+                name,
+            } => {
+                let mut diagnostic = Diagnostic::error(
+                    "RES0004",
+                    format!(
+                        "duplicate {} definition `{}`",
+                        kind.as_str(),
+                        session.str(*name)
+                    ),
+                )
+                .with_label(Label::primary(
+                    *span,
+                    format!("`{}` is defined again here", session.str(*name)),
+                ));
+
+                if let Some(previous) = previous {
+                    diagnostic = diagnostic.with_label(Label::secondary(
+                        *previous,
+                        format!("previous definition of `{}` is here", session.str(*name)),
+                    ));
+                }
+
+                diagnostic
+            }
+            Self::ClassArity {
+                span,
+                class_name,
+                actual,
+            } => Diagnostic::error(
+                "RES0005",
+                format!("class `{class_name}` must have exactly one parameter"),
+            )
+            .with_label(Label::primary(
+                *span,
+                format!("expected exactly one class parameter, but found {}", actual),
+            )),
+            Self::SignatureArity { span, name, params } => Diagnostic::error(
+                "RES0006",
+                format!(
+                    "function `{}` has more parameters than its signature accepts",
+                    session.str(*name)
+                ),
+            )
+            .with_label(Label::primary(
+                *span,
+                format!(
+                    "this definition has {} parameter{}, but the signature is not a function type",
+                    params,
+                    if *params == 1 { "" } else { "s" }
+                ),
+            )),
+            Self::CyclicImports { span, modules } => {
+                Diagnostic::error("RES0007", "cyclic module imports").with_label(Label::primary(
+                    *span,
+                    format!(
+                        "cycle: {}",
+                        modules
+                            .iter()
+                            .map(|module| module.as_string(session))
+                            .collect::<Vec<_>>()
+                            .join(" -> ")
+                    ),
+                ))
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ProjectError {
+    Message(String),
+    Resolve(ResolveError),
+}
+
+impl From<String> for ProjectError {
+    fn from(message: String) -> Self {
+        Self::Message(message)
+    }
+}
+
+impl From<ResolveError> for ProjectError {
+    fn from(error: ResolveError) -> Self {
+        Self::Resolve(error)
     }
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct ModuleApi {
-    pub terms: HashMap<Symbol, SymbolId>,
-    pub types: HashMap<Symbol, SymbolId>,
-    pub constructors: HashMap<Symbol, SymbolId>,
-    pub classes: HashMap<Symbol, SymbolId>,
+    pub terms: HashMap<Symbol, DefId>,
+    pub types: HashMap<Symbol, DefId>,
+    pub constructors: HashMap<Symbol, DefId>,
+    pub classes: HashMap<Symbol, DefId>,
 
     pub class_methods: HashMap<Symbol, Vec<Symbol>>,
 }
@@ -55,19 +295,19 @@ impl ModuleApi {
 
                 for name in names {
                     if let Some(sym) = self.terms.get(name) {
-                        out.terms.insert(*name, sym.clone());
+                        out.terms.insert(*name, *sym);
                     }
 
                     if let Some(sym) = self.types.get(name) {
-                        out.types.insert(*name, sym.clone());
+                        out.types.insert(*name, *sym);
                     }
 
                     if let Some(sym) = self.constructors.get(name) {
-                        out.constructors.insert(*name, sym.clone());
+                        out.constructors.insert(*name, *sym);
                     }
 
                     if let Some(sym) = self.classes.get(name) {
-                        out.classes.insert(*name, sym.clone());
+                        out.classes.insert(*name, *sym);
 
                         // Solveig's current simple import rule is:
                         //
@@ -81,7 +321,7 @@ impl ModuleApi {
 
                             for method_name in method_names {
                                 if let Some(method_sym) = self.terms.get(method_name) {
-                                    out.terms.insert(*method_name, method_sym.clone());
+                                    out.terms.insert(*method_name, *method_sym);
                                 }
                             }
                         }
@@ -96,10 +336,10 @@ impl ModuleApi {
 
 #[derive(Debug, Clone, Default)]
 pub struct TypedModuleApi {
-    pub term_schemes: HashMap<SymbolId, core::ast::Scheme>,
-    pub type_kinds: HashMap<SymbolId, Kind>,
-    pub constructor_types: HashMap<SymbolId, TypeExpr>,
-    pub class_defs: HashMap<SymbolId, core::ast::ClassDefinition>,
+    pub term_schemes: HashMap<DefId, core::ast::Scheme>,
+    pub type_kinds: HashMap<DefId, Kind>,
+    pub constructor_types: HashMap<DefId, TypeExpr>,
+    pub class_defs: HashMap<DefId, core::ast::ClassDefinition>,
     pub instance_defs: Vec<
         core::ast::InstanceDefinition<
             syntax::inference::type_infer::TcMetadata,
@@ -109,7 +349,7 @@ pub struct TypedModuleApi {
 }
 
 impl TypedModuleApi {
-    fn include_class_with_superclasses(&self, out: &mut Self, sym: &SymbolId) {
+    fn include_class_with_superclasses(&self, out: &mut Self, sym: &DefId) {
         if out.class_defs.contains_key(sym) {
             return;
         }
@@ -118,7 +358,7 @@ impl TypedModuleApi {
             return;
         };
 
-        out.class_defs.insert(sym.clone(), class_def.clone());
+        out.class_defs.insert(*sym, class_def.clone());
 
         // Keep superclass definitions from the same typed API if they are present.
         // This is what lets `import M(BoundedLike)` internally retain `OrdLike`
@@ -151,7 +391,7 @@ impl TypedModuleApi {
 
             for (sym, scheme) in &self.term_schemes {
                 if session.str(sym.name) == short_name {
-                    out.term_schemes.insert(sym.clone(), scheme.clone());
+                    out.term_schemes.insert(*sym, scheme.clone());
                 }
             }
         }
@@ -167,24 +407,24 @@ impl TypedModuleApi {
                 for name in names {
                     for (sym, scheme) in &self.term_schemes {
                         if &sym.name == name {
-                            out.term_schemes.insert(sym.clone(), scheme.clone());
+                            out.term_schemes.insert(*sym, scheme.clone());
                         }
                     }
 
                     for (sym, kind) in &self.type_kinds {
                         if &sym.name == name {
-                            out.type_kinds.insert(sym.clone(), kind.clone());
+                            out.type_kinds.insert(*sym, kind.clone());
                         }
                     }
 
                     for (sym, ty) in &self.constructor_types {
                         if &sym.name == name {
-                            out.constructor_types.insert(sym.clone(), ty.clone());
+                            out.constructor_types.insert(*sym, ty.clone());
                         }
                     }
                 }
 
-                let mut selected_classes = Vec::<(SymbolId, bool)>::new();
+                let mut selected_classes = Vec::<(DefId, bool)>::new();
 
                 for (sym, class_def) in &self.class_defs {
                     let class_selected = names.iter().any(|name| name == &sym.name);
@@ -199,7 +439,7 @@ impl TypedModuleApi {
                         // If the class itself was selected, expose its method terms too.
                         // If only one method was selected, keep the owning class definition
                         // internally, but do not implicitly expose the rest of the methods.
-                        selected_classes.push((sym.clone(), class_selected));
+                        selected_classes.push((*sym, class_selected));
                     }
                 }
 
@@ -223,35 +463,48 @@ impl TypedModuleApi {
     pub fn extend_display_maps(
         &self,
         session: &Session,
-        func_schemes: &mut HashMap<String, core::ast::Scheme>,
-        tycon_kinds: &mut HashMap<String, Kind>,
-        constructor_types: &mut HashMap<String, TypeExpr>,
-        class_defs: &mut HashMap<String, core::ast::ClassDefinition>,
-        instance_defs: &mut Vec<
-            core::ast::InstanceDefinition<
-                syntax::inference::type_infer::TcMetadata,
-                std::ops::Range<usize>,
-            >,
-        >,
+        modules: &ModuleTable,
+        out: &mut TypedDisplayMaps<'_>,
     ) {
         for (sym, scheme) in &self.term_schemes {
-            func_schemes.insert(sym.display(session), scheme.clone());
+            out.func_schemes.insert(
+                defid_to_legacy_string(session, modules, *sym),
+                scheme.clone(),
+            );
         }
 
         for (sym, kind) in &self.type_kinds {
-            tycon_kinds.insert(sym.display(session), kind.clone());
+            out.tycon_kinds
+                .insert(defid_to_legacy_string(session, modules, *sym), kind.clone());
         }
 
         for (sym, ty) in &self.constructor_types {
-            constructor_types.insert(sym.display(session), ty.clone());
+            out.constructor_types
+                .insert(defid_to_legacy_string(session, modules, *sym), ty.clone());
         }
 
         for (sym, class_def) in &self.class_defs {
-            class_defs.insert(sym.display(session), class_def.clone());
+            out.class_defs.insert(
+                defid_to_legacy_string(session, modules, *sym),
+                class_def.clone(),
+            );
         }
 
-        instance_defs.extend(self.instance_defs.clone());
+        out.instance_defs.extend(self.instance_defs.clone());
     }
+}
+
+pub struct TypedDisplayMaps<'a> {
+    pub func_schemes: &'a mut HashMap<String, core::ast::Scheme>,
+    pub tycon_kinds: &'a mut HashMap<String, Kind>,
+    pub constructor_types: &'a mut HashMap<String, TypeExpr>,
+    pub class_defs: &'a mut HashMap<String, core::ast::ClassDefinition>,
+    pub instance_defs: &'a mut Vec<
+        core::ast::InstanceDefinition<
+            syntax::inference::type_infer::TcMetadata,
+            std::ops::Range<usize>,
+        >,
+    >,
 }
 
 pub type SharedModuleApi = Rc<ModuleApi>;
@@ -260,6 +513,7 @@ pub type SharedTypedModuleApi = Rc<TypedModuleApi>;
 #[derive(Debug, Clone)]
 pub struct Imported<T> {
     pub alias: Symbol,
+    pub module: ModuleName,
     pub api: Rc<T>,
     pub spec: ImportSpec,
 }
@@ -269,15 +523,17 @@ pub type ImportedTypedApi = Imported<TypedModuleApi>;
 
 #[derive(Debug, Clone, Default)]
 pub struct BuiltinApi {
-    pub terms: HashMap<Symbol, SymbolId>,
-    pub types: HashMap<Symbol, SymbolId>,
-    pub constructors: HashMap<Symbol, SymbolId>,
-    pub classes: HashMap<Symbol, SymbolId>,
+    pub terms: HashMap<Symbol, DefId>,
+    pub types: HashMap<Symbol, DefId>,
+    pub constructors: HashMap<Symbol, DefId>,
+    pub classes: HashMap<Symbol, DefId>,
 }
 
 #[derive(Debug, Clone)]
 pub struct ModuleContext {
     pub module: ModuleName,
+    pub module_id: ModuleId,
+    pub file: FileId,
     pub local_api: SharedModuleApi,
     pub imported_apis: Vec<ImportedApi>,
     pub builtins: Rc<BuiltinApi>,
@@ -294,6 +550,7 @@ pub struct ModuleFile {
 #[derive(Debug)]
 pub struct Project {
     pub modules: HashMap<ModuleName, ModuleFile>,
+    pub module_table: ModuleTable,
 }
 
 pub struct ParsedProject {
@@ -312,6 +569,7 @@ impl ParsedProject {
 pub struct ModuleGraph {
     pub graph: DiGraph<ModuleName, ()>,
     pub indices: HashMap<ModuleName, NodeIndex>,
+    pub import_spans: HashMap<(ModuleName, ModuleName), FileSpan>,
 }
 
 #[derive(Debug, Clone)]
@@ -319,6 +577,7 @@ pub struct EffectiveImport {
     pub alias: Symbol,
     pub module: ModuleName,
     pub spec: ImportSpec,
+    pub span: FileSpan,
 }
 
 pub fn is_prelude_module(session: &Session, module: &ModuleName) -> bool {
@@ -353,6 +612,7 @@ pub fn effective_imports(
     session: &Session,
     module: &ModuleName,
     explicit: &[ImportDecl],
+    file: FileId,
 ) -> Vec<EffectiveImport> {
     let mut out = explicit
         .iter()
@@ -360,6 +620,7 @@ pub fn effective_imports(
             alias: imp.alias,
             module: imp.module.clone(),
             spec: imp.spec.clone(),
+            span: FileSpan::new(file, imp.span),
         })
         .collect::<Vec<_>>();
 
@@ -368,6 +629,7 @@ pub fn effective_imports(
             alias: implicit.default_alias(),
             module: implicit,
             spec: ImportSpec::All,
+            span: FileSpan::new(file, Span::new(0, 0)),
         });
     }
 
@@ -378,7 +640,10 @@ fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
     parser::parse_source(session, file, source)
 }
 
-fn mk_virtual_prelude_file(session: &Session, module: &ModuleName) -> Result<ModuleFile, String> {
+fn mk_virtual_prelude_file(
+    session: &Session,
+    module: &ModuleName,
+) -> Result<ModuleFile, ProjectError> {
     let source = prelude_module(session, module)
         .ok_or_else(|| {
             format!(
@@ -466,17 +731,42 @@ pub fn parse_project(project: &Project) -> ParsedProject {
     ParsedProject { modules }
 }
 
-pub fn load_project(session: &Session, entry_file: &Path) -> Result<(PathBuf, Project), String> {
+struct PendingModule {
+    file: PathBuf,
+    requested_module: Option<ModuleName>,
+    import_span: Option<FileSpan>,
+}
+
+pub fn load_project(
+    session: &Session,
+    entry_file: &Path,
+) -> Result<(PathBuf, Project), ProjectError> {
     let root = entry_file
         .parent()
         .ok_or_else(|| format!("cannot determine source root for {}", entry_file.display()))?
         .to_path_buf();
 
     let mut modules = HashMap::<ModuleName, ModuleFile>::new();
-    let mut stack = vec![entry_file.to_path_buf()];
+    let mut stack = vec![PendingModule {
+        file: entry_file.to_path_buf(),
+        requested_module: None,
+        import_span: None,
+    }];
 
-    while let Some(file) = stack.pop() {
-        let module_file = scan_module_file(session, &root, &file)?;
+    while let Some(pending) = stack.pop() {
+        let module_file = match scan_module_file(session, &root, &pending.file) {
+            Ok(module_file) => module_file,
+            Err(message) => {
+                if !pending.file.is_file()
+                    && let (Some(module), Some(span)) =
+                        (pending.requested_module, pending.import_span)
+                {
+                    return Err(ResolveError::UnknownModule { span, module }.into());
+                }
+
+                return Err(ProjectError::Message(message));
+            }
+        };
         if modules.contains_key(&module_file.name) {
             continue;
         }
@@ -484,7 +774,12 @@ pub fn load_project(session: &Session, entry_file: &Path) -> Result<(PathBuf, Pr
         let module_name = module_file.name.clone();
 
         if !session.diagnostics().has_errors() {
-            for imp in effective_imports(session, &module_name, &module_file.imports) {
+            for imp in effective_imports(
+                session,
+                &module_name,
+                &module_file.imports,
+                module_file.parsed.file,
+            ) {
                 if prelude_module(session, &imp.module).is_some() {
                     if !modules.contains_key(&imp.module) {
                         modules.insert(
@@ -493,7 +788,11 @@ pub fn load_project(session: &Session, entry_file: &Path) -> Result<(PathBuf, Pr
                         );
                     }
                 } else {
-                    stack.push(file_from_module_name(session, &root, &imp.module));
+                    stack.push(PendingModule {
+                        file: file_from_module_name(session, &root, &imp.module),
+                        requested_module: Some(imp.module),
+                        import_span: Some(imp.span),
+                    });
                 }
             }
         }
@@ -501,12 +800,24 @@ pub fn load_project(session: &Session, entry_file: &Path) -> Result<(PathBuf, Pr
         modules.insert(module_name, module_file);
     }
 
-    Ok((root, Project { modules }))
+    let module_table = ModuleTable::new(session, modules.keys());
+
+    Ok((
+        root,
+        Project {
+            modules,
+            module_table,
+        },
+    ))
 }
 
-pub fn build_module_graph(session: &Session, project: &Project) -> Result<ModuleGraph, String> {
+pub fn build_module_graph(
+    session: &Session,
+    project: &Project,
+) -> Result<ModuleGraph, ResolveError> {
     let mut graph = DiGraph::<ModuleName, ()>::new();
     let mut indices = HashMap::new();
+    let mut import_spans = HashMap::new();
 
     for module_name in project.modules.keys() {
         let ix = graph.add_node(module_name.clone());
@@ -514,60 +825,111 @@ pub fn build_module_graph(session: &Session, project: &Project) -> Result<Module
     }
 
     for (module_name, module_file) in &project.modules {
-        let from = indices[module_name];
+        let from = *indices
+            .get(module_name)
+            .expect("ICE: module graph missing node for known module");
 
-        for imp in effective_imports(session, module_name, &module_file.imports) {
-            let to = *indices.get(&imp.module).ok_or_else(|| {
-                format!(
-                    "module {} imports missing module {}",
-                    module_name.as_string(session),
-                    imp.module.as_string(session)
-                )
-            })?;
+        for imp in effective_imports(
+            session,
+            module_name,
+            &module_file.imports,
+            module_file.parsed.file,
+        ) {
+            let to = *indices
+                .get(&imp.module)
+                .ok_or_else(|| ResolveError::UnknownModule {
+                    span: imp.span,
+                    module: imp.module.clone(),
+                })?;
             graph.add_edge(from, to, ());
+            import_spans.insert((module_name.clone(), imp.module), imp.span);
         }
     }
 
-    Ok(ModuleGraph { graph, indices })
+    Ok(ModuleGraph {
+        graph,
+        indices,
+        import_spans,
+    })
 }
 
 pub fn module_order_checked(
     session: &Session,
     project: &Project,
-) -> Result<Vec<ModuleName>, String> {
+) -> Result<Vec<ModuleName>, ResolveError> {
     let graph = build_module_graph(session, project)?;
     ensure_acyclic_modules(session, &graph)?;
     module_order(session, &graph)
 }
 
-pub fn ensure_acyclic_modules(session: &Session, graph: &ModuleGraph) -> Result<(), String> {
+pub fn ensure_acyclic_modules(session: &Session, graph: &ModuleGraph) -> Result<(), ResolveError> {
     for scc in tarjan_scc(&graph.graph) {
         if scc.len() > 1 {
-            let names = scc
+            let mut modules = scc
                 .iter()
-                .map(|ix| graph.graph[*ix].as_string(session))
+                .map(|ix| graph.graph[*ix].clone())
                 .collect::<Vec<_>>();
-            return Err(format!("cyclic module imports: {}", names.join(" -> ")));
+            modules.sort_by_key(|module| module.as_string(session));
+
+            let span = cycle_span(graph, &modules)
+                .expect("ICE: cyclic import diagnostic requires an import edge span");
+
+            return Err(ResolveError::CyclicImports { span, modules });
         }
 
         let ix = scc[0];
         if graph.graph.contains_edge(ix, ix) {
-            return Err(format!(
-                "module {} imports itself",
-                graph.graph[ix].as_string(session)
-            ));
+            let module = graph.graph[ix].clone();
+            let span = graph
+                .import_spans
+                .get(&(module.clone(), module.clone()))
+                .copied()
+                .expect("ICE: self import diagnostic requires an import edge span");
+
+            return Err(ResolveError::CyclicImports {
+                span,
+                modules: vec![module],
+            });
         }
     }
     Ok(())
 }
 
-pub fn module_order(session: &Session, graph: &ModuleGraph) -> Result<Vec<ModuleName>, String> {
+fn cycle_span(graph: &ModuleGraph, modules: &[ModuleName]) -> Option<FileSpan> {
+    for from in modules {
+        for to in modules {
+            if let Some(span) = graph.import_spans.get(&(from.clone(), to.clone())) {
+                return Some(*span);
+            }
+        }
+    }
+
+    None
+}
+
+pub fn module_order(
+    _session: &Session,
+    graph: &ModuleGraph,
+) -> Result<Vec<ModuleName>, ResolveError> {
     let mut order = toposort(&graph.graph, None)
-        .map_err(|c| {
-            format!(
-                "cycle involving {}",
-                graph.graph[c.node_id()].as_string(session)
-            )
+        .map_err(|cycle| {
+            let module = graph.graph[cycle.node_id()].clone();
+            let span = graph
+                .import_spans
+                .iter()
+                .find_map(|((from, to), span)| {
+                    if from == &module || to == &module {
+                        Some(*span)
+                    } else {
+                        None
+                    }
+                })
+                .expect("ICE: toposort cycle diagnostic requires an import edge span");
+
+            ResolveError::CyclicImports {
+                span,
+                modules: vec![module],
+            }
         })?
         .into_iter()
         .map(|ix| graph.graph[ix].clone())
@@ -577,70 +939,131 @@ pub fn module_order(session: &Session, graph: &ModuleGraph) -> Result<Vec<Module
     Ok(order)
 }
 
-pub fn build_module_api(module_name: &ModuleName, parsed: &ParsedModule) -> ModuleApi {
+fn local_def_id(module_id: ModuleId, name: Symbol) -> DefId {
+    DefId {
+        module: module_id,
+        name,
+    }
+}
+
+fn file_span(file: FileId, span: Span) -> FileSpan {
+    FileSpan::new(file, span)
+}
+
+fn check_duplicate(
+    seen: &mut HashMap<Symbol, FileSpan>,
+    file: FileId,
+    span: Span,
+    kind: ResolveNameKind,
+    name: Symbol,
+) -> Result<(), ResolveError> {
+    let current = file_span(file, span);
+    if let Some(previous) = seen.insert(name, current) {
+        return Err(ResolveError::DuplicateDefinition {
+            span: current,
+            previous: Some(previous),
+            kind,
+            name,
+        });
+    }
+
+    Ok(())
+}
+
+pub fn build_module_api(
+    module_id: ModuleId,
+    parsed: &ParsedModule,
+) -> Result<ModuleApi, ResolveError> {
     let mut api = ModuleApi::default();
+    let mut term_defs = HashMap::<Symbol, FileSpan>::new();
+    let mut term_sigs = HashMap::<Symbol, FileSpan>::new();
+    let mut types = HashMap::<Symbol, FileSpan>::new();
+    let mut seen_constructors = HashMap::<Symbol, FileSpan>::new();
+    let mut classes = HashMap::<Symbol, FileSpan>::new();
 
     for def in &parsed.defs {
         match &def.0 {
             SurfaceDefinition::FunDef { name, .. } => {
-                api.terms.insert(
+                check_duplicate(
+                    &mut term_defs,
+                    parsed.file,
+                    name.1,
+                    ResolveNameKind::Term,
                     name.0,
-                    SymbolId {
-                        module: module_name.clone(),
-                        name: name.0,
-                    },
-                );
+                )?;
+
+                api.terms.insert(name.0, local_def_id(module_id, name.0));
             }
 
             SurfaceDefinition::SigDef { name, .. } => {
-                api.terms.entry(name.0).or_insert(SymbolId {
-                    module: module_name.clone(),
-                    name: name.0,
-                });
+                check_duplicate(
+                    &mut term_sigs,
+                    parsed.file,
+                    name.1,
+                    ResolveNameKind::Signature,
+                    name.0,
+                )?;
+
+                api.terms
+                    .entry(name.0)
+                    .or_insert(local_def_id(module_id, name.0));
             }
 
             SurfaceDefinition::DataDef {
                 name, constructors, ..
             } => {
-                api.types.insert(
+                check_duplicate(
+                    &mut types,
+                    parsed.file,
+                    name.1,
+                    ResolveNameKind::TypeConstructor,
                     name.0,
-                    SymbolId {
-                        module: module_name.clone(),
-                        name: name.0,
-                    },
-                );
+                )?;
+
+                api.types.insert(name.0, local_def_id(module_id, name.0));
 
                 for ctor in constructors {
-                    api.constructors.insert(
+                    check_duplicate(
+                        &mut seen_constructors,
+                        parsed.file,
+                        ctor.0.name.1,
+                        ResolveNameKind::Constructor,
                         ctor.0.name.0,
-                        SymbolId {
-                            module: module_name.clone(),
-                            name: ctor.0.name.0,
-                        },
-                    );
+                    )?;
+
+                    api.constructors
+                        .insert(ctor.0.name.0, local_def_id(module_id, ctor.0.name.0));
                 }
             }
 
             SurfaceDefinition::ClassDef { name, methods, .. } => {
                 let class_name = name.0;
-
-                api.classes.insert(
+                check_duplicate(
+                    &mut classes,
+                    parsed.file,
+                    name.1,
+                    ResolveNameKind::Class,
                     class_name,
-                    SymbolId {
-                        module: module_name.clone(),
-                        name: class_name,
-                    },
-                );
+                )?;
+
+                api.classes
+                    .insert(class_name, local_def_id(module_id, class_name));
 
                 let mut method_names = Vec::new();
 
                 for method in methods {
                     let method_name = method.name.0;
+                    check_duplicate(
+                        &mut term_defs,
+                        parsed.file,
+                        method.name.1,
+                        ResolveNameKind::Term,
+                        method_name,
+                    )?;
 
-                    api.terms.entry(method_name).or_insert(SymbolId {
-                        module: module_name.clone(),
-                        name: method_name,
-                    });
+                    api.terms
+                        .entry(method_name)
+                        .or_insert(local_def_id(module_id, method_name));
 
                     method_names.push(method_name);
                 }
@@ -652,11 +1075,12 @@ pub fn build_module_api(module_name: &ModuleName, parsed: &ParsedModule) -> Modu
         }
     }
 
-    api
+    Ok(api)
 }
 
 pub fn build_typed_module_api(
     session: &Session,
+    module_id: ModuleId,
     module_name: &ModuleName,
     checked: &CheckedModule,
 ) -> TypedModuleApi {
@@ -666,10 +1090,7 @@ pub fn build_typed_module_api(
     for (name, scheme) in &checked.func_schemes {
         if let Some(stripped) = name.strip_prefix(&prefix) {
             api.term_schemes.insert(
-                SymbolId {
-                    module: module_name.clone(),
-                    name: session.intern(stripped),
-                },
+                local_def_id(module_id, session.intern(stripped)),
                 scheme.clone(),
             );
         }
@@ -678,10 +1099,7 @@ pub fn build_typed_module_api(
     for (name, kind) in &checked.tycon_kinds {
         if let Some(stripped) = name.strip_prefix(&prefix) {
             api.type_kinds.insert(
-                SymbolId {
-                    module: module_name.clone(),
-                    name: session.intern(stripped),
-                },
+                local_def_id(module_id, session.intern(stripped)),
                 kind.clone(),
             );
         }
@@ -690,10 +1108,7 @@ pub fn build_typed_module_api(
     for (name, ty) in &checked.constructor_types {
         if let Some(stripped) = name.strip_prefix(&prefix) {
             api.constructor_types.insert(
-                SymbolId {
-                    module: module_name.clone(),
-                    name: session.intern(stripped),
-                },
+                local_def_id(module_id, session.intern(stripped)),
                 ty.clone(),
             );
         }
@@ -706,10 +1121,7 @@ pub fn build_typed_module_api(
             .unwrap_or(&class_def.name);
 
         api.class_defs.insert(
-            SymbolId {
-                module: module_name.clone(),
-                name: session.intern(stripped),
-            },
+            local_def_id(module_id, session.intern(stripped)),
             class_def.clone(),
         );
     }

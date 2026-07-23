@@ -432,6 +432,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_import(&mut self) -> Result<ImportDecl, ParseError> {
+        let start = self.current_start();
         self.expect(&Token::Import)?;
 
         let mut segments = vec![self.expect_module_name_segment()?];
@@ -463,11 +464,13 @@ impl<'a> Parser<'a> {
         } else {
             ImportSpec::All
         };
+        let end = self.current_start();
 
         Ok(ImportDecl {
             module,
             alias,
             spec,
+            span: mk_span(start, end),
         })
     }
 

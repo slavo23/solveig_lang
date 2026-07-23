@@ -2,9 +2,9 @@
    ╭─[ $WORKSPACE/tests/golden/diag/non_function_application/src/main.sv:1:8 ]
    │
  1 │ main = 1 2
-   │        ┬ ┬  
+   │        ┬ ┬
    │        ╰──── this expression is applied like a function, but has type `Int`
-   │          │  
+   │          │
    │          ╰── unexpected argument encountered here
 ───╯
 type error

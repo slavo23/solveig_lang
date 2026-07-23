@@ -65,6 +65,7 @@ pub struct ImportDecl {
     pub module: ModuleName,
     pub alias: Symbol,
     pub spec: ImportSpec,
+    pub span: Span,
 }
 
 #[derive(Debug, Clone)]

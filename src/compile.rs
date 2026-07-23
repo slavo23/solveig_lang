@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use base::Session;
+use base::{FileSpan, Session};
 use core::ast::{ClassDefinition, Scheme};
 use lowering::closure_lower::lower_to_closure_ir;
 use lowering::lowering::lower_module;
@@ -10,14 +10,15 @@ use runtime::vm::Machine;
 use solveig_report::emit_diagnostics;
 use surface::ast::ModuleName;
 use syntax::inference::holes::hole_diagnostics;
-use syntax::inference::type_infer::{check_and_elab_module, CheckedModule, TypeCheckEnv};
+use syntax::inference::type_infer::{CheckedModule, TypeCheckEnv, check_and_elab_module};
 
 use crate::project::{
-    build_module_api, build_typed_module_api, effective_imports, load_project,
-    module_order_checked, parse_project, BuiltinApi, ImportedApi, ImportedTypedApi, ModuleContext,
-    ParsedProject, Project, SharedModuleApi, SharedTypedModuleApi,
+    BuiltinApi, DefId, ImportedApi, ImportedTypedApi, ModuleContext, ModuleId, ModuleTable,
+    ParsedProject, Project, ProjectError, ResolveError, SharedModuleApi, SharedTypedModuleApi,
+    TypedDisplayMaps, build_module_api, build_typed_module_api, defid_to_legacy_string,
+    effective_imports, load_project, module_order_checked, parse_project,
 };
-use crate::resolver::{Resolver, ResolverImports};
+use crate::resolver::{Resolver, ResolverError, ResolverImports};
 
 pub fn compile_and_run_project(
     project_root: &Path,
@@ -70,17 +71,36 @@ fn compile_project_capture(
 fn check_project_modules(project_root: &Path) -> Result<Vec<CheckedModule>, String> {
     let session = Session::new();
     let entry_file = find_entry_file(project_root)?;
-    let (_root, project) = load_project(&session, &entry_file)?;
+    let (_root, project) = match load_project(&session, &entry_file) {
+        Ok(project) => project,
+        Err(ProjectError::Message(message)) => return Err(message),
+        Err(ProjectError::Resolve(error)) => {
+            emit_resolve_errors(&session, None, vec![error])?;
+            return Err("resolve error".to_string());
+        }
+    };
 
     if session.diagnostics().has_errors() {
         emit_session_diagnostics(&session)?;
         return Err("parse error".to_string());
     }
 
-    let order = module_order_checked(&session, &project)?;
+    let order = match module_order_checked(&session, &project) {
+        Ok(order) => order,
+        Err(error) => {
+            emit_resolve_errors(&session, Some(&project.module_table), vec![error])?;
+            return Err("resolve error".to_string());
+        }
+    };
     let parsed = parse_project(&project);
 
-    let mut state = FrontendState::new(&session, &project, &parsed, &order)?;
+    let mut state = match FrontendState::new(&session, &project, &parsed, &order) {
+        Ok(state) => state,
+        Err(error) => {
+            emit_resolve_errors(&session, Some(&project.module_table), vec![error])?;
+            return Err("resolve error".to_string());
+        }
+    };
     state.check_all(&order)?;
 
     Ok(state.checked_modules)
@@ -92,6 +112,20 @@ fn emit_session_diagnostics(session: &Session) -> Result<(), String> {
 
     emit_diagnostics(&diagnostics, &source_map)
         .map_err(|err| format!("failed to print diagnostics: {err}"))
+}
+
+fn emit_resolve_errors(
+    session: &Session,
+    modules: Option<&ModuleTable>,
+    errors: Vec<ResolveError>,
+) -> Result<(), String> {
+    for error in errors {
+        session
+            .diagnostics()
+            .push(error.to_diagnostic(session, modules));
+    }
+
+    emit_session_diagnostics(session)
 }
 
 fn erase_tc_expr_to_span_expr(
@@ -202,6 +236,7 @@ struct FrontendState<'a> {
     builtins: Rc<BuiltinApi>,
     apis: HashMap<ModuleName, SharedModuleApi>,
     typed_apis: HashMap<ModuleName, SharedTypedModuleApi>,
+    resolutions: HashMap<ModuleId, Vec<(FileSpan, DefId)>>,
     checked_modules: Vec<CheckedModule>,
 }
 
@@ -211,11 +246,15 @@ impl<'a> FrontendState<'a> {
         project: &'a Project,
         parsed: &'a ParsedProject,
         order: &[ModuleName],
-    ) -> Result<Self, String> {
+    ) -> Result<Self, ResolveError> {
         let mut apis = HashMap::new();
 
         for module_name in order {
-            let api = build_module_api(module_name, parsed.get(session, module_name));
+            let module_id = project
+                .module_table
+                .id(module_name)
+                .expect("ICE: checked module order referenced unknown module");
+            let api = build_module_api(module_id, parsed.get(session, module_name))?;
             apis.insert(module_name.clone(), Rc::new(api));
         }
 
@@ -226,6 +265,7 @@ impl<'a> FrontendState<'a> {
             builtins: Rc::new(BuiltinApi::default()),
             apis,
             typed_apis: HashMap::new(),
+            resolutions: HashMap::new(),
             checked_modules: Vec::new(),
         })
     }
@@ -233,7 +273,17 @@ impl<'a> FrontendState<'a> {
     fn check_all(&mut self, order: &[ModuleName]) -> Result<(), String> {
         for module_name in order {
             let checked = self.check_module(module_name)?;
-            let typed_api = Rc::new(build_typed_module_api(self.session, module_name, &checked));
+            let module_id = self
+                .project
+                .module_table
+                .id(module_name)
+                .expect("ICE: checked module order referenced unknown module");
+            let typed_api = Rc::new(build_typed_module_api(
+                self.session,
+                module_id,
+                module_name,
+                &checked,
+            ));
 
             self.typed_apis.insert(module_name.clone(), typed_api);
             self.checked_modules.push(checked);
@@ -252,7 +302,7 @@ impl<'a> FrontendState<'a> {
             if let Some(api) = self.typed_apis.get(&imp.module) {
                 for (sym, class_def) in &api.filtered(self.session, &imp.spec).class_defs {
                     out.insert(
-                        sym.display(self.session),
+                        defid_to_legacy_string(self.session, &self.project.module_table, *sym),
                         class_def
                             .params
                             .iter()
@@ -266,15 +316,22 @@ impl<'a> FrontendState<'a> {
         out
     }
 
-    fn check_module(&self, module_name: &ModuleName) -> Result<CheckedModule, String> {
+    fn check_module(&mut self, module_name: &ModuleName) -> Result<CheckedModule, String> {
         let module_file = &self.project.modules[module_name];
         let parsed = self.parsed.get(self.session, module_name);
         let file = parsed.file;
-        let imports = effective_imports(self.session, module_name, &parsed.imports);
+        let module_id = self
+            .project
+            .module_table
+            .id(module_name)
+            .expect("ICE: module check referenced unknown module");
+        let imports = effective_imports(self.session, module_name, &parsed.imports, file);
 
         let imported_apis = self.build_imported_apis(&imports);
         let cx = ModuleContext {
             module: module_name.clone(),
+            module_id,
+            file,
             local_api: self.apis[module_name].clone(),
             imported_apis,
             builtins: self.builtins.clone(),
@@ -285,15 +342,24 @@ impl<'a> FrontendState<'a> {
             class_param_kinds: self.collect_imported_class_param_kinds(&imports),
         };
 
-        let resolver = Resolver::new(self.session);
-        let resolved = resolver
-            .resolve_module(module_name, parsed, &cx, &resolver_imports)
-            .map_err(|errs| {
-                format!(
-                    "resolve error in {}:\n{errs:#?}",
-                    module_file.path.display()
-                )
-            })?;
+        let resolver = Resolver::new(self.session, &self.project.module_table);
+        let resolved_info =
+            match resolver.resolve_module(module_name, parsed, &cx, &resolver_imports) {
+                Ok(resolved) => resolved,
+                Err(ResolverError::Resolve(errors)) => {
+                    emit_resolve_errors(self.session, Some(&self.project.module_table), errors)?;
+                    return Err("resolve error".to_string());
+                }
+                Err(ResolverError::Kind(err)) => {
+                    return Err(format!(
+                        "resolve error in {}:\n{err:#?}",
+                        module_file.path.display()
+                    ));
+                }
+            };
+        self.resolutions
+            .insert(module_id, resolved_info.resolutions.clone());
+        let resolved = resolved_info.module;
 
         let imported_typed = self.build_imported_typed_apis(&imports);
         let (
@@ -302,7 +368,7 @@ impl<'a> FrontendState<'a> {
             constructor_types,
             imported_class_defs,
             imported_instance_defs,
-        ) = collect_imported_type_info(self.session, &imported_typed);
+        ) = collect_imported_type_info(self.session, &self.project.module_table, &imported_typed);
 
         let mut check_env = TypeCheckEnv::from_module(&resolved);
 
@@ -351,6 +417,7 @@ impl<'a> FrontendState<'a> {
             .iter()
             .map(|imp| ImportedApi {
                 alias: imp.alias,
+                module: imp.module.clone(),
                 api: Rc::new(self.apis[&imp.module].filtered(&imp.spec)),
                 spec: imp.spec.clone(),
             })
@@ -368,6 +435,7 @@ impl<'a> FrontendState<'a> {
                     .get(&imp.module)
                     .map(|api| ImportedTypedApi {
                         alias: imp.alias,
+                        module: imp.module.clone(),
                         api: api.clone(),
                         spec: imp.spec.clone(),
                     })
@@ -384,7 +452,10 @@ impl<'a> FrontendState<'a> {
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
                 for (sym, kind) in &api.filtered(self.session, &imp.spec).type_kinds {
-                    out.insert(sym.display(self.session), kind.clone());
+                    out.insert(
+                        defid_to_legacy_string(self.session, &self.project.module_table, *sym),
+                        kind.clone(),
+                    );
                 }
             }
         }
@@ -395,6 +466,7 @@ impl<'a> FrontendState<'a> {
 
 fn collect_imported_type_info(
     session: &Session,
+    modules: &ModuleTable,
     imports: &[ImportedTypedApi],
 ) -> (
     HashMap<String, Scheme>,
@@ -415,13 +487,18 @@ fn collect_imported_type_info(
     let mut instance_defs = Vec::new();
 
     for imp in imports {
+        let mut display_maps = TypedDisplayMaps {
+            func_schemes: &mut func_schemes,
+            tycon_kinds: &mut tycon_kinds,
+            constructor_types: &mut constructor_types,
+            class_defs: &mut class_defs,
+            instance_defs: &mut instance_defs,
+        };
+
         imp.api.filtered(session, &imp.spec).extend_display_maps(
             session,
-            &mut func_schemes,
-            &mut tycon_kinds,
-            &mut constructor_types,
-            &mut class_defs,
-            &mut instance_defs,
+            modules,
+            &mut display_maps,
         );
     }
 

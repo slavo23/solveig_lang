@@ -3,9 +3,9 @@
    │
  2 │ ╭─▶     case True of
  3 │ ├─▶         True => 1
-   │ │                       
+   │ │
    │ ╰─────────────────────── this case expression does not cover all values of type `Bool`
-   │     
+   │
    │     Note: scrutinee type: `Bool`
    │           missing pattern:
    │             False

@@ -1,8 +1,8 @@
-[TC0002] Error: unknown constructor `MissingValue`
+[RES0003] Error: unknown constructor `MissingValue`
    ╭─[ $WORKSPACE/tests/golden/diag/unknown_constructor_expr/src/main.sv:1:8 ]
    │
  1 │ main = MissingValue
-   │        ──────┬─────  
-   │              ╰─────── constructor `MissingValue` is not known here
+   │        ──────┬─────
+   │              ╰─────── no constructor named `MissingValue` is in scope here
 ───╯
-type error
+resolve error
