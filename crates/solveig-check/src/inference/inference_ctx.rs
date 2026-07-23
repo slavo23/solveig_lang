@@ -1,6 +1,5 @@
 use solveig_ast::ast::{
-    EvarId, Kind, Predicate, Pretty, TyConId, TyVarId, TypeExpr, tycon_display_name,
-    tyvar_display_name,
+    EvarId, Kind, Predicate, Pretty, TyConId, TyVarId, TypeExpr, tyvar_display_name,
 };
 use std::collections::HashMap;
 use std::iter::successors;
@@ -232,7 +231,7 @@ impl Context {
             TypeExpr::TyCon(id) => tycon_kinds
                 .get(id)
                 .cloned()
-                .ok_or_else(|| format!("unknown type constructor: {}", tycon_display_name(*id))),
+                .ok_or_else(|| format!("unknown type constructor: T{}", id.0)),
 
             TypeExpr::TyVar(id) => self
                 .universal_kind_id(*id)

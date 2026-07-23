@@ -92,7 +92,7 @@ impl<'a> Resolver<'a> {
             _ => match self.resolve_term_defid(r, span, cx) {
                 Some(def_id) => {
                     self.record_resolution(span, def_id);
-                    self.legacy_name(def_id);
+                    self.qualified_def_name(def_id);
                     VarRef::Global(def_id)
                 }
                 None => VarRef::legacy_global(&self.unresolved_name(r)),
@@ -335,7 +335,7 @@ impl<'a> Resolver<'a> {
                 } => {
                     let (name, _span) = spanned_name;
                     let fn_id = self.local_def_id(cx, *name);
-                    let fn_name = self.legacy_name(fn_id);
+                    let fn_name = self.qualified_def_name(fn_id);
                     let sig = func_schemes.get(&fn_id).cloned();
 
                     let wrapped = match &sig {

@@ -3,7 +3,7 @@ impl<'a> Resolver<'a> {
         match self.resolve_ctor_defid(r, span, cx) {
             Some(def_id) => {
                 self.record_resolution(span, def_id);
-                self.legacy_name(def_id)
+                self.qualified_def_name(def_id)
             }
             None => self.unresolved_name(r),
         }
@@ -179,7 +179,7 @@ impl<'a> Resolver<'a> {
                     constructors,
                 } => {
                     let (name, _span) = spanned_name;
-                    let data_name = self.legacy_name(self.local_def_id(cx, *name));
+                    let data_name = self.qualified_def_name(self.local_def_id(cx, *name));
 
                     Some(RawDataDef {
                         id: legacy_tycon_id(&data_name),
@@ -192,7 +192,7 @@ impl<'a> Resolver<'a> {
                         constructors: constructors
                             .iter()
                             .map(|constructor| RawConstructorDef {
-                                name: self.legacy_name(self.local_def_id(cx, constructor.0.name.0)),
+                                name: self.qualified_def_name(self.local_def_id(cx, constructor.0.name.0)),
                                 span: self.file_span(cx, constructor.1),
                                 fields: constructor
                                     .0

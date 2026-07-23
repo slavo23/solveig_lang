@@ -21,9 +21,7 @@ use solveig_syntax::ast::{
     SurfaceUnOp,
 };
 
-use crate::project::{
-    ModuleContext, ModuleTable, ResolveError, ResolveNameKind, defid_to_legacy_string,
-};
+use crate::project::{ModuleContext, ModuleTable, ResolveError, ResolveNameKind};
 
 type Span = Range<usize>;
 
@@ -145,8 +143,8 @@ impl<'a> Resolver<'a> {
     fn record_resolution(&mut self, span: FileSpan, def_id: DefId) {
         self.resolutions.push((span, def_id));
     }
-    fn legacy_name(&self, def_id: DefId) -> String {
-        let name = defid_to_legacy_string(self.session, self.modules, def_id);
+    fn qualified_def_name(&self, def_id: DefId) -> String {
+        let name = self.modules.def_path(def_id).render(self.session);
         register_def_display_name(def_id, &name);
         name
     }

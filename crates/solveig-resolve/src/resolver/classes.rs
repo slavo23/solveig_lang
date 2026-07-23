@@ -9,7 +9,7 @@ impl<'a> Resolver<'a> {
         match self.resolve_class_defid(r, span, cx, local) {
             Some(def_id) => {
                 self.record_resolution(span, def_id);
-                self.legacy_name(def_id)
+                self.qualified_def_name(def_id)
             }
             None => self.unresolved_name(r),
         }
@@ -240,7 +240,7 @@ impl<'a> Resolver<'a> {
                     }
 
                     let class_def_id = self.local_def_id(cx, name.0);
-                    let class_name = self.legacy_name(class_def_id);
+                    let class_name = self.qualified_def_name(class_def_id);
                     let class_id = legacy_class_id(&class_name);
 
                     let class_params = ty_params
@@ -299,7 +299,7 @@ impl<'a> Resolver<'a> {
 
                             ClassMethodDef {
                                 id: method_id,
-                                name: self.legacy_name(method_id),
+                                name: self.qualified_def_name(method_id),
                                 scheme,
                             }
                         })

@@ -48,15 +48,31 @@ impl ModuleTable {
             .get(id.0 as usize)
             .expect("ICE: ModuleId not present in ModuleTable")
     }
+
+    pub fn def_path(&self, def: DefId) -> DefPath<'_> {
+        DefPath {
+            module: self.name(def.module),
+            name: def.name,
+        }
+    }
 }
 
-pub fn defid_to_legacy_string(session: &Session, modules: &ModuleTable, def: DefId) -> String {
-    let module = modules.name(def.module);
+#[derive(Debug, Clone, Copy)]
+pub struct DefPath<'a> {
+    module: &'a ModuleName,
+    name: Symbol,
+}
 
-    if module.0.is_empty() {
-        session.str(def.name).to_string()
-    } else {
-        format!("{}.{}", module.as_string(session), session.str(def.name))
+impl DefPath<'_> {
+    pub fn render(self, session: &Session) -> String {
+        if self.module.0.is_empty() {
+            return session.str(self.name).to_string();
+        }
+
+        let mut rendered = self.module.as_string(session);
+        rendered.push('.');
+        rendered.push_str(session.str(self.name));
+        rendered
     }
 }
 
@@ -133,7 +149,7 @@ impl ResolveError {
                 if let Some(modules) = modules {
                     let rendered = candidates
                         .iter()
-                        .map(|candidate| defid_to_legacy_string(session, modules, *candidate))
+                        .map(|candidate| modules.def_path(*candidate).render(session))
                         .collect::<Vec<_>>()
                         .join(", ");
 
@@ -986,6 +1002,26 @@ mod tests {
     };
 
     use super::*;
+
+    #[test]
+    fn module_table_renders_def_paths_from_ids() {
+        let session = Session::new();
+        let sample = ModuleName(vec![session.intern("sample")]);
+        let helper = ModuleName(vec![session.intern("sample"), session.intern("helper")]);
+        let modules = ModuleTable::new(&session, [&sample, &helper]);
+        let helper_id = modules
+            .id(&helper)
+            .expect("ICE: test module table must contain helper");
+        let value = DefId {
+            module: helper_id,
+            name: session.intern("value"),
+        };
+
+        assert_eq!(
+            modules.def_path(value).render(&session),
+            "sample.helper.value"
+        );
+    }
 
     #[test]
     fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
