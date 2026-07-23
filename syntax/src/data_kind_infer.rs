@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use base::FileSpan;
 use core::ast::{Kind, TypeExpr};
 
 use crate::signature_infer::KindError;
@@ -7,6 +8,7 @@ use crate::signature_infer::KindError;
 #[derive(Debug, Clone)]
 pub struct RawDataDef {
     pub name: String,
+    pub span: FileSpan,
     pub ty_params: Vec<String>,
     pub constructors: Vec<RawConstructorDef>,
 }
@@ -14,6 +16,7 @@ pub struct RawDataDef {
 #[derive(Debug, Clone)]
 pub struct RawConstructorDef {
     pub name: String,
+    pub span: FileSpan,
     pub fields: Vec<TypeExpr>,
 }
 
@@ -164,10 +167,7 @@ impl DataKindInferencer {
 
             Kind::Var(v) => {
                 if v == target {
-                    Err(KindError::OccursCheckFailed {
-                        var: target.to_string(),
-                        in_kind: kind.clone(),
-                    })
+                    Err(KindError::occurs_check_failed(target, kind.clone()))
                 } else if !self.is_meta(v) || self.is_before(v, target) {
                     Ok(kind.clone())
                 } else {
@@ -210,7 +210,7 @@ impl DataKindInferencer {
                 Ok(())
             }
 
-            _ => Err(KindError::CannotUnify { lhs, rhs }),
+            _ => Err(KindError::cannot_unify(lhs, rhs)),
         }
     }
 
@@ -227,7 +227,7 @@ impl DataKindInferencer {
                 let kind = var_env
                     .get(name)
                     .map(|k| self.apply_kind(k))
-                    .ok_or_else(|| KindError::UnboundTypeVariable(name.clone()))?;
+                    .ok_or_else(|| KindError::unbound_type_variable(name.clone()))?;
                 Ok((kind, TypeExpr::TyVar(name.clone())))
             }
 
@@ -235,7 +235,7 @@ impl DataKindInferencer {
                 let kind = var_env
                     .get(name)
                     .map(|k| self.apply_kind(k))
-                    .ok_or_else(|| KindError::UnboundTypeVariable(name.clone()))?;
+                    .ok_or_else(|| KindError::unbound_type_variable(name.clone()))?;
                 Ok((kind, TypeExpr::TyExVar(name.clone())))
             }
 
@@ -243,7 +243,7 @@ impl DataKindInferencer {
                 let kind = tycon_env
                     .get(name)
                     .map(|k| self.apply_kind(k))
-                    .ok_or_else(|| KindError::UnboundTypeConstructor(name.clone()))?;
+                    .ok_or_else(|| KindError::unbound_type_constructor(name.clone()))?;
                 Ok((kind, TypeExpr::TyCon(name.clone())))
             }
 
@@ -328,10 +328,10 @@ impl DataKindInferencer {
                 Ok(self.apply_kind(&a2))
             }
 
-            _ => Err(KindError::CannotUnify {
-                lhs: fun_kind,
-                rhs: Kind::make_arrow(arg_kind, Kind::Star),
-            }),
+            _ => Err(KindError::cannot_unify(
+                fun_kind,
+                Kind::make_arrow(arg_kind, Kind::Star),
+            )),
         }
     }
 
@@ -389,7 +389,8 @@ impl DataKindInferencer {
                 .rev()
                 .fold(Kind::Star, |acc, (_, k)| Kind::make_arrow(k.clone(), acc));
 
-            self.unify(tycon_kind, expected)?;
+            self.unify(tycon_kind, expected)
+                .map_err(|error| error.with_span(def.span))?;
 
             let var_env: HashMap<String, Kind> = param_metas
                 .iter()
@@ -403,8 +404,9 @@ impl DataKindInferencer {
 
             let mut ctor_fields = Vec::new();
             for ctor in &def.constructors {
-                let rebuilt =
-                    self.check_constructor(&ctor.fields, &ret_ty, &tycon_env, &var_env)?;
+                let rebuilt = self
+                    .check_constructor(&ctor.fields, &ret_ty, &tycon_env, &var_env)
+                    .map_err(|error| error.with_span(ctor.span))?;
                 ctor_fields.push((ctor.name.clone(), rebuilt));
             }
 

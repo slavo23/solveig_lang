@@ -1,8 +1,8 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use base::{FileSpan, Session};
+use base::{FileSpan, IntoDiagnostic, Session};
 use core::ast::{ClassDefinition, Scheme};
 use lowering::closure_lower::lower_to_closure_ir;
 use lowering::lowering::lower_module;
@@ -75,7 +75,8 @@ fn check_project_modules(project_root: &Path) -> Result<Vec<CheckedModule>, Stri
         Ok(project) => project,
         Err(ProjectError::Message(message)) => return Err(message),
         Err(ProjectError::Resolve(error)) => {
-            emit_resolve_errors(&session, None, vec![error])?;
+            push_resolve_errors(&session, None, vec![error]);
+            emit_session_diagnostics(&session)?;
             return Err("resolve error".to_string());
         }
     };
@@ -88,7 +89,8 @@ fn check_project_modules(project_root: &Path) -> Result<Vec<CheckedModule>, Stri
     let order = match module_order_checked(&session, &project) {
         Ok(order) => order,
         Err(error) => {
-            emit_resolve_errors(&session, Some(&project.module_table), vec![error])?;
+            push_resolve_errors(&session, Some(&project.module_table), vec![error]);
+            emit_session_diagnostics(&session)?;
             return Err("resolve error".to_string());
         }
     };
@@ -96,8 +98,9 @@ fn check_project_modules(project_root: &Path) -> Result<Vec<CheckedModule>, Stri
 
     let mut state = match FrontendState::new(&session, &project, &parsed, &order) {
         Ok(state) => state,
-        Err(error) => {
-            emit_resolve_errors(&session, Some(&project.module_table), vec![error])?;
+        Err(errors) => {
+            push_resolve_errors(&session, Some(&project.module_table), errors);
+            emit_session_diagnostics(&session)?;
             return Err("resolve error".to_string());
         }
     };
@@ -114,18 +117,16 @@ fn emit_session_diagnostics(session: &Session) -> Result<(), String> {
         .map_err(|err| format!("failed to print diagnostics: {err}"))
 }
 
-fn emit_resolve_errors(
+fn push_resolve_errors(
     session: &Session,
     modules: Option<&ModuleTable>,
     errors: Vec<ResolveError>,
-) -> Result<(), String> {
+) {
     for error in errors {
         session
             .diagnostics()
-            .push(error.to_diagnostic(session, modules));
+            .push(error.into_diagnostic((session, modules)));
     }
-
-    emit_session_diagnostics(session)
 }
 
 fn erase_tc_expr_to_span_expr(
@@ -240,22 +241,50 @@ struct FrontendState<'a> {
     checked_modules: Vec<CheckedModule>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FrontendPhase {
+    Resolve,
+    Kind,
+    Type,
+    Hole,
+}
+
+impl FrontendPhase {
+    fn error_message(self) -> &'static str {
+        match self {
+            Self::Resolve => "resolve error",
+            Self::Kind => "kind error",
+            Self::Type => "type error",
+            Self::Hole => "Program has unfilled holes. Aborting compilation",
+        }
+    }
+}
+
 impl<'a> FrontendState<'a> {
     fn new(
         session: &'a Session,
         project: &'a Project,
         parsed: &'a ParsedProject,
         order: &[ModuleName],
-    ) -> Result<Self, ResolveError> {
+    ) -> Result<Self, Vec<ResolveError>> {
         let mut apis = HashMap::new();
+        let mut errors = Vec::new();
 
         for module_name in order {
             let module_id = project
                 .module_table
                 .id(module_name)
                 .expect("ICE: checked module order referenced unknown module");
-            let api = build_module_api(module_id, parsed.get(session, module_name))?;
-            apis.insert(module_name.clone(), Rc::new(api));
+            match build_module_api(module_id, parsed.get(session, module_name)) {
+                Ok(api) => {
+                    apis.insert(module_name.clone(), Rc::new(api));
+                }
+                Err(error) => errors.push(error),
+            }
+        }
+
+        if !errors.is_empty() {
+            return Err(errors);
         }
 
         Ok(Self {
@@ -271,8 +300,31 @@ impl<'a> FrontendState<'a> {
     }
 
     fn check_all(&mut self, order: &[ModuleName]) -> Result<(), String> {
+        let mut failed_modules = HashSet::new();
+        let mut first_failure: Option<FrontendPhase> = None;
+
         for module_name in order {
-            let checked = self.check_module(module_name)?;
+            let parsed = self.parsed.get(self.session, module_name);
+            let imports =
+                effective_imports(self.session, module_name, &parsed.imports, parsed.file);
+
+            if imports
+                .iter()
+                .any(|import| failed_modules.contains(&import.module))
+            {
+                failed_modules.insert(module_name.clone());
+                continue;
+            }
+
+            let checked = match self.check_module(module_name) {
+                Ok(checked) => checked,
+                Err(phase) => {
+                    failed_modules.insert(module_name.clone());
+                    first_failure = Some(first_failure.map_or(phase, |current| current.min(phase)));
+                    continue;
+                }
+            };
+
             let module_id = self
                 .project
                 .module_table
@@ -287,6 +339,11 @@ impl<'a> FrontendState<'a> {
 
             self.typed_apis.insert(module_name.clone(), typed_api);
             self.checked_modules.push(checked);
+        }
+
+        if let Some(phase) = first_failure {
+            emit_session_diagnostics(self.session)?;
+            return Err(phase.error_message().to_string());
         }
 
         Ok(())
@@ -316,8 +373,7 @@ impl<'a> FrontendState<'a> {
         out
     }
 
-    fn check_module(&mut self, module_name: &ModuleName) -> Result<CheckedModule, String> {
-        let module_file = &self.project.modules[module_name];
+    fn check_module(&mut self, module_name: &ModuleName) -> Result<CheckedModule, FrontendPhase> {
         let parsed = self.parsed.get(self.session, module_name);
         let file = parsed.file;
         let module_id = self
@@ -347,14 +403,12 @@ impl<'a> FrontendState<'a> {
             match resolver.resolve_module(module_name, parsed, &cx, &resolver_imports) {
                 Ok(resolved) => resolved,
                 Err(ResolverError::Resolve(errors)) => {
-                    emit_resolve_errors(self.session, Some(&self.project.module_table), errors)?;
-                    return Err("resolve error".to_string());
+                    push_resolve_errors(self.session, Some(&self.project.module_table), errors);
+                    return Err(FrontendPhase::Resolve);
                 }
                 Err(ResolverError::Kind(err)) => {
-                    return Err(format!(
-                        "resolve error in {}:\n{err:#?}",
-                        module_file.path.display()
-                    ));
+                    self.session.diagnostics().push(err.into_diagnostic(()));
+                    return Err(FrontendPhase::Kind);
                 }
             };
         self.resolutions
@@ -387,26 +441,21 @@ impl<'a> FrontendState<'a> {
         let checked_raw = match check_and_elab_module(&resolved, &check_env, file) {
             Ok(c) => c,
             Err(errors) => {
-                let diagnostics = errors
-                    .iter()
-                    .map(|error| error.to_diagnostic())
-                    .collect::<Vec<_>>();
-
-                let source_map = self.session.source_map();
-                emit_diagnostics(&diagnostics, &source_map)
-                    .map_err(|err| format!("failed to print type errors: {err}"))?;
-                return Err("type error".to_string());
+                for error in errors {
+                    self.session.diagnostics().push(error.into_diagnostic(()));
+                }
+                return Err(FrontendPhase::Type);
             }
         };
 
         if !checked_raw.holes.is_empty() {
             let diagnostics = hole_diagnostics(&checked_raw.holes, &check_env.constructor_types);
 
-            let source_map = self.session.source_map();
-            emit_diagnostics(&diagnostics, &source_map)
-                .map_err(|err| format!("failed to print hole diagnostics: {err}"))?;
+            for diagnostic in diagnostics {
+                self.session.diagnostics().push(diagnostic);
+            }
 
-            return Err("Program has unfilled holes. Aborting compilation".to_string());
+            return Err(FrontendPhase::Hole);
         }
 
         Ok(checked_raw.module)

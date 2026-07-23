@@ -6,7 +6,7 @@ use std::rc::Rc;
 use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
-use base::{Diagnostic, FileId, FileSpan, Label, Session, Span, Symbol};
+use base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use core::ast::{ClassDefinition, Kind, TypeExpr};
 use surface::ast::{ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition};
 use surface::parser;
@@ -255,6 +255,24 @@ impl ResolveError {
                 ))
             }
         }
+    }
+}
+
+impl<'a> IntoDiagnostic<(&'a Session, Option<&'a ModuleTable>)> for ResolveError {
+    fn into_diagnostic(
+        self,
+        (session, modules): (&'a Session, Option<&'a ModuleTable>),
+    ) -> Diagnostic {
+        self.to_diagnostic(session, modules)
+    }
+}
+
+impl<'a> IntoDiagnostic<(&'a Session, Option<&'a ModuleTable>)> for &ResolveError {
+    fn into_diagnostic(
+        self,
+        (session, modules): (&'a Session, Option<&'a ModuleTable>),
+    ) -> Diagnostic {
+        self.to_diagnostic(session, modules)
     }
 }
 

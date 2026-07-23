@@ -1221,6 +1221,7 @@ impl<'a> Resolver<'a> {
 
                     Some(RawDataDef {
                         name: self.legacy_name(self.local_def_id(cx, *name)),
+                        span: self.file_span(cx, defn.1),
                         ty_params: ty_params
                             .iter()
                             .map(|p| self.symbol_text(p.0).to_string())
@@ -1229,6 +1230,7 @@ impl<'a> Resolver<'a> {
                             .iter()
                             .map(|constructor| RawConstructorDef {
                                 name: self.legacy_name(self.local_def_id(cx, constructor.0.name.0)),
+                                span: self.file_span(cx, constructor.1),
                                 fields: constructor
                                     .0
                                     .params
@@ -1397,12 +1399,15 @@ impl<'a> Resolver<'a> {
                         })
                         .collect::<Vec<_>>();
 
-                    Some(ClassDefinition {
-                        name: class_name,
-                        params: class_params,
-                        superclasses: resolved_superclasses,
-                        methods: resolved_methods,
-                    })
+                    Some((
+                        ClassDefinition {
+                            name: class_name,
+                            params: class_params,
+                            superclasses: resolved_superclasses,
+                            methods: resolved_methods,
+                        },
+                        self.file_span(cx, defn.1),
+                    ))
                 }
 
                 _ => None,
@@ -1415,7 +1420,7 @@ impl<'a> Resolver<'a> {
 
         let mut seed_class_env = imported.class_param_kinds.clone();
 
-        seed_class_env.extend(raw_class_defs.iter().map(|class_def| {
+        seed_class_env.extend(raw_class_defs.iter().map(|(class_def, _span)| {
             (
                 class_def.name.clone(),
                 class_def
@@ -1428,9 +1433,10 @@ impl<'a> Resolver<'a> {
 
         let kinded_class_defs = raw_class_defs
             .iter()
-            .map(|class_def| {
+            .map(|(class_def, span)| {
                 ClassKindInferencer::new(all_tycon_kinds.clone(), seed_class_env.clone())
                     .infer_class(class_def)
+                    .map_err(|error| error.with_span(*span))
             })
             .collect::<Result<Vec<_>, _>>()?;
 
@@ -1518,12 +1524,9 @@ impl<'a> Resolver<'a> {
                 continue;
             }
 
-            let (checked_context, checked_head) = self.kind_check_instance_predicates(
-                raw_context,
-                raw_head,
-                all_tycon_kinds,
-                class_env,
-            )?;
+            let (checked_context, checked_head) = self
+                .kind_check_instance_predicates(raw_context, raw_head, all_tycon_kinds, class_env)
+                .map_err(|error| error.with_span(self.file_span(cx, defn.1)))?;
 
             trace_predicates(
                 self.session,
@@ -1604,7 +1607,9 @@ impl<'a> Resolver<'a> {
 
             let inf =
                 SignatureKindInferencer::with_envs(sig_tycon_env.clone(), sig_class_env.clone());
-            let info = inf.infer_scheme(&raw_scheme)?;
+            let info = inf
+                .infer_scheme(&raw_scheme)
+                .map_err(|error| error.with_span(self.file_span(cx, ty.1)))?;
 
             func_schemes.insert(fn_name, info.scheme.clone());
         }

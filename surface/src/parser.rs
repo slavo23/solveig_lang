@@ -1,4 +1,4 @@
-use base::{Diagnostic, FileId, FileSpan, Label, Session, Span, Symbol};
+use base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 
 use crate::ast::*;
 use crate::lexer::{self, Assoc, Fixity, LexError, PosToken, Token, builtin_fixity};
@@ -167,6 +167,18 @@ impl ParseError {
     pub fn to_diagnostic(&self) -> Diagnostic {
         Diagnostic::error("PAR0001", "parse error")
             .with_label(Label::primary(self.span, self.message.clone()))
+    }
+}
+
+impl IntoDiagnostic for ParseError {
+    fn into_diagnostic(self, (): ()) -> Diagnostic {
+        self.to_diagnostic()
+    }
+}
+
+impl IntoDiagnostic for &ParseError {
+    fn into_diagnostic(self, (): ()) -> Diagnostic {
+        self.to_diagnostic()
     }
 }
 

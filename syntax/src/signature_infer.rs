@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use core::ast::{Kind, Predicate, Scheme, TypeExpr};
+use base::{Diagnostic, FileSpan, IntoDiagnostic, Label};
+use core::ast::{Kind, Predicate, Pretty, Scheme, TypeExpr};
 
 #[derive(Debug, Clone)]
 pub struct SignatureKindInfo {
@@ -19,11 +20,192 @@ pub struct SchemeKindInfo {
 
 #[derive(Debug, Clone)]
 pub enum KindError {
-    UnboundTypeVariable(String),
-    UnboundTypeConstructor(String),
-    OccursCheckFailed { var: String, in_kind: Kind },
-    CannotUnify { lhs: Kind, rhs: Kind },
-    SignatureMustHaveKindStar { got: Kind },
+    UnboundTypeVariable {
+        span: Option<FileSpan>,
+        name: String,
+    },
+    UnboundTypeConstructor {
+        span: Option<FileSpan>,
+        name: String,
+    },
+    OccursCheckFailed {
+        span: Option<FileSpan>,
+        var: String,
+        in_kind: Kind,
+    },
+    CannotUnify {
+        span: Option<FileSpan>,
+        lhs: Kind,
+        rhs: Kind,
+    },
+    SignatureMustHaveKindStar {
+        span: Option<FileSpan>,
+        got: Kind,
+    },
+}
+
+impl KindError {
+    pub fn unbound_type_variable(name: impl Into<String>) -> Self {
+        Self::UnboundTypeVariable {
+            span: None,
+            name: name.into(),
+        }
+    }
+
+    pub fn unbound_type_constructor(name: impl Into<String>) -> Self {
+        Self::UnboundTypeConstructor {
+            span: None,
+            name: name.into(),
+        }
+    }
+
+    pub fn occurs_check_failed(var: impl Into<String>, in_kind: Kind) -> Self {
+        Self::OccursCheckFailed {
+            span: None,
+            var: var.into(),
+            in_kind,
+        }
+    }
+
+    pub fn cannot_unify(lhs: Kind, rhs: Kind) -> Self {
+        Self::CannotUnify {
+            span: None,
+            lhs,
+            rhs,
+        }
+    }
+
+    pub fn signature_must_have_kind_star(got: Kind) -> Self {
+        Self::SignatureMustHaveKindStar { span: None, got }
+    }
+
+    pub fn with_span(mut self, span: FileSpan) -> Self {
+        match &mut self {
+            Self::UnboundTypeVariable {
+                span: error_span, ..
+            }
+            | Self::UnboundTypeConstructor {
+                span: error_span, ..
+            }
+            | Self::OccursCheckFailed {
+                span: error_span, ..
+            }
+            | Self::CannotUnify {
+                span: error_span, ..
+            }
+            | Self::SignatureMustHaveKindStar {
+                span: error_span, ..
+            } => {
+                if error_span.is_none() {
+                    *error_span = Some(span);
+                }
+            }
+        }
+
+        self
+    }
+
+    pub fn to_diagnostic(&self) -> Diagnostic {
+        match self {
+            Self::UnboundTypeVariable { span, name } => {
+                let mut diagnostic = Diagnostic::error(
+                    "KIND0001",
+                    format!("type variable `{}` is not in scope", name),
+                );
+                if let Some(span) = span {
+                    diagnostic = diagnostic.with_label(Label::primary(
+                        *span,
+                        format!("`{}` is used here, but no type variable was bound", name),
+                    ));
+                }
+                diagnostic
+            }
+
+            Self::UnboundTypeConstructor { span, name } => {
+                let mut diagnostic = Diagnostic::error(
+                    "KIND0002",
+                    format!("type constructor `{}` is not in scope", name),
+                );
+                if let Some(span) = span {
+                    diagnostic = diagnostic.with_label(Label::primary(
+                        *span,
+                        format!("`{}` is used here, but no type constructor was found", name),
+                    ));
+                }
+                diagnostic
+            }
+
+            Self::OccursCheckFailed { span, var, in_kind } => {
+                let mut diagnostic = Diagnostic::error(
+                    "KIND0003",
+                    format!(
+                        "cannot construct recursive kind `{}` in `{}`",
+                        var,
+                        in_kind.pretty()
+                    ),
+                );
+                if let Some(span) = span {
+                    diagnostic = diagnostic.with_label(Label::primary(
+                        *span,
+                        format!(
+                            "kind variable `{}` occurs inside `{}`",
+                            var,
+                            in_kind.pretty()
+                        ),
+                    ));
+                }
+                diagnostic
+            }
+
+            Self::CannotUnify { span, lhs, rhs } => {
+                let mut diagnostic = Diagnostic::error(
+                    "KIND0004",
+                    format!(
+                        "kind mismatch: `{}` is not `{}`",
+                        lhs.pretty(),
+                        rhs.pretty()
+                    ),
+                );
+                if let Some(span) = span {
+                    diagnostic = diagnostic.with_label(Label::primary(
+                        *span,
+                        format!(
+                            "this type has kind `{}`, but kind `{}` was required",
+                            lhs.pretty(),
+                            rhs.pretty()
+                        ),
+                    ));
+                }
+                diagnostic
+            }
+
+            Self::SignatureMustHaveKindStar { span, got } => {
+                let mut diagnostic = Diagnostic::error(
+                    "KIND0005",
+                    format!("signature has kind `{}` instead of `*`", got.pretty()),
+                );
+                if let Some(span) = span {
+                    diagnostic = diagnostic.with_label(Label::primary(
+                        *span,
+                        format!("this signature has kind `{}`", got.pretty()),
+                    ));
+                }
+                diagnostic
+            }
+        }
+    }
+}
+
+impl IntoDiagnostic for KindError {
+    fn into_diagnostic(self, (): ()) -> Diagnostic {
+        self.to_diagnostic()
+    }
+}
+
+impl IntoDiagnostic for &KindError {
+    fn into_diagnostic(self, (): ()) -> Diagnostic {
+        self.to_diagnostic()
+    }
 }
 
 pub struct SignatureKindInferencer {
@@ -104,7 +286,7 @@ impl SignatureKindInferencer {
             return Ok(());
         }
         if self.occurs(&var, &kind) {
-            return Err(KindError::OccursCheckFailed { var, in_kind: kind });
+            return Err(KindError::occurs_check_failed(var, kind));
         }
         self.subst.insert(var, kind);
         Ok(())
@@ -122,7 +304,7 @@ impl SignatureKindInferencer {
                 self.unify(*l1, *l2)?;
                 self.unify(*r1, *r2)
             }
-            (lhs, rhs) => Err(KindError::CannotUnify { lhs, rhs }),
+            (lhs, rhs) => Err(KindError::cannot_unify(lhs, rhs)),
         }
     }
 
@@ -149,13 +331,13 @@ impl SignatureKindInferencer {
             .class_env
             .get(&pred.class_name)
             .cloned()
-            .ok_or_else(|| KindError::UnboundTypeConstructor(pred.class_name.clone()))?;
+            .ok_or_else(|| KindError::unbound_type_constructor(pred.class_name.clone()))?;
 
         if expected_kinds.len() != pred.args.len() {
-            return Err(KindError::CannotUnify {
-                lhs: Kind::Star,
-                rhs: Kind::make_arrow(Kind::Star, Kind::Star),
-            });
+            return Err(KindError::cannot_unify(
+                Kind::Star,
+                Kind::make_arrow(Kind::Star, Kind::Star),
+            ));
         }
 
         let mut rebuilt_args = Vec::with_capacity(pred.args.len());
@@ -185,7 +367,7 @@ impl SignatureKindInferencer {
                     .get(name)
                     .cloned()
                     .map(|k| self.apply_kind(&k))
-                    .ok_or_else(|| KindError::UnboundTypeVariable(name.clone()))?;
+                    .ok_or_else(|| KindError::unbound_type_variable(name.clone()))?;
                 Ok((kind, TypeExpr::TyVar(name.clone())))
             }
 
@@ -194,7 +376,7 @@ impl SignatureKindInferencer {
                     .get(name)
                     .cloned()
                     .map(|k| self.apply_kind(&k))
-                    .ok_or_else(|| KindError::UnboundTypeVariable(name.clone()))?;
+                    .ok_or_else(|| KindError::unbound_type_variable(name.clone()))?;
                 Ok((kind, TypeExpr::TyExVar(name.clone())))
             }
 
@@ -204,7 +386,7 @@ impl SignatureKindInferencer {
                     .get(name)
                     .cloned()
                     .map(|k| self.apply_kind(&k))
-                    .ok_or_else(|| KindError::UnboundTypeConstructor(name.clone()))?;
+                    .ok_or_else(|| KindError::unbound_type_constructor(name.clone()))?;
                 Ok((kind, TypeExpr::TyCon(name.clone())))
             }
 
@@ -338,7 +520,7 @@ impl SignatureKindInferencer {
         let sig_kind = self.apply_kind(&sig_kind);
 
         if sig_kind != Kind::Star {
-            return Err(KindError::SignatureMustHaveKindStar { got: sig_kind });
+            return Err(KindError::signature_must_have_kind_star(sig_kind));
         }
 
         let mut quants = Vec::new();
@@ -380,7 +562,7 @@ impl SignatureKindInferencer {
         let body_kind = self.apply_kind(&body_kind);
 
         if body_kind != Kind::Star {
-            return Err(KindError::SignatureMustHaveKindStar { got: body_kind });
+            return Err(KindError::signature_must_have_kind_star(body_kind));
         }
 
         let quantifiers = quantifier_names

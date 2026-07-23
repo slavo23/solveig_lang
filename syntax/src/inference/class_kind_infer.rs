@@ -12,10 +12,7 @@ pub struct ClassKindInferencer {
 }
 
 impl ClassKindInferencer {
-    pub fn new(
-        tycon_env: HashMap<String, Kind>,
-        class_env: HashMap<String, Vec<Kind>>,
-    ) -> Self {
+    pub fn new(tycon_env: HashMap<String, Kind>, class_env: HashMap<String, Vec<Kind>>) -> Self {
         Self {
             next_meta: 0,
             subst: HashMap::new(),
@@ -40,9 +37,7 @@ impl ClassKindInferencer {
                     Kind::Var(v.clone())
                 }
             }
-            Kind::Arrow(lhs, rhs) => {
-                Kind::make_arrow(self.apply_kind(lhs), self.apply_kind(rhs))
-            }
+            Kind::Arrow(lhs, rhs) => Kind::make_arrow(self.apply_kind(lhs), self.apply_kind(rhs)),
         }
     }
 
@@ -62,7 +57,7 @@ impl ClassKindInferencer {
         }
 
         if self.occurs(&var, &kind) {
-            return Err(KindError::OccursCheckFailed { var, in_kind: kind });
+            return Err(KindError::occurs_check_failed(var, kind));
         }
 
         self.subst.insert(var, kind);
@@ -81,7 +76,7 @@ impl ClassKindInferencer {
                 self.unify(*l1, *l2)?;
                 self.unify(*r1, *r2)
             }
-            (lhs, rhs) => Err(KindError::CannotUnify { lhs, rhs }),
+            (lhs, rhs) => Err(KindError::cannot_unify(lhs, rhs)),
         }
     }
 
@@ -111,14 +106,14 @@ impl ClassKindInferencer {
                 .get(name)
                 .cloned()
                 .map(|k| self.apply_kind(&k))
-                .ok_or_else(|| KindError::UnboundTypeVariable(name.clone())),
+                .ok_or_else(|| KindError::unbound_type_variable(name.clone())),
 
             TypeExpr::TyCon(name) => self
                 .tycon_env
                 .get(name)
                 .cloned()
                 .map(|k| self.apply_kind(&k))
-                .ok_or_else(|| KindError::UnboundTypeConstructor(name.clone())),
+                .ok_or_else(|| KindError::unbound_type_constructor(name.clone())),
 
             TypeExpr::TyArr(lhs, rhs) => {
                 let lhs_kind = self.infer_type_kind(lhs, env)?;
@@ -169,11 +164,7 @@ impl ClassKindInferencer {
         }
     }
 
-    fn zonk_type_with_env(
-        &self,
-        ty: &TypeExpr,
-        env: &HashMap<String, Kind>,
-    ) -> TypeExpr {
+    fn zonk_type_with_env(&self, ty: &TypeExpr, env: &HashMap<String, Kind>) -> TypeExpr {
         match ty {
             TypeExpr::TyUnit => TypeExpr::TyUnit,
             TypeExpr::TyVar(name) => TypeExpr::TyVar(name.clone()),
@@ -193,15 +184,12 @@ impl ClassKindInferencer {
                     .map(|k| self.zonk_kind_for_binder(k))
                     .unwrap_or(Kind::Star);
 
-                TypeExpr::make_forall(
-                    name.clone(),
-                    kind,
-                    self.zonk_type_with_env(body, env),
-                )
+                TypeExpr::make_forall(name.clone(), kind, self.zonk_type_with_env(body, env))
             }
             #[allow(unreachable_patterns)]
             TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
-                preds.iter()
+                preds
+                    .iter()
                     .map(|p| self.zonk_predicate_with_env(p, env))
                     .collect(),
                 self.zonk_type_with_env(body, env),
@@ -209,11 +197,7 @@ impl ClassKindInferencer {
         }
     }
 
-    fn zonk_predicate_with_env(
-        &self,
-        pred: &Predicate,
-        env: &HashMap<String, Kind>,
-    ) -> Predicate {
+    fn zonk_predicate_with_env(&self, pred: &Predicate, env: &HashMap<String, Kind>) -> Predicate {
         Predicate {
             class_name: pred.class_name.clone(),
             args: pred
@@ -233,13 +217,13 @@ impl ClassKindInferencer {
             .class_env
             .get(&pred.class_name)
             .cloned()
-            .ok_or_else(|| KindError::UnboundTypeConstructor(pred.class_name.clone()))?;
+            .ok_or_else(|| KindError::unbound_type_constructor(pred.class_name.clone()))?;
 
         if expected_kinds.len() != pred.args.len() {
-            return Err(KindError::CannotUnify {
-                lhs: Kind::Star,
-                rhs: Kind::make_arrow(Kind::Star, Kind::Star),
-            });
+            return Err(KindError::cannot_unify(
+                Kind::Star,
+                Kind::make_arrow(Kind::Star, Kind::Star),
+            ));
         }
 
         for (arg, expected_kind) in pred.args.iter().zip(expected_kinds.iter()) {

@@ -86,6 +86,10 @@ impl Diagnostic {
     }
 }
 
+pub trait IntoDiagnostic<Context = ()> {
+    fn into_diagnostic(self, context: Context) -> Diagnostic;
+}
+
 #[derive(Debug, Default)]
 pub struct DiagnosticSink {
     diagnostics: RefCell<Vec<Diagnostic>>,
@@ -126,7 +130,10 @@ impl DiagnosticSink {
                     .then(left.span.end.cmp(&right.span.end)),
                 (None, Some(_)) => std::cmp::Ordering::Greater,
                 (Some(_), None) => std::cmp::Ordering::Less,
-                (None, None) => left.code.cmp(right.code).then(left.message.cmp(&right.message)),
+                (None, None) => left
+                    .code
+                    .cmp(right.code)
+                    .then(left.message.cmp(&right.message)),
             }
         });
 
@@ -517,6 +524,18 @@ impl TypeError {
         }
 
         parts.with_note(format!("the class requires `{}`", expected))
+    }
+}
+
+impl IntoDiagnostic for TypeError {
+    fn into_diagnostic(self, (): ()) -> Diagnostic {
+        self.to_diagnostic()
+    }
+}
+
+impl IntoDiagnostic for &TypeError {
+    fn into_diagnostic(self, (): ()) -> Diagnostic {
+        self.to_diagnostic()
     }
 }
 
