@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    ClassDefinition, ClassId, CtorId, DefId, ModuleId, Scheme, TyConId, TypeExpr,
+    ClassDefinition, ClassId, CtorId, DefId, ModuleId, PrettyTables, Scheme, TyConId, TypeExpr,
     class_display_name, ctor_display_name, def_display_name, tycon_display_name,
 };
 use solveig_base::{FileSpan, IntoDiagnostic, Session};
@@ -73,12 +73,18 @@ pub fn checked_project_schemes(project_root: &Path) -> Result<BTreeMap<String, S
 
 fn checked_project_schemes_impl(project_root: &Path) -> Result<BTreeMap<String, String>, String> {
     let checked_modules = check_project_modules(project_root)?;
+    let merged = merge_checked_modules(checked_modules)?;
+    let pretty_tables = PrettyTables {
+        tycons: &merged.tycon_table,
+        classes: &merged.class_table,
+    };
     let mut schemes = BTreeMap::new();
 
-    for module in checked_modules {
-        for (id, scheme) in module.func_schemes {
-            schemes.insert(def_display_name(id), scheme.pretty());
-        }
+    for (id, scheme) in &merged.func_schemes {
+        schemes.insert(
+            def_display_name(*id),
+            scheme.pretty_with_tables(pretty_tables),
+        );
     }
 
     Ok(schemes)

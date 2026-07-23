@@ -1172,6 +1172,150 @@ impl ClassTable {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct PrettyTables<'a> {
+    pub tycons: &'a TyConTable,
+    pub classes: &'a ClassTable,
+}
+
+fn short_display_name(name: &str) -> &str {
+    name.rsplit('.').next().unwrap_or(name)
+}
+
+fn tycon_display_name_with_tables(id: TyConId, tables: PrettyTables<'_>) -> String {
+    tables
+        .tycons
+        .get(id)
+        .map(|info| symbol_display_name(info.name))
+        .unwrap_or_else(|| tycon_display_name(id))
+}
+
+fn class_display_name_with_tables(id: ClassId, tables: PrettyTables<'_>) -> String {
+    tables
+        .classes
+        .get(id)
+        .map(|info| symbol_display_name(info.name))
+        .unwrap_or_else(|| class_display_name(id))
+}
+
+impl TypeExpr {
+    pub fn pretty_with_tables(&self, tables: PrettyTables<'_>) -> String {
+        fn traverse_helper(t: &Ty, parent_precedence: u8, tables: PrettyTables<'_>) -> String {
+            let curr_precedence = TypeExpr::get_precedence(t);
+
+            let type_fmt = match t {
+                TypeExpr::TyUnit => "()".into(),
+                TypeExpr::TyVar(id) => tyvar_display_name(*id),
+                TypeExpr::TyExVar(id) => legacy_evar_name(*id),
+                TypeExpr::TyCon(id) => {
+                    short_display_name(&tycon_display_name_with_tables(*id, tables)).to_string()
+                }
+
+                TypeExpr::TyArr(lhs, rhs) => {
+                    let lhs_fmt = traverse_helper(lhs, PRECEDENCE_APP, tables);
+                    let rhs_fmt = traverse_helper(rhs, PRECEDENCE_ARR, tables);
+                    format!("{lhs_fmt} -> {rhs_fmt}")
+                }
+
+                TypeExpr::TyForAll(_, _, _) => {
+                    let (kinded_quants, rest) = t.peel_forall();
+
+                    let peeled_quants = kinded_quants
+                        .iter()
+                        .map(|(id, kind)| {
+                            format!("({} : {})", tyvar_display_name(*id), kind.pretty())
+                        })
+                        .collect::<Vec<_>>();
+
+                    format!(
+                        "∀ {}. {}",
+                        peeled_quants.join(" "),
+                        traverse_helper(&rest, PRECEDENCE_LOOSE, tables)
+                    )
+                }
+
+                TypeExpr::Qualified(preds, body) => {
+                    let preds_fmt = if preds.len() == 1 {
+                        preds[0].pretty_with_tables(tables)
+                    } else {
+                        format!(
+                            "({})",
+                            preds
+                                .iter()
+                                .map(|p| p.pretty_with_tables(tables))
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        )
+                    };
+
+                    format!(
+                        "{preds_fmt} => {}",
+                        traverse_helper(body, PRECEDENCE_LOOSE, tables)
+                    )
+                }
+
+                TypeExpr::TyApp(f, x) => {
+                    let f_s = traverse_helper(f, PRECEDENCE_APP, tables);
+                    let x_s = traverse_helper(x, PRECEDENCE_ATOM, tables);
+                    format!("{f_s} {x_s}")
+                }
+            };
+
+            if curr_precedence < parent_precedence {
+                format!("({type_fmt})")
+            } else {
+                type_fmt
+            }
+        }
+
+        traverse_helper(self, PRECEDENCE_LOOSE, tables)
+    }
+}
+
+impl Predicate {
+    pub fn pretty_with_tables(&self, tables: PrettyTables<'_>) -> String {
+        let full_class_name = class_display_name_with_tables(self.class_id, tables);
+        let class_name = short_display_name(&full_class_name).to_string();
+
+        let args = self
+            .args
+            .iter()
+            .map(|arg| {
+                let s = arg.pretty_with_tables(tables);
+                match arg {
+                    TypeExpr::TyArr(_, _)
+                    | TypeExpr::TyForAll(_, _, _)
+                    | TypeExpr::Qualified(_, _) => format!("({s})"),
+                    _ => s,
+                }
+            })
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        if args.is_empty() {
+            class_name
+        } else {
+            format!("{class_name} {args}")
+        }
+    }
+}
+
+impl Scheme {
+    pub fn pretty_with_tables(&self, tables: PrettyTables<'_>) -> String {
+        let mut ty = self.ty.clone();
+
+        if !self.predicates.is_empty() {
+            ty = TypeExpr::make_qualified(self.predicates.clone(), ty);
+        }
+
+        for (name, kind) in self.quantifiers.iter().rev() {
+            ty = TypeExpr::make_forall_id(*name, kind.clone(), ty);
+        }
+
+        ty.pretty_with_tables(tables)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct InstanceMethodDef<A, P = A> {
     pub name: String,
@@ -1401,6 +1545,55 @@ mod tests {
             .expect("ICE: rebuilt class table must contain WidgetLike");
         assert_eq!(symbol_display_name(class_info.name), class_name);
         assert_eq!(class_info.definition.id, class_id);
+    }
+
+    #[test]
+    fn table_backed_pretty_uses_identity_tables() {
+        let tycon_id = TyConId(42);
+        let class_id = ClassId(77);
+        let mut tycons = TyConTable::new();
+        let mut classes = ClassTable::new();
+
+        tycons.insert_with_id(
+            tycon_id,
+            TyConInfo {
+                name: legacy_symbol_id("test.module.TableTy"),
+                kind: Kind::Star,
+                definition: TyConDefinition::Primitive,
+            },
+        );
+        classes.insert_with_id(
+            class_id,
+            ClassInfo {
+                name: legacy_symbol_id("test.module.TableClass"),
+                definition: ClassDefinition {
+                    id: class_id,
+                    name: "test.module.TableClass".to_string(),
+                    params: Vec::new(),
+                    superclasses: Vec::new(),
+                    methods: Vec::new(),
+                },
+            },
+        );
+
+        let tables = PrettyTables {
+            tycons: &tycons,
+            classes: &classes,
+        };
+        let scheme = Scheme {
+            quantifiers: Vec::new(),
+            predicates: vec![Predicate {
+                class_id,
+                args: vec![TypeExpr::TyCon(tycon_id)],
+            }],
+            ty: TypeExpr::TyCon(tycon_id),
+        };
+
+        assert_eq!(TypeExpr::TyCon(tycon_id).pretty(), "T42");
+        assert_eq!(
+            scheme.pretty_with_tables(tables),
+            "TableClass TableTy => TableTy"
+        );
     }
 
     #[test]
