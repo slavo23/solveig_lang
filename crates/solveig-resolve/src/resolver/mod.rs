@@ -65,7 +65,6 @@ fn trace_predicates(session: &Session, module: &ModuleName, label: &str, predica
 
 #[derive(Debug, Clone, Default)]
 pub struct ResolverImports {
-    pub tycon_kinds: HashMap<String, Kind>,
     pub tycon_kind_ids: HashMap<TyConId, Kind>,
     pub class_param_kind_ids: HashMap<ClassId, Vec<Kind>>,
 }

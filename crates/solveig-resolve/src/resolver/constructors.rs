@@ -179,9 +179,11 @@ impl<'a> Resolver<'a> {
                     constructors,
                 } => {
                     let (name, _span) = spanned_name;
+                    let data_name = self.legacy_name(self.local_def_id(cx, *name));
 
                     Some(RawDataDef {
-                        name: self.legacy_name(self.local_def_id(cx, *name)),
+                        id: legacy_tycon_id(&data_name),
+                        name: data_name,
                         span: self.file_span(cx, defn.1),
                         ty_params: ty_params
                             .iter()
@@ -221,10 +223,9 @@ impl<'a> Resolver<'a> {
         KindError,
     > {
         let (inferred_data, _all_tycon_kinds) =
-            infer_all_data_kinds_with_env(raw_data_defs, imported.tycon_kinds.clone())?;
+            infer_all_data_kinds_with_env(raw_data_defs, imported.tycon_kind_ids.clone())?;
 
         let mut data_defs = Vec::new();
-        let mut local_tycon_kinds = HashMap::new();
         let mut local_tycon_kind_ids = HashMap::new();
         let mut constructor_types = HashMap::new();
 
@@ -243,8 +244,7 @@ impl<'a> Resolver<'a> {
                 });
             }
 
-            local_tycon_kinds.insert(idef.name.clone(), idef.tycon_kind.clone());
-            local_tycon_kind_ids.insert(legacy_tycon_id(&idef.name), idef.tycon_kind.clone());
+            local_tycon_kind_ids.insert(idef.id, idef.tycon_kind.clone());
 
             data_defs.push(DataDefinition {
                 name: idef.name.clone(),
@@ -259,7 +259,7 @@ impl<'a> Resolver<'a> {
             module_name,
             format!(
                 "data: local_tycons={:?}, local_ctors={:?}",
-                local_tycon_kinds.keys().collect::<Vec<_>>(),
+                local_tycon_kind_ids.keys().collect::<Vec<_>>(),
                 constructor_types.keys().collect::<Vec<_>>()
             ),
         );

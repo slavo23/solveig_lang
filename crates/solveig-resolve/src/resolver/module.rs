@@ -14,7 +14,7 @@ impl<'a> Resolver<'a> {
             format!(
                 "start: defs={}, imported_tycons={}, imported_classes={}, local_classes={:?}",
                 parsed.defs.len(),
-                imported.tycon_kinds.len(),
+                imported.tycon_kind_ids.len(),
                 imported.class_param_kind_ids.len(),
                 local.classes
             ),

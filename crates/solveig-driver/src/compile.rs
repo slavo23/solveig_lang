@@ -444,7 +444,6 @@ impl<'a> FrontendState<'a> {
         };
 
         let resolver_imports = ResolverImports {
-            tycon_kinds: self.collect_imported_kinds(&imports),
             tycon_kind_ids: self.collect_imported_kind_ids(&imports),
             class_param_kind_ids: self.collect_imported_class_param_kind_ids(&imports),
         };
@@ -553,27 +552,6 @@ impl<'a> FrontendState<'a> {
                     })
             })
             .collect()
-    }
-
-    fn collect_imported_kinds(
-        &self,
-        imports: &[EffectiveImport],
-    ) -> HashMap<String, solveig_ast::ast::Kind> {
-        let mut out = HashMap::new();
-
-        for imp in imports {
-            if let Some(api) = self.typed_apis.get(&imp.module) {
-                let filtered = api.filtered(self.session, &imp.spec);
-                for (sym, kind) in &filtered.type_kinds {
-                    let name = filtered
-                        .type_name(*sym)
-                        .expect("ICE: imported type kind missing typed API name");
-                    out.insert(name, kind.clone());
-                }
-            }
-        }
-
-        out
     }
 
     fn collect_imported_kind_ids(
