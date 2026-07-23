@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use solveig_ast::ast::{
-    CaseArmNode, CtorId, Literal, Pattern, PatternNode, Predicate, Pretty, TyVarId, TypeExpr,
-    ctor_display_name, tycon_display_name,
+    CaseArmNode, CtorId, CtorTable, Literal, Pattern, PatternNode, Predicate, PrettyTables,
+    TyConId, TyVarId, TypeExpr, ctor_display_name, symbol_display_name, tycon_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -15,12 +15,18 @@ type Span = Range<usize>;
 pub fn check_case(
     file: FileId,
     constructor_types: &HashMap<CtorId, TypeExpr>,
+    ctor_table: &CtorTable,
+    pretty_tables: PrettyTables<'_>,
     scrutinee_type: &TypeExpr,
     arms: &[CaseArmNode<Span>],
     case_span: Span,
 ) -> Result<(), TypeError> {
-    let constructor_env = ConstructorEnv::from_constructor_types(constructor_types);
-    let checker = ExhaustivenessChecker { constructor_env };
+    let constructor_env = ConstructorEnv::from_constructor_types(constructor_types, ctor_table);
+    let checker = ExhaustivenessChecker {
+        constructor_env,
+        ctor_table,
+        pretty_tables,
+    };
 
     let scrutinee_type = normalize_type(scrutinee_type);
 
@@ -39,7 +45,7 @@ pub fn check_case(
             break;
         };
 
-        let rendered = pretty_witness_row(&witness);
+        let rendered = checker.pretty_witness_row(&witness);
 
         if missing.contains(&rendered) {
             break;
@@ -54,7 +60,7 @@ pub fn check_case(
     } else {
         Err(TypeError::NonExhaustivePatterns {
             span: FileSpan::new(file, SourceSpan::from_usize_range(case_span)),
-            scrutinee_type: scrutinee_type.pretty(),
+            scrutinee_type: scrutinee_type.pretty_with_tables(pretty_tables),
             missing,
         })
     }
@@ -99,12 +105,12 @@ enum Witness {
 }
 
 impl Witness {
-    fn pretty(&self) -> String {
+    fn pretty(&self, ctor_table: &CtorTable) -> String {
         match self {
             Witness::Wild => "_".to_string(),
 
             Witness::Head(Head::Constructor(id), args) => {
-                let display_name = ctor_display_name(*id);
+                let display_name = ctor_display_name_with_table(*id, ctor_table);
                 let name = short_name(&display_name);
 
                 if name == "Nil" && args.is_empty() {
@@ -112,7 +118,11 @@ impl Witness {
                 }
 
                 if name == "Cons" && args.len() == 2 {
-                    return format!("{} :: {}", args[0].pretty_atom(), args[1].pretty());
+                    return format!(
+                        "{} :: {}",
+                        args[0].pretty_atom(ctor_table),
+                        args[1].pretty(ctor_table)
+                    );
                 }
 
                 if args.is_empty() {
@@ -122,7 +132,7 @@ impl Witness {
                         "{} {}",
                         name,
                         args.iter()
-                            .map(Witness::pretty_atom)
+                            .map(|arg| arg.pretty_atom(ctor_table))
                             .collect::<Vec<_>>()
                             .join(" ")
                     )
@@ -136,11 +146,11 @@ impl Witness {
         }
     }
 
-    fn pretty_atom(&self) -> String {
+    fn pretty_atom(&self, ctor_table: &CtorTable) -> String {
         match self {
-            Witness::Wild => self.pretty(),
-            Witness::Head(_, args) if args.is_empty() => self.pretty(),
-            Witness::Head(_, _) => format!("({})", self.pretty()),
+            Witness::Wild => self.pretty(ctor_table),
+            Witness::Head(_, args) if args.is_empty() => self.pretty(ctor_table),
+            Witness::Head(_, _) => format!("({})", self.pretty(ctor_table)),
         }
     }
 }
@@ -154,19 +164,25 @@ struct ConstructorSig {
 #[derive(Clone, Debug, Default)]
 struct ConstructorEnv {
     by_name: HashMap<CtorId, ConstructorSig>,
-    by_tycon: HashMap<String, Vec<CtorId>>,
+    by_tycon: HashMap<TyConId, Vec<CtorId>>,
 }
 
-fn is_open_primitive_type(ty: &TypeExpr) -> bool {
+fn is_open_primitive_type(ty: &TypeExpr, pretty_tables: PrettyTables<'_>) -> bool {
     match normalize_type(ty) {
-        TypeExpr::TyCon(id) => matches!(short_name(&tycon_display_name(id)), "Int" | "String"),
-        TypeExpr::TyApp(lhs, _) => is_open_primitive_type(&lhs),
+        TypeExpr::TyCon(id) => matches!(
+            short_name(&tycon_display_name_with_tables(id, pretty_tables)),
+            "Int" | "String"
+        ),
+        TypeExpr::TyApp(lhs, _) => is_open_primitive_type(&lhs, pretty_tables),
         _ => false,
     }
 }
 
 impl ConstructorEnv {
-    fn from_constructor_types(constructor_types: &HashMap<CtorId, TypeExpr>) -> Self {
+    fn from_constructor_types(
+        constructor_types: &HashMap<CtorId, TypeExpr>,
+        ctor_table: &CtorTable,
+    ) -> Self {
         let mut env = ConstructorEnv::default();
 
         for (constructor_id, constructor_type) in constructor_types {
@@ -194,8 +210,8 @@ impl ConstructorEnv {
 
         for constructors in env.by_tycon.values_mut() {
             constructors.sort_by(|left, right| {
-                let left_name = ctor_display_name(*left);
-                let right_name = ctor_display_name(*right);
+                let left_name = ctor_display_name_with_table(*left, ctor_table);
+                let right_name = ctor_display_name_with_table(*right, ctor_table);
                 short_name(&left_name)
                     .cmp(short_name(&right_name))
                     .then_with(|| left_name.cmp(&right_name))
@@ -205,8 +221,12 @@ impl ConstructorEnv {
         env
     }
 
-    fn constructors_for_type(&self, ty: &TypeExpr) -> Option<Vec<CtorId>> {
-        if is_open_primitive_type(ty) {
+    fn constructors_for_type(
+        &self,
+        ty: &TypeExpr,
+        pretty_tables: PrettyTables<'_>,
+    ) -> Option<Vec<CtorId>> {
+        if is_open_primitive_type(ty, pretty_tables) {
             return None;
         }
 
@@ -236,11 +256,27 @@ impl ConstructorEnv {
     }
 }
 
-struct ExhaustivenessChecker {
+struct ExhaustivenessChecker<'a> {
     constructor_env: ConstructorEnv,
+    ctor_table: &'a CtorTable,
+    pretty_tables: PrettyTables<'a>,
 }
 
-impl ExhaustivenessChecker {
+impl ExhaustivenessChecker<'_> {
+    fn pretty_witness_row(&self, witness: &[Witness]) -> String {
+        match witness {
+            [] => "_".to_string(),
+
+            [one] => one.pretty(self.ctor_table),
+
+            many => many
+                .iter()
+                .map(|witness| witness.pretty(self.ctor_table))
+                .collect::<Vec<_>>()
+                .join(", "),
+        }
+    }
+
     fn useful(
         &self,
         matrix: &[Vec<Pat>],
@@ -296,7 +332,10 @@ impl ExhaustivenessChecker {
         types: &[TypeExpr],
         first_type: &TypeExpr,
     ) -> Option<Vec<Witness>> {
-        let Some(constructors) = self.constructor_env.constructors_for_type(first_type) else {
+        let Some(constructors) = self
+            .constructor_env
+            .constructors_for_type(first_type, self.pretty_tables)
+        else {
             let rest = self.useful_default_tail(matrix, vector, types)?;
 
             let mut out = Vec::with_capacity(1 + rest.len());
@@ -540,20 +579,6 @@ fn witness_to_pattern(witness: &Witness) -> Pat {
     }
 }
 
-fn pretty_witness_row(witness: &[Witness]) -> String {
-    match witness {
-        [] => "_".to_string(),
-
-        [one] => one.pretty(),
-
-        many => many
-            .iter()
-            .map(Witness::pretty)
-            .collect::<Vec<_>>()
-            .join(", "),
-    }
-}
-
 fn constructor_shape(ty: &TypeExpr) -> Option<(Vec<TypeExpr>, TypeExpr)> {
     let mut current = strip_type_prefixes(ty.clone());
     let mut args = Vec::new();
@@ -590,9 +615,9 @@ fn normalize_type(ty: &TypeExpr) -> TypeExpr {
     strip_type_prefixes(ty.clone())
 }
 
-fn type_head_tycon(ty: &TypeExpr) -> Option<String> {
+fn type_head_tycon(ty: &TypeExpr) -> Option<TyConId> {
     match normalize_type(ty) {
-        TypeExpr::TyCon(id) => Some(tycon_display_name(id)),
+        TypeExpr::TyCon(id) => Some(id),
 
         TypeExpr::TyApp(lhs, _) => type_head_tycon(&lhs),
 
@@ -686,10 +711,28 @@ fn short_name(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
+fn ctor_display_name_with_table(id: CtorId, ctor_table: &CtorTable) -> String {
+    ctor_table
+        .get(id)
+        .map(|info| symbol_display_name(info.name))
+        .unwrap_or_else(|| ctor_display_name(id))
+}
+
+fn tycon_display_name_with_tables(id: TyConId, pretty_tables: PrettyTables<'_>) -> String {
+    pretty_tables
+        .tycons
+        .get(id)
+        .map(|info| symbol_display_name(info.name))
+        .unwrap_or_else(|| tycon_display_name(id))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solveig_ast::ast::{CaseArm, ExprNode, Kind, TermExpr, TermExprNode, legacy_ctor_id};
+    use solveig_ast::ast::{
+        CaseArm, ClassTable, CtorInfo, ExprNode, Kind, TermExpr, TermExprNode, TyConDefinition,
+        TyConInfo, TyConTable, legacy_ctor_id, legacy_symbol_id,
+    };
 
     struct ExhaustivenessCase {
         name: &'static str,
@@ -769,14 +812,98 @@ mod tests {
         }
     }
 
+    #[test]
+    fn check_case_witnesses_use_constructor_table_names() {
+        let tycon_id = TyConId(42);
+        let hidden_id = CtorId(7);
+        let shown_id = CtorId(9);
+        let widget = TypeExpr::TyCon(tycon_id);
+
+        let constructor_types =
+            HashMap::from([(hidden_id, widget.clone()), (shown_id, widget.clone())]);
+
+        let mut tycon_table = TyConTable::new();
+        tycon_table.insert_with_id(
+            tycon_id,
+            TyConInfo {
+                name: legacy_symbol_id("test.pretty.Widget"),
+                kind: Kind::Star,
+                definition: TyConDefinition::Primitive,
+            },
+        );
+
+        let mut ctor_table = CtorTable::new();
+        ctor_table.insert_with_id(
+            hidden_id,
+            CtorInfo {
+                name: legacy_symbol_id("test.pretty.Hidden"),
+                tycon: tycon_id,
+                fields: Vec::new(),
+                full_type: widget.clone(),
+                tag: 0,
+            },
+        );
+        ctor_table.insert_with_id(
+            shown_id,
+            CtorInfo {
+                name: legacy_symbol_id("test.pretty.Shown"),
+                tycon: tycon_id,
+                fields: Vec::new(),
+                full_type: widget.clone(),
+                tag: 1,
+            },
+        );
+
+        let class_table = ClassTable::new();
+        let arms = vec![arm(Pattern::Con(hidden_id, Vec::new()))];
+
+        match check_case(
+            FileId(0),
+            &constructor_types,
+            &ctor_table,
+            PrettyTables {
+                tycons: &tycon_table,
+                classes: &class_table,
+            },
+            &widget,
+            &arms,
+            span(),
+        ) {
+            Ok(()) => panic!("ICE: expected non-exhaustive pattern report"),
+            Err(TypeError::NonExhaustivePatterns {
+                scrutinee_type,
+                missing,
+                ..
+            }) => {
+                assert_eq!(scrutinee_type, "Widget");
+                assert_eq!(missing, vec!["Shown"]);
+            }
+            Err(error) => panic!("ICE: expected only exhaustiveness errors, got {error:?}"),
+        }
+    }
+
     fn missing_patterns(
         constructor_types: &HashMap<CtorId, TypeExpr>,
         scrutinee_type: &TypeExpr,
         patterns: Vec<Pattern<Span>>,
     ) -> Vec<String> {
         let arms = patterns.into_iter().map(arm).collect::<Vec<_>>();
+        let ctor_table = CtorTable::new();
+        let tycon_table = TyConTable::new();
+        let class_table = ClassTable::new();
 
-        match check_case(FileId(0), constructor_types, scrutinee_type, &arms, span()) {
+        match check_case(
+            FileId(0),
+            constructor_types,
+            &ctor_table,
+            PrettyTables {
+                tycons: &tycon_table,
+                classes: &class_table,
+            },
+            scrutinee_type,
+            &arms,
+            span(),
+        ) {
             Ok(()) => Vec::new(),
             Err(TypeError::NonExhaustivePatterns { missing, .. }) => missing,
             Err(error) => panic!("ICE: expected only exhaustiveness errors, got {error:?}"),

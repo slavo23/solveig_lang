@@ -1,5 +1,9 @@
-fn dict_type_for_pred(pred: &Predicate, classes: &HashMap<String, ClassRuntimeInfo>) -> TypeExpr {
-    let class_name = class_display_name(pred.class_id);
+fn dict_type_for_pred(
+    pred: &Predicate,
+    classes: &HashMap<String, ClassRuntimeInfo>,
+    tables: PrettyTables<'_>,
+) -> TypeExpr {
+    let class_name = display_class_name(pred.class_id, tables);
     let info = classes
         .get(&class_name)
         .unwrap_or_else(|| panic!("ICE: missing runtime class info for {}", class_name));
@@ -180,13 +184,18 @@ fn resolve_superclass_evidence_from_given(
     given: &Predicate,
     given_expr: TermExprNode<TcMetadata, Span>,
     classes: &HashMap<String, ClassRuntimeInfo>,
+    tables: PrettyTables<'_>,
     seen: &mut Vec<String>,
 ) -> Option<TermExprNode<TcMetadata, Span>> {
     if given == wanted {
         return Some(given_expr);
     }
 
-    let key = format!("{}=>{}", mangle_predicate(given), mangle_predicate(wanted));
+    let key = format!(
+        "{}=>{}",
+        mangle_predicate(given, tables),
+        mangle_predicate(wanted, tables)
+    );
 
     if seen.contains(&key) {
         return None;
@@ -194,7 +203,7 @@ fn resolve_superclass_evidence_from_given(
 
     seen.push(key);
 
-    let given_class_name = class_display_name(given.class_id);
+    let given_class_name = display_class_name(given.class_id, tables);
     let Some(class_rt) = classes.get(&given_class_name) else {
         seen.pop();
         return None;
@@ -217,6 +226,7 @@ fn resolve_superclass_evidence_from_given(
             &instantiated_superclass,
             superclass_expr,
             classes,
+            tables,
             seen,
         ) {
             seen.pop();
@@ -232,6 +242,7 @@ fn resolve_evidence(
     env: &EvidenceEnv,
     classes: &HashMap<String, ClassRuntimeInfo>,
     instances: &[InstanceDefinition<TcMetadata, Span>],
+    tables: PrettyTables<'_>,
     seen: &mut Vec<String>,
 ) -> Option<TermExprNode<TcMetadata, Span>> {
     if let Some(given) = env.lookup(pred) {
@@ -244,13 +255,14 @@ fn resolve_evidence(
             given_pred,
             given_expr.clone(),
             classes,
+            tables,
             &mut Vec::new(),
         ) {
             return Some(evidence);
         }
     }
 
-    let key = mangle_predicate(pred);
+    let key = mangle_predicate(pred, tables);
 
     if seen.contains(&key) {
         return None;
@@ -263,12 +275,13 @@ fn resolve_evidence(
             continue;
         };
 
-        let mut dict_expr = mk_global_var(&instance_dict_name(&inst.head));
+        let mut dict_expr = mk_global_var(&instance_dict_name(&inst.head, tables));
 
         for ctx_pred in &inst.context {
             let needed_pred = instantiate_predicate_with_subst(ctx_pred, &subst);
 
-            let ctx_evidence = resolve_evidence(&needed_pred, env, classes, instances, seen)?;
+            let ctx_evidence =
+                resolve_evidence(&needed_pred, env, classes, instances, tables, seen)?;
 
             dict_expr = mk_app(dict_expr, ctx_evidence);
         }
@@ -333,6 +346,7 @@ fn build_class_runtime_info(
 fn synthesize_dict_data_defs(
     module: &ResolvedModule<TcMetadata, Span>,
     classes: &HashMap<String, ClassRuntimeInfo>,
+    tables: PrettyTables<'_>,
 ) -> Vec<DataDefinition> {
     module
         .class_defs
@@ -345,7 +359,7 @@ fn synthesize_dict_data_defs(
             let superclass_field_types = class_def
                 .superclasses
                 .iter()
-                .map(|pred| dict_type_for_pred(pred, classes));
+                .map(|pred| dict_type_for_pred(pred, classes, tables));
 
             let method_field_types = class_def.methods.iter().map(|m| m.scheme.ty.clone());
 
@@ -385,6 +399,7 @@ fn synthesize_dict_data_defs(
 fn synthesize_selector_defs(
     module: &ResolvedModule<TcMetadata, Span>,
     classes: &HashMap<String, ClassRuntimeInfo>,
+    tables: PrettyTables<'_>,
 ) -> Vec<TermDefinition<TcMetadata, Span>> {
     let mut out = Vec::new();
 
@@ -447,7 +462,7 @@ fn synthesize_selector_defs(
             };
 
             let selector_ty = TypeExpr::make_arr(
-                dict_type_for_pred(&dict_pred, classes),
+                dict_type_for_pred(&dict_pred, classes, tables),
                 method.scheme.ty.clone(),
             );
 
@@ -521,6 +536,7 @@ fn elaborate_func_defs(
 ) -> Vec<TermDefinition<TcMetadata, Span>> {
     let method_to_class = build_method_to_class(module);
     let constrained_funcs = build_constrained_func_info(module);
+    let tables = pretty_tables_for_module(module);
 
     module
         .func_defs
@@ -534,7 +550,7 @@ fn elaborate_func_defs(
             let mut new_body = def.body.clone();
 
             for pred in sig.predicates.iter().rev() {
-                let dict_name = instance_dict_name(pred);
+                let dict_name = instance_dict_name(pred, tables);
                 evidence_env.extend(pred.clone(), mk_var(&dict_name));
 
                 let new_body_anno = new_body.anno.clone();
@@ -551,6 +567,7 @@ fn elaborate_func_defs(
                 &method_to_class,
                 &constrained_funcs,
                 &module.instance_defs,
+                tables,
             );
 
             let new_ty = sig
@@ -558,7 +575,7 @@ fn elaborate_func_defs(
                 .iter()
                 .rev()
                 .fold(sig.ty.clone(), |acc, pred| {
-                    TypeExpr::make_arr(dict_type_for_pred(pred, classes), acc)
+                    TypeExpr::make_arr(dict_type_for_pred(pred, classes, tables), acc)
                 });
 
             TermDefinition {
@@ -622,6 +639,7 @@ fn free_type_vars_in_instance(inst: &InstanceDefinition<TcMetadata, Span>) -> Ve
 fn synthesize_instance_dict_defs(
     module: &ResolvedModule<TcMetadata, Span>,
     classes: &HashMap<String, ClassRuntimeInfo>,
+    tables: PrettyTables<'_>,
 ) -> Vec<TermDefinition<TcMetadata, Span>> {
     let mut out = Vec::new();
 
@@ -629,8 +647,8 @@ fn synthesize_instance_dict_defs(
     let constrained_funcs = build_constrained_func_info(module);
 
     for inst in &module.instance_defs {
-        let dict_name = instance_dict_name(&inst.head);
-        let inst_class_name = class_display_name(inst.head.class_id);
+        let dict_name = instance_dict_name(&inst.head, tables);
+        let inst_class_name = display_class_name(inst.head.class_id, tables);
 
         let class_rt = classes
             .get(&inst_class_name)
@@ -646,7 +664,7 @@ fn synthesize_instance_dict_defs(
         let mut context_dict_names = Vec::new();
 
         for pred in &inst.context {
-            let dict_arg_name = format!("arg${}", instance_dict_name(pred));
+            let dict_arg_name = format!("arg${}", instance_dict_name(pred, tables));
             context_dict_names.push(dict_arg_name.clone());
             evidence_env.extend(pred.clone(), mk_var(&dict_arg_name));
         }
@@ -663,12 +681,13 @@ fn synthesize_instance_dict_defs(
                 &evidence_env,
                 classes,
                 &module.instance_defs,
+                tables,
                 &mut Vec::new(),
             )
             .unwrap_or_else(|| {
                 panic!("ICE: missing superclass evidence: {} requires {}",
-                    inst.head.pretty(),
-                    needed_superclass.pretty(),
+                    inst.head.pretty_with_tables(tables),
+                    needed_superclass.pretty_with_tables(tables),
                 )
             });
 
@@ -689,7 +708,7 @@ fn synthesize_instance_dict_defs(
                 .find(|m| m.name == short_name)
                 .unwrap_or_else(|| {
                     panic!("ICE: missing instance method: {} lacks {}",
-                        inst.head.pretty(),
+                        inst.head.pretty_with_tables(tables),
                         class_method.name
                     )
                 });
@@ -701,6 +720,7 @@ fn synthesize_instance_dict_defs(
                 &method_to_class,
                 &constrained_funcs,
                 &module.instance_defs,
+                tables,
             );
 
             field_exprs.push(rewritten_method);
@@ -718,10 +738,10 @@ fn synthesize_instance_dict_defs(
             );
         }
 
-        let dict_ty = dict_type_for_pred(&inst.head, classes);
+        let dict_ty = dict_type_for_pred(&inst.head, classes, tables);
 
         let final_ty = inst.context.iter().rev().fold(dict_ty, |acc, pred| {
-            TypeExpr::make_arr(dict_type_for_pred(pred, classes), acc)
+            TypeExpr::make_arr(dict_type_for_pred(pred, classes, tables), acc)
         });
 
         let quantifiers = free_type_vars_in_instance(inst)

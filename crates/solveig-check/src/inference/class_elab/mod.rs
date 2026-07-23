@@ -3,9 +3,10 @@ use std::ops::Range;
 
 use solveig_ast::ast::{
     CaseArm, CaseArmNode, ConstructorDef, DataDefinition, InstanceDefinition, Kind, Pattern,
-    PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode,
-    TyVarId, TypeExpr, VarRef, class_display_name, legacy_ctor_id, legacy_def_id, legacy_tycon_id,
-    legacy_tyvar_id, tycon_display_name, tyvar_display_name, var_display_name,
+    PatternNode, Predicate, PrettyTables, ResolvedModule, Scheme, TermDefinition, TermExpr,
+    TermExprNode, TyVarId, TypeExpr, VarRef, class_display_name, legacy_ctor_id, legacy_def_id,
+    legacy_tycon_id, legacy_tyvar_id, symbol_display_name, tycon_display_name, tyvar_display_name,
+    var_display_name,
 };
 
 use crate::inference::type_infer::TcMetadata;
@@ -54,6 +55,13 @@ impl EvidenceEnv {
 
     fn extend(&mut self, pred: Predicate, expr: TermExprNode<TcMetadata, Span>) {
         self.by_pred.push((pred, expr));
+    }
+}
+
+fn pretty_tables_for_module(module: &ResolvedModule<TcMetadata, Span>) -> PrettyTables<'_> {
+    PrettyTables {
+        tycons: &module.tycon_table,
+        classes: &module.class_table,
     }
 }
 

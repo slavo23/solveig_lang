@@ -5,6 +5,7 @@ fn rewrite_expr(
     method_to_class: &HashMap<String, String>,
     constrained_funcs: &HashMap<String, ConstrainedFuncInfo>,
     instances: &[InstanceDefinition<TcMetadata, Span>],
+    tables: PrettyTables<'_>,
 ) -> TermExprNode<TcMetadata, Span> {
     let anno = expr.anno.clone();
 
@@ -32,16 +33,23 @@ fn rewrite_expr(
                     let needed_pred =
                         instantiate_predicate_with_subst(&method_rt.class_head_pred, &subst);
 
-                    if let Some(dict_expr) =
-                        resolve_evidence(&needed_pred, env, class_info, instances, &mut Vec::new())
+                    if let Some(dict_expr) = resolve_evidence(
+                        &needed_pred,
+                        env,
+                        class_info,
+                        instances,
+                        tables,
+                        &mut Vec::new(),
+                    )
                     {
                         TermExpr::App(
                             Box::new(mk_global_var(&method_rt.selector_name)),
                             Box::new(dict_expr),
                         )
                     } else {
-                        panic!("ICE: missing method evidence: {} needs {:?}",
-                            name, needed_pred
+                        panic!("ICE: missing method evidence: {} needs {}",
+                            name,
+                            needed_pred.pretty_with_tables(tables)
                         );
                     }
                 } else {
@@ -62,6 +70,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
         ),
 
@@ -75,6 +84,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             );
 
             let rewritten_args = args
@@ -87,6 +97,7 @@ fn rewrite_expr(
                         method_to_class,
                         constrained_funcs,
                         instances,
+                        tables,
                     )
                 })
                 .collect::<Vec<_>>();
@@ -108,12 +119,14 @@ fn rewrite_expr(
                                 env,
                                 class_info,
                                 instances,
+                                tables,
                                 &mut Vec::new(),
                             ) {
                                 dict_args.push(dict_expr);
                             } else {
-                                panic!("ICE: missing constrained-function evidence: {} needs {:?}",
-                                    name, instantiated_pred
+                                panic!("ICE: missing constrained-function evidence: {} needs {}",
+                                    name,
+                                    instantiated_pred.pretty_with_tables(tables)
                                 );
                             }
                         }
@@ -146,6 +159,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
         ),
 
@@ -157,6 +171,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
             ty.clone(),
         ),
@@ -169,6 +184,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
             ty.clone(),
         ),
@@ -181,6 +197,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
             arms.iter()
                 .map(|arm| {
@@ -194,6 +211,7 @@ fn rewrite_expr(
                                 method_to_class,
                                 constrained_funcs,
                                 instances,
+                                tables,
                             ),
                         },
                         arm.anno.clone(),
@@ -210,6 +228,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
             Box::new(rewrite_expr(
                 t,
@@ -218,6 +237,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
             Box::new(rewrite_expr(
                 e,
@@ -226,6 +246,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
         ),
 
@@ -238,6 +259,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
             Box::new(rewrite_expr(
                 r,
@@ -246,6 +268,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
         ),
 
@@ -258,6 +281,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
         ),
 
@@ -270,6 +294,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
             Box::new(rewrite_expr(
                 in_expr,
@@ -278,6 +303,7 @@ fn rewrite_expr(
                 method_to_class,
                 constrained_funcs,
                 instances,
+                tables,
             )),
         ),
 
@@ -290,10 +316,11 @@ pub fn elaborate_typeclasses(
     module: &ResolvedModule<TcMetadata, Span>,
 ) -> ResolvedModule<TcMetadata, Span> {
     let class_info = build_class_runtime_info(module);
+    let module_tables = pretty_tables_for_module(module);
 
-    let dict_data_defs = synthesize_dict_data_defs(module, &class_info);
-    let selector_defs = synthesize_selector_defs(module, &class_info);
-    let instance_dict_defs = synthesize_instance_dict_defs(module, &class_info);
+    let dict_data_defs = synthesize_dict_data_defs(module, &class_info, module_tables);
+    let selector_defs = synthesize_selector_defs(module, &class_info, module_tables);
+    let instance_dict_defs = synthesize_instance_dict_defs(module, &class_info, module_tables);
 
     let mut data_defs = module.data_defs.clone();
     data_defs.extend(dict_data_defs.clone());

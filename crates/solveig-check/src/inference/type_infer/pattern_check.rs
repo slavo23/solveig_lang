@@ -121,6 +121,8 @@ impl TypeChecker {
         exhaustiveness::check_case(
             self.file,
             &self.constructor_types,
+            &self.ctor_table,
+            self.pretty_tables(),
             &scrutinee_type_for_exhaustiveness,
             arms,
             span.clone(),
