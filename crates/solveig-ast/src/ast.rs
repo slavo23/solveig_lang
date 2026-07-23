@@ -121,6 +121,10 @@ pub fn legacy_evar_id(name: &str) -> Option<EvarId> {
     raw.parse::<u32>().ok().map(EvarId)
 }
 
+pub fn legacy_tyvar_name(base: &str, id: TyVarId) -> String {
+    format!("{}{}", base, id.0)
+}
+
 impl Ty {
     pub fn is_mono(&self) -> bool {
         match self {
@@ -195,6 +199,10 @@ impl Ty {
 
     pub fn make_var(var_name: String) -> TypeExpr {
         Self::TyVar(var_name)
+    }
+
+    pub fn make_var_id(base: &str, id: TyVarId) -> TypeExpr {
+        Self::TyVar(legacy_tyvar_name(base, id))
     }
 
     pub fn make_evar(id: EvarId) -> TypeExpr {
@@ -745,5 +753,16 @@ mod tests {
             TypeExpr::TyExVar("a^42".to_string())
         );
         assert_eq!(legacy_evar_id("user_type_var"), None);
+    }
+
+    #[test]
+    fn legacy_tyvar_bridge_names_generated_ids() {
+        let id = TyVarId(9);
+
+        assert_eq!(legacy_tyvar_name("t", id), "t9");
+        assert_eq!(
+            TypeExpr::make_var_id("t", id),
+            TypeExpr::TyVar("t9".to_string())
+        );
     }
 }

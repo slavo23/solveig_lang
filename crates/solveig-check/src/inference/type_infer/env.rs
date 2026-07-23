@@ -93,6 +93,9 @@ impl TypeChecker {
     fn fresh_evar_id(&mut self) -> EvarId {
         EvarId(self.fresh_id())
     }
+    fn fresh_tyvar_id(&mut self) -> TyVarId {
+        TyVarId(self.fresh_id())
+    }
     fn evar_type(id: EvarId) -> TypeExpr {
         TypeExpr::make_evar(id)
     }
@@ -100,8 +103,16 @@ impl TypeChecker {
         legacy_evar_id(evar_name)
             .unwrap_or_else(|| panic!("ICE: malformed legacy evar name `{evar_name}`"))
     }
-    fn fresh_universal_name(&mut self, base: &str) -> String {
-        format!("{}{}", base, self.fresh_id())
+    fn fresh_universal(&mut self, base: &str) -> (TyVarId, String) {
+        let id = self.fresh_tyvar_id();
+        (id, legacy_tyvar_name(base, id))
+    }
+    fn fresh_universal_entry(&mut self, name: String, kind: Kind) -> ContextEntry {
+        ContextEntry::UniVar {
+            id: self.fresh_tyvar_id(),
+            name,
+            kind,
+        }
     }
     fn scheme_to_type(scheme: &Scheme) -> TypeExpr {
         let mut ty = scheme.ty.clone();

@@ -470,11 +470,11 @@ impl TypeChecker {
         let mut binders = Vec::new();
 
         for evar in evars {
-            let universal = self.fresh_universal_name("t");
+            let (universal_id, universal) = self.fresh_universal("t");
             let kind = ctx.evar_kind_id(evar).unwrap_or(Kind::Star);
             let evar_name = solveig_ast::ast::legacy_evar_name(evar);
 
-            result = result.substitute(&evar_name, &TypeExpr::TyVar(universal.clone()));
+            result = result.substitute(&evar_name, &TypeExpr::make_var_id("t", universal_id));
             binders.push((universal, kind));
         }
 

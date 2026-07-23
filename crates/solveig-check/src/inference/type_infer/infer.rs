@@ -218,7 +218,7 @@ impl TypeChecker {
                 Ok((delta, elaborated, result_type))
             }
             TermExpr::TyAbs(param, kind, body) => {
-                let universal_entry = ContextEntry::UniVar(param.clone(), kind.clone());
+                let universal_entry = self.fresh_universal_entry(param.clone(), kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
 
                 let (delta, elaborated_body, body_type) =

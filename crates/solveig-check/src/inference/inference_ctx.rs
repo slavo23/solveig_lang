@@ -1,5 +1,5 @@
 use solveig_ast::ast::{
-    EvarId, Kind, Predicate, Pretty, TypeExpr, legacy_evar_id as decode_legacy_evar_id,
+    EvarId, Kind, Predicate, Pretty, TyVarId, TypeExpr, legacy_evar_id as decode_legacy_evar_id,
 };
 use std::collections::HashMap;
 use std::iter::successors;
@@ -7,10 +7,22 @@ use std::iter::successors;
 #[derive(Clone, PartialEq, Debug)]
 pub enum ContextEntry {
     ExVar(EvarId, Kind),
-    UniVar(String, Kind),
-    TypedVar { var_name: String, ty: TypeExpr },
-    SolvedEVar { lhs: EvarId, rhs: TypeExpr },
-    Marker { var_name: String },
+    UniVar {
+        id: TyVarId,
+        name: String,
+        kind: Kind,
+    },
+    TypedVar {
+        var_name: String,
+        ty: TypeExpr,
+    },
+    SolvedEVar {
+        lhs: EvarId,
+        rhs: TypeExpr,
+    },
+    Marker {
+        var_name: String,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -175,7 +187,13 @@ impl Context {
     pub fn has_universal(&self, var_name: &str) -> bool {
         self.entries
             .iter()
-            .any(|ent| matches!(ent, ContextEntry::UniVar(name, _) if name == var_name))
+            .any(|ent| matches!(ent, ContextEntry::UniVar { name, .. } if name == var_name))
+    }
+
+    pub fn has_universal_id(&self, var_id: TyVarId) -> bool {
+        self.entries
+            .iter()
+            .any(|ent| matches!(ent, ContextEntry::UniVar { id, .. } if *id == var_id))
     }
 
     pub fn evar_kind(&self, evar_name: &str) -> Option<Kind> {
@@ -192,7 +210,14 @@ impl Context {
 
     pub fn universal_kind(&self, var_name: &str) -> Option<Kind> {
         self.entries.iter().find_map(|ent| match ent {
-            ContextEntry::UniVar(name, kind) if name == var_name => Some(kind.clone()),
+            ContextEntry::UniVar { name, kind, .. } if name == var_name => Some(kind.clone()),
+            _ => None,
+        })
+    }
+
+    pub fn universal_kind_id(&self, var_id: TyVarId) -> Option<Kind> {
+        self.entries.iter().find_map(|ent| match ent {
+            ContextEntry::UniVar { id, kind, .. } if *id == var_id => Some(kind.clone()),
             _ => None,
         })
     }
@@ -303,9 +328,12 @@ impl Context {
                 self.type_well_formed(lhs) && self.type_well_formed(rhs)
             }
             TypeExpr::TyForAll(quantifier, kind, body) => {
-                let extended = self
-                    .clone()
-                    .add_entry(ContextEntry::UniVar(quantifier.clone(), kind.clone()));
+                let id = TyVarId(u32::MAX - self.entries.len() as u32);
+                let extended = self.clone().add_entry(ContextEntry::UniVar {
+                    id,
+                    name: quantifier.clone(),
+                    kind: kind.clone(),
+                });
                 extended.type_well_formed(body)
             }
             TypeExpr::Qualified(preds, body) => {
@@ -340,5 +368,20 @@ mod tests {
 
         assert!(ctx.has_solved_evar("a^7"));
         assert_eq!(ctx.apply(&TypeExpr::make_evar(evar)), TypeExpr::TyUnit);
+    }
+
+    #[test]
+    fn universal_context_entries_are_keyed_by_id() {
+        let tyvar = TyVarId(3);
+        let ctx = Context::new().add_entry(ContextEntry::UniVar {
+            id: tyvar,
+            name: "a".to_string(),
+            kind: Kind::Star,
+        });
+
+        assert!(ctx.has_universal("a"));
+        assert!(ctx.has_universal_id(tyvar));
+        assert_eq!(ctx.universal_kind("a"), Some(Kind::Star));
+        assert_eq!(ctx.universal_kind_id(tyvar), Some(Kind::Star));
     }
 }

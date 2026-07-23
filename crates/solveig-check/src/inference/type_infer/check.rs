@@ -20,7 +20,8 @@ impl TypeChecker {
             ) => {
                 let substituted_body_type =
                     body_type.substitute(quantifier, &TypeExpr::TyVar(param.clone()));
-                let universal_entry = ContextEntry::UniVar(param.clone(), quant_kind.clone());
+                let universal_entry =
+                    self.fresh_universal_entry(param.clone(), quant_kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
 
                 let (delta, elaborated_body) =
@@ -117,7 +118,8 @@ impl TypeChecker {
             }
 
             (_, TypeExpr::TyForAll(quantifier, kind, body_type)) => {
-                let universal_entry = ContextEntry::UniVar(quantifier.clone(), kind.clone());
+                let universal_entry =
+                    self.fresh_universal_entry(quantifier.clone(), kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
 
                 let (delta, elaborated_body) =

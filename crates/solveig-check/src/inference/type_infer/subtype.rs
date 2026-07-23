@@ -73,7 +73,8 @@ impl TypeChecker {
             }
 
             (_, TypeExpr::TyForAll(quantifier, kind, body)) => {
-                let universal_entry = ContextEntry::UniVar(quantifier.clone(), kind.clone());
+                let universal_entry =
+                    self.fresh_universal_entry(quantifier.clone(), kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let theta = self.solve_subtype_inner(extended_ctx, left, body)?;
                 Ok(theta.until(&universal_entry))
@@ -214,7 +215,8 @@ impl TypeChecker {
                 self.instantiate_left(theta, arg_evar, &arg_applied)
             }
             TypeExpr::TyForAll(quantifier, kind, body) => {
-                let universal_entry = ContextEntry::UniVar(quantifier.clone(), kind.clone());
+                let universal_entry =
+                    self.fresh_universal_entry(quantifier.clone(), kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let delta = self.instantiate_left(extended_ctx, evar_id, body)?;
                 Ok(delta.until(&universal_entry))
