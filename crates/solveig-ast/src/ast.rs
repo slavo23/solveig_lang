@@ -1023,6 +1023,7 @@ pub struct ClassMethodDef {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClassDefinition {
+    pub id: ClassId,
     pub name: String,
     pub params: Vec<(String, Kind)>,
     pub superclasses: Vec<Predicate>,
@@ -1045,8 +1046,9 @@ impl ClassTable {
         Self::default()
     }
 
-    pub fn insert(&mut self, info: ClassInfo) -> ClassId {
+    pub fn insert(&mut self, mut info: ClassInfo) -> ClassId {
         let id = ClassId(self.entries.len() as u32);
+        info.definition.id = id;
         self.entries.push(info);
         id
     }
@@ -1139,6 +1141,7 @@ mod tests {
         let eq_id = classes.insert(ClassInfo {
             name: session.intern("Eq"),
             definition: ClassDefinition {
+                id: ClassId(u32::MAX),
                 name: "Eq".to_string(),
                 params: vec![("a".to_string(), Kind::Star)],
                 superclasses: Vec::new(),
@@ -1147,6 +1150,14 @@ mod tests {
         });
 
         assert_eq!(eq_id, ClassId(0));
+        assert_eq!(
+            classes
+                .get(eq_id)
+                .expect("ICE: inserted Eq class must be present")
+                .definition
+                .id,
+            eq_id
+        );
         assert_eq!(
             classes.iter().map(|(id, _)| id).collect::<Vec<_>>(),
             vec![eq_id]

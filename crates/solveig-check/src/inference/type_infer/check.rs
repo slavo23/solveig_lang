@@ -183,10 +183,7 @@ pub fn check_and_elab_module(
 
     for inst in &module.instance_defs {
         let inst_class_name = class_display_name(inst.head.class_id);
-        let class_def = env
-            .class_defs
-            .iter()
-            .find(|class_def| class_def.name == inst_class_name);
+        let class_def = env.class_defs.get(&inst.head.class_id);
 
         let class_def = match class_def {
             Some(class_def) => class_def,

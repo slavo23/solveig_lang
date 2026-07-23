@@ -330,6 +330,7 @@ impl ClassKindInferencer {
             .collect::<Vec<_>>();
 
         Ok(ClassDefinition {
+            id: class_def.id,
             name: class_def.name.clone(),
             params,
             superclasses,

@@ -6,7 +6,7 @@ use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{
-    ClassDefinition, CtorId, DefId, Kind, ModuleId, TypeExpr, class_display_name,
+    ClassDefinition, ClassId, CtorId, DefId, Kind, ModuleId, TypeExpr, class_display_name,
     ctor_display_name, legacy_ctor_id, legacy_tycon_id,
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
@@ -356,11 +356,10 @@ impl TypedModuleApi {
         // imported in the usual way. Prelude classes are already imported
         // implicitly for ordinary user modules.
         for superclass in &class_def.superclasses {
-            let superclass_name = class_display_name(superclass.class_id);
             let Some((super_sym, _)) = self
                 .class_defs
                 .iter()
-                .find(|(_, candidate)| candidate.name == superclass_name)
+                .find(|(_, candidate)| candidate.id == superclass.class_id)
             else {
                 continue;
             };
@@ -470,11 +469,8 @@ impl TypedModuleApi {
                 .insert(legacy_ctor_id(&name), ty.clone());
         }
 
-        for (sym, class_def) in &self.class_defs {
-            out.class_defs.insert(
-                defid_to_legacy_string(session, modules, *sym),
-                class_def.clone(),
-            );
+        for class_def in self.class_defs.values() {
+            out.class_defs.insert(class_def.id, class_def.clone());
         }
 
         out.instance_defs.extend(self.instance_defs.clone());
@@ -485,7 +481,7 @@ pub struct TypedDisplayMaps<'a> {
     pub func_schemes: &'a mut HashMap<DefId, solveig_ast::ast::Scheme>,
     pub tycon_kinds: &'a mut HashMap<solveig_ast::ast::TyConId, Kind>,
     pub constructor_types: &'a mut HashMap<CtorId, TypeExpr>,
-    pub class_defs: &'a mut HashMap<String, solveig_ast::ast::ClassDefinition>,
+    pub class_defs: &'a mut HashMap<ClassId, solveig_ast::ast::ClassDefinition>,
     pub instance_defs: &'a mut Vec<
         solveig_ast::ast::InstanceDefinition<
             solveig_check::inference::type_infer::TcMetadata,
@@ -917,10 +913,8 @@ pub fn build_typed_module_api(
     }
 
     for class_def in &checked.class_defs {
-        let stripped = class_def
-            .name
-            .strip_prefix(&prefix)
-            .unwrap_or(&class_def.name);
+        let class_name = class_display_name(class_def.id);
+        let stripped = class_name.strip_prefix(&prefix).unwrap_or(&class_name);
 
         api.class_defs.insert(
             local_def_id(module_id, session.intern(stripped)),

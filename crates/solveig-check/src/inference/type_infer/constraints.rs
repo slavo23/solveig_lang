@@ -150,13 +150,8 @@ impl TypeChecker {
     }
     fn superclass_predicates_for_given(&self, given: &Predicate) -> Vec<Predicate> {
         let given = self.zonk_predicate(given);
-        let given_class_name = class_display_name(given.class_id);
 
-        let Some(class_def) = self
-            .class_defs
-            .iter()
-            .find(|class_def| class_def.name == given_class_name)
-        else {
+        let Some(class_def) = self.class_defs.get(&given.class_id) else {
             return Vec::new();
         };
 
@@ -241,9 +236,9 @@ impl TypeChecker {
 
         let specialized = Self::substitute_scheme(method_scheme, &subst);
 
-        let specialized_class_head = Predicate::legacy(
-            class_def.name.clone(),
-            class_def
+        let specialized_class_head = Predicate {
+            class_id: class_def.id,
+            args: class_def
                 .params
                 .iter()
                 .map(|(name, _)| {
@@ -253,7 +248,7 @@ impl TypeChecker {
                         .unwrap_or_else(|| TypeExpr::TyVar(legacy_tyvar_id(name)))
                 })
                 .collect(),
-        );
+        };
 
         let mut predicates = specialized
             .predicates

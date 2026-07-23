@@ -33,7 +33,7 @@ pub struct TypeChecker {
     counter: u32,
     constructor_types: HashMap<CtorId, TypeExpr>,
     func_schemes: HashMap<DefId, Scheme>,
-    class_defs: Vec<ClassDefinition>,
+    class_defs: HashMap<ClassId, ClassDefinition>,
     instance_defs: Vec<InstanceDefinition<Span>>,
     tycon_kinds: HashMap<TyConId, Kind>,
     givens: Vec<Predicate>,
@@ -55,7 +55,7 @@ impl TypeChecker {
             counter: 0,
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
-            class_defs: Vec::new(),
+            class_defs: HashMap::new(),
             instance_defs: Vec::new(),
             tycon_kinds: HashMap::new(),
             givens: Vec::new(),
@@ -154,7 +154,7 @@ impl TypeChecker {
         }
     }
     fn lookup_class_method_scheme(&self, id: DefId) -> Option<Scheme> {
-        self.class_defs.iter().find_map(|class_def| {
+        self.class_defs.values().find_map(|class_def| {
             class_def.methods.iter().find_map(|method| {
                 if method.id == id {
                     Some(Self::class_method_scheme_for_term_lookup(class_def, method))
@@ -172,7 +172,7 @@ pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
 pub struct TypeCheckEnv {
     pub constructor_types: HashMap<CtorId, TypeExpr>,
     pub func_schemes: HashMap<DefId, Scheme>,
-    pub class_defs: Vec<ClassDefinition>,
+    pub class_defs: HashMap<ClassId, ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<Span>>,
     pub tycon_kinds: HashMap<TyConId, Kind>,
 }
@@ -182,7 +182,11 @@ impl TypeCheckEnv {
         Self {
             constructor_types: module.constructor_types.clone(),
             func_schemes: module.func_schemes.clone(),
-            class_defs: module.class_defs.clone(),
+            class_defs: module
+                .class_defs
+                .iter()
+                .map(|class_def| (class_def.id, class_def.clone()))
+                .collect(),
             instance_defs: module.instance_defs.clone(),
             tycon_kinds: module.tycon_kinds.clone(),
         }
@@ -212,7 +216,7 @@ mod tests {
         let mut env = TypeCheckEnv {
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
-            class_defs: Vec::new(),
+            class_defs: HashMap::new(),
             instance_defs: Vec::new(),
             tycon_kinds: HashMap::new(),
         };
@@ -244,19 +248,24 @@ mod tests {
             name: solveig_base::Symbol(9),
         };
 
+        let class_id = solveig_ast::ast::legacy_class_id("C");
         let env = TypeCheckEnv {
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
-            class_defs: vec![ClassDefinition {
-                name: "C".to_string(),
-                params: Vec::new(),
-                superclasses: Vec::new(),
-                methods: vec![ClassMethodDef {
-                    id: method_id,
-                    name: "C.method".to_string(),
-                    scheme: Scheme::mono(TypeExpr::TyUnit),
-                }],
-            }],
+            class_defs: HashMap::from([(
+                class_id,
+                ClassDefinition {
+                    id: class_id,
+                    name: "C".to_string(),
+                    params: Vec::new(),
+                    superclasses: Vec::new(),
+                    methods: vec![ClassMethodDef {
+                        id: method_id,
+                        name: "C.method".to_string(),
+                        scheme: Scheme::mono(TypeExpr::TyUnit),
+                    }],
+                },
+            )]),
             instance_defs: Vec::new(),
             tycon_kinds: HashMap::new(),
         };
@@ -277,23 +286,55 @@ mod tests {
     }
 
     #[test]
+    fn typecheck_env_class_defs_are_keyed_by_classid() {
+        let class_id = solveig_ast::ast::legacy_class_id("test.EnvClass");
+        let module = ResolvedModule::<Span> {
+            data_defs: Vec::new(),
+            class_defs: vec![ClassDefinition {
+                id: class_id,
+                name: "test.EnvClass".to_string(),
+                params: Vec::new(),
+                superclasses: Vec::new(),
+                methods: Vec::new(),
+            }],
+            instance_defs: Vec::new(),
+            tycon_kinds: HashMap::new(),
+            constructor_types: HashMap::new(),
+            func_schemes: HashMap::new(),
+            func_defs: Vec::new(),
+        };
+
+        let env = TypeCheckEnv::from_module(&module);
+
+        assert!(env.class_defs.contains_key(&class_id));
+        assert!(!env
+            .class_defs
+            .contains_key(&solveig_ast::ast::legacy_class_id("test.OtherEnvClass")));
+    }
+
+    #[test]
     fn superclass_lookup_uses_predicate_class_ids() {
         let superclass_name = "test.Sup".to_string();
         let class_name = "test.Sub".to_string();
         let int_ty = TypeExpr::make_con("test.Int".to_string());
 
+        let class_id = solveig_ast::ast::legacy_class_id(&class_name);
         let env = TypeCheckEnv {
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
-            class_defs: vec![ClassDefinition {
-                name: class_name.clone(),
-                params: vec![("a".to_string(), Kind::Star)],
-                superclasses: vec![Predicate::legacy(
-                    superclass_name.clone(),
-                    vec![TypeExpr::make_var("a".to_string())],
-                )],
-                methods: Vec::new(),
-            }],
+            class_defs: HashMap::from([(
+                class_id,
+                ClassDefinition {
+                    id: class_id,
+                    name: class_name.clone(),
+                    params: vec![("a".to_string(), Kind::Star)],
+                    superclasses: vec![Predicate::legacy(
+                        superclass_name.clone(),
+                        vec![TypeExpr::make_var("a".to_string())],
+                    )],
+                    methods: Vec::new(),
+                },
+            )]),
             instance_defs: Vec::new(),
             tycon_kinds: HashMap::new(),
         };

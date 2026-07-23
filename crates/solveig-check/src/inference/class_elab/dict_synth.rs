@@ -286,14 +286,14 @@ fn build_class_runtime_info(
     let mut out = HashMap::new();
 
     for class_def in &module.class_defs {
-        let class_head_pred = Predicate::legacy(
-            class_def.name.clone(),
-            class_def
+        let class_head_pred = Predicate {
+            class_id: class_def.id,
+            args: class_def
                 .params
                 .iter()
                 .map(|(name, _)| TypeExpr::make_var(name.clone()))
                 .collect(),
-        );
+        };
 
         let mut methods = HashMap::new();
 
@@ -437,14 +437,14 @@ fn synthesize_selector_defs(
                 mk_anno(),
             );
 
-            let dict_pred = Predicate::legacy(
-                class_def.name.clone(),
-                class_def
+            let dict_pred = Predicate {
+                class_id: class_def.id,
+                args: class_def
                     .params
                     .iter()
                     .map(|(name, _)| TypeExpr::make_var(name.clone()))
                     .collect(),
-            );
+            };
 
             let selector_ty = TypeExpr::make_arr(
                 dict_type_for_pred(&dict_pred, classes),
@@ -639,7 +639,7 @@ fn synthesize_instance_dict_defs(
         let class_def = module
             .class_defs
             .iter()
-            .find(|c| c.name == inst_class_name)
+            .find(|c| c.id == inst.head.class_id)
             .unwrap_or_else(|| panic!("ICE: missing class definition for {}", inst_class_name));
 
         let mut evidence_env = EvidenceEnv::default();

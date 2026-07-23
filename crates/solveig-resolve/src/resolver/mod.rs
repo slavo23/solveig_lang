@@ -6,8 +6,8 @@ use solveig_ast::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, ConstructorDef, CtorId,
     DataDefinition, DefId, InstanceDefinition, InstanceMethodDef, Kind, KindMetaId, Literal,
     ModuleId, Pattern, PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr,
-    TermExprNode, TyConId, TypeExpr, UnOp, VarRef, legacy_ctor_id, legacy_tycon_id,
-    register_def_display_name, register_symbol_display_name, tyvar_display_name,
+    TermExprNode, TyConId, TypeExpr, UnOp, VarRef, legacy_class_id, legacy_ctor_id,
+    legacy_tycon_id, register_def_display_name, register_symbol_display_name, tyvar_display_name,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use solveig_check::data_kind_infer::{

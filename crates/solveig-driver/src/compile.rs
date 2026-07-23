@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    ClassDefinition, CtorId, DefId, ModuleId, Scheme, TyConId, TypeExpr, class_display_name,
-    ctor_display_name, def_display_name, tycon_display_name,
+    ClassDefinition, ClassId, CtorId, DefId, ModuleId, Scheme, TyConId, TypeExpr,
+    class_display_name, ctor_display_name, def_display_name, tycon_display_name,
 };
 use solveig_base::{FileSpan, IntoDiagnostic, Session};
 use solveig_check::inference::holes::hole_diagnostics;
@@ -401,9 +401,9 @@ impl<'a> FrontendState<'a> {
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
-                for (sym, class_def) in &api.filtered(self.session, &imp.spec).class_defs {
+                for class_def in api.filtered(self.session, &imp.spec).class_defs.values() {
                     out.insert(
-                        defid_to_legacy_string(self.session, &self.project.module_table, *sym),
+                        class_display_name(class_def.id),
                         class_def
                             .params
                             .iter()
@@ -473,9 +473,7 @@ impl<'a> FrontendState<'a> {
         check_env.func_schemes.extend(func_schemes);
         check_env.tycon_kinds.extend(tycon_kinds);
         check_env.constructor_types.extend(constructor_types);
-        check_env
-            .class_defs
-            .extend(imported_class_defs.into_values());
+        check_env.class_defs.extend(imported_class_defs);
         check_env
             .instance_defs
             .extend(erase_checked_instance_defs_to_resolved(
@@ -562,7 +560,7 @@ fn collect_imported_type_info(
     HashMap<DefId, Scheme>,
     HashMap<TyConId, solveig_ast::ast::Kind>,
     HashMap<CtorId, solveig_ast::ast::TypeExpr>,
-    HashMap<String, ClassDefinition>,
+    HashMap<ClassId, ClassDefinition>,
     Vec<
         solveig_ast::ast::InstanceDefinition<
             solveig_check::inference::type_infer::TcMetadata,
@@ -629,7 +627,7 @@ fn retain_only_local_symbols(
 
     checked
         .class_defs
-        .retain(|class_def| class_def.name.starts_with(&prefix));
+        .retain(|class_def| class_display_name(class_def.id).starts_with(&prefix));
 
     checked
         .instance_defs

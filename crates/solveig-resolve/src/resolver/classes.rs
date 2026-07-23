@@ -239,8 +239,9 @@ impl<'a> Resolver<'a> {
                         });
                     }
 
-                    let class_id = self.local_def_id(cx, name.0);
-                    let class_name = self.legacy_name(class_id);
+                    let class_def_id = self.local_def_id(cx, name.0);
+                    let class_name = self.legacy_name(class_def_id);
+                    let class_id = legacy_class_id(&class_name);
 
                     let class_params = ty_params
                         .iter()
@@ -306,6 +307,7 @@ impl<'a> Resolver<'a> {
 
                     Some((
                         ClassDefinition {
+                            id: class_id,
                             name: class_name,
                             params: class_params,
                             superclasses: resolved_superclasses,
