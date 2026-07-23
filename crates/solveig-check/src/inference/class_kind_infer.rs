@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
 use solveig_ast::ast::{
-    ClassDefinition, Kind, KindMetaId, Predicate, Scheme, TyVarId, TypeExpr, class_display_name,
-    legacy_tyvar_id, tycon_display_name, tyvar_display_name,
+    ClassDefinition, ClassId, Kind, KindMetaId, Predicate, Scheme, TyConId, TyVarId, TypeExpr,
+    legacy_tyvar_id, tyvar_display_name,
 };
 
 use crate::signature_infer::KindError;
@@ -10,12 +10,12 @@ use crate::signature_infer::KindError;
 pub struct ClassKindInferencer {
     next_meta: u32,
     subst: HashMap<KindMetaId, Kind>,
-    tycon_env: HashMap<String, Kind>,
-    class_env: HashMap<String, Vec<Kind>>,
+    tycon_env: HashMap<TyConId, Kind>,
+    class_env: HashMap<ClassId, Vec<Kind>>,
 }
 
 impl ClassKindInferencer {
-    pub fn new(tycon_env: HashMap<String, Kind>, class_env: HashMap<String, Vec<Kind>>) -> Self {
+    pub fn new(tycon_env: HashMap<TyConId, Kind>, class_env: HashMap<ClassId, Vec<Kind>>) -> Self {
         Self {
             next_meta: 0,
             subst: HashMap::new(),
@@ -114,14 +114,12 @@ impl ClassKindInferencer {
 
             TypeExpr::TyExVar(_) => Ok(Kind::Star),
 
-            TypeExpr::TyCon(id) => {
-                let name = tycon_display_name(*id);
-                self.tycon_env
-                    .get(&name)
-                    .cloned()
-                    .map(|k| self.apply_kind(&k))
-                    .ok_or_else(|| KindError::unbound_type_constructor(name))
-            }
+            TypeExpr::TyCon(id) => self
+                .tycon_env
+                .get(id)
+                .cloned()
+                .map(|k| self.apply_kind(&k))
+                .ok_or_else(|| KindError::unbound_type_constructor(tycon_id_display(*id))),
 
             TypeExpr::TyArr(lhs, rhs) => {
                 let lhs_kind = self.infer_type_kind(lhs, env)?;
@@ -221,12 +219,10 @@ impl ClassKindInferencer {
         pred: &Predicate,
         env: &mut HashMap<TyVarId, Kind>,
     ) -> Result<Predicate, KindError> {
-        let class_name = class_display_name(pred.class_id);
-        let expected_kinds = self
-            .class_env
-            .get(&class_name)
-            .cloned()
-            .ok_or_else(|| KindError::unbound_type_constructor(class_name.clone()))?;
+        let expected_kinds =
+            self.class_env.get(&pred.class_id).cloned().ok_or_else(|| {
+                KindError::unbound_type_constructor(class_id_display(pred.class_id))
+            })?;
 
         if expected_kinds.len() != pred.args.len() {
             return Err(KindError::cannot_unify(
@@ -336,5 +332,61 @@ impl ClassKindInferencer {
             superclasses,
             methods,
         })
+    }
+}
+
+fn tycon_id_display(id: TyConId) -> String {
+    format!("T{}", id.0)
+}
+
+fn class_id_display(id: ClassId) -> String {
+    format!("K{}", id.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use solveig_ast::ast::{ClassMethodDef, DefId, ModuleId, legacy_tyvar_id};
+    use solveig_base::Symbol;
+
+    use super::*;
+
+    #[test]
+    fn class_kind_inference_uses_id_keyed_type_and_class_envs() {
+        let tycon_id = TyConId(51);
+        let class_id = ClassId(52);
+        let superclass_id = ClassId(53);
+        let param = legacy_tyvar_id("a");
+        let class_def = ClassDefinition {
+            id: class_id,
+            name: "sample.WidgetLike".to_string(),
+            params: vec![("a".to_string(), Kind::Star)],
+            superclasses: vec![Predicate {
+                class_id: superclass_id,
+                args: vec![TypeExpr::TyVar(param)],
+            }],
+            methods: vec![ClassMethodDef {
+                id: DefId {
+                    module: ModuleId(7),
+                    name: Symbol(1),
+                },
+                name: "sample.WidgetLike.method".to_string(),
+                scheme: Scheme {
+                    quantifiers: Vec::new(),
+                    predicates: Vec::new(),
+                    ty: TypeExpr::TyCon(tycon_id),
+                },
+            }],
+        };
+
+        let inferred = ClassKindInferencer::new(
+            HashMap::from([(tycon_id, Kind::Star)]),
+            HashMap::from([(superclass_id, vec![Kind::Star])]),
+        )
+        .infer_class(&class_def)
+        .expect("ICE: ID-keyed class kind environment should resolve test IDs");
+
+        assert_eq!(inferred.id, class_id);
+        assert_eq!(inferred.superclasses[0].class_id, superclass_id);
+        assert_eq!(inferred.methods[0].scheme.ty, TypeExpr::TyCon(tycon_id));
     }
 }

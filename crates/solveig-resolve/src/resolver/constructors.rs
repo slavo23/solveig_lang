@@ -215,14 +215,12 @@ impl<'a> Resolver<'a> {
     ) -> Result<
         (
             Vec<DataDefinition>,
-            HashMap<String, Kind>,
             HashMap<TyConId, Kind>,
             HashMap<CtorId, TypeExpr>,
-            HashMap<String, Kind>,
         ),
         KindError,
     > {
-        let (inferred_data, all_tycon_kinds) =
+        let (inferred_data, _all_tycon_kinds) =
             infer_all_data_kinds_with_env(raw_data_defs, imported.tycon_kinds.clone())?;
 
         let mut data_defs = Vec::new();
@@ -266,12 +264,6 @@ impl<'a> Resolver<'a> {
             ),
         );
 
-        Ok((
-            data_defs,
-            local_tycon_kinds,
-            local_tycon_kind_ids,
-            constructor_types,
-            all_tycon_kinds,
-        ))
+        Ok((data_defs, local_tycon_kind_ids, constructor_types))
     }
 }

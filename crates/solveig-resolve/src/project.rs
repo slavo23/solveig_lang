@@ -7,7 +7,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{
     ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Kind, ModuleId, TyConTable,
-    TypeExpr, class_display_name, ctor_display_name, legacy_ctor_id, legacy_tycon_id,
+    TypeExpr, symbol_display_name,
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
@@ -326,7 +326,9 @@ impl ModuleApi {
 pub struct TypedModuleApi {
     pub term_schemes: HashMap<DefId, solveig_ast::ast::Scheme>,
     pub type_kinds: HashMap<DefId, Kind>,
+    pub type_ids: HashMap<DefId, solveig_ast::ast::TyConId>,
     pub constructor_types: HashMap<DefId, TypeExpr>,
+    pub constructor_ids: HashMap<DefId, CtorId>,
     pub class_defs: HashMap<DefId, solveig_ast::ast::ClassDefinition>,
     pub tycon_table: TyConTable,
     pub ctor_table: CtorTable,
@@ -410,12 +412,18 @@ impl TypedModuleApi {
                     for (sym, kind) in &self.type_kinds {
                         if &sym.name == name {
                             out.type_kinds.insert(*sym, kind.clone());
+                            if let Some(id) = self.type_ids.get(sym) {
+                                out.type_ids.insert(*sym, *id);
+                            }
                         }
                     }
 
                     for (sym, ty) in &self.constructor_types {
                         if &sym.name == name {
                             out.constructor_types.insert(*sym, ty.clone());
+                            if let Some(id) = self.constructor_ids.get(sym) {
+                                out.constructor_ids.insert(*sym, *id);
+                            }
                         }
                     }
                 }
@@ -456,25 +464,27 @@ impl TypedModuleApi {
         }
     }
 
-    pub fn extend_display_maps(
-        &self,
-        session: &Session,
-        modules: &ModuleTable,
-        out: &mut TypedDisplayMaps<'_>,
-    ) {
+    pub fn extend_display_maps(&self, out: &mut TypedDisplayMaps<'_>) {
         for (sym, scheme) in &self.term_schemes {
             out.func_schemes.insert(*sym, scheme.clone());
         }
 
         for (sym, kind) in &self.type_kinds {
-            let name = defid_to_legacy_string(session, modules, *sym);
-            out.tycon_kinds.insert(legacy_tycon_id(&name), kind.clone());
+            let id = self
+                .type_ids
+                .get(sym)
+                .copied()
+                .expect("ICE: typed module API type kind missing TyConId");
+            out.tycon_kinds.insert(id, kind.clone());
         }
 
         for (sym, ty) in &self.constructor_types {
-            let name = defid_to_legacy_string(session, modules, *sym);
-            out.constructor_types
-                .insert(legacy_ctor_id(&name), ty.clone());
+            let id = self
+                .constructor_ids
+                .get(sym)
+                .copied()
+                .expect("ICE: typed module API constructor missing CtorId");
+            out.constructor_types.insert(id, ty.clone());
         }
 
         for class_def in self.class_defs.values() {
@@ -494,6 +504,12 @@ impl TypedModuleApi {
         }
 
         out.instance_defs.extend(self.instance_defs.clone());
+    }
+
+    pub fn type_name(&self, sym: DefId) -> Option<String> {
+        let id = self.type_ids.get(&sym)?;
+        let info = self.tycon_table.get(*id)?;
+        Some(symbol_display_name(info.name))
     }
 }
 
@@ -920,28 +936,34 @@ pub fn build_typed_module_api(
     }
 
     for (id, kind) in &checked.tycon_kinds {
-        let name = solveig_ast::ast::tycon_display_name(*id);
+        let Some(info) = checked.tycon_table.get(*id) else {
+            continue;
+        };
+        let name = symbol_display_name(info.name);
         if let Some(stripped) = name.strip_prefix(&prefix) {
-            api.type_kinds.insert(
-                local_def_id(module_id, session.intern(stripped)),
-                kind.clone(),
-            );
+            let def_id = local_def_id(module_id, session.intern(stripped));
+            api.type_kinds.insert(def_id, kind.clone());
+            api.type_ids.insert(def_id, *id);
         }
     }
 
     for (id, ty) in &checked.constructor_types {
-        let name = ctor_display_name(*id);
+        let Some(info) = checked.ctor_table.get(*id) else {
+            continue;
+        };
+        let name = symbol_display_name(info.name);
         if let Some(stripped) = name.strip_prefix(&prefix) {
-            api.constructor_types.insert(
-                local_def_id(module_id, session.intern(stripped)),
-                ty.clone(),
-            );
+            let def_id = local_def_id(module_id, session.intern(stripped));
+            api.constructor_types.insert(def_id, ty.clone());
+            api.constructor_ids.insert(def_id, *id);
         }
     }
 
     for class_def in &checked.class_defs {
-        let class_name = class_display_name(class_def.id);
-        let stripped = class_name.strip_prefix(&prefix).unwrap_or(&class_name);
+        let stripped = class_def
+            .name
+            .strip_prefix(&prefix)
+            .unwrap_or(&class_def.name);
 
         api.class_defs.insert(
             local_def_id(module_id, session.intern(stripped)),
@@ -952,4 +974,118 @@ pub fn build_typed_module_api(
     api.instance_defs = checked.instance_defs.clone();
 
     api
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use solveig_ast::ast::{
+        ConstructorDef, CtorInfo, DataDefinition, ResolvedModule, TyConDefinition, TyConId,
+        TyConInfo, legacy_symbol_id,
+    };
+
+    use super::*;
+
+    #[test]
+    fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
+        let session = Session::new();
+        let module_id = ModuleId(7);
+        let module_name = ModuleName(vec![session.intern("sample")]);
+        let tycon_id = TyConId(42);
+        let ctor_id = CtorId(43);
+        let type_name = "sample.Widget";
+        let ctor_name = "sample.MkWidget";
+        let widget_ty = TypeExpr::TyCon(tycon_id);
+        let ctor_ty = TypeExpr::make_arr(TypeExpr::TyUnit, widget_ty.clone());
+
+        let data_def = DataDefinition {
+            name: type_name.to_string(),
+            ty_params: Vec::new(),
+            tycon_kind: Kind::Star,
+            constructors: vec![ConstructorDef {
+                id: ctor_id,
+                name: ctor_name.to_string(),
+                fields: vec![TypeExpr::TyUnit],
+                full_type: ctor_ty.clone(),
+            }],
+        };
+
+        let mut tycon_table = TyConTable::new();
+        tycon_table.insert_with_id(
+            tycon_id,
+            TyConInfo {
+                name: legacy_symbol_id(type_name),
+                kind: Kind::Star,
+                definition: TyConDefinition::Data(data_def.clone()),
+            },
+        );
+
+        let mut ctor_table = CtorTable::new();
+        ctor_table.insert_with_id(
+            ctor_id,
+            CtorInfo {
+                name: legacy_symbol_id(ctor_name),
+                tycon: tycon_id,
+                fields: vec![TypeExpr::TyUnit],
+                full_type: ctor_ty.clone(),
+                tag: 0,
+            },
+        );
+
+        let checked: CheckedModule = ResolvedModule {
+            data_defs: vec![data_def],
+            class_defs: Vec::new(),
+            instance_defs: Vec::new(),
+            tycon_table,
+            ctor_table,
+            class_table: ClassTable::new(),
+            tycon_kinds: HashMap::from([(tycon_id, Kind::Star)]),
+            constructor_types: HashMap::from([(ctor_id, ctor_ty.clone())]),
+            func_schemes: HashMap::new(),
+            func_defs: Vec::new(),
+        };
+
+        let api = build_typed_module_api(&session, module_id, &module_name, &checked);
+        let type_def = super::local_def_id(module_id, session.intern("Widget"));
+        let ctor_def = super::local_def_id(module_id, session.intern("MkWidget"));
+
+        assert_eq!(api.type_ids.get(&type_def), Some(&tycon_id));
+        assert_eq!(api.constructor_ids.get(&ctor_def), Some(&ctor_id));
+        assert_eq!(api.type_name(type_def).as_deref(), Some(type_name));
+
+        let mut tycon_kinds = HashMap::new();
+        let mut constructor_types = HashMap::new();
+        let mut func_schemes = HashMap::new();
+        let mut class_defs = HashMap::new();
+        let mut imported_tycons = TyConTable::new();
+        let mut imported_ctors = CtorTable::new();
+        let mut imported_classes = ClassTable::new();
+        let mut instance_defs = Vec::new();
+        let mut maps = TypedDisplayMaps {
+            func_schemes: &mut func_schemes,
+            tycon_kinds: &mut tycon_kinds,
+            constructor_types: &mut constructor_types,
+            class_defs: &mut class_defs,
+            tycon_table: &mut imported_tycons,
+            ctor_table: &mut imported_ctors,
+            class_table: &mut imported_classes,
+            instance_defs: &mut instance_defs,
+        };
+
+        api.extend_display_maps(&mut maps);
+
+        assert_eq!(tycon_kinds.get(&tycon_id), Some(&Kind::Star));
+        assert_eq!(constructor_types.get(&ctor_id), Some(&ctor_ty));
+        assert!(
+            tycon_kinds
+                .keys()
+                .all(|id| *id != solveig_ast::ast::legacy_tycon_id(type_name))
+        );
+        assert!(
+            constructor_types
+                .keys()
+                .all(|id| *id != solveig_ast::ast::legacy_ctor_id(ctor_name))
+        );
+    }
 }

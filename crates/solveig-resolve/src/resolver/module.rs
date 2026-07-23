@@ -15,7 +15,7 @@ impl<'a> Resolver<'a> {
                 "start: defs={}, imported_tycons={}, imported_classes={}, local_classes={:?}",
                 parsed.defs.len(),
                 imported.tycon_kinds.len(),
-                imported.class_param_kinds.len(),
+                imported.class_param_kind_ids.len(),
                 local.classes
             ),
         );
@@ -25,17 +25,14 @@ impl<'a> Resolver<'a> {
             return Err(ResolverError::Resolve(errors));
         }
 
-        let (
-            data_defs,
-            local_tycon_kinds,
-            local_tycon_kind_ids,
-            constructor_types,
-            all_tycon_kinds,
-        ) =
+        let (data_defs, local_tycon_kind_ids, constructor_types) =
             self.resolve_data_defs(module_name, raw_data_defs, imported)?;
 
+        let mut all_tycon_kind_ids = imported.tycon_kind_ids.clone();
+        all_tycon_kind_ids.extend(local_tycon_kind_ids.clone());
+
         let class_defs =
-            self.resolve_class_defs(module_name, parsed, cx, imported, &local, &all_tycon_kinds)?;
+            self.resolve_class_defs(module_name, parsed, cx, imported, &local, &all_tycon_kind_ids)?;
         if let Some(errors) = self.take_errors() {
             return Err(ResolverError::Resolve(errors));
         }
@@ -47,7 +44,7 @@ impl<'a> Resolver<'a> {
             parsed,
             cx,
             &local,
-            &all_tycon_kinds,
+            &all_tycon_kind_ids,
             &class_env,
         )?;
         if let Some(errors) = self.take_errors() {
@@ -60,7 +57,7 @@ impl<'a> Resolver<'a> {
             cx,
             imported,
             &local,
-            &local_tycon_kinds,
+            &local_tycon_kind_ids,
             &class_defs,
         )?;
         if let Some(errors) = self.take_errors() {

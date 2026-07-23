@@ -4,8 +4,7 @@ use std::rc::Rc;
 
 use solveig_ast::ast::{
     ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, ModuleId, PrettyTables, Scheme,
-    TyConId, TyConTable, TypeExpr, class_display_name, ctor_display_name, def_display_name,
-    tycon_display_name,
+    TyConId, TyConTable, TypeExpr, def_display_name, symbol_display_name,
 };
 use solveig_base::{FileSpan, IntoDiagnostic, Session};
 use solveig_check::inference::holes::hole_diagnostics;
@@ -18,8 +17,7 @@ use solveig_report::emit_diagnostics;
 use solveig_resolve::project::{
     BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleTable,
     ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi, TypedDisplayMaps,
-    build_module_api, build_typed_module_api, defid_to_legacy_string, effective_imports,
-    module_order_checked,
+    build_module_api, build_typed_module_api, effective_imports, module_order_checked,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::ModuleName;
@@ -401,17 +399,17 @@ impl<'a> FrontendState<'a> {
         Ok(())
     }
 
-    fn collect_imported_class_param_kinds(
+    fn collect_imported_class_param_kind_ids(
         &self,
         imports: &[EffectiveImport],
-    ) -> HashMap<String, Vec<solveig_ast::ast::Kind>> {
+    ) -> HashMap<ClassId, Vec<solveig_ast::ast::Kind>> {
         let mut out = HashMap::new();
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
                 for class_def in api.filtered(self.session, &imp.spec).class_defs.values() {
                     out.insert(
-                        class_display_name(class_def.id),
+                        class_def.id,
                         class_def
                             .params
                             .iter()
@@ -447,7 +445,8 @@ impl<'a> FrontendState<'a> {
 
         let resolver_imports = ResolverImports {
             tycon_kinds: self.collect_imported_kinds(&imports),
-            class_param_kinds: self.collect_imported_class_param_kinds(&imports),
+            tycon_kind_ids: self.collect_imported_kind_ids(&imports),
+            class_param_kind_ids: self.collect_imported_class_param_kind_ids(&imports),
         };
 
         let resolver = Resolver::new(self.session, &self.project.module_table);
@@ -477,7 +476,7 @@ impl<'a> FrontendState<'a> {
             tycon_table: imported_tycon_table,
             ctor_table: imported_ctor_table,
             class_table: imported_class_table,
-        } = collect_imported_type_info(self.session, &self.project.module_table, &imported_typed);
+        } = collect_imported_type_info(self.session, &imported_typed);
 
         let mut check_env = TypeCheckEnv::from_module(&resolved);
 
@@ -564,11 +563,35 @@ impl<'a> FrontendState<'a> {
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
-                for (sym, kind) in &api.filtered(self.session, &imp.spec).type_kinds {
-                    out.insert(
-                        defid_to_legacy_string(self.session, &self.project.module_table, *sym),
-                        kind.clone(),
-                    );
+                let filtered = api.filtered(self.session, &imp.spec);
+                for (sym, kind) in &filtered.type_kinds {
+                    let name = filtered
+                        .type_name(*sym)
+                        .expect("ICE: imported type kind missing typed API name");
+                    out.insert(name, kind.clone());
+                }
+            }
+        }
+
+        out
+    }
+
+    fn collect_imported_kind_ids(
+        &self,
+        imports: &[EffectiveImport],
+    ) -> HashMap<TyConId, solveig_ast::ast::Kind> {
+        let mut out = HashMap::new();
+
+        for imp in imports {
+            if let Some(api) = self.typed_apis.get(&imp.module) {
+                let filtered = api.filtered(self.session, &imp.spec);
+                for (sym, kind) in &filtered.type_kinds {
+                    let id = filtered
+                        .type_ids
+                        .get(sym)
+                        .copied()
+                        .expect("ICE: imported type kind missing typed API TyConId");
+                    out.insert(id, kind.clone());
                 }
             }
         }
@@ -588,11 +611,7 @@ struct ImportedTypeInfo {
     class_table: ClassTable,
 }
 
-fn collect_imported_type_info(
-    session: &Session,
-    modules: &ModuleTable,
-    imports: &[ImportedTypedApi],
-) -> ImportedTypeInfo {
+fn collect_imported_type_info(session: &Session, imports: &[ImportedTypedApi]) -> ImportedTypeInfo {
     let mut func_schemes = HashMap::new();
     let mut tycon_kinds = HashMap::new();
     let mut constructor_types = HashMap::new();
@@ -614,11 +633,9 @@ fn collect_imported_type_info(
             instance_defs: &mut instance_defs,
         };
 
-        imp.api.filtered(session, &imp.spec).extend_display_maps(
-            session,
-            modules,
-            &mut display_maps,
-        );
+        imp.api
+            .filtered(session, &imp.spec)
+            .extend_display_maps(&mut display_maps);
     }
 
     ImportedTypeInfo {
@@ -642,38 +659,6 @@ fn find_entry_file(project_root: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn retain_only_local_symbols(
-    session: &Session,
-    module_name: &ModuleName,
-    mut checked: CheckedModule,
-) -> CheckedModule {
-    let prefix = module_name.as_string(session) + ".";
-
-    checked
-        .tycon_kinds
-        .retain(|id, _| tycon_display_name(*id).starts_with(&prefix));
-    checked
-        .constructor_types
-        .retain(|id, _| ctor_display_name(*id).starts_with(&prefix));
-    checked
-        .func_schemes
-        .retain(|id, _| def_display_name(*id).starts_with(&prefix));
-
-    checked
-        .class_defs
-        .retain(|class_def| class_display_name(class_def.id).starts_with(&prefix));
-
-    checked
-        .instance_defs
-        .retain(|inst_def| class_display_name(inst_def.head.class_id).starts_with(&prefix));
-
-    checked
-        .func_defs
-        .retain(|def| def.name.starts_with(&prefix));
-
-    checked
-}
-
 fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, String> {
     let mut data_defs = Vec::new();
     let mut class_defs = Vec::new();
@@ -684,13 +669,30 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
     let mut func_defs = Vec::new();
 
     for m in mods {
-        data_defs.extend(m.data_defs);
-        class_defs.extend(m.class_defs);
-        instance_defs.extend(m.instance_defs);
-        extend_unique_tycon(&mut tycon_kinds, m.tycon_kinds)?;
-        extend_unique_ctor(&mut constructor_types, m.constructor_types)?;
-        extend_unique_def(&mut func_schemes, m.func_schemes, "function")?;
-        func_defs.extend(m.func_defs);
+        let CheckedModule {
+            data_defs: module_data_defs,
+            class_defs: module_class_defs,
+            instance_defs: module_instance_defs,
+            tycon_table: module_tycon_table,
+            ctor_table: module_ctor_table,
+            class_table: _,
+            tycon_kinds: module_tycon_kinds,
+            constructor_types: module_constructor_types,
+            func_schemes: module_func_schemes,
+            func_defs: module_func_defs,
+        } = m;
+
+        data_defs.extend(module_data_defs);
+        class_defs.extend(module_class_defs);
+        instance_defs.extend(module_instance_defs);
+        extend_unique_tycon(&mut tycon_kinds, module_tycon_kinds, &module_tycon_table)?;
+        extend_unique_ctor(
+            &mut constructor_types,
+            module_constructor_types,
+            &module_ctor_table,
+        )?;
+        extend_unique_def(&mut func_schemes, module_func_schemes, "function")?;
+        func_defs.extend(module_func_defs);
     }
 
     let mut module = solveig_ast::ast::ResolvedModule {
@@ -726,12 +728,13 @@ fn extend_unique_def<T>(
 fn extend_unique_tycon(
     dst: &mut HashMap<TyConId, solveig_ast::ast::Kind>,
     src: HashMap<TyConId, solveig_ast::ast::Kind>,
+    names: &TyConTable,
 ) -> Result<(), String> {
     for (k, v) in src {
         if dst.insert(k, v).is_some() {
             return Err(format!(
                 "duplicate type constructor {}",
-                tycon_display_name(k)
+                tycon_name_for_error(k, names)
             ));
         }
     }
@@ -741,11 +744,29 @@ fn extend_unique_tycon(
 fn extend_unique_ctor(
     dst: &mut HashMap<CtorId, TypeExpr>,
     src: HashMap<CtorId, TypeExpr>,
+    names: &CtorTable,
 ) -> Result<(), String> {
     for (k, v) in src {
         if dst.insert(k, v).is_some() {
-            return Err(format!("duplicate constructor {}", ctor_display_name(k)));
+            return Err(format!(
+                "duplicate constructor {}",
+                ctor_name_for_error(k, names)
+            ));
         }
     }
     Ok(())
+}
+
+fn tycon_name_for_error(id: TyConId, names: &TyConTable) -> String {
+    names
+        .get(id)
+        .map(|info| symbol_display_name(info.name))
+        .unwrap_or_else(|| format!("T{}", id.0))
+}
+
+fn ctor_name_for_error(id: CtorId, names: &CtorTable) -> String {
+    names
+        .get(id)
+        .map(|info| symbol_display_name(info.name))
+        .unwrap_or_else(|| format!("C{}", id.0))
 }

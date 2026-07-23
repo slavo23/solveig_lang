@@ -3,7 +3,7 @@ use std::env;
 use std::ops::Range;
 
 use solveig_ast::ast::{
-    BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, ConstructorDef, CtorId,
+    BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassId, ClassMethodDef, ConstructorDef, CtorId,
     DataDefinition, DefId, InstanceDefinition, InstanceMethodDef, Kind, KindMetaId, Literal,
     ModuleId, Pattern, PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr,
     TermExprNode, TyConId, TypeExpr, UnOp, VarRef, legacy_class_id, legacy_ctor_id,
@@ -66,7 +66,8 @@ fn trace_predicates(session: &Session, module: &ModuleName, label: &str, predica
 #[derive(Debug, Clone, Default)]
 pub struct ResolverImports {
     pub tycon_kinds: HashMap<String, Kind>,
-    pub class_param_kinds: HashMap<String, Vec<Kind>>,
+    pub tycon_kind_ids: HashMap<TyConId, Kind>,
+    pub class_param_kind_ids: HashMap<ClassId, Vec<Kind>>,
 }
 
 #[derive(Debug)]

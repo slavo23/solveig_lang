@@ -161,12 +161,12 @@ impl<'a> Resolver<'a> {
         cx: &ModuleContext,
         imported: &ResolverImports,
         local: &LocalResolverEnv,
-        local_tycon_kinds: &HashMap<String, Kind>,
+        local_tycon_kinds: &HashMap<TyConId, Kind>,
         class_defs: &[ClassDefinition],
     ) -> Result<HashMap<DefId, Scheme>, KindError> {
         let mut func_schemes = HashMap::new();
 
-        let mut sig_tycon_env = imported.tycon_kinds.clone();
+        let mut sig_tycon_env = imported.tycon_kind_ids.clone();
         sig_tycon_env.extend(local_tycon_kinds.clone());
 
         let sig_class_env = Self::class_param_kind_env(imported, class_defs);

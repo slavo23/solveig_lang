@@ -122,12 +122,12 @@ impl<'a> Resolver<'a> {
     fn class_param_kind_env(
         imported: &ResolverImports,
         class_defs: &[ClassDefinition],
-    ) -> HashMap<String, Vec<Kind>> {
-        let mut class_env = imported.class_param_kinds.clone();
+    ) -> HashMap<ClassId, Vec<Kind>> {
+        let mut class_env = imported.class_param_kind_ids.clone();
 
         class_env.extend(class_defs.iter().map(|class_def| {
             (
-                class_def.name.clone(),
+                class_def.id,
                 class_def
                     .params
                     .iter()
@@ -142,8 +142,8 @@ impl<'a> Resolver<'a> {
         &self,
         context: Vec<Predicate>,
         head: Predicate,
-        all_tycon_kinds: &HashMap<String, Kind>,
-        class_env: &HashMap<String, Vec<Kind>>,
+        all_tycon_kinds: &HashMap<TyConId, Kind>,
+        class_env: &HashMap<ClassId, Vec<Kind>>,
     ) -> Result<(Vec<Predicate>, Predicate), KindError> {
         let context_len = context.len();
 
@@ -219,7 +219,7 @@ impl<'a> Resolver<'a> {
         cx: &ModuleContext,
         imported: &ResolverImports,
         local: &LocalResolverEnv,
-        all_tycon_kinds: &HashMap<String, Kind>,
+        all_tycon_kinds: &HashMap<TyConId, Kind>,
     ) -> Result<Vec<ClassDefinition>, KindError> {
         let raw_class_defs = parsed
             .defs
@@ -325,12 +325,12 @@ impl<'a> Resolver<'a> {
             return Ok(Vec::new());
         }
 
-        let mut seed_class_env = imported.class_param_kinds.clone();
+        let mut seed_class_env = imported.class_param_kind_ids.clone();
         let mut next_seed_kind_meta = u32::MAX;
 
         seed_class_env.extend(raw_class_defs.iter().map(|(class_def, _span)| {
             (
-                class_def.name.clone(),
+                class_def.id,
                 class_def
                     .params
                     .iter()
@@ -374,8 +374,8 @@ impl<'a> Resolver<'a> {
         parsed: &ParsedModule,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-        all_tycon_kinds: &HashMap<String, Kind>,
-        class_env: &HashMap<String, Vec<Kind>>,
+        all_tycon_kinds: &HashMap<TyConId, Kind>,
+        class_env: &HashMap<ClassId, Vec<Kind>>,
     ) -> Result<Vec<InstanceDefinition<Span>>, KindError> {
         let mut instance_defs = Vec::new();
 

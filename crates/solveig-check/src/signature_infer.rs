@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use solveig_ast::ast::{
-    Kind, KindMetaId, Predicate, Pretty, Scheme, TyVarId, TypeExpr, class_display_name,
-    tycon_display_name, tyvar_display_name,
+    ClassId, Kind, KindMetaId, Predicate, Pretty, Scheme, TyConId, TyVarId, TypeExpr,
+    tyvar_display_name,
 };
 use solveig_base::{Diagnostic, FileSpan, IntoDiagnostic, Label};
 
@@ -214,8 +214,8 @@ impl IntoDiagnostic for &KindError {
 pub struct SignatureKindInferencer {
     next_meta: u32,
     subst: HashMap<KindMetaId, Kind>,
-    tycon_env: HashMap<String, Kind>,
-    class_env: HashMap<String, Vec<Kind>>,
+    tycon_env: HashMap<TyConId, Kind>,
+    class_env: HashMap<ClassId, Vec<Kind>>,
 }
 
 impl Default for SignatureKindInferencer {
@@ -234,7 +234,7 @@ impl SignatureKindInferencer {
         }
     }
 
-    pub fn with_tycon_env(tycon_env: HashMap<String, Kind>) -> Self {
+    pub fn with_tycon_env(tycon_env: HashMap<TyConId, Kind>) -> Self {
         Self {
             next_meta: 0,
             subst: HashMap::new(),
@@ -244,8 +244,8 @@ impl SignatureKindInferencer {
     }
 
     pub fn with_envs(
-        tycon_env: HashMap<String, Kind>,
-        class_env: HashMap<String, Vec<Kind>>,
+        tycon_env: HashMap<TyConId, Kind>,
+        class_env: HashMap<ClassId, Vec<Kind>>,
     ) -> Self {
         Self {
             next_meta: 0,
@@ -331,12 +331,10 @@ impl SignatureKindInferencer {
         pred: &Predicate,
         env: &mut HashMap<TyVarId, Kind>,
     ) -> Result<Predicate, KindError> {
-        let class_name = class_display_name(pred.class_id);
-        let expected_kinds = self
-            .class_env
-            .get(&class_name)
-            .cloned()
-            .ok_or_else(|| KindError::unbound_type_constructor(class_name.clone()))?;
+        let expected_kinds =
+            self.class_env.get(&pred.class_id).cloned().ok_or_else(|| {
+                KindError::unbound_type_constructor(class_id_display(pred.class_id))
+            })?;
 
         if expected_kinds.len() != pred.args.len() {
             return Err(KindError::cannot_unify(
@@ -379,13 +377,12 @@ impl SignatureKindInferencer {
             TypeExpr::TyExVar(id) => Ok((Kind::Star, TypeExpr::TyExVar(*id))),
 
             TypeExpr::TyCon(id) => {
-                let name = tycon_display_name(*id);
                 let kind = self
                     .tycon_env
-                    .get(&name)
+                    .get(id)
                     .cloned()
                     .map(|k| self.apply_kind(&k))
-                    .ok_or_else(|| KindError::unbound_type_constructor(name.clone()))?;
+                    .ok_or_else(|| KindError::unbound_type_constructor(tycon_id_display(*id)))?;
                 Ok((kind, TypeExpr::TyCon(*id)))
             }
 
@@ -581,5 +578,42 @@ impl SignatureKindInferencer {
             signature_kind: Kind::Star,
             kind_subst: self.subst,
         })
+    }
+}
+
+fn tycon_id_display(id: TyConId) -> String {
+    format!("T{}", id.0)
+}
+
+fn class_id_display(id: ClassId) -> String {
+    format!("K{}", id.0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scheme_kind_inference_uses_id_keyed_type_and_class_envs() {
+        let tycon_id = TyConId(41);
+        let class_id = ClassId(42);
+        let scheme = Scheme {
+            quantifiers: Vec::new(),
+            predicates: vec![Predicate {
+                class_id,
+                args: vec![TypeExpr::TyCon(tycon_id)],
+            }],
+            ty: TypeExpr::TyCon(tycon_id),
+        };
+
+        let info = SignatureKindInferencer::with_envs(
+            HashMap::from([(tycon_id, Kind::Star)]),
+            HashMap::from([(class_id, vec![Kind::Star])]),
+        )
+        .infer_scheme(&scheme)
+        .expect("ICE: ID-keyed signature kind environment should resolve test IDs");
+
+        assert_eq!(info.scheme.ty, TypeExpr::TyCon(tycon_id));
+        assert_eq!(info.scheme.predicates[0].class_id, class_id);
     }
 }
