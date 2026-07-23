@@ -216,6 +216,7 @@ impl<'a> Resolver<'a> {
         (
             Vec<DataDefinition>,
             HashMap<String, Kind>,
+            HashMap<TyConId, Kind>,
             HashMap<CtorId, TypeExpr>,
             HashMap<String, Kind>,
         ),
@@ -226,6 +227,7 @@ impl<'a> Resolver<'a> {
 
         let mut data_defs = Vec::new();
         let mut local_tycon_kinds = HashMap::new();
+        let mut local_tycon_kind_ids = HashMap::new();
         let mut constructor_types = HashMap::new();
 
         for idef in &inferred_data {
@@ -244,6 +246,7 @@ impl<'a> Resolver<'a> {
             }
 
             local_tycon_kinds.insert(idef.name.clone(), idef.tycon_kind.clone());
+            local_tycon_kind_ids.insert(legacy_tycon_id(&idef.name), idef.tycon_kind.clone());
 
             data_defs.push(DataDefinition {
                 name: idef.name.clone(),
@@ -266,6 +269,7 @@ impl<'a> Resolver<'a> {
         Ok((
             data_defs,
             local_tycon_kinds,
+            local_tycon_kind_ids,
             constructor_types,
             all_tycon_kinds,
         ))

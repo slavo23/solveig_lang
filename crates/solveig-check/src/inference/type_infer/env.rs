@@ -35,7 +35,7 @@ pub struct TypeChecker {
     func_schemes: HashMap<String, Scheme>,
     class_defs: Vec<ClassDefinition>,
     instance_defs: Vec<InstanceDefinition<Span>>,
-    tycon_kinds: HashMap<String, Kind>,
+    tycon_kinds: HashMap<TyConId, Kind>,
     givens: Vec<Predicate>,
     wanteds: Vec<Wanted>,
     evar_solutions: HashMap<EvarId, TypeExpr>,
@@ -176,7 +176,7 @@ pub struct TypeCheckEnv {
     pub func_schemes: HashMap<String, Scheme>,
     pub class_defs: Vec<ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<Span>>,
-    pub tycon_kinds: HashMap<String, Kind>,
+    pub tycon_kinds: HashMap<TyConId, Kind>,
 }
 
 impl TypeCheckEnv {

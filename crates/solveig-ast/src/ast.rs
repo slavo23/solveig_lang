@@ -838,7 +838,7 @@ pub struct ResolvedModule<A, P = A> {
     pub data_defs: Vec<DataDefinition>,
     pub class_defs: Vec<ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<A, P>>,
-    pub tycon_kinds: HashMap<String, Kind>,
+    pub tycon_kinds: HashMap<TyConId, Kind>,
     pub constructor_types: HashMap<CtorId, TypeExpr>,
     pub func_schemes: HashMap<String, Scheme>,
     pub func_defs: Vec<TermDefinition<A, P>>,

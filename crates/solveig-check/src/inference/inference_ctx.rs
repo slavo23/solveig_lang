@@ -1,5 +1,6 @@
 use solveig_ast::ast::{
-    EvarId, Kind, Predicate, Pretty, TyVarId, TypeExpr, tycon_display_name, tyvar_display_name,
+    EvarId, Kind, Predicate, Pretty, TyConId, TyVarId, TypeExpr, tycon_display_name,
+    tyvar_display_name,
 };
 use std::collections::HashMap;
 use std::iter::successors;
@@ -222,14 +223,14 @@ impl Context {
     pub fn kind_of_type(
         &self,
         ty: &TypeExpr,
-        tycon_kinds: &HashMap<String, Kind>,
+        tycon_kinds: &HashMap<TyConId, Kind>,
     ) -> Result<Kind, String> {
         let ty = self.apply(ty);
         match &ty {
             TypeExpr::TyUnit => Ok(Kind::Star),
 
             TypeExpr::TyCon(id) => tycon_kinds
-                .get(&tycon_display_name(*id))
+                .get(id)
                 .cloned()
                 .ok_or_else(|| format!("unknown type constructor: {}", tycon_display_name(*id))),
 
@@ -347,5 +348,22 @@ mod tests {
         assert!(ctx.has_universal_id(tyvar));
         assert_eq!(ctx.universal_kind("a"), Some(Kind::Star));
         assert_eq!(ctx.universal_kind_id(tyvar), Some(Kind::Star));
+    }
+
+    #[test]
+    fn type_constructor_kinds_are_keyed_by_id() {
+        let list_id = TyConId(7);
+        let other_id = TyConId(8);
+        let mut tycon_kinds = HashMap::new();
+        tycon_kinds.insert(list_id, Kind::make_arrow(Kind::Star, Kind::Star));
+
+        let ctx = Context::new();
+        let list_unit = TypeExpr::make_app(TypeExpr::make_con_id(list_id), TypeExpr::TyUnit);
+
+        assert_eq!(ctx.kind_of_type(&list_unit, &tycon_kinds), Ok(Kind::Star));
+        assert!(
+            ctx.kind_of_type(&TypeExpr::make_con_id(other_id), &tycon_kinds)
+                .is_err()
+        );
     }
 }

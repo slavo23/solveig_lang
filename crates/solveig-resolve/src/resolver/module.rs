@@ -25,7 +25,13 @@ impl<'a> Resolver<'a> {
             return Err(ResolverError::Resolve(errors));
         }
 
-        let (data_defs, local_tycon_kinds, constructor_types, all_tycon_kinds) =
+        let (
+            data_defs,
+            local_tycon_kinds,
+            local_tycon_kind_ids,
+            constructor_types,
+            all_tycon_kinds,
+        ) =
             self.resolve_data_defs(module_name, raw_data_defs, imported)?;
 
         let class_defs =
@@ -84,7 +90,7 @@ impl<'a> Resolver<'a> {
                 data_defs,
                 class_defs,
                 instance_defs,
-                tycon_kinds: local_tycon_kinds,
+                tycon_kinds: local_tycon_kind_ids,
                 constructor_types,
                 func_schemes,
                 func_defs,

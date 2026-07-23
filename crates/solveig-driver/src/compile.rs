@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    ClassDefinition, CtorId, DefId, ModuleId, Scheme, TypeExpr, ctor_display_name,
+    ClassDefinition, CtorId, DefId, ModuleId, Scheme, TyConId, TypeExpr, ctor_display_name,
+    tycon_display_name,
 };
 use solveig_base::{FileSpan, IntoDiagnostic, Session};
 use solveig_check::inference::holes::hole_diagnostics;
@@ -559,7 +560,7 @@ fn collect_imported_type_info(
     imports: &[ImportedTypedApi],
 ) -> (
     HashMap<String, Scheme>,
-    HashMap<String, solveig_ast::ast::Kind>,
+    HashMap<TyConId, solveig_ast::ast::Kind>,
     HashMap<CtorId, solveig_ast::ast::TypeExpr>,
     HashMap<String, ClassDefinition>,
     Vec<
@@ -618,7 +619,7 @@ fn retain_only_local_symbols(
 
     checked
         .tycon_kinds
-        .retain(|name, _| name.starts_with(&prefix));
+        .retain(|id, _| tycon_display_name(*id).starts_with(&prefix));
     checked
         .constructor_types
         .retain(|id, _| ctor_display_name(*id).starts_with(&prefix));
@@ -654,7 +655,7 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
         data_defs.extend(m.data_defs);
         class_defs.extend(m.class_defs);
         instance_defs.extend(m.instance_defs);
-        extend_unique(&mut tycon_kinds, m.tycon_kinds, "type constructor")?;
+        extend_unique_tycon(&mut tycon_kinds, m.tycon_kinds)?;
         extend_unique_ctor(&mut constructor_types, m.constructor_types)?;
         extend_unique(&mut func_schemes, m.func_schemes, "function")?;
         func_defs.extend(m.func_defs);
@@ -679,6 +680,21 @@ fn extend_unique<T>(
     for (k, v) in src {
         if dst.insert(k.clone(), v).is_some() {
             return Err(format!("duplicate {label} {k}"));
+        }
+    }
+    Ok(())
+}
+
+fn extend_unique_tycon(
+    dst: &mut HashMap<TyConId, solveig_ast::ast::Kind>,
+    src: HashMap<TyConId, solveig_ast::ast::Kind>,
+) -> Result<(), String> {
+    for (k, v) in src {
+        if dst.insert(k, v).is_some() {
+            return Err(format!(
+                "duplicate type constructor {}",
+                tycon_display_name(k)
+            ));
         }
     }
     Ok(())

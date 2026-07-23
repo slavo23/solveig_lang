@@ -307,7 +307,7 @@ pub fn elaborate_typeclasses(
 
     let mut tycon_kinds = module.tycon_kinds.clone();
     for dd in &dict_data_defs {
-        tycon_kinds.insert(dd.name.clone(), dd.tycon_kind.clone());
+        tycon_kinds.insert(legacy_tycon_id(&dd.name), dd.tycon_kind.clone());
     }
 
     let mut func_defs = module.func_defs.clone();

@@ -7,6 +7,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{
     ClassDefinition, CtorId, DefId, Kind, ModuleId, TypeExpr, ctor_display_name, legacy_ctor_id,
+    legacy_tycon_id,
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
@@ -461,8 +462,8 @@ impl TypedModuleApi {
         }
 
         for (sym, kind) in &self.type_kinds {
-            out.tycon_kinds
-                .insert(defid_to_legacy_string(session, modules, *sym), kind.clone());
+            let name = defid_to_legacy_string(session, modules, *sym);
+            out.tycon_kinds.insert(legacy_tycon_id(&name), kind.clone());
         }
 
         for (sym, ty) in &self.constructor_types {
@@ -484,7 +485,7 @@ impl TypedModuleApi {
 
 pub struct TypedDisplayMaps<'a> {
     pub func_schemes: &'a mut HashMap<String, solveig_ast::ast::Scheme>,
-    pub tycon_kinds: &'a mut HashMap<String, Kind>,
+    pub tycon_kinds: &'a mut HashMap<solveig_ast::ast::TyConId, Kind>,
     pub constructor_types: &'a mut HashMap<CtorId, TypeExpr>,
     pub class_defs: &'a mut HashMap<String, solveig_ast::ast::ClassDefinition>,
     pub instance_defs: &'a mut Vec<
@@ -900,7 +901,8 @@ pub fn build_typed_module_api(
         }
     }
 
-    for (name, kind) in &checked.tycon_kinds {
+    for (id, kind) in &checked.tycon_kinds {
+        let name = solveig_ast::ast::tycon_display_name(*id);
         if let Some(stripped) = name.strip_prefix(&prefix) {
             api.type_kinds.insert(
                 local_def_id(module_id, session.intern(stripped)),
