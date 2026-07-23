@@ -1,13 +1,15 @@
-use solveig_ast::ast::{Kind, Predicate, Pretty, TypeExpr};
+use solveig_ast::ast::{
+    EvarId, Kind, Predicate, Pretty, TypeExpr, legacy_evar_id as decode_legacy_evar_id,
+};
 use std::collections::HashMap;
 use std::iter::successors;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ContextEntry {
-    ExVar(String, Kind),
+    ExVar(EvarId, Kind),
     UniVar(String, Kind),
     TypedVar { var_name: String, ty: TypeExpr },
-    SolvedEVar { lhs: String, rhs: TypeExpr },
+    SolvedEVar { lhs: EvarId, rhs: TypeExpr },
     Marker { var_name: String },
 }
 
@@ -133,10 +135,19 @@ impl Context {
         Self::from_halves(left, right)
     }
 
+    fn legacy_evar_id(evar_name: &str) -> Option<EvarId> {
+        decode_legacy_evar_id(evar_name)
+    }
+
     pub fn find_solved_evar(&self, evar_name: &str) -> Option<ContextEntry> {
+        let evar_id = Self::legacy_evar_id(evar_name)?;
+        self.find_solved_evar_id(evar_id)
+    }
+
+    pub fn find_solved_evar_id(&self, evar_id: EvarId) -> Option<ContextEntry> {
         self.entries
             .iter()
-            .find(|ent| matches!(ent, ContextEntry::SolvedEVar { lhs, .. } if lhs == evar_name))
+            .find(|ent| matches!(ent, ContextEntry::SolvedEVar { lhs, .. } if *lhs == evar_id))
             .cloned()
     }
 
@@ -144,10 +155,21 @@ impl Context {
         self.find_solved_evar(evar_name).is_some()
     }
 
+    pub fn has_solved_evar_id(&self, evar_id: EvarId) -> bool {
+        self.find_solved_evar_id(evar_id).is_some()
+    }
+
     pub fn has_unsolved_evar(&self, evar_name: &str) -> bool {
+        let Some(evar_id) = Self::legacy_evar_id(evar_name) else {
+            return false;
+        };
+        self.has_unsolved_evar_id(evar_id)
+    }
+
+    pub fn has_unsolved_evar_id(&self, evar_id: EvarId) -> bool {
         self.entries
             .iter()
-            .any(|ent| matches!(ent, ContextEntry::ExVar(name, _) if name == evar_name))
+            .any(|ent| matches!(ent, ContextEntry::ExVar(id, _) if *id == evar_id))
     }
 
     pub fn has_universal(&self, var_name: &str) -> bool {
@@ -157,8 +179,13 @@ impl Context {
     }
 
     pub fn evar_kind(&self, evar_name: &str) -> Option<Kind> {
+        let evar_id = Self::legacy_evar_id(evar_name)?;
+        self.evar_kind_id(evar_id)
+    }
+
+    pub fn evar_kind_id(&self, evar_id: EvarId) -> Option<Kind> {
         self.entries.iter().find_map(|ent| match ent {
-            ContextEntry::ExVar(name, kind) if name == evar_name => Some(kind.clone()),
+            ContextEntry::ExVar(id, kind) if *id == evar_id => Some(kind.clone()),
             _ => None,
         })
     }
@@ -171,14 +198,23 @@ impl Context {
     }
 
     pub fn evar_before(&self, earlier: &str, later: &str) -> bool {
+        let (Some(earlier), Some(later)) =
+            (Self::legacy_evar_id(earlier), Self::legacy_evar_id(later))
+        else {
+            return false;
+        };
+        self.evar_before_id(earlier, later)
+    }
+
+    pub fn evar_before_id(&self, earlier: EvarId, later: EvarId) -> bool {
         let position_a = self
             .entries
             .iter()
-            .position(|ent| matches!(ent, ContextEntry::ExVar(name, _) if name == earlier));
+            .position(|ent| matches!(ent, ContextEntry::ExVar(id, _) if *id == earlier));
         let position_b = self
             .entries
             .iter()
-            .position(|ent| matches!(ent, ContextEntry::ExVar(name, _) if name == later));
+            .position(|ent| matches!(ent, ContextEntry::ExVar(id, _) if *id == later));
         match (position_a, position_b) {
             (Some(pos_a), Some(pos_b)) => pos_a < pos_b,
             _ => false,
@@ -279,5 +315,30 @@ impl Context {
                     && self.type_well_formed(body)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn evar_context_entries_are_keyed_by_id() {
+        let evar = EvarId(7);
+        let unsolved = ContextEntry::ExVar(evar, Kind::Star);
+        let ctx = Context::new().add_entry(unsolved.clone());
+
+        assert!(ctx.has_unsolved_evar("a^7"));
+        assert!(ctx.has_unsolved_evar_id(evar));
+        assert!(!ctx.has_unsolved_evar("a^8"));
+
+        let solved = ContextEntry::SolvedEVar {
+            lhs: evar,
+            rhs: TypeExpr::TyUnit,
+        };
+        let ctx = ctx.replace(&unsolved, &solved);
+
+        assert!(ctx.has_solved_evar("a^7"));
+        assert_eq!(ctx.apply(&TypeExpr::make_evar(evar)), TypeExpr::TyUnit);
     }
 }

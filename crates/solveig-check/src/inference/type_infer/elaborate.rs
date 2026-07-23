@@ -29,12 +29,12 @@ impl TypeChecker {
     }
     fn record_solution(&mut self, solved_entry: &ContextEntry) {
         if let ContextEntry::SolvedEVar {
-            lhs: evar_name,
+            lhs: evar_id,
             rhs: solution,
         } = solved_entry
         {
             self.evar_solutions
-                .insert(evar_name.clone(), solution.clone());
+                .insert(*evar_id, solution.clone());
         }
     }
     fn context_bindings(&self, ctx: &Context) -> Vec<(String, TypeExpr)> {
@@ -69,7 +69,9 @@ impl TypeChecker {
     pub fn zonk_type(&self, ty: &TypeExpr) -> TypeExpr {
         match ty {
             TypeExpr::TyExVar(name) => {
-                if let Some(solution) = self.evar_solutions.get(name) {
+                if let Some(solution) =
+                    legacy_evar_id(name).and_then(|id| self.evar_solutions.get(&id))
+                {
                     self.zonk_type(solution)
                 } else {
                     ty.clone()

@@ -5,9 +5,9 @@ use crate::inference::exhaustiveness;
 use crate::inference::holes::HoleInfo;
 use crate::inference::inference_ctx::{Context, ContextEntry};
 use solveig_ast::ast::{
-    BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, InstanceDefinition,
+    BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, EvarId, InstanceDefinition,
     InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate, Pretty, ResolvedModule,
-    Scheme, TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
+    Scheme, TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp, legacy_evar_id,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};

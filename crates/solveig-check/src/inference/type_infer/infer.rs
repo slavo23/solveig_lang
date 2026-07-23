@@ -18,9 +18,9 @@ impl TypeChecker {
                 Ok((ctx, annotation.clone()))
             }
             None => {
-                let evar_name = self.fresh_evar_name();
-                let new_ctx = ctx.add_entry(ContextEntry::ExVar(evar_name.clone(), Kind::Star));
-                Ok((new_ctx, TypeExpr::TyExVar(evar_name)))
+                let evar_id = self.fresh_evar_id();
+                let new_ctx = ctx.add_entry(ContextEntry::ExVar(evar_id, Kind::Star));
+                Ok((new_ctx, Self::evar_type(evar_id)))
             }
         }
     }
@@ -137,17 +137,17 @@ impl TypeChecker {
                 let (ctx, param_type) =
                     self.infer_lambda_param_type(ctx, param, maybe_annotation, span.clone())?;
 
-                let result_evar = self.fresh_evar_name();
+                let result_evar = self.fresh_evar_id();
                 let typed_var_entry = ContextEntry::TypedVar {
                     var_name: param.clone(),
                     ty: param_type.clone(),
                 };
 
                 let extended_ctx = ctx
-                    .add_entry(ContextEntry::ExVar(result_evar.clone(), Kind::Star))
+                    .add_entry(ContextEntry::ExVar(result_evar, Kind::Star))
                     .add_entry(typed_var_entry.clone());
 
-                let body_expected_type = TypeExpr::TyExVar(result_evar.clone());
+                let body_expected_type = Self::evar_type(result_evar);
                 let (delta, elaborated_body) =
                     self.solve_checking(extended_ctx, body, &body_expected_type)?;
 
@@ -261,9 +261,9 @@ impl TypeChecker {
                 let bool_type = self.bool_type();
                 let (gamma, elaborated_cond) = self.solve_checking(ctx, cond, &bool_type)?;
 
-                let result_evar = self.fresh_evar_name();
-                let result_type = TypeExpr::TyExVar(result_evar.clone());
-                let theta = gamma.add_entry(ContextEntry::ExVar(result_evar.clone(), Kind::Star));
+                let result_evar = self.fresh_evar_id();
+                let result_type = Self::evar_type(result_evar);
+                let theta = gamma.add_entry(ContextEntry::ExVar(result_evar, Kind::Star));
 
                 let (theta, elaborated_then) =
                     self.solve_checking(theta, then_branch, &result_type)?;
@@ -298,9 +298,9 @@ impl TypeChecker {
                 self.solve_unary_operator_inference(ctx, op, rhs, span)
             }
             TermExpr::Hole => {
-                let evar_name = self.fresh_evar_name();
-                let evar_type = TypeExpr::TyExVar(evar_name.clone());
-                let extended_ctx = ctx.add_entry(ContextEntry::ExVar(evar_name, Kind::Star));
+                let evar_id = self.fresh_evar_id();
+                let evar_type = Self::evar_type(evar_id);
+                let extended_ctx = ctx.add_entry(ContextEntry::ExVar(evar_id, Kind::Star));
                 self.report_hole(&extended_ctx, span.clone(), &evar_type);
                 let elaborated = elab_node(TermExpr::Hole, span, evar_type.clone());
                 Ok((extended_ctx, elaborated, evar_type))
@@ -320,11 +320,11 @@ impl TypeChecker {
 
         match &function_type {
             TypeExpr::TyForAll(quantifier, kind, body) => {
-                let fresh_evar = self.fresh_evar_name();
-                let evar_entry = ContextEntry::ExVar(fresh_evar.clone(), kind.clone());
+                let fresh_evar = self.fresh_evar_id();
+                let evar_entry = ContextEntry::ExVar(fresh_evar, kind.clone());
                 let extended_ctx = ctx.add_entry(evar_entry);
 
-                let ty_arg = TypeExpr::TyExVar(fresh_evar.clone());
+                let ty_arg = Self::evar_type(fresh_evar);
                 let instantiated_type = body.substitute(quantifier, &ty_arg);
 
                 let wrapped_function = TermExprNode::new(
@@ -357,33 +357,34 @@ impl TypeChecker {
             }
 
             TypeExpr::TyExVar(evar_name) if ctx.has_unsolved_evar(evar_name) => {
+                let evar_id = Self::evar_id_from_legacy_name(evar_name);
                 let evar_entry = ContextEntry::ExVar(
-                    evar_name.clone(),
+                    evar_id,
                     ctx.evar_kind(evar_name)
                         .unwrap_or_else(|| panic!("ICE: missing evar kind for {evar_name}")),
                 );
                 let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 
-                let domain_evar = self.fresh_evar_name();
-                let codomain_evar = self.fresh_evar_name();
+                let domain_evar = self.fresh_evar_id();
+                let codomain_evar = self.fresh_evar_id();
                 let arrow_solution = ContextEntry::SolvedEVar {
-                    lhs: evar_name.clone(),
+                    lhs: evar_id,
                     rhs: TypeExpr::make_arr(
-                        TypeExpr::TyExVar(domain_evar.clone()),
-                        TypeExpr::TyExVar(codomain_evar.clone()),
+                        Self::evar_type(domain_evar),
+                        Self::evar_type(codomain_evar),
                     ),
                 };
                 self.record_solution(&arrow_solution);
 
-                left_entries.push(ContextEntry::ExVar(codomain_evar.clone(), Kind::Star));
-                left_entries.push(ContextEntry::ExVar(domain_evar.clone(), Kind::Star));
+                left_entries.push(ContextEntry::ExVar(codomain_evar, Kind::Star));
+                left_entries.push(ContextEntry::ExVar(domain_evar, Kind::Star));
                 left_entries.push(arrow_solution);
                 let new_ctx = Context::from_halves(left_entries, right_entries);
 
                 let (delta, elaborated_argument) =
-                    self.solve_checking(new_ctx, argument, &TypeExpr::TyExVar(domain_evar))?;
+                    self.solve_checking(new_ctx, argument, &Self::evar_type(domain_evar))?;
 
-                let result_type = delta.apply(&TypeExpr::TyExVar(codomain_evar));
+                let result_type = delta.apply(&Self::evar_type(codomain_evar));
                 let elaborated = elab_node(
                     TermExpr::App(
                         Box::new(elaborated_function.clone()),

@@ -73,9 +73,9 @@ impl TypeChecker {
         let (gamma, elaborated_scrutinee, scrutinee_type) = self.solve_inference(ctx, scrutinee)?;
         let scrutinee_type = gamma.apply(&scrutinee_type);
 
-        let result_evar = self.fresh_evar_name();
-        let result_type = TypeExpr::TyExVar(result_evar.clone());
-        let mut theta = gamma.add_entry(ContextEntry::ExVar(result_evar.clone(), Kind::Star));
+        let result_evar = self.fresh_evar_id();
+        let result_type = Self::evar_type(result_evar);
+        let mut theta = gamma.add_entry(ContextEntry::ExVar(result_evar, Kind::Star));
 
         let mut elaborated_arms: Vec<CaseArmNode<TcMetadata, Span>> =
             Vec::with_capacity(arms.len());
@@ -97,10 +97,10 @@ impl TypeChecker {
             let (omega, elaborated_body) =
                 self.solve_checking(body_ctx, &arm.node.expr, &arm_result_type)?;
 
-            if !omega.has_unsolved_evar(&result_evar) && !omega.has_solved_evar(&result_evar) {
+            if !omega.has_unsolved_evar_id(result_evar) && !omega.has_solved_evar_id(result_evar) {
                 return Err(TypeError::MissingCaseResultExistential {
                     span: self.get_file_span(arm.node.expr.anno.clone()),
-                    evar: result_evar,
+                    evar: solveig_ast::ast::legacy_evar_name(result_evar),
                     arm_index,
                 });
             }

@@ -74,9 +74,9 @@ impl TypeChecker {
         let mut subst = HashMap::<String, TypeExpr>::new();
 
         for (name, kind) in &scheme.quantifiers {
-            let fresh = self.fresh_evar_name();
-            ctx = ctx.add_entry(ContextEntry::ExVar(fresh.clone(), kind.clone()));
-            subst.insert(name.clone(), TypeExpr::TyExVar(fresh));
+            let fresh = self.fresh_evar_id();
+            ctx = ctx.add_entry(ContextEntry::ExVar(fresh, kind.clone()));
+            subst.insert(name.clone(), Self::evar_type(fresh));
         }
 
         let instantiated_preds = scheme
@@ -430,11 +430,12 @@ impl TypeChecker {
                 .collect(),
         }
     }
-    fn collect_exvars_in_type(ty: &TypeExpr, acc: &mut Vec<String>) {
+    fn collect_exvars_in_type(ty: &TypeExpr, acc: &mut Vec<EvarId>) {
         match ty {
             TypeExpr::TyExVar(name) => {
-                if !acc.contains(name) {
-                    acc.push(name.clone());
+                let id = Self::evar_id_from_legacy_name(name);
+                if !acc.contains(&id) {
+                    acc.push(id);
                 }
             }
             TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
@@ -470,9 +471,10 @@ impl TypeChecker {
 
         for evar in evars {
             let universal = self.fresh_universal_name("t");
-            let kind = ctx.evar_kind(&evar).unwrap_or(Kind::Star);
+            let kind = ctx.evar_kind_id(evar).unwrap_or(Kind::Star);
+            let evar_name = solveig_ast::ast::legacy_evar_name(evar);
 
-            result = result.substitute(&evar, &TypeExpr::TyVar(universal.clone()));
+            result = result.substitute(&evar_name, &TypeExpr::TyVar(universal.clone()));
             binders.push((universal, kind));
         }
 

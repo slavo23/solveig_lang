@@ -112,6 +112,15 @@ pub enum Ty {
 
 pub type TypeExpr = Ty;
 
+pub fn legacy_evar_name(id: EvarId) -> String {
+    format!("a^{}", id.0)
+}
+
+pub fn legacy_evar_id(name: &str) -> Option<EvarId> {
+    let raw = name.strip_prefix("a^")?;
+    raw.parse::<u32>().ok().map(EvarId)
+}
+
 impl Ty {
     pub fn is_mono(&self) -> bool {
         match self {
@@ -186,6 +195,10 @@ impl Ty {
 
     pub fn make_var(var_name: String) -> TypeExpr {
         Self::TyVar(var_name)
+    }
+
+    pub fn make_evar(id: EvarId) -> TypeExpr {
+        Self::TyExVar(legacy_evar_name(id))
     }
 
     pub fn make_forall(quant_name: String, kind: Kind, body: TypeExpr) -> TypeExpr {
@@ -719,5 +732,18 @@ mod tests {
             classes.iter().map(|(id, _)| id).collect::<Vec<_>>(),
             vec![eq_id]
         );
+    }
+
+    #[test]
+    fn legacy_evar_bridge_round_trips_ids() {
+        let id = EvarId(42);
+
+        assert_eq!(legacy_evar_name(id), "a^42");
+        assert_eq!(legacy_evar_id("a^42"), Some(id));
+        assert_eq!(
+            TypeExpr::make_evar(id),
+            TypeExpr::TyExVar("a^42".to_string())
+        );
+        assert_eq!(legacy_evar_id("user_type_var"), None);
     }
 }

@@ -30,7 +30,7 @@ fn file_span(file: FileId, span: Span) -> FileSpan {
 
 pub struct TypeChecker {
     file: FileId,
-    counter: usize,
+    counter: u32,
     constructor_types: HashMap<String, TypeExpr>,
     func_schemes: HashMap<String, Scheme>,
     class_defs: Vec<ClassDefinition>,
@@ -38,7 +38,7 @@ pub struct TypeChecker {
     tycon_kinds: HashMap<String, Kind>,
     givens: Vec<Predicate>,
     wanteds: Vec<Wanted>,
-    evar_solutions: HashMap<String, TypeExpr>,
+    evar_solutions: HashMap<EvarId, TypeExpr>,
     holes: Vec<HoleInfo>,
 }
 
@@ -86,12 +86,19 @@ impl TypeChecker {
     fn get_file_span(&self, span: Span) -> FileSpan {
         file_span(self.file, span)
     }
-    fn fresh_id(&mut self) -> usize {
+    fn fresh_id(&mut self) -> u32 {
         self.counter += 1;
         self.counter
     }
-    fn fresh_evar_name(&mut self) -> String {
-        format!("a^{}", self.fresh_id())
+    fn fresh_evar_id(&mut self) -> EvarId {
+        EvarId(self.fresh_id())
+    }
+    fn evar_type(id: EvarId) -> TypeExpr {
+        TypeExpr::make_evar(id)
+    }
+    fn evar_id_from_legacy_name(evar_name: &str) -> EvarId {
+        legacy_evar_id(evar_name)
+            .unwrap_or_else(|| panic!("ICE: malformed legacy evar name `{evar_name}`"))
     }
     fn fresh_universal_name(&mut self, base: &str) -> String {
         format!("{}{}", base, self.fresh_id())
@@ -177,4 +184,3 @@ pub struct TCOutput {
     pub module: CheckedModule,
     pub holes: Vec<HoleInfo>,
 }
-
