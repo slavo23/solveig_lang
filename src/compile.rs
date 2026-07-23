@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -32,20 +32,26 @@ pub fn run_project_capture(project_root: &Path, entry_name: &str) -> Result<Stri
     compile_project_capture(project_root, entry_name, false)
 }
 
+pub fn checked_project_schemes(project_root: &Path) -> Result<BTreeMap<String, String>, String> {
+    let checked_modules = check_project_modules(project_root)?;
+    let mut schemes = BTreeMap::new();
+
+    for module in checked_modules {
+        for (name, scheme) in module.func_schemes {
+            schemes.insert(name, scheme.pretty());
+        }
+    }
+
+    Ok(schemes)
+}
+
 fn compile_project_capture(
     project_root: &Path,
     entry_name: &str,
     dump_bytecode: bool,
 ) -> Result<String, String> {
-    let entry_file = find_entry_file(project_root)?;
-    let (_root, project) = load_project(&entry_file)?;
-    let order = module_order_checked(&project)?;
-    let parsed = parse_project(&project)?;
-
-    let mut state = FrontendState::new(&project, &parsed, &order)?;
-    state.check_all(&order)?;
-
-    let merged = merge_checked_modules(state.checked_modules)?;
+    let checked_modules = check_project_modules(project_root)?;
+    let merged = merge_checked_modules(checked_modules)?;
     let elaborated = syntax::inference::class_elab::elaborate_typeclasses(&merged);
     let ir = lower_module(&elaborated);
     let cc = lower_to_closure_ir(&ir);
@@ -58,6 +64,18 @@ fn compile_project_capture(
     let entry_fq = format!("main.{entry_name}");
     let result = Machine::exec(&cc, &entry_fq);
     Ok(result.display().to_string())
+}
+
+fn check_project_modules(project_root: &Path) -> Result<Vec<CheckedModule>, String> {
+    let entry_file = find_entry_file(project_root)?;
+    let (_root, project) = load_project(&entry_file)?;
+    let order = module_order_checked(&project)?;
+    let parsed = parse_project(&project)?;
+
+    let mut state = FrontendState::new(&project, &parsed, &order)?;
+    state.check_all(&order)?;
+
+    Ok(state.checked_modules)
 }
 
 fn erase_tc_expr_to_span_expr(
