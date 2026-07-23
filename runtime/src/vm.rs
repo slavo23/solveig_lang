@@ -1197,3 +1197,266 @@ impl EvalResult {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use core::ast::BinOp;
+    use lowering::closure_ir::{CCCaseArm, CCExpr, CCFunction, CCGlobalDef, CCPattern};
+    use std::rc::Rc;
+
+    const TRUE_TAG: u16 = 0;
+    const FALSE_TAG: u16 = 1;
+    const NIL_TAG: u16 = 2;
+    const CONS_TAG: u16 = 3;
+
+    #[test]
+    fn tail_recursive_countdown_uses_bounded_vm_stack() {
+        let countdown = function(
+            0,
+            "countdown",
+            2,
+            if_then_else(
+                bin(BinOp::Equal, local(1), int(0)),
+                local(0),
+                call_known(
+                    0,
+                    vec![
+                        bin(BinOp::Minus, local(1), int(1)),
+                        bin(BinOp::Plus, local(0), int(1)),
+                    ],
+                ),
+            ),
+        );
+
+        let program = program(
+            vec![global(
+                "main",
+                call_known(0, vec![int(5_000_000), int(0)]),
+            )],
+            vec![countdown],
+            &[],
+        );
+
+        let bytecode = lower_to_bytecode(&program);
+        let countdown_chunk = bytecode
+            .chunks
+            .iter()
+            .find(|chunk| chunk.name == "countdown")
+            .expect("countdown chunk should be lowered");
+
+        assert!(
+            countdown_chunk
+                .code
+                .iter()
+                .any(|instr| matches!(instr, Instr::TailCallKnown { .. })),
+            "countdown must lower its recursive call as TailCallKnown"
+        );
+        assert!(
+            !countdown_chunk
+                .code
+                .iter()
+                .any(|instr| matches!(instr, Instr::CallKnown { .. })),
+            "countdown should not keep a caller continuation for the recursive call"
+        );
+
+        assert_eq!(run(&program), "5000000");
+    }
+
+    #[test]
+    fn partial_application_applies_remaining_arguments() {
+        let add3 = function(
+            0,
+            "add3",
+            3,
+            bin(
+                BinOp::Plus,
+                bin(BinOp::Plus, local(2), local(1)),
+                local(0),
+            ),
+        );
+
+        let program = program(
+            vec![global(
+                "main",
+                call(call_known(0, vec![int(10), int(20)]), vec![int(12)]),
+            )],
+            vec![add3],
+            &[],
+        );
+
+        assert_eq!(run(&program), "42");
+    }
+
+    #[test]
+    fn gc_preserves_list_across_build_and_fold() {
+        let build = function(
+            0,
+            "build",
+            2,
+            if_then_else(
+                bin(BinOp::Equal, local(1), int(0)),
+                local(0),
+                call_known(
+                    0,
+                    vec![
+                        bin(BinOp::Minus, local(1), int(1)),
+                        pack(CONS_TAG, 2, vec![local(1), local(0)]),
+                    ],
+                ),
+            ),
+        );
+
+        let fold_sum = function(
+            1,
+            "fold_sum",
+            2,
+            case(
+                local(1),
+                vec![
+                    arm(CCPattern::Con(NIL_TAG, vec![]), local(0)),
+                    arm(
+                        CCPattern::Con(CONS_TAG, vec![CCPattern::Var, CCPattern::Var]),
+                        call_known(
+                            1,
+                            vec![local(0), bin(BinOp::Plus, local(2), local(1))],
+                        ),
+                    ),
+                ],
+            ),
+        );
+
+        let program = program(
+            vec![global(
+                "main",
+                let_in(
+                    call_known(
+                        0,
+                        vec![int(40_000), pack(NIL_TAG, 0, Vec::new())],
+                    ),
+                    call_known(1, vec![local(0), int(0)]),
+                ),
+            )],
+            vec![build, fold_sum],
+            &[("Nil", NIL_TAG, 0), ("Cons", CONS_TAG, 2)],
+        );
+
+        assert_eq!(run(&program), "800020000");
+    }
+
+    #[test]
+    fn global_thunks_resume_dependency_order() {
+        let program = program(
+            vec![
+                global("main", bin(BinOp::Plus, global_ref(1), global_ref(2))),
+                global("branch", bin(BinOp::Plus, global_ref(3), global_ref(2))),
+                global("leaf", int(10)),
+                global("root", bin(BinOp::Plus, global_ref(2), int(1))),
+            ],
+            Vec::new(),
+            &[],
+        );
+
+        assert_eq!(run(&program), "31");
+    }
+
+    fn run(program: &CCProgram) -> String {
+        Machine::exec(program, "main").display().to_string()
+    }
+
+    fn program(
+        globals: Vec<CCGlobalDef>,
+        functions: Vec<CCFunction>,
+        extra_constructors: &[(&str, u16, u16)],
+    ) -> CCProgram {
+        let mut constructor_arities = vec![
+            ("True".to_string(), TRUE_TAG, 0),
+            ("False".to_string(), FALSE_TAG, 0),
+        ];
+
+        constructor_arities.extend(
+            extra_constructors
+                .iter()
+                .map(|(name, tag, arity)| ((*name).to_string(), *tag, *arity)),
+        );
+
+        CCProgram {
+            globals,
+            functions,
+            constructor_arities,
+        }
+    }
+
+    fn function(id: usize, name: &str, arity: usize, body: Rc<CCExpr>) -> CCFunction {
+        CCFunction {
+            id,
+            name: name.to_string(),
+            arity,
+            capture_count: 0,
+            body,
+        }
+    }
+
+    fn global(name: &str, body: Rc<CCExpr>) -> CCGlobalDef {
+        CCGlobalDef {
+            name: name.to_string(),
+            body,
+        }
+    }
+
+    fn expr(expr: CCExpr) -> Rc<CCExpr> {
+        Rc::new(expr)
+    }
+
+    fn int(n: i64) -> Rc<CCExpr> {
+        expr(CCExpr::Int(n))
+    }
+
+    fn local(index: usize) -> Rc<CCExpr> {
+        expr(CCExpr::Local(index))
+    }
+
+    fn global_ref(index: usize) -> Rc<CCExpr> {
+        expr(CCExpr::Global(index))
+    }
+
+    fn bin(op: BinOp, lhs: Rc<CCExpr>, rhs: Rc<CCExpr>) -> Rc<CCExpr> {
+        expr(CCExpr::BinaryOp(op, lhs, rhs))
+    }
+
+    fn call(callee: Rc<CCExpr>, args: Vec<Rc<CCExpr>>) -> Rc<CCExpr> {
+        expr(CCExpr::Call { callee, args })
+    }
+
+    fn call_known(func: usize, args: Vec<Rc<CCExpr>>) -> Rc<CCExpr> {
+        expr(CCExpr::CallKnown { func, args })
+    }
+
+    fn let_in(binder: Rc<CCExpr>, body: Rc<CCExpr>) -> Rc<CCExpr> {
+        expr(CCExpr::Let(binder, body))
+    }
+
+    fn pack(tag: u16, arity: u16, fields: Vec<Rc<CCExpr>>) -> Rc<CCExpr> {
+        expr(CCExpr::Pack { tag, arity, fields })
+    }
+
+    fn case(scrutinee: Rc<CCExpr>, arms: Vec<CCCaseArm>) -> Rc<CCExpr> {
+        expr(CCExpr::Case { scrutinee, arms })
+    }
+
+    fn arm(pattern: CCPattern, body: Rc<CCExpr>) -> CCCaseArm {
+        CCCaseArm { pattern, body }
+    }
+
+    fn if_then_else(
+        cond: Rc<CCExpr>,
+        then_br: Rc<CCExpr>,
+        else_br: Rc<CCExpr>,
+    ) -> Rc<CCExpr> {
+        expr(CCExpr::IfThenElse {
+            cond,
+            then_br,
+            else_br,
+        })
+    }
+}
