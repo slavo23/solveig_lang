@@ -9,19 +9,20 @@ fn rewrite_expr(
     let anno = expr.anno.clone();
 
     let node = match &expr.node {
-        TermExpr::Var(name) => {
+        TermExpr::Var(var_ref) => {
+            let name = var_display_name(var_ref);
             let actual_ty = anno.inferred_type.clone();
 
-            if let Some(class_name) = method_to_class.get(name) {
+            if let Some(class_name) = method_to_class.get(&name) {
                 let class_rt = class_info
                     .get(class_name)
                     .unwrap_or_else(|| panic!("ICE: missing class runtime info for {}", class_name));
 
-                let short_name = name.rsplit('.').next().unwrap_or(name);
+                let short_name = name.rsplit('.').next().unwrap_or(&name);
 
                 let method_rt = class_rt
                     .methods
-                    .get(name)
+                    .get(&name)
                     .or_else(|| class_rt.methods.get(short_name))
                     .unwrap_or_else(|| panic!("ICE: missing method runtime info for {}", name));
 
@@ -35,7 +36,7 @@ fn rewrite_expr(
                         resolve_evidence(&needed_pred, env, class_info, instances, &mut Vec::new())
                     {
                         TermExpr::App(
-                            Box::new(mk_var(&method_rt.selector_name)),
+                            Box::new(mk_global_var(&method_rt.selector_name)),
                             Box::new(dict_expr),
                         )
                     } else {
@@ -44,10 +45,10 @@ fn rewrite_expr(
                         );
                     }
                 } else {
-                    TermExpr::Var(name.clone())
+                    TermExpr::Var(var_ref.clone())
                 }
             } else {
-                TermExpr::Var(name.clone())
+                TermExpr::Var(var_ref.clone())
             }
         }
 
@@ -90,8 +91,9 @@ fn rewrite_expr(
                 })
                 .collect::<Vec<_>>();
 
-            let rebuilt = if let TermExpr::Var(name) = &head.node {
-                if let Some(info) = constrained_funcs.get(name) {
+            let rebuilt = if let TermExpr::Var(var_ref) = &head.node {
+                let name = var_display_name(var_ref);
+                if let Some(info) = constrained_funcs.get(&name) {
                     let actual_head_ty = head.anno.inferred_type.clone();
                     let mut subst = HashMap::<TyVarId, TypeExpr>::new();
 

@@ -8,7 +8,8 @@ use solveig_ast::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, CtorId, EvarId,
     InstanceDefinition, InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate, Pretty,
     ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TyVarId, TypeExpr, UnOp,
-    ctor_display_name, legacy_ctor_id, legacy_tyvar_id, legacy_tyvar_name, tyvar_display_name,
+    VarRef, ctor_display_name, legacy_ctor_id, legacy_tyvar_id, legacy_tyvar_name,
+    tyvar_display_name, var_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};

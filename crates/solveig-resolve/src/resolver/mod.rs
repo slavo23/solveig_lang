@@ -6,7 +6,8 @@ use solveig_ast::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, ConstructorDef, CtorId,
     DataDefinition, DefId, InstanceDefinition, InstanceMethodDef, Kind, KindMetaId, Literal,
     ModuleId, Pattern, PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr,
-    TermExprNode, TypeExpr, UnOp, legacy_ctor_id, tyvar_display_name,
+    TermExprNode, TypeExpr, UnOp, VarRef, legacy_ctor_id, register_def_display_name,
+    register_symbol_display_name, tyvar_display_name,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use solveig_check::data_kind_infer::{
@@ -145,7 +146,9 @@ impl<'a> Resolver<'a> {
         self.resolutions.push((span, def_id));
     }
     fn legacy_name(&self, def_id: DefId) -> String {
-        defid_to_legacy_string(self.session, self.modules, def_id)
+        let name = defid_to_legacy_string(self.session, self.modules, def_id);
+        register_def_display_name(def_id, &name);
+        name
     }
     fn local_def_id(&self, cx: &ModuleContext, name: Symbol) -> DefId {
         DefId {

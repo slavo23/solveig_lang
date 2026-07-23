@@ -17,7 +17,10 @@ fn mk_anno() -> TcMetadata {
     }
 }
 fn mk_var(name: &str) -> TermExprNode<TcMetadata, Span> {
-    TermExprNode::new(TermExpr::Var(name.to_string()), mk_anno())
+    TermExprNode::new(TermExpr::Var(VarRef::legacy_local(name)), mk_anno())
+}
+fn mk_global_var(name: &str) -> TermExprNode<TcMetadata, Span> {
+    TermExprNode::new(TermExpr::Var(VarRef::legacy_global(name)), mk_anno())
 }
 fn mk_con(name: &str) -> TermExprNode<TcMetadata, Span> {
     TermExprNode::new(TermExpr::Con(legacy_ctor_id(name)), mk_anno())
@@ -258,7 +261,7 @@ fn resolve_evidence(
             continue;
         };
 
-        let mut dict_expr = mk_var(&instance_dict_name(&inst.head));
+        let mut dict_expr = mk_global_var(&instance_dict_name(&inst.head));
 
         for ctx_pred in &inst.context {
             let needed_pred = instantiate_predicate_with_subst(ctx_pred, &subst);

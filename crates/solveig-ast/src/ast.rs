@@ -119,6 +119,8 @@ pub fn legacy_evar_name(id: EvarId) -> String {
 
 const LEGACY_TYCON_TAG: u32 = 0x8000_0000;
 const LEGACY_CTOR_TAG: u32 = 0x8000_0000;
+const LEGACY_SYMBOL_TAG: u32 = 0x8000_0000;
+const LEGACY_DEF_MODULE: ModuleId = ModuleId(0xffff_fffe);
 
 #[derive(Default)]
 struct LegacyTyConRegistry {
@@ -132,6 +134,14 @@ struct LegacyCtorRegistry {
     ids: HashMap<String, CtorId>,
 }
 
+#[derive(Default)]
+struct LegacyTermNameRegistry {
+    symbols: Vec<String>,
+    symbol_ids: HashMap<String, Symbol>,
+    symbol_names: HashMap<Symbol, String>,
+    def_names: HashMap<DefId, String>,
+}
+
 fn legacy_tycon_registry() -> &'static Mutex<LegacyTyConRegistry> {
     static REGISTRY: OnceLock<Mutex<LegacyTyConRegistry>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(LegacyTyConRegistry::default()))
@@ -140,6 +150,11 @@ fn legacy_tycon_registry() -> &'static Mutex<LegacyTyConRegistry> {
 fn legacy_ctor_registry() -> &'static Mutex<LegacyCtorRegistry> {
     static REGISTRY: OnceLock<Mutex<LegacyCtorRegistry>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(LegacyCtorRegistry::default()))
+}
+
+fn legacy_term_name_registry() -> &'static Mutex<LegacyTermNameRegistry> {
+    static REGISTRY: OnceLock<Mutex<LegacyTermNameRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(LegacyTermNameRegistry::default()))
 }
 
 pub fn legacy_tycon_id(name: &str) -> TyConId {
@@ -202,6 +217,105 @@ pub fn ctor_display_name(id: CtorId) -> String {
         .get(index)
         .cloned()
         .unwrap_or_else(|| format!("C{}", id.0))
+}
+
+pub fn legacy_symbol_id(name: &str) -> Symbol {
+    let mut registry = legacy_term_name_registry()
+        .lock()
+        .expect("ICE: legacy term-name registry lock poisoned");
+
+    if let Some(id) = registry.symbol_ids.get(name) {
+        return *id;
+    }
+
+    let id = Symbol(LEGACY_SYMBOL_TAG | registry.symbols.len() as u32);
+    registry.symbols.push(name.to_string());
+    registry.symbol_ids.insert(name.to_string(), id);
+    registry.symbol_names.insert(id, name.to_string());
+    id
+}
+
+pub fn register_symbol_display_name(symbol: Symbol, name: &str) {
+    let mut registry = legacy_term_name_registry()
+        .lock()
+        .expect("ICE: legacy term-name registry lock poisoned");
+    registry.symbol_names.insert(symbol, name.to_string());
+}
+
+pub fn symbol_display_name(symbol: Symbol) -> String {
+    let registry = legacy_term_name_registry()
+        .lock()
+        .expect("ICE: legacy term-name registry lock poisoned");
+
+    if let Some(name) = registry.symbol_names.get(&symbol) {
+        return name.clone();
+    }
+
+    if symbol.0 & LEGACY_SYMBOL_TAG == 0 {
+        return format!("s{}", symbol.0);
+    }
+
+    let index = (symbol.0 & !LEGACY_SYMBOL_TAG) as usize;
+    registry
+        .symbols
+        .get(index)
+        .cloned()
+        .unwrap_or_else(|| format!("s{}", symbol.0))
+}
+
+pub fn register_def_display_name(def_id: DefId, name: &str) {
+    let mut registry = legacy_term_name_registry()
+        .lock()
+        .expect("ICE: legacy term-name registry lock poisoned");
+    registry.def_names.insert(def_id, name.to_string());
+}
+
+pub fn legacy_def_id(name: &str) -> DefId {
+    let def_id = DefId {
+        module: LEGACY_DEF_MODULE,
+        name: legacy_symbol_id(name),
+    };
+    register_def_display_name(def_id, name);
+    def_id
+}
+
+pub fn def_display_name(def_id: DefId) -> String {
+    let registry = legacy_term_name_registry()
+        .lock()
+        .expect("ICE: legacy term-name registry lock poisoned");
+
+    if let Some(name) = registry.def_names.get(&def_id) {
+        return name.clone();
+    }
+
+    drop(registry);
+
+    if def_id.module == LEGACY_DEF_MODULE {
+        symbol_display_name(def_id.name)
+    } else {
+        format!("D{}.{}", def_id.module.0, def_id.name.0)
+    }
+}
+
+pub fn var_display_name(var: &VarRef) -> String {
+    match var {
+        VarRef::Local(symbol) => symbol_display_name(*symbol),
+        VarRef::Global(def_id) => def_display_name(*def_id),
+    }
+}
+
+impl VarRef {
+    pub fn legacy_local(name: &str) -> Self {
+        Self::Local(legacy_symbol_id(name))
+    }
+
+    pub fn legacy_global(name: &str) -> Self {
+        Self::Global(legacy_def_id(name))
+    }
+
+    pub fn display_name(&self) -> String {
+        var_display_name(self)
+    }
 }
 
 const LEGACY_SOURCE_TYVAR_TAG: u32 = 0x8000_0000;
@@ -678,7 +792,7 @@ pub enum UnOp {
 #[derive(Clone, Debug)]
 pub enum TermExpr<A, P = A> {
     Unit,
-    Var(String),
+    Var(VarRef),
     Lit(Literal),
     Hole,
     App(Box<TermExprNode<A, P>>, Box<TermExprNode<A, P>>),
@@ -1027,5 +1141,33 @@ mod tests {
         assert_eq!(legacy_ctor_id(name), id);
         assert_ne!(legacy_ctor_id("test.module.OtherCtor"), id);
         assert_eq!(ctor_display_name(id), name);
+    }
+
+    #[test]
+    fn legacy_varref_bridge_preserves_local_and_global_names() {
+        let local = VarRef::legacy_local("value");
+        let global_name = "test.module.value";
+        let global = VarRef::legacy_global(global_name);
+
+        assert_eq!(var_display_name(&local), "value");
+        assert_eq!(var_display_name(&global), global_name);
+
+        let source_symbol = Symbol(12);
+        register_symbol_display_name(source_symbol, "sourceValue");
+        assert_eq!(
+            var_display_name(&VarRef::Local(source_symbol)),
+            "sourceValue"
+        );
+
+        let def_id = DefId {
+            module: ModuleId(7),
+            name: Symbol(11),
+        };
+        register_def_display_name(def_id, "other.module.value");
+
+        assert_eq!(
+            var_display_name(&VarRef::Global(def_id)),
+            "other.module.value"
+        );
     }
 }

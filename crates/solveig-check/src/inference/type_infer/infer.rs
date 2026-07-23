@@ -89,13 +89,17 @@ impl TypeChecker {
                 Ok((ctx, elaborated, TypeExpr::TyUnit))
             }
             TermExpr::Var(name) => {
-                if let Some(var_type) = self.lookup_local_term_var(&ctx, name) {
+                let display_name = var_display_name(name);
+
+                if matches!(name, VarRef::Local(_))
+                    && let Some(var_type) = self.lookup_local_term_var(&ctx, &display_name)
+                {
                     let var_type = ctx.apply(&var_type);
                     let elaborated = elab_node(TermExpr::Var(name.clone()), span, var_type.clone());
                     return Ok((ctx, elaborated, var_type));
                 }
 
-                if let Some(scheme) = self.func_schemes.get(name).cloned() {
+                if let Some(scheme) = self.func_schemes.get(&display_name).cloned() {
                     let (ctx, preds, instantiated_ty) = self.instantiate_scheme(ctx, &scheme);
                     self.add_wanteds(preds, span.clone());
 
@@ -104,7 +108,7 @@ impl TypeChecker {
                         elab_node(TermExpr::Var(name.clone()), span, instantiated_ty.clone());
                     return Ok((ctx, elaborated, instantiated_ty));
                 }
-                if let Some(method_scheme) = self.lookup_class_method_scheme(name) {
+                if let Some(method_scheme) = self.lookup_class_method_scheme(&display_name) {
                     let (ctx, preds, instantiated_ty) =
                         self.instantiate_scheme(ctx, &method_scheme);
 
@@ -118,7 +122,7 @@ impl TypeChecker {
 
                 Err(TypeError::UnboundVariable {
                     span: self.get_file_span(span.clone()),
-                    name: name.clone(),
+                    name: display_name,
                 })
             }
             TermExpr::Con(id) => {

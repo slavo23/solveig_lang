@@ -1,13 +1,4 @@
 impl<'a> Resolver<'a> {
-    fn resolve_term_ref(&mut self, r: &NameRef, span: FileSpan, cx: &ModuleContext) -> String {
-        match self.resolve_term_defid(r, span, cx) {
-            Some(def_id) => {
-                self.record_resolution(span, def_id);
-                self.legacy_name(def_id)
-            }
-            None => self.unresolved_name(r),
-        }
-    }
     fn resolve_term_defid(
         &mut self,
         r: &NameRef,
@@ -92,10 +83,20 @@ impl<'a> Resolver<'a> {
         span: FileSpan,
         cx: &ModuleContext,
         bound_terms: &HashSet<Symbol>,
-    ) -> String {
+    ) -> VarRef {
         match r.segments.as_slice() {
-            [name] if bound_terms.contains(name) => self.symbol_text(*name).to_string(),
-            _ => self.resolve_term_ref(r, span, cx),
+            [name] if bound_terms.contains(name) => {
+                register_symbol_display_name(*name, self.symbol_text(*name));
+                VarRef::Local(*name)
+            }
+            _ => match self.resolve_term_defid(r, span, cx) {
+                Some(def_id) => {
+                    self.record_resolution(span, def_id);
+                    self.legacy_name(def_id);
+                    VarRef::Global(def_id)
+                }
+                None => VarRef::legacy_global(&self.unresolved_name(r)),
+            },
         }
     }
     fn resolve_surface_expr_in_module(

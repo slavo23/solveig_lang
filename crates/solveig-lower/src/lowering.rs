@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use solveig_ast::ast::{
     CaseArm, CtorId, CtorRuntimeInfo, DataDefinition, Literal, Pattern, PatternNode,
-    ResolvedModule, TermExpr, TermExprNode, ctor_display_name,
+    ResolvedModule, TermExpr, TermExprNode, VarRef, ctor_display_name, var_display_name,
 };
 
 use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
@@ -15,18 +15,20 @@ struct LowerCtx {
 }
 
 impl LowerCtx {
-    fn resolve_var(&self, name: &str) -> Rc<IRExpr> {
+    fn resolve_var(&self, var: &VarRef) -> Rc<IRExpr> {
+        let name = var_display_name(var);
+
         for (depth, bound_name) in self.scope.iter().rev().enumerate() {
-            if bound_name == name {
+            if bound_name == &name {
                 return Rc::new(IRExpr::BVar(depth));
             }
         }
-        if let Some(&global_index) = self.globals.get(name) {
+        if let Some(&global_index) = self.globals.get(&name) {
             return Rc::new(IRExpr::FVar(global_index));
         }
         if let Some(&(tag, arity)) = self
             .constructors
-            .get(&solveig_ast::ast::legacy_ctor_id(name))
+            .get(&solveig_ast::ast::legacy_ctor_id(&name))
         {
             return Rc::new(IRExpr::Con { tag, arity });
         }
