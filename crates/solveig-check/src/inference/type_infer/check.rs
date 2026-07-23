@@ -182,7 +182,12 @@ pub fn check_and_elab_module(
     }
 
     for inst in &module.instance_defs {
-        let inst_class_name = class_display_name(inst.head.class_id);
+        let env_pretty_tables = env.pretty_tables();
+        let inst_class_name = env
+            .class_table
+            .get(inst.head.class_id)
+            .map(|info| symbol_display_name(info.name))
+            .unwrap_or_else(|| class_display_name(inst.head.class_id));
         let class_def = env.class_defs.get(&inst.head.class_id);
 
         let class_def = match class_def {
@@ -216,8 +221,8 @@ pub fn check_and_elab_module(
                 .map(|pred| {
                     format!(
                         "{} required by superclass of {}",
-                        pred.pretty(),
-                        inst.head.pretty()
+                        pred.pretty_with_tables(env_pretty_tables),
+                        inst.head.pretty_with_tables(env_pretty_tables)
                     )
                 })
                 .collect::<Vec<_>>();
@@ -291,7 +296,7 @@ pub fn check_and_elab_module(
                             span: file_span(file, inst_method.body.anno.clone()),
                             method: inst_method.name.clone(),
                             class_name: inst_class_name.clone(),
-                            expected: expected_scheme.pretty(),
+                            expected: checker.pretty_scheme(&expected_scheme),
                             cause: Box::new(cause),
                         });
                     }
@@ -302,7 +307,7 @@ pub fn check_and_elab_module(
                         span: file_span(file, inst_method.body.anno.clone()),
                         method: inst_method.name.clone(),
                         class_name: inst_class_name.clone(),
-                        expected: expected_scheme.pretty(),
+                        expected: checker.pretty_scheme(&expected_scheme),
                         cause: Box::new(cause),
                     });
                 }

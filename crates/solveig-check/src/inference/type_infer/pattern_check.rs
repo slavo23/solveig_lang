@@ -167,7 +167,7 @@ impl TypeChecker {
                     .cloned()
                     .ok_or_else(|| TypeError::UnknownPatternConstructor {
                         span: self.get_file_span(pattern.anno.clone()),
-                        name: ctor_display_name(*constructor_id),
+                        name: self.display_ctor_name(*constructor_id),
                     })?;
 
                 let (mut theta, field_types, constructor_result_type) = self

@@ -35,6 +35,9 @@ pub struct TypeChecker {
     func_schemes: HashMap<DefId, Scheme>,
     class_defs: HashMap<ClassId, ClassDefinition>,
     instance_defs: Vec<InstanceDefinition<Span>>,
+    tycon_table: TyConTable,
+    ctor_table: CtorTable,
+    class_table: ClassTable,
     tycon_kinds: HashMap<TyConId, Kind>,
     givens: Vec<Predicate>,
     wanteds: Vec<Wanted>,
@@ -57,6 +60,9 @@ impl TypeChecker {
             func_schemes: HashMap::new(),
             class_defs: HashMap::new(),
             instance_defs: Vec::new(),
+            tycon_table: TyConTable::new(),
+            ctor_table: CtorTable::new(),
+            class_table: ClassTable::new(),
             tycon_kinds: HashMap::new(),
             givens: Vec::new(),
             wanteds: Vec::new(),
@@ -72,6 +78,9 @@ impl TypeChecker {
             func_schemes: env.func_schemes.clone(),
             class_defs: env.class_defs.clone(),
             instance_defs: env.instance_defs.clone(),
+            tycon_table: env.tycon_table.clone(),
+            ctor_table: env.ctor_table.clone(),
+            class_table: env.class_table.clone(),
             tycon_kinds: env.tycon_kinds.clone(),
             givens: Vec::new(),
             wanteds: Vec::new(),
@@ -85,6 +94,33 @@ impl TypeChecker {
     }
     fn get_file_span(&self, span: Span) -> FileSpan {
         file_span(self.file, span)
+    }
+    fn pretty_tables(&self) -> PrettyTables<'_> {
+        PrettyTables {
+            tycons: &self.tycon_table,
+            classes: &self.class_table,
+        }
+    }
+    fn pretty_type(&self, ty: &TypeExpr) -> String {
+        ty.pretty_with_tables(self.pretty_tables())
+    }
+    fn pretty_predicate(&self, pred: &Predicate) -> String {
+        pred.pretty_with_tables(self.pretty_tables())
+    }
+    fn pretty_scheme(&self, scheme: &Scheme) -> String {
+        scheme.pretty_with_tables(self.pretty_tables())
+    }
+    fn display_class_name(&self, id: ClassId) -> String {
+        self.class_table
+            .get(id)
+            .map(|info| symbol_display_name(info.name))
+            .unwrap_or_else(|| class_display_name(id))
+    }
+    fn display_ctor_name(&self, id: CtorId) -> String {
+        self.ctor_table
+            .get(id)
+            .map(|info| symbol_display_name(info.name))
+            .unwrap_or_else(|| ctor_display_name(id))
     }
     fn fresh_id(&mut self) -> u32 {
         self.counter += 1;
@@ -174,6 +210,9 @@ pub struct TypeCheckEnv {
     pub func_schemes: HashMap<DefId, Scheme>,
     pub class_defs: HashMap<ClassId, ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<Span>>,
+    pub tycon_table: TyConTable,
+    pub ctor_table: CtorTable,
+    pub class_table: ClassTable,
     pub tycon_kinds: HashMap<TyConId, Kind>,
 }
 
@@ -188,7 +227,17 @@ impl TypeCheckEnv {
                 .map(|class_def| (class_def.id, class_def.clone()))
                 .collect(),
             instance_defs: module.instance_defs.clone(),
+            tycon_table: module.tycon_table.clone(),
+            ctor_table: module.ctor_table.clone(),
+            class_table: module.class_table.clone(),
             tycon_kinds: module.tycon_kinds.clone(),
+        }
+    }
+
+    pub fn pretty_tables(&self) -> PrettyTables<'_> {
+        PrettyTables {
+            tycons: &self.tycon_table,
+            classes: &self.class_table,
         }
     }
 }
@@ -201,6 +250,7 @@ pub struct TCOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use solveig_ast::ast::{ClassInfo, TyConDefinition, TyConInfo, legacy_symbol_id};
 
     #[test]
     fn global_function_schemes_are_keyed_by_defid() {
@@ -218,6 +268,9 @@ mod tests {
             func_schemes: HashMap::new(),
             class_defs: HashMap::new(),
             instance_defs: Vec::new(),
+            tycon_table: TyConTable::new(),
+            ctor_table: CtorTable::new(),
+            class_table: ClassTable::new(),
             tycon_kinds: HashMap::new(),
         };
         env.func_schemes
@@ -267,6 +320,9 @@ mod tests {
                 },
             )]),
             instance_defs: Vec::new(),
+            tycon_table: TyConTable::new(),
+            ctor_table: CtorTable::new(),
+            class_table: ClassTable::new(),
             tycon_kinds: HashMap::new(),
         };
 
@@ -339,6 +395,9 @@ mod tests {
                 },
             )]),
             instance_defs: Vec::new(),
+            tycon_table: TyConTable::new(),
+            ctor_table: CtorTable::new(),
+            class_table: ClassTable::new(),
             tycon_kinds: HashMap::new(),
         };
 
@@ -352,5 +411,57 @@ mod tests {
             solveig_ast::ast::legacy_class_id(&superclass_name)
         );
         assert_eq!(superclasses[0].args, vec![int_ty]);
+    }
+
+    #[test]
+    fn typechecker_pretty_uses_env_tables() {
+        let tycon_id = TyConId(88);
+        let class_id = ClassId(77);
+
+        let mut tycon_table = TyConTable::new();
+        tycon_table.insert_with_id(
+            tycon_id,
+            TyConInfo {
+                name: legacy_symbol_id("test.pretty.Widget"),
+                kind: Kind::Star,
+                definition: TyConDefinition::Primitive,
+            },
+        );
+
+        let mut class_table = ClassTable::new();
+        class_table.insert_with_id(
+            class_id,
+            ClassInfo {
+                name: legacy_symbol_id("test.pretty.Showy"),
+                definition: ClassDefinition {
+                    id: class_id,
+                    name: "test.pretty.Showy".to_string(),
+                    params: Vec::new(),
+                    superclasses: Vec::new(),
+                    methods: Vec::new(),
+                },
+            },
+        );
+
+        let env = TypeCheckEnv {
+            constructor_types: HashMap::new(),
+            func_schemes: HashMap::new(),
+            class_defs: HashMap::new(),
+            instance_defs: Vec::new(),
+            tycon_table,
+            ctor_table: CtorTable::new(),
+            class_table,
+            tycon_kinds: HashMap::new(),
+        };
+
+        let checker = TypeChecker::with_env(&env, FileId(0));
+        let widget = TypeExpr::TyCon(tycon_id);
+        let pred = Predicate {
+            class_id,
+            args: vec![widget.clone()],
+        };
+
+        assert_eq!(checker.pretty_type(&widget), "Widget");
+        assert_eq!(checker.pretty_predicate(&pred), "Showy Widget");
     }
 }

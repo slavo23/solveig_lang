@@ -17,8 +17,8 @@ impl TypeChecker {
             Ok(delta) => Ok(delta),
             Err(()) => Err(TypeError::SubtypeMismatch {
                 span: origin_span,
-                left: left.pretty(),
-                right: right.pretty(),
+                left: self.pretty_type(left),
+                right: self.pretty_type(right),
             }),
         }
     }
@@ -385,7 +385,7 @@ impl TypeChecker {
 
             _ => Err(TypeError::ConstructorNotApplicable {
                 span: self.get_file_span(span),
-                actual: ty.pretty(),
+                actual: self.pretty_type(&ty),
             }),
         }
     }

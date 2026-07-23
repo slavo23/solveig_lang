@@ -6,8 +6,8 @@ use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{
-    ClassDefinition, ClassId, CtorId, DefId, Kind, ModuleId, TypeExpr, class_display_name,
-    ctor_display_name, legacy_ctor_id, legacy_tycon_id,
+    ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Kind, ModuleId, TyConTable,
+    TypeExpr, class_display_name, ctor_display_name, legacy_ctor_id, legacy_tycon_id,
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
@@ -328,6 +328,9 @@ pub struct TypedModuleApi {
     pub type_kinds: HashMap<DefId, Kind>,
     pub constructor_types: HashMap<DefId, TypeExpr>,
     pub class_defs: HashMap<DefId, solveig_ast::ast::ClassDefinition>,
+    pub tycon_table: TyConTable,
+    pub ctor_table: CtorTable,
+    pub class_table: ClassTable,
     pub instance_defs: Vec<
         solveig_ast::ast::InstanceDefinition<
             solveig_check::inference::type_infer::TcMetadata,
@@ -390,7 +393,12 @@ impl TypedModuleApi {
             ImportSpec::All => self.clone(),
 
             ImportSpec::Only(names) => {
-                let mut out = Self::default();
+                let mut out = Self {
+                    tycon_table: self.tycon_table.clone(),
+                    ctor_table: self.ctor_table.clone(),
+                    class_table: self.class_table.clone(),
+                    ..Self::default()
+                };
 
                 for name in names {
                     for (sym, scheme) in &self.term_schemes {
@@ -473,6 +481,18 @@ impl TypedModuleApi {
             out.class_defs.insert(class_def.id, class_def.clone());
         }
 
+        for (id, info) in self.tycon_table.iter() {
+            out.tycon_table.insert_with_id(id, info.clone());
+        }
+
+        for (id, info) in self.ctor_table.iter() {
+            out.ctor_table.insert_with_id(id, info.clone());
+        }
+
+        for (id, info) in self.class_table.iter() {
+            out.class_table.insert_with_id(id, info.clone());
+        }
+
         out.instance_defs.extend(self.instance_defs.clone());
     }
 }
@@ -482,6 +502,9 @@ pub struct TypedDisplayMaps<'a> {
     pub tycon_kinds: &'a mut HashMap<solveig_ast::ast::TyConId, Kind>,
     pub constructor_types: &'a mut HashMap<CtorId, TypeExpr>,
     pub class_defs: &'a mut HashMap<ClassId, solveig_ast::ast::ClassDefinition>,
+    pub tycon_table: &'a mut TyConTable,
+    pub ctor_table: &'a mut CtorTable,
+    pub class_table: &'a mut ClassTable,
     pub instance_defs: &'a mut Vec<
         solveig_ast::ast::InstanceDefinition<
             solveig_check::inference::type_infer::TcMetadata,
@@ -885,6 +908,10 @@ pub fn build_typed_module_api(
 ) -> TypedModuleApi {
     let mut api = TypedModuleApi::default();
     let prefix = module_name.as_string(session) + ".";
+
+    api.tycon_table = checked.tycon_table.clone();
+    api.ctor_table = checked.ctor_table.clone();
+    api.class_table = checked.class_table.clone();
 
     for (id, scheme) in &checked.func_schemes {
         if id.module == module_id {

@@ -296,12 +296,12 @@ impl TypeChecker {
                 if overlaps {
                     errors.push(TypeError::OverlappingInstances {
                         span: self.get_file_span(0..0),
-                        class_name: class_display_name(inst_a.head.class_id),
+                        class_name: self.display_class_name(inst_a.head.class_id),
                         instance_type: inst_b
                             .head
                             .args
                             .iter()
-                            .map(|a| a.pretty())
+                            .map(|a| self.pretty_type(a))
                             .collect::<Vec<_>>()
                             .join(" "),
                     });
@@ -424,7 +424,7 @@ impl TypeChecker {
             span,
             predicates: wanteds
                 .into_iter()
-                .map(|w| self.zonk_predicate(&w.pred).pretty())
+                .map(|w| self.pretty_predicate(&self.zonk_predicate(&w.pred)))
                 .collect(),
         }
     }

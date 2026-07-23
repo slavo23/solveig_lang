@@ -3,12 +3,15 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    ClassDefinition, ClassId, CtorId, DefId, ModuleId, PrettyTables, Scheme, TyConId, TypeExpr,
-    class_display_name, ctor_display_name, def_display_name, tycon_display_name,
+    ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, ModuleId, PrettyTables, Scheme,
+    TyConId, TyConTable, TypeExpr, class_display_name, ctor_display_name, def_display_name,
+    tycon_display_name,
 };
 use solveig_base::{FileSpan, IntoDiagnostic, Session};
 use solveig_check::inference::holes::hole_diagnostics;
-use solveig_check::inference::type_infer::{CheckedModule, TypeCheckEnv, check_and_elab_module};
+use solveig_check::inference::type_infer::{
+    CheckedModule, TcMetadata, TypeCheckEnv, check_and_elab_module,
+};
 use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
 use solveig_report::emit_diagnostics;
@@ -256,14 +259,13 @@ fn erase_tc_expr_to_span_expr(
     solveig_ast::ast::TermExprNode::new(node, anno)
 }
 
+type CheckedInstanceDef = solveig_ast::ast::InstanceDefinition<TcMetadata, std::ops::Range<usize>>;
+type ResolvedInstanceDef =
+    solveig_ast::ast::InstanceDefinition<std::ops::Range<usize>, std::ops::Range<usize>>;
+
 fn erase_checked_instance_defs_to_resolved(
-    defs: Vec<
-        solveig_ast::ast::InstanceDefinition<
-            solveig_check::inference::type_infer::TcMetadata,
-            std::ops::Range<usize>,
-        >,
-    >,
-) -> Vec<solveig_ast::ast::InstanceDefinition<std::ops::Range<usize>, std::ops::Range<usize>>> {
+    defs: Vec<CheckedInstanceDef>,
+) -> Vec<ResolvedInstanceDef> {
     defs.into_iter()
         .map(|inst| solveig_ast::ast::InstanceDefinition {
             context: inst.context,
@@ -466,13 +468,16 @@ impl<'a> FrontendState<'a> {
         let resolved = resolved_info.module;
 
         let imported_typed = self.build_imported_typed_apis(&imports);
-        let (
+        let ImportedTypeInfo {
             func_schemes,
             tycon_kinds,
             constructor_types,
-            imported_class_defs,
-            imported_instance_defs,
-        ) = collect_imported_type_info(self.session, &self.project.module_table, &imported_typed);
+            class_defs: imported_class_defs,
+            instance_defs: imported_instance_defs,
+            tycon_table: imported_tycon_table,
+            ctor_table: imported_ctor_table,
+            class_table: imported_class_table,
+        } = collect_imported_type_info(self.session, &self.project.module_table, &imported_typed);
 
         let mut check_env = TypeCheckEnv::from_module(&resolved);
 
@@ -480,6 +485,15 @@ impl<'a> FrontendState<'a> {
         check_env.tycon_kinds.extend(tycon_kinds);
         check_env.constructor_types.extend(constructor_types);
         check_env.class_defs.extend(imported_class_defs);
+        for (id, info) in imported_tycon_table.iter() {
+            check_env.tycon_table.insert_with_id(id, info.clone());
+        }
+        for (id, info) in imported_ctor_table.iter() {
+            check_env.ctor_table.insert_with_id(id, info.clone());
+        }
+        for (id, info) in imported_class_table.iter() {
+            check_env.class_table.insert_with_id(id, info.clone());
+        }
         check_env
             .instance_defs
             .extend(erase_checked_instance_defs_to_resolved(
@@ -497,7 +511,12 @@ impl<'a> FrontendState<'a> {
         };
 
         if !checked_raw.holes.is_empty() {
-            let diagnostics = hole_diagnostics(&checked_raw.holes, &check_env.constructor_types);
+            let diagnostics = hole_diagnostics(
+                &checked_raw.holes,
+                &check_env.constructor_types,
+                &check_env.ctor_table,
+                check_env.pretty_tables(),
+            );
 
             for diagnostic in diagnostics {
                 self.session.diagnostics().push(diagnostic);
@@ -558,27 +577,30 @@ impl<'a> FrontendState<'a> {
     }
 }
 
+struct ImportedTypeInfo {
+    func_schemes: HashMap<DefId, Scheme>,
+    tycon_kinds: HashMap<TyConId, solveig_ast::ast::Kind>,
+    constructor_types: HashMap<CtorId, solveig_ast::ast::TypeExpr>,
+    class_defs: HashMap<ClassId, ClassDefinition>,
+    instance_defs: Vec<CheckedInstanceDef>,
+    tycon_table: TyConTable,
+    ctor_table: CtorTable,
+    class_table: ClassTable,
+}
+
 fn collect_imported_type_info(
     session: &Session,
     modules: &ModuleTable,
     imports: &[ImportedTypedApi],
-) -> (
-    HashMap<DefId, Scheme>,
-    HashMap<TyConId, solveig_ast::ast::Kind>,
-    HashMap<CtorId, solveig_ast::ast::TypeExpr>,
-    HashMap<ClassId, ClassDefinition>,
-    Vec<
-        solveig_ast::ast::InstanceDefinition<
-            solveig_check::inference::type_infer::TcMetadata,
-            std::ops::Range<usize>,
-        >,
-    >,
-) {
+) -> ImportedTypeInfo {
     let mut func_schemes = HashMap::new();
     let mut tycon_kinds = HashMap::new();
     let mut constructor_types = HashMap::new();
     let mut class_defs = HashMap::new();
     let mut instance_defs = Vec::new();
+    let mut tycon_table = TyConTable::new();
+    let mut ctor_table = CtorTable::new();
+    let mut class_table = ClassTable::new();
 
     for imp in imports {
         let mut display_maps = TypedDisplayMaps {
@@ -586,6 +608,9 @@ fn collect_imported_type_info(
             tycon_kinds: &mut tycon_kinds,
             constructor_types: &mut constructor_types,
             class_defs: &mut class_defs,
+            tycon_table: &mut tycon_table,
+            ctor_table: &mut ctor_table,
+            class_table: &mut class_table,
             instance_defs: &mut instance_defs,
         };
 
@@ -596,13 +621,16 @@ fn collect_imported_type_info(
         );
     }
 
-    (
+    ImportedTypeInfo {
         func_schemes,
         tycon_kinds,
         constructor_types,
         class_defs,
         instance_defs,
-    )
+        tycon_table,
+        ctor_table,
+        class_table,
+    }
 }
 
 fn find_entry_file(project_root: &Path) -> Result<PathBuf, String> {

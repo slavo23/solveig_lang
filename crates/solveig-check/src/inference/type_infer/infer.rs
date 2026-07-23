@@ -11,7 +11,7 @@ impl TypeChecker {
                 if !ctx.type_well_formed(annotation) {
                     return Err(TypeError::IllFormedAnnotation {
                         span: self.get_file_span(span),
-                        ty: annotation.pretty(),
+                        ty: self.pretty_type(annotation),
                         target: format!("parameter `{}`", param),
                     });
                 }
@@ -134,7 +134,7 @@ impl TypeChecker {
                     self.constructor_types.get(id).cloned().ok_or_else(|| {
                         TypeError::UnknownConstructor {
                             span: self.get_file_span(span.clone()),
-                            name: ctor_display_name(*id),
+                            name: self.display_ctor_name(*id),
                         }
                     })?;
                 let elaborated = elab_node(TermExpr::Con(*id), span, constructor_type.clone());
@@ -256,8 +256,8 @@ impl TypeChecker {
                     }
                     other => Err(TypeError::NonPolymorphicTypeApplication {
                         span: self.get_file_span(span),
-                        actual: other.pretty(),
-                        ty_arg: ty_arg.pretty(),
+                        actual: self.pretty_type(&other),
+                        ty_arg: self.pretty_type(ty_arg),
                     }),
                 }
             }
@@ -406,7 +406,7 @@ impl TypeChecker {
             other => Err(TypeError::NonFunctionApplication {
                 span: self.get_file_span(span.clone()),
                 arg_span: self.get_file_span(arg_span.clone()),
-                actual: other.pretty(),
+                actual: self.pretty_type(other),
             }),
         }
     }
