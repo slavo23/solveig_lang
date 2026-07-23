@@ -85,16 +85,22 @@ impl<'a> Resolver<'a> {
             ),
         );
 
+        let mut module = ResolvedModule {
+            data_defs,
+            class_defs,
+            instance_defs,
+            tycon_table: Default::default(),
+            ctor_table: Default::default(),
+            class_table: Default::default(),
+            tycon_kinds: local_tycon_kind_ids,
+            constructor_types,
+            func_schemes,
+            func_defs,
+        };
+        module.rebuild_identity_tables();
+
         Ok(ResolvedModuleInfo {
-            module: ResolvedModule {
-                data_defs,
-                class_defs,
-                instance_defs,
-                tycon_kinds: local_tycon_kind_ids,
-                constructor_types,
-                func_schemes,
-                func_defs,
-            },
+            module,
             resolutions: self.resolutions,
         })
     }

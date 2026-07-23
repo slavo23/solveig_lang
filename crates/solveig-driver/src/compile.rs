@@ -659,15 +659,21 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
         func_defs.extend(m.func_defs);
     }
 
-    Ok(solveig_ast::ast::ResolvedModule {
+    let mut module = solveig_ast::ast::ResolvedModule {
         data_defs,
         class_defs,
         instance_defs,
+        tycon_table: Default::default(),
+        ctor_table: Default::default(),
+        class_table: Default::default(),
         tycon_kinds,
         constructor_types,
         func_schemes,
         func_defs,
-    })
+    };
+    module.rebuild_identity_tables();
+
+    Ok(module)
 }
 
 fn extend_unique_def<T>(

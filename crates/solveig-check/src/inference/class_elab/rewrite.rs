@@ -314,26 +314,34 @@ pub fn elaborate_typeclasses(
     func_defs.extend(selector_defs);
     func_defs.extend(instance_dict_defs);
 
-    let rewritten_func_defs = elaborate_func_defs(
-        &ResolvedModule {
-            data_defs: data_defs.clone(),
-            class_defs: module.class_defs.clone(),
-            instance_defs: module.instance_defs.clone(),
-            tycon_kinds: tycon_kinds.clone(),
-            constructor_types: constructor_types.clone(),
-            func_schemes: module.func_schemes.clone(),
-            func_defs,
-        },
-        &class_info,
-    );
+    let mut rewrite_module = ResolvedModule {
+        data_defs: data_defs.clone(),
+        class_defs: module.class_defs.clone(),
+        instance_defs: module.instance_defs.clone(),
+        tycon_table: Default::default(),
+        ctor_table: Default::default(),
+        class_table: Default::default(),
+        tycon_kinds: tycon_kinds.clone(),
+        constructor_types: constructor_types.clone(),
+        func_schemes: module.func_schemes.clone(),
+        func_defs,
+    };
+    rewrite_module.rebuild_identity_tables();
 
-    ResolvedModule {
+    let rewritten_func_defs = elaborate_func_defs(&rewrite_module, &class_info);
+
+    let mut output = ResolvedModule {
         data_defs,
         class_defs: Vec::new(),
         instance_defs: Vec::new(),
+        tycon_table: Default::default(),
+        ctor_table: Default::default(),
+        class_table: Default::default(),
         tycon_kinds,
         constructor_types,
         func_schemes: module.func_schemes.clone(),
         func_defs: rewritten_func_defs,
-    }
+    };
+    output.rebuild_identity_tables();
+    output
 }

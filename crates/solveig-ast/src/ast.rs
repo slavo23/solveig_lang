@@ -894,10 +894,76 @@ pub struct ResolvedModule<A, P = A> {
     pub data_defs: Vec<DataDefinition>,
     pub class_defs: Vec<ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<A, P>>,
+    pub tycon_table: TyConTable,
+    pub ctor_table: CtorTable,
+    pub class_table: ClassTable,
     pub tycon_kinds: HashMap<TyConId, Kind>,
     pub constructor_types: HashMap<CtorId, TypeExpr>,
     pub func_schemes: HashMap<DefId, Scheme>,
     pub func_defs: Vec<TermDefinition<A, P>>,
+}
+
+impl<A, P> ResolvedModule<A, P> {
+    pub fn rebuild_identity_tables(&mut self) {
+        let (tycon_table, ctor_table, class_table) =
+            identity_tables_from_defs(&self.data_defs, &self.class_defs);
+
+        self.tycon_table = tycon_table;
+        self.ctor_table = ctor_table;
+        self.class_table = class_table;
+    }
+}
+
+pub fn identity_tables_from_defs(
+    data_defs: &[DataDefinition],
+    class_defs: &[ClassDefinition],
+) -> (TyConTable, CtorTable, ClassTable) {
+    let mut tycon_table = TyConTable::new();
+    let mut ctor_table = CtorTable::new();
+    let mut class_table = ClassTable::new();
+    let mut next_ctor_tag = 0_u16;
+
+    for data_def in data_defs {
+        let tycon_id = legacy_tycon_id(&data_def.name);
+
+        tycon_table.insert_with_id(
+            tycon_id,
+            TyConInfo {
+                name: legacy_symbol_id(&data_def.name),
+                kind: data_def.tycon_kind.clone(),
+                definition: TyConDefinition::Data(data_def.clone()),
+            },
+        );
+
+        for ctor_def in &data_def.constructors {
+            ctor_table.insert_with_id(
+                ctor_def.id,
+                CtorInfo {
+                    name: legacy_symbol_id(&ctor_def.name),
+                    tycon: tycon_id,
+                    fields: ctor_def.fields.clone(),
+                    full_type: ctor_def.full_type.clone(),
+                    tag: next_ctor_tag,
+                },
+            );
+
+            next_ctor_tag = next_ctor_tag
+                .checked_add(1)
+                .expect("ICE: constructor tag overflow while rebuilding identity tables");
+        }
+    }
+
+    for class_def in class_defs {
+        class_table.insert_with_id(
+            class_def.id,
+            ClassInfo {
+                name: legacy_symbol_id(&class_def.name),
+                definition: class_def.clone(),
+            },
+        );
+    }
+
+    (tycon_table, ctor_table, class_table)
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -923,7 +989,7 @@ pub struct TyConInfo {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TyConTable {
-    entries: Vec<TyConInfo>,
+    entries: Vec<(TyConId, TyConInfo)>,
 }
 
 impl TyConTable {
@@ -933,19 +999,32 @@ impl TyConTable {
 
     pub fn insert(&mut self, info: TyConInfo) -> TyConId {
         let id = TyConId(self.entries.len() as u32);
-        self.entries.push(info);
+        self.insert_with_id(id, info);
         id
     }
 
+    pub fn insert_with_id(&mut self, id: TyConId, info: TyConInfo) {
+        if let Some((_, existing)) = self
+            .entries
+            .iter_mut()
+            .find(|(existing, _)| *existing == id)
+        {
+            *existing = info;
+            return;
+        }
+
+        self.entries.push((id, info));
+    }
+
     pub fn get(&self, id: TyConId) -> Option<&TyConInfo> {
-        self.entries.get(id.0 as usize)
+        self.entries
+            .iter()
+            .find(|(existing, _)| *existing == id)
+            .map(|(_, info)| info)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (TyConId, &TyConInfo)> {
-        self.entries
-            .iter()
-            .enumerate()
-            .map(|(index, info)| (TyConId(index as u32), info))
+        self.entries.iter().map(|(id, info)| (*id, info))
     }
 }
 
@@ -975,7 +1054,7 @@ pub struct CtorInfo {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CtorTable {
-    entries: Vec<CtorInfo>,
+    entries: Vec<(CtorId, CtorInfo)>,
 }
 
 impl CtorTable {
@@ -985,19 +1064,32 @@ impl CtorTable {
 
     pub fn insert(&mut self, info: CtorInfo) -> CtorId {
         let id = CtorId(self.entries.len() as u32);
-        self.entries.push(info);
+        self.insert_with_id(id, info);
         id
     }
 
+    pub fn insert_with_id(&mut self, id: CtorId, info: CtorInfo) {
+        if let Some((_, existing)) = self
+            .entries
+            .iter_mut()
+            .find(|(existing, _)| *existing == id)
+        {
+            *existing = info;
+            return;
+        }
+
+        self.entries.push((id, info));
+    }
+
     pub fn get(&self, id: CtorId) -> Option<&CtorInfo> {
-        self.entries.get(id.0 as usize)
+        self.entries
+            .iter()
+            .find(|(existing, _)| *existing == id)
+            .map(|(_, info)| info)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (CtorId, &CtorInfo)> {
-        self.entries
-            .iter()
-            .enumerate()
-            .map(|(index, info)| (CtorId(index as u32), info))
+        self.entries.iter().map(|(id, info)| (*id, info))
     }
 }
 
@@ -1038,7 +1130,7 @@ pub struct ClassInfo {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ClassTable {
-    entries: Vec<ClassInfo>,
+    entries: Vec<(ClassId, ClassInfo)>,
 }
 
 impl ClassTable {
@@ -1049,19 +1141,34 @@ impl ClassTable {
     pub fn insert(&mut self, mut info: ClassInfo) -> ClassId {
         let id = ClassId(self.entries.len() as u32);
         info.definition.id = id;
-        self.entries.push(info);
+        self.insert_with_id(id, info);
         id
     }
 
+    pub fn insert_with_id(&mut self, id: ClassId, mut info: ClassInfo) {
+        info.definition.id = id;
+
+        if let Some((_, existing)) = self
+            .entries
+            .iter_mut()
+            .find(|(existing, _)| *existing == id)
+        {
+            *existing = info;
+            return;
+        }
+
+        self.entries.push((id, info));
+    }
+
     pub fn get(&self, id: ClassId) -> Option<&ClassInfo> {
-        self.entries.get(id.0 as usize)
+        self.entries
+            .iter()
+            .find(|(existing, _)| *existing == id)
+            .map(|(_, info)| info)
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (ClassId, &ClassInfo)> {
-        self.entries
-            .iter()
-            .enumerate()
-            .map(|(index, info)| (ClassId(index as u32), info))
+        self.entries.iter().map(|(id, info)| (*id, info))
     }
 }
 
@@ -1224,6 +1331,76 @@ mod tests {
             Predicate::legacy(name.to_string(), Vec::new()).pretty(),
             "EqWidget"
         );
+    }
+
+    #[test]
+    fn resolved_module_rebuilds_identity_tables_for_legacy_ids() {
+        let tycon_name = "test.module.Widget";
+        let ctor_name = "test.module.MkWidget";
+        let class_name = "test.module.WidgetLike";
+        let tycon_id = legacy_tycon_id(tycon_name);
+        let ctor_id = legacy_ctor_id(ctor_name);
+        let class_id = legacy_class_id(class_name);
+
+        let data_def = DataDefinition {
+            name: tycon_name.to_string(),
+            ty_params: Vec::new(),
+            tycon_kind: Kind::Star,
+            constructors: vec![ConstructorDef {
+                id: ctor_id,
+                name: ctor_name.to_string(),
+                fields: vec![TypeExpr::TyUnit],
+                full_type: TypeExpr::make_arr(
+                    TypeExpr::TyUnit,
+                    TypeExpr::make_con(tycon_name.to_string()),
+                ),
+            }],
+        };
+
+        let class_def = ClassDefinition {
+            id: class_id,
+            name: class_name.to_string(),
+            params: Vec::new(),
+            superclasses: Vec::new(),
+            methods: Vec::new(),
+        };
+
+        let mut module = ResolvedModule::<()> {
+            data_defs: vec![data_def],
+            class_defs: vec![class_def],
+            instance_defs: Vec::new(),
+            tycon_table: TyConTable::new(),
+            ctor_table: CtorTable::new(),
+            class_table: ClassTable::new(),
+            tycon_kinds: HashMap::new(),
+            constructor_types: HashMap::new(),
+            func_schemes: HashMap::new(),
+            func_defs: Vec::new(),
+        };
+
+        module.rebuild_identity_tables();
+
+        let tycon_info = module
+            .tycon_table
+            .get(tycon_id)
+            .expect("ICE: rebuilt type-constructor table must contain Widget");
+        assert_eq!(symbol_display_name(tycon_info.name), tycon_name);
+        assert_eq!(tycon_info.kind, Kind::Star);
+
+        let ctor_info = module
+            .ctor_table
+            .get(ctor_id)
+            .expect("ICE: rebuilt constructor table must contain MkWidget");
+        assert_eq!(symbol_display_name(ctor_info.name), ctor_name);
+        assert_eq!(ctor_info.tycon, tycon_id);
+        assert_eq!(ctor_info.tag, 0);
+
+        let class_info = module
+            .class_table
+            .get(class_id)
+            .expect("ICE: rebuilt class table must contain WidgetLike");
+        assert_eq!(symbol_display_name(class_info.name), class_name);
+        assert_eq!(class_info.definition.id, class_id);
     }
 
     #[test]
