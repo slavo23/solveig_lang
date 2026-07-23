@@ -1,0 +1,10 @@
+[TC0005] Error: type mismatch
+   ╭─[ $WORKSPACE/tests/golden/diag/type_mismatch/src/main.sv:2:8 ]
+   │
+ 2 │ main = True
+   │        ──┬─  
+   │          ╰─── this expression has type `Bool`
+   │ 
+   │ Note: but it was required to have type `Int`
+───╯
+type error

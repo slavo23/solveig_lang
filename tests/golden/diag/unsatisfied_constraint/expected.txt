@@ -1,0 +1,11 @@
+[TC0013] Error: unsatisfied type class constraints: Need Int
+   ╭─[ $WORKSPACE/tests/golden/diag/unsatisfied_constraint/src/main.sv:4:8 ]
+   │
+ 4 │ main = need 1
+   │        ──┬─  
+   │          ╰─── constraints arise from this expression
+   │ 
+   │ Note: no matching instance found for:
+   │         Need Int
+───╯
+type error

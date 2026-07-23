@@ -1,0 +1,8 @@
+[TC0001] Error: variable `missingValue` is not in scope
+   ╭─[ $WORKSPACE/tests/golden/diag/unbound_variable/src/main.sv:1:8 ]
+   │
+ 1 │ main = missingValue
+   │        ──────┬─────  
+   │              ╰─────── `missingValue` is used here, but no binding was found
+───╯
+type error

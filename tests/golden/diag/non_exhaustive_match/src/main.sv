@@ -1,0 +1,3 @@
+main =
+    case True of
+        True => 1

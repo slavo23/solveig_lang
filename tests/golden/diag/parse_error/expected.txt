@@ -1,0 +1,7 @@
+Error: parse error
+   ╭─[ $WORKSPACE/tests/golden/diag/parse_error/src/main.sv:1:23 ]
+   │
+   │ 
+───╯
+
+

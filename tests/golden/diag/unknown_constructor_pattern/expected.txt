@@ -1,0 +1,8 @@
+[TC0003] Error: unknown constructor `MissingValue` in pattern
+   ╭─[ $WORKSPACE/tests/golden/diag/unknown_constructor_pattern/src/main.sv:3:9 ]
+   │
+ 3 │         MissingValue => 1
+   │         ──────┬─────  
+   │               ╰─────── pattern uses unknown constructor `MissingValue`
+───╯
+type error

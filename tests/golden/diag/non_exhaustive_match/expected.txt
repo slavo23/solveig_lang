@@ -1,0 +1,13 @@
+[TC0016] Error: non-exhaustive pattern match
+   ╭─[ $WORKSPACE/tests/golden/diag/non_exhaustive_match/src/main.sv:2:5 ]
+   │
+ 2 │ ╭─▶     case True of
+ 3 │ ├─▶         True => 1
+   │ │                       
+   │ ╰─────────────────────── this case expression does not cover all values of type `Bool`
+   │     
+   │     Note: scrutinee type: `Bool`
+   │           missing pattern:
+   │             False
+───╯
+type error
