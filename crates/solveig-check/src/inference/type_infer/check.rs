@@ -183,11 +183,7 @@ pub fn check_and_elab_module(
 
     for inst in &module.instance_defs {
         let env_pretty_tables = env.pretty_tables();
-        let inst_class_name = env
-            .class_table
-            .get(inst.head.class_id)
-            .map(|info| symbol_display_name(info.name))
-            .unwrap_or_else(|| class_display_name(inst.head.class_id));
+        let inst_class_name = env.display_class_name(inst.head.class_id);
         let class_def = env.class_defs.get(&inst.head.class_id);
 
         let class_def = match class_def {

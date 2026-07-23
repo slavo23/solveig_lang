@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use solveig_ast::ast::{
-    CtorId, CtorTable, EvarId, PrettyTables, TypeExpr, ctor_display_name, symbol_display_name,
-};
+use solveig_ast::ast::{CtorId, CtorTable, EvarId, PrettyTables, TypeExpr, symbol_display_name};
 use solveig_base::FileSpan;
 use solveig_base::utils::diagnostics::{Diagnostic, Label};
 
@@ -173,7 +171,7 @@ fn constructor_fills(
             continue;
         }
 
-        let name = ctor_display_name_with_table(*id, ctor_table);
+        let name = ctor_table_name(*id, ctor_table);
         let short = short_name(&name);
         if params.is_empty() {
             results.push(short.to_string());
@@ -200,11 +198,11 @@ fn short_name(qualified: &str) -> &str {
     qualified.rsplit('.').next().unwrap_or(qualified)
 }
 
-fn ctor_display_name_with_table(id: CtorId, ctor_table: &CtorTable) -> String {
+fn ctor_table_name(id: CtorId, ctor_table: &CtorTable) -> String {
     ctor_table
         .get(id)
         .map(|info| symbol_display_name(info.name))
-        .unwrap_or_else(|| ctor_display_name(id))
+        .unwrap_or_else(|| panic!("ICE: hole diagnostic constructor table missing CtorId {id:?}"))
 }
 
 pub fn hole_diagnostics(

@@ -114,13 +114,13 @@ impl TypeChecker {
         self.class_table
             .get(id)
             .map(|info| symbol_display_name(info.name))
-            .unwrap_or_else(|| class_display_name(id))
+            .unwrap_or_else(|| panic!("ICE: type checker class table missing ClassId {id:?}"))
     }
     fn display_ctor_name(&self, id: CtorId) -> String {
         self.ctor_table
             .get(id)
             .map(|info| symbol_display_name(info.name))
-            .unwrap_or_else(|| ctor_display_name(id))
+            .unwrap_or_else(|| panic!("ICE: type checker constructor table missing CtorId {id:?}"))
     }
     fn fresh_id(&mut self) -> u32 {
         self.counter += 1;
@@ -239,6 +239,13 @@ impl TypeCheckEnv {
             tycons: &self.tycon_table,
             classes: &self.class_table,
         }
+    }
+
+    fn display_class_name(&self, id: ClassId) -> String {
+        self.class_table
+            .get(id)
+            .map(|info| symbol_display_name(info.name))
+            .unwrap_or_else(|| panic!("ICE: type check env class table missing ClassId {id:?}"))
     }
 }
 

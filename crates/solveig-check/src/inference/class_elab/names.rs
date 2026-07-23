@@ -8,14 +8,14 @@ fn display_tycon_name(id: solveig_ast::ast::TyConId, tables: PrettyTables<'_>) -
         .tycons
         .get(id)
         .map(|info| symbol_display_name(info.name))
-        .unwrap_or_else(|| tycon_display_name(id))
+        .unwrap_or_else(|| panic!("ICE: class elaboration type table missing TyConId {id:?}"))
 }
 fn display_class_name(id: solveig_ast::ast::ClassId, tables: PrettyTables<'_>) -> String {
     tables
         .classes
         .get(id)
         .map(|info| symbol_display_name(info.name))
-        .unwrap_or_else(|| class_display_name(id))
+        .unwrap_or_else(|| panic!("ICE: class elaboration class table missing ClassId {id:?}"))
 }
 fn mangle_type(ty: &TypeExpr, tables: PrettyTables<'_>) -> String {
     match ty {

@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use solveig_ast::ast::{
     CaseArmNode, CtorId, CtorTable, Literal, Pattern, PatternNode, Predicate, PrettyTables,
-    TyConId, TyVarId, TypeExpr, ctor_display_name, symbol_display_name, tycon_display_name,
+    TyConId, TyVarId, TypeExpr, symbol_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -110,7 +110,7 @@ impl Witness {
             Witness::Wild => "_".to_string(),
 
             Witness::Head(Head::Constructor(id), args) => {
-                let display_name = ctor_display_name_with_table(*id, ctor_table);
+                let display_name = ctor_table_name(*id, ctor_table);
                 let name = short_name(&display_name);
 
                 if name == "Nil" && args.is_empty() {
@@ -170,7 +170,7 @@ struct ConstructorEnv {
 fn is_open_primitive_type(ty: &TypeExpr, pretty_tables: PrettyTables<'_>) -> bool {
     match normalize_type(ty) {
         TypeExpr::TyCon(id) => matches!(
-            short_name(&tycon_display_name_with_tables(id, pretty_tables)),
+            short_name(&tycon_table_name(id, pretty_tables)),
             "Int" | "String"
         ),
         TypeExpr::TyApp(lhs, _) => is_open_primitive_type(&lhs, pretty_tables),
@@ -210,8 +210,8 @@ impl ConstructorEnv {
 
         for constructors in env.by_tycon.values_mut() {
             constructors.sort_by(|left, right| {
-                let left_name = ctor_display_name_with_table(*left, ctor_table);
-                let right_name = ctor_display_name_with_table(*right, ctor_table);
+                let left_name = ctor_table_name(*left, ctor_table);
+                let right_name = ctor_table_name(*right, ctor_table);
                 short_name(&left_name)
                     .cmp(short_name(&right_name))
                     .then_with(|| left_name.cmp(&right_name))
@@ -711,19 +711,19 @@ fn short_name(name: &str) -> &str {
     name.rsplit('.').next().unwrap_or(name)
 }
 
-fn ctor_display_name_with_table(id: CtorId, ctor_table: &CtorTable) -> String {
+fn ctor_table_name(id: CtorId, ctor_table: &CtorTable) -> String {
     ctor_table
         .get(id)
         .map(|info| symbol_display_name(info.name))
-        .unwrap_or_else(|| ctor_display_name(id))
+        .unwrap_or_else(|| panic!("ICE: exhaustiveness constructor table missing CtorId {id:?}"))
 }
 
-fn tycon_display_name_with_tables(id: TyConId, pretty_tables: PrettyTables<'_>) -> String {
+fn tycon_table_name(id: TyConId, pretty_tables: PrettyTables<'_>) -> String {
     pretty_tables
         .tycons
         .get(id)
         .map(|info| symbol_display_name(info.name))
-        .unwrap_or_else(|| tycon_display_name(id))
+        .unwrap_or_else(|| panic!("ICE: exhaustiveness type table missing TyConId {id:?}"))
 }
 
 #[cfg(test)]
@@ -731,7 +731,7 @@ mod tests {
     use super::*;
     use solveig_ast::ast::{
         CaseArm, ClassTable, CtorInfo, ExprNode, Kind, TermExpr, TermExprNode, TyConDefinition,
-        TyConInfo, TyConTable, legacy_ctor_id, legacy_symbol_id,
+        TyConInfo, TyConTable, legacy_ctor_id, legacy_symbol_id, legacy_tycon_id,
     };
 
     struct ExhaustivenessCase {
@@ -743,7 +743,7 @@ mod tests {
 
     #[test]
     fn check_case_table_driven_witnesses() {
-        let constructor_types = test_constructor_types();
+        let fixtures = test_constructor_fixtures();
 
         let cases = vec![
             ExhaustivenessCase {
@@ -802,7 +802,13 @@ mod tests {
         ];
 
         for case in cases {
-            let actual = missing_patterns(&constructor_types, &case.scrutinee_type, case.patterns);
+            let actual = missing_patterns(
+                &fixtures.constructor_types,
+                &fixtures.ctor_table,
+                &fixtures.tycon_table,
+                &case.scrutinee_type,
+                case.patterns,
+            );
 
             assert_eq!(
                 actual, case.expected_missing,
@@ -882,22 +888,28 @@ mod tests {
         }
     }
 
+    struct TestConstructorFixtures {
+        constructor_types: HashMap<CtorId, TypeExpr>,
+        ctor_table: CtorTable,
+        tycon_table: TyConTable,
+    }
+
     fn missing_patterns(
         constructor_types: &HashMap<CtorId, TypeExpr>,
+        ctor_table: &CtorTable,
+        tycon_table: &TyConTable,
         scrutinee_type: &TypeExpr,
         patterns: Vec<Pattern<Span>>,
     ) -> Vec<String> {
         let arms = patterns.into_iter().map(arm).collect::<Vec<_>>();
-        let ctor_table = CtorTable::new();
-        let tycon_table = TyConTable::new();
         let class_table = ClassTable::new();
 
         match check_case(
             FileId(0),
             constructor_types,
-            &ctor_table,
+            ctor_table,
             PrettyTables {
-                tycons: &tycon_table,
+                tycons: tycon_table,
                 classes: &class_table,
             },
             scrutinee_type,
@@ -910,7 +922,7 @@ mod tests {
         }
     }
 
-    fn test_constructor_types() -> HashMap<CtorId, TypeExpr> {
+    fn test_constructor_fixtures() -> TestConstructorFixtures {
         let mut constructors = HashMap::new();
 
         constructors.insert(legacy_ctor_id("False"), bool_ty());
@@ -942,7 +954,55 @@ mod tests {
             ),
         );
 
-        constructors
+        let mut tycon_table = TyConTable::new();
+        for name in ["Bool", "Int", "Maybe", "List", "Pair"] {
+            tycon_table.insert_with_id(
+                legacy_tycon_id(name),
+                TyConInfo {
+                    name: legacy_symbol_id(name),
+                    kind: Kind::Star,
+                    definition: TyConDefinition::Primitive,
+                },
+            );
+        }
+
+        let mut ctor_table = CtorTable::new();
+        insert_ctor(&mut ctor_table, "False", "Bool", 0, &constructors);
+        insert_ctor(&mut ctor_table, "True", "Bool", 1, &constructors);
+        insert_ctor(&mut ctor_table, "Nothing", "Maybe", 2, &constructors);
+        insert_ctor(&mut ctor_table, "Just", "Maybe", 3, &constructors);
+        insert_ctor(&mut ctor_table, "Nil", "List", 4, &constructors);
+        insert_ctor(&mut ctor_table, "Cons", "List", 5, &constructors);
+        insert_ctor(&mut ctor_table, "MkPair", "Pair", 6, &constructors);
+
+        TestConstructorFixtures {
+            constructor_types: constructors,
+            ctor_table,
+            tycon_table,
+        }
+    }
+
+    fn insert_ctor(
+        ctor_table: &mut CtorTable,
+        ctor_name: &str,
+        tycon_name: &str,
+        tag: u16,
+        constructor_types: &HashMap<CtorId, TypeExpr>,
+    ) {
+        let ctor_id = legacy_ctor_id(ctor_name);
+        ctor_table.insert_with_id(
+            ctor_id,
+            CtorInfo {
+                name: legacy_symbol_id(ctor_name),
+                tycon: legacy_tycon_id(tycon_name),
+                fields: Vec::new(),
+                full_type: constructor_types
+                    .get(&ctor_id)
+                    .cloned()
+                    .expect("ICE: test constructor table entry must have a type"),
+                tag,
+            },
+        );
     }
 
     fn arm(pattern: Pattern<Span>) -> CaseArmNode<Span> {
