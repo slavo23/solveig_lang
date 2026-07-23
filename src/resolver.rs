@@ -487,7 +487,7 @@ impl Resolver {
         sf: &SpannedWrapper<SurfacePattern<'src>>,
         cx: &ModuleContext,
     ) -> PatternNode<Span> {
-        let span: Span = sf.1.into();
+        let span: Span = sf.1.clone();
 
         let node = match &sf.0 {
             SurfacePattern::Var(var_name) => Pattern::Var(var_name.to_string()),
@@ -548,7 +548,7 @@ impl Resolver {
         local: &LocalResolverEnv,
         bound_terms: &HashSet<String>,
     ) -> TermExprNode<Span> {
-        let span: Span = sf.1.into();
+        let span: Span = sf.1.clone();
 
         let node = match &sf.0 {
             SurfaceExpr::Unit => TermExpr::Unit,
@@ -679,7 +679,7 @@ impl Resolver {
                 pattern,
                 expr: self.resolve_surface_expr_in_module(&sf.0.expr, cx, local, &arm_bound_terms),
             },
-            sf.1.into(),
+            sf.1.clone(),
         )
     }
 
@@ -697,7 +697,7 @@ impl Resolver {
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> TermExprNode<Span> {
-        let span: Span = body.1.into();
+        let span: Span = body.1.clone();
         let mut bound_terms = HashSet::new();
 
         for param in params {
@@ -725,7 +725,7 @@ impl Resolver {
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> TermExprNode<Span> {
-        let span: Span = body.1.into();
+        let span: Span = body.1.clone();
         let mut bound_terms = HashSet::new();
 
         for param in params {

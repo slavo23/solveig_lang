@@ -1,12 +1,10 @@
 use std::path::Path;
 
 use ariadne::{Color, Label, Report, ReportKind, Source};
-use chumsky::span::SimpleSpan;
 
 use crate::ast::*;
 use crate::lexer::{self, Assoc, Fixity, LexError, PosToken, Token, builtin_fixity};
 
-type Span = SimpleSpan;
 type S<T> = (T, Span);
 
 type NameSpan<'src> = (&'src str, usize, usize);
@@ -18,7 +16,7 @@ type BinOpInfo<'src> = (Token<'src>, usize, usize);
 type StackedOp<'src> = (Token<'src>, usize, usize, Fixity);
 
 fn mk_span(start: usize, end: usize) -> Span {
-    (start..end).into()
+    start..end
 }
 
 fn sp<T>(value: T, start: usize, end: usize) -> S<T> {
@@ -939,7 +937,7 @@ impl<'src> Parser<'src> {
             _ => Err(self.error(format!("expected pattern, got {:?}", self.current_kind()))),
         }
     }
-    
+
     fn is_pattern_arg_start(&self) -> bool {
         matches!(
             self.current_kind(),

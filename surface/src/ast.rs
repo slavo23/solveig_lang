@@ -1,6 +1,6 @@
-use chumsky::span::SimpleSpan;
+pub type Span = std::ops::Range<usize>;
 
-pub type Spanned<T> = (T, SimpleSpan);
+pub type Spanned<T> = (T, Span);
 
 pub type SpannedWrapper<T> = Spanned<T>;
 
