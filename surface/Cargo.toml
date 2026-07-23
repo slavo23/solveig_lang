@@ -1,8 +1,0 @@
-[package]
-name = "surface"
-version = "0.1.0"
-edition = "2024"
-
-[dependencies]
-base = { path = "../base", version = "0.1.0" }
-logos = { version = "0.16.1" }

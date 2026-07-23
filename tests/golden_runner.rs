@@ -3,7 +3,7 @@ use std::fs;
 use std::panic;
 use std::path::{Path, PathBuf};
 
-use solveig_lang::run_project_capture;
+use solveig_driver::run_project_capture;
 
 #[test]
 fn golden_run_cases() {

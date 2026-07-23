@@ -1,5 +1,5 @@
 use clap::Parser;
-use solveig_lang::compile_and_run_project;
+use solveig_driver::compile_and_run_project;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]

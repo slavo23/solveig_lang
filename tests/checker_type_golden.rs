@@ -1,11 +1,10 @@
 use std::path::Path;
 
-use solveig_lang::checked_project_schemes;
+use solveig_driver::checked_project_schemes;
 
 #[test]
 fn checker_api_golden_types() {
-    let project_root =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/types/checker_api");
+    let project_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/types/checker_api");
     let schemes = checked_project_schemes(&project_root)
         .expect("checker API golden fixture should resolve and check");
 
@@ -43,18 +42,9 @@ fn checker_api_golden_types() {
             "main.sameWrap",
             "∀ (a : *). Eq a => Wrap a -> Wrap a -> Bool",
         ),
-        (
-            "main.notEqThrough",
-            "∀ (a : *). Eq a => a -> a -> Bool",
-        ),
-        (
-            "main.lessViaOrd",
-            "∀ (a : *). Ord a => a -> a -> Bool",
-        ),
-        (
-            "main.sameViaOrd",
-            "∀ (a : *). Ord a => a -> a -> Bool",
-        ),
+        ("main.notEqThrough", "∀ (a : *). Eq a => a -> a -> Bool"),
+        ("main.lessViaOrd", "∀ (a : *). Ord a => a -> a -> Bool"),
+        ("main.sameViaOrd", "∀ (a : *). Ord a => a -> a -> Bool"),
         ("main.lessInt", "Bool"),
         ("main.wrapNotEqInt", "Bool"),
         ("main.useRank2", "(∀ (a : *). a -> a) -> Int"),

@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use solveig_lang::run_project_capture;
+use solveig_driver::run_project_capture;
 
 #[test]
 fn captures_example_project_output() {

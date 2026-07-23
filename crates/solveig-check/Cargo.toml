@@ -1,0 +1,14 @@
+[package]
+name = "solveig-check"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+solveig-ast = { path = "../solveig-ast" }
+solveig-base = { path = "../solveig-base" }
+slab = { workspace = true }
+petgraph = { workspace = true }
+
+[build-dependencies]
+slab.workspace = true
+petgraph.workspace = true

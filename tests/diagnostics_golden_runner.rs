@@ -70,7 +70,7 @@ fn run_cli_case(case_root: &Path, case_name: &str) -> String {
 }
 
 fn run_cli(case_root: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_solveig_lang"))
+    Command::new(env!("CARGO_BIN_EXE_solveig"))
         .arg("--project-root")
         .arg(case_root)
         .output()

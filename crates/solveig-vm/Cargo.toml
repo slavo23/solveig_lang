@@ -1,0 +1,8 @@
+[package]
+name = "solveig-vm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+solveig-ast = { path = "../solveig-ast" }
+solveig-lower = { path = "../solveig-lower" }

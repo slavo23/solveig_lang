@@ -72,10 +72,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "base"
-version = "0.1.0"
-
-[[package]]
 name = "clap"
 version = "4.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -120,13 +116,6 @@ name = "colorchoice"
 version = "1.0.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d07550c9036bf2ae0c684c4297d503f838287c83c53686d05370d0e139ae570"
-
-[[package]]
-name = "core"
-version = "0.1.0"
-dependencies = [
- "slab",
-]
 
 [[package]]
 name = "equivalent"
@@ -222,13 +211,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lowering"
-version = "0.1.0"
-dependencies = [
- "core",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -288,14 +270,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "dc897dd8d9e8bd1ed8cdad82b5966c3e0ecae09fb1907d58efaa013543185d0a"
 
 [[package]]
-name = "runtime"
-version = "0.1.0"
-dependencies = [
- "core",
- "lowering",
-]
-
-[[package]]
 name = "serde"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -331,26 +305,88 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
+name = "solveig"
+version = "0.1.0"
+dependencies = [
+ "clap",
+ "solveig-driver",
+]
+
+[[package]]
+name = "solveig-ast"
+version = "0.1.0"
+dependencies = [
+ "slab",
+]
+
+[[package]]
+name = "solveig-base"
+version = "0.1.0"
+
+[[package]]
+name = "solveig-check"
+version = "0.1.0"
+dependencies = [
+ "petgraph",
+ "slab",
+ "solveig-ast",
+ "solveig-base",
+]
+
+[[package]]
+name = "solveig-driver"
+version = "0.1.0"
+dependencies = [
+ "solveig-ast",
+ "solveig-base",
+ "solveig-check",
+ "solveig-lower",
+ "solveig-report",
+ "solveig-resolve",
+ "solveig-syntax",
+ "solveig-vm",
+]
+
+[[package]]
+name = "solveig-lower"
+version = "0.1.0"
+dependencies = [
+ "solveig-ast",
+]
+
+[[package]]
 name = "solveig-report"
 version = "0.1.0"
 dependencies = [
  "ariadne",
- "base",
+ "solveig-base",
 ]
 
 [[package]]
-name = "solveig_lang"
+name = "solveig-resolve"
 version = "0.1.0"
 dependencies = [
- "base",
- "clap",
- "core",
- "lowering",
  "petgraph",
- "runtime",
- "solveig-report",
- "surface",
- "syntax",
+ "solveig-ast",
+ "solveig-base",
+ "solveig-check",
+ "solveig-syntax",
+]
+
+[[package]]
+name = "solveig-syntax"
+version = "0.1.0"
+dependencies = [
+ "logos",
+ "solveig-base",
+]
+
+[[package]]
+name = "solveig-vm"
+version = "0.1.0"
+dependencies = [
+ "solveig-ast",
+ "solveig-lower",
 ]
 
 [[package]]
@@ -358,14 +394,6 @@ name = "strsim"
 version = "0.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
-
-[[package]]
-name = "surface"
-version = "0.1.0"
-dependencies = [
- "base",
- "logos",
-]
 
 [[package]]
 name = "syn"
@@ -376,17 +404,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "syntax"
-version = "0.1.0"
-dependencies = [
- "base",
- "core",
- "lowering",
- "petgraph",
- "slab",
 ]
 
 [[package]]
