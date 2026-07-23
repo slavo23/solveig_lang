@@ -6,7 +6,7 @@ use solveig_ast::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, ConstructorDef, DataDefinition,
     DefId, InstanceDefinition, InstanceMethodDef, Kind, KindMetaId, Literal, ModuleId, Pattern,
     PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode,
-    TypeExpr, UnOp, tyvar_display_name,
+    TypeExpr, UnOp, legacy_ctor_id, tyvar_display_name,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use solveig_check::data_kind_infer::{

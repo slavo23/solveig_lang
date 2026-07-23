@@ -116,11 +116,11 @@ impl<'a> Resolver<'a> {
                 cx,
                 bound_terms,
             )),
-            SurfaceExpr::Con(con_name) => TermExpr::Con(self.resolve_ctor_ref(
+            SurfaceExpr::Con(con_name) => TermExpr::Con(legacy_ctor_id(&self.resolve_ctor_ref(
                 &con_name.0,
                 self.file_span(cx, con_name.1),
                 cx,
-            )),
+            ))),
 
             SurfaceExpr::Literal(lit) => match lit {
                 SurfaceLiteral::Int(value) => TermExpr::Lit(Literal::Int(*value)),

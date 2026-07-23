@@ -110,7 +110,7 @@ impl TypeChecker {
             TermExpr::Unit => TermExpr::Unit,
             TermExpr::Var(name) => TermExpr::Var(name.clone()),
             TermExpr::Lit(lit_val) => TermExpr::Lit(lit_val.clone()),
-            TermExpr::Con(name) => TermExpr::Con(name.clone()),
+            TermExpr::Con(id) => TermExpr::Con(*id),
             TermExpr::App(func, arg) => TermExpr::App(
                 Box::new(self.zonk_expr(func)),
                 Box::new(self.zonk_expr(arg)),

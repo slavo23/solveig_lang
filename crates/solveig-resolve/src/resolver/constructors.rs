@@ -112,7 +112,11 @@ impl<'a> Resolver<'a> {
             }
             SurfacePattern::Wild => Pattern::Wild,
             SurfacePattern::Con(con_name, args) => Pattern::Con(
-                self.resolve_ctor_ref(&con_name.0, self.file_span(cx, con_name.1), cx),
+                legacy_ctor_id(&self.resolve_ctor_ref(
+                    &con_name.0,
+                    self.file_span(cx, con_name.1),
+                    cx,
+                )),
                 args.iter()
                     .map(|arg| self.resolve_surface_pattern_in_module(arg, cx))
                     .collect(),

@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use solveig_ast::ast::{
     CaseArm, DataDefinition, Literal, Pattern, PatternNode, ResolvedModule, TermExpr, TermExprNode,
+    ctor_display_name,
 };
 
 use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
@@ -71,10 +72,11 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
         TermExpr::Unit => Rc::new(IRExpr::Unit),
         TermExpr::Var(name) => ctx.resolve_var(name),
         TermExpr::Lit(Literal::Int(n)) => Rc::new(IRExpr::Int(*n)),
-        TermExpr::Con(name) => {
+        TermExpr::Con(id) => {
+            let name = ctor_display_name(*id);
             let &(tag, arity) = ctx
                 .constructors
-                .get(name)
+                .get(&name)
                 .unwrap_or_else(|| panic!("unknown constructor during lowering: {}", name));
             Rc::new(IRExpr::Con { tag, arity })
         }
@@ -157,10 +159,11 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> IRPattern {
         Pattern::Var(_) => IRPattern::Var,
         Pattern::Wild => IRPattern::Wild,
         Pattern::Lit(lit_val) => IRPattern::Lit(lit_val.clone()),
-        Pattern::Con(name, sub_patterns) => {
+        Pattern::Con(id, sub_patterns) => {
+            let name = ctor_display_name(*id);
             let &(tag, _) = ctx
                 .constructors
-                .get(name)
+                .get(&name)
                 .unwrap_or_else(|| panic!("unknown constructor in pattern: {}", name));
             let sub_ir_patterns = sub_patterns
                 .iter()

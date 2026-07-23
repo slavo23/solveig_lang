@@ -3,7 +3,7 @@ use std::ops::Range;
 
 use solveig_ast::ast::{
     CaseArmNode, Literal, Pattern, PatternNode, Predicate, Pretty, TyVarId, TypeExpr,
-    tycon_display_name,
+    ctor_display_name, tycon_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -516,8 +516,8 @@ fn lower_pattern(pattern: &PatternNode<Span>) -> Pat {
 
         Pattern::Lit(lit) => Pat::Head(Head::Literal(LitPat::from_literal(lit)), Vec::new()),
 
-        Pattern::Con(name, args) => Pat::Head(
-            Head::Constructor(name.clone()),
+        Pattern::Con(id, args) => Pat::Head(
+            Head::Constructor(ctor_display_name(*id)),
             args.iter().map(lower_pattern).collect(),
         ),
     }
@@ -686,7 +686,7 @@ fn short_name(name: &str) -> &str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solveig_ast::ast::{CaseArm, ExprNode, Kind, TermExpr, TermExprNode};
+    use solveig_ast::ast::{CaseArm, ExprNode, Kind, TermExpr, TermExprNode, legacy_ctor_id};
 
     struct ExhaustivenessCase {
         name: &'static str,
@@ -831,7 +831,7 @@ mod tests {
 
     fn con(name: &str, args: Vec<Pattern<Span>>) -> Pattern<Span> {
         Pattern::Con(
-            name.to_string(),
+            legacy_ctor_id(name),
             args.into_iter().map(pattern_node).collect(),
         )
     }

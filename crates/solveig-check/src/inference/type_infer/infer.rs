@@ -121,16 +121,16 @@ impl TypeChecker {
                     name: name.clone(),
                 })
             }
-            TermExpr::Con(name) => {
+            TermExpr::Con(id) => {
+                let name = ctor_display_name(*id);
                 let constructor_type =
-                    self.constructor_types.get(name).cloned().ok_or_else(|| {
+                    self.constructor_types.get(&name).cloned().ok_or_else(|| {
                         TypeError::UnknownConstructor {
                             span: self.get_file_span(span.clone()),
                             name: name.clone(),
                         }
                     })?;
-                let elaborated =
-                    elab_node(TermExpr::Con(name.clone()), span, constructor_type.clone());
+                let elaborated = elab_node(TermExpr::Con(*id), span, constructor_type.clone());
                 Ok((ctx, elaborated, constructor_type))
             }
             TermExpr::Abs(param, maybe_annotation, body) => {

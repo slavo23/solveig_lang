@@ -118,6 +118,7 @@ pub fn legacy_evar_name(id: EvarId) -> String {
 }
 
 const LEGACY_TYCON_TAG: u32 = 0x8000_0000;
+const LEGACY_CTOR_TAG: u32 = 0x8000_0000;
 
 #[derive(Default)]
 struct LegacyTyConRegistry {
@@ -125,9 +126,20 @@ struct LegacyTyConRegistry {
     ids: HashMap<String, TyConId>,
 }
 
+#[derive(Default)]
+struct LegacyCtorRegistry {
+    names: Vec<String>,
+    ids: HashMap<String, CtorId>,
+}
+
 fn legacy_tycon_registry() -> &'static Mutex<LegacyTyConRegistry> {
     static REGISTRY: OnceLock<Mutex<LegacyTyConRegistry>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(LegacyTyConRegistry::default()))
+}
+
+fn legacy_ctor_registry() -> &'static Mutex<LegacyCtorRegistry> {
+    static REGISTRY: OnceLock<Mutex<LegacyCtorRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(LegacyCtorRegistry::default()))
 }
 
 pub fn legacy_tycon_id(name: &str) -> TyConId {
@@ -159,6 +171,37 @@ pub fn tycon_display_name(id: TyConId) -> String {
         .get(index)
         .cloned()
         .unwrap_or_else(|| format!("T{}", id.0))
+}
+
+pub fn legacy_ctor_id(name: &str) -> CtorId {
+    let mut registry = legacy_ctor_registry()
+        .lock()
+        .expect("ICE: legacy constructor registry lock poisoned");
+
+    if let Some(id) = registry.ids.get(name) {
+        return *id;
+    }
+
+    let id = CtorId(LEGACY_CTOR_TAG | registry.names.len() as u32);
+    registry.names.push(name.to_string());
+    registry.ids.insert(name.to_string(), id);
+    id
+}
+
+pub fn ctor_display_name(id: CtorId) -> String {
+    if id.0 & LEGACY_CTOR_TAG == 0 {
+        return format!("C{}", id.0);
+    }
+
+    let registry = legacy_ctor_registry()
+        .lock()
+        .expect("ICE: legacy constructor registry lock poisoned");
+    let index = (id.0 & !LEGACY_CTOR_TAG) as usize;
+    registry
+        .names
+        .get(index)
+        .cloned()
+        .unwrap_or_else(|| format!("C{}", id.0))
 }
 
 const LEGACY_SOURCE_TYVAR_TAG: u32 = 0x8000_0000;
@@ -643,7 +686,7 @@ pub enum TermExpr<A, P = A> {
     TyAbs(String, Kind, Box<TermExprNode<A, P>>),
     TyApp(Box<TermExprNode<A, P>>, TypeExpr),
     Anno(Box<TermExprNode<A, P>>, TypeExpr),
-    Con(String),
+    Con(CtorId),
     Case(Box<TermExprNode<A, P>>, Vec<CaseArmNode<A, P>>),
     IfThenElse(
         Box<TermExprNode<A, P>>,
@@ -657,7 +700,7 @@ pub enum TermExpr<A, P = A> {
 
 #[derive(Clone, Debug)]
 pub enum Pattern<A> {
-    Con(String, Vec<PatternNode<A>>),
+    Con(CtorId, Vec<PatternNode<A>>),
     Lit(Literal),
     Var(String),
     Wild,
@@ -966,5 +1009,15 @@ mod tests {
         assert_eq!(tycon_display_name(id), name);
         assert_eq!(TypeExpr::make_con(name.to_string()), TypeExpr::TyCon(id));
         assert_eq!(TypeExpr::make_con(name.to_string()).pretty(), "Widget");
+    }
+
+    #[test]
+    fn legacy_ctor_bridge_preserves_registered_names() {
+        let name = "test.module.MkWidget";
+        let id = legacy_ctor_id(name);
+
+        assert_eq!(legacy_ctor_id(name), id);
+        assert_ne!(legacy_ctor_id("test.module.OtherCtor"), id);
+        assert_eq!(ctor_display_name(id), name);
     }
 }

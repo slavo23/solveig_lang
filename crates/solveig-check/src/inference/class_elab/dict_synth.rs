@@ -20,7 +20,7 @@ fn mk_var(name: &str) -> TermExprNode<TcMetadata, Span> {
     TermExprNode::new(TermExpr::Var(name.to_string()), mk_anno())
 }
 fn mk_con(name: &str) -> TermExprNode<TcMetadata, Span> {
-    TermExprNode::new(TermExpr::Con(name.to_string()), mk_anno())
+    TermExprNode::new(TermExpr::Con(legacy_ctor_id(name)), mk_anno())
 }
 fn mk_app(
     f: TermExprNode<TcMetadata, Span>,
@@ -46,7 +46,7 @@ fn mk_dict_field_projection(
         .collect::<Vec<_>>();
 
     let dict_pat = PatternNode::new(
-        Pattern::Con(class_rt.dict_ctor.clone(), field_patterns),
+        Pattern::Con(legacy_ctor_id(&class_rt.dict_ctor), field_patterns),
         0..0,
     );
 
@@ -412,8 +412,10 @@ fn synthesize_selector_defs(
                 })
                 .collect::<Vec<_>>();
 
-            let dict_pat =
-                PatternNode::new(Pattern::Con(info.dict_ctor.clone(), field_patterns), 0..0);
+            let dict_pat = PatternNode::new(
+                Pattern::Con(legacy_ctor_id(&info.dict_ctor), field_patterns),
+                0..0,
+            );
 
             let body = TermExprNode::new(
                 TermExpr::Case(
