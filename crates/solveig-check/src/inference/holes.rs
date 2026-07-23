@@ -42,7 +42,7 @@ pub fn prettify_evars(ty: &TypeExpr) -> TypeExpr {
     let mut result = ty.clone();
     for (i, evar) in evars.iter().enumerate() {
         let letter = (b'a' + (i as u8 % 26)) as char;
-        result = result.substitute_evar(*evar, &TypeExpr::TyVar(format!("?{}", letter)));
+        result = result.substitute_evar(*evar, &TypeExpr::make_var(format!("?{}", letter)));
     }
     result
 }

@@ -67,18 +67,18 @@ fn mk_dict_field_projection(
 fn subst_from_class_head(
     params: &[(String, Kind)],
     args: &[TypeExpr],
-) -> HashMap<String, TypeExpr> {
+) -> HashMap<TyVarId, TypeExpr> {
     params
         .iter()
         .zip(args.iter())
-        .map(|((param_name, _), arg)| (param_name.clone(), arg.clone()))
+        .map(|((param_name, _), arg)| (legacy_tyvar_id(param_name), arg.clone()))
         .collect()
 }
-fn collect_app_spine<'a>(
-    expr: &'a TermExprNode<TcMetadata, Span>,
+fn collect_app_spine(
+    expr: &TermExprNode<TcMetadata, Span>,
 ) -> (
-    &'a TermExprNode<TcMetadata, Span>,
-    Vec<&'a TermExprNode<TcMetadata, Span>>,
+    &TermExprNode<TcMetadata, Span>,
+    Vec<&TermExprNode<TcMetadata, Span>>,
 ) {
     let mut args = Vec::new();
     let mut head = expr;
@@ -102,13 +102,13 @@ fn rebuild_app_spine(
 fn match_type_pattern(
     pattern: &TypeExpr,
     actual: &TypeExpr,
-    subst: &mut HashMap<String, TypeExpr>,
+    subst: &mut HashMap<TyVarId, TypeExpr>,
 ) -> bool {
     match pattern {
-        TypeExpr::TyVar(name) => match subst.get(name) {
+        TypeExpr::TyVar(id) => match subst.get(id) {
             Some(existing) => existing == actual,
             None => {
-                subst.insert(name.clone(), actual.clone());
+                subst.insert(*id, actual.clone());
                 true
             }
         },
@@ -139,12 +139,12 @@ fn match_type_pattern(
 fn match_predicate_pattern(
     pattern: &Predicate,
     actual: &Predicate,
-) -> Option<HashMap<String, TypeExpr>> {
+) -> Option<HashMap<TyVarId, TypeExpr>> {
     if pattern.class_name != actual.class_name || pattern.args.len() != actual.args.len() {
         return None;
     }
 
-    let mut subst = HashMap::<String, TypeExpr>::new();
+    let mut subst = HashMap::<TyVarId, TypeExpr>::new();
 
     for (pattern_arg, actual_arg) in pattern.args.iter().zip(actual.args.iter()) {
         if !match_type_pattern(pattern_arg, actual_arg, &mut subst) {
@@ -156,7 +156,7 @@ fn match_predicate_pattern(
 }
 fn instantiate_predicate_with_subst(
     pred: &Predicate,
-    subst: &HashMap<String, TypeExpr>,
+    subst: &HashMap<TyVarId, TypeExpr>,
 ) -> Predicate {
     Predicate {
         class_name: pred.class_name.clone(),
@@ -166,7 +166,7 @@ fn instantiate_predicate_with_subst(
             .map(|arg| {
                 subst
                     .iter()
-                    .fold(arg.clone(), |acc, (name, ty)| acc.substitute(name, ty))
+                    .fold(arg.clone(), |acc, (name, ty)| acc.substitute(*name, ty))
             })
             .collect(),
     }
@@ -286,7 +286,7 @@ fn build_class_runtime_info(
             args: class_def
                 .params
                 .iter()
-                .map(|(name, _)| TypeExpr::TyVar(name.clone()))
+                .map(|(name, _)| TypeExpr::make_var(name.clone()))
                 .collect(),
         };
 
@@ -350,7 +350,7 @@ fn synthesize_dict_data_defs(
 
             let dict_ty = class_def.params.iter().cloned().fold(
                 TypeExpr::TyCon(info.dict_tycon.clone()),
-                |acc, (name, _)| TypeExpr::make_app(acc, TypeExpr::TyVar(name)),
+                |acc, (name, _)| TypeExpr::make_app(acc, TypeExpr::make_var(name)),
             );
 
             let ctor_ty = field_types
@@ -434,7 +434,7 @@ fn synthesize_selector_defs(
                 args: class_def
                     .params
                     .iter()
-                    .map(|(name, _)| TypeExpr::TyVar(name.clone()))
+                    .map(|(name, _)| TypeExpr::make_var(name.clone()))
                     .collect(),
             };
 
@@ -444,7 +444,11 @@ fn synthesize_selector_defs(
             );
 
             let selector_scheme = Scheme {
-                quantifiers: class_def.params.clone(),
+                quantifiers: class_def
+                    .params
+                    .iter()
+                    .map(|(name, kind)| (legacy_tyvar_id(name), kind.clone()))
+                    .collect(),
                 predicates: Vec::new(),
                 ty: selector_ty,
             };
@@ -484,19 +488,19 @@ fn build_constrained_func_info(
     let mut constrained_funcs = HashMap::<String, ConstrainedFuncInfo>::new();
 
     for def in &module.func_defs {
-        if let Some(sig) = &def.signature {
-            if !sig.predicates.is_empty() {
-                let info = ConstrainedFuncInfo {
-                    predicates: sig.predicates.clone(),
-                    body_ty: sig.ty.clone(),
-                };
+        if let Some(sig) = &def.signature
+            && !sig.predicates.is_empty()
+        {
+            let info = ConstrainedFuncInfo {
+                predicates: sig.predicates.clone(),
+                body_ty: sig.ty.clone(),
+            };
 
-                constrained_funcs.insert(def.name.clone(), info.clone());
+            constrained_funcs.insert(def.name.clone(), info.clone());
 
-                let short_name = def.name.rsplit('.').next().unwrap_or(&def.name).to_string();
+            let short_name = def.name.rsplit('.').next().unwrap_or(&def.name).to_string();
 
-                constrained_funcs.insert(short_name, info);
-            }
+            constrained_funcs.insert(short_name, info);
         }
     }
 
@@ -560,11 +564,11 @@ fn elaborate_func_defs(
         })
         .collect()
 }
-fn free_type_vars_in_type(ty: &TypeExpr, out: &mut Vec<String>) {
+fn free_type_vars_in_type(ty: &TypeExpr, out: &mut Vec<TyVarId>) {
     match ty {
-        TypeExpr::TyVar(name) => {
-            if !out.contains(name) {
-                out.push(name.clone());
+        TypeExpr::TyVar(id) => {
+            if !out.contains(id) {
+                out.push(*id);
             }
         }
 
@@ -589,12 +593,12 @@ fn free_type_vars_in_type(ty: &TypeExpr, out: &mut Vec<String>) {
         TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}
     }
 }
-fn free_type_vars_in_predicate(pred: &Predicate, out: &mut Vec<String>) {
+fn free_type_vars_in_predicate(pred: &Predicate, out: &mut Vec<TyVarId>) {
     for arg in &pred.args {
         free_type_vars_in_type(arg, out);
     }
 }
-fn free_type_vars_in_instance(inst: &InstanceDefinition<TcMetadata, Span>) -> Vec<String> {
+fn free_type_vars_in_instance(inst: &InstanceDefinition<TcMetadata, Span>) -> Vec<TyVarId> {
     let mut out = Vec::new();
 
     for pred in &inst.context {
@@ -693,7 +697,7 @@ fn synthesize_instance_dict_defs(
 
         let mut dict_expr = field_exprs
             .into_iter()
-            .fold(mk_con(&class_rt.dict_ctor), |acc, field| mk_app(acc, field));
+            .fold(mk_con(&class_rt.dict_ctor), mk_app);
 
         for dict_arg_name in context_dict_names.iter().rev() {
             let anno = dict_expr.anno.clone();

@@ -1,12 +1,14 @@
 use std::collections::{HashMap, HashSet};
 
-use solveig_ast::ast::{Kind, KindMetaId, Predicate, Pretty, Scheme, TypeExpr};
+use solveig_ast::ast::{
+    Kind, KindMetaId, Predicate, Pretty, Scheme, TyVarId, TypeExpr, tyvar_display_name,
+};
 use solveig_base::{Diagnostic, FileSpan, IntoDiagnostic, Label};
 
 #[derive(Debug, Clone)]
 pub struct SignatureKindInfo {
     pub kinded_signature: TypeExpr,
-    pub quantified_var_kinds: Vec<(String, Kind)>,
+    pub quantified_var_kinds: Vec<(TyVarId, Kind)>,
     pub signature_kind: Kind,
     pub kind_subst: HashMap<KindMetaId, Kind>,
 }
@@ -326,7 +328,7 @@ impl SignatureKindInferencer {
     fn infer_predicate(
         &mut self,
         pred: &Predicate,
-        env: &mut HashMap<String, Kind>,
+        env: &mut HashMap<TyVarId, Kind>,
     ) -> Result<Predicate, KindError> {
         let expected_kinds = self
             .class_env
@@ -358,18 +360,18 @@ impl SignatureKindInferencer {
     fn infer_and_rebuild(
         &mut self,
         ty: &TypeExpr,
-        env: &mut HashMap<String, Kind>,
+        env: &mut HashMap<TyVarId, Kind>,
     ) -> Result<(Kind, TypeExpr), KindError> {
         match ty {
             TypeExpr::TyUnit => Ok((Kind::Star, TypeExpr::TyUnit)),
 
-            TypeExpr::TyVar(name) => {
+            TypeExpr::TyVar(id) => {
                 let kind = env
-                    .get(name)
+                    .get(id)
                     .cloned()
                     .map(|k| self.apply_kind(&k))
-                    .ok_or_else(|| KindError::unbound_type_variable(name.clone()))?;
-                Ok((kind, TypeExpr::TyVar(name.clone())))
+                    .ok_or_else(|| KindError::unbound_type_variable(tyvar_display_name(*id)))?;
+                Ok((kind, TypeExpr::TyVar(*id)))
             }
 
             TypeExpr::TyExVar(id) => Ok((Kind::Star, TypeExpr::TyExVar(*id))),
@@ -408,13 +410,13 @@ impl SignatureKindInferencer {
 
             TypeExpr::TyForAll(var_name, _old_kind, body) => {
                 let fresh = self.fresh_meta();
-                let old = env.insert(var_name.clone(), fresh.clone());
+                let old = env.insert(*var_name, fresh.clone());
                 let (body_kind, body_kinded) = self.infer_and_rebuild(body, env)?;
                 self.unify(body_kind, Kind::Star)?;
 
                 match old {
                     Some(prev) => {
-                        env.insert(var_name.clone(), prev);
+                        env.insert(*var_name, prev);
                     }
                     None => {
                         env.remove(var_name);
@@ -424,7 +426,7 @@ impl SignatureKindInferencer {
                 let solved_binder_kind = self.zonk_kind_for_binder(&fresh);
                 Ok((
                     Kind::Star,
-                    TypeExpr::TyForAll(var_name.clone(), solved_binder_kind, Box::new(body_kinded)),
+                    TypeExpr::TyForAll(*var_name, solved_binder_kind, Box::new(body_kinded)),
                 ))
             }
 
@@ -445,25 +447,25 @@ impl SignatureKindInferencer {
         }
     }
 
-    fn collect_outer_foralls(ty: &TypeExpr, out: &mut Vec<(String, Kind)>) {
+    fn collect_outer_foralls(ty: &TypeExpr, out: &mut Vec<(TyVarId, Kind)>) {
         if let TypeExpr::TyForAll(name, kind, body) = ty {
-            out.push((name.clone(), kind.clone()));
+            out.push((*name, kind.clone()));
             Self::collect_outer_foralls(body, out);
         }
     }
 
     fn collect_free_tyvars_in_type(
         ty: &TypeExpr,
-        bound: &mut Vec<String>,
-        seen: &mut HashSet<String>,
-        out: &mut Vec<String>,
+        bound: &mut Vec<TyVarId>,
+        seen: &mut HashSet<TyVarId>,
+        out: &mut Vec<TyVarId>,
     ) {
         match ty {
             TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}
 
-            TypeExpr::TyVar(name) => {
-                if !bound.contains(name) && seen.insert(name.clone()) {
-                    out.push(name.clone());
+            TypeExpr::TyVar(id) => {
+                if !bound.contains(id) && seen.insert(*id) {
+                    out.push(*id);
                 }
             }
 
@@ -473,7 +475,7 @@ impl SignatureKindInferencer {
             }
 
             TypeExpr::TyForAll(name, _, body) => {
-                bound.push(name.clone());
+                bound.push(*name);
                 Self::collect_free_tyvars_in_type(body, bound, seen, out);
                 bound.pop();
             }
@@ -489,11 +491,11 @@ impl SignatureKindInferencer {
         }
     }
 
-    fn collect_implicit_quantifiers(&self, scheme: &Scheme) -> Vec<String> {
+    fn collect_implicit_quantifiers(&self, scheme: &Scheme) -> Vec<TyVarId> {
         let mut bound = scheme
             .quantifiers
             .iter()
-            .map(|(name, _)| name.clone())
+            .map(|(name, _)| *name)
             .collect::<Vec<_>>();
         let mut seen = bound.iter().cloned().collect::<HashSet<_>>();
         let mut out = Vec::new();
@@ -509,7 +511,7 @@ impl SignatureKindInferencer {
     }
 
     pub fn infer_signature(mut self, ty: &TypeExpr) -> Result<SignatureKindInfo, KindError> {
-        let mut env = HashMap::<String, Kind>::new();
+        let mut env = HashMap::<TyVarId, Kind>::new();
         let (sig_kind, kinded_sig) = self.infer_and_rebuild(ty, &mut env)?;
         let sig_kind = self.apply_kind(&sig_kind);
 
@@ -532,17 +534,17 @@ impl SignatureKindInferencer {
         let implicit_quants = self.collect_implicit_quantifiers(scheme);
 
         let mut quantifier_names = Vec::new();
-        let mut env = HashMap::<String, Kind>::new();
+        let mut env = HashMap::<TyVarId, Kind>::new();
 
         for (name, _old_kind) in &scheme.quantifiers {
             let fresh = self.fresh_meta();
-            env.insert(name.clone(), fresh);
-            quantifier_names.push(name.clone());
+            env.insert(*name, fresh);
+            quantifier_names.push(*name);
         }
 
         for name in implicit_quants {
             let fresh = self.fresh_meta();
-            env.insert(name.clone(), fresh);
+            env.insert(name, fresh);
             quantifier_names.push(name);
         }
 

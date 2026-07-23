@@ -4,7 +4,7 @@ use std::ops::Range;
 use solveig_ast::ast::{
     CaseArm, CaseArmNode, ConstructorDef, DataDefinition, InstanceDefinition, Kind, Pattern,
     PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode,
-    TypeExpr,
+    TyVarId, TypeExpr, legacy_tyvar_id, tyvar_display_name,
 };
 
 use crate::inference::type_infer::TcMetadata;

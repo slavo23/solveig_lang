@@ -18,10 +18,10 @@ impl TypeChecker {
                 TermExpr::TyAbs(param, _kind, body),
                 TypeExpr::TyForAll(quantifier, quant_kind, body_type),
             ) => {
+                let param_id = legacy_tyvar_id(param);
                 let substituted_body_type =
-                    body_type.substitute(quantifier, &TypeExpr::TyVar(param.clone()));
-                let universal_entry =
-                    self.fresh_universal_entry(param.clone(), quant_kind.clone());
+                    body_type.substitute(*quantifier, &TypeExpr::TyVar(param_id));
+                let universal_entry = Self::universal_entry(param_id, quant_kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
 
                 let (delta, elaborated_body) =
@@ -118,8 +118,7 @@ impl TypeChecker {
             }
 
             (_, TypeExpr::TyForAll(quantifier, kind, body_type)) => {
-                let universal_entry =
-                    self.fresh_universal_entry(quantifier.clone(), kind.clone());
+                let universal_entry = Self::universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
 
                 let (delta, elaborated_body) =
@@ -127,7 +126,11 @@ impl TypeChecker {
 
                 let result_type = expected_type.clone();
                 let elaborated = elab_node(
-                    TermExpr::TyAbs(quantifier.clone(), kind.clone(), Box::new(elaborated_body)),
+                    TermExpr::TyAbs(
+                        tyvar_display_name(*quantifier),
+                        kind.clone(),
+                        Box::new(elaborated_body),
+                    ),
                     span,
                     result_type,
                 );
@@ -205,13 +208,9 @@ pub fn check_and_elab_module(
             // for its own superclass obligations. This avoids accepting recursive proofs
             // such as constructing `Eq Int` through the `Ord Int` dictionary currently
             // being checked.
-            checker.instance_defs = checker
+            checker
                 .instance_defs
-                .into_iter()
-                .filter(|candidate| {
-                    candidate.head != inst.head || candidate.context != inst.context
-                })
-                .collect();
+                .retain(|candidate| candidate.head != inst.head || candidate.context != inst.context);
 
             let missing_superclasses = superclass_obligations
                 .iter()

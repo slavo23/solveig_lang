@@ -67,14 +67,14 @@ impl TypeChecker {
                     .add_entry(marker.clone())
                     .add_entry(ContextEntry::ExVar(fresh_evar, kind.clone()));
 
-                let instantiated_body = body.substitute(quantifier, &Self::evar_type(fresh_evar));
+                let instantiated_body =
+                    body.substitute(*quantifier, &Self::evar_type(fresh_evar));
                 let theta = self.solve_subtype_inner(extended_ctx, &instantiated_body, right)?;
                 Ok(theta.until(&marker))
             }
 
             (_, TypeExpr::TyForAll(quantifier, kind, body)) => {
-                let universal_entry =
-                    self.fresh_universal_entry(quantifier.clone(), kind.clone());
+                let universal_entry = Self::universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let theta = self.solve_subtype_inner(extended_ctx, left, body)?;
                 Ok(theta.until(&universal_entry))
@@ -211,8 +211,7 @@ impl TypeChecker {
                 self.instantiate_left(theta, arg_evar, &arg_applied)
             }
             TypeExpr::TyForAll(quantifier, kind, body) => {
-                let universal_entry =
-                    self.fresh_universal_entry(quantifier.clone(), kind.clone());
+                let universal_entry = Self::universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let delta = self.instantiate_left(extended_ctx, evar_id, body)?;
                 Ok(delta.until(&universal_entry))
@@ -327,7 +326,7 @@ impl TypeChecker {
                     .add_entry(marker.clone())
                     .add_entry(ContextEntry::ExVar(fresh_evar, kind.clone()));
 
-                let instantiated = body.substitute(quantifier, &Self::evar_type(fresh_evar));
+                let instantiated = body.substitute(*quantifier, &Self::evar_type(fresh_evar));
                 let delta = self.instantiate_right(extended_ctx, &instantiated, evar_id)?;
                 Ok(delta.until(&marker))
             }
@@ -352,7 +351,7 @@ impl TypeChecker {
             TypeExpr::TyForAll(quantifier, kind, body) => {
                 let fresh_evar = self.fresh_evar_id();
                 let new_ctx = ctx.add_entry(ContextEntry::ExVar(fresh_evar, kind.clone()));
-                let instantiated = body.substitute(quantifier, &Self::evar_type(fresh_evar));
+                let instantiated = body.substitute(*quantifier, &Self::evar_type(fresh_evar));
                 self.force_arrow(new_ctx, &instantiated, span)
             }
             TypeExpr::Qualified(_, body) => self.force_arrow(ctx, body, span),

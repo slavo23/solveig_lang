@@ -218,13 +218,14 @@ impl TypeChecker {
                 Ok((delta, elaborated, result_type))
             }
             TermExpr::TyAbs(param, kind, body) => {
-                let universal_entry = self.fresh_universal_entry(param.clone(), kind.clone());
+                let param_id = legacy_tyvar_id(param);
+                let universal_entry = Self::universal_entry(param_id, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
 
                 let (delta, elaborated_body, body_type) =
                     self.solve_inference(extended_ctx, body)?;
 
-                let forall_type = TypeExpr::make_forall(param.clone(), kind.clone(), body_type);
+                let forall_type = TypeExpr::make_forall_id(param_id, kind.clone(), body_type);
                 let elaborated = elab_node(
                     TermExpr::TyAbs(param.clone(), kind.clone(), Box::new(elaborated_body)),
                     span,
@@ -238,7 +239,7 @@ impl TypeChecker {
 
                 match inner_type_applied {
                     TypeExpr::TyForAll(quantifier, _kind, body) => {
-                        let result_type = body.substitute(&quantifier, ty_arg);
+                        let result_type = body.substitute(quantifier, ty_arg);
                         let elaborated = elab_node(
                             TermExpr::TyApp(Box::new(elaborated_inner), ty_arg.clone()),
                             span,
@@ -325,7 +326,7 @@ impl TypeChecker {
                 let extended_ctx = ctx.add_entry(evar_entry);
 
                 let ty_arg = Self::evar_type(fresh_evar);
-                let instantiated_type = body.substitute(quantifier, &ty_arg);
+                let instantiated_type = body.substitute(*quantifier, &ty_arg);
 
                 let wrapped_function = TermExprNode::new(
                     TermExpr::TyApp(Box::new(elaborated_function.clone()), ty_arg),

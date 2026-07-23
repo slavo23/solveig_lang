@@ -103,10 +103,10 @@ impl TypeChecker {
         let id = self.fresh_tyvar_id();
         (id, legacy_tyvar_name(base, id))
     }
-    fn fresh_universal_entry(&mut self, name: String, kind: Kind) -> ContextEntry {
+    fn universal_entry(id: TyVarId, kind: Kind) -> ContextEntry {
         ContextEntry::UniVar {
-            id: self.fresh_tyvar_id(),
-            name,
+            id,
+            name: tyvar_display_name(id),
             kind,
         }
     }
@@ -117,8 +117,8 @@ impl TypeChecker {
             ty = TypeExpr::make_qualified(scheme.predicates.clone(), ty);
         }
 
-        for (name, kind) in scheme.quantifiers.iter().rev() {
-            ty = TypeExpr::make_forall(name.clone(), kind.clone(), ty);
+        for (id, kind) in scheme.quantifiers.iter().rev() {
+            ty = TypeExpr::make_forall_id(*id, kind.clone(), ty);
         }
 
         ty
@@ -135,11 +135,15 @@ impl TypeChecker {
         class_def: &ClassDefinition,
         method: &ClassMethodDef,
     ) -> Scheme {
-        let mut quantifiers = class_def.params.clone();
+        let mut quantifiers = class_def
+            .params
+            .iter()
+            .map(|(name, kind)| (legacy_tyvar_id(name), kind.clone()))
+            .collect::<Vec<_>>();
 
-        for (name, kind) in &method.scheme.quantifiers {
-            if !quantifiers.iter().any(|(existing, _)| existing == name) {
-                quantifiers.push((name.clone(), kind.clone()));
+        for (id, kind) in &method.scheme.quantifiers {
+            if !quantifiers.iter().any(|(existing, _)| existing == id) {
+                quantifiers.push((*id, kind.clone()));
             }
         }
 

@@ -271,7 +271,7 @@ impl<'a> Resolver<'a> {
                         class_name: class_name.clone(),
                         args: ty_params
                             .iter()
-                            .map(|param| TypeExpr::TyVar(self.symbol_text(param.0).to_string()))
+                            .map(|param| TypeExpr::make_var(self.symbol_text(param.0).to_string()))
                             .collect(),
                     };
 

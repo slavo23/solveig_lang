@@ -93,7 +93,7 @@ fn rewrite_expr(
             let rebuilt = if let TermExpr::Var(name) = &head.node {
                 if let Some(info) = constrained_funcs.get(name) {
                     let actual_head_ty = head.anno.inferred_type.clone();
-                    let mut subst = HashMap::<String, TypeExpr>::new();
+                    let mut subst = HashMap::<TyVarId, TypeExpr>::new();
 
                     if match_type_pattern(&info.body_ty, &actual_head_ty, &mut subst) {
                         let mut dict_args = Vec::new();

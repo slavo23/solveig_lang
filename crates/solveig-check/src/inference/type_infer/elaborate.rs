@@ -42,7 +42,7 @@ impl TypeChecker {
             .iter()
             .filter_map(|entry| {
                 if let ContextEntry::TypedVar { var_name, ty } = entry {
-                    Some((var_name.clone(), self.zonk_type(&ctx.apply(&ty))))
+                    Some((var_name.clone(), self.zonk_type(&ctx.apply(ty))))
                 } else {
                     None
                 }
@@ -82,7 +82,7 @@ impl TypeChecker {
                 TypeExpr::make_app(self.zonk_type(lhs), self.zonk_type(rhs))
             }
             TypeExpr::TyForAll(quantifier, kind, body) => {
-                TypeExpr::make_forall(quantifier.clone(), kind.clone(), self.zonk_type(body))
+                TypeExpr::make_forall_id(*quantifier, kind.clone(), self.zonk_type(body))
             }
             TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
                 preds

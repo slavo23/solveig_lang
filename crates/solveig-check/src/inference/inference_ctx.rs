@@ -1,4 +1,4 @@
-use solveig_ast::ast::{EvarId, Kind, Predicate, Pretty, TyVarId, TypeExpr};
+use solveig_ast::ast::{EvarId, Kind, Predicate, Pretty, TyVarId, TypeExpr, tyvar_display_name};
 use std::collections::HashMap;
 use std::iter::successors;
 
@@ -72,7 +72,7 @@ impl Context {
             }
 
             TypeExpr::TyForAll(quantifier, kind, body) => {
-                TypeExpr::make_forall(quantifier.clone(), kind.clone(), self.apply(body))
+                TypeExpr::make_forall_id(*quantifier, kind.clone(), self.apply(body))
             }
 
             TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
@@ -231,9 +231,9 @@ impl Context {
                 .cloned()
                 .ok_or_else(|| format!("unknown type constructor: {}", name)),
 
-            TypeExpr::TyVar(name) => self
-                .universal_kind(name)
-                .ok_or_else(|| format!("unbound type variable: {}", name)),
+            TypeExpr::TyVar(id) => self
+                .universal_kind_id(*id)
+                .ok_or_else(|| format!("unbound type variable: {}", tyvar_display_name(*id))),
 
             TypeExpr::TyExVar(id) => self
                 .evar_kind_id(*id)
@@ -286,16 +286,15 @@ impl Context {
     pub fn type_well_formed(&self, ty: &TypeExpr) -> bool {
         match ty {
             TypeExpr::TyUnit | TypeExpr::TyCon(_) => true,
-            TypeExpr::TyVar(name) => self.has_universal(name),
+            TypeExpr::TyVar(id) => self.has_universal_id(*id),
             TypeExpr::TyExVar(id) => self.has_unsolved_evar_id(*id) || self.has_solved_evar_id(*id),
             TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
                 self.type_well_formed(lhs) && self.type_well_formed(rhs)
             }
             TypeExpr::TyForAll(quantifier, kind, body) => {
-                let id = TyVarId(u32::MAX - self.entries.len() as u32);
                 let extended = self.clone().add_entry(ContextEntry::UniVar {
-                    id,
-                    name: quantifier.clone(),
+                    id: *quantifier,
+                    name: tyvar_display_name(*quantifier),
                     kind: kind.clone(),
                 });
                 extended.type_well_formed(body)

@@ -101,10 +101,10 @@ impl Pretty<Kind> for Kind {
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 pub enum Ty {
     TyUnit,
-    TyVar(String),
+    TyVar(TyVarId),
     TyExVar(EvarId),
     TyArr(Box<Ty>, Box<Ty>),
-    TyForAll(String, Kind, Box<Ty>),
+    TyForAll(TyVarId, Kind, Box<Ty>),
     TyCon(String),
     TyApp(Box<Ty>, Box<Ty>),
     Qualified(Vec<Predicate>, Box<Ty>),
@@ -116,8 +116,94 @@ pub fn legacy_evar_name(id: EvarId) -> String {
     format!("a^{}", id.0)
 }
 
+const LEGACY_SOURCE_TYVAR_TAG: u32 = 0x8000_0000;
+const LEGACY_SOURCE_TYVAR_LEN_SHIFT: u32 = 24;
+const LEGACY_SOURCE_TYVAR_CODE_MASK: u32 = 0x00ff_ffff;
+const LEGACY_SOURCE_TYVAR_BASE: u32 = 40;
+const LEGACY_SOURCE_TYVAR_MAX_CHARS: usize = 4;
+
 pub fn legacy_tyvar_name(base: &str, id: TyVarId) -> String {
     format!("{}{}", base, id.0)
+}
+
+fn encode_tyvar_char(ch: char) -> Option<u32> {
+    match ch {
+        'a'..='z' => Some(ch as u32 - 'a' as u32 + 1),
+        '0'..='9' => Some(ch as u32 - '0' as u32 + 27),
+        '_' => Some(37),
+        '\'' => Some(38),
+        '?' => Some(39),
+        _ => None,
+    }
+}
+
+fn decode_tyvar_char(code: u32) -> Option<char> {
+    match code {
+        1..=26 => char::from_u32('a' as u32 + code - 1),
+        27..=36 => char::from_u32('0' as u32 + code - 27),
+        37 => Some('_'),
+        38 => Some('\''),
+        39 => Some('?'),
+        _ => None,
+    }
+}
+
+pub fn legacy_tyvar_id(name: &str) -> TyVarId {
+    let chars = name.chars().collect::<Vec<_>>();
+    if !chars.is_empty() && chars.len() <= LEGACY_SOURCE_TYVAR_MAX_CHARS {
+        let mut code = 0_u32;
+        let mut encodable = true;
+
+        for ch in &chars {
+            if let Some(part) = encode_tyvar_char(*ch) {
+                code = code * LEGACY_SOURCE_TYVAR_BASE + part;
+            } else {
+                encodable = false;
+                break;
+            }
+        }
+
+        if encodable {
+            return TyVarId(
+                LEGACY_SOURCE_TYVAR_TAG
+                    | ((chars.len() as u32) << LEGACY_SOURCE_TYVAR_LEN_SHIFT)
+                    | code,
+            );
+        }
+    }
+
+    let hash = name.bytes().fold(2166136261_u32, |acc, byte| {
+        (acc ^ byte as u32).wrapping_mul(16777619)
+    });
+    TyVarId(
+        LEGACY_SOURCE_TYVAR_TAG
+            | (5 << LEGACY_SOURCE_TYVAR_LEN_SHIFT)
+            | (hash & LEGACY_SOURCE_TYVAR_CODE_MASK),
+    )
+}
+
+pub fn tyvar_display_name(id: TyVarId) -> String {
+    if id.0 & LEGACY_SOURCE_TYVAR_TAG == 0 {
+        return legacy_tyvar_name("t", id);
+    }
+
+    let len = ((id.0 >> LEGACY_SOURCE_TYVAR_LEN_SHIFT) & 0x7) as usize;
+    if !(1..=LEGACY_SOURCE_TYVAR_MAX_CHARS).contains(&len) {
+        return legacy_tyvar_name("t", id);
+    }
+
+    let mut code = id.0 & LEGACY_SOURCE_TYVAR_CODE_MASK;
+    let mut chars = Vec::with_capacity(len);
+    for _ in 0..len {
+        let part = code % LEGACY_SOURCE_TYVAR_BASE;
+        let Some(ch) = decode_tyvar_char(part) else {
+            return legacy_tyvar_name("t", id);
+        };
+        chars.push(ch);
+        code /= LEGACY_SOURCE_TYVAR_BASE;
+    }
+
+    chars.iter().rev().collect()
 }
 
 impl Ty {
@@ -157,18 +243,18 @@ impl Ty {
         }
     }
 
-    pub fn peel_scheme_like(&self) -> (Vec<(String, Kind)>, Vec<Predicate>, TypeExpr) {
+    pub fn peel_scheme_like(&self) -> (Vec<(TyVarId, Kind)>, Vec<Predicate>, TypeExpr) {
         let (quants, rest) = self.peel_forall();
         let (preds, ty) = rest.peel_qualified();
         (quants, preds, ty)
     }
 
-    pub fn peel_forall(&self) -> (Vec<(String, Kind)>, TypeExpr) {
+    pub fn peel_forall(&self) -> (Vec<(TyVarId, Kind)>, TypeExpr) {
         let mut current_ty = self.clone();
         let mut quants_with_kinds = vec![];
         while let TypeExpr::TyForAll(q, _kind, body) = current_ty {
             current_ty = *body;
-            quants_with_kinds.push((q.clone(), _kind));
+            quants_with_kinds.push((q, _kind));
         }
 
         (quants_with_kinds, current_ty)
@@ -190,11 +276,12 @@ impl Ty {
     }
 
     pub fn make_var(var_name: String) -> TypeExpr {
-        Self::TyVar(var_name)
+        Self::TyVar(legacy_tyvar_id(&var_name))
     }
 
     pub fn make_var_id(base: &str, id: TyVarId) -> TypeExpr {
-        Self::TyVar(legacy_tyvar_name(base, id))
+        let _ = base;
+        Self::TyVar(id)
     }
 
     pub fn make_evar(id: EvarId) -> TypeExpr {
@@ -202,17 +289,21 @@ impl Ty {
     }
 
     pub fn make_forall(quant_name: String, kind: Kind, body: TypeExpr) -> TypeExpr {
-        TypeExpr::TyForAll(quant_name, kind, Box::new(body))
+        TypeExpr::TyForAll(legacy_tyvar_id(&quant_name), kind, Box::new(body))
+    }
+
+    pub fn make_forall_id(quant_id: TyVarId, kind: Kind, body: TypeExpr) -> TypeExpr {
+        TypeExpr::TyForAll(quant_id, kind, Box::new(body))
     }
 
     pub fn make_qualified(predicates: Vec<Predicate>, body: TypeExpr) -> TypeExpr {
         TypeExpr::Qualified(predicates, Box::new(body))
     }
 
-    pub fn substitute(&self, var_name: &str, with_type: &TypeExpr) -> TypeExpr {
+    pub fn substitute(&self, var_id: TyVarId, with_type: &TypeExpr) -> TypeExpr {
         match self {
-            Self::TyVar(sub_var_name) => {
-                if sub_var_name == var_name {
+            Self::TyVar(sub_var_id) => {
+                if *sub_var_id == var_id {
                     with_type.clone()
                 } else {
                     self.clone()
@@ -222,23 +313,23 @@ impl Ty {
             Self::TyCon(_) | Self::TyExVar(_) | Self::TyUnit => self.clone(),
 
             Self::TyArr(lhs, rhs) => Self::make_arr(
-                lhs.substitute(var_name, with_type),
-                rhs.substitute(var_name, with_type),
+                lhs.substitute(var_id, with_type),
+                rhs.substitute(var_id, with_type),
             ),
 
             Self::TyApp(lhs, rhs) => Self::make_app(
-                lhs.substitute(var_name, with_type),
-                rhs.substitute(var_name, with_type),
+                lhs.substitute(var_id, with_type),
+                rhs.substitute(var_id, with_type),
             ),
 
             Self::TyForAll(quantifier, kind, body) => {
-                if quantifier == var_name {
-                    Self::make_forall(quantifier.clone(), kind.clone(), (**body).clone())
+                if *quantifier == var_id {
+                    Self::make_forall_id(*quantifier, kind.clone(), (**body).clone())
                 } else {
-                    Self::make_forall(
-                        quantifier.clone(),
+                    Self::make_forall_id(
+                        *quantifier,
                         kind.clone(),
-                        body.substitute(var_name, with_type),
+                        body.substitute(var_id, with_type),
                     )
                 }
             }
@@ -251,12 +342,12 @@ impl Ty {
                         args: pred
                             .args
                             .iter()
-                            .map(|arg| arg.substitute(var_name, with_type))
+                            .map(|arg| arg.substitute(var_id, with_type))
                             .collect(),
                     })
                     .collect();
 
-                Self::make_qualified(new_preds, body.substitute(var_name, with_type))
+                Self::make_qualified(new_preds, body.substitute(var_id, with_type))
             }
         }
     }
@@ -283,8 +374,8 @@ impl Ty {
                 rhs.substitute_evar(evar_id, with_type),
             ),
 
-            Self::TyForAll(quantifier, kind, body) => Self::make_forall(
-                quantifier.clone(),
+            Self::TyForAll(quantifier, kind, body) => Self::make_forall_id(
+                *quantifier,
                 kind.clone(),
                 body.substitute_evar(evar_id, with_type),
             ),
@@ -326,9 +417,9 @@ impl Pretty<Ty> for Ty {
 
             let type_fmt = match t {
                 TypeExpr::TyUnit => "()".into(),
-                TypeExpr::TyVar(name) => name.clone(),
+                TypeExpr::TyVar(id) => tyvar_display_name(*id),
                 TypeExpr::TyExVar(id) => legacy_evar_name(*id),
-                TypeExpr::TyCon(name) => name.split('.').last().unwrap().to_string(),
+                TypeExpr::TyCon(name) => name.split('.').next_back().unwrap().to_string(),
 
                 TypeExpr::TyArr(lhs, rhs) => {
                     let lhs_fmt = traverse_helper(lhs, PRECEDENCE_APP);
@@ -341,7 +432,9 @@ impl Pretty<Ty> for Ty {
 
                     let peeled_quants = kinded_quants
                         .iter()
-                        .map(|(name, kind)| format!("({name} : {})", kind.pretty()))
+                        .map(|(id, kind)| {
+                            format!("({} : {})", tyvar_display_name(*id), kind.pretty())
+                        })
                         .collect::<Vec<_>>();
 
                     format!(
@@ -391,7 +484,7 @@ impl Predicate {
         let class_name = self
             .class_name
             .split('.')
-            .last()
+            .next_back()
             .unwrap_or(&self.class_name);
 
         let args = self
@@ -426,7 +519,7 @@ impl Scheme {
         }
 
         for (name, kind) in self.quantifiers.iter().rev() {
-            ty = TypeExpr::make_forall(name.clone(), kind.clone(), ty);
+            ty = TypeExpr::make_forall_id(*name, kind.clone(), ty);
         }
 
         ty.pretty()
@@ -638,7 +731,7 @@ pub struct Predicate {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Scheme {
-    pub quantifiers: Vec<(String, Kind)>,
+    pub quantifiers: Vec<(TyVarId, Kind)>,
     pub predicates: Vec<Predicate>,
     pub ty: TypeExpr,
 }
@@ -795,7 +888,7 @@ mod tests {
 
         assert!(TypeExpr::make_evar(needle).occurs_check(needle));
         assert!(!TypeExpr::make_evar(EvarId(3)).occurs_check(needle));
-        assert!(!TypeExpr::TyVar(legacy_evar_name(needle)).occurs_check(needle));
+        assert!(!TypeExpr::make_var(legacy_evar_name(needle)).occurs_check(needle));
     }
 
     #[test]
@@ -803,9 +896,6 @@ mod tests {
         let id = TyVarId(9);
 
         assert_eq!(legacy_tyvar_name("t", id), "t9");
-        assert_eq!(
-            TypeExpr::make_var_id("t", id),
-            TypeExpr::TyVar("t9".to_string())
-        );
+        assert_eq!(TypeExpr::make_var_id("t", id), TypeExpr::TyVar(id));
     }
 }

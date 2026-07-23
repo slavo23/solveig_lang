@@ -1,8 +1,8 @@
 impl TypeChecker {
-    fn free_type_vars_in_type(ty: &TypeExpr, out: &mut BTreeSet<String>) {
+    fn free_type_vars_in_type(ty: &TypeExpr, out: &mut BTreeSet<TyVarId>) {
         match ty {
-            TypeExpr::TyVar(name) => {
-                out.insert(name.clone());
+            TypeExpr::TyVar(id) => {
+                out.insert(*id);
             }
 
             TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
@@ -26,12 +26,12 @@ impl TypeChecker {
             TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}
         }
     }
-    fn free_type_vars_in_predicate(pred: &Predicate, out: &mut BTreeSet<String>) {
+    fn free_type_vars_in_predicate(pred: &Predicate, out: &mut BTreeSet<TyVarId>) {
         for arg in &pred.args {
             Self::free_type_vars_in_type(arg, out);
         }
     }
-    fn free_type_vars_in_instance(inst: &InstanceDefinition<Span>) -> Vec<String> {
+    fn free_type_vars_in_instance(inst: &InstanceDefinition<Span>) -> Vec<TyVarId> {
         let mut out = BTreeSet::new();
 
         for pred in &inst.context {
@@ -42,7 +42,7 @@ impl TypeChecker {
 
         out.into_iter().collect()
     }
-    fn instance_quantifiers(inst: &InstanceDefinition<Span>) -> Vec<(String, Kind)> {
+    fn instance_quantifiers(inst: &InstanceDefinition<Span>) -> Vec<(TyVarId, Kind)> {
         Self::free_type_vars_in_instance(inst)
             .into_iter()
             .map(|name| (name, Kind::Star))
@@ -50,7 +50,7 @@ impl TypeChecker {
     }
     fn instantiate_predicate_with_subst(
         pred: &Predicate,
-        subst: &HashMap<String, TypeExpr>,
+        subst: &HashMap<TyVarId, TypeExpr>,
     ) -> Predicate {
         Predicate {
             class_name: pred.class_name.clone(),
@@ -60,7 +60,7 @@ impl TypeChecker {
                 .map(|arg| {
                     subst
                         .iter()
-                        .fold(arg.clone(), |acc, (name, ty)| acc.substitute(name, ty))
+                        .fold(arg.clone(), |acc, (name, ty)| acc.substitute(*name, ty))
                 })
                 .collect(),
         }
@@ -71,12 +71,12 @@ impl TypeChecker {
         scheme: &Scheme,
     ) -> (Context, Vec<Predicate>, TypeExpr) {
         let mut ctx = ctx;
-        let mut subst = HashMap::<String, TypeExpr>::new();
+        let mut subst = HashMap::<TyVarId, TypeExpr>::new();
 
         for (name, kind) in &scheme.quantifiers {
             let fresh = self.fresh_evar_id();
             ctx = ctx.add_entry(ContextEntry::ExVar(fresh, kind.clone()));
-            subst.insert(name.clone(), Self::evar_type(fresh));
+            subst.insert(*name, Self::evar_type(fresh));
         }
 
         let instantiated_preds = scheme
@@ -86,7 +86,7 @@ impl TypeChecker {
             .collect::<Vec<_>>();
 
         let instantiated_ty = subst.iter().fold(scheme.ty.clone(), |acc, (name, ty)| {
-            acc.substitute(name, ty)
+            acc.substitute(*name, ty)
         });
 
         (ctx, instantiated_preds, instantiated_ty)
@@ -116,7 +116,7 @@ impl TypeChecker {
         self.givens.truncate(old_len);
         result
     }
-    fn substitute_predicate(pred: &Predicate, subst: &HashMap<String, TypeExpr>) -> Predicate {
+    fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, TypeExpr>) -> Predicate {
         Predicate {
             class_name: pred.class_name.clone(),
             args: pred
@@ -125,12 +125,12 @@ impl TypeChecker {
                 .map(|arg| {
                     subst
                         .iter()
-                        .fold(arg.clone(), |acc, (name, ty)| acc.substitute(name, ty))
+                        .fold(arg.clone(), |acc, (name, ty)| acc.substitute(*name, ty))
                 })
                 .collect(),
         }
     }
-    fn substitute_scheme(scheme: &Scheme, subst: &HashMap<String, TypeExpr>) -> Scheme {
+    fn substitute_scheme(scheme: &Scheme, subst: &HashMap<TyVarId, TypeExpr>) -> Scheme {
         Scheme {
             quantifiers: scheme.quantifiers.clone(),
 
@@ -141,7 +141,7 @@ impl TypeChecker {
                 .collect(),
 
             ty: subst.iter().fold(scheme.ty.clone(), |acc, (name, ty)| {
-                acc.substitute(name, ty)
+                acc.substitute(*name, ty)
             }),
         }
     }
@@ -167,7 +167,7 @@ impl TypeChecker {
             .params
             .iter()
             .zip(given.args.iter())
-            .map(|((param_name, _), arg)| (param_name.clone(), arg.clone()))
+            .map(|((param_name, _), arg)| (legacy_tyvar_id(param_name), arg.clone()))
             .collect::<HashMap<_, _>>();
 
         class_def
@@ -212,7 +212,9 @@ impl TypeChecker {
             .params
             .iter()
             .zip(instance_head.args.iter())
-            .map(|((param_name, _), instance_arg)| (param_name.clone(), instance_arg.clone()))
+            .map(|((param_name, _), instance_arg)| {
+                (legacy_tyvar_id(param_name), instance_arg.clone())
+            })
             .collect::<HashMap<_, _>>();
 
         class_def
@@ -226,14 +228,14 @@ impl TypeChecker {
         method_scheme: &Scheme,
         instance_head: &Predicate,
         instance_context: &[Predicate],
-        instance_quantifiers: &[(String, Kind)],
+        instance_quantifiers: &[(TyVarId, Kind)],
     ) -> Scheme {
-        let mut subst = HashMap::<String, TypeExpr>::new();
+        let mut subst = HashMap::<TyVarId, TypeExpr>::new();
 
         for ((param_name, _), instance_arg) in
             class_def.params.iter().zip(instance_head.args.iter())
         {
-            subst.insert(param_name.clone(), instance_arg.clone());
+            subst.insert(legacy_tyvar_id(param_name), instance_arg.clone());
         }
 
         let specialized = Self::substitute_scheme(method_scheme, &subst);
@@ -245,9 +247,9 @@ impl TypeChecker {
                 .iter()
                 .map(|(name, _)| {
                     subst
-                        .get(name)
+                        .get(&legacy_tyvar_id(name))
                         .cloned()
-                        .unwrap_or_else(|| TypeExpr::TyVar(name.clone()))
+                        .unwrap_or_else(|| TypeExpr::TyVar(legacy_tyvar_id(name)))
                 })
                 .collect(),
         };
@@ -262,9 +264,9 @@ impl TypeChecker {
 
         let mut quantifiers = instance_quantifiers.to_vec();
 
-        for (name, kind) in specialized.quantifiers {
-            if !quantifiers.iter().any(|(existing, _)| existing == &name) {
-                quantifiers.push((name, kind));
+        for (id, kind) in specialized.quantifiers {
+            if !quantifiers.iter().any(|(existing, _)| existing == &id) {
+                quantifiers.push((id, kind));
             }
         }
 
@@ -316,13 +318,13 @@ impl TypeChecker {
     fn match_instance_type(
         pattern: &TypeExpr,
         target: &TypeExpr,
-        subst: &mut HashMap<String, TypeExpr>,
+        subst: &mut HashMap<TyVarId, TypeExpr>,
     ) -> bool {
         match pattern {
-            TypeExpr::TyVar(name) => match subst.get(name) {
+            TypeExpr::TyVar(id) => match subst.get(id) {
                 Some(existing) => existing == target,
                 None => {
-                    subst.insert(name.clone(), target.clone());
+                    subst.insert(*id, target.clone());
                     true
                 }
             },
@@ -379,7 +381,7 @@ impl TypeChecker {
                 continue;
             }
 
-            let mut subst = HashMap::<String, TypeExpr>::new();
+            let mut subst = HashMap::<TyVarId, TypeExpr>::new();
 
             let head_matches =
                 inst.head
@@ -412,8 +414,8 @@ impl TypeChecker {
     fn unresolved_wanteds(&self) -> Vec<Wanted> {
         self.wanteds
             .iter()
-            .cloned()
             .filter(|wanted| !self.discharge_predicate_with_givens(&wanted.pred, &wanted.givens))
+            .cloned()
             .collect()
     }
     fn wanteds_error(&self, wanteds: Vec<Wanted>) -> TypeError {
@@ -473,11 +475,12 @@ impl TypeChecker {
             let kind = ctx.evar_kind_id(evar).unwrap_or(Kind::Star);
 
             result = result.substitute_evar(evar, &TypeExpr::make_var_id("t", universal_id));
-            binders.push((universal, kind));
+            let _ = universal;
+            binders.push((universal_id, kind));
         }
 
         for (name, kind) in binders.into_iter().rev() {
-            result = TypeExpr::make_forall(name, kind, result);
+            result = TypeExpr::make_forall_id(name, kind, result);
         }
 
         result

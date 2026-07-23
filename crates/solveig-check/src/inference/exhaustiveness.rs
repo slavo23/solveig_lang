@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use solveig_ast::ast::{CaseArmNode, Literal, Pattern, PatternNode, Predicate, Pretty, TypeExpr};
+use solveig_ast::ast::{
+    CaseArmNode, Literal, Pattern, PatternNode, Predicate, Pretty, TyVarId, TypeExpr,
+};
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
 
@@ -215,7 +217,7 @@ impl ConstructorEnv {
     ) -> Option<Vec<TypeExpr>> {
         let sig = self.by_name.get(constructor_name)?;
 
-        let mut subst = HashMap::<String, TypeExpr>::new();
+        let mut subst = HashMap::<TyVarId, TypeExpr>::new();
 
         if !match_type_template(&sig.result_type, scrutinee_type, &mut subst) {
             return None;
@@ -602,14 +604,14 @@ fn type_head_tycon(ty: &TypeExpr) -> Option<String> {
 fn match_type_template(
     template: &TypeExpr,
     actual: &TypeExpr,
-    subst: &mut HashMap<String, TypeExpr>,
+    subst: &mut HashMap<TyVarId, TypeExpr>,
 ) -> bool {
     match (normalize_type(template), normalize_type(actual)) {
-        (TypeExpr::TyVar(name), actual) => {
-            if let Some(existing) = subst.get(&name) {
+        (TypeExpr::TyVar(id), actual) => {
+            if let Some(existing) = subst.get(&id) {
                 *existing == actual
             } else {
-                subst.insert(name, actual);
+                subst.insert(id, actual);
                 true
             }
         }
@@ -634,12 +636,9 @@ fn match_type_template(
     }
 }
 
-fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<String, TypeExpr>) -> TypeExpr {
+fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<TyVarId, TypeExpr>) -> TypeExpr {
     match ty {
-        TypeExpr::TyVar(name) => subst
-            .get(name)
-            .cloned()
-            .unwrap_or_else(|| TypeExpr::TyVar(name.clone())),
+        TypeExpr::TyVar(id) => subst.get(id).cloned().unwrap_or(TypeExpr::TyVar(*id)),
 
         TypeExpr::TyUnit => TypeExpr::TyUnit,
 
@@ -659,11 +658,7 @@ fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<String, TypeExpr>) -> TypeExpr
             let mut scoped_subst = subst.clone();
             scoped_subst.remove(name);
 
-            TypeExpr::make_forall(
-                name.clone(),
-                kind.clone(),
-                subst_type_vars(body, &scoped_subst),
-            )
+            TypeExpr::make_forall_id(*name, kind.clone(), subst_type_vars(body, &scoped_subst))
         }
 
         TypeExpr::Qualified(predicates, body) => TypeExpr::make_qualified(
@@ -877,7 +872,7 @@ mod tests {
     }
 
     fn tyvar(name: &str) -> TypeExpr {
-        TypeExpr::TyVar(name.to_string())
+        TypeExpr::make_var(name.to_string())
     }
 
     fn app(func: TypeExpr, arg: TypeExpr) -> TypeExpr {

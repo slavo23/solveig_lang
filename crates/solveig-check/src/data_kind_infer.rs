@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use solveig_ast::ast::{Kind, KindMetaId, TypeExpr};
+use solveig_ast::ast::{Kind, KindMetaId, TyVarId, TypeExpr, legacy_tyvar_id, tyvar_display_name};
 use solveig_base::FileSpan;
 
 use crate::signature_infer::KindError;
@@ -123,13 +123,13 @@ impl DataKindInferencer {
     fn apply_type(&self, ty: &TypeExpr) -> TypeExpr {
         match ty {
             TypeExpr::TyUnit => TypeExpr::TyUnit,
-            TypeExpr::TyVar(n) => TypeExpr::TyVar(n.clone()),
+            TypeExpr::TyVar(n) => TypeExpr::TyVar(*n),
             TypeExpr::TyExVar(id) => TypeExpr::TyExVar(*id),
             TypeExpr::TyCon(n) => TypeExpr::TyCon(n.clone()),
             TypeExpr::TyArr(l, r) => TypeExpr::make_arr(self.apply_type(l), self.apply_type(r)),
             TypeExpr::TyApp(l, r) => TypeExpr::make_app(self.apply_type(l), self.apply_type(r)),
             TypeExpr::TyForAll(name, kind, body) => {
-                TypeExpr::make_forall(name.clone(), self.zonk(kind), self.apply_type(body))
+                TypeExpr::make_forall_id(*name, self.zonk(kind), self.apply_type(body))
             }
             TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
                 preds.iter().map(|p| self.apply_predicate(p)).collect(),
@@ -221,17 +221,17 @@ impl DataKindInferencer {
         &mut self,
         ty: &TypeExpr,
         tycon_env: &HashMap<String, Kind>,
-        var_env: &HashMap<String, Kind>,
+        var_env: &HashMap<TyVarId, Kind>,
     ) -> Result<(Kind, TypeExpr), KindError> {
         match ty {
             TypeExpr::TyUnit => Ok((Kind::Star, TypeExpr::TyUnit)),
 
-            TypeExpr::TyVar(name) => {
+            TypeExpr::TyVar(id) => {
                 let kind = var_env
-                    .get(name)
+                    .get(id)
                     .map(|k| self.apply_kind(k))
-                    .ok_or_else(|| KindError::unbound_type_variable(name.clone()))?;
-                Ok((kind, TypeExpr::TyVar(name.clone())))
+                    .ok_or_else(|| KindError::unbound_type_variable(tyvar_display_name(*id)))?;
+                Ok((kind, TypeExpr::TyVar(*id)))
             }
 
             TypeExpr::TyExVar(id) => Ok((Kind::Star, TypeExpr::TyExVar(*id))),
@@ -267,14 +267,11 @@ impl DataKindInferencer {
             TypeExpr::TyForAll(v, _old_k, body) => {
                 let fresh = self.fresh_meta();
                 let mut new_env = var_env.clone();
-                new_env.insert(v.clone(), fresh.clone());
+                new_env.insert(*v, fresh.clone());
                 let (bk, br) = self.infer_kind(body, tycon_env, &new_env)?;
                 self.unify(bk, Kind::Star)?;
                 let solved_k = self.zonk(&fresh);
-                Ok((
-                    Kind::Star,
-                    TypeExpr::TyForAll(v.clone(), solved_k, Box::new(br)),
-                ))
+                Ok((Kind::Star, TypeExpr::TyForAll(*v, solved_k, Box::new(br))))
             }
 
             TypeExpr::Qualified(preds, body) => {
@@ -336,7 +333,7 @@ impl DataKindInferencer {
         fields: &[TypeExpr],
         return_type: &TypeExpr,
         tycon_env: &HashMap<String, Kind>,
-        var_env: &HashMap<String, Kind>,
+        var_env: &HashMap<TyVarId, Kind>,
     ) -> Result<Vec<TypeExpr>, KindError> {
         let mut rebuilt = Vec::new();
         for field in fields {
@@ -388,14 +385,14 @@ impl DataKindInferencer {
             self.unify(tycon_kind, expected)
                 .map_err(|error| error.with_span(def.span))?;
 
-            let var_env: HashMap<String, Kind> = param_metas
+            let var_env: HashMap<TyVarId, Kind> = param_metas
                 .iter()
-                .map(|(n, m)| (n.clone(), self.apply_kind(m)))
+                .map(|(n, m)| (legacy_tyvar_id(n), self.apply_kind(m)))
                 .collect();
 
             let mut ret_ty = TypeExpr::TyCon(def.name.clone());
             for (pn, _) in &param_metas {
-                ret_ty = TypeExpr::make_app(ret_ty, TypeExpr::TyVar(pn.clone()));
+                ret_ty = TypeExpr::make_app(ret_ty, TypeExpr::make_var(pn.clone()));
             }
 
             let mut ctor_fields = Vec::new();

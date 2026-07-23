@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 
-use solveig_ast::ast::{ClassDefinition, Kind, KindMetaId, Predicate, Scheme, TypeExpr};
+use solveig_ast::ast::{
+    ClassDefinition, Kind, KindMetaId, Predicate, Scheme, TyVarId, TypeExpr, legacy_tyvar_id,
+    tyvar_display_name,
+};
 
 use crate::signature_infer::KindError;
 
@@ -98,16 +101,16 @@ impl ClassKindInferencer {
     fn infer_type_kind(
         &mut self,
         ty: &TypeExpr,
-        env: &mut HashMap<String, Kind>,
+        env: &mut HashMap<TyVarId, Kind>,
     ) -> Result<Kind, KindError> {
         match ty {
             TypeExpr::TyUnit => Ok(Kind::Star),
 
-            TypeExpr::TyVar(name) => env
-                .get(name)
+            TypeExpr::TyVar(id) => env
+                .get(id)
                 .cloned()
                 .map(|k| self.apply_kind(&k))
-                .ok_or_else(|| KindError::unbound_type_variable(name.clone())),
+                .ok_or_else(|| KindError::unbound_type_variable(tyvar_display_name(*id))),
 
             TypeExpr::TyExVar(_) => Ok(Kind::Star),
 
@@ -137,14 +140,14 @@ impl ClassKindInferencer {
 
             TypeExpr::TyForAll(var_name, _old_kind, body) => {
                 let fresh = self.fresh_meta();
-                let old = env.insert(var_name.clone(), fresh.clone());
+                let old = env.insert(*var_name, fresh.clone());
 
                 let body_kind = self.infer_type_kind(body, env)?;
                 self.unify(body_kind, Kind::Star)?;
 
                 match old {
                     Some(prev) => {
-                        env.insert(var_name.clone(), prev);
+                        env.insert(*var_name, prev);
                     }
                     None => {
                         env.remove(var_name);
@@ -167,10 +170,10 @@ impl ClassKindInferencer {
         }
     }
 
-    fn zonk_type_with_env(&self, ty: &TypeExpr, env: &HashMap<String, Kind>) -> TypeExpr {
+    fn zonk_type_with_env(&self, ty: &TypeExpr, env: &HashMap<TyVarId, Kind>) -> TypeExpr {
         match ty {
             TypeExpr::TyUnit => TypeExpr::TyUnit,
-            TypeExpr::TyVar(name) => TypeExpr::TyVar(name.clone()),
+            TypeExpr::TyVar(id) => TypeExpr::TyVar(*id),
             TypeExpr::TyExVar(id) => TypeExpr::TyExVar(*id),
             TypeExpr::TyCon(name) => TypeExpr::TyCon(name.clone()),
             TypeExpr::TyArr(lhs, rhs) => TypeExpr::make_arr(
@@ -187,7 +190,7 @@ impl ClassKindInferencer {
                     .map(|k| self.zonk_kind_for_binder(k))
                     .unwrap_or(Kind::Star);
 
-                TypeExpr::make_forall(name.clone(), kind, self.zonk_type_with_env(body, env))
+                TypeExpr::make_forall_id(*name, kind, self.zonk_type_with_env(body, env))
             }
             #[allow(unreachable_patterns)]
             TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
@@ -200,7 +203,7 @@ impl ClassKindInferencer {
         }
     }
 
-    fn zonk_predicate_with_env(&self, pred: &Predicate, env: &HashMap<String, Kind>) -> Predicate {
+    fn zonk_predicate_with_env(&self, pred: &Predicate, env: &HashMap<TyVarId, Kind>) -> Predicate {
         Predicate {
             class_name: pred.class_name.clone(),
             args: pred
@@ -214,7 +217,7 @@ impl ClassKindInferencer {
     fn check_predicate(
         &mut self,
         pred: &Predicate,
-        env: &mut HashMap<String, Kind>,
+        env: &mut HashMap<TyVarId, Kind>,
     ) -> Result<Predicate, KindError> {
         let expected_kinds = self
             .class_env
@@ -240,12 +243,12 @@ impl ClassKindInferencer {
     fn infer_scheme(
         &mut self,
         scheme: &Scheme,
-        outer_env: &HashMap<String, Kind>,
+        outer_env: &HashMap<TyVarId, Kind>,
     ) -> Result<Scheme, KindError> {
         let mut env = outer_env.clone();
 
         for (name, _kind) in &scheme.quantifiers {
-            env.insert(name.clone(), self.fresh_meta());
+            env.insert(*name, self.fresh_meta());
         }
 
         for pred in &scheme.predicates {
@@ -263,7 +266,7 @@ impl ClassKindInferencer {
                     .get(name)
                     .map(|k| self.zonk_kind_for_binder(k))
                     .unwrap_or(Kind::Star);
-                (name.clone(), kind)
+                (*name, kind)
             })
             .collect::<Vec<_>>();
 
@@ -286,10 +289,10 @@ impl ClassKindInferencer {
         mut self,
         class_def: &ClassDefinition,
     ) -> Result<ClassDefinition, KindError> {
-        let mut env = HashMap::<String, Kind>::new();
+        let mut env = HashMap::<TyVarId, Kind>::new();
 
         for (name, _kind) in &class_def.params {
-            env.insert(name.clone(), self.fresh_meta());
+            env.insert(legacy_tyvar_id(name), self.fresh_meta());
         }
 
         let methods = class_def
@@ -315,7 +318,7 @@ impl ClassKindInferencer {
             .iter()
             .map(|(name, _)| {
                 let kind = env
-                    .get(name)
+                    .get(&legacy_tyvar_id(name))
                     .map(|k| self.zonk_kind_for_binder(k))
                     .unwrap_or(Kind::Star);
                 (name.clone(), kind)
