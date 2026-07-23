@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 
-use solveig_ast::ast::{ClassDefinition, Kind, Predicate, Scheme, TypeExpr};
+use solveig_ast::ast::{ClassDefinition, Kind, KindMetaId, Predicate, Scheme, TypeExpr};
 
 use crate::signature_infer::KindError;
 
 pub struct ClassKindInferencer {
-    next_meta: usize,
-    subst: HashMap<String, Kind>,
+    next_meta: u32,
+    subst: HashMap<KindMetaId, Kind>,
     tycon_env: HashMap<String, Kind>,
     class_env: HashMap<String, Vec<Kind>>,
 }
@@ -22,44 +22,42 @@ impl ClassKindInferencer {
     }
 
     fn fresh_meta(&mut self) -> Kind {
-        let name = format!("?ck{}", self.next_meta);
+        let id = KindMetaId(self.next_meta);
         self.next_meta += 1;
-        Kind::make_var(name)
+        Kind::make_meta(id)
     }
 
     fn apply_kind(&self, kind: &Kind) -> Kind {
         match kind {
             Kind::Star => Kind::Star,
-            Kind::Var(v) => {
-                if let Some(sol) = self.subst.get(v) {
+            Kind::Meta(id) => {
+                if let Some(sol) = self.subst.get(id) {
                     self.apply_kind(sol)
                 } else {
-                    Kind::Var(v.clone())
+                    Kind::Meta(*id)
                 }
             }
-            Kind::Meta(id) => Kind::Meta(*id),
             Kind::Arrow(lhs, rhs) => Kind::make_arrow(self.apply_kind(lhs), self.apply_kind(rhs)),
         }
     }
 
-    fn occurs(&self, needle: &str, kind: &Kind) -> bool {
+    fn occurs(&self, needle: KindMetaId, kind: &Kind) -> bool {
         match self.apply_kind(kind) {
             Kind::Star => false,
-            Kind::Var(v) => v == needle,
-            Kind::Meta(_) => false,
+            Kind::Meta(id) => id == needle,
             Kind::Arrow(lhs, rhs) => self.occurs(needle, &lhs) || self.occurs(needle, &rhs),
         }
     }
 
-    fn bind_meta(&mut self, var: String, kind: Kind) -> Result<(), KindError> {
+    fn bind_meta(&mut self, var: KindMetaId, kind: Kind) -> Result<(), KindError> {
         let kind = self.apply_kind(&kind);
 
-        if kind == Kind::Var(var.clone()) {
+        if kind == Kind::Meta(var) {
             return Ok(());
         }
 
-        if self.occurs(&var, &kind) {
-            return Err(KindError::occurs_check_failed(var, kind));
+        if self.occurs(var, &kind) {
+            return Err(KindError::occurs_check_failed(format!("?k{}", var.0), kind));
         }
 
         self.subst.insert(var, kind);
@@ -73,8 +71,8 @@ impl ClassKindInferencer {
         match (lhs, rhs) {
             (Kind::Star, Kind::Star) => Ok(()),
             (Kind::Meta(left), Kind::Meta(right)) if left == right => Ok(()),
-            (Kind::Var(v), other) => self.bind_meta(v, other),
-            (other, Kind::Var(v)) => self.bind_meta(v, other),
+            (Kind::Meta(v), other) => self.bind_meta(v, other),
+            (other, Kind::Meta(v)) => self.bind_meta(v, other),
             (Kind::Arrow(l1, r1), Kind::Arrow(l2, r2)) => {
                 self.unify(*l1, *l2)?;
                 self.unify(*r1, *r2)
@@ -85,7 +83,7 @@ impl ClassKindInferencer {
 
     fn default_unsolved(kind: Kind) -> Kind {
         match kind {
-            Kind::Var(_) | Kind::Meta(_) => Kind::Star,
+            Kind::Meta(_) => Kind::Star,
             Kind::Star => Kind::Star,
             Kind::Arrow(lhs, rhs) => {
                 Kind::make_arrow(Self::default_unsolved(*lhs), Self::default_unsolved(*rhs))

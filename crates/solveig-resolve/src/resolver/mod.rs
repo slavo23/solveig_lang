@@ -4,8 +4,9 @@ use std::ops::Range;
 
 use solveig_ast::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, ConstructorDef, DataDefinition,
-    DefId, InstanceDefinition, InstanceMethodDef, Kind, Literal, ModuleId, Pattern, PatternNode,
-    Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
+    DefId, InstanceDefinition, InstanceMethodDef, Kind, KindMetaId, Literal, ModuleId, Pattern,
+    PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode,
+    TypeExpr, UnOp,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use solveig_check::data_kind_infer::{

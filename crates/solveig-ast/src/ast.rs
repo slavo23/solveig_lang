@@ -47,7 +47,6 @@ pub trait Pretty<T> {
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 pub enum Kind {
-    Var(String),
     Meta(KindMetaId),
     Star,
     Arrow(Box<Kind>, Box<Kind>),
@@ -56,10 +55,6 @@ pub enum Kind {
 impl Kind {
     pub fn make_star() -> Self {
         Kind::Star
-    }
-
-    pub fn make_var(var: String) -> Self {
-        Kind::Var(var)
     }
 
     pub fn make_meta(id: KindMetaId) -> Self {
@@ -74,7 +69,7 @@ impl Kind {
 impl Pretty<Kind> for Kind {
     fn get_precedence(kind: &Kind) -> u8 {
         match kind {
-            Kind::Star | Kind::Var(_) | Kind::Meta(_) => PRECEDENCE_ATOM,
+            Kind::Star | Kind::Meta(_) => PRECEDENCE_ATOM,
             Kind::Arrow(_, _) => PRECEDENCE_ARR,
         }
     }
@@ -84,7 +79,6 @@ impl Pretty<Kind> for Kind {
             let curr_precedence = Kind::get_precedence(kind);
             let kind_fmt = match kind {
                 Kind::Star => "*".to_string(),
-                Kind::Var(k_var) => k_var.to_string(),
                 Kind::Meta(id) => format!("?k{}", id.0),
                 Kind::Arrow(lhs, rhs) => {
                     let lhs_fmt = traverse_helper(lhs, PRECEDENCE_ATOM);

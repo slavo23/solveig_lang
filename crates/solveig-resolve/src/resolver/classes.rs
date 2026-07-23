@@ -342,6 +342,7 @@ impl<'a> Resolver<'a> {
         }
 
         let mut seed_class_env = imported.class_param_kinds.clone();
+        let mut next_seed_kind_meta = u32::MAX;
 
         seed_class_env.extend(raw_class_defs.iter().map(|(class_def, _span)| {
             (
@@ -349,7 +350,13 @@ impl<'a> Resolver<'a> {
                 class_def
                     .params
                     .iter()
-                    .map(|(_, _)| Kind::make_var("?seed".to_string()))
+                    .map(|(_, _)| {
+                        let id = KindMetaId(next_seed_kind_meta);
+                        next_seed_kind_meta = next_seed_kind_meta
+                            .checked_sub(1)
+                            .expect("ICE: exhausted class seed kind metas");
+                        Kind::make_meta(id)
+                    })
                     .collect::<Vec<_>>(),
             )
         }));

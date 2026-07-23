@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use solveig_ast::ast::{Kind, TypeExpr};
+use solveig_ast::ast::{Kind, KindMetaId, TypeExpr};
 use solveig_base::FileSpan;
 
 use crate::signature_infer::KindError;
@@ -36,9 +36,9 @@ pub struct InferredConstructorDef {
 }
 
 pub struct DataKindInferencer {
-    meta_order: Vec<String>,
-    solutions: HashMap<String, Kind>,
-    next_meta: usize,
+    meta_order: Vec<KindMetaId>,
+    solutions: HashMap<KindMetaId, Kind>,
+    next_meta: u32,
 }
 
 impl Default for DataKindInferencer {
@@ -57,43 +57,46 @@ impl DataKindInferencer {
     }
 
     fn fresh_meta(&mut self) -> Kind {
-        let name = format!("?k{}", self.next_meta);
+        let id = KindMetaId(self.next_meta);
         self.next_meta += 1;
-        self.meta_order.push(name.clone());
-        Kind::Var(name)
+        self.meta_order.push(id);
+        Kind::make_meta(id)
     }
 
-    fn fresh_meta_before(&mut self, target: &str) -> Kind {
-        let name = format!("?k{}", self.next_meta);
+    fn fresh_meta_before(&mut self, target: KindMetaId) -> Kind {
+        let id = KindMetaId(self.next_meta);
         self.next_meta += 1;
-        let pos = self
-            .position_of(target)
-            .unwrap_or_else(|| panic!("ICE: fresh_meta_before target '{target}' not in ordering"));
-        self.meta_order.insert(pos, name.clone());
-        Kind::Var(name)
+        let pos = self.position_of(target).unwrap_or_else(|| {
+            panic!(
+                "ICE: fresh_meta_before target '?k{}' not in ordering",
+                target.0
+            )
+        });
+        self.meta_order.insert(pos, id);
+        Kind::make_meta(id)
     }
 
-    fn position_of(&self, meta: &str) -> Option<usize> {
-        self.meta_order.iter().position(|m| m == meta)
+    fn position_of(&self, meta: KindMetaId) -> Option<usize> {
+        self.meta_order.iter().position(|m| *m == meta)
     }
 
-    fn is_before(&self, a: &str, b: &str) -> bool {
+    fn is_before(&self, a: KindMetaId, b: KindMetaId) -> bool {
         match (self.position_of(a), self.position_of(b)) {
             (Some(pa), Some(pb)) => pa < pb,
             _ => false,
         }
     }
 
-    fn is_meta(&self, name: &str) -> bool {
-        self.meta_order.iter().any(|m| m == name)
+    fn is_meta(&self, id: KindMetaId) -> bool {
+        self.meta_order.contains(&id)
     }
 
-    fn is_unsolved(&self, meta: &str) -> bool {
-        self.is_meta(meta) && !self.solutions.contains_key(meta)
+    fn is_unsolved(&self, meta: KindMetaId) -> bool {
+        self.is_meta(meta) && !self.solutions.contains_key(&meta)
     }
 
-    fn solve(&mut self, meta: &str, kind: Kind) {
-        self.solutions.insert(meta.to_string(), kind);
+    fn solve(&mut self, meta: KindMetaId, kind: Kind) {
+        self.solutions.insert(meta, kind);
     }
 
     fn apply_predicate(&self, pred: &solveig_ast::ast::Predicate) -> solveig_ast::ast::Predicate {
@@ -106,14 +109,13 @@ impl DataKindInferencer {
     fn apply_kind(&self, kind: &Kind) -> Kind {
         match kind {
             Kind::Star => Kind::Star,
-            Kind::Var(v) => {
-                if let Some(sol) = self.solutions.get(v) {
+            Kind::Meta(id) => {
+                if let Some(sol) = self.solutions.get(id) {
                     self.apply_kind(sol)
                 } else {
-                    Kind::Var(v.clone())
+                    Kind::Meta(*id)
                 }
             }
-            Kind::Meta(id) => Kind::Meta(*id),
             Kind::Arrow(lhs, rhs) => Kind::make_arrow(self.apply_kind(lhs), self.apply_kind(rhs)),
         }
     }
@@ -141,18 +143,18 @@ impl DataKindInferencer {
     }
 
     fn default_all_unsolved(&mut self) {
-        let unsolved: Vec<String> = self
+        let unsolved: Vec<KindMetaId> = self
             .meta_order
             .iter()
-            .filter(|m| !self.solutions.contains_key(*m))
-            .cloned()
+            .copied()
+            .filter(|m| !self.solutions.contains_key(m))
             .collect();
         for m in unsolved {
             self.solutions.insert(m, Kind::Star);
         }
     }
 
-    fn promote(&mut self, target: &str, kind: &Kind) -> Result<Kind, KindError> {
+    fn promote(&mut self, target: KindMetaId, kind: &Kind) -> Result<Kind, KindError> {
         let kind = self.apply_kind(kind);
         match &kind {
             Kind::Star => Ok(Kind::Star),
@@ -166,20 +168,20 @@ impl DataKindInferencer {
                 Ok(Kind::make_arrow(lhs_p, rhs_p))
             }
 
-            Kind::Var(v) => {
-                if v == target {
-                    Err(KindError::occurs_check_failed(target, kind.clone()))
-                } else if !self.is_meta(v) || self.is_before(v, target) {
+            Kind::Meta(id) => {
+                if *id == target {
+                    Err(KindError::occurs_check_failed(
+                        format!("?k{}", target.0),
+                        kind.clone(),
+                    ))
+                } else if !self.is_meta(*id) || self.is_before(*id, target) {
                     Ok(kind.clone())
                 } else {
-                    let v = v.clone();
                     let fresh = self.fresh_meta_before(target);
-                    self.solve(&v, fresh.clone());
+                    self.solve(*id, fresh.clone());
                     Ok(fresh)
                 }
             }
-
-            Kind::Meta(_) => Ok(kind.clone()),
         }
     }
 
@@ -199,17 +201,15 @@ impl DataKindInferencer {
                 self.unify(r1, r2)
             }
 
-            (Kind::Var(v), _) if self.is_unsolved(v) => {
-                let v = v.clone();
-                let promoted = self.promote(&v, &rhs)?;
-                self.solve(&v, promoted);
+            (Kind::Meta(id), _) if self.is_unsolved(*id) => {
+                let promoted = self.promote(*id, &rhs)?;
+                self.solve(*id, promoted);
                 Ok(())
             }
 
-            (_, Kind::Var(v)) if self.is_unsolved(v) => {
-                let v = v.clone();
-                let promoted = self.promote(&v, &lhs)?;
-                self.solve(&v, promoted);
+            (_, Kind::Meta(id)) if self.is_unsolved(*id) => {
+                let promoted = self.promote(*id, &lhs)?;
+                self.solve(*id, promoted);
                 Ok(())
             }
 
@@ -321,12 +321,11 @@ impl DataKindInferencer {
                 Ok(self.apply_kind(&result_k))
             }
 
-            Kind::Var(ref v) if self.is_unsolved(v) => {
-                let v = v.clone();
-                let a1 = self.fresh_meta_before(&v);
-                let a2 = self.fresh_meta_before(&v);
+            Kind::Meta(id) if self.is_unsolved(id) => {
+                let a1 = self.fresh_meta_before(id);
+                let a2 = self.fresh_meta_before(id);
 
-                self.solve(&v, Kind::make_arrow(a1.clone(), a2.clone()));
+                self.solve(id, Kind::make_arrow(a1.clone(), a2.clone()));
                 self.unify(a1, arg_kind)?;
                 Ok(self.apply_kind(&a2))
             }
@@ -476,7 +475,7 @@ fn build_constructor_type(
 
 fn default_unsolved(kind: Kind) -> Kind {
     match kind {
-        Kind::Var(_) | Kind::Meta(_) => Kind::Star,
+        Kind::Meta(_) => Kind::Star,
         Kind::Star => Kind::Star,
         Kind::Arrow(l, r) => Kind::make_arrow(default_unsolved(*l), default_unsolved(*r)),
     }
