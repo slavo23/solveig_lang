@@ -260,10 +260,7 @@ impl PayloadStore {
         }
 
         let start = self.values.len();
-        self.values.reserve(len);
-        unsafe {
-            self.values.set_len(start + len);
-        }
+        self.values.resize(start + len, Value::Unit);
         PayloadRef {
             start,
             end: start + len,
