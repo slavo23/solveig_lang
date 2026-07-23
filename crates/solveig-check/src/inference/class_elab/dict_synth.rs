@@ -1,7 +1,7 @@
 fn dict_type_for_pred(pred: &Predicate, classes: &HashMap<String, ClassRuntimeInfo>) -> TypeExpr {
     let info = classes
         .get(&pred.class_name)
-        .unwrap_or_else(|| panic!("missing runtime class info for {}", pred.class_name));
+        .unwrap_or_else(|| panic!("ICE: missing runtime class info for {}", pred.class_name));
 
     pred.args
         .iter()
@@ -333,7 +333,9 @@ fn synthesize_dict_data_defs(
         .class_defs
         .iter()
         .map(|class_def| {
-            let info = classes.get(&class_def.name).unwrap();
+            let info = classes
+                .get(&class_def.name)
+                .expect("ICE: class runtime info must exist for synthesized dictionary data");
 
             let superclass_field_types = class_def
                 .superclasses
@@ -381,11 +383,18 @@ fn synthesize_selector_defs(
     let mut out = Vec::new();
 
     for class_def in &module.class_defs {
-        let info = classes.get(&class_def.name).unwrap();
+        let info = classes
+            .get(&class_def.name)
+            .expect("ICE: class runtime info must exist for synthesized selector");
 
         for (method_ix, method) in class_def.methods.iter().enumerate() {
             let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
-            let selector = info.methods.get(short_name).unwrap().selector_name.clone();
+            let selector = info
+                .methods
+                .get(short_name)
+                .expect("ICE: method runtime info must exist for synthesized selector")
+                .selector_name
+                .clone();
             let dict_arg = "dict".to_string();
 
             // Superclass dictionaries are stored before method fields.
@@ -610,13 +619,13 @@ fn synthesize_instance_dict_defs(
 
         let class_rt = classes
             .get(&inst.head.class_name)
-            .unwrap_or_else(|| panic!("missing runtime class info for {}", inst.head.class_name));
+            .unwrap_or_else(|| panic!("ICE: missing runtime class info for {}", inst.head.class_name));
 
         let class_def = module
             .class_defs
             .iter()
             .find(|c| c.name == inst.head.class_name)
-            .unwrap_or_else(|| panic!("missing class definition for {}", inst.head.class_name));
+            .unwrap_or_else(|| panic!("ICE: missing class definition for {}", inst.head.class_name));
 
         let mut evidence_env = EvidenceEnv::default();
         let mut context_dict_names = Vec::new();
@@ -642,8 +651,7 @@ fn synthesize_instance_dict_defs(
                 &mut Vec::new(),
             )
             .unwrap_or_else(|| {
-                panic!(
-                    "missing superclass evidence during class elaboration: instance {} requires {}",
+                panic!("ICE: missing superclass evidence: {} requires {}",
                     inst.head.pretty(),
                     needed_superclass.pretty(),
                 )
@@ -665,8 +673,7 @@ fn synthesize_instance_dict_defs(
                 .iter()
                 .find(|m| m.name == short_name)
                 .unwrap_or_else(|| {
-                    panic!(
-                        "instance for {} missing method {}",
+                    panic!("ICE: missing instance method: {} lacks {}",
                         inst.head.pretty(),
                         class_method.name
                     )

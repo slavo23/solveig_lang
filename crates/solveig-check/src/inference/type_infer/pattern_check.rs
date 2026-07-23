@@ -33,13 +33,14 @@ impl TypeChecker {
         ctx: Context,
         constructor_type: &TypeExpr,
         arity: usize,
+        span: Span,
     ) -> TcResult<(Context, Vec<TypeExpr>, TypeExpr)> {
         let mut theta = ctx;
         let mut current_type = constructor_type.clone();
         let mut field_types = Vec::with_capacity(arity);
 
         for _ in 0..arity {
-            let (new_ctx, domain, codomain) = self.force_arrow(theta, &current_type)?;
+            let (new_ctx, domain, codomain) = self.force_arrow(theta, &current_type, span.clone())?;
             theta = new_ctx;
             field_types.push(domain);
             current_type = codomain;
@@ -97,10 +98,11 @@ impl TypeChecker {
                 self.solve_checking(body_ctx, &arm.node.expr, &arm_result_type)?;
 
             if !omega.has_unsolved_evar(&result_evar) && !omega.has_solved_evar(&result_evar) {
-                panic!(
-                    "internal compiler error: missing case result existential `{}` after arm {}",
-                    result_evar, arm_index
-                );
+                return Err(TypeError::MissingCaseResultExistential {
+                    span: self.get_file_span(arm.node.expr.anno.clone()),
+                    evar: result_evar,
+                    arm_index,
+                });
             }
 
             theta = omega.until(&arm_marker);
@@ -169,7 +171,12 @@ impl TypeChecker {
                     })?;
 
                 let (mut theta, field_types, constructor_result_type) = self
-                    .instantiate_constructor_pattern(ctx, &constructor_type, sub_patterns.len())?;
+                    .instantiate_constructor_pattern(
+                        ctx,
+                        &constructor_type,
+                        sub_patterns.len(),
+                        pattern.anno.clone(),
+                    )?;
 
                 theta = self.solve_subtype(
                     theta.clone(),

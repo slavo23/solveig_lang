@@ -780,7 +780,7 @@ mod tests {
         match check_case(FileId(0), constructor_types, scrutinee_type, &arms, span()) {
             Ok(()) => Vec::new(),
             Err(TypeError::NonExhaustivePatterns { missing, .. }) => missing,
-            Err(error) => panic!("expected only exhaustiveness errors, got {error:?}"),
+            Err(error) => panic!("ICE: expected only exhaustiveness errors, got {error:?}"),
         }
     }
 

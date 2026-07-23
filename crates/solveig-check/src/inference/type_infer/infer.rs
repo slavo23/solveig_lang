@@ -360,7 +360,7 @@ impl TypeChecker {
                 let evar_entry = ContextEntry::ExVar(
                     evar_name.clone(),
                     ctx.evar_kind(evar_name)
-                        .unwrap_or_else(|| panic!("missing evar kind for {}", evar_name)),
+                        .unwrap_or_else(|| panic!("ICE: missing evar kind for {evar_name}")),
                 );
                 let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 

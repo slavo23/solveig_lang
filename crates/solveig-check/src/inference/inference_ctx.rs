@@ -76,7 +76,7 @@ impl Context {
             if next != *prev { Some(next) } else { None }
         })
         .last()
-        .unwrap()
+        .expect("ICE: context application iterator is never empty")
     }
 
     pub fn add_entry(self, entry: ContextEntry) -> Context {
@@ -97,7 +97,7 @@ impl Context {
         if let Some(position) = new_entries.iter().rposition(|ent| ent == target) {
             new_entries[position] = replacement.clone();
         } else {
-            panic!("replace: {:?} not found in context", target);
+            panic!("ICE: replace target {:?} not found in context", target);
         }
         Context {
             entries: new_entries,
@@ -117,7 +117,7 @@ impl Context {
                 (left, middle, right)
             }
             None => {
-                panic!("split_at: {:?} not found in context", on_entry);
+                panic!("ICE: split_at target {:?} not found in context", on_entry);
             }
         }
     }

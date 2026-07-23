@@ -106,7 +106,7 @@ impl TypeChecker {
 
         let result_kind = ctx
             .evar_kind(result_evar_name)
-            .unwrap_or_else(|| panic!("missing evar kind for {}", result_evar_name));
+            .unwrap_or_else(|| panic!("ICE: missing evar kind for {result_evar_name}"));
 
         let func_kind = Kind::make_arrow(arg_kind.clone(), result_kind);
 
@@ -121,7 +121,7 @@ impl TypeChecker {
         let evar_entry = ContextEntry::ExVar(
             evar_name.to_string(),
             ctx.evar_kind(evar_name)
-                .unwrap_or_else(|| panic!("missing evar kind for {}", evar_name)),
+                .unwrap_or_else(|| panic!("ICE: missing evar kind for {evar_name}")),
         );
         let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 
@@ -148,7 +148,7 @@ impl TypeChecker {
                     &ContextEntry::ExVar(
                         other_evar.clone(),
                         ctx.evar_kind(other_evar)
-                            .unwrap_or_else(|| panic!("missing evar kind for {}", other_evar)),
+                            .unwrap_or_else(|| panic!("ICE: missing evar kind for {other_evar}")),
                     ),
                     &solution,
                 ))
@@ -217,11 +217,7 @@ impl TypeChecker {
             }
             TypeExpr::Qualified(_, body) => self.instantiate_left(ctx, evar_name, body),
 
-            _ => todo!(
-                "instantiate left failed {} <: {}",
-                evar_name,
-                target.pretty()
-            ),
+            _ => Err(()),
         }
     }
     fn instantiate_right(
@@ -233,7 +229,7 @@ impl TypeChecker {
         let evar_entry = ContextEntry::ExVar(
             evar_name.to_string(),
             ctx.evar_kind(evar_name)
-                .unwrap_or_else(|| panic!("missing evar kind for {}", evar_name)),
+                .unwrap_or_else(|| panic!("ICE: missing evar kind for {evar_name}")),
         );
         let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
         let left_ctx = Context::from_entries(left_entries.clone());
@@ -259,7 +255,7 @@ impl TypeChecker {
                     &ContextEntry::ExVar(
                         other_evar.clone(),
                         ctx.evar_kind(other_evar)
-                            .unwrap_or_else(|| panic!("missing evar kind for {}", other_evar)),
+                            .unwrap_or_else(|| panic!("ICE: missing evar kind for {other_evar}")),
                     ),
                     &solution,
                 ))
@@ -335,13 +331,14 @@ impl TypeChecker {
             }
             TypeExpr::Qualified(_, body) => self.instantiate_right(ctx, body, evar_name),
 
-            _ => todo!("instantiate right failed"),
+            _ => Err(()),
         }
     }
     fn force_arrow(
         &mut self,
         ctx: Context,
         ty: &TypeExpr,
+        span: Span,
     ) -> TcResult<(Context, TypeExpr, TypeExpr)> {
         let ty = ctx.apply(ty);
 
@@ -354,15 +351,15 @@ impl TypeChecker {
                 let fresh_evar = self.fresh_evar_name();
                 let new_ctx = ctx.add_entry(ContextEntry::ExVar(fresh_evar.clone(), kind.clone()));
                 let instantiated = body.substitute(quantifier, &TypeExpr::TyExVar(fresh_evar));
-                self.force_arrow(new_ctx, &instantiated)
+                self.force_arrow(new_ctx, &instantiated, span)
             }
-            TypeExpr::Qualified(_, body) => self.force_arrow(ctx, body),
+            TypeExpr::Qualified(_, body) => self.force_arrow(ctx, body, span),
 
             TypeExpr::TyExVar(evar_name) if ctx.has_unsolved_evar(evar_name) => {
                 let evar_entry = ContextEntry::ExVar(
                     evar_name.clone(),
                     ctx.evar_kind(evar_name)
-                        .unwrap_or_else(|| panic!("missing evar kind for {}", evar_name)),
+                        .unwrap_or_else(|| panic!("ICE: missing evar kind for {evar_name}")),
                 );
                 let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 
@@ -389,7 +386,10 @@ impl TypeChecker {
                 ))
             }
 
-            _ => todo!("force arrow failed"),
+            _ => Err(TypeError::ConstructorNotApplicable {
+                span: self.get_file_span(span),
+                actual: ty.pretty(),
+            }),
         }
     }
 }

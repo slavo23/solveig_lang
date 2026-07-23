@@ -68,7 +68,7 @@ impl DataKindInferencer {
         self.next_meta += 1;
         let pos = self
             .position_of(target)
-            .unwrap_or_else(|| panic!("fresh_meta_before: target '{}' not in ordering", target));
+            .unwrap_or_else(|| panic!("ICE: fresh_meta_before target '{target}' not in ordering"));
         self.meta_order.insert(pos, name.clone());
         Kind::Var(name)
     }
@@ -513,13 +513,17 @@ fn tarjan_scc(n: usize, adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
                 go(w, adj, s);
                 s.low[v] = s.low[v].min(s.low[w]);
             } else if s.on_stack[w] {
-                s.low[v] = s.low[v].min(s.num[w].unwrap());
+                s.low[v] = s.low[v]
+                    .min(s.num[w].expect("ICE: Tarjan on-stack node must have a discovery index"));
             }
         }
-        if s.low[v] == s.num[v].unwrap() {
+        if s.low[v] == s.num[v].expect("ICE: Tarjan root node must have a discovery index") {
             let mut scc = Vec::new();
             loop {
-                let w = s.stack.pop().unwrap();
+                let w = s
+                    .stack
+                    .pop()
+                    .expect("ICE: Tarjan SCC stack must contain the root");
                 s.on_stack[w] = false;
                 scc.push(w);
                 if w == v {

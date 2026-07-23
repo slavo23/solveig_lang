@@ -15,7 +15,7 @@ fn rewrite_expr(
             if let Some(class_name) = method_to_class.get(name) {
                 let class_rt = class_info
                     .get(class_name)
-                    .unwrap_or_else(|| panic!("missing class runtime info for {}", class_name));
+                    .unwrap_or_else(|| panic!("ICE: missing class runtime info for {}", class_name));
 
                 let short_name = name.rsplit('.').next().unwrap_or(name);
 
@@ -23,7 +23,7 @@ fn rewrite_expr(
                     .methods
                     .get(name)
                     .or_else(|| class_rt.methods.get(short_name))
-                    .unwrap_or_else(|| panic!("missing method runtime info for {}", name));
+                    .unwrap_or_else(|| panic!("ICE: missing method runtime info for {}", name));
 
                 let mut subst = HashMap::new();
 
@@ -39,8 +39,7 @@ fn rewrite_expr(
                             Box::new(dict_expr),
                         )
                     } else {
-                        panic!(
-                            "missing evidence during class elaboration for method {} and predicate {:?}",
+                        panic!("ICE: missing method evidence: {} needs {:?}",
                             name, needed_pred
                         );
                     }
@@ -111,8 +110,7 @@ fn rewrite_expr(
                             ) {
                                 dict_args.push(dict_expr);
                             } else {
-                                panic!(
-                                    "missing evidence during class elaboration for constrained function {} and predicate {:?}",
+                                panic!("ICE: missing constrained-function evidence: {} needs {:?}",
                                     name, instantiated_pred
                                 );
                             }
