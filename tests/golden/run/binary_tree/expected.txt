@@ -1,0 +1,1 @@
+Node (Node Leaf 1 Leaf) 2 (Node (Node (Node (Node (Node (Node Leaf 3 Leaf) 4 (Node Leaf 6 Leaf)) 7 (Node (Node Leaf 8 Leaf) 10 Leaf)) 13 (Node Leaf 14 Leaf)) 17 Leaf) 40 Leaf)

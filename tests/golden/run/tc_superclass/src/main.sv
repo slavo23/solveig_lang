@@ -1,0 +1,3 @@
+import tcTests.tcStressTest(typeclassSuperclassSuccessMain)
+
+main = typeclassSuperclassSuccessMain
