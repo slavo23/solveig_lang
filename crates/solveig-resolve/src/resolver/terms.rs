@@ -322,7 +322,7 @@ impl<'a> Resolver<'a> {
         parsed: &ParsedModule,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-        func_schemes: &HashMap<String, Scheme>,
+        func_schemes: &HashMap<DefId, Scheme>,
     ) -> Vec<TermDefinition<Span>> {
         parsed
             .defs
@@ -334,8 +334,9 @@ impl<'a> Resolver<'a> {
                     params,
                 } => {
                     let (name, _span) = spanned_name;
-                    let fn_name = self.legacy_name(self.local_def_id(cx, *name));
-                    let sig = func_schemes.get(&fn_name).cloned();
+                    let fn_id = self.local_def_id(cx, *name);
+                    let fn_name = self.legacy_name(fn_id);
+                    let sig = func_schemes.get(&fn_id).cloned();
 
                     let wrapped = match &sig {
                         Some(sig) => self.wrap_function_body_with_signature_in_module(
@@ -352,6 +353,7 @@ impl<'a> Resolver<'a> {
                     };
 
                     Some(TermDefinition {
+                        id: fn_id,
                         name: fn_name,
                         signature: sig,
                         body: wrapped,

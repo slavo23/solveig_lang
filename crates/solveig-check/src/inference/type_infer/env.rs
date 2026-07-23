@@ -32,7 +32,7 @@ pub struct TypeChecker {
     file: FileId,
     counter: u32,
     constructor_types: HashMap<CtorId, TypeExpr>,
-    func_schemes: HashMap<String, Scheme>,
+    func_schemes: HashMap<DefId, Scheme>,
     class_defs: Vec<ClassDefinition>,
     instance_defs: Vec<InstanceDefinition<Span>>,
     tycon_kinds: HashMap<TyConId, Kind>,
@@ -173,7 +173,7 @@ pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
 #[derive(Clone, Debug)]
 pub struct TypeCheckEnv {
     pub constructor_types: HashMap<CtorId, TypeExpr>,
-    pub func_schemes: HashMap<String, Scheme>,
+    pub func_schemes: HashMap<DefId, Scheme>,
     pub class_defs: Vec<ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<Span>>,
     pub tycon_kinds: HashMap<TyConId, Kind>,
@@ -194,4 +194,44 @@ impl TypeCheckEnv {
 pub struct TCOutput {
     pub module: CheckedModule,
     pub holes: Vec<HoleInfo>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn global_function_schemes_are_keyed_by_defid() {
+        let def_id = DefId {
+            module: solveig_ast::ast::ModuleId(2),
+            name: solveig_base::Symbol(3),
+        };
+        let other_def_id = DefId {
+            module: solveig_ast::ast::ModuleId(2),
+            name: solveig_base::Symbol(4),
+        };
+
+        let mut env = TypeCheckEnv {
+            constructor_types: HashMap::new(),
+            func_schemes: HashMap::new(),
+            class_defs: Vec::new(),
+            instance_defs: Vec::new(),
+            tycon_kinds: HashMap::new(),
+        };
+        env.func_schemes
+            .insert(def_id, Scheme::mono(TypeExpr::TyUnit));
+
+        let mut checker = TypeChecker::with_env(&env, FileId(0));
+        let expr = TermExprNode::new(TermExpr::Var(VarRef::Global(def_id)), 0..0);
+
+        let result = checker.solve_inference(Context::new(), &expr);
+        assert!(matches!(result, Ok((_, _, TypeExpr::TyUnit))));
+
+        let missing_expr = TermExprNode::new(TermExpr::Var(VarRef::Global(other_def_id)), 0..0);
+        assert!(
+            checker
+                .solve_inference(Context::new(), &missing_expr)
+                .is_err()
+        );
+    }
 }

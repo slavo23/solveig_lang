@@ -163,7 +163,7 @@ impl<'a> Resolver<'a> {
         local: &LocalResolverEnv,
         local_tycon_kinds: &HashMap<String, Kind>,
         class_defs: &[ClassDefinition],
-    ) -> Result<HashMap<String, Scheme>, KindError> {
+    ) -> Result<HashMap<DefId, Scheme>, KindError> {
         let mut func_schemes = HashMap::new();
 
         let mut sig_tycon_env = imported.tycon_kinds.clone();
@@ -181,7 +181,8 @@ impl<'a> Resolver<'a> {
             };
 
             let (name, _span) = spanned_name;
-            let fn_name = self.legacy_name(self.local_def_id(cx, *name));
+            let fn_id = self.local_def_id(cx, *name);
+            let fn_name = self.legacy_name(fn_id);
             let raw_scheme = self.resolve_surface_scheme(ty, cx, local);
 
             trace_predicates(
@@ -201,7 +202,7 @@ impl<'a> Resolver<'a> {
                 .infer_scheme(&raw_scheme)
                 .map_err(|error| error.with_span(self.file_span(cx, ty.1)))?;
 
-            func_schemes.insert(fn_name, info.scheme.clone());
+            func_schemes.insert(fn_id, info.scheme.clone());
         }
 
         Ok(func_schemes)

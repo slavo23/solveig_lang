@@ -460,6 +460,7 @@ fn synthesize_selector_defs(
             };
 
             out.push(TermDefinition {
+                id: legacy_def_id(&selector),
                 name: selector,
                 signature: Some(selector_scheme),
                 body: TermExprNode::new(TermExpr::Abs(dict_arg, None, Box::new(body)), mk_anno()),
@@ -559,6 +560,7 @@ fn elaborate_func_defs(
                 });
 
             TermDefinition {
+                id: def.id,
                 name: def.name.clone(),
                 signature: Some(Scheme {
                     quantifiers: sig.quantifiers.clone(),
@@ -725,6 +727,7 @@ fn synthesize_instance_dict_defs(
             .collect::<Vec<_>>();
 
         out.push(TermDefinition {
+            id: legacy_def_id(&dict_name),
             name: dict_name,
             signature: Some(Scheme {
                 quantifiers,

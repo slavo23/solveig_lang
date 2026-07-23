@@ -455,10 +455,7 @@ impl TypedModuleApi {
         out: &mut TypedDisplayMaps<'_>,
     ) {
         for (sym, scheme) in &self.term_schemes {
-            out.func_schemes.insert(
-                defid_to_legacy_string(session, modules, *sym),
-                scheme.clone(),
-            );
+            out.func_schemes.insert(*sym, scheme.clone());
         }
 
         for (sym, kind) in &self.type_kinds {
@@ -484,7 +481,7 @@ impl TypedModuleApi {
 }
 
 pub struct TypedDisplayMaps<'a> {
-    pub func_schemes: &'a mut HashMap<String, solveig_ast::ast::Scheme>,
+    pub func_schemes: &'a mut HashMap<DefId, solveig_ast::ast::Scheme>,
     pub tycon_kinds: &'a mut HashMap<solveig_ast::ast::TyConId, Kind>,
     pub constructor_types: &'a mut HashMap<CtorId, TypeExpr>,
     pub class_defs: &'a mut HashMap<String, solveig_ast::ast::ClassDefinition>,
@@ -892,12 +889,9 @@ pub fn build_typed_module_api(
     let mut api = TypedModuleApi::default();
     let prefix = module_name.as_string(session) + ".";
 
-    for (name, scheme) in &checked.func_schemes {
-        if let Some(stripped) = name.strip_prefix(&prefix) {
-            api.term_schemes.insert(
-                local_def_id(module_id, session.intern(stripped)),
-                scheme.clone(),
-            );
+    for (id, scheme) in &checked.func_schemes {
+        if id.module == module_id {
+            api.term_schemes.insert(*id, scheme.clone());
         }
     }
 

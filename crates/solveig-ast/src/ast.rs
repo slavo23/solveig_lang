@@ -828,6 +828,7 @@ pub struct CaseArm<A, P = A> {
 
 #[derive(Clone, Debug)]
 pub struct TermDefinition<A, P = A> {
+    pub id: DefId,
     pub name: String,
     pub signature: Option<Scheme>,
     pub body: TermExprNode<A, P>,
@@ -840,7 +841,7 @@ pub struct ResolvedModule<A, P = A> {
     pub instance_defs: Vec<InstanceDefinition<A, P>>,
     pub tycon_kinds: HashMap<TyConId, Kind>,
     pub constructor_types: HashMap<CtorId, TypeExpr>,
-    pub func_schemes: HashMap<String, Scheme>,
+    pub func_schemes: HashMap<DefId, Scheme>,
     pub func_defs: Vec<TermDefinition<A, P>>,
 }
 

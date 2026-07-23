@@ -5,7 +5,7 @@ use crate::inference::exhaustiveness;
 use crate::inference::holes::HoleInfo;
 use crate::inference::inference_ctx::{Context, ContextEntry};
 use solveig_ast::ast::{
-    BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, CtorId, EvarId,
+    BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, CtorId, DefId, EvarId,
     InstanceDefinition, InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate, Pretty,
     ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TyConId, TyVarId, TypeExpr,
     UnOp, VarRef, ctor_display_name, legacy_ctor_id, legacy_tyvar_id, legacy_tyvar_name,

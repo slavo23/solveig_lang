@@ -99,7 +99,9 @@ impl TypeChecker {
                     return Ok((ctx, elaborated, var_type));
                 }
 
-                if let Some(scheme) = self.func_schemes.get(&display_name).cloned() {
+                if let VarRef::Global(def_id) = name
+                    && let Some(scheme) = self.func_schemes.get(def_id).cloned()
+                {
                     let (ctx, preds, instantiated_ty) = self.instantiate_scheme(ctx, &scheme);
                     self.add_wanteds(preds, span.clone());
 

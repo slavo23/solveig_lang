@@ -169,7 +169,7 @@ pub fn check_and_elab_module(
     let mut checked_instance_defs = Vec::new();
 
     let mut available_func_schemes = env.func_schemes.clone();
-    let mut checked_func_schemes = HashMap::<String, Scheme>::new();
+    let mut checked_func_schemes = HashMap::<DefId, Scheme>::new();
 
     let mut all_holes = Vec::new();
 
@@ -340,14 +340,14 @@ pub fn check_and_elab_module(
                             let final_scheme = checker.zonk_scheme(sig);
 
                             checked_defs.push(TermDefinition {
+                                id: func_def.id,
                                 name: func_def.name.clone(),
                                 signature: Some(final_scheme.clone()),
                                 body: zonked_expr,
                             });
 
-                            available_func_schemes
-                                .insert(func_def.name.clone(), final_scheme.clone());
-                            checked_func_schemes.insert(func_def.name.clone(), final_scheme);
+                            available_func_schemes.insert(func_def.id, final_scheme.clone());
+                            checked_func_schemes.insert(func_def.id, final_scheme);
                         }
 
                         let _ = final_ctx;
@@ -372,13 +372,14 @@ pub fn check_and_elab_module(
                         let final_scheme = TypeChecker::type_to_scheme(&final_sig);
 
                         checked_defs.push(TermDefinition {
+                            id: func_def.id,
                             name: func_def.name.clone(),
                             signature: Some(final_scheme.clone()),
                             body: zonked_expr,
                         });
 
-                        available_func_schemes.insert(func_def.name.clone(), final_scheme.clone());
-                        checked_func_schemes.insert(func_def.name.clone(), final_scheme);
+                        available_func_schemes.insert(func_def.id, final_scheme.clone());
+                        checked_func_schemes.insert(func_def.id, final_scheme);
                     }
                 }
 

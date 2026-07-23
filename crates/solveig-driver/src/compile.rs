@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use solveig_ast::ast::{
     ClassDefinition, CtorId, DefId, ModuleId, Scheme, TyConId, TypeExpr, ctor_display_name,
-    tycon_display_name,
+    def_display_name, tycon_display_name,
 };
 use solveig_base::{FileSpan, IntoDiagnostic, Session};
 use solveig_check::inference::holes::hole_diagnostics;
@@ -76,8 +76,8 @@ fn checked_project_schemes_impl(project_root: &Path) -> Result<BTreeMap<String, 
     let mut schemes = BTreeMap::new();
 
     for module in checked_modules {
-        for (name, scheme) in module.func_schemes {
-            schemes.insert(name, scheme.pretty());
+        for (id, scheme) in module.func_schemes {
+            schemes.insert(def_display_name(id), scheme.pretty());
         }
     }
 
@@ -559,7 +559,7 @@ fn collect_imported_type_info(
     modules: &ModuleTable,
     imports: &[ImportedTypedApi],
 ) -> (
-    HashMap<String, Scheme>,
+    HashMap<DefId, Scheme>,
     HashMap<TyConId, solveig_ast::ast::Kind>,
     HashMap<CtorId, solveig_ast::ast::TypeExpr>,
     HashMap<String, ClassDefinition>,
@@ -625,7 +625,7 @@ fn retain_only_local_symbols(
         .retain(|id, _| ctor_display_name(*id).starts_with(&prefix));
     checked
         .func_schemes
-        .retain(|name, _| name.starts_with(&prefix));
+        .retain(|id, _| def_display_name(*id).starts_with(&prefix));
 
     checked
         .class_defs
@@ -657,7 +657,7 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
         instance_defs.extend(m.instance_defs);
         extend_unique_tycon(&mut tycon_kinds, m.tycon_kinds)?;
         extend_unique_ctor(&mut constructor_types, m.constructor_types)?;
-        extend_unique(&mut func_schemes, m.func_schemes, "function")?;
+        extend_unique_def(&mut func_schemes, m.func_schemes, "function")?;
         func_defs.extend(m.func_defs);
     }
 
@@ -672,14 +672,14 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
     })
 }
 
-fn extend_unique<T>(
-    dst: &mut HashMap<String, T>,
-    src: HashMap<String, T>,
+fn extend_unique_def<T>(
+    dst: &mut HashMap<DefId, T>,
+    src: HashMap<DefId, T>,
     label: &str,
 ) -> Result<(), String> {
     for (k, v) in src {
-        if dst.insert(k.clone(), v).is_some() {
-            return Err(format!("duplicate {label} {k}"));
+        if dst.insert(k, v).is_some() {
+            return Err(format!("duplicate {label} {}", def_display_name(k)));
         }
     }
     Ok(())
