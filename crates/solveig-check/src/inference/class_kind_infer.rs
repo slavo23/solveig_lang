@@ -37,6 +37,7 @@ impl ClassKindInferencer {
                     Kind::Var(v.clone())
                 }
             }
+            Kind::Meta(id) => Kind::Meta(*id),
             Kind::Arrow(lhs, rhs) => Kind::make_arrow(self.apply_kind(lhs), self.apply_kind(rhs)),
         }
     }
@@ -45,6 +46,7 @@ impl ClassKindInferencer {
         match self.apply_kind(kind) {
             Kind::Star => false,
             Kind::Var(v) => v == needle,
+            Kind::Meta(_) => false,
             Kind::Arrow(lhs, rhs) => self.occurs(needle, &lhs) || self.occurs(needle, &rhs),
         }
     }
@@ -70,6 +72,7 @@ impl ClassKindInferencer {
 
         match (lhs, rhs) {
             (Kind::Star, Kind::Star) => Ok(()),
+            (Kind::Meta(left), Kind::Meta(right)) if left == right => Ok(()),
             (Kind::Var(v), other) => self.bind_meta(v, other),
             (other, Kind::Var(v)) => self.bind_meta(v, other),
             (Kind::Arrow(l1, r1), Kind::Arrow(l2, r2)) => {
@@ -82,7 +85,7 @@ impl ClassKindInferencer {
 
     fn default_unsolved(kind: Kind) -> Kind {
         match kind {
-            Kind::Var(_) => Kind::Star,
+            Kind::Var(_) | Kind::Meta(_) => Kind::Star,
             Kind::Star => Kind::Star,
             Kind::Arrow(lhs, rhs) => {
                 Kind::make_arrow(Self::default_unsolved(*lhs), Self::default_unsolved(*rhs))

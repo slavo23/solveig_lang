@@ -4,8 +4,8 @@ use std::ops::Range;
 
 use solveig_ast::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, ConstructorDef, DataDefinition,
-    InstanceDefinition, InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate,
-    ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
+    DefId, InstanceDefinition, InstanceMethodDef, Kind, Literal, ModuleId, Pattern, PatternNode,
+    Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use solveig_check::data_kind_infer::{
@@ -20,7 +20,7 @@ use solveig_syntax::ast::{
 };
 
 use crate::project::{
-    DefId, ModuleContext, ModuleTable, ResolveError, ResolveNameKind, defid_to_legacy_string,
+    ModuleContext, ModuleTable, ResolveError, ResolveNameKind, defid_to_legacy_string,
 };
 
 type Span = Range<usize>;
@@ -98,7 +98,7 @@ struct LocalResolverEnv {
 }
 
 impl LocalResolverEnv {
-    fn from_parsed_module(module_id: crate::project::ModuleId, parsed: &ParsedModule) -> Self {
+    fn from_parsed_module(module_id: ModuleId, parsed: &ParsedModule) -> Self {
         let classes = parsed
             .defs
             .iter()

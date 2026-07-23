@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use solveig_ast::ast::{ClassDefinition, Scheme};
+use solveig_ast::ast::{ClassDefinition, DefId, ModuleId, Scheme};
 use solveig_base::{FileSpan, IntoDiagnostic, Session};
 use solveig_check::inference::holes::hole_diagnostics;
 use solveig_check::inference::type_infer::{CheckedModule, TypeCheckEnv, check_and_elab_module};
@@ -10,10 +10,10 @@ use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
 use solveig_report::emit_diagnostics;
 use solveig_resolve::project::{
-    BuiltinApi, DefId, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleId,
-    ModuleTable, ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi,
-    TypedDisplayMaps, build_module_api, build_typed_module_api, defid_to_legacy_string,
-    effective_imports, module_order_checked,
+    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleTable,
+    ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi, TypedDisplayMaps,
+    build_module_api, build_typed_module_api, defid_to_legacy_string, effective_imports,
+    module_order_checked,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::ModuleName;

@@ -113,6 +113,7 @@ impl DataKindInferencer {
                     Kind::Var(v.clone())
                 }
             }
+            Kind::Meta(id) => Kind::Meta(*id),
             Kind::Arrow(lhs, rhs) => Kind::make_arrow(self.apply_kind(lhs), self.apply_kind(rhs)),
         }
     }
@@ -177,6 +178,8 @@ impl DataKindInferencer {
                     Ok(fresh)
                 }
             }
+
+            Kind::Meta(_) => Ok(kind.clone()),
         }
     }
 
@@ -473,7 +476,7 @@ fn build_constructor_type(
 
 fn default_unsolved(kind: Kind) -> Kind {
     match kind {
-        Kind::Var(_) => Kind::Star,
+        Kind::Var(_) | Kind::Meta(_) => Kind::Star,
         Kind::Star => Kind::Star,
         Kind::Arrow(l, r) => Kind::make_arrow(default_unsolved(*l), default_unsolved(*r)),
     }

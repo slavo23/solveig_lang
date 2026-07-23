@@ -1,9 +1,44 @@
 use std::collections::HashMap;
 
+use solveig_base::Symbol;
+
 const PRECEDENCE_LOOSE: u8 = 0;
 const PRECEDENCE_ARR: u8 = 1;
 const PRECEDENCE_APP: u8 = 2;
 const PRECEDENCE_ATOM: u8 = 3;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ModuleId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DefId {
+    pub module: ModuleId,
+    pub name: Symbol,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TyVarId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct EvarId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct TyConId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct CtorId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ClassId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct KindMetaId(pub u32);
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum VarRef {
+    Local(Symbol),
+    Global(DefId),
+}
 
 pub trait Pretty<T> {
     fn pretty(&self) -> String;
@@ -13,6 +48,7 @@ pub trait Pretty<T> {
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
 pub enum Kind {
     Var(String),
+    Meta(KindMetaId),
     Star,
     Arrow(Box<Kind>, Box<Kind>),
 }
@@ -26,6 +62,10 @@ impl Kind {
         Kind::Var(var)
     }
 
+    pub fn make_meta(id: KindMetaId) -> Self {
+        Kind::Meta(id)
+    }
+
     pub fn make_arrow(lhs: Kind, rhs: Kind) -> Self {
         Kind::Arrow(Box::new(lhs), Box::new(rhs))
     }
@@ -34,7 +74,7 @@ impl Kind {
 impl Pretty<Kind> for Kind {
     fn get_precedence(kind: &Kind) -> u8 {
         match kind {
-            Kind::Star | Kind::Var(_) => PRECEDENCE_ATOM,
+            Kind::Star | Kind::Var(_) | Kind::Meta(_) => PRECEDENCE_ATOM,
             Kind::Arrow(_, _) => PRECEDENCE_ARR,
         }
     }
@@ -45,6 +85,7 @@ impl Pretty<Kind> for Kind {
             let kind_fmt = match kind {
                 Kind::Star => "*".to_string(),
                 Kind::Var(k_var) => k_var.to_string(),
+                Kind::Meta(id) => format!("?k{}", id.0),
                 Kind::Arrow(lhs, rhs) => {
                     let lhs_fmt = traverse_helper(lhs, PRECEDENCE_ATOM);
                     let rhs_fmt = traverse_helper(rhs, PRECEDENCE_ARR);
@@ -64,18 +105,20 @@ impl Pretty<Kind> for Kind {
 }
 
 #[derive(Clone, PartialEq, Debug, Eq, Hash)]
-pub enum TypeExpr {
+pub enum Ty {
     TyUnit,
     TyVar(String),
     TyExVar(String),
-    TyArr(Box<TypeExpr>, Box<TypeExpr>),
-    TyForAll(String, Kind, Box<TypeExpr>),
+    TyArr(Box<Ty>, Box<Ty>),
+    TyForAll(String, Kind, Box<Ty>),
     TyCon(String),
-    TyApp(Box<TypeExpr>, Box<TypeExpr>),
-    Qualified(Vec<Predicate>, Box<TypeExpr>),
+    TyApp(Box<Ty>, Box<Ty>),
+    Qualified(Vec<Predicate>, Box<Ty>),
 }
 
-impl TypeExpr {
+pub type TypeExpr = Ty;
+
+impl Ty {
     pub fn is_mono(&self) -> bool {
         match self {
             TypeExpr::TyForAll(_, _, _) => false,
@@ -212,8 +255,8 @@ impl TypeExpr {
     }
 }
 
-impl Pretty<TypeExpr> for TypeExpr {
-    fn get_precedence(t: &TypeExpr) -> u8 {
+impl Pretty<Ty> for Ty {
+    fn get_precedence(t: &Ty) -> u8 {
         match t {
             TypeExpr::TyForAll(_, _, _) | TypeExpr::Qualified(_, _) => PRECEDENCE_LOOSE,
             TypeExpr::TyArr(_, _) => PRECEDENCE_ARR,
@@ -225,7 +268,7 @@ impl Pretty<TypeExpr> for TypeExpr {
     }
 
     fn pretty(&self) -> String {
-        fn traverse_helper(t: &TypeExpr, parent_precedence: u8) -> String {
+        fn traverse_helper(t: &Ty, parent_precedence: u8) -> String {
             let curr_precedence = TypeExpr::get_precedence(t);
 
             let type_fmt = match t {
@@ -449,10 +492,88 @@ pub struct DataDefinition {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum TyConDefinition {
+    Data(DataDefinition),
+    Primitive,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TyConInfo {
+    pub name: Symbol,
+    pub kind: Kind,
+    pub definition: TyConDefinition,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TyConTable {
+    entries: Vec<TyConInfo>,
+}
+
+impl TyConTable {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, info: TyConInfo) -> TyConId {
+        let id = TyConId(self.entries.len() as u32);
+        self.entries.push(info);
+        id
+    }
+
+    pub fn get(&self, id: TyConId) -> Option<&TyConInfo> {
+        self.entries.get(id.0 as usize)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (TyConId, &TyConInfo)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(index, info)| (TyConId(index as u32), info))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct ConstructorDef {
     pub name: String,
     pub fields: Vec<TypeExpr>,
     pub full_type: TypeExpr,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CtorInfo {
+    pub name: Symbol,
+    pub tycon: TyConId,
+    pub fields: Vec<TypeExpr>,
+    pub full_type: TypeExpr,
+    pub tag: u16,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct CtorTable {
+    entries: Vec<CtorInfo>,
+}
+
+impl CtorTable {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, info: CtorInfo) -> CtorId {
+        let id = CtorId(self.entries.len() as u32);
+        self.entries.push(info);
+        id
+    }
+
+    pub fn get(&self, id: CtorId) -> Option<&CtorInfo> {
+        self.entries.get(id.0 as usize)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (CtorId, &CtorInfo)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(index, info)| (CtorId(index as u32), info))
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -482,6 +603,40 @@ pub struct ClassDefinition {
     pub methods: Vec<ClassMethodDef>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct ClassInfo {
+    pub name: Symbol,
+    pub definition: ClassDefinition,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ClassTable {
+    entries: Vec<ClassInfo>,
+}
+
+impl ClassTable {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn insert(&mut self, info: ClassInfo) -> ClassId {
+        let id = ClassId(self.entries.len() as u32);
+        self.entries.push(info);
+        id
+    }
+
+    pub fn get(&self, id: ClassId) -> Option<&ClassInfo> {
+        self.entries.get(id.0 as usize)
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (ClassId, &ClassInfo)> {
+        self.entries
+            .iter()
+            .enumerate()
+            .map(|(index, info)| (ClassId(index as u32), info))
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct InstanceMethodDef<A, P = A> {
     pub name: String,
@@ -493,4 +648,82 @@ pub struct InstanceDefinition<A, P = A> {
     pub context: Vec<Predicate>,
     pub head: Predicate,
     pub methods: Vec<InstanceMethodDef<A, P>>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use solveig_base::Session;
+
+    #[test]
+    fn identity_tables_allocate_dense_stable_ids() {
+        let session = Session::new();
+
+        let mut tycons = TyConTable::new();
+        let bool_id = tycons.insert(TyConInfo {
+            name: session.intern("Bool"),
+            kind: Kind::Star,
+            definition: TyConDefinition::Primitive,
+        });
+        let list_id = tycons.insert(TyConInfo {
+            name: session.intern("List"),
+            kind: Kind::make_arrow(Kind::Star, Kind::Star),
+            definition: TyConDefinition::Primitive,
+        });
+
+        assert_eq!(bool_id, TyConId(0));
+        assert_eq!(list_id, TyConId(1));
+        assert_eq!(
+            session.str(
+                tycons
+                    .get(bool_id)
+                    .expect("ICE: inserted Bool type constructor must be present")
+                    .name
+            ),
+            "Bool"
+        );
+
+        let mut ctors = CtorTable::new();
+        let false_id = ctors.insert(CtorInfo {
+            name: session.intern("False"),
+            tycon: bool_id,
+            fields: Vec::new(),
+            full_type: TypeExpr::TyCon("Bool".to_string()),
+            tag: 0,
+        });
+        let true_id = ctors.insert(CtorInfo {
+            name: session.intern("True"),
+            tycon: bool_id,
+            fields: Vec::new(),
+            full_type: TypeExpr::TyCon("Bool".to_string()),
+            tag: 1,
+        });
+
+        assert_eq!(false_id, CtorId(0));
+        assert_eq!(true_id, CtorId(1));
+        assert_eq!(
+            ctors
+                .get(true_id)
+                .expect("ICE: inserted True constructor must be present")
+                .tag,
+            1
+        );
+
+        let mut classes = ClassTable::new();
+        let eq_id = classes.insert(ClassInfo {
+            name: session.intern("Eq"),
+            definition: ClassDefinition {
+                name: "Eq".to_string(),
+                params: vec![("a".to_string(), Kind::Star)],
+                superclasses: Vec::new(),
+                methods: Vec::new(),
+            },
+        });
+
+        assert_eq!(eq_id, ClassId(0));
+        assert_eq!(
+            classes.iter().map(|(id, _)| id).collect::<Vec<_>>(),
+            vec![eq_id]
+        );
+    }
 }

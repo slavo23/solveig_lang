@@ -5,19 +5,10 @@ use std::rc::Rc;
 use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
-use solveig_ast::ast::{ClassDefinition, Kind, TypeExpr};
+use solveig_ast::ast::{ClassDefinition, DefId, Kind, ModuleId, TypeExpr};
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
 use solveig_syntax::ast::{ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition};
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct ModuleId(pub u32);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-pub struct DefId {
-    pub module: ModuleId,
-    pub name: Symbol,
-}
 
 #[derive(Debug, Clone)]
 pub struct ModuleTable {

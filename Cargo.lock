@@ -317,6 +317,7 @@ name = "solveig-ast"
 version = "0.1.0"
 dependencies = [
  "slab",
+ "solveig-base",
 ]
 
 [[package]]
