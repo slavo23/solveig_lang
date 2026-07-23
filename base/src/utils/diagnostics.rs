@@ -1,17 +1,17 @@
+use std::cell::RefCell;
 use std::error::Error;
 use std::ops::Range;
 
-use crate::utils::span::Span;
 use ariadne::{Label, Report, ReportKind, Source};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct FileSpan {
+pub struct LegacyFileSpan {
     pub file_id: String,
-    pub span: Span,
+    pub span: Range<usize>,
 }
 
-impl FileSpan {
-    pub fn new(file_id: impl Into<String>, span: Span) -> Self {
+impl LegacyFileSpan {
+    pub fn new(file_id: impl Into<String>, span: Range<usize>) -> Self {
         Self {
             file_id: file_id.into(),
             span,
@@ -27,15 +27,68 @@ impl FileSpan {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct DiagnosticSink {
+    diagnostics: RefCell<Vec<CompilerDiagnostic>>,
+}
+
+impl DiagnosticSink {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&self, diagnostic: CompilerDiagnostic) {
+        self.diagnostics.borrow_mut().push(diagnostic);
+    }
+
+    pub fn has_errors(&self) -> bool {
+        !self.diagnostics.borrow().is_empty()
+    }
+
+    pub fn drain(&self) -> Vec<CompilerDiagnostic> {
+        self.diagnostics.borrow_mut().drain(..).collect()
+    }
+
+    pub fn sorted_by_file_and_span(&self) -> Vec<CompilerDiagnostic> {
+        let mut diagnostics = self.diagnostics.borrow().clone();
+
+        diagnostics.sort_by(|left, right| {
+            let left_anchor = left.anchor_span();
+            let right_anchor = right.anchor_span();
+
+            match (left_anchor, right_anchor) {
+                (Some(left), Some(right)) => left
+                    .file_id
+                    .cmp(&right.file_id)
+                    .then(left.span.start.cmp(&right.span.start))
+                    .then(left.span.end.cmp(&right.span.end)),
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, None) => left.code.cmp(right.code).then(left.message.cmp(&right.message)),
+            }
+        });
+
+        diagnostics
+    }
+
+    pub fn len(&self) -> usize {
+        self.diagnostics.borrow().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.diagnostics.borrow().is_empty()
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct DiagnosticLabel {
-    pub span: FileSpan,
+    pub span: LegacyFileSpan,
     pub message: String,
     pub primary: bool,
 }
 
 impl DiagnosticLabel {
-    pub fn primary(span: FileSpan, message: impl Into<String>) -> Self {
+    pub fn primary(span: LegacyFileSpan, message: impl Into<String>) -> Self {
         Self {
             span,
             message: message.into(),
@@ -43,7 +96,7 @@ impl DiagnosticLabel {
         }
     }
 
-    pub fn secondary(span: FileSpan, message: impl Into<String>) -> Self {
+    pub fn secondary(span: LegacyFileSpan, message: impl Into<String>) -> Self {
         Self {
             span,
             message: message.into(),
@@ -89,7 +142,7 @@ impl CompilerDiagnostic {
         self
     }
 
-    pub fn anchor_span(&self) -> Option<&FileSpan> {
+    pub fn anchor_span(&self) -> Option<&LegacyFileSpan> {
         self.labels
             .iter()
             .find(|label| label.primary)
@@ -101,65 +154,65 @@ impl CompilerDiagnostic {
 #[derive(Clone, Debug)]
 pub enum TypeError {
     UnboundVariable {
-        span: FileSpan,
+        span: LegacyFileSpan,
         name: String,
     },
     UnknownConstructor {
-        span: FileSpan,
+        span: LegacyFileSpan,
         name: String,
     },
     UnknownPatternConstructor {
-        span: FileSpan,
+        span: LegacyFileSpan,
         name: String,
     },
     EmptyCaseExpression {
-        span: FileSpan,
+        span: LegacyFileSpan,
     },
     SubtypeMismatch {
-        span: FileSpan,
+        span: LegacyFileSpan,
         left: String,
         right: String,
     },
     InstantiateLeftFailed {
-        span: FileSpan,
+        span: LegacyFileSpan,
         evar: String,
         target: String,
     },
     InstantiateRightFailed {
-        span: FileSpan,
+        span: LegacyFileSpan,
         source: String,
         evar: String,
     },
     ConstructorNotApplicable {
-        span: FileSpan,
+        span: LegacyFileSpan,
         actual: String,
     },
     NonFunctionApplication {
-        span: FileSpan,
-        arg_span: FileSpan,
+        span: LegacyFileSpan,
+        arg_span: LegacyFileSpan,
         actual: String,
     },
     NonPolymorphicTypeApplication {
-        span: FileSpan,
+        span: LegacyFileSpan,
         actual: String,
         ty_arg: String,
     },
     IllFormedAnnotation {
-        span: FileSpan,
+        span: LegacyFileSpan,
         ty: String,
         target: String,
     },
     MissingCaseResultExistential {
-        span: FileSpan,
+        span: LegacyFileSpan,
         evar: String,
         arm_index: usize,
     },
     UnsatisfiedConstraints {
-        span: FileSpan,
+        span: LegacyFileSpan,
         predicates: Vec<String>,
     },
     OverlappingInstances {
-        span: FileSpan,
+        span: LegacyFileSpan,
         class_name: String,
         instance_type: String,
     },
@@ -171,14 +224,14 @@ pub enum TypeError {
     /// structured lets diagnostics underline the precise expression that failed
     /// and add instance/class context as notes.
     InstanceMethodTypeMismatch {
-        span: FileSpan,
+        span: LegacyFileSpan,
         method: String,
         class_name: String,
         expected: String,
         cause: Box<TypeError>,
     },
     NonExhaustivePatterns {
-        span: FileSpan,
+        span: LegacyFileSpan,
         scrutinee_type: String,
         missing: Vec<String>,
     },
@@ -395,7 +448,7 @@ impl TypeError {
     }
 
     fn instance_method_diagnostic(
-        method_span: &FileSpan,
+        method_span: &LegacyFileSpan,
         method: &str,
         class_name: &str,
         expected: &str,
@@ -425,7 +478,7 @@ impl TypeError {
             .with_note(format!("the class requires `{}`", expected))
     }
 
-    fn primary_span(&self) -> &FileSpan {
+    fn primary_span(&self) -> &LegacyFileSpan {
         match self {
             TypeError::UnboundVariable { span, .. }
             | TypeError::UnknownConstructor { span, .. }
@@ -611,7 +664,7 @@ impl TypeError {
     }
 }
 
-fn span_same_location(a: &FileSpan, b: &FileSpan) -> bool {
+fn span_same_location(a: &LegacyFileSpan, b: &LegacyFileSpan) -> bool {
     a.file_id == b.file_id && a.span == b.span
 }
 

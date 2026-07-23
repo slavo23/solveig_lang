@@ -1,15 +1,17 @@
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::ops::Range;
 
 use crate::inference::exhaustiveness;
 use crate::inference::holes::HoleInfo;
 use crate::inference::inference_ctx::{Context, ContextEntry};
-use base::utils::diagnostics::{FileSpan, TypeError};
-use base::utils::span::Span;
+use base::utils::diagnostics::{LegacyFileSpan, TypeError};
 use core::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, InstanceDefinition,
     InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate, Pretty, ResolvedModule,
     Scheme, TermDefinition, TermExpr, TermExprNode, TypeExpr, UnOp,
 };
+
+type Span = Range<usize>;
 
 #[derive(Clone, Debug)]
 pub struct TcMetadata {
@@ -99,8 +101,8 @@ impl TypeChecker {
         Self::with_env(&env, file_id)
     }
 
-    fn get_file_span(&self, span: Span) -> FileSpan {
-        FileSpan {
+    fn get_file_span(&self, span: Span) -> LegacyFileSpan {
+        LegacyFileSpan {
             file_id: self.file_id.clone(),
             span,
         }
@@ -860,7 +862,7 @@ impl TypeChecker {
         ctx: Context,
         left: &TypeExpr,
         right: &TypeExpr,
-        origin_span: FileSpan,
+        origin_span: LegacyFileSpan,
     ) -> Result<Context, TypeError> {
         let original_left = ctx.apply(left);
         let original_right = ctx.apply(right);
@@ -2068,7 +2070,7 @@ pub fn check_and_elab_module(
             Some(class_def) => class_def,
             None => {
                 errors.push(TypeError::UnboundVariable {
-                    span: FileSpan::new(file_id.clone(), 0..0),
+                    span: LegacyFileSpan::new(file_id.clone(), 0..0),
                     name: format!("unknown class `{}` in instance", inst.head.class_name),
                 });
                 continue;
@@ -2113,7 +2115,7 @@ pub fn check_and_elab_module(
                     .unwrap_or(0..0);
 
                 errors.push(TypeError::UnsatisfiedConstraints {
-                    span: FileSpan::new(file_id.clone(), span),
+                    span: LegacyFileSpan::new(file_id.clone(), span),
                     predicates: missing_superclasses,
                 });
             }
@@ -2131,7 +2133,7 @@ pub fn check_and_elab_module(
                 Some(class_method) => class_method,
                 None => {
                     errors.push(TypeError::UnboundVariable {
-                        span: FileSpan::new(file_id.clone(), inst_method.body.anno.clone()),
+                        span: LegacyFileSpan::new(file_id.clone(), inst_method.body.anno.clone()),
                         name: format!(
                             "instance method `{}` not found in class `{}`",
                             inst_method.name, inst.head.class_name
@@ -2171,7 +2173,10 @@ pub fn check_and_elab_module(
                         let cause = checker.wanteds_error(unresolved);
 
                         errors.push(TypeError::InstanceMethodTypeMismatch {
-                            span: FileSpan::new(file_id.clone(), inst_method.body.anno.clone()),
+                            span: LegacyFileSpan::new(
+                                file_id.clone(),
+                                inst_method.body.anno.clone(),
+                            ),
                             method: inst_method.name.clone(),
                             class_name: inst.head.class_name.clone(),
                             expected: expected_scheme.pretty(),
@@ -2182,7 +2187,10 @@ pub fn check_and_elab_module(
 
                 Err(cause) => {
                     errors.push(TypeError::InstanceMethodTypeMismatch {
-                        span: FileSpan::new(file_id.clone(), inst_method.body.anno.clone()),
+                        span: LegacyFileSpan::new(
+                            file_id.clone(),
+                            inst_method.body.anno.clone(),
+                        ),
                         method: inst_method.name.clone(),
                         class_name: inst.head.class_name.clone(),
                         expected: expected_scheme.pretty(),

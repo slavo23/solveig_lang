@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 use std::env;
+use std::ops::Range;
 
-use base::utils::span::Span;
 use core::ast::{
     BinOp, CaseArm, CaseArmNode, ClassDefinition, ClassMethodDef, ConstructorDef, DataDefinition,
     InstanceDefinition, InstanceMethodDef, Kind, Literal, Pattern, PatternNode, Predicate,
@@ -17,6 +17,8 @@ use syntax::inference::class_kind_infer::ClassKindInferencer;
 use syntax::signature_infer::{KindError, SignatureKindInferencer};
 
 use crate::project::ModuleContext;
+
+type Span = Range<usize>;
 
 fn qualify(module: &ModuleName, name: &str) -> String {
     format!("{}.{}", module.as_string(), name)

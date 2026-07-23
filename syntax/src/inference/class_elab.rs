@@ -1,6 +1,6 @@
 use std::collections::HashMap;
+use std::ops::Range;
 
-use base::utils::span::Span;
 use core::ast::{
     CaseArm, CaseArmNode, ConstructorDef, DataDefinition, InstanceDefinition, Kind, Pattern,
     PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode,
@@ -8,6 +8,8 @@ use core::ast::{
 };
 
 use crate::inference::type_infer::TcMetadata;
+
+type Span = Range<usize>;
 
 #[derive(Clone, Debug)]
 struct MethodRuntimeInfo {

@@ -1,1 +1,1 @@
-pub type Span = std::ops::Range<usize>;
+pub use crate::source::{FileId, FileSpan, SourceFile, SourceMap, Span};

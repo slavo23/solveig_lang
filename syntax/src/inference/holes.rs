@@ -1,11 +1,13 @@
 use std::collections::HashMap;
 
-use base::utils::diagnostics::{CompilerDiagnostic, DiagnosticLabel, FileSpan, emit_diagnostic};
+use base::utils::diagnostics::{
+    CompilerDiagnostic, DiagnosticLabel, LegacyFileSpan, emit_diagnostic,
+};
 use core::ast::{Pretty, TypeExpr};
 
 #[derive(Clone, Debug)]
 pub struct HoleInfo {
-    pub span: FileSpan,
+    pub span: LegacyFileSpan,
     pub expected_type: TypeExpr,
     pub context: Vec<(String, TypeExpr)>,
 }

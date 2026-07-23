@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
-use base::utils::diagnostics::{FileSpan, TypeError};
-use base::utils::span::Span;
+use base::utils::diagnostics::{LegacyFileSpan, TypeError};
 use core::ast::{CaseArmNode, Literal, Pattern, PatternNode, Predicate, Pretty, TypeExpr};
 
 const MAX_MISSING_EXAMPLES: usize = 3;
+type Span = Range<usize>;
 
 /// Maranget-style exhaustiveness checking.
 
@@ -49,7 +50,7 @@ pub fn check_case(
         Ok(())
     } else {
         Err(TypeError::NonExhaustivePatterns {
-            span: FileSpan::new(file_id, case_span),
+            span: LegacyFileSpan::new(file_id, case_span),
             scrutinee_type: scrutinee_type.pretty(),
             missing,
         })
