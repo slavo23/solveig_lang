@@ -300,6 +300,7 @@ impl<'a> Resolver<'a> {
                             ClassMethodDef {
                                 id: method_id,
                                 name: self.qualified_def_name(method_id),
+                                short_name: self.symbol_text(method.name.0).to_string(),
                                 scheme,
                             }
                         })
@@ -309,6 +310,7 @@ impl<'a> Resolver<'a> {
                         ClassDefinition {
                             id: class_id,
                             name: class_name,
+                            short_name: self.symbol_text(name.0).to_string(),
                             params: class_params,
                             superclasses: resolved_superclasses,
                             methods: resolved_methods,

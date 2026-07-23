@@ -92,6 +92,7 @@ mod tests {
             tycon_id,
             TyConInfo {
                 name: legacy_symbol_id("test.pretty.Widget"),
+                short_name: legacy_symbol_id("Widget"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Primitive,
             },
@@ -102,9 +103,11 @@ mod tests {
             class_id,
             ClassInfo {
                 name: legacy_symbol_id("test.pretty.Showy"),
+                short_name: legacy_symbol_id("Showy"),
                 definition: ClassDefinition {
                     id: class_id,
                     name: "test.pretty.Showy".to_string(),
+                    short_name: "Showy".to_string(),
                     params: Vec::new(),
                     superclasses: Vec::new(),
                     methods: Vec::new(),

@@ -311,20 +311,13 @@ fn build_class_runtime_info(
         let mut methods = HashMap::new();
 
         for method in &class_def.methods {
-            let short_name = method
-                .name
-                .rsplit('.')
-                .next()
-                .unwrap_or(&method.name)
-                .to_string();
-
             let method_info = MethodRuntimeInfo {
                 selector_name: selector_name(&method.name),
                 class_head_pred: class_head_pred.clone(),
                 method_body_ty: method.scheme.ty.clone(),
             };
 
-            methods.insert(short_name.clone(), method_info.clone());
+            methods.insert(method.short_name.clone(), method_info.clone());
             methods.insert(method.name.clone(), method_info);
         }
 
@@ -381,6 +374,7 @@ fn synthesize_dict_data_defs(
 
             DataDefinition {
                 name: info.dict_tycon.clone(),
+                short_name: info.dict_tycon.clone(),
                 ty_params: class_def.params.clone(),
                 tycon_kind: class_def
                     .params
@@ -389,6 +383,7 @@ fn synthesize_dict_data_defs(
                 constructors: vec![ConstructorDef {
                     id: legacy_ctor_id(&info.dict_ctor),
                     name: info.dict_ctor.clone(),
+                    short_name: info.dict_ctor.clone(),
                     fields: field_types,
                     full_type: ctor_ty,
                 }],
@@ -409,10 +404,9 @@ fn synthesize_selector_defs(
             .expect("ICE: class runtime info must exist for synthesized selector");
 
         for (method_ix, method) in class_def.methods.iter().enumerate() {
-            let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
             let selector = info
                 .methods
-                .get(short_name)
+                .get(&method.short_name)
                 .expect("ICE: method runtime info must exist for synthesized selector")
                 .selector_name
                 .clone();
@@ -478,7 +472,8 @@ fn synthesize_selector_defs(
 
             out.push(TermDefinition {
                 id: legacy_def_id(&selector),
-                name: selector,
+                name: selector.clone(),
+                short_name: selector,
                 signature: Some(selector_scheme),
                 body: TermExprNode::new(TermExpr::Abs(dict_arg, None, Box::new(body)), mk_anno()),
             });
@@ -492,14 +487,7 @@ fn build_method_to_class(module: &ResolvedModule<TcMetadata, Span>) -> HashMap<S
 
     for class_def in &module.class_defs {
         for method in &class_def.methods {
-            let short_name = method
-                .name
-                .rsplit('.')
-                .next()
-                .unwrap_or(&method.name)
-                .to_string();
-
-            method_to_class.insert(short_name, class_def.name.clone());
+            method_to_class.insert(method.short_name.clone(), class_def.name.clone());
             method_to_class.insert(method.name.clone(), class_def.name.clone());
         }
     }
@@ -521,10 +509,7 @@ fn build_constrained_func_info(
             };
 
             constrained_funcs.insert(def.name.clone(), info.clone());
-
-            let short_name = def.name.rsplit('.').next().unwrap_or(&def.name).to_string();
-
-            constrained_funcs.insert(short_name, info);
+            constrained_funcs.insert(def.short_name.clone(), info);
         }
     }
 
@@ -581,6 +566,7 @@ fn elaborate_func_defs(
             TermDefinition {
                 id: def.id,
                 name: def.name.clone(),
+                short_name: def.short_name.clone(),
                 signature: Some(Scheme {
                     quantifiers: sig.quantifiers.clone(),
                     predicates: Vec::new(),
@@ -696,16 +682,10 @@ fn synthesize_instance_dict_defs(
 
         // Then synthesize ordinary method fields.
         for class_method in &class_def.methods {
-            let short_name = class_method
-                .name
-                .rsplit('.')
-                .next()
-                .unwrap_or(&class_method.name);
-
             let impl_method = inst
                 .methods
                 .iter()
-                .find(|m| m.name == short_name)
+                .find(|m| m.name == class_method.short_name)
                 .unwrap_or_else(|| {
                     panic!("ICE: missing instance method: {} lacks {}",
                         inst.head.pretty_with_tables(tables),
@@ -751,7 +731,8 @@ fn synthesize_instance_dict_defs(
 
         out.push(TermDefinition {
             id: legacy_def_id(&dict_name),
-            name: dict_name,
+            name: dict_name.clone(),
+            short_name: dict_name,
             signature: Some(Scheme {
                 quantifiers,
                 predicates: Vec::new(),

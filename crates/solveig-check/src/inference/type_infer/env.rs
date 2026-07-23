@@ -317,11 +317,13 @@ mod tests {
                 ClassDefinition {
                     id: class_id,
                     name: "C".to_string(),
+                    short_name: "C".to_string(),
                     params: Vec::new(),
                     superclasses: Vec::new(),
                     methods: vec![ClassMethodDef {
                         id: method_id,
                         name: "C.method".to_string(),
+                        short_name: "method".to_string(),
                         scheme: Scheme::mono(TypeExpr::TyUnit),
                     }],
                 },
@@ -356,6 +358,7 @@ mod tests {
             class_defs: vec![ClassDefinition {
                 id: class_id,
                 name: "test.EnvClass".to_string(),
+                short_name: "EnvClass".to_string(),
                 params: Vec::new(),
                 superclasses: Vec::new(),
                 methods: Vec::new(),
@@ -393,6 +396,7 @@ mod tests {
                 ClassDefinition {
                     id: class_id,
                     name: class_name.clone(),
+                    short_name: "Sub".to_string(),
                     params: vec![("a".to_string(), Kind::Star)],
                     superclasses: vec![Predicate::legacy(
                         superclass_name.clone(),
@@ -430,6 +434,7 @@ mod tests {
             tycon_id,
             TyConInfo {
                 name: legacy_symbol_id("test.pretty.Widget"),
+                short_name: legacy_symbol_id("Widget"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Primitive,
             },
@@ -440,9 +445,11 @@ mod tests {
             class_id,
             ClassInfo {
                 name: legacy_symbol_id("test.pretty.Showy"),
+                short_name: legacy_symbol_id("Showy"),
                 definition: ClassDefinition {
                     id: class_id,
                     name: "test.pretty.Showy".to_string(),
+                    short_name: "Showy".to_string(),
                     params: Vec::new(),
                     superclasses: Vec::new(),
                     methods: Vec::new(),

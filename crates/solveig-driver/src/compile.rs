@@ -407,7 +407,7 @@ impl<'a> FrontendState<'a> {
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
-                for class_def in api.filtered(self.session, &imp.spec).class_defs.values() {
+                for class_def in api.filtered(&imp.spec).class_defs.values() {
                     out.insert(
                         class_def.id,
                         class_def
@@ -475,7 +475,7 @@ impl<'a> FrontendState<'a> {
             tycon_table: imported_tycon_table,
             ctor_table: imported_ctor_table,
             class_table: imported_class_table,
-        } = collect_imported_type_info(self.session, &imported_typed);
+        } = collect_imported_type_info(&imported_typed);
 
         let mut check_env = TypeCheckEnv::from_module(&resolved);
 
@@ -562,7 +562,7 @@ impl<'a> FrontendState<'a> {
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
-                let filtered = api.filtered(self.session, &imp.spec);
+                let filtered = api.filtered(&imp.spec);
                 for (sym, kind) in &filtered.type_kinds {
                     let id = filtered
                         .type_ids
@@ -589,7 +589,7 @@ struct ImportedTypeInfo {
     class_table: ClassTable,
 }
 
-fn collect_imported_type_info(session: &Session, imports: &[ImportedTypedApi]) -> ImportedTypeInfo {
+fn collect_imported_type_info(imports: &[ImportedTypedApi]) -> ImportedTypeInfo {
     let mut func_schemes = HashMap::new();
     let mut tycon_kinds = HashMap::new();
     let mut constructor_types = HashMap::new();
@@ -612,7 +612,7 @@ fn collect_imported_type_info(session: &Session, imports: &[ImportedTypedApi]) -
         };
 
         imp.api
-            .filtered(session, &imp.spec)
+            .filtered(&imp.spec)
             .extend_display_maps(&mut display_maps);
     }
 

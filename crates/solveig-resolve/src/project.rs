@@ -389,24 +389,15 @@ impl TypedModuleApi {
         }
     }
 
-    fn include_class_methods(
-        &self,
-        session: &Session,
-        out: &mut Self,
-        class_def: &ClassDefinition,
-    ) {
+    fn include_class_methods(&self, out: &mut Self, class_def: &ClassDefinition) {
         for method in &class_def.methods {
-            let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
-
-            for (sym, scheme) in &self.term_schemes {
-                if session.str(sym.name) == short_name {
-                    out.term_schemes.insert(*sym, scheme.clone());
-                }
+            if let Some(scheme) = self.term_schemes.get(&method.id) {
+                out.term_schemes.insert(method.id, scheme.clone());
             }
         }
     }
 
-    pub fn filtered(&self, session: &Session, spec: &ImportSpec) -> Self {
+    pub fn filtered(&self, spec: &ImportSpec) -> Self {
         match spec {
             ImportSpec::All => self.clone(),
 
@@ -449,11 +440,10 @@ impl TypedModuleApi {
                 for (sym, class_def) in &self.class_defs {
                     let class_selected = names.iter().any(|name| name == &sym.name);
 
-                    let method_selected = class_def.methods.iter().any(|method| {
-                        let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
-
-                        names.iter().any(|name| session.str(*name) == short_name)
-                    });
+                    let method_selected = class_def
+                        .methods
+                        .iter()
+                        .any(|method| names.iter().any(|name| name == &method.id.name));
 
                     if class_selected || method_selected {
                         // If the class itself was selected, expose its method terms too.
@@ -467,7 +457,7 @@ impl TypedModuleApi {
                     self.include_class_with_superclasses(&mut out, &sym);
 
                     if include_methods && let Some(class_def) = self.class_defs.get(&sym) {
-                        self.include_class_methods(session, &mut out, class_def);
+                        self.include_class_methods(&mut out, class_def);
                     }
                 }
 
@@ -1037,11 +1027,13 @@ mod tests {
 
         let data_def = DataDefinition {
             name: type_name.to_string(),
+            short_name: "Widget".to_string(),
             ty_params: Vec::new(),
             tycon_kind: Kind::Star,
             constructors: vec![ConstructorDef {
                 id: ctor_id,
                 name: ctor_name.to_string(),
+                short_name: "MkWidget".to_string(),
                 fields: vec![TypeExpr::TyUnit],
                 full_type: ctor_ty.clone(),
             }],
@@ -1052,6 +1044,7 @@ mod tests {
             tycon_id,
             TyConInfo {
                 name: legacy_symbol_id(type_name),
+                short_name: legacy_symbol_id("Widget"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Data(data_def.clone()),
             },
@@ -1062,6 +1055,7 @@ mod tests {
             ctor_id,
             CtorInfo {
                 name: legacy_symbol_id(ctor_name),
+                short_name: legacy_symbol_id("MkWidget"),
                 tycon: tycon_id,
                 fields: vec![TypeExpr::TyUnit],
                 full_type: ctor_ty.clone(),

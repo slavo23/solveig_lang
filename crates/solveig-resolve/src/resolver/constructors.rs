@@ -184,6 +184,7 @@ impl<'a> Resolver<'a> {
                     Some(RawDataDef {
                         id: legacy_tycon_id(&data_name),
                         name: data_name,
+                        short_name: self.symbol_text(*name).to_string(),
                         span: self.file_span(cx, defn.1),
                         ty_params: ty_params
                             .iter()
@@ -192,7 +193,10 @@ impl<'a> Resolver<'a> {
                         constructors: constructors
                             .iter()
                             .map(|constructor| RawConstructorDef {
-                                name: self.qualified_def_name(self.local_def_id(cx, constructor.0.name.0)),
+                                name: self.qualified_def_name(
+                                    self.local_def_id(cx, constructor.0.name.0),
+                                ),
+                                short_name: self.symbol_text(constructor.0.name.0).to_string(),
                                 span: self.file_span(cx, constructor.1),
                                 fields: constructor
                                     .0
@@ -239,6 +243,7 @@ impl<'a> Resolver<'a> {
                 core_ctors.push(ConstructorDef {
                     id: ctor_id,
                     name: ctor.name.clone(),
+                    short_name: ctor.short_name.clone(),
                     fields: ctor.kinded_fields.clone(),
                     full_type: ctor.full_type.clone(),
                 });
@@ -248,6 +253,7 @@ impl<'a> Resolver<'a> {
 
             data_defs.push(DataDefinition {
                 name: idef.name.clone(),
+                short_name: idef.short_name.clone(),
                 ty_params: idef.ty_params.clone(),
                 tycon_kind: idef.tycon_kind.clone(),
                 constructors: core_ctors,

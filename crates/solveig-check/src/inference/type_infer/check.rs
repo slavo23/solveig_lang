@@ -241,8 +241,7 @@ pub fn check_and_elab_module(
 
         for inst_method in &inst.methods {
             let class_method = class_def.methods.iter().find(|method| {
-                let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
-                method.name == inst_method.name || short_name == inst_method.name
+                method.name == inst_method.name || method.short_name == inst_method.name
             });
 
             let class_method = match class_method {
@@ -341,6 +340,7 @@ pub fn check_and_elab_module(
                             checked_defs.push(TermDefinition {
                                 id: func_def.id,
                                 name: func_def.name.clone(),
+                                short_name: func_def.short_name.clone(),
                                 signature: Some(final_scheme.clone()),
                                 body: zonked_expr,
                             });
@@ -373,6 +373,7 @@ pub fn check_and_elab_module(
                         checked_defs.push(TermDefinition {
                             id: func_def.id,
                             name: func_def.name.clone(),
+                            short_name: func_def.short_name.clone(),
                             signature: Some(final_scheme.clone()),
                             body: zonked_expr,
                         });

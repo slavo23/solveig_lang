@@ -110,8 +110,7 @@ impl Witness {
             Witness::Wild => "_".to_string(),
 
             Witness::Head(Head::Constructor(id), args) => {
-                let display_name = ctor_table_name(*id, ctor_table);
-                let name = short_name(&display_name);
+                let name = ctor_table_short_name(*id, ctor_table);
 
                 if name == "Nil" && args.is_empty() {
                     return "[]".to_string();
@@ -126,7 +125,7 @@ impl Witness {
                 }
 
                 if args.is_empty() {
-                    name.to_string()
+                    name
                 } else {
                     format!(
                         "{} {}",
@@ -170,7 +169,7 @@ struct ConstructorEnv {
 fn is_open_primitive_type(ty: &TypeExpr, pretty_tables: PrettyTables<'_>) -> bool {
     match normalize_type(ty) {
         TypeExpr::TyCon(id) => matches!(
-            short_name(&tycon_table_name(id, pretty_tables)),
+            tycon_table_short_name(id, pretty_tables).as_str(),
             "Int" | "String"
         ),
         TypeExpr::TyApp(lhs, _) => is_open_primitive_type(&lhs, pretty_tables),
@@ -212,8 +211,11 @@ impl ConstructorEnv {
             constructors.sort_by(|left, right| {
                 let left_name = ctor_table_name(*left, ctor_table);
                 let right_name = ctor_table_name(*right, ctor_table);
-                short_name(&left_name)
-                    .cmp(short_name(&right_name))
+                let left_short_name = ctor_table_short_name(*left, ctor_table);
+                let right_short_name = ctor_table_short_name(*right, ctor_table);
+
+                left_short_name
+                    .cmp(&right_short_name)
                     .then_with(|| left_name.cmp(&right_name))
             });
         }
@@ -707,10 +709,6 @@ fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<TyVarId, TypeExpr>) -> TypeExp
     }
 }
 
-fn short_name(name: &str) -> &str {
-    name.rsplit('.').next().unwrap_or(name)
-}
-
 fn ctor_table_name(id: CtorId, ctor_table: &CtorTable) -> String {
     ctor_table
         .get(id)
@@ -718,11 +716,18 @@ fn ctor_table_name(id: CtorId, ctor_table: &CtorTable) -> String {
         .unwrap_or_else(|| panic!("ICE: exhaustiveness constructor table missing CtorId {id:?}"))
 }
 
-fn tycon_table_name(id: TyConId, pretty_tables: PrettyTables<'_>) -> String {
+fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable) -> String {
+    ctor_table
+        .get(id)
+        .map(|info| symbol_display_name(info.short_name))
+        .unwrap_or_else(|| panic!("ICE: exhaustiveness constructor table missing CtorId {id:?}"))
+}
+
+fn tycon_table_short_name(id: TyConId, pretty_tables: PrettyTables<'_>) -> String {
     pretty_tables
         .tycons
         .get(id)
-        .map(|info| symbol_display_name(info.name))
+        .map(|info| symbol_display_name(info.short_name))
         .unwrap_or_else(|| panic!("ICE: exhaustiveness type table missing TyConId {id:?}"))
 }
 
@@ -833,6 +838,7 @@ mod tests {
             tycon_id,
             TyConInfo {
                 name: legacy_symbol_id("test.pretty.Widget"),
+                short_name: legacy_symbol_id("Widget"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Primitive,
             },
@@ -843,6 +849,7 @@ mod tests {
             hidden_id,
             CtorInfo {
                 name: legacy_symbol_id("test.pretty.Hidden"),
+                short_name: legacy_symbol_id("Hidden"),
                 tycon: tycon_id,
                 fields: Vec::new(),
                 full_type: widget.clone(),
@@ -853,6 +860,7 @@ mod tests {
             shown_id,
             CtorInfo {
                 name: legacy_symbol_id("test.pretty.Shown"),
+                short_name: legacy_symbol_id("Shown"),
                 tycon: tycon_id,
                 fields: Vec::new(),
                 full_type: widget.clone(),
@@ -960,6 +968,7 @@ mod tests {
                 legacy_tycon_id(name),
                 TyConInfo {
                     name: legacy_symbol_id(name),
+                    short_name: legacy_symbol_id(name),
                     kind: Kind::Star,
                     definition: TyConDefinition::Primitive,
                 },
@@ -994,6 +1003,7 @@ mod tests {
             ctor_id,
             CtorInfo {
                 name: legacy_symbol_id(ctor_name),
+                short_name: legacy_symbol_id(ctor_name),
                 tycon: legacy_tycon_id(tycon_name),
                 fields: Vec::new(),
                 full_type: constructor_types

@@ -302,6 +302,7 @@ impl ClassKindInferencer {
                 Ok(solveig_ast::ast::ClassMethodDef {
                     id: method.id,
                     name: method.name.clone(),
+                    short_name: method.short_name.clone(),
                     scheme,
                 })
             })
@@ -328,6 +329,7 @@ impl ClassKindInferencer {
         Ok(ClassDefinition {
             id: class_def.id,
             name: class_def.name.clone(),
+            short_name: class_def.short_name.clone(),
             params,
             superclasses,
             methods,
@@ -359,6 +361,7 @@ mod tests {
         let class_def = ClassDefinition {
             id: class_id,
             name: "sample.WidgetLike".to_string(),
+            short_name: "WidgetLike".to_string(),
             params: vec![("a".to_string(), Kind::Star)],
             superclasses: vec![Predicate {
                 class_id: superclass_id,
@@ -370,6 +373,7 @@ mod tests {
                     name: Symbol(1),
                 },
                 name: "sample.WidgetLike.method".to_string(),
+                short_name: "method".to_string(),
                 scheme: Scheme {
                     quantifiers: Vec::new(),
                     predicates: Vec::new(),

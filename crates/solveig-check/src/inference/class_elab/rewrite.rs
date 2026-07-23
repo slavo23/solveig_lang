@@ -19,12 +19,9 @@ fn rewrite_expr(
                     .get(class_name)
                     .unwrap_or_else(|| panic!("ICE: missing class runtime info for {}", class_name));
 
-                let short_name = name.rsplit('.').next().unwrap_or(&name);
-
                 let method_rt = class_rt
                     .methods
                     .get(&name)
-                    .or_else(|| class_rt.methods.get(short_name))
                     .unwrap_or_else(|| panic!("ICE: missing method runtime info for {}", name));
 
                 let mut subst = HashMap::new();

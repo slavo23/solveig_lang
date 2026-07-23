@@ -355,6 +355,7 @@ impl<'a> Resolver<'a> {
                     Some(TermDefinition {
                         id: fn_id,
                         name: fn_name,
+                        short_name: self.symbol_text(*name).to_string(),
                         signature: sig,
                         body: wrapped,
                     })

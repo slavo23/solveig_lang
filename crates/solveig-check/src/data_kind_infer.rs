@@ -11,6 +11,7 @@ use crate::signature_infer::KindError;
 pub struct RawDataDef {
     pub id: TyConId,
     pub name: String,
+    pub short_name: String,
     pub span: FileSpan,
     pub ty_params: Vec<String>,
     pub constructors: Vec<RawConstructorDef>,
@@ -19,6 +20,7 @@ pub struct RawDataDef {
 #[derive(Debug, Clone)]
 pub struct RawConstructorDef {
     pub name: String,
+    pub short_name: String,
     pub span: FileSpan,
     pub fields: Vec<TypeExpr>,
 }
@@ -27,6 +29,7 @@ pub struct RawConstructorDef {
 pub struct InferredDataDef {
     pub id: TyConId,
     pub name: String,
+    pub short_name: String,
     pub ty_params: Vec<(String, Kind)>,
     pub tycon_kind: Kind,
     pub constructors: Vec<InferredConstructorDef>,
@@ -35,6 +38,7 @@ pub struct InferredDataDef {
 #[derive(Debug, Clone)]
 pub struct InferredConstructorDef {
     pub name: String,
+    pub short_name: String,
     pub kinded_fields: Vec<TypeExpr>,
     pub full_type: TypeExpr,
 }
@@ -367,8 +371,9 @@ impl DataKindInferencer {
         struct DtResult {
             id: TyConId,
             name: String,
+            short_name: String,
             param_metas: Vec<(String, Kind)>,
-            ctor_fields: Vec<(String, Vec<TypeExpr>)>,
+            ctor_fields: Vec<(String, String, Vec<TypeExpr>)>,
         }
 
         let mut dt_results: Vec<DtResult> = Vec::new();
@@ -405,12 +410,13 @@ impl DataKindInferencer {
                 let rebuilt = self
                     .check_constructor(&ctor.fields, &ret_ty, &tycon_env, &var_env)
                     .map_err(|error| error.with_span(ctor.span))?;
-                ctor_fields.push((ctor.name.clone(), rebuilt));
+                ctor_fields.push((ctor.name.clone(), ctor.short_name.clone(), rebuilt));
             }
 
             dt_results.push(DtResult {
                 id: def.id,
                 name: def.name.clone(),
+                short_name: def.short_name.clone(),
                 param_metas,
                 ctor_fields,
             });
@@ -429,11 +435,12 @@ impl DataKindInferencer {
             let tycon_kind = self.zonk(&tycon_metas[&dt.id]);
 
             let mut ctors = Vec::new();
-            for (cn, fields) in &dt.ctor_fields {
+            for (cn, short_cn, fields) in &dt.ctor_fields {
                 let kf: Vec<TypeExpr> = fields.iter().map(|f| self.apply_type(f)).collect();
                 let full_type = build_constructor_type(dt.id, &ty_params, &kf);
                 ctors.push(InferredConstructorDef {
                     name: cn.clone(),
+                    short_name: short_cn.clone(),
                     kinded_fields: kf,
                     full_type,
                 });
@@ -442,6 +449,7 @@ impl DataKindInferencer {
             results.push(InferredDataDef {
                 id: dt.id,
                 name: dt.name.clone(),
+                short_name: dt.short_name.clone(),
                 ty_params,
                 tycon_kind,
                 constructors: ctors,
@@ -633,10 +641,12 @@ mod tests {
         RawDataDef {
             id,
             name: name.to_string(),
+            short_name: name.to_string(),
             span: test_span(),
             ty_params: Vec::new(),
             constructors: vec![RawConstructorDef {
                 name: format!("{name}.Mk"),
+                short_name: "Mk".to_string(),
                 span: test_span(),
                 fields,
             }],

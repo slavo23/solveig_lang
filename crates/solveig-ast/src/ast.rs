@@ -185,19 +185,18 @@ pub fn legacy_tycon_id(name: &str) -> TyConId {
 }
 
 pub fn tycon_display_name(id: TyConId) -> String {
-    if id.0 & LEGACY_TYCON_TAG == 0 {
-        return format!("T{}", id.0);
-    }
-
     let registry = legacy_tycon_registry()
         .lock()
         .expect("ICE: legacy type constructor registry lock poisoned");
     let index = (id.0 & !LEGACY_TYCON_TAG) as usize;
-    registry
-        .names
-        .get(index)
-        .cloned()
-        .unwrap_or_else(|| format!("T{}", id.0))
+
+    if id.0 & LEGACY_TYCON_TAG != 0
+        && let Some(name) = registry.names.get(index)
+    {
+        return name.clone();
+    }
+
+    tycon_fallback_name(id)
 }
 
 pub fn legacy_ctor_id(name: &str) -> CtorId {
@@ -216,19 +215,18 @@ pub fn legacy_ctor_id(name: &str) -> CtorId {
 }
 
 pub fn ctor_display_name(id: CtorId) -> String {
-    if id.0 & LEGACY_CTOR_TAG == 0 {
-        return format!("C{}", id.0);
-    }
-
     let registry = legacy_ctor_registry()
         .lock()
         .expect("ICE: legacy constructor registry lock poisoned");
     let index = (id.0 & !LEGACY_CTOR_TAG) as usize;
-    registry
-        .names
-        .get(index)
-        .cloned()
-        .unwrap_or_else(|| format!("C{}", id.0))
+
+    if id.0 & LEGACY_CTOR_TAG != 0
+        && let Some(name) = registry.names.get(index)
+    {
+        return name.clone();
+    }
+
+    ctor_fallback_name(id)
 }
 
 pub fn legacy_class_id(name: &str) -> ClassId {
@@ -247,19 +245,30 @@ pub fn legacy_class_id(name: &str) -> ClassId {
 }
 
 pub fn class_display_name(id: ClassId) -> String {
-    if id.0 & LEGACY_CLASS_TAG == 0 {
-        return format!("K{}", id.0);
-    }
-
     let registry = legacy_class_registry()
         .lock()
         .expect("ICE: legacy class registry lock poisoned");
     let index = (id.0 & !LEGACY_CLASS_TAG) as usize;
-    registry
-        .names
-        .get(index)
-        .cloned()
-        .unwrap_or_else(|| format!("K{}", id.0))
+
+    if id.0 & LEGACY_CLASS_TAG != 0
+        && let Some(name) = registry.names.get(index)
+    {
+        return name.clone();
+    }
+
+    class_fallback_name(id)
+}
+
+fn tycon_fallback_name(id: TyConId) -> String {
+    format!("T{}", id.0)
+}
+
+fn ctor_fallback_name(id: CtorId) -> String {
+    format!("C{}", id.0)
+}
+
+fn class_fallback_name(id: ClassId) -> String {
+    format!("K{}", id.0)
 }
 
 pub fn legacy_symbol_id(name: &str) -> Symbol {
@@ -672,11 +681,7 @@ impl Pretty<Ty> for Ty {
                 TypeExpr::TyUnit => "()".into(),
                 TypeExpr::TyVar(id) => tyvar_display_name(*id),
                 TypeExpr::TyExVar(id) => legacy_evar_name(*id),
-                TypeExpr::TyCon(id) => tycon_display_name(*id)
-                    .split('.')
-                    .next_back()
-                    .unwrap()
-                    .to_string(),
+                TypeExpr::TyCon(id) => tycon_fallback_name(*id),
 
                 TypeExpr::TyArr(lhs, rhs) => {
                     let lhs_fmt = traverse_helper(lhs, PRECEDENCE_APP);
@@ -738,13 +743,6 @@ impl Pretty<Ty> for Ty {
 
 impl Predicate {
     pub fn pretty(&self) -> String {
-        let full_class_name = class_display_name(self.class_id);
-        let class_name = full_class_name
-            .split('.')
-            .next_back()
-            .unwrap_or(&full_class_name)
-            .to_string();
-
         let args = self
             .args
             .iter()
@@ -761,9 +759,9 @@ impl Predicate {
             .join(" ");
 
         if args.is_empty() {
-            class_name
+            class_fallback_name(self.class_id)
         } else {
-            format!("{class_name} {args}")
+            format!("{} {args}", class_fallback_name(self.class_id))
         }
     }
 
@@ -775,7 +773,7 @@ impl Predicate {
     }
 
     pub fn class_name(&self) -> String {
-        class_display_name(self.class_id)
+        class_fallback_name(self.class_id)
     }
 }
 
@@ -885,6 +883,7 @@ pub struct CaseArm<A, P = A> {
 pub struct TermDefinition<A, P = A> {
     pub id: DefId,
     pub name: String,
+    pub short_name: String,
     pub signature: Option<Scheme>,
     pub body: TermExprNode<A, P>,
 }
@@ -930,6 +929,7 @@ pub fn identity_tables_from_defs(
             tycon_id,
             TyConInfo {
                 name: legacy_symbol_id(&data_def.name),
+                short_name: legacy_symbol_id(&data_def.short_name),
                 kind: data_def.tycon_kind.clone(),
                 definition: TyConDefinition::Data(data_def.clone()),
             },
@@ -940,6 +940,7 @@ pub fn identity_tables_from_defs(
                 ctor_def.id,
                 CtorInfo {
                     name: legacy_symbol_id(&ctor_def.name),
+                    short_name: legacy_symbol_id(&ctor_def.short_name),
                     tycon: tycon_id,
                     fields: ctor_def.fields.clone(),
                     full_type: ctor_def.full_type.clone(),
@@ -958,6 +959,7 @@ pub fn identity_tables_from_defs(
             class_def.id,
             ClassInfo {
                 name: legacy_symbol_id(&class_def.name),
+                short_name: legacy_symbol_id(&class_def.short_name),
                 definition: class_def.clone(),
             },
         );
@@ -969,6 +971,7 @@ pub fn identity_tables_from_defs(
 #[derive(Clone, Debug, PartialEq)]
 pub struct DataDefinition {
     pub name: String,
+    pub short_name: String,
     pub ty_params: Vec<(String, Kind)>,
     pub tycon_kind: Kind,
     pub constructors: Vec<ConstructorDef>,
@@ -983,6 +986,7 @@ pub enum TyConDefinition {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TyConInfo {
     pub name: Symbol,
+    pub short_name: Symbol,
     pub kind: Kind,
     pub definition: TyConDefinition,
 }
@@ -1032,6 +1036,7 @@ impl TyConTable {
 pub struct ConstructorDef {
     pub id: CtorId,
     pub name: String,
+    pub short_name: String,
     pub fields: Vec<TypeExpr>,
     pub full_type: TypeExpr,
 }
@@ -1046,6 +1051,7 @@ pub struct CtorRuntimeInfo {
 #[derive(Clone, Debug, PartialEq)]
 pub struct CtorInfo {
     pub name: Symbol,
+    pub short_name: Symbol,
     pub tycon: TyConId,
     pub fields: Vec<TypeExpr>,
     pub full_type: TypeExpr,
@@ -1110,6 +1116,7 @@ pub struct Scheme {
 pub struct ClassMethodDef {
     pub id: DefId,
     pub name: String,
+    pub short_name: String,
     pub scheme: Scheme,
 }
 
@@ -1117,6 +1124,7 @@ pub struct ClassMethodDef {
 pub struct ClassDefinition {
     pub id: ClassId,
     pub name: String,
+    pub short_name: String,
     pub params: Vec<(String, Kind)>,
     pub superclasses: Vec<Predicate>,
     pub methods: Vec<ClassMethodDef>,
@@ -1125,6 +1133,7 @@ pub struct ClassDefinition {
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClassInfo {
     pub name: Symbol,
+    pub short_name: Symbol,
     pub definition: ClassDefinition,
 }
 
@@ -1178,24 +1187,20 @@ pub struct PrettyTables<'a> {
     pub classes: &'a ClassTable,
 }
 
-fn short_display_name(name: &str) -> &str {
-    name.rsplit('.').next().unwrap_or(name)
-}
-
-fn tycon_display_name_with_tables(id: TyConId, tables: PrettyTables<'_>) -> String {
+fn tycon_pretty_name(id: TyConId, tables: PrettyTables<'_>) -> String {
     tables
         .tycons
         .get(id)
-        .map(|info| symbol_display_name(info.name))
-        .unwrap_or_else(|| tycon_display_name(id))
+        .map(|info| symbol_display_name(info.short_name))
+        .unwrap_or_else(|| panic!("ICE: pretty tables missing TyConId {id:?}"))
 }
 
-fn class_display_name_with_tables(id: ClassId, tables: PrettyTables<'_>) -> String {
+fn class_pretty_name(id: ClassId, tables: PrettyTables<'_>) -> String {
     tables
         .classes
         .get(id)
-        .map(|info| symbol_display_name(info.name))
-        .unwrap_or_else(|| class_display_name(id))
+        .map(|info| symbol_display_name(info.short_name))
+        .unwrap_or_else(|| panic!("ICE: pretty tables missing ClassId {id:?}"))
 }
 
 impl TypeExpr {
@@ -1207,9 +1212,7 @@ impl TypeExpr {
                 TypeExpr::TyUnit => "()".into(),
                 TypeExpr::TyVar(id) => tyvar_display_name(*id),
                 TypeExpr::TyExVar(id) => legacy_evar_name(*id),
-                TypeExpr::TyCon(id) => {
-                    short_display_name(&tycon_display_name_with_tables(*id, tables)).to_string()
-                }
+                TypeExpr::TyCon(id) => tycon_pretty_name(*id, tables),
 
                 TypeExpr::TyArr(lhs, rhs) => {
                     let lhs_fmt = traverse_helper(lhs, PRECEDENCE_APP, tables);
@@ -1274,8 +1277,7 @@ impl TypeExpr {
 
 impl Predicate {
     pub fn pretty_with_tables(&self, tables: PrettyTables<'_>) -> String {
-        let full_class_name = class_display_name_with_tables(self.class_id, tables);
-        let class_name = short_display_name(&full_class_name).to_string();
+        let class_name = class_pretty_name(self.class_id, tables);
 
         let args = self
             .args
@@ -1341,11 +1343,13 @@ mod tests {
         let mut tycons = TyConTable::new();
         let bool_id = tycons.insert(TyConInfo {
             name: session.intern("Bool"),
+            short_name: session.intern("Bool"),
             kind: Kind::Star,
             definition: TyConDefinition::Primitive,
         });
         let list_id = tycons.insert(TyConInfo {
             name: session.intern("List"),
+            short_name: session.intern("List"),
             kind: Kind::make_arrow(Kind::Star, Kind::Star),
             definition: TyConDefinition::Primitive,
         });
@@ -1365,6 +1369,7 @@ mod tests {
         let mut ctors = CtorTable::new();
         let false_id = ctors.insert(CtorInfo {
             name: session.intern("False"),
+            short_name: session.intern("False"),
             tycon: bool_id,
             fields: Vec::new(),
             full_type: TypeExpr::make_con("Bool".to_string()),
@@ -1372,6 +1377,7 @@ mod tests {
         });
         let true_id = ctors.insert(CtorInfo {
             name: session.intern("True"),
+            short_name: session.intern("True"),
             tycon: bool_id,
             fields: Vec::new(),
             full_type: TypeExpr::make_con("Bool".to_string()),
@@ -1391,9 +1397,11 @@ mod tests {
         let mut classes = ClassTable::new();
         let eq_id = classes.insert(ClassInfo {
             name: session.intern("Eq"),
+            short_name: session.intern("Eq"),
             definition: ClassDefinition {
                 id: ClassId(u32::MAX),
                 name: "Eq".to_string(),
+                short_name: "Eq".to_string(),
                 params: vec![("a".to_string(), Kind::Star)],
                 superclasses: Vec::new(),
                 methods: Vec::new(),
@@ -1449,7 +1457,10 @@ mod tests {
         assert_ne!(legacy_tycon_id("test.module.OtherWidget"), id);
         assert_eq!(tycon_display_name(id), name);
         assert_eq!(TypeExpr::make_con(name.to_string()), TypeExpr::TyCon(id));
-        assert_eq!(TypeExpr::make_con(name.to_string()).pretty(), "Widget");
+        assert_eq!(
+            TypeExpr::make_con(name.to_string()).pretty(),
+            format!("T{}", id.0)
+        );
     }
 
     #[test]
@@ -1473,7 +1484,7 @@ mod tests {
         assert_eq!(Predicate::legacy(name.to_string(), Vec::new()).class_id, id);
         assert_eq!(
             Predicate::legacy(name.to_string(), Vec::new()).pretty(),
-            "EqWidget"
+            format!("K{}", id.0)
         );
     }
 
@@ -1488,11 +1499,13 @@ mod tests {
 
         let data_def = DataDefinition {
             name: tycon_name.to_string(),
+            short_name: "Widget".to_string(),
             ty_params: Vec::new(),
             tycon_kind: Kind::Star,
             constructors: vec![ConstructorDef {
                 id: ctor_id,
                 name: ctor_name.to_string(),
+                short_name: "MkWidget".to_string(),
                 fields: vec![TypeExpr::TyUnit],
                 full_type: TypeExpr::make_arr(
                     TypeExpr::TyUnit,
@@ -1504,6 +1517,7 @@ mod tests {
         let class_def = ClassDefinition {
             id: class_id,
             name: class_name.to_string(),
+            short_name: "WidgetLike".to_string(),
             params: Vec::new(),
             superclasses: Vec::new(),
             methods: Vec::new(),
@@ -1558,6 +1572,7 @@ mod tests {
             tycon_id,
             TyConInfo {
                 name: legacy_symbol_id("test.module.TableTy"),
+                short_name: legacy_symbol_id("TableTy"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Primitive,
             },
@@ -1566,9 +1581,11 @@ mod tests {
             class_id,
             ClassInfo {
                 name: legacy_symbol_id("test.module.TableClass"),
+                short_name: legacy_symbol_id("TableClass"),
                 definition: ClassDefinition {
                     id: class_id,
                     name: "test.module.TableClass".to_string(),
+                    short_name: "TableClass".to_string(),
                     params: Vec::new(),
                     superclasses: Vec::new(),
                     methods: Vec::new(),

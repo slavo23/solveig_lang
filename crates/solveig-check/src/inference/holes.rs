@@ -171,12 +171,14 @@ fn constructor_fills(
             continue;
         }
 
-        let name = ctor_table_name(*id, ctor_table);
-        let short = short_name(&name);
         if params.is_empty() {
-            results.push(short.to_string());
+            results.push(ctor_table_short_name(*id, ctor_table));
         } else if let Some(args) = fill_params(&params, ctx) {
-            results.push(format!("{} {}", short, args.join(" ")));
+            results.push(format!(
+                "{} {}",
+                ctor_table_short_name(*id, ctor_table),
+                args.join(" ")
+            ));
         }
     }
 
@@ -194,14 +196,10 @@ fn fill_params(params: &[TypeExpr], ctx: &[(String, TypeExpr)]) -> Option<Vec<St
         .collect()
 }
 
-fn short_name(qualified: &str) -> &str {
-    qualified.rsplit('.').next().unwrap_or(qualified)
-}
-
-fn ctor_table_name(id: CtorId, ctor_table: &CtorTable) -> String {
+fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable) -> String {
     ctor_table
         .get(id)
-        .map(|info| symbol_display_name(info.name))
+        .map(|info| symbol_display_name(info.short_name))
         .unwrap_or_else(|| panic!("ICE: hole diagnostic constructor table missing CtorId {id:?}"))
 }
 
@@ -272,6 +270,7 @@ mod tests {
             tycon_id,
             TyConInfo {
                 name: legacy_symbol_id("test.pretty.Widget"),
+                short_name: legacy_symbol_id("Widget"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Primitive,
             },
@@ -282,6 +281,7 @@ mod tests {
             ctor_id,
             CtorInfo {
                 name: legacy_symbol_id("test.pretty.MakeWidget"),
+                short_name: legacy_symbol_id("MakeWidget"),
                 tycon: tycon_id,
                 fields: Vec::new(),
                 full_type: widget.clone(),
