@@ -961,6 +961,7 @@ pub struct Scheme {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ClassMethodDef {
+    pub id: DefId,
     pub name: String,
     pub scheme: Scheme,
 }

@@ -153,12 +153,10 @@ impl TypeChecker {
             ty: method.scheme.ty.clone(),
         }
     }
-    fn lookup_class_method_scheme(&self, name: &str) -> Option<Scheme> {
+    fn lookup_class_method_scheme(&self, id: DefId) -> Option<Scheme> {
         self.class_defs.iter().find_map(|class_def| {
             class_def.methods.iter().find_map(|method| {
-                let short_name = method.name.rsplit('.').next().unwrap_or(&method.name);
-
-                if method.name == name || short_name == name {
+                if method.id == id {
                     Some(Self::class_method_scheme_for_term_lookup(class_def, method))
                 } else {
                     None
@@ -228,6 +226,49 @@ mod tests {
         assert!(matches!(result, Ok((_, _, TypeExpr::TyUnit))));
 
         let missing_expr = TermExprNode::new(TermExpr::Var(VarRef::Global(other_def_id)), 0..0);
+        assert!(
+            checker
+                .solve_inference(Context::new(), &missing_expr)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn class_method_schemes_are_keyed_by_defid() {
+        let method_id = DefId {
+            module: solveig_ast::ast::ModuleId(5),
+            name: solveig_base::Symbol(8),
+        };
+        let other_method_id = DefId {
+            module: solveig_ast::ast::ModuleId(5),
+            name: solveig_base::Symbol(9),
+        };
+
+        let env = TypeCheckEnv {
+            constructor_types: HashMap::new(),
+            func_schemes: HashMap::new(),
+            class_defs: vec![ClassDefinition {
+                name: "C".to_string(),
+                params: Vec::new(),
+                superclasses: Vec::new(),
+                methods: vec![ClassMethodDef {
+                    id: method_id,
+                    name: "C.method".to_string(),
+                    scheme: Scheme::mono(TypeExpr::TyUnit),
+                }],
+            }],
+            instance_defs: Vec::new(),
+            tycon_kinds: HashMap::new(),
+        };
+
+        let mut checker = TypeChecker::with_env(&env, FileId(0));
+        let expr = TermExprNode::new(TermExpr::Var(VarRef::Global(method_id)), 0..0);
+
+        let result = checker.solve_inference(Context::new(), &expr);
+        assert!(matches!(result, Ok((_, _, TypeExpr::TyUnit))));
+
+        let missing_expr =
+            TermExprNode::new(TermExpr::Var(VarRef::Global(other_method_id)), 0..0);
         assert!(
             checker
                 .solve_inference(Context::new(), &missing_expr)

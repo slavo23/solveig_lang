@@ -110,7 +110,9 @@ impl TypeChecker {
                         elab_node(TermExpr::Var(name.clone()), span, instantiated_ty.clone());
                     return Ok((ctx, elaborated, instantiated_ty));
                 }
-                if let Some(method_scheme) = self.lookup_class_method_scheme(&display_name) {
+                if let VarRef::Global(def_id) = name
+                    && let Some(method_scheme) = self.lookup_class_method_scheme(*def_id)
+                {
                     let (ctx, preds, instantiated_ty) =
                         self.instantiate_scheme(ctx, &method_scheme);
 

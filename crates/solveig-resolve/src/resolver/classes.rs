@@ -290,6 +290,7 @@ impl<'a> Resolver<'a> {
                     let resolved_methods = methods
                         .iter()
                         .map(|method| {
+                            let method_id = self.local_def_id(cx, method.name.0);
                             let raw_method_scheme =
                                 self.resolve_surface_scheme(&method.ty, cx, local);
 
@@ -316,7 +317,8 @@ impl<'a> Resolver<'a> {
                             );
 
                             ClassMethodDef {
-                                name: self.legacy_name(self.local_def_id(cx, method.name.0)),
+                                id: method_id,
+                                name: self.legacy_name(method_id),
                                 scheme,
                             }
                         })

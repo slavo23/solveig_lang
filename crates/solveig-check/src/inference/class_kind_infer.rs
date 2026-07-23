@@ -303,6 +303,7 @@ impl ClassKindInferencer {
             .map(|method| {
                 let scheme = self.infer_scheme(&method.scheme, &env)?;
                 Ok(solveig_ast::ast::ClassMethodDef {
+                    id: method.id,
                     name: method.name.clone(),
                     scheme,
                 })
