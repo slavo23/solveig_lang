@@ -186,6 +186,7 @@ pub fn check_and_elab_module(
     let mut checked_func_schemes = HashMap::<DefId, Scheme>::new();
 
     let mut all_holes = Vec::new();
+    let mut all_warnings = Vec::new();
 
     {
         let checker = TypeChecker::with_env(env, file);
@@ -324,6 +325,7 @@ pub fn check_and_elab_module(
 
             checker.finalize_holes();
             all_holes.extend(checker.holes);
+            all_warnings.extend(checker.warnings);
         }
 
         checked_instance_defs.push(InstanceDefinition {
@@ -405,6 +407,7 @@ pub fn check_and_elab_module(
 
         checker.finalize_holes();
         all_holes.extend(checker.holes);
+        all_warnings.extend(checker.warnings);
     }
 
     if errors.is_empty() {
@@ -422,8 +425,10 @@ pub fn check_and_elab_module(
                 func_defs: checked_defs,
             },
             holes: all_holes,
+            diagnostics: all_warnings,
         })
     } else {
+        errors.extend(all_warnings);
         Err(errors)
     }
 }

@@ -214,6 +214,9 @@ pub enum TypeError {
         class_name: String,
         instance_type: String,
     },
+    UnreachablePattern {
+        span: FileSpan,
+    },
 
     /// Contextual wrapper around the real error that happened while checking an
     /// instance method body against the specialized class method type.
@@ -238,6 +241,7 @@ pub enum TypeError {
 #[derive(Clone, Debug)]
 struct DiagnosticParts {
     code: &'static str,
+    severity: Severity,
     message: String,
     labels: Vec<Label>,
     notes: Vec<String>,
@@ -245,8 +249,17 @@ struct DiagnosticParts {
 
 impl DiagnosticParts {
     fn new(code: &'static str, message: impl Into<String>) -> Self {
+        Self::with_severity(code, Severity::Error, message)
+    }
+
+    fn warning(code: &'static str, message: impl Into<String>) -> Self {
+        Self::with_severity(code, Severity::Warning, message)
+    }
+
+    fn with_severity(code: &'static str, severity: Severity, message: impl Into<String>) -> Self {
         Self {
             code,
+            severity,
             message: message.into(),
             labels: Vec::new(),
             notes: Vec::new(),
@@ -284,7 +297,7 @@ impl DiagnosticParts {
     fn into_diagnostic(self) -> Diagnostic {
         Diagnostic {
             code: self.code,
-            severity: Severity::Error,
+            severity: self.severity,
             message: self.message,
             labels: self.labels,
             notes: self.notes,
@@ -485,6 +498,15 @@ impl TypeError {
             )
             .with_label(Label::primary(*span, "duplicate instance defined here"))
             .with_note("an instance for this type already exists"),
+
+            TypeError::UnreachablePattern { span } => {
+                DiagnosticParts::warning("TC0017", "unreachable pattern").with_label(
+                    Label::primary(
+                        *span,
+                        "this pattern is already covered by earlier case arms",
+                    ),
+                )
+            }
 
             TypeError::InstanceMethodTypeMismatch {
                 span,

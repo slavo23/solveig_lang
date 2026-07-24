@@ -118,15 +118,21 @@ impl TypeChecker {
 
         let scrutinee_type_for_exhaustiveness = self.zonk_type(&theta.apply(&scrutinee_type));
 
-        exhaustiveness::check_case(
+        let case_diagnostics = exhaustiveness::check_case(
             self.file,
-            &self.constructor_types,
+            &self.tycon_table,
             &self.ctor_table,
             self.pretty_tables(),
             &scrutinee_type_for_exhaustiveness,
             arms,
             span.clone(),
-        )?;
+        );
+
+        self.warnings.extend(case_diagnostics.warnings);
+
+        if let Some(error) = case_diagnostics.error {
+            return Err(error);
+        }
 
         let final_type = theta.apply(&result_type);
         let elaborated = elab_node(

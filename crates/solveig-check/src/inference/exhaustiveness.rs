@@ -2,8 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use solveig_ast::ast::{
-    CaseArmNode, CtorId, CtorTable, Literal, PRIM_TYS, Pattern, PatternNode, Predicate,
-    PrettyTables, TyConId, TyVarId, TypeExpr, symbol_display_name,
+    CaseArmNode, CtorId, CtorInfo, CtorTable, DataDefinition, Literal, PRIM_TYS, Pattern,
+    PatternNode, Predicate, PrettyTables, TyConDefinition, TyConId, TyConTable, TyVarId, TypeExpr,
+    legacy_tyvar_id, symbol_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -14,22 +15,25 @@ type Span = Range<usize>;
 /// Maranget-style exhaustiveness checking.
 pub fn check_case(
     file: FileId,
-    constructor_types: &HashMap<CtorId, TypeExpr>,
+    tycon_table: &TyConTable,
     ctor_table: &CtorTable,
     pretty_tables: PrettyTables<'_>,
     scrutinee_type: &TypeExpr,
     arms: &[CaseArmNode<Span>],
     case_span: Span,
-) -> Result<(), TypeError> {
-    let constructor_env = ConstructorEnv::from_constructor_types(constructor_types, ctor_table);
+) -> CaseDiagnostics {
+    let data_env = DataEnv {
+        tycon_table,
+        ctor_table,
+    };
     let checker = ExhaustivenessChecker {
-        constructor_env,
+        data_env,
         ctor_table,
     };
 
     let scrutinee_type = normalize_type(scrutinee_type);
 
-    let mut matrix = arms
+    let matrix = arms
         .iter()
         .map(|arm| vec![lower_pattern(&arm.node.pattern)])
         .collect::<Vec<_>>();
@@ -37,10 +41,12 @@ pub fn check_case(
     let vector = vec![Pat::Wild];
     let types = vec![scrutinee_type.clone()];
 
+    let warnings = unreachable_pattern_warnings(file, &checker, &matrix, &types, arms);
+    let mut exhaustiveness_matrix = matrix;
     let mut missing = Vec::new();
 
     for _ in 0..MAX_MISSING_EXAMPLES {
-        let Some(witness) = checker.useful(&matrix, &vector, &types) else {
+        let Some(witness) = checker.useful(&exhaustiveness_matrix, &vector, &types) else {
             break;
         };
 
@@ -51,18 +57,26 @@ pub fn check_case(
         }
 
         missing.push(rendered);
-        matrix.push(witness_to_pattern_row(&witness));
+        exhaustiveness_matrix.push(witness_to_pattern_row(&witness));
     }
 
-    if missing.is_empty() {
-        Ok(())
+    let error = if missing.is_empty() {
+        None
     } else {
-        Err(TypeError::NonExhaustivePatterns {
+        Some(TypeError::NonExhaustivePatterns {
             span: FileSpan::new(file, SourceSpan::from_usize_range(case_span)),
             scrutinee_type: scrutinee_type.pretty_with_tables(pretty_tables),
             missing,
         })
-    }
+    };
+
+    CaseDiagnostics { warnings, error }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CaseDiagnostics {
+    pub warnings: Vec<TypeError>,
+    pub error: Option<TypeError>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -153,79 +167,32 @@ impl Witness {
     }
 }
 
-#[derive(Clone, Debug)]
-struct ConstructorSig {
-    arg_types: Vec<TypeExpr>,
-    result_type: TypeExpr,
-}
-
-#[derive(Clone, Debug, Default)]
-struct ConstructorEnv {
-    by_name: HashMap<CtorId, ConstructorSig>,
-    by_tycon: HashMap<TyConId, Vec<CtorId>>,
-}
-
 fn is_open_primitive_type(ty: &TypeExpr) -> bool {
-    match normalize_type(ty) {
-        TypeExpr::TyCon(id) => PRIM_TYS.open_primitive_tycon_ids().contains(&id),
-        TypeExpr::TyApp(lhs, _) => is_open_primitive_type(&lhs),
-        _ => false,
-    }
+    type_head_tycon(ty).is_some_and(|id| PRIM_TYS.open_primitive_tycon_ids().contains(&id))
 }
 
-impl ConstructorEnv {
-    fn from_constructor_types(
-        constructor_types: &HashMap<CtorId, TypeExpr>,
-        ctor_table: &CtorTable,
-    ) -> Self {
-        let mut env = ConstructorEnv::default();
+#[derive(Clone, Copy)]
+struct DataEnv<'a> {
+    tycon_table: &'a TyConTable,
+    ctor_table: &'a CtorTable,
+}
 
-        for (constructor_id, constructor_type) in constructor_types {
-            let Some((arg_types, result_type)) = constructor_shape(constructor_type) else {
-                continue;
-            };
-
-            let Some(result_tycon) = type_head_tycon(&result_type) else {
-                continue;
-            };
-
-            env.by_name.insert(
-                *constructor_id,
-                ConstructorSig {
-                    arg_types,
-                    result_type,
-                },
-            );
-
-            env.by_tycon
-                .entry(result_tycon)
-                .or_default()
-                .push(*constructor_id);
-        }
-
-        for constructors in env.by_tycon.values_mut() {
-            constructors.sort_by(|left, right| {
-                let left_name = ctor_table_name(*left, ctor_table);
-                let right_name = ctor_table_name(*right, ctor_table);
-                let left_short_name = ctor_table_short_name(*left, ctor_table);
-                let right_short_name = ctor_table_short_name(*right, ctor_table);
-
-                left_short_name
-                    .cmp(&right_short_name)
-                    .then_with(|| left_name.cmp(&right_name))
-            });
-        }
-
-        env
-    }
-
+impl DataEnv<'_> {
     fn constructors_for_type(&self, ty: &TypeExpr) -> Option<Vec<CtorId>> {
         if is_open_primitive_type(ty) {
             return None;
         }
 
-        let tycon = type_head_tycon(ty)?;
-        self.by_tycon.get(&tycon).cloned()
+        let (tycon, _) = type_head_and_args(ty)?;
+        let data_def = self.data_definition(tycon)?;
+
+        Some(
+            data_def
+                .constructors
+                .iter()
+                .map(|constructor| constructor.id)
+                .collect(),
+        )
     }
 
     fn field_types_for_constructor(
@@ -233,25 +200,29 @@ impl ConstructorEnv {
         constructor_id: CtorId,
         scrutinee_type: &TypeExpr,
     ) -> Option<Vec<TypeExpr>> {
-        let sig = self.by_name.get(&constructor_id)?;
+        let ctor = self.ctor_table.get(constructor_id)?;
+        let (tycon, ty_args) = type_head_and_args(scrutinee_type)?;
 
-        let mut subst = HashMap::<TyVarId, TypeExpr>::new();
-
-        if !match_type_template(&sig.result_type, scrutinee_type, &mut subst) {
+        if ctor.tycon != tycon {
             return None;
         }
 
-        Some(
-            sig.arg_types
-                .iter()
-                .map(|field_type| subst_type_vars(field_type, &subst))
-                .collect(),
-        )
+        let data_def = self.data_definition(ctor.tycon)?;
+        Some(instantiate_ctor_fields(data_def, ctor, &ty_args))
+    }
+
+    fn data_definition(&self, tycon: TyConId) -> Option<&DataDefinition> {
+        let tycon_info = self.tycon_table.get(tycon)?;
+
+        match &tycon_info.definition {
+            TyConDefinition::Data(data_def) => Some(data_def),
+            TyConDefinition::Primitive => None,
+        }
     }
 }
 
 struct ExhaustivenessChecker<'a> {
-    constructor_env: ConstructorEnv,
+    data_env: DataEnv<'a>,
     ctor_table: &'a CtorTable,
 }
 
@@ -325,7 +296,7 @@ impl ExhaustivenessChecker<'_> {
         types: &[TypeExpr],
         first_type: &TypeExpr,
     ) -> Option<Vec<Witness>> {
-        let Some(constructors) = self.constructor_env.constructors_for_type(first_type) else {
+        let Some(constructors) = self.data_env.constructors_for_type(first_type) else {
             let rest = self.useful_default_tail(matrix, vector, types)?;
 
             let mut out = Vec::with_capacity(1 + rest.len());
@@ -485,7 +456,7 @@ impl ExhaustivenessChecker<'_> {
     ) -> Option<Vec<TypeExpr>> {
         match head {
             Head::Constructor(constructor_id) => self
-                .constructor_env
+                .data_env
                 .field_types_for_constructor(*constructor_id, scrutinee_type),
 
             Head::Literal(_) => Some(Vec::new()),
@@ -569,85 +540,84 @@ fn witness_to_pattern(witness: &Witness) -> Pat {
     }
 }
 
-fn constructor_shape(ty: &TypeExpr) -> Option<(Vec<TypeExpr>, TypeExpr)> {
-    let mut current = strip_type_prefixes(ty.clone());
+fn unreachable_pattern_warnings(
+    file: FileId,
+    checker: &ExhaustivenessChecker<'_>,
+    matrix: &[Vec<Pat>],
+    types: &[TypeExpr],
+    arms: &[CaseArmNode<Span>],
+) -> Vec<TypeError> {
+    let mut warnings = Vec::new();
+
+    for (index, row) in matrix.iter().enumerate() {
+        if checker.useful(&matrix[..index], row, types).is_none() {
+            warnings.push(TypeError::UnreachablePattern {
+                span: FileSpan::new(
+                    file,
+                    SourceSpan::from_usize_range(arms[index].node.pattern.anno.clone()),
+                ),
+            });
+        }
+    }
+
+    warnings
+}
+
+fn normalize_type(ty: &TypeExpr) -> TypeExpr {
+    let mut current = ty;
+
+    while let TypeExpr::TyForAll(_, _, body) = current {
+        current = body;
+    }
+
+    current.clone()
+}
+
+fn type_head_tycon(ty: &TypeExpr) -> Option<TyConId> {
+    type_head_and_args(ty).map(|(tycon, _)| tycon)
+}
+
+fn type_head_and_args(ty: &TypeExpr) -> Option<(TyConId, Vec<TypeExpr>)> {
+    let mut current = normalize_type(ty);
     let mut args = Vec::new();
 
     loop {
         match current {
-            TypeExpr::TyArr(arg, result) => {
-                args.push(strip_type_prefixes(*arg));
-                current = strip_type_prefixes(*result);
+            TypeExpr::TyCon(id) => {
+                args.reverse();
+                return Some((id, args));
             }
 
-            result => return Some((args, result)),
-        }
-    }
-}
-
-fn strip_type_prefixes(mut ty: TypeExpr) -> TypeExpr {
-    loop {
-        match ty {
-            TypeExpr::TyForAll(_, _, body) => {
-                ty = *body;
+            TypeExpr::TyApp(lhs, rhs) => {
+                args.push(normalize_type(&rhs));
+                current = normalize_type(&lhs);
             }
 
-            other => return other,
+            TypeExpr::TyUnit
+            | TypeExpr::TyVar(_)
+            | TypeExpr::TyExVar(_)
+            | TypeExpr::TyArr(_, _)
+            | TypeExpr::TyForAll(_, _, _) => return None,
         }
     }
 }
 
-fn normalize_type(ty: &TypeExpr) -> TypeExpr {
-    strip_type_prefixes(ty.clone())
-}
+fn instantiate_ctor_fields(
+    data_def: &DataDefinition,
+    ctor: &CtorInfo,
+    ty_args: &[TypeExpr],
+) -> Vec<TypeExpr> {
+    let subst = data_def
+        .ty_params
+        .iter()
+        .zip(ty_args)
+        .map(|((name, _), arg)| (legacy_tyvar_id(name), arg.clone()))
+        .collect::<HashMap<_, _>>();
 
-fn type_head_tycon(ty: &TypeExpr) -> Option<TyConId> {
-    match normalize_type(ty) {
-        TypeExpr::TyCon(id) => Some(id),
-
-        TypeExpr::TyApp(lhs, _) => type_head_tycon(&lhs),
-
-        TypeExpr::TyUnit
-        | TypeExpr::TyVar(_)
-        | TypeExpr::TyExVar(_)
-        | TypeExpr::TyArr(_, _)
-        | TypeExpr::TyForAll(_, _, _) => None,
-    }
-}
-
-fn match_type_template(
-    template: &TypeExpr,
-    actual: &TypeExpr,
-    subst: &mut HashMap<TyVarId, TypeExpr>,
-) -> bool {
-    match (normalize_type(template), normalize_type(actual)) {
-        (TypeExpr::TyVar(id), actual) => {
-            if let Some(existing) = subst.get(&id) {
-                *existing == actual
-            } else {
-                subst.insert(id, actual);
-                true
-            }
-        }
-
-        (TypeExpr::TyCon(left), TypeExpr::TyCon(right)) => left == right,
-
-        (TypeExpr::TyUnit, TypeExpr::TyUnit) => true,
-
-        (TypeExpr::TyExVar(left), TypeExpr::TyExVar(right)) => left == right,
-
-        (TypeExpr::TyApp(left_fn, left_arg), TypeExpr::TyApp(right_fn, right_arg)) => {
-            match_type_template(&left_fn, &right_fn, subst)
-                && match_type_template(&left_arg, &right_arg, subst)
-        }
-
-        (TypeExpr::TyArr(left_arg, left_ret), TypeExpr::TyArr(right_arg, right_ret)) => {
-            match_type_template(&left_arg, &right_arg, subst)
-                && match_type_template(&left_ret, &right_ret, subst)
-        }
-
-        _ => false,
-    }
+    ctor.fields
+        .iter()
+        .map(|field_type| subst_type_vars(field_type, &subst))
+        .collect()
 }
 
 fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<TyVarId, TypeExpr>) -> TypeExpr {
@@ -693,13 +663,6 @@ fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<TyVarId, TypeExpr>) -> TypeExp
     }
 }
 
-fn ctor_table_name(id: CtorId, ctor_table: &CtorTable) -> String {
-    ctor_table
-        .get(id)
-        .map(|info| symbol_display_name(info.name))
-        .unwrap_or_else(|| panic!("ICE: exhaustiveness constructor table missing CtorId {id:?}"))
-}
-
 fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable) -> String {
     ctor_table
         .get(id)
@@ -711,9 +674,10 @@ fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable) -> String {
 mod tests {
     use super::*;
     use solveig_ast::ast::{
-        CaseArm, ClassTable, CtorInfo, ExprNode, Kind, TermExpr, TermExprNode, TyConDefinition,
-        TyConInfo, TyConTable, legacy_ctor_id, legacy_symbol_id, legacy_tycon_id,
+        CaseArm, ClassTable, ConstructorDef, CtorInfo, ExprNode, Kind, TermExpr, TermExprNode,
+        TyConDefinition, TyConInfo, TyConTable, legacy_ctor_id, legacy_symbol_id, legacy_tycon_id,
     };
+    use solveig_base::Severity;
 
     struct ExhaustivenessCase {
         name: &'static str,
@@ -784,7 +748,6 @@ mod tests {
 
         for case in cases {
             let actual = missing_patterns(
-                &fixtures.constructor_types,
                 &fixtures.ctor_table,
                 &fixtures.tycon_table,
                 &case.scrutinee_type,
@@ -805,9 +768,28 @@ mod tests {
         let hidden_id = CtorId(7);
         let shown_id = CtorId(9);
         let widget = TypeExpr::TyCon(tycon_id);
-
-        let constructor_types =
-            HashMap::from([(hidden_id, widget.clone()), (shown_id, widget.clone())]);
+        let data_def = DataDefinition {
+            name: "test.pretty.Widget".to_string(),
+            short_name: "Widget".to_string(),
+            ty_params: Vec::new(),
+            tycon_kind: Kind::Star,
+            constructors: vec![
+                ConstructorDef {
+                    id: hidden_id,
+                    name: "test.pretty.Hidden".to_string(),
+                    short_name: "Hidden".to_string(),
+                    fields: Vec::new(),
+                    full_type: widget.clone(),
+                },
+                ConstructorDef {
+                    id: shown_id,
+                    name: "test.pretty.Shown".to_string(),
+                    short_name: "Shown".to_string(),
+                    fields: Vec::new(),
+                    full_type: widget.clone(),
+                },
+            ],
+        };
 
         let mut tycon_table = TyConTable::new();
         tycon_table.insert_with_id(
@@ -816,7 +798,7 @@ mod tests {
                 name: legacy_symbol_id("test.pretty.Widget"),
                 short_name: legacy_symbol_id("Widget"),
                 kind: Kind::Star,
-                definition: TyConDefinition::Primitive,
+                definition: TyConDefinition::Data(data_def),
             },
         );
 
@@ -847,9 +829,9 @@ mod tests {
         let class_table = ClassTable::new();
         let arms = vec![arm(Pattern::Con(hidden_id, Vec::new()))];
 
-        match check_case(
+        let diagnostics = check_case(
             FileId(0),
-            &constructor_types,
+            &tycon_table,
             &ctor_table,
             PrettyTables {
                 tycons: &tycon_table,
@@ -858,9 +840,10 @@ mod tests {
             &widget,
             &arms,
             span(),
-        ) {
-            Ok(()) => panic!("ICE: expected non-exhaustive pattern report"),
-            Err(TypeError::NonExhaustivePatterns {
+        );
+
+        match diagnostics.error {
+            Some(TypeError::NonExhaustivePatterns {
                 scrutinee_type,
                 missing,
                 ..
@@ -868,18 +851,94 @@ mod tests {
                 assert_eq!(scrutinee_type, "Widget");
                 assert_eq!(missing, vec!["Shown"]);
             }
-            Err(error) => panic!("ICE: expected only exhaustiveness errors, got {error:?}"),
+            Some(error) => panic!("ICE: expected only exhaustiveness errors, got {error:?}"),
+            None => panic!("ICE: expected non-exhaustive pattern report"),
         }
     }
 
+    #[test]
+    fn instantiate_ctor_fields_substitutes_scrutinee_type_args() {
+        let fixtures = test_constructor_fixtures();
+        let data_def = data_def_named(&fixtures.tycon_table, "List");
+        let cons = fixtures
+            .ctor_table
+            .get(ctor_id("Cons"))
+            .expect("ICE: test fixture must define Cons");
+
+        let fields = instantiate_ctor_fields(data_def, cons, &[int_ty()]);
+
+        assert_eq!(fields, vec![int_ty(), list_ty(int_ty())]);
+    }
+
+    #[test]
+    fn check_case_reports_unreachable_pattern_warnings() {
+        let duplicate = redundancy_warnings_for_patterns(vec![
+            con("True", vec![]),
+            con("True", vec![]),
+            con("False", vec![]),
+        ]);
+
+        assert_eq!(duplicate.len(), 1);
+        assert_unreachable_warning(&duplicate[0]);
+
+        let after_wildcard = redundancy_warnings_for_patterns(vec![wild(), con("True", vec![])]);
+
+        assert_eq!(after_wildcard.len(), 1);
+        assert_unreachable_warning(&after_wildcard[0]);
+
+        let overlapping_but_useful = redundancy_warnings_for_maybe_bool_patterns(vec![
+            con("Just", vec![con("True", vec![])]),
+            con("Just", vec![wild()]),
+            con("Nothing", vec![]),
+        ]);
+
+        assert!(overlapping_but_useful.is_empty());
+    }
+
     struct TestConstructorFixtures {
-        constructor_types: HashMap<CtorId, TypeExpr>,
         ctor_table: CtorTable,
         tycon_table: TyConTable,
     }
 
+    fn redundancy_warnings_for_patterns(patterns: Vec<Pattern<Span>>) -> Vec<TypeError> {
+        check_patterns(bool_ty(), patterns).warnings
+    }
+
+    fn redundancy_warnings_for_maybe_bool_patterns(patterns: Vec<Pattern<Span>>) -> Vec<TypeError> {
+        check_patterns(maybe_ty(bool_ty()), patterns).warnings
+    }
+
+    fn check_patterns(scrutinee_type: TypeExpr, patterns: Vec<Pattern<Span>>) -> CaseDiagnostics {
+        let fixtures = test_constructor_fixtures();
+        let arms = patterns.into_iter().map(arm).collect::<Vec<_>>();
+        let class_table = ClassTable::new();
+
+        check_case(
+            FileId(0),
+            &fixtures.tycon_table,
+            &fixtures.ctor_table,
+            PrettyTables {
+                tycons: &fixtures.tycon_table,
+                classes: &class_table,
+            },
+            &scrutinee_type,
+            &arms,
+            span(),
+        )
+    }
+
+    fn assert_unreachable_warning(error: &TypeError) {
+        let TypeError::UnreachablePattern { .. } = error else {
+            panic!("ICE: expected unreachable-pattern warning, got {error:?}");
+        };
+
+        let diagnostic = error.to_diagnostic();
+        assert_eq!(diagnostic.code, "TC0017");
+        assert_eq!(diagnostic.severity, Severity::Warning);
+        assert_eq!(diagnostic.message, "unreachable pattern");
+    }
+
     fn missing_patterns(
-        constructor_types: &HashMap<CtorId, TypeExpr>,
         ctor_table: &CtorTable,
         tycon_table: &TyConTable,
         scrutinee_type: &TypeExpr,
@@ -890,7 +949,7 @@ mod tests {
 
         match check_case(
             FileId(0),
-            constructor_types,
+            tycon_table,
             ctor_table,
             PrettyTables {
                 tycons: tycon_table,
@@ -899,96 +958,176 @@ mod tests {
             scrutinee_type,
             &arms,
             span(),
-        ) {
-            Ok(()) => Vec::new(),
-            Err(TypeError::NonExhaustivePatterns { missing, .. }) => missing,
-            Err(error) => panic!("ICE: expected only exhaustiveness errors, got {error:?}"),
+        )
+        .error
+        {
+            None => Vec::new(),
+            Some(TypeError::NonExhaustivePatterns { missing, .. }) => missing,
+            Some(error) => panic!("ICE: expected only exhaustiveness errors, got {error:?}"),
         }
     }
 
     fn test_constructor_fixtures() -> TestConstructorFixtures {
-        let mut constructors = HashMap::new();
-
-        constructors.insert(ctor_id("True"), bool_ty());
-        constructors.insert(ctor_id("False"), bool_ty());
-
-        constructors.insert(legacy_ctor_id("Nothing"), forall("a", maybe_ty(tyvar("a"))));
-        constructors.insert(
-            legacy_ctor_id("Just"),
-            forall("a", arr(tyvar("a"), maybe_ty(tyvar("a")))),
-        );
-
-        constructors.insert(legacy_ctor_id("Nil"), forall("a", list_ty(tyvar("a"))));
-        constructors.insert(
-            legacy_ctor_id("Cons"),
-            forall(
-                "a",
-                arr(tyvar("a"), arr(list_ty(tyvar("a")), list_ty(tyvar("a")))),
-            ),
-        );
-
-        constructors.insert(
-            legacy_ctor_id("MkPair"),
-            forall(
-                "a",
-                forall(
-                    "b",
-                    arr(tyvar("a"), arr(tyvar("b"), pair_ty(tyvar("a"), tyvar("b")))),
-                ),
-            ),
-        );
-
         let mut tycon_table = TyConTable::new();
-        for name in ["Bool", "Int", "Maybe", "List", "Pair"] {
-            tycon_table.insert_with_id(
-                tycon_id(name),
-                TyConInfo {
-                    name: legacy_symbol_id(name),
-                    short_name: legacy_symbol_id(name),
-                    kind: Kind::Star,
-                    definition: TyConDefinition::Primitive,
-                },
-            );
+        let mut ctor_table = CtorTable::new();
+
+        tycon_table.insert_with_id(
+            PRIM_TYS.int,
+            TyConInfo {
+                name: legacy_symbol_id("Int"),
+                short_name: legacy_symbol_id("Int"),
+                kind: Kind::Star,
+                definition: TyConDefinition::Primitive,
+            },
+        );
+
+        let data_defs = vec![
+            DataDefinition {
+                name: "Bool".to_string(),
+                short_name: "Bool".to_string(),
+                ty_params: Vec::new(),
+                tycon_kind: Kind::Star,
+                constructors: vec![
+                    ConstructorDef {
+                        id: ctor_id("True"),
+                        name: "True".to_string(),
+                        short_name: "True".to_string(),
+                        fields: Vec::new(),
+                        full_type: bool_ty(),
+                    },
+                    ConstructorDef {
+                        id: ctor_id("False"),
+                        name: "False".to_string(),
+                        short_name: "False".to_string(),
+                        fields: Vec::new(),
+                        full_type: bool_ty(),
+                    },
+                ],
+            },
+            DataDefinition {
+                name: "Maybe".to_string(),
+                short_name: "Maybe".to_string(),
+                ty_params: vec![("a".to_string(), Kind::Star)],
+                tycon_kind: unary_kind(),
+                constructors: vec![
+                    ConstructorDef {
+                        id: ctor_id("Nothing"),
+                        name: "Nothing".to_string(),
+                        short_name: "Nothing".to_string(),
+                        fields: Vec::new(),
+                        full_type: forall("a", maybe_ty(tyvar("a"))),
+                    },
+                    ConstructorDef {
+                        id: ctor_id("Just"),
+                        name: "Just".to_string(),
+                        short_name: "Just".to_string(),
+                        fields: vec![tyvar("a")],
+                        full_type: forall("a", arr(tyvar("a"), maybe_ty(tyvar("a")))),
+                    },
+                ],
+            },
+            DataDefinition {
+                name: "List".to_string(),
+                short_name: "List".to_string(),
+                ty_params: vec![("a".to_string(), Kind::Star)],
+                tycon_kind: unary_kind(),
+                constructors: vec![
+                    ConstructorDef {
+                        id: ctor_id("Nil"),
+                        name: "Nil".to_string(),
+                        short_name: "Nil".to_string(),
+                        fields: Vec::new(),
+                        full_type: forall("a", list_ty(tyvar("a"))),
+                    },
+                    ConstructorDef {
+                        id: ctor_id("Cons"),
+                        name: "Cons".to_string(),
+                        short_name: "Cons".to_string(),
+                        fields: vec![tyvar("a"), list_ty(tyvar("a"))],
+                        full_type: forall(
+                            "a",
+                            arr(tyvar("a"), arr(list_ty(tyvar("a")), list_ty(tyvar("a")))),
+                        ),
+                    },
+                ],
+            },
+            DataDefinition {
+                name: "Pair".to_string(),
+                short_name: "Pair".to_string(),
+                ty_params: vec![("a".to_string(), Kind::Star), ("b".to_string(), Kind::Star)],
+                tycon_kind: binary_kind(),
+                constructors: vec![ConstructorDef {
+                    id: ctor_id("MkPair"),
+                    name: "MkPair".to_string(),
+                    short_name: "MkPair".to_string(),
+                    fields: vec![tyvar("a"), tyvar("b")],
+                    full_type: forall(
+                        "a",
+                        forall(
+                            "b",
+                            arr(tyvar("a"), arr(tyvar("b"), pair_ty(tyvar("a"), tyvar("b")))),
+                        ),
+                    ),
+                }],
+            },
+        ];
+
+        let mut next_tag = 0;
+        for data_def in data_defs {
+            insert_data_definition(&mut tycon_table, &mut ctor_table, data_def, &mut next_tag);
         }
 
-        let mut ctor_table = CtorTable::new();
-        insert_ctor(&mut ctor_table, "True", "Bool", 0, &constructors);
-        insert_ctor(&mut ctor_table, "False", "Bool", 1, &constructors);
-        insert_ctor(&mut ctor_table, "Nothing", "Maybe", 2, &constructors);
-        insert_ctor(&mut ctor_table, "Just", "Maybe", 3, &constructors);
-        insert_ctor(&mut ctor_table, "Nil", "List", 4, &constructors);
-        insert_ctor(&mut ctor_table, "Cons", "List", 5, &constructors);
-        insert_ctor(&mut ctor_table, "MkPair", "Pair", 6, &constructors);
-
         TestConstructorFixtures {
-            constructor_types: constructors,
             ctor_table,
             tycon_table,
         }
     }
 
-    fn insert_ctor(
+    fn insert_data_definition(
+        tycon_table: &mut TyConTable,
         ctor_table: &mut CtorTable,
-        ctor_name: &str,
-        tycon_name: &str,
-        tag: u16,
-        constructor_types: &HashMap<CtorId, TypeExpr>,
+        data_def: DataDefinition,
+        next_tag: &mut u16,
     ) {
-        let ctor_id = ctor_id(ctor_name);
-        ctor_table.insert_with_id(
-            ctor_id,
-            CtorInfo {
-                name: legacy_symbol_id(ctor_name),
-                short_name: legacy_symbol_id(ctor_name),
-                tycon: tycon_id(tycon_name),
-                fields: Vec::new(),
-                full_type: constructor_types
-                    .get(&ctor_id)
-                    .cloned()
-                    .expect("ICE: test constructor table entry must have a type"),
-                tag,
+        let tycon = tycon_id(&data_def.short_name);
+
+        tycon_table.insert_with_id(
+            tycon,
+            TyConInfo {
+                name: legacy_symbol_id(&data_def.name),
+                short_name: legacy_symbol_id(&data_def.short_name),
+                kind: data_def.tycon_kind.clone(),
+                definition: TyConDefinition::Data(data_def.clone()),
             },
         );
+
+        for constructor in &data_def.constructors {
+            ctor_table.insert_with_id(
+                constructor.id,
+                CtorInfo {
+                    name: legacy_symbol_id(&constructor.name),
+                    short_name: legacy_symbol_id(&constructor.short_name),
+                    tycon,
+                    fields: constructor.fields.clone(),
+                    full_type: constructor.full_type.clone(),
+                    tag: *next_tag,
+                },
+            );
+
+            *next_tag += 1;
+        }
+    }
+
+    fn data_def_named<'a>(tycon_table: &'a TyConTable, name: &str) -> &'a DataDefinition {
+        let info = tycon_table
+            .get(tycon_id(name))
+            .expect("ICE: test fixture must define requested tycon");
+
+        let TyConDefinition::Data(data_def) = &info.definition else {
+            panic!("ICE: test fixture requested data definition from primitive tycon");
+        };
+
+        data_def
     }
 
     fn arm(pattern: Pattern<Span>) -> CaseArmNode<Span> {
@@ -1027,6 +1166,14 @@ mod tests {
 
     fn int_ty() -> TypeExpr {
         tycon("Int")
+    }
+
+    fn unary_kind() -> Kind {
+        Kind::make_arrow(Kind::Star, Kind::Star)
+    }
+
+    fn binary_kind() -> Kind {
+        Kind::make_arrow(Kind::Star, unary_kind())
     }
 
     fn maybe_ty(arg: TypeExpr) -> TypeExpr {

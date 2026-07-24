@@ -43,6 +43,7 @@ pub struct TypeChecker {
     wanteds: Vec<Wanted>,
     evar_solutions: HashMap<EvarId, TypeExpr>,
     holes: Vec<HoleInfo>,
+    warnings: Vec<TypeError>,
 }
 
 impl Default for TypeChecker {
@@ -68,6 +69,7 @@ impl TypeChecker {
             wanteds: Vec::new(),
             evar_solutions: HashMap::new(),
             holes: Vec::new(),
+            warnings: Vec::new(),
         }
     }
     pub fn with_env(env: &TypeCheckEnv, file: FileId) -> Self {
@@ -86,6 +88,7 @@ impl TypeChecker {
             wanteds: Vec::new(),
             evar_solutions: HashMap::new(),
             holes: Vec::new(),
+            warnings: Vec::new(),
         }
     }
     pub fn with_module_context(module: &ResolvedModule<Span>, file: FileId) -> Self {
@@ -242,6 +245,7 @@ impl TypeCheckEnv {
 pub struct TCOutput {
     pub module: CheckedModule,
     pub holes: Vec<HoleInfo>,
+    pub diagnostics: Vec<TypeError>,
 }
 
 #[cfg(test)]

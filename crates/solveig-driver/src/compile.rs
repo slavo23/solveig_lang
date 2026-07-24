@@ -151,6 +151,10 @@ fn check_project_modules(project_root: &Path) -> Result<Vec<CheckedModule>, Stri
     };
     state.check_all(&order)?;
 
+    if !session.diagnostics().is_empty() {
+        emit_session_diagnostics(&session)?;
+    }
+
     Ok(state.checked_modules)
 }
 
@@ -510,6 +514,12 @@ impl<'a> FrontendState<'a> {
                 return Err(FrontendPhase::Type);
             }
         };
+
+        for diagnostic in &checked_raw.diagnostics {
+            self.session
+                .diagnostics()
+                .push(diagnostic.into_diagnostic(()));
+        }
 
         if !checked_raw.holes.is_empty() {
             let diagnostics = hole_diagnostics(
