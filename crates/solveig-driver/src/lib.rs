@@ -2,5 +2,6 @@ mod compile;
 mod project;
 
 pub use compile::{
-    Compilation, checked_project_schemes, compile_and_run_project, run_project_capture,
+    Compilation, CompileOptions, checked_project_schemes, compile_and_run_project,
+    compile_and_run_project_with_options, run_project_capture,
 };

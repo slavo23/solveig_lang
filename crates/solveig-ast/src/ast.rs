@@ -1707,9 +1707,12 @@ impl<A, P> InstanceMethodDef<A, P> {
 
 #[derive(Clone, Debug)]
 pub struct InstanceDefinition<A, P = A> {
+    pub id: InstanceId,
     pub def_module: ModuleId,
     pub context: Vec<Predicate>,
+    pub context_evidence: Vec<EvVarId>,
     pub head: Predicate,
+    pub superclass_evidence: Vec<Ev>,
     pub methods: Vec<InstanceMethodDef<A, P>>,
 }
 
@@ -1724,9 +1727,12 @@ impl<A, P> InstanceDefinition<A, P> {
         FP: FnMut(P) -> Q,
     {
         InstanceDefinition {
+            id: self.id,
             def_module: self.def_module,
             context: self.context,
+            context_evidence: self.context_evidence,
             head: self.head,
+            superclass_evidence: self.superclass_evidence,
             methods: self
                 .methods
                 .into_iter()
@@ -1783,20 +1789,27 @@ impl<A, P> InstanceTable<A, P> {
 
     pub fn insert_definition(&mut self, definition: InstanceDefinition<A, P>) -> InstanceId {
         let InstanceDefinition {
+            id,
             def_module,
             context,
+            context_evidence: _,
             head,
+            superclass_evidence: _,
             methods,
         } = definition;
         let class = head.class_id;
 
-        self.insert(InstanceInfo {
-            head,
-            context,
-            class,
-            def_module,
-            methods,
-        })
+        self.entries.push((
+            id,
+            InstanceInfo {
+                head,
+                context,
+                class,
+                def_module,
+                methods,
+            },
+        ));
+        id
     }
 
     pub fn iter(&self) -> impl Iterator<Item = (InstanceId, &InstanceInfo<A, P>)> {

@@ -5,8 +5,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, ModuleId, PrettyTables, Scheme,
-    TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, def_display_name, symbol_display_name,
+    ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Ev, InstanceId, ModuleId,
+    PrettyTables, Scheme, TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, def_display_name,
+    symbol_display_name,
 };
 use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile};
 use solveig_check::inference::holes::hole_diagnostics;
@@ -32,6 +33,12 @@ use crate::project::{ProjectError, load_project, parse_project};
 pub struct Compilation {
     project_root: PathBuf,
     artifacts: Rc<RefCell<Option<CompilationArtifacts>>>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct CompileOptions {
+    pub dump_bytecode: bool,
+    pub dump_evidence: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -75,13 +82,29 @@ impl Compilation {
         entry_name: &str,
         dump_bytecode: bool,
     ) -> Result<(), String> {
-        let output = self.compile_project_capture(entry_name, dump_bytecode)?;
+        let output = self.compile_project_capture(
+            entry_name,
+            CompileOptions {
+                dump_bytecode,
+                dump_evidence: false,
+            },
+        )?;
+        println!("{output}");
+        Ok(())
+    }
+
+    pub fn compile_and_run_project_with_options(
+        &self,
+        entry_name: &str,
+        options: CompileOptions,
+    ) -> Result<(), String> {
+        let output = self.compile_project_capture(entry_name, options)?;
         println!("{output}");
         Ok(())
     }
 
     pub fn run_project_capture(&self, entry_name: &str) -> Result<String, String> {
-        self.compile_project_capture(entry_name, false)
+        self.compile_project_capture(entry_name, CompileOptions::default())
     }
 
     pub fn checked_project_schemes(&self) -> Result<BTreeMap<String, String>, String> {
@@ -110,14 +133,18 @@ impl Compilation {
     fn compile_project_capture(
         &self,
         entry_name: &str,
-        dump_bytecode: bool,
+        options: CompileOptions,
     ) -> Result<String, String> {
         let merged = self.check_and_merge_project()?;
-        let elaborated = solveig_check::inference::class_elab::elaborate_typeclasses(&merged);
-        let ir = lower_module(&elaborated);
+
+        if options.dump_evidence {
+            dump_solved_evidence(&merged);
+        }
+
+        let ir = lower_module(&merged);
         let cc = lower_to_closure_ir(&ir);
 
-        if dump_bytecode {
+        if options.dump_bytecode {
             Machine::dump_bytecode(&cc, "bytecode.txt")
                 .map_err(|e| format!("failed to dump bytecode: {e}"))?;
         }
@@ -273,12 +300,184 @@ fn span_len(span: &Range<usize>) -> usize {
     span.end.saturating_sub(span.start)
 }
 
+fn dump_solved_evidence(module: &CheckedModule) {
+    let tables = PrettyTables {
+        tycons: &module.tycon_table,
+        classes: &module.class_table,
+    };
+    let mut printed_any = false;
+
+    eprintln!("=== Evidence ===");
+
+    for func in &module.func_defs {
+        let mut lines = Vec::new();
+        collect_evidence_lines(&func.body, tables, &mut lines);
+        printed_any |= print_evidence_block(&func.name, &lines);
+    }
+
+    for inst in &module.instance_defs {
+        let owner = format!(
+            "instance#{} {}",
+            inst.id.0,
+            inst.head.pretty_with_tables(tables)
+        );
+        let mut lines = inst
+            .context
+            .iter()
+            .zip(inst.context_evidence.iter())
+            .enumerate()
+            .map(|(index, (pred, evvar))| {
+                format!(
+                    "ctx[{index}] %ev{} : {}",
+                    evvar.0,
+                    pred.pretty_with_tables(tables)
+                )
+            })
+            .collect::<Vec<_>>();
+        lines.extend(
+            inst.superclass_evidence
+                .iter()
+                .enumerate()
+                .map(|(index, ev)| format!("super[{index}] = {}", format_ev(ev, tables))),
+        );
+        printed_any |= print_evidence_block(&owner, &lines);
+
+        for method in &inst.methods {
+            let mut lines = Vec::new();
+            collect_evidence_lines(&method.body, tables, &mut lines);
+            printed_any |=
+                print_evidence_block(&format!("instance#{}::{}", inst.id.0, method.name), &lines);
+        }
+    }
+
+    if !printed_any {
+        eprintln!("  (none)");
+    }
+}
+
+fn print_evidence_block(owner: &str, lines: &[String]) -> bool {
+    if lines.is_empty() {
+        return false;
+    }
+
+    eprintln!("{owner}:");
+    for line in lines {
+        eprintln!("  {line}");
+    }
+    true
+}
+
+fn collect_evidence_lines(
+    expr: &TermExprNode<TcMetadata, Range<usize>>,
+    tables: PrettyTables<'_>,
+    out: &mut Vec<String>,
+) {
+    match &expr.node {
+        TermExpr::EvAbs(evvar, pred, body) => {
+            out.push(format!(
+                "lambda %ev{} : {}",
+                evvar.0,
+                pred.pretty_with_tables(tables)
+            ));
+            collect_evidence_lines(body, tables, out);
+        }
+        TermExpr::EvApp(body, ev) => {
+            out.push(format!("apply {}", format_ev(ev, tables)));
+            collect_evidence_lines(body, tables, out);
+        }
+        TermExpr::App(func, arg) => {
+            collect_evidence_lines(func, tables, out);
+            collect_evidence_lines(arg, tables, out);
+        }
+        TermExpr::Abs(_, _, body)
+        | TermExpr::TyAbs(_, _, body)
+        | TermExpr::TyApp(body, _)
+        | TermExpr::Anno(body, _)
+        | TermExpr::UnaryOperator(_, body) => collect_evidence_lines(body, tables, out),
+        TermExpr::Case(scrutinee, arms) => {
+            collect_evidence_lines(scrutinee, tables, out);
+            for arm in arms {
+                collect_evidence_lines(&arm.node.expr, tables, out);
+            }
+        }
+        TermExpr::IfThenElse(cond, then_branch, else_branch) => {
+            collect_evidence_lines(cond, tables, out);
+            collect_evidence_lines(then_branch, tables, out);
+            collect_evidence_lines(else_branch, tables, out);
+        }
+        TermExpr::BinaryOperator(_, lhs, rhs) => {
+            collect_evidence_lines(lhs, tables, out);
+            collect_evidence_lines(rhs, tables, out);
+        }
+        TermExpr::Let(_, binder, in_expr) => {
+            collect_evidence_lines(binder, tables, out);
+            collect_evidence_lines(in_expr, tables, out);
+        }
+        TermExpr::Unit
+        | TermExpr::Var(_)
+        | TermExpr::Lit(_)
+        | TermExpr::Hole
+        | TermExpr::Con(_) => {}
+    }
+}
+
+fn format_ev(ev: &Ev, tables: PrettyTables<'_>) -> String {
+    match ev {
+        Ev::Var(evvar) => format!("%ev{}", evvar.0),
+        Ev::Placeholder(evvar) => format!("<placeholder %ev{}>", evvar.0),
+        Ev::Inst(instance_id, ty_args, sub_evidence) => {
+            let ty_args = if ty_args.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " @{}",
+                    ty_args
+                        .iter()
+                        .map(|ty| ty.pretty_with_tables(tables))
+                        .collect::<Vec<_>>()
+                        .join(" @")
+                )
+            };
+            let sub_evidence = if sub_evidence.is_empty() {
+                String::new()
+            } else {
+                format!(
+                    " ({})",
+                    sub_evidence
+                        .iter()
+                        .map(|ev| format_ev(ev, tables))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            };
+
+            format!("inst#{}{}{}", instance_id.0, ty_args, sub_evidence)
+        }
+        Ev::Super(root, class_id, index) => {
+            format!(
+                "super({}).class#{}.{}",
+                format_ev(root, tables),
+                class_id.0,
+                index
+            )
+        }
+    }
+}
+
 pub fn compile_and_run_project(
     project_root: &Path,
     entry_name: &str,
     dump_bytecode: bool,
 ) -> Result<(), String> {
     Compilation::new(project_root).compile_and_run_project(entry_name, dump_bytecode)
+}
+
+pub fn compile_and_run_project_with_options(
+    project_root: &Path,
+    entry_name: &str,
+    options: CompileOptions,
+) -> Result<(), String> {
+    Compilation::new(project_root).compile_and_run_project_with_options(entry_name, options)
 }
 
 pub fn run_project_capture(project_root: &Path, entry_name: &str) -> Result<String, String> {
@@ -366,6 +565,7 @@ struct FrontendState<'a> {
     checked_modules: Vec<CheckedModule>,
     checked: HashMap<ModuleId, CheckedModule>,
     module_files: HashMap<ModuleId, FileId>,
+    next_instance_id: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -427,6 +627,7 @@ impl<'a> FrontendState<'a> {
             checked_modules: Vec::new(),
             checked: HashMap::new(),
             module_files: HashMap::new(),
+            next_instance_id: 0,
         })
     }
 
@@ -555,7 +756,8 @@ impl<'a> FrontendState<'a> {
             };
         self.resolutions
             .insert(module_id, resolved_info.resolutions.clone());
-        let resolved = resolved_info.module;
+        let mut resolved = resolved_info.module;
+        self.stamp_instance_ids(&mut resolved);
 
         let imported_typed = self.build_imported_typed_apis(&imports);
         let ImportedTypeInfo {
@@ -622,6 +824,17 @@ impl<'a> FrontendState<'a> {
         }
 
         Ok(checked_raw.module)
+    }
+
+    fn stamp_instance_ids(&mut self, module: &mut solveig_ast::ast::ResolvedModule<Range<usize>>) {
+        for inst in &mut module.instance_defs {
+            let id = self.next_instance_id;
+            self.next_instance_id = self
+                .next_instance_id
+                .checked_add(1)
+                .expect("ICE: instance id space exhausted");
+            inst.id = InstanceId(id);
+        }
     }
 
     fn build_imported_apis(&self, imports: &[EffectiveImport]) -> Vec<ImportedApi> {

@@ -1,5 +1,5 @@
 use clap::Parser;
-use solveig_driver::compile_and_run_project;
+use solveig_driver::{CompileOptions, compile_and_run_project_with_options};
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -11,12 +11,21 @@ struct Cli {
     entry: String,
     #[arg(long, default_value = "false")]
     dump_bytecode: bool,
+    #[arg(long, default_value = "false")]
+    dump_evidence: bool,
 }
 
 fn main() {
     let cli = Cli::parse();
 
-    if let Err(err) = compile_and_run_project(&cli.project_root, &cli.entry, cli.dump_bytecode) {
+    if let Err(err) = compile_and_run_project_with_options(
+        &cli.project_root,
+        &cli.entry,
+        CompileOptions {
+            dump_bytecode: cli.dump_bytecode,
+            dump_evidence: cli.dump_evidence,
+        },
+    ) {
         eprintln!("{err}");
         std::process::exit(1);
     }

@@ -1,4 +1,3 @@
-pub mod class_elab;
 pub mod class_kind_infer;
 pub mod exhaustiveness;
 pub mod holes;

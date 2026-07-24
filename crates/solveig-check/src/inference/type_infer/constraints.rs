@@ -353,17 +353,18 @@ impl TypeChecker {
             .map(|id| subst.get(&id).cloned().unwrap_or(TypeExpr::TyVar(id)))
             .collect()
     }
-    fn discharge_predicate_with_givens(&mut self, pred: &Predicate, givens: &[Predicate]) -> bool {
-        let mut evidence_givens = Vec::new();
-
-        for pred in givens {
-            evidence_givens.push(GivenEvidence {
-                ev: self.fresh_evvar_id(),
-                pred: self.zonk_predicate(pred),
-            });
-        }
-
-        self.entail(&evidence_givens, pred).is_ok()
+    fn solve_predicates_with_givens(
+        &mut self,
+        predicates: &[Predicate],
+        givens: &[Predicate],
+    ) -> (Vec<GivenEvidence>, Vec<Result<Ev, Unsolved>>) {
+        self.with_givens(givens.to_vec(), |checker| {
+            let evidence_givens = checker.givens.clone();
+            predicates
+                .iter()
+                .map(|pred| checker.entail(&evidence_givens, pred))
+                .collect()
+        })
     }
     // THIH §7.3 defines entailment as superclass closure over givens followed
     // by instance matching (`bySuper` then `byInst`). C1 keeps the same search
@@ -608,11 +609,18 @@ mod entailment_tests {
         }
     }
 
-    fn instance(head: Predicate, context: Vec<Predicate>) -> InstanceDefinition<Span> {
+    fn instance_with_id(
+        id: InstanceId,
+        head: Predicate,
+        context: Vec<Predicate>,
+    ) -> InstanceDefinition<Span> {
         InstanceDefinition {
+            id,
             def_module: ModuleId(0),
             context,
+            context_evidence: Vec::new(),
             head,
+            superclass_evidence: Vec::new(),
             methods: Vec::new(),
         }
     }
@@ -621,10 +629,19 @@ mod entailment_tests {
         let a = var("a");
         let b = var("b");
         let instance_defs = vec![
-            instance(pred(EQ, tycon(INT)), Vec::new()),
-            instance(pred(EQ, maybe(a.clone())), vec![pred(EQ, a.clone())]),
-            instance(pred(EQ, list(a.clone())), vec![pred(EQ, a.clone())]),
-            instance(
+            instance_with_id(InstanceId(0), pred(EQ, tycon(INT)), Vec::new()),
+            instance_with_id(
+                InstanceId(1),
+                pred(EQ, maybe(a.clone())),
+                vec![pred(EQ, a.clone())],
+            ),
+            instance_with_id(
+                InstanceId(2),
+                pred(EQ, list(a.clone())),
+                vec![pred(EQ, a.clone())],
+            ),
+            instance_with_id(
+                InstanceId(3),
                 pred(EQ, pair(a.clone(), b.clone())),
                 vec![pred(EQ, a.clone()), pred(EQ, b.clone())],
             ),
@@ -718,8 +735,16 @@ mod entailment_tests {
     #[test]
     fn instance_table_overlap_detection_unifies_both_heads() {
         let table = InstanceTable::from_definitions(vec![
-            instance(pred(EQ, pair(var("a"), tycon(INT))), Vec::new()),
-            instance(pred(EQ, pair(tycon(PRIM_TYS.bool), var("b"))), Vec::new()),
+            instance_with_id(
+                InstanceId(0),
+                pred(EQ, pair(var("a"), tycon(INT))),
+                Vec::new(),
+            ),
+            instance_with_id(
+                InstanceId(1),
+                pred(EQ, pair(tycon(PRIM_TYS.bool), var("b"))),
+                Vec::new(),
+            ),
         ]);
 
         let overlaps = table.overlaps();

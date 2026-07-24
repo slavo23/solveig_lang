@@ -228,47 +228,51 @@ pub fn check_and_elab_module(
         let superclass_obligations =
             TypeChecker::specialize_superclasses_for_instance(class_def, &inst.head);
 
-        if !superclass_obligations.is_empty() {
-            let mut checker = TypeChecker::with_env(env, file);
+        let mut checker = TypeChecker::with_env(env, file);
 
-            // While validating `instance C t`, do not use that same instance as evidence
-            // for its own superclass obligations. This avoids accepting recursive proofs
-            // such as constructing `Eq Int` through the `Ord Int` dictionary currently
-            // being checked.
-            let superclass_instance_defs = env
-                .instance_defs
-                .iter()
-                .filter(|candidate| {
-                    candidate.head != inst.head || candidate.context != inst.context
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            checker.instance_table = InstanceTable::from_definitions(superclass_instance_defs);
+        // While validating `instance C t`, do not use that same instance as evidence
+        // for its own superclass obligations. This avoids accepting recursive proofs
+        // such as constructing `Eq Int` through the `Ord Int` dictionary currently
+        // being checked.
+        let superclass_instance_defs = env
+            .instance_defs
+            .iter()
+            .filter(|candidate| candidate.id != inst.id)
+            .cloned()
+            .collect::<Vec<_>>();
+        checker.instance_table = InstanceTable::from_definitions(superclass_instance_defs);
 
-            let missing_superclasses = superclass_obligations
-                .iter()
-                .filter(|pred| !checker.discharge_predicate_with_givens(pred, &inst.context))
-                .map(|pred| {
-                    format!(
-                        "{} required by superclass of {}",
-                        pred.pretty_with_tables(env_pretty_tables),
-                        inst.head.pretty_with_tables(env_pretty_tables)
-                    )
-                })
-                .collect::<Vec<_>>();
+        let (context_givens, superclass_results) =
+            checker.solve_predicates_with_givens(&superclass_obligations, &inst.context);
+        let context_evidence = context_givens
+            .iter()
+            .map(|given| given.ev)
+            .collect::<Vec<_>>();
+        let mut superclass_evidence = Vec::new();
+        let mut missing_superclasses = Vec::new();
 
-            if !missing_superclasses.is_empty() {
-                let span = inst
-                    .methods
-                    .first()
-                    .map(|method| method.body.anno.clone())
-                    .unwrap_or(0..0);
-
-                errors.push(TypeError::UnsatisfiedConstraints {
-                    span: file_span(file, span),
-                    predicates: missing_superclasses,
-                });
+        for (pred, result) in superclass_obligations.iter().zip(superclass_results) {
+            match result {
+                Ok(ev) => superclass_evidence.push(checker.zonk_ev(&ev)),
+                Err(_) => missing_superclasses.push(format!(
+                    "{} required by superclass of {}",
+                    pred.pretty_with_tables(env_pretty_tables),
+                    inst.head.pretty_with_tables(env_pretty_tables)
+                )),
             }
+        }
+
+        if !missing_superclasses.is_empty() {
+            let span = inst
+                .methods
+                .first()
+                .map(|method| method.body.anno.clone())
+                .unwrap_or(0..0);
+
+            errors.push(TypeError::UnsatisfiedConstraints {
+                span: file_span(file, span),
+                predicates: missing_superclasses,
+            });
         }
 
         let mut checked_methods = Vec::new();
@@ -348,9 +352,12 @@ pub fn check_and_elab_module(
         }
 
         checked_instance_defs.push(InstanceDefinition {
+            id: inst.id,
             def_module: inst.def_module,
             context: inst.context.clone(),
+            context_evidence,
             head: inst.head.clone(),
+            superclass_evidence,
             methods: checked_methods,
         });
     }

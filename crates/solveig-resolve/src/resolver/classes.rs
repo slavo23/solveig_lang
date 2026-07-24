@@ -471,9 +471,15 @@ impl<'a> Resolver<'a> {
                 .collect::<Vec<_>>();
 
             instance_defs.push(InstanceDefinition {
+                id: solveig_ast::ast::InstanceId(
+                    u32::try_from(instance_defs.len())
+                        .expect("ICE: module instance count does not fit in u32"),
+                ),
                 def_module: cx.module_id,
                 context: checked_context,
+                context_evidence: Vec::new(),
                 head: checked_head,
+                superclass_evidence: Vec::new(),
                 methods: resolved_methods,
             });
         }
