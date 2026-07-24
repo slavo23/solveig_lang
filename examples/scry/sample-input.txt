@@ -1,0 +1,6 @@
+(parent alice bob)
+(grandparent alice ?who)
+(ancestor alice ?who)
+(shares-interest alice ?who)
+(unknown alice)
+:quit

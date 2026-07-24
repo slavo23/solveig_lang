@@ -461,3 +461,5 @@ See [diagnostics.md](diagnostics.md) for the full code index.
 - Browse `tests/golden/run/` for small executable programs.
 - Browse `examples/smoke_suite` for larger algorithm examples.
 - Browse `examples/quiz_game` for practical IO and a local `State` monad.
+- Browse `examples/scry` for a mini S-expression rule engine with recursive
+  search and an interactive prompt.

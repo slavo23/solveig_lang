@@ -28,6 +28,12 @@ Run the interactive quiz example:
 cargo run -- --project-root examples/quiz_game
 ```
 
+Run the Scry mini rule engine:
+
+```bash
+cargo run -- --project-root examples/scry < examples/scry/sample-input.txt
+```
+
 Run all tests:
 
 ```bash
@@ -242,6 +248,8 @@ See [docs/diagnostics.md](docs/diagnostics.md) for the full code index.
   imports and evaluates algorithms and typeclass stress cases.
 - `examples/quiz_game` reads questions from `questions.txt`, prompts on stdin,
   scores answers, writes `last-score.txt`, and appends `score-history.txt`.
+- `examples/scry` is a mini S-expression rule engine with facts, rules,
+  recursive queries, file IO, and an interactive prompt.
 - `tests/golden/run/` contains small executable regression cases.
 - `tests/golden/diag/` contains diagnostic regression cases.
 

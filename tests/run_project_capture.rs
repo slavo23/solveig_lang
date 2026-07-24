@@ -81,6 +81,32 @@ fn quiz_game_example_reads_file_prompts_scores_and_writes_reports() {
 }
 
 #[test]
+fn scry_example_answers_rule_queries() {
+    let _guard = project_run_lock();
+    let project_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/scry");
+    let stdin = fs::read_to_string(project_root.join("sample-input.txt"))
+        .expect("scry sample input should be readable");
+
+    let output = run_project_capture_with_stdin(&project_root, "main", &stdin)
+        .expect("scry example should run");
+
+    assert_eq!(
+        output,
+        "Scry loaded 10 facts/rules. Type :help for commands.\n\
+         scry> true\n\
+         scry> ?who = clara\n\
+         scry> ?who = bob\n\
+         ?who = faye\n\
+         ?who = clara\n\
+         ?who = dima\n\
+         scry> ?who = alice\n\
+         ?who = clara\n\
+         scry> false\n\
+         scry> bye\n"
+    );
+}
+
+#[test]
 fn io_streams_prompt_readline_and_program_args() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(

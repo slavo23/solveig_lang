@@ -1,0 +1,24 @@
+(fact (parent alice bob))
+(fact (parent bob clara))
+(fact (parent clara dima))
+(fact (parent alice faye))
+(fact (likes alice logic))
+(fact (likes clara logic))
+(fact (likes bob puzzles))
+
+(rule (grandparent ?x ?z)
+  (and
+    (parent ?x ?y)
+    (parent ?y ?z)))
+
+(rule (ancestor ?x ?z)
+  (or
+    (parent ?x ?z)
+    (and
+      (parent ?x ?y)
+      (ancestor ?y ?z))))
+
+(rule (shares-interest ?x ?y)
+  (and
+    (likes ?x ?thing)
+    (likes ?y ?thing)))
