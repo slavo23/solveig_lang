@@ -180,6 +180,9 @@ pub enum SurfaceUnOp {
 #[derive(Debug, Clone, PartialEq)]
 pub enum SurfaceLiteral {
     Int(i64),
+    Float(f64),
+    Char(char),
+    Str(String),
 }
 
 #[derive(Debug, Clone, PartialEq)]

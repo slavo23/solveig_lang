@@ -86,6 +86,10 @@ fn int_pattern(value: i64, start: usize, end: usize) -> S<SurfacePattern> {
     sp(SurfacePattern::Lit(SurfaceLiteral::Int(value)), start, end)
 }
 
+fn literal_pattern(literal: SurfaceLiteral, start: usize, end: usize) -> S<SurfacePattern> {
+    sp(SurfacePattern::Lit(literal), start, end)
+}
+
 fn cons_pattern(
     session: &Session,
     head: S<SurfacePattern>,
@@ -251,6 +255,10 @@ impl<'a> Parser<'a> {
         match self.current_kind() {
             Token::Ident(symbol) => format!("identifier `{}`", self.token_text(*symbol)),
             Token::UpperIdent(symbol) => format!("constructor `{}`", self.token_text(*symbol)),
+            Token::Int(value) => format!("integer literal `{value}`"),
+            Token::Float(value) => format!("float literal `{value}`"),
+            Token::Char(value) => format!("char literal `{value}`"),
+            Token::Str(_) => "string literal".to_string(),
             other => format!("{other:?}"),
         }
     }
@@ -979,6 +987,36 @@ impl<'a> Parser<'a> {
                 Ok(int_pattern(value, token.start, token.end))
             }
 
+            Token::Float(value) => {
+                let value = *value;
+                let token = self.advance();
+                Ok(literal_pattern(
+                    SurfaceLiteral::Float(value),
+                    token.start,
+                    token.end,
+                ))
+            }
+
+            Token::Char(value) => {
+                let value = *value;
+                let token = self.advance();
+                Ok(literal_pattern(
+                    SurfaceLiteral::Char(value),
+                    token.start,
+                    token.end,
+                ))
+            }
+
+            Token::Str(value) => {
+                let value = value.clone();
+                let token = self.advance();
+                Ok(literal_pattern(
+                    SurfaceLiteral::Str(value),
+                    token.start,
+                    token.end,
+                ))
+            }
+
             Token::Minus => {
                 // fix mutable borrow later
                 let minus = self.advance().clone();
@@ -992,8 +1030,18 @@ impl<'a> Parser<'a> {
                         Ok(int_pattern(value, minus.start, int_token.end))
                     }
 
+                    Token::Float(value) => {
+                        let value = -*value;
+                        let float_token = self.advance();
+                        Ok(literal_pattern(
+                            SurfaceLiteral::Float(value),
+                            minus.start,
+                            float_token.end,
+                        ))
+                    }
+
                     _ => Err(self.error(format!(
-                        "expected integer literal after `-` in pattern, got {}",
+                        "expected numeric literal after `-` in pattern, got {}",
                         self.describe_current()
                     ))),
                 }
@@ -1063,6 +1111,9 @@ impl<'a> Parser<'a> {
         matches!(
             self.current_kind(),
             Token::Int(_)
+                | Token::Float(_)
+                | Token::Char(_)
+                | Token::Str(_)
                 | Token::Minus
                 | Token::Ident(_)
                 | Token::UpperIdent(_)
@@ -1141,6 +1192,9 @@ impl<'a> Parser<'a> {
         matches!(
             self.current_kind(),
             Token::Int(_)
+                | Token::Float(_)
+                | Token::Char(_)
+                | Token::Str(_)
                 | Token::Ident(_)
                 | Token::UpperIdent(_)
                 | Token::LParen
@@ -1158,6 +1212,33 @@ impl<'a> Parser<'a> {
                 let token = self.advance();
                 Ok(sp(
                     SurfaceExpr::Literal(SurfaceLiteral::Int(value)),
+                    token.start,
+                    token.end,
+                ))
+            }
+            Token::Float(value) => {
+                let value = *value;
+                let token = self.advance();
+                Ok(sp(
+                    SurfaceExpr::Literal(SurfaceLiteral::Float(value)),
+                    token.start,
+                    token.end,
+                ))
+            }
+            Token::Char(value) => {
+                let value = *value;
+                let token = self.advance();
+                Ok(sp(
+                    SurfaceExpr::Literal(SurfaceLiteral::Char(value)),
+                    token.start,
+                    token.end,
+                ))
+            }
+            Token::Str(value) => {
+                let value = value.clone();
+                let token = self.advance();
+                Ok(sp(
+                    SurfaceExpr::Literal(SurfaceLiteral::Str(value)),
                     token.start,
                     token.end,
                 ))

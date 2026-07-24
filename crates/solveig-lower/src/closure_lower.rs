@@ -83,6 +83,7 @@ impl ClosureLowerer {
             globals,
             functions,
             constructor_arities: program.constructor_arities.clone(),
+            string_constants: program.string_constants.clone(),
         }
     }
 
@@ -218,6 +219,9 @@ impl<'a> ExprLowerer<'a> {
         match expr.as_ref() {
             IRExpr::Unit => Rc::new(CCExpr::Unit),
             IRExpr::Int(n) => Rc::new(CCExpr::Int(*n)),
+            IRExpr::Float(n) => Rc::new(CCExpr::Float(*n)),
+            IRExpr::Char(ch) => Rc::new(CCExpr::Char(*ch)),
+            IRExpr::StrConst(index) => Rc::new(CCExpr::StrConst(*index)),
             IRExpr::BVar(index) => self.lower_bvar(*index),
             IRExpr::FVar(index) => Rc::new(CCExpr::Global(*index)),
             IRExpr::Con { tag, arity } => Rc::new(CCExpr::CtorFn {

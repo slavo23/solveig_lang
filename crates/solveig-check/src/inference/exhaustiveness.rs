@@ -4,7 +4,7 @@ use std::ops::Range;
 use solveig_ast::ast::{
     CaseArmNode, CtorId, CtorInfo, CtorTable, DataDefinition, Literal, PRIM_TYS, Pattern,
     PatternNode, Predicate, PrettyTables, TyConDefinition, TyConId, TyConTable, TyVarId, TypeExpr,
-    legacy_tyvar_id, symbol_display_name,
+    legacy_tyvar_id, string_literal_value, symbol_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -82,6 +82,9 @@ pub struct CaseDiagnostics {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 enum LitPat {
     Int(i64),
+    Float(u64),
+    Char(char),
+    Str(solveig_ast::ast::StrLitId),
 }
 
 impl LitPat {
@@ -89,14 +92,49 @@ impl LitPat {
     fn from_literal(lit: &Literal) -> Self {
         match lit {
             Literal::Int(value) => LitPat::Int(*value),
+            Literal::Float(value) => LitPat::Float(value.to_bits()),
+            Literal::Char(value) => LitPat::Char(*value),
+            Literal::Str(id) => LitPat::Str(*id),
         }
     }
 
     fn pretty(&self) -> String {
         match self {
             LitPat::Int(value) => value.to_string(),
+            LitPat::Float(bits) => f64::from_bits(*bits).to_string(),
+            LitPat::Char(value) => format!("'{}'", escape_char_literal(*value)),
+            LitPat::Str(id) => format!("\"{}\"", escape_string_literal(&string_literal_value(*id))),
         }
     }
+}
+
+fn escape_char_literal(ch: char) -> String {
+    match ch {
+        '\n' => "\\n".to_string(),
+        '\t' => "\\t".to_string(),
+        '\\' => "\\\\".to_string(),
+        '\'' => "\\'".to_string(),
+        '"' => "\\\"".to_string(),
+        ch if ch.is_control() => ch.escape_unicode().to_string(),
+        ch => ch.to_string(),
+    }
+}
+
+fn escape_string_literal(value: &str) -> String {
+    let mut out = String::new();
+
+    for ch in value.chars() {
+        out.push_str(&match ch {
+            '\n' => "\\n".to_string(),
+            '\t' => "\\t".to_string(),
+            '\\' => "\\\\".to_string(),
+            '"' => "\\\"".to_string(),
+            ch if ch.is_control() => ch.escape_unicode().to_string(),
+            ch => ch.to_string(),
+        });
+    }
+
+    out
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]

@@ -5,6 +5,9 @@ use std::rc::Rc;
 pub enum CCExpr {
     Unit,
     Int(i64),
+    Float(f64),
+    Char(char),
+    StrConst(u32),
     Local(usize),
     Capture(usize),
     Global(usize),
@@ -96,6 +99,7 @@ pub struct CCProgram {
     pub globals: Vec<CCGlobalDef>,
     pub functions: Vec<CCFunction>,
     pub constructor_arities: Vec<CtorRuntimeInfo>,
+    pub string_constants: Vec<String>,
 }
 
 impl CCProgram {

@@ -155,9 +155,13 @@ impl TypeChecker {
             Pattern::Wild => Ok((ctx, vec![])),
             Pattern::Var(name) => Ok((ctx, vec![(name.clone(), scrutinee_type)])),
             Pattern::Lit(lit) => {
-                let literal_type = match lit {
-                    Literal::Int(_) => self.int_type(),
-                };
+                if matches!(lit, Literal::Float(_)) {
+                    return Err(TypeError::UnsupportedFloatPattern {
+                        span: self.get_file_span(pattern.anno.clone()),
+                    });
+                }
+
+                let literal_type = self.literal_type(lit);
 
                 let theta = self.solve_subtype(
                     ctx.clone(),

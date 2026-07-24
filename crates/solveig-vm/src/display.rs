@@ -51,6 +51,8 @@ impl DisplayValue<'_> {
         match val {
             Value::Unit => "()".into(),
             Value::Int(n) => n.to_string(),
+            Value::Float(n) => n.to_string(),
+            Value::Char(ch) => format!("'{}'", escape_char_literal(ch)),
             Value::CtorFn { tag, .. } => {
                 format!("<ctor {}>", tag_name(self.arities, tag))
             }
@@ -96,6 +98,9 @@ impl DisplayValue<'_> {
                     } else {
                         format!("{} {}", name, self.render_args(fields))
                     }
+                }
+                HeapObject::Str { bytes } => {
+                    format!("\"{}\"", escape_string_literal(self.heap.str_value(*bytes)))
                 }
             },
         }
@@ -199,4 +204,33 @@ impl DisplayValue<'_> {
             _ => None,
         }
     }
+}
+
+fn escape_char_literal(ch: char) -> String {
+    match ch {
+        '\n' => "\\n".to_string(),
+        '\t' => "\\t".to_string(),
+        '\\' => "\\\\".to_string(),
+        '\'' => "\\'".to_string(),
+        '"' => "\\\"".to_string(),
+        ch if ch.is_control() => ch.escape_unicode().to_string(),
+        ch => ch.to_string(),
+    }
+}
+
+fn escape_string_literal(value: &str) -> String {
+    let mut out = String::new();
+
+    for ch in value.chars() {
+        out.push_str(&match ch {
+            '\n' => "\\n".to_string(),
+            '\t' => "\\t".to_string(),
+            '\\' => "\\\\".to_string(),
+            '"' => "\\\"".to_string(),
+            ch if ch.is_control() => ch.escape_unicode().to_string(),
+            ch => ch.to_string(),
+        });
+    }
+
+    out
 }

@@ -111,11 +111,7 @@ impl<'a> Resolver<'a> {
         let node = match &sf.0 {
             SurfacePattern::Var(var_name) => Pattern::Var(self.symbol_text(*var_name).to_string()),
             SurfacePattern::Lit(lit) => {
-                let core_lit = match lit {
-                    SurfaceLiteral::Int(int_lit_value) => Literal::Int(*int_lit_value),
-                };
-
-                Pattern::Lit(core_lit)
+                Pattern::Lit(resolve_literal(lit))
             }
             SurfacePattern::Wild => Pattern::Wild,
             SurfacePattern::Con(con_name, args) => Pattern::Con(

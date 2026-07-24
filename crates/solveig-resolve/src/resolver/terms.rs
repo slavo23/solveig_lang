@@ -123,9 +123,7 @@ impl<'a> Resolver<'a> {
                 cx,
             )),
 
-            SurfaceExpr::Literal(lit) => match lit {
-                SurfaceLiteral::Int(value) => TermExpr::Lit(Literal::Int(*value)),
-            },
+            SurfaceExpr::Literal(lit) => TermExpr::Lit(resolve_literal(lit)),
 
             SurfaceExpr::App(lhs, rhs) => TermExpr::App(
                 Box::new(self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms)),

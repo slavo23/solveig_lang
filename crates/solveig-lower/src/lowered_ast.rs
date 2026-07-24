@@ -7,6 +7,9 @@ pub enum IRExpr {
     BVar(usize),
     FVar(usize),
     Int(i64),
+    Float(f64),
+    Char(char),
+    StrConst(u32),
     BinaryOp(BinOp, Rc<IRExpr>, Rc<IRExpr>),
     UnaryOp(UnOp, Rc<IRExpr>),
     CallBuiltin(BuiltinId, Vec<Rc<IRExpr>>),
@@ -58,6 +61,7 @@ impl IRPattern {
 pub struct IRProgram {
     pub globals: Vec<IRGlobalDef>,
     pub constructor_arities: Vec<CtorRuntimeInfo>,
+    pub string_constants: Vec<String>,
 }
 
 impl IRProgram {

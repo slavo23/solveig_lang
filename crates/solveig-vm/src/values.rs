@@ -1,13 +1,87 @@
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+use std::hash::{Hash, Hasher};
+
+#[derive(Debug, Clone, Copy)]
 pub struct ObjId(pub u32);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum Value {
     Unit,
     Int(i64),
+    Float(f64),
+    Char(char),
     CtorFn { tag: u16, arity: u16 },
     FunctionRef { chunk: u32, arity: u16 },
     Obj(ObjId),
+}
+
+impl PartialEq for ObjId {
+    fn eq(&self, other: &Self) -> bool {
+        self.0 == other.0
+    }
+}
+
+impl Eq for ObjId {}
+
+impl Hash for ObjId {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.hash(state);
+    }
+}
+
+impl PartialEq for Value {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Value::Unit, Value::Unit) => true,
+            (Value::Int(lhs), Value::Int(rhs)) => lhs == rhs,
+            (Value::Float(lhs), Value::Float(rhs)) => lhs.to_bits() == rhs.to_bits(),
+            (Value::Char(lhs), Value::Char(rhs)) => lhs == rhs,
+            (
+                Value::CtorFn {
+                    tag: lhs_tag,
+                    arity: lhs_arity,
+                },
+                Value::CtorFn {
+                    tag: rhs_tag,
+                    arity: rhs_arity,
+                },
+            ) => lhs_tag == rhs_tag && lhs_arity == rhs_arity,
+            (
+                Value::FunctionRef {
+                    chunk: lhs_chunk,
+                    arity: lhs_arity,
+                },
+                Value::FunctionRef {
+                    chunk: rhs_chunk,
+                    arity: rhs_arity,
+                },
+            ) => lhs_chunk == rhs_chunk && lhs_arity == rhs_arity,
+            (Value::Obj(lhs), Value::Obj(rhs)) => lhs == rhs,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Value {}
+
+impl Hash for Value {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        std::mem::discriminant(self).hash(state);
+        match self {
+            Value::Unit => {}
+            Value::Int(value) => value.hash(state),
+            Value::Float(value) => value.to_bits().hash(state),
+            Value::Char(value) => value.hash(state),
+            Value::CtorFn { tag, arity } => {
+                tag.hash(state);
+                arity.hash(state);
+            }
+            Value::FunctionRef { chunk, arity } => {
+                chunk.hash(state);
+                arity.hash(state);
+            }
+            Value::Obj(id) => id.hash(state),
+        }
+    }
 }
 
 #[derive(Clone)]

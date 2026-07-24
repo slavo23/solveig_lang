@@ -3,8 +3,9 @@ use std::rc::Rc;
 
 use solveig_ast::ast::{
     BuiltinDefinition, CaseArm, ClassId, CtorId, CtorRuntimeInfo, DefId, Ev, EvVarId,
-    InstanceDefinition, Literal, Pattern, PatternNode, ResolvedModule, TermExpr, TermExprNode,
-    VarRef, runtime_ctor_role, symbol_display_name, var_display_name,
+    InstanceDefinition, Literal, Pattern, PatternNode, ResolvedModule, StrLitId, TermExpr,
+    TermExprNode, VarRef, runtime_ctor_role, string_literal_value, symbol_display_name,
+    var_display_name,
 };
 
 use super::dicts::{DictLayout, DictLayouts, instance_global_name};
@@ -21,6 +22,8 @@ struct LowerCtx {
     globals: HashMap<String, usize>,
     constructors: HashMap<CtorId, LowerConstructorInfo>,
     dicts: DictLayouts,
+    string_constants: Vec<String>,
+    string_indices: HashMap<StrLitId, u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +90,18 @@ impl LowerCtx {
         self.scope.pop();
     }
 
+    fn string_constant_index(&mut self, id: StrLitId) -> u32 {
+        if let Some(index) = self.string_indices.get(&id) {
+            return *index;
+        }
+
+        let index = u32::try_from(self.string_constants.len())
+            .expect("ICE: string constant pool exceeded u32 capacity");
+        self.string_constants.push(string_literal_value(id));
+        self.string_indices.insert(id, index);
+        index
+    }
+
     fn push_pattern_binders<A>(&mut self, pattern: &PatternNode<A>) {
         match &pattern.node {
             Pattern::Var(name) => self.push_term(name),
@@ -120,7 +135,12 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
     match &expr.node {
         TermExpr::Unit => Rc::new(IRExpr::Unit),
         TermExpr::Var(name) => ctx.resolve_var(name),
-        TermExpr::Lit(Literal::Int(n)) => Rc::new(IRExpr::Int(*n)),
+        TermExpr::Lit(lit) => match lit {
+            Literal::Int(n) => Rc::new(IRExpr::Int(*n)),
+            Literal::Float(n) => Rc::new(IRExpr::Float(*n)),
+            Literal::Char(ch) => Rc::new(IRExpr::Char(*ch)),
+            Literal::Str(id) => Rc::new(IRExpr::StrConst(ctx.string_constant_index(*id))),
+        },
         TermExpr::Con(id) => {
             let info = ctx.constructors.get(id).unwrap_or_else(|| {
                 panic!(
@@ -528,6 +548,8 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
         globals,
         constructors: constructors.clone(),
         dicts: dicts.clone(),
+        string_constants: Vec::new(),
+        string_indices: HashMap::new(),
     };
 
     let mut ir_globals = module
@@ -567,6 +589,7 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
     IRProgram {
         globals: ir_globals,
         constructor_arities,
+        string_constants: ctx.string_constants,
     }
 }
 

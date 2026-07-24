@@ -27,6 +27,23 @@ impl TypeChecker {
     fn int_type(&self) -> TypeExpr {
         TypeExpr::make_con_id(PRIM_TYS.int)
     }
+    fn float_type(&self) -> TypeExpr {
+        TypeExpr::make_con_id(PRIM_TYS.float)
+    }
+    fn char_type(&self) -> TypeExpr {
+        TypeExpr::make_con_id(PRIM_TYS.char)
+    }
+    fn string_type(&self) -> TypeExpr {
+        TypeExpr::make_con_id(PRIM_TYS.string)
+    }
+    fn literal_type(&self, lit: &Literal) -> TypeExpr {
+        match lit {
+            Literal::Int(_) => self.int_type(),
+            Literal::Float(_) => self.float_type(),
+            Literal::Char(_) => self.char_type(),
+            Literal::Str(_) => self.string_type(),
+        }
+    }
     fn solve_unary_operator_inference(
         &mut self,
         ctx: Context,
@@ -305,9 +322,7 @@ impl TypeChecker {
                 Ok((theta, elaborated, final_type))
             }
             TermExpr::Lit(lit) => {
-                let ty = match lit {
-                    Literal::Int(_) => self.int_type(),
-                };
+                let ty = self.literal_type(lit);
 
                 let elaborated = elab_node(TermExpr::Lit(lit.clone()), span, ty.clone());
                 Ok((ctx, elaborated, ty))

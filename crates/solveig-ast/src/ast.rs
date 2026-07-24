@@ -43,6 +43,9 @@ pub struct EvVarId(pub u32);
 pub struct BuiltinId(pub u16);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct StrLitId(pub u32);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct KindMetaId(pub u32);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -166,6 +169,12 @@ struct LegacyTermNameRegistry {
     def_names: HashMap<DefId, String>,
 }
 
+#[derive(Default)]
+struct StringLiteralRegistry {
+    values: Vec<String>,
+    ids: HashMap<String, StrLitId>,
+}
+
 fn legacy_tycon_registry() -> &'static Mutex<LegacyTyConRegistry> {
     static REGISTRY: OnceLock<Mutex<LegacyTyConRegistry>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(LegacyTyConRegistry::default()))
@@ -184,6 +193,11 @@ fn legacy_class_registry() -> &'static Mutex<LegacyClassRegistry> {
 fn legacy_term_name_registry() -> &'static Mutex<LegacyTermNameRegistry> {
     static REGISTRY: OnceLock<Mutex<LegacyTermNameRegistry>> = OnceLock::new();
     REGISTRY.get_or_init(|| Mutex::new(LegacyTermNameRegistry::default()))
+}
+
+fn string_literal_registry() -> &'static Mutex<StringLiteralRegistry> {
+    static REGISTRY: OnceLock<Mutex<StringLiteralRegistry>> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(StringLiteralRegistry::default()))
 }
 
 pub fn legacy_tycon_id(name: &str) -> TyConId {
@@ -302,6 +316,33 @@ pub fn legacy_symbol_id(name: &str) -> Symbol {
     registry.symbol_ids.insert(name.to_string(), id);
     registry.symbol_names.insert(id, name.to_string());
     id
+}
+
+pub fn intern_string_literal(value: &str) -> StrLitId {
+    let mut registry = string_literal_registry()
+        .lock()
+        .expect("ICE: string-literal registry lock poisoned");
+
+    if let Some(id) = registry.ids.get(value) {
+        return *id;
+    }
+
+    let id = StrLitId(registry.values.len() as u32);
+    registry.values.push(value.to_string());
+    registry.ids.insert(value.to_string(), id);
+    id
+}
+
+pub fn string_literal_value(id: StrLitId) -> String {
+    let registry = string_literal_registry()
+        .lock()
+        .expect("ICE: string-literal registry lock poisoned");
+
+    registry
+        .values
+        .get(id.0 as usize)
+        .cloned()
+        .unwrap_or_else(|| panic!("ICE: missing string literal payload for StrLitId {id:?}"))
 }
 
 pub const COMPILER_PRELUDE_BUILTINS_MODULE: &str = "prelude.builtins";
@@ -1101,6 +1142,9 @@ impl<A, P> ExprNode<CaseArm<A, P>, P> {
 #[derive(Clone, Debug)]
 pub enum Literal {
     Int(i64),
+    Float(f64),
+    Char(char),
+    Str(StrLitId),
 }
 
 #[derive(Clone, Debug, Copy)]

@@ -1,0 +1,10 @@
+[TC0020] Error: float literal patterns are not supported
+   ╭─[ $WORKSPACE/tests/golden/diag/float_pattern/src/main.sv:4:9 ]
+   │
+ 4 │         1.0 => 1
+   │         ─┬─
+   │          ╰─── this pattern matches a Float literal
+   │
+   │ Note: Float values are not currently allowed in literal patterns; use a wildcard and compare explicitly once Float comparisons are available
+───╯
+type error

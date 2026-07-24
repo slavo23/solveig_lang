@@ -227,6 +227,9 @@ pub enum TypeError {
         method: String,
         class_name: String,
     },
+    UnsupportedFloatPattern {
+        span: FileSpan,
+    },
 
     /// Contextual wrapper around the real error that happened while checking an
     /// instance method body against the specialized class method type.
@@ -546,6 +549,18 @@ impl TypeError {
                 *span,
                 format!("this instance must define `{}` or use a class default", method),
             )),
+
+            TypeError::UnsupportedFloatPattern { span } => DiagnosticParts::new(
+                "TC0020",
+                "float literal patterns are not supported",
+            )
+            .with_label(Label::primary(
+                *span,
+                "this pattern matches a Float literal",
+            ))
+            .with_note(
+                "Float values are not currently allowed in literal patterns; use a wildcard and compare explicitly once Float comparisons are available",
+            ),
 
             TypeError::InstanceMethodTypeMismatch {
                 span,

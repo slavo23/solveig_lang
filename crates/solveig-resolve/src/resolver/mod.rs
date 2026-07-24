@@ -8,8 +8,9 @@ use solveig_ast::ast::{
     InstanceDefinition, InstanceMethodDef, Kind, KindMetaId, Literal, ModuleId, PRIM_TYS, Pattern,
     PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode,
     TyConId, TypeExpr, UnOp, VarRef, compiler_bool_constructor_types,
-    compiler_bool_data_definition, compiler_primitive_tycon_kinds, legacy_class_id, legacy_ctor_id,
-    legacy_tycon_id, register_def_display_name, register_symbol_display_name, tyvar_display_name,
+    compiler_bool_data_definition, compiler_primitive_tycon_kinds, intern_string_literal,
+    legacy_class_id, legacy_ctor_id, legacy_tycon_id, register_def_display_name,
+    register_symbol_display_name, tyvar_display_name,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use solveig_check::data_kind_infer::{
@@ -38,6 +39,15 @@ fn resolver_trace_enabled() -> bool {
             !value.is_empty() && value != "0" && value != "false" && value != "off"
         }
         Err(_) => false,
+    }
+}
+
+fn resolve_literal(lit: &SurfaceLiteral) -> Literal {
+    match lit {
+        SurfaceLiteral::Int(value) => Literal::Int(*value),
+        SurfaceLiteral::Float(value) => Literal::Float(*value),
+        SurfaceLiteral::Char(value) => Literal::Char(*value),
+        SurfaceLiteral::Str(value) => Literal::Str(intern_string_literal(value)),
     }
 }
 

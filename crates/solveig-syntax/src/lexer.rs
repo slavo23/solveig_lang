@@ -101,6 +101,15 @@ enum RawToken {
     #[token("_", priority = 3)]
     Underscore,
 
+    #[regex(r"[0-9]+((\.[0-9]+)([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)", |lex| lex.slice().parse::<f64>().ok())]
+    Float(f64),
+
+    #[regex(r#"'([^'\\\n]|\\(n|t|\\|'|"|u\{[0-9a-fA-F]{1,6}\}))'"#, |lex| parse_char_literal(lex.slice()))]
+    Char(char),
+
+    #[regex(r#""([^"\\\n]|\\(n|t|\\|'|"|u\{[0-9a-fA-F]{1,6}\}))*""#, |lex| parse_string_literal(lex.slice()))]
+    Str(String),
+
     #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
     Int(i64),
 
@@ -113,7 +122,7 @@ enum RawToken {
 
 // -- Positioned tokens ------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PosToken {
     pub kind: Token,
     pub start: usize,
@@ -138,9 +147,12 @@ impl PosToken {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Token {
     Int(i64),
+    Float(f64),
+    Char(char),
+    Str(String),
     Ident(Symbol),
     UpperIdent(Symbol),
 
@@ -201,6 +213,79 @@ pub struct LexError {
     pub line: u32,
     pub col: u32,
     pub message: String,
+}
+
+fn parse_string_literal(slice: &str) -> Option<String> {
+    let body = slice.strip_prefix('"')?.strip_suffix('"')?;
+    decode_escaped_body(body)
+}
+
+fn parse_char_literal(slice: &str) -> Option<char> {
+    let body = slice.strip_prefix('\'')?.strip_suffix('\'')?;
+    let decoded = decode_escaped_body(body)?;
+    let mut chars = decoded.chars();
+    let ch = chars.next()?;
+
+    if chars.next().is_none() {
+        Some(ch)
+    } else {
+        None
+    }
+}
+
+fn decode_escaped_body(body: &str) -> Option<String> {
+    let mut out = String::new();
+    let mut chars = body.chars();
+
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            out.push(decode_escape(&mut chars)?);
+        } else {
+            out.push(ch);
+        }
+    }
+
+    Some(out)
+}
+
+fn decode_escape(chars: &mut std::str::Chars<'_>) -> Option<char> {
+    match chars.next()? {
+        'n' => Some('\n'),
+        't' => Some('\t'),
+        '\\' => Some('\\'),
+        '\'' => Some('\''),
+        '"' => Some('"'),
+        'u' => decode_unicode_escape(chars),
+        _ => None,
+    }
+}
+
+fn decode_unicode_escape(chars: &mut std::str::Chars<'_>) -> Option<char> {
+    if chars.next()? != '{' {
+        return None;
+    }
+
+    let mut value = String::new();
+
+    loop {
+        let ch = chars.next()?;
+        if ch == '}' {
+            break;
+        }
+
+        if !ch.is_ascii_hexdigit() || value.len() == 6 {
+            return None;
+        }
+
+        value.push(ch);
+    }
+
+    if value.is_empty() {
+        return None;
+    }
+
+    let scalar = u32::from_str_radix(&value, 16).ok()?;
+    char::from_u32(scalar)
 }
 
 fn strip_block_comments(source: &str) -> String {
@@ -277,6 +362,9 @@ fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Option<Token>
     let token = match raw {
         RawToken::Newline | RawToken::LineComment => return None,
         RawToken::Int(n) => Token::Int(n),
+        RawToken::Float(n) => Token::Float(n),
+        RawToken::Char(ch) => Token::Char(ch),
+        RawToken::Str(value) => Token::Str(value),
         RawToken::Ident => Token::Ident(session.intern(slice)),
         RawToken::UpperIdent => Token::UpperIdent(session.intern(slice)),
 

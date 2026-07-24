@@ -32,6 +32,9 @@ pub enum HeapObject {
         tag: u16,
         fields: PayloadRef,
     },
+    Str {
+        bytes: ByteRef,
+    },
 }
 
 #[derive(Debug)]
@@ -40,6 +43,7 @@ pub struct Heap {
     pub mark_bits: Vec<bool>,
     pub free_list: Vec<u32>,
     pub payloads: PayloadStore,
+    pub bytes: ByteStore,
     pub allocations_since_gc: usize,
     pub next_gc_at: usize,
 }
@@ -51,6 +55,7 @@ impl Default for Heap {
             mark_bits: Vec::new(),
             free_list: Vec::new(),
             payloads: PayloadStore::default(),
+            bytes: ByteStore::default(),
             allocations_since_gc: 0,
             next_gc_at: 32_768,
         }
@@ -146,8 +151,18 @@ impl Heap {
             }
             HeapObject::PartialCtor { applied_args, .. } => self.payloads.free_span(*applied_args),
             HeapObject::DataN { fields, .. } => self.payloads.free_span(*fields),
+            HeapObject::Str { bytes } => self.bytes.free_span(*bytes),
             HeapObject::Data0 { .. } | HeapObject::Data1 { .. } | HeapObject::Data2 { .. } => {}
         }
+    }
+
+    pub fn alloc_str(&mut self, value: &str) -> Value {
+        let bytes = self.bytes.alloc(value.as_bytes());
+        self.alloc(HeapObject::Str { bytes })
+    }
+
+    pub fn str_value(&self, bytes: ByteRef) -> &str {
+        self.bytes.as_str(bytes)
     }
 }
 
@@ -199,6 +214,101 @@ pub struct PayloadStore {
     pub bucket1: Vec<usize>,
     pub bucket2: Vec<usize>,
     pub bucket3: Vec<usize>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ByteRef {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl ByteRef {
+    #[inline(always)]
+    pub fn len(self) -> usize {
+        self.end - self.start
+    }
+
+    #[inline(always)]
+    pub fn is_empty(self) -> bool {
+        self.start == self.end
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct ByteStore {
+    bytes: Vec<u8>,
+    free: Vec<ByteRef>,
+}
+
+impl ByteStore {
+    #[inline]
+    pub fn empty() -> ByteRef {
+        ByteRef { start: 0, end: 0 }
+    }
+
+    #[inline]
+    fn as_slice(&self, span: ByteRef) -> &[u8] {
+        &self.bytes[span.start..span.end]
+    }
+
+    #[inline]
+    pub fn as_str(&self, span: ByteRef) -> &str {
+        std::str::from_utf8(self.as_slice(span))
+            .expect("ICE: Solveig heap string bytes must be valid UTF-8")
+    }
+
+    fn take_free_span(&mut self, len: usize) -> Option<ByteRef> {
+        let idx = self.free.iter().position(|r| r.len() >= len)?;
+        let span = self.free[idx];
+
+        if span.len() == len {
+            self.free.swap_remove(idx);
+            Some(span)
+        } else {
+            let out = ByteRef {
+                start: span.start,
+                end: span.start + len,
+            };
+            self.free[idx] = ByteRef {
+                start: span.start + len,
+                end: span.end,
+            };
+            Some(out)
+        }
+    }
+
+    fn reserve_span(&mut self, len: usize) -> ByteRef {
+        if len == 0 {
+            return Self::empty();
+        }
+
+        if let Some(span) = self.take_free_span(len) {
+            return span;
+        }
+
+        let start = self.bytes.len();
+        self.bytes.resize(start + len, 0);
+        ByteRef {
+            start,
+            end: start + len,
+        }
+    }
+
+    pub fn alloc(&mut self, bytes: &[u8]) -> ByteRef {
+        let span = self.reserve_span(bytes.len());
+
+        if !span.is_empty() {
+            self.bytes[span.start..span.end].copy_from_slice(bytes);
+        }
+
+        span
+    }
+
+    pub fn free_span(&mut self, span: ByteRef) {
+        if !span.is_empty() {
+            self.free.push(span);
+        }
+    }
 }
 
 impl PayloadStore {

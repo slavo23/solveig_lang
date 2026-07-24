@@ -1,5 +1,5 @@
-use solveig_ast::ast::Literal;
 use solveig_ast::ast::{CtorId, CtorRuntimeInfo, PRIM_TYS};
+use solveig_ast::ast::{Literal, string_literal_value};
 
 use super::bytecode::{
     BytePattern, BytecodeProgram, ChunkKind, Instr, MatchArm, lower_to_bytecode,
@@ -179,6 +179,7 @@ impl Vm {
                     }
                     Children::None
                 }
+                Some(HeapObject::Str { .. }) => Children::None,
                 None => Children::None,
             };
 
@@ -635,6 +636,10 @@ impl Vm {
             | HeapObject::DataN { tag, .. } => {
                 panic!("cannot apply saturated constructor tag {}", tag);
             }
+
+            HeapObject::Str { .. } => {
+                panic!("ICE: heap string reached callable-object invocation");
+            }
         }
     }
 
@@ -908,6 +913,19 @@ impl Vm {
             match instr {
                 Instr::PushUnit => self.push(Value::Unit),
                 Instr::PushInt(n) => self.push(Value::Int(n)),
+                Instr::PushFloat(n) => self.push(Value::Float(n)),
+                Instr::PushChar(ch) => self.push(Value::Char(ch)),
+                Instr::PushStr(index) => {
+                    self.maybe_gc();
+                    let value = program
+                        .string_constants
+                        .get(index as usize)
+                        .unwrap_or_else(|| {
+                            panic!("ICE: bytecode references missing string constant {index}")
+                        });
+                    let value = self.heap.alloc_str(value);
+                    self.push(value);
+                }
                 Instr::LoadLocal(slot) => self.push(self.load(slot)),
                 Instr::StoreLocal(slot) => {
                     let val = self.pop();
@@ -1114,6 +1132,16 @@ fn match_pattern_inner(
         }
         BytePattern::Lit(lit_val) => match (lit_val, value) {
             (Literal::Int(expected), Value::Int(actual)) => *expected == actual,
+            (Literal::Float(expected), Value::Float(actual)) => {
+                expected.to_bits() == actual.to_bits()
+            }
+            (Literal::Char(expected), Value::Char(actual)) => *expected == actual,
+            (Literal::Str(expected), Value::Obj(id)) => match heap.get(id) {
+                HeapObject::Str { bytes } => {
+                    heap.str_value(*bytes) == string_literal_value(*expected)
+                }
+                _ => false,
+            },
             _ => false,
         },
         BytePattern::Wild => true,
@@ -1596,6 +1624,7 @@ mod tests {
             globals,
             functions,
             constructor_arities,
+            string_constants: Vec::new(),
         }
     }
 

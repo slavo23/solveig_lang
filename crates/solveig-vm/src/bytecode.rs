@@ -11,6 +11,9 @@ const NON_EXHAUSTIVE_CASE_TRAP: u16 = 1;
 pub enum Instr {
     PushUnit,
     PushInt(i64),
+    PushFloat(f64),
+    PushChar(char),
+    PushStr(u32),
     LoadLocal(u16),
     LoadGlobal(u32),
     PushCtorFn {
@@ -119,6 +122,7 @@ pub struct BytecodeProgram {
     pub chunks: Vec<Chunk>,
     pub globals: Vec<CompiledGlobal>,
     pub constructor_arities: Vec<CtorRuntimeInfo>,
+    pub string_constants: Vec<String>,
 }
 
 impl BytecodeProgram {
@@ -161,6 +165,11 @@ impl BytecodeProgram {
                 "tag {:>3}  arity {:>2}  {}\n",
                 info.tag, info.arity, info.name
             ));
+        }
+
+        out.push_str("\n=== String Constants ===\n");
+        for (idx, value) in self.string_constants.iter().enumerate() {
+            out.push_str(&format!("[{idx}] \"{}\"\n", escape_string_literal(value)));
         }
 
         out.push_str("\n=== Chunks ===\n");
@@ -265,6 +274,7 @@ impl BytecodeLowerer {
             chunks: self.chunks,
             globals,
             constructor_arities: program.constructor_arities.clone(),
+            string_constants: program.string_constants.clone(),
         }
     }
 
@@ -426,6 +436,9 @@ impl BytecodeLowerer {
         match expr.as_ref() {
             CCExpr::Unit => builder.emit(Instr::PushUnit),
             CCExpr::Int(n) => builder.emit(Instr::PushInt(*n)),
+            CCExpr::Float(n) => builder.emit(Instr::PushFloat(*n)),
+            CCExpr::Char(ch) => builder.emit(Instr::PushChar(*ch)),
+            CCExpr::StrConst(index) => builder.emit(Instr::PushStr(*index)),
 
             CCExpr::Local(index) => {
                 let slot = env.lookup(*index);
@@ -808,6 +821,9 @@ fn format_instr(instr: &Instr) -> String {
     match instr {
         Instr::PushUnit => "PushUnit".to_string(),
         Instr::PushInt(n) => format!("PushInt {n}"),
+        Instr::PushFloat(n) => format!("PushFloat {n}"),
+        Instr::PushChar(ch) => format!("PushChar '{}'", escape_char_literal(*ch)),
+        Instr::PushStr(index) => format!("PushStr const#{index}"),
         Instr::LoadLocal(slot) => format!("LoadLocal {slot}"),
         Instr::LoadGlobal(idx) => format!("LoadGlobal {idx}"),
         Instr::PushCtorFn { tag, arity } => format!("PushCtorFn tag={tag} arity={arity}"),
@@ -864,7 +880,10 @@ fn format_pattern(pattern: &BytePattern) -> String {
         BytePattern::Var => "Var".to_string(),
         BytePattern::Wild => "_".to_string(),
         BytePattern::Lit(lit_val) => match lit_val {
-            Literal::Int(i_val) => format!("Int({})", i_val.to_string()),
+            Literal::Int(i_val) => format!("Int({i_val})"),
+            Literal::Float(value) => format!("Float({value})"),
+            Literal::Char(value) => format!("Char('{}')", escape_char_literal(*value)),
+            Literal::Str(id) => format!("StrLit({})", id.0),
         },
         BytePattern::Con(tag, sub_patterns) => {
             if sub_patterns.is_empty() {
@@ -885,9 +904,7 @@ fn lower_pattern(pattern: &CCPattern) -> BytePattern {
     match pattern {
         CCPattern::Var => BytePattern::Var,
         CCPattern::Wild => BytePattern::Wild,
-        CCPattern::Lit(lit_val) => match lit_val {
-            Literal::Int(i_val) => BytePattern::Lit(Literal::Int(*i_val)),
-        },
+        CCPattern::Lit(lit_val) => BytePattern::Lit(lit_val.clone()),
         CCPattern::Con(tag, sub_patterns) => BytePattern::Con(
             *tag,
             sub_patterns
@@ -897,4 +914,33 @@ fn lower_pattern(pattern: &CCPattern) -> BytePattern {
                 .into_boxed_slice(),
         ),
     }
+}
+
+fn escape_char_literal(ch: char) -> String {
+    match ch {
+        '\n' => "\\n".to_string(),
+        '\t' => "\\t".to_string(),
+        '\\' => "\\\\".to_string(),
+        '\'' => "\\'".to_string(),
+        '"' => "\\\"".to_string(),
+        ch if ch.is_control() => ch.escape_unicode().to_string(),
+        ch => ch.to_string(),
+    }
+}
+
+fn escape_string_literal(value: &str) -> String {
+    let mut out = String::new();
+
+    for ch in value.chars() {
+        out.push_str(&match ch {
+            '\n' => "\\n".to_string(),
+            '\t' => "\\t".to_string(),
+            '\\' => "\\\\".to_string(),
+            '"' => "\\\"".to_string(),
+            ch if ch.is_control() => ch.escape_unicode().to_string(),
+            ch => ch.to_string(),
+        });
+    }
+
+    out
 }
