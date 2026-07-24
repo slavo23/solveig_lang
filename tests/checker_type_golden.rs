@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::process::Command;
 
 use solveig_driver::checked_project_schemes;
 
@@ -68,4 +69,31 @@ fn checker_api_golden_types() {
 
         assert_eq!(actual, expected_scheme, "scheme changed for `{name}`");
     }
+}
+
+#[test]
+fn cli_does_not_see_unimported_instances() {
+    let project_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/types/unimported_instance");
+    let output = Command::new(env!("CARGO_BIN_EXE_solveig"))
+        .arg("--project-root")
+        .arg(&project_root)
+        .arg("--verify-core")
+        .output()
+        .expect("Solveig CLI should run for unimported-instance fixture");
+    let actual = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(
+        !output.status.success(),
+        "unimported-instance fixture unexpectedly compiled:\n{actual}"
+    );
+    assert!(
+        actual.contains("Need Int") && actual.contains("no matching instance found"),
+        "unimported-instance fixture should fail because the sibling instance is not imported:\n\
+         {actual}"
+    );
 }

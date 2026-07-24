@@ -9,7 +9,8 @@ use solveig_ast::ast::{
     PrettyTables, Scheme, TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, def_display_name,
     symbol_display_name,
 };
-use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile};
+use solveig_base::utils::diagnostics::Diagnostic;
+use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap};
 use solveig_check::core_lint::{CoreLintEnv, lint_checked_module};
 use solveig_check::inference::holes::hole_diagnostics;
 use solveig_check::inference::type_infer::{
@@ -69,13 +70,15 @@ struct CheckedProject {
 }
 
 impl CompilationArtifacts {
-    fn from_checked_project(project: &CheckedProject, merged: &CheckedModule) -> Self {
+    fn from_checked_project(project: &CheckedProject) -> Self {
+        let (tycon_table, class_table) = checked_project_tables(&project.modules);
+
         Self {
             checked: project.checked.clone(),
             module_files: project.module_files.clone(),
             source_files: project.source_files.clone(),
-            tycon_table: merged.tycon_table.clone(),
-            class_table: merged.class_table.clone(),
+            tycon_table,
+            class_table,
         }
     }
 }
@@ -120,18 +123,21 @@ impl Compilation {
     }
 
     pub fn checked_project_schemes(&self) -> Result<BTreeMap<String, String>, String> {
-        let merged = self.check_and_merge_project(true)?;
+        let checked_project = self.check_project(true)?;
+        let (tycon_table, class_table) = checked_project_tables(&checked_project.modules);
         let pretty_tables = PrettyTables {
-            tycons: &merged.tycon_table,
-            classes: &merged.class_table,
+            tycons: &tycon_table,
+            classes: &class_table,
         };
         let mut schemes = BTreeMap::new();
 
-        for (id, scheme) in &merged.func_schemes {
-            schemes.insert(
-                def_display_name(*id),
-                scheme.pretty_with_tables(pretty_tables),
-            );
+        for module in &checked_project.modules {
+            for (id, scheme) in &module.func_schemes {
+                schemes.insert(
+                    def_display_name(*id),
+                    scheme.pretty_with_tables(pretty_tables),
+                );
+            }
         }
 
         Ok(schemes)
@@ -147,7 +153,12 @@ impl Compilation {
         entry_name: &str,
         options: CompileOptions,
     ) -> Result<String, String> {
-        let merged = self.check_and_merge_project(options.verify_core)?;
+        let checked_project = self.check_project(options.verify_core)?;
+        let merged = merge_checked_modules(checked_project.modules.clone())?;
+
+        if options.verify_core {
+            verify_lowering_core(&merged, &checked_project)?;
+        }
 
         if options.dump_evidence {
             dump_solved_evidence(&merged);
@@ -167,19 +178,68 @@ impl Compilation {
         Ok(result.display().to_string())
     }
 
-    fn check_and_merge_project(&self, verify_core: bool) -> Result<CheckedModule, String> {
+    fn check_project(&self, verify_core: bool) -> Result<CheckedProject, String> {
         self.artifacts.replace(None);
         let checked_project = check_project_modules(&self.project_root, verify_core)?;
-        let merged = merge_checked_modules(checked_project.modules.clone())?;
-
         self.artifacts
             .replace(Some(CompilationArtifacts::from_checked_project(
                 &checked_project,
-                &merged,
             )));
 
-        Ok(merged)
+        Ok(checked_project)
     }
+}
+
+fn checked_project_tables(modules: &[CheckedModule]) -> (TyConTable, ClassTable) {
+    let mut tycon_table = TyConTable::new();
+    let mut class_table = ClassTable::new();
+
+    for module in modules {
+        for (id, info) in module.tycon_table.iter() {
+            tycon_table.insert_with_id(id, info.clone());
+        }
+
+        for (id, info) in module.class_table.iter() {
+            class_table.insert_with_id(id, info.clone());
+        }
+    }
+
+    (tycon_table, class_table)
+}
+
+fn verify_lowering_core(
+    merged: &CheckedModule,
+    checked_project: &CheckedProject,
+) -> Result<(), String> {
+    let lint_env =
+        CoreLintEnv::from_module(merged).with_files(checked_project.module_files.clone());
+    let diagnostics = lint_checked_module(merged, &lint_env);
+
+    if diagnostics.is_empty() {
+        return Ok(());
+    }
+
+    emit_core_lint_diagnostics(&diagnostics, &checked_project.source_files)?;
+    Err(FrontendPhase::Core.error_message().to_string())
+}
+
+fn emit_core_lint_diagnostics(
+    diagnostics: &[Diagnostic],
+    source_files: &[SourceFile],
+) -> Result<(), String> {
+    let source_map = source_map_from_files(source_files);
+    emit_diagnostics(diagnostics, &source_map)
+        .map_err(|err| format!("failed to print diagnostics: {err}"))
+}
+
+fn source_map_from_files(source_files: &[SourceFile]) -> SourceMap {
+    let mut source_map = SourceMap::new();
+
+    for source in source_files {
+        source_map.add_file(source.path.clone(), source.src.clone());
+    }
+
+    source_map
 }
 
 #[derive(Clone, Debug)]
@@ -537,20 +597,6 @@ fn check_project_modules(project_root: &Path, verify_core: bool) -> Result<Check
         }
     };
     state.check_all(&order)?;
-
-    if verify_core {
-        let merged = merge_checked_modules(state.checked_modules.clone())?;
-        let lint_env = CoreLintEnv::from_module(&merged).with_files(state.module_files.clone());
-        let diagnostics = lint_checked_module(&merged, &lint_env);
-
-        if !diagnostics.is_empty() {
-            for diagnostic in diagnostics {
-                session.diagnostics().push(diagnostic);
-            }
-            emit_session_diagnostics(&session)?;
-            return Err(FrontendPhase::Core.error_message().to_string());
-        }
-    }
 
     if !session.diagnostics().is_empty() {
         emit_session_diagnostics(&session)?;
