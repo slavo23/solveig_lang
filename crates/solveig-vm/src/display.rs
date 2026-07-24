@@ -1,6 +1,6 @@
 use crate::heap::{Heap, HeapObject};
 use crate::values::Value;
-use solveig_ast::ast::{CtorRuntimeInfo, CtorRuntimeRole};
+use solveig_ast::ast::CtorRuntimeInfo;
 
 pub struct DisplayValue<'a> {
     pub root: Value,
@@ -15,39 +15,15 @@ impl std::fmt::Display for DisplayValue<'_> {
 }
 
 fn tag_name(arities: &[CtorRuntimeInfo], tag: u16) -> String {
-    tag_info(arities, tag)
+    arities
+        .iter()
+        .find(|info| info.tag == tag)
         .map(|info| info.short_name.clone())
         .unwrap_or_else(|| "<?>".to_string())
 }
 
-fn tag_info(arities: &[CtorRuntimeInfo], tag: u16) -> Option<&CtorRuntimeInfo> {
-    arities.iter().find(|info| info.tag == tag)
-}
-
-fn tag_has_role(arities: &[CtorRuntimeInfo], tag: u16, role: CtorRuntimeRole) -> bool {
-    tag_info(arities, tag)
-        .map(|info| info.role == role)
-        .unwrap_or(false)
-}
-
-fn tag_has_short_name(arities: &[CtorRuntimeInfo], tag: u16, expected: &str) -> bool {
-    tag_info(arities, tag)
-        .map(|info| info.short_name == expected)
-        .unwrap_or(false)
-}
-
 impl DisplayValue<'_> {
     fn render(&self, val: Value) -> String {
-        if let Some(s) = self.try_nat(val) {
-            return s;
-        }
-        if let Some(s) = self.try_list(val) {
-            return s;
-        }
-        if let Some(s) = self.try_pair(val) {
-            return s;
-        }
-
         match val {
             Value::Unit => "()".into(),
             Value::Int(n) => n.to_string(),
@@ -121,89 +97,6 @@ impl DisplayValue<'_> {
             .map(|&v| self.render_atom(v))
             .collect::<Vec<_>>()
             .join(" ")
-    }
-
-    fn try_nat(&self, mut val: Value) -> Option<String> {
-        let mut n = 0usize;
-
-        loop {
-            match val {
-                Value::Obj(id) => match self.heap.get(id) {
-                    HeapObject::Data0 { tag } => {
-                        if tag_has_short_name(self.arities, *tag, "Z") {
-                            return Some(n.to_string());
-                        }
-                        return None;
-                    }
-                    HeapObject::Data1 { tag, field } => {
-                        if tag_has_short_name(self.arities, *tag, "S") {
-                            n += 1;
-                            val = *field;
-                            continue;
-                        }
-                        return None;
-                    }
-                    HeapObject::Data2 { .. } | HeapObject::DataN { .. } => return None,
-                    _ => return None,
-                },
-                _ => return None,
-            }
-        }
-    }
-    fn try_list(&self, mut val: Value) -> Option<String> {
-        let mut items = Vec::new();
-
-        loop {
-            match val {
-                Value::Obj(id) => match self.heap.get(id) {
-                    HeapObject::Data0 { tag } => {
-                        if tag_has_role(self.arities, *tag, CtorRuntimeRole::PreludeListNil) {
-                            return Some(format!("[{}]", items.join(", ")));
-                        }
-                        return None;
-                    }
-                    HeapObject::Data2 {
-                        tag,
-                        field0,
-                        field1,
-                    } => {
-                        if tag_has_role(self.arities, *tag, CtorRuntimeRole::PreludeListCons) {
-                            items.push(self.render(*field0));
-                            val = *field1;
-                            continue;
-                        }
-                        return None;
-                    }
-                    HeapObject::Data1 { .. } | HeapObject::DataN { .. } => return None,
-                    _ => return None,
-                },
-                _ => return None,
-            }
-        }
-    }
-
-    fn try_pair(&self, val: Value) -> Option<String> {
-        match val {
-            Value::Obj(id) => match self.heap.get(id) {
-                HeapObject::Data2 {
-                    tag,
-                    field0,
-                    field1,
-                } => {
-                    if tag_has_role(self.arities, *tag, CtorRuntimeRole::PreludePair) {
-                        Some(format!(
-                            "({}, {})",
-                            self.render(*field0),
-                            self.render(*field1)
-                        ))
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            },
-            _ => None,
-        }
     }
 }
 

@@ -248,6 +248,31 @@ impl TypeCheckEnv {
         }
     }
 
+    pub fn from_checked_module(module: &CheckedModule) -> Self {
+        let mut expr_anno = |metadata: TcMetadata| metadata.span;
+        let mut pattern_anno = |span: Span| span;
+
+        Self {
+            constructor_types: module.constructor_types.clone(),
+            func_schemes: module.func_schemes.clone(),
+            class_defs: module
+                .class_defs
+                .iter()
+                .map(|class_def| (class_def.id, class_def.clone()))
+                .collect(),
+            instance_defs: module
+                .instance_defs
+                .clone()
+                .into_iter()
+                .map(|inst| inst.map_anno(&mut expr_anno, &mut pattern_anno))
+                .collect(),
+            tycon_table: module.tycon_table.clone(),
+            ctor_table: module.ctor_table.clone(),
+            class_table: module.class_table.clone(),
+            tycon_kinds: module.tycon_kinds.clone(),
+        }
+    }
+
     pub fn pretty_tables(&self) -> PrettyTables<'_> {
         PrettyTables {
             tycons: &self.tycon_table,

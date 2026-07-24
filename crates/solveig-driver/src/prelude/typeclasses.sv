@@ -333,6 +333,83 @@ mapIO_ f xs =
         [] => prelude.builtins.pureIO ()
         | y :: ys => prelude.builtins.bindIO (f y) (fun ignored => mapIO_ f ys)
 
+class Show a where
+    show : a -> String
+
+showCharPayload : Char -> String
+showCharPayload c =
+    if c == '\n' then "\\n"
+    else if c == '\t' then "\\t"
+    else if c == '\\' then "\\\\"
+    else if c == '\'' then "\\'"
+    else if c == '"' then "\\\""
+    else charToString c
+
+showStringPayload : Char -> String
+showStringPayload c =
+    if c == '\n' then "\\n"
+    else if c == '\t' then "\\t"
+    else if c == '\\' then "\\\\"
+    else if c == '"' then "\\\""
+    else charToString c
+
+showStringChars : [Char] -> String
+showStringChars chars =
+    case chars of
+        [] => ""
+        | c :: rest => stringAppend (showStringPayload c) (showStringChars rest)
+
+showListItems : forall a. Show a => [a] -> String
+showListItems xs =
+    case xs of
+        [] => ""
+        | y :: ys =>
+            case ys of
+                [] => show y
+                | _ :: _ => stringAppend (show y) (stringAppend ", " (showListItems ys))
+
+instance Show Int where
+    show value = intToString value
+
+instance Show Float where
+    show value = floatToString value
+
+instance Show Char where
+    show value = stringAppend "'" (stringAppend (showCharPayload value) "'")
+
+instance Show String where
+    show value = stringAppend "\"" (stringAppend (showStringChars (stringToChars value)) "\"")
+
+instance Show () where
+    show value = "()"
+
+instance Show Bool where
+    show value =
+        case value of
+            True => "True"
+            | False => "False"
+
+instance Show Ordering where
+    show value =
+        case value of
+            LT => "LT"
+            | EQ => "EQ"
+            | GT => "GT"
+
+instance Show a => Show (Maybe a) where
+    show value =
+        case value of
+            Nothing => "Nothing"
+            | Just x => stringAppend "Just " (show x)
+
+instance Show a => Show (List a) where
+    show value = stringAppend "[" (stringAppend (showListItems value) "]")
+
+instance (Show a, Show b) => Show (Pair a b) where
+    show value =
+        case value of
+            MkPair a b => stringAppend "(" (stringAppend (show a) (stringAppend ", " (stringAppend (show b) ")")))
+
 class Semigroup a where
     appendS : a -> a -> a
 

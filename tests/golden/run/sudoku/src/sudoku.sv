@@ -1,6 +1,12 @@
 data MaybePos = NoPos | FoundPos Int Int;
 data MaybeBoard = NoBoard | Solved [[Int]];
 
+instance Show MaybeBoard where
+    show value =
+        case value of
+            NoBoard => "NoBoard"
+          | Solved board => appendString "Solved " (show board)
+
 digits : [Int];
 digits =
     [1, 2, 3, 4, 5, 6, 7, 8, 9];

@@ -1494,6 +1494,17 @@ impl EvalResult {
             arities: &self.constructor_arities,
         }
     }
+
+    pub fn as_string(&self) -> Option<&str> {
+        let Value::Obj(id) = self.root else {
+            return None;
+        };
+
+        match self.heap.get(id) {
+            HeapObject::Str { bytes } => Some(self.heap.str_value(*bytes)),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]

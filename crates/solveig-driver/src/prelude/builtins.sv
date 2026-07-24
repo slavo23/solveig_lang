@@ -19,6 +19,9 @@ printStr text = prelude.prim.printStr text;
 readLine : IO String;
 readLine = prelude.prim.readLine;
 
+appendString : String -> String -> String;
+appendString left right = prelude.prim.stringAppend left right;
+
 even : Int -> Bool;
 even n = intEq (intMod n 2) 0;
 

@@ -558,3 +558,21 @@ pub fn check_and_elab_module(
         Err(errors)
     }
 }
+
+pub fn check_and_elab_expr_in_checked_module(
+    module: &CheckedModule,
+    file: FileId,
+    expr: &TermExprNode<Span>,
+    expected_type: &TypeExpr,
+) -> Result<Option<TermExprNode<TcMetadata, Span>>, TypeError> {
+    let env = TypeCheckEnv::from_checked_module(module);
+    let mut checker = TypeChecker::with_env(&env, file);
+    let (_ctx, elaborated) = checker.solve_checking(Context::new(), expr, expected_type)?;
+    let unresolved = checker.unresolved_wanteds();
+
+    if unresolved.is_empty() {
+        Ok(Some(checker.zonk_expr(&elaborated)))
+    } else {
+        Ok(None)
+    }
+}

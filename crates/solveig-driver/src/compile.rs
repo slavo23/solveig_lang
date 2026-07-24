@@ -16,17 +16,19 @@ use solveig_ast::ast::{
     BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
     BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BuiltinDefinition,
     BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassTable, CtorId,
-    CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, PRIM_TYS, PrettyTables, Scheme, TermExpr,
-    TermExprNode, TyConId, TyConTable, TypeExpr, def_display_name, legacy_tyvar_id,
-    prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
-    register_def_display_name, register_symbol_display_name, symbol_display_name,
+    CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, PRIM_TYS, PrettyTables, Scheme,
+    TermDefinition, TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, VarRef,
+    def_display_name, legacy_symbol_id, legacy_tyvar_id, prelude_list_tycon_id,
+    prelude_maybe_tycon_id, prelude_ordering_tycon_id, register_def_display_name,
+    register_symbol_display_name, symbol_display_name,
 };
 use solveig_base::utils::diagnostics::Diagnostic;
 use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap};
 use solveig_check::core_lint::{CoreLintEnv, lint_checked_module};
 use solveig_check::inference::holes::hole_diagnostics;
 use solveig_check::inference::type_infer::{
-    CheckedModule, TcMetadata, TypeCheckEnv, check_and_elab_module,
+    CheckedModule, TcMetadata, TypeCheckEnv, check_and_elab_expr_in_checked_module,
+    check_and_elab_module,
 };
 use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
@@ -210,14 +212,22 @@ impl Compilation {
         args: &[String],
     ) -> Result<CapturedRun, String> {
         let checked_project = self.check_project(options.verify_core)?;
-        let merged = merge_checked_modules(checked_project.modules.clone())?;
+        let mut merged = merge_checked_modules(checked_project.modules.clone())?;
 
-        if options.verify_core {
-            verify_lowering_core(&merged, &checked_project)?;
-        }
+        let entry_fq = format!("main.{entry_name}");
+        let entry_is_io = entry_returns_io(&merged, &entry_fq);
+        let show_entry = if entry_is_io {
+            None
+        } else {
+            add_show_entry_wrapper(&mut merged, &checked_project, &entry_fq)
+        };
 
         if options.dump_evidence {
             dump_solved_evidence(&merged);
+        }
+
+        if options.verify_core {
+            verify_lowering_core(&merged, &checked_project)?;
         }
 
         let ir = lower_module(&merged);
@@ -228,13 +238,23 @@ impl Compilation {
                 .map_err(|e| format!("failed to dump bytecode: {e}"))?;
         }
 
-        let entry_fq = format!("main.{entry_name}");
-        if entry_returns_io(&merged, &entry_fq) {
+        if entry_is_io {
             let result = Machine::exec_io(&cc, &entry_fq, stdin, args)
                 .map_err(|err| format!("runtime error: {err}"))?;
             Ok(CapturedRun {
                 output: result.stdout,
                 performed_io: true,
+            })
+        } else if let Some(show_entry) = show_entry {
+            let result =
+                Machine::exec(&cc, &show_entry).map_err(|err| format!("runtime error: {err}"))?;
+            let output = result
+                .as_string()
+                .ok_or_else(|| "runtime error: Show main did not return String".to_string())?
+                .to_string();
+            Ok(CapturedRun {
+                output,
+                performed_io: false,
             })
         } else {
             let result =
@@ -276,11 +296,7 @@ fn checked_project_tables(modules: &[CheckedModule]) -> (TyConTable, ClassTable)
 }
 
 fn entry_returns_io(module: &CheckedModule, entry_name: &str) -> bool {
-    module
-        .func_schemes
-        .iter()
-        .find(|(def_id, _)| def_display_name(**def_id) == entry_name)
-        .is_some_and(|(_, scheme)| scheme_returns_io(scheme))
+    entry_def(module, entry_name).is_some_and(|(_, scheme)| scheme_returns_io(scheme))
 }
 
 fn scheme_returns_io(scheme: &Scheme) -> bool {
@@ -288,6 +304,100 @@ fn scheme_returns_io(scheme: &Scheme) -> bool {
     matches!(
         ty,
         TypeExpr::TyApp(func, _) if matches!(*func, TypeExpr::TyCon(id) if id == PRIM_TYS.io)
+    )
+}
+
+const SHOW_ENTRY_NAME: &str = "main.$solveig_show_main";
+const SHOW_ENTRY_SHORT_NAME: &str = "$solveig_show_main";
+
+fn add_show_entry_wrapper(
+    module: &mut CheckedModule,
+    checked_project: &CheckedProject,
+    entry_name: &str,
+) -> Option<String> {
+    let (entry_id, _) = entry_def(module, entry_name)?;
+    let show_method_id = show_method_id(module)?;
+    let string_ty = TypeExpr::make_con_id(PRIM_TYS.string);
+    let expr = show_entry_expr(show_method_id, entry_id, entry_expr_span(module, entry_id));
+    let file = checked_project
+        .module_files
+        .get(&entry_id.module)
+        .copied()
+        .unwrap_or(FileId(0));
+    let elaborated = match check_and_elab_expr_in_checked_module(module, file, &expr, &string_ty) {
+        Ok(Some(expr)) => expr,
+        Ok(None) | Err(_) => return None,
+    };
+    let id = DefId {
+        module: entry_id.module,
+        name: legacy_symbol_id(SHOW_ENTRY_SHORT_NAME),
+    };
+    let scheme = Scheme::mono(string_ty);
+
+    register_def_display_name(id, SHOW_ENTRY_NAME);
+    module.func_schemes.insert(id, scheme.clone());
+    module.func_defs.push(TermDefinition {
+        id,
+        name: SHOW_ENTRY_NAME.to_string(),
+        short_name: SHOW_ENTRY_SHORT_NAME.to_string(),
+        signature: Some(scheme),
+        body: elaborated,
+    });
+
+    Some(SHOW_ENTRY_NAME.to_string())
+}
+
+fn entry_def<'a>(module: &'a CheckedModule, entry_name: &str) -> Option<(DefId, &'a Scheme)> {
+    module
+        .func_schemes
+        .iter()
+        .find(|(def_id, _)| def_display_name(**def_id) == entry_name)
+        .map(|(def_id, scheme)| (*def_id, scheme))
+}
+
+fn show_method_id(module: &CheckedModule) -> Option<DefId> {
+    module
+        .class_defs
+        .iter()
+        .find(|class_def| {
+            class_def.name == "prelude.typeclasses.Show" || class_def.short_name == "Show"
+        })
+        .and_then(|class_def| {
+            class_def
+                .methods
+                .iter()
+                .find(|method| method.short_name == "show")
+                .map(|method| method.id)
+        })
+}
+
+fn entry_expr_span(module: &CheckedModule, entry_id: DefId) -> Range<usize> {
+    module
+        .func_defs
+        .iter()
+        .find(|func| func.id == entry_id)
+        .map(|func| func.body.anno.span.clone())
+        .filter(|span| span.start < span.end)
+        .unwrap_or(0..1)
+}
+
+fn show_entry_expr(
+    show_method_id: DefId,
+    entry_id: DefId,
+    span: Range<usize>,
+) -> TermExprNode<Range<usize>> {
+    TermExprNode::new(
+        TermExpr::App(
+            Box::new(TermExprNode::new(
+                TermExpr::Var(VarRef::Global(show_method_id)),
+                span.clone(),
+            )),
+            Box::new(TermExprNode::new(
+                TermExpr::Var(VarRef::Global(entry_id)),
+                span.clone(),
+            )),
+        ),
+        span,
     )
 }
 
@@ -1038,7 +1148,7 @@ fn primitive_builtin_specs() -> Vec<PrimitiveBuiltinSpec> {
             "pureIO",
             BUILTIN_PURE_IO,
             1,
-            poly_arr(&["a"], &[a.clone()], io_of(a.clone())),
+            poly_arr(&["a"], std::slice::from_ref(&a), io_of(a.clone())),
         ),
         prim_spec(
             "bindIO",
