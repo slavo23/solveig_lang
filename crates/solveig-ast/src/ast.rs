@@ -410,6 +410,9 @@ pub const BUILTIN_PRINT_LINE: BuiltinId = BuiltinId(39);
 pub const BUILTIN_PRINT_STR: BuiltinId = BuiltinId(40);
 pub const BUILTIN_READ_LINE: BuiltinId = BuiltinId(41);
 pub const BUILTIN_GET_ARGS: BuiltinId = BuiltinId(42);
+pub const BUILTIN_READ_FILE: BuiltinId = BuiltinId(43);
+pub const BUILTIN_WRITE_FILE: BuiltinId = BuiltinId(44);
+pub const BUILTIN_APPEND_FILE: BuiltinId = BuiltinId(45);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrimTys {

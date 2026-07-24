@@ -19,6 +19,15 @@ printStr text = prelude.prim.printStr text;
 readLine : IO String;
 readLine = prelude.prim.readLine;
 
+readFile : String -> IO String;
+readFile path = prelude.prim.readFile path;
+
+writeFile : String -> String -> IO ();
+writeFile path contents = prelude.prim.writeFile path contents;
+
+appendFile : String -> String -> IO ();
+appendFile path contents = prelude.prim.appendFile path contents;
+
 appendString : String -> String -> String;
 appendString left right = prelude.prim.stringAppend left right;
 

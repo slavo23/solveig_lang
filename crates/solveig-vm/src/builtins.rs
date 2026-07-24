@@ -1,16 +1,17 @@
 use std::cmp::Ordering;
 
 use solveig_ast::ast::{
-    BUILTIN_BIND_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_STRING,
-    BUILTIN_CHARS_TO_STRING, BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ,
-    BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL,
-    BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB, BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING,
-    BUILTIN_GET_ARGS, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE, BUILTIN_INT_DIV, BUILTIN_INT_EQ,
-    BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD,
-    BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING,
-    BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_LINE,
-    BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
-    BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BuiltinId, CtorId,
+    BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ,
+    BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING, BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV,
+    BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT,
+    BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB, BUILTIN_FLOAT_TO_INT,
+    BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE,
+    BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE,
+    BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB,
+    BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR,
+    BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_STRING_APPEND,
+    BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
+    BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinId, CtorId,
     CtorRuntimeInfo, prelude_list_cons_ctor_id, prelude_list_nil_ctor_id,
     prelude_maybe_just_ctor_id, prelude_maybe_nothing_ctor_id, prelude_ordering_eq_ctor_id,
     prelude_ordering_gt_ctor_id, prelude_ordering_lt_ctor_id,
@@ -192,6 +193,9 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_PRINT_STR, "printStr", 1, print_str),
     builtin!(BUILTIN_READ_LINE, "readLine", 0, read_line),
     builtin!(BUILTIN_GET_ARGS, "getArgs", 0, get_args),
+    builtin!(BUILTIN_READ_FILE, "readFile", 1, read_file),
+    builtin!(BUILTIN_WRITE_FILE, "writeFile", 2, write_file),
+    builtin!(BUILTIN_APPEND_FILE, "appendFile", 2, append_file),
 ];
 
 // D3 primitive semantics:
@@ -478,6 +482,31 @@ fn read_line(ctx: &mut VmCtx<'_>, _args: &[Value]) -> Result<Value, RuntimeError
 
 fn get_args(ctx: &mut VmCtx<'_>, _args: &[Value]) -> Result<Value, RuntimeError> {
     Ok(ctx.alloc_io_action(IoAction::GetArgs))
+}
+
+fn read_file(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let path = expect_value(args, 0, "readFile")?;
+    Ok(ctx.alloc_io_action(IoAction::ReadFile { path }))
+}
+
+fn write_file(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let path = expect_value(args, 0, "writeFile")?;
+    let contents = expect_value(args, 1, "writeFile")?;
+    Ok(ctx.alloc_io_action(IoAction::WriteFile {
+        path,
+        contents,
+        append: false,
+    }))
+}
+
+fn append_file(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let path = expect_value(args, 0, "appendFile")?;
+    let contents = expect_value(args, 1, "appendFile")?;
+    Ok(ctx.alloc_io_action(IoAction::WriteFile {
+        path,
+        contents,
+        append: true,
+    }))
 }
 
 fn ordering_value(

@@ -41,10 +41,24 @@ pub enum HeapObject {
 #[derive(Debug, Clone, Copy)]
 pub enum IoAction {
     Pure(Value),
-    Bind { action: Value, continuation: Value },
-    Print { text: Value, newline: bool },
+    Bind {
+        action: Value,
+        continuation: Value,
+    },
+    Print {
+        text: Value,
+        newline: bool,
+    },
     ReadLine,
     GetArgs,
+    ReadFile {
+        path: Value,
+    },
+    WriteFile {
+        path: Value,
+        contents: Value,
+        append: bool,
+    },
 }
 
 #[derive(Debug)]

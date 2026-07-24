@@ -1,20 +1,22 @@
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::io::{self, BufRead, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    BUILTIN_BIND_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_STRING,
-    BUILTIN_CHARS_TO_STRING, BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ,
-    BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL,
-    BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB, BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING,
-    BUILTIN_GET_ARGS, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE, BUILTIN_INT_DIV, BUILTIN_INT_EQ,
-    BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD,
-    BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING,
-    BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_LINE,
-    BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
-    BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BuiltinDefinition,
+    BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ,
+    BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING, BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV,
+    BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT,
+    BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB, BUILTIN_FLOAT_TO_INT,
+    BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE,
+    BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE,
+    BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB,
+    BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR,
+    BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_STRING_APPEND,
+    BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
+    BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinDefinition,
     BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassTable, CtorId,
     CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, PRIM_TYS, PrettyTables, Scheme,
     TermDefinition, TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, VarRef,
@@ -30,6 +32,7 @@ use solveig_check::inference::type_infer::{
     CheckedModule, TcMetadata, TypeCheckEnv, check_and_elab_expr_in_checked_module,
     check_and_elab_module,
 };
+use solveig_lower::closure_ir::CCProgram;
 use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
 use solveig_report::emit_diagnostics;
@@ -85,7 +88,13 @@ struct CheckedProject {
 
 struct CapturedRun {
     output: String,
-    performed_io: bool,
+}
+
+struct PreparedRun {
+    cc: CCProgram,
+    entry_fq: String,
+    entry_is_io: bool,
+    show_entry: Option<String>,
 }
 
 impl CompilationArtifacts {
@@ -115,22 +124,14 @@ impl Compilation {
         entry_name: &str,
         dump_bytecode: bool,
     ) -> Result<(), String> {
-        let capture = self.compile_project_capture_inner(
+        self.compile_and_run_project_with_options(
             entry_name,
             CompileOptions {
                 dump_bytecode,
                 dump_evidence: false,
                 verify_core: false,
             },
-            "",
-            &[],
-        )?;
-        if capture.performed_io {
-            print!("{}", capture.output);
-        } else {
-            println!("{}", capture.output);
-        }
-        Ok(())
+        )
     }
 
     pub fn compile_and_run_project_with_options(
@@ -138,12 +139,57 @@ impl Compilation {
         entry_name: &str,
         options: CompileOptions,
     ) -> Result<(), String> {
-        let capture = self.compile_project_capture_inner(entry_name, options, "", &[])?;
-        if capture.performed_io {
-            print!("{}", capture.output);
+        self.compile_and_run_project_with_options_and_args(entry_name, options, &[])
+    }
+
+    pub fn compile_and_run_project_with_options_and_args(
+        &self,
+        entry_name: &str,
+        options: CompileOptions,
+        args: &[String],
+    ) -> Result<(), String> {
+        let stdin = io::stdin();
+        let mut stdin = stdin.lock();
+        let stdout = io::stdout();
+        let mut stdout = stdout.lock();
+
+        self.run_project_with_streams(entry_name, options, &mut stdin, &mut stdout, args)
+    }
+
+    pub fn run_project_with_streams(
+        &self,
+        entry_name: &str,
+        options: CompileOptions,
+        stdin: &mut dyn BufRead,
+        stdout: &mut dyn Write,
+        args: &[String],
+    ) -> Result<(), String> {
+        let prepared = self.prepare_project_run(entry_name, options)?;
+
+        if prepared.entry_is_io {
+            Machine::exec_io_with_streams(
+                &prepared.cc,
+                &prepared.entry_fq,
+                stdin,
+                stdout,
+                args,
+                &self.project_root,
+            )
+            .map_err(|err| format!("runtime error: {err}"))?;
+        } else if let Some(show_entry) = prepared.show_entry {
+            let result = Machine::exec(&prepared.cc, &show_entry)
+                .map_err(|err| format!("runtime error: {err}"))?;
+            let output = result
+                .as_string()
+                .ok_or_else(|| "runtime error: Show main did not return String".to_string())?;
+            writeln!(stdout, "{output}").map_err(|err| format!("failed to write output: {err}"))?;
         } else {
-            println!("{}", capture.output);
+            let result = Machine::exec(&prepared.cc, &prepared.entry_fq)
+                .map_err(|err| format!("runtime error: {err}"))?;
+            writeln!(stdout, "{}", result.display())
+                .map_err(|err| format!("failed to write output: {err}"))?;
         }
+
         Ok(())
     }
 
@@ -211,6 +257,42 @@ impl Compilation {
         stdin: &str,
         args: &[String],
     ) -> Result<CapturedRun, String> {
+        let prepared = self.prepare_project_run(entry_name, options)?;
+
+        if prepared.entry_is_io {
+            let result = Machine::exec_io(
+                &prepared.cc,
+                &prepared.entry_fq,
+                stdin,
+                args,
+                &self.project_root,
+            )
+            .map_err(|err| format!("runtime error: {err}"))?;
+            Ok(CapturedRun {
+                output: result.stdout,
+            })
+        } else if let Some(show_entry) = prepared.show_entry {
+            let result = Machine::exec(&prepared.cc, &show_entry)
+                .map_err(|err| format!("runtime error: {err}"))?;
+            let output = result
+                .as_string()
+                .ok_or_else(|| "runtime error: Show main did not return String".to_string())?
+                .to_string();
+            Ok(CapturedRun { output })
+        } else {
+            let result = Machine::exec(&prepared.cc, &prepared.entry_fq)
+                .map_err(|err| format!("runtime error: {err}"))?;
+            Ok(CapturedRun {
+                output: result.display().to_string(),
+            })
+        }
+    }
+
+    fn prepare_project_run(
+        &self,
+        entry_name: &str,
+        options: CompileOptions,
+    ) -> Result<PreparedRun, String> {
         let checked_project = self.check_project(options.verify_core)?;
         let mut merged = merge_checked_modules(checked_project.modules.clone())?;
 
@@ -238,32 +320,12 @@ impl Compilation {
                 .map_err(|e| format!("failed to dump bytecode: {e}"))?;
         }
 
-        if entry_is_io {
-            let result = Machine::exec_io(&cc, &entry_fq, stdin, args)
-                .map_err(|err| format!("runtime error: {err}"))?;
-            Ok(CapturedRun {
-                output: result.stdout,
-                performed_io: true,
-            })
-        } else if let Some(show_entry) = show_entry {
-            let result =
-                Machine::exec(&cc, &show_entry).map_err(|err| format!("runtime error: {err}"))?;
-            let output = result
-                .as_string()
-                .ok_or_else(|| "runtime error: Show main did not return String".to_string())?
-                .to_string();
-            Ok(CapturedRun {
-                output,
-                performed_io: false,
-            })
-        } else {
-            let result =
-                Machine::exec(&cc, &entry_fq).map_err(|err| format!("runtime error: {err}"))?;
-            Ok(CapturedRun {
-                output: result.display().to_string(),
-                performed_io: false,
-            })
-        }
+        Ok(PreparedRun {
+            cc,
+            entry_fq,
+            entry_is_io,
+            show_entry,
+        })
     }
 
     fn check_project(&self, verify_core: bool) -> Result<CheckedProject, String> {
@@ -736,6 +798,16 @@ pub fn compile_and_run_project_with_options(
     Compilation::new(project_root).compile_and_run_project_with_options(entry_name, options)
 }
 
+pub fn compile_and_run_project_with_options_and_args(
+    project_root: &Path,
+    entry_name: &str,
+    options: CompileOptions,
+    args: &[String],
+) -> Result<(), String> {
+    Compilation::new(project_root)
+        .compile_and_run_project_with_options_and_args(entry_name, options, args)
+}
+
 pub fn run_project_capture(project_root: &Path, entry_name: &str) -> Result<String, String> {
     Compilation::new(project_root).run_project_capture(entry_name)
 }
@@ -1179,13 +1251,31 @@ fn primitive_builtin_specs() -> Vec<PrimitiveBuiltinSpec> {
             "readLine",
             BUILTIN_READ_LINE,
             0,
-            Scheme::mono(io_of(string)),
+            Scheme::mono(io_of(string.clone())),
         ),
         prim_spec(
             "getArgs",
             BUILTIN_GET_ARGS,
             0,
             Scheme::mono(io_of(string_list)),
+        ),
+        prim_spec(
+            "readFile",
+            BUILTIN_READ_FILE,
+            1,
+            unary(string.clone(), io_of(string.clone())),
+        ),
+        prim_spec(
+            "writeFile",
+            BUILTIN_WRITE_FILE,
+            2,
+            arr(&[string.clone(), string.clone()], io_of(TypeExpr::TyUnit)),
+        ),
+        prim_spec(
+            "appendFile",
+            BUILTIN_APPEND_FILE,
+            2,
+            arr(&[string.clone(), string], io_of(TypeExpr::TyUnit)),
         ),
     ]
 }

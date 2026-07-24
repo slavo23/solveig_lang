@@ -9,8 +9,10 @@ use super::values::{BoolCache, Continuation, GlobalSlot, NullaryCtorCache, ObjId
 use crate::builtins::{self, VmCtx};
 use crate::display::DisplayValue;
 use solveig_lower::closure_ir::CCProgram;
-use std::collections::VecDeque;
 use std::fmt;
+use std::fs::{self, OpenOptions};
+use std::io::{BufRead, Cursor, Write};
+use std::path::{Path, PathBuf};
 
 struct Vm {
     chunk: usize,
@@ -25,9 +27,6 @@ struct Vm {
     globals: Vec<GlobalSlot>,
     nullary_ctors: NullaryCtorCache,
     bools: BoolCache,
-    stdin: VecDeque<String>,
-    stdout: String,
-    args: Vec<String>,
 }
 
 #[inline]
@@ -60,12 +59,69 @@ enum InvokeMode {
     TailCall,
 }
 
-impl Vm {
-    fn new(program: &BytecodeProgram) -> Self {
-        Self::new_with_io(program, "", Vec::new())
+struct IoRuntime<'a> {
+    stdin: &'a mut dyn BufRead,
+    stdout: &'a mut dyn Write,
+    args: &'a [String],
+    cwd: &'a Path,
+    line_buffer: String,
+}
+
+impl<'a> IoRuntime<'a> {
+    fn new(
+        stdin: &'a mut dyn BufRead,
+        stdout: &'a mut dyn Write,
+        args: &'a [String],
+        cwd: &'a Path,
+    ) -> Self {
+        Self {
+            stdin,
+            stdout,
+            args,
+            cwd,
+            line_buffer: String::new(),
+        }
     }
 
-    fn new_with_io(program: &BytecodeProgram, stdin: &str, args: Vec<String>) -> Self {
+    fn read_line(&mut self) -> Result<String, RuntimeError> {
+        self.line_buffer.clear();
+        let bytes = self
+            .stdin
+            .read_line(&mut self.line_buffer)
+            .map_err(|err| RuntimeError::builtin(format!("readLine failed: {err}")))?;
+        if bytes == 0 {
+            return Ok(String::new());
+        }
+
+        if self.line_buffer.ends_with('\n') {
+            self.line_buffer.pop();
+            if self.line_buffer.ends_with('\r') {
+                self.line_buffer.pop();
+            }
+        }
+
+        Ok(self.line_buffer.clone())
+    }
+
+    fn write_str(&mut self, text: &str) -> Result<(), RuntimeError> {
+        self.stdout
+            .write_all(text.as_bytes())
+            .and_then(|()| self.stdout.flush())
+            .map_err(|err| RuntimeError::builtin(format!("IO write failed: {err}")))
+    }
+
+    fn resolve_path(&self, path: &str) -> PathBuf {
+        let path = Path::new(path);
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.cwd.join(path)
+        }
+    }
+}
+
+impl Vm {
+    fn new(program: &BytecodeProgram) -> Self {
         let max_tag = program
             .constructor_arities
             .iter()
@@ -91,9 +147,6 @@ impl Vm {
                 true_val: Value::Unit,
                 false_val: Value::Unit,
             },
-            stdin: split_stdin_lines(stdin),
-            stdout: String::new(),
-            args,
         };
 
         vm.init_nullary(&program.constructor_arities);
@@ -211,6 +264,19 @@ impl Vm {
                             }
                         }
                         IoAction::ReadLine | IoAction::GetArgs => {}
+                        IoAction::ReadFile { path } => {
+                            if let Value::Obj(child) = path {
+                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
+                            }
+                        }
+                        IoAction::WriteFile { path, contents, .. } => {
+                            if let Value::Obj(child) = path {
+                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
+                            }
+                            if let Value::Obj(child) = contents {
+                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
+                            }
+                        }
                     }
                     Children::None
                 }
@@ -796,6 +862,7 @@ impl Vm {
         &mut self,
         program: &BytecodeProgram,
         action: Value,
+        io: &mut IoRuntime<'_>,
     ) -> Result<Value, RuntimeError> {
         match self.expect_io_action(action)? {
             IoAction::Pure(value) => Ok(value),
@@ -803,25 +870,25 @@ impl Vm {
                 action,
                 continuation,
             } => {
-                let value = self.perform_io(program, action)?;
+                let value = self.perform_io(program, action, io)?;
                 let next = self.call_value_for_result(program, continuation, &[value])?;
-                self.perform_io(program, next)
+                self.perform_io(program, next, io)
             }
             IoAction::Print { text, newline } => {
-                let text = self.expect_string_value(text, "IO print")?;
-                self.stdout.push_str(&text);
+                let mut text = self.expect_string_value(text, "IO print")?;
                 if newline {
-                    self.stdout.push('\n');
+                    text.push('\n');
                 }
+                io.write_str(&text)?;
                 Ok(Value::Unit)
             }
             IoAction::ReadLine => {
-                let line = self.stdin.pop_front().unwrap_or_default();
+                let line = io.read_line()?;
                 Ok(self.heap.alloc_str(&line))
             }
             IoAction::GetArgs => {
-                let mut arg_values = Vec::with_capacity(self.args.len());
-                for arg in &self.args {
+                let mut arg_values = Vec::with_capacity(io.args.len());
+                for arg in io.args {
                     arg_values.push(self.heap.alloc_str(arg));
                 }
 
@@ -833,6 +900,48 @@ impl Vm {
                     self.bools.false_val,
                 );
                 ctx.alloc_list_from_values(&arg_values, "getArgs")
+            }
+            IoAction::ReadFile { path } => {
+                let path = self.expect_string_value(path, "readFile")?;
+                let resolved = io.resolve_path(&path);
+                let contents = fs::read_to_string(&resolved).map_err(|err| {
+                    RuntimeError::builtin(format!(
+                        "readFile failed for `{}`: {err}",
+                        resolved.display()
+                    ))
+                })?;
+                Ok(self.heap.alloc_str(&contents))
+            }
+            IoAction::WriteFile {
+                path,
+                contents,
+                append,
+            } => {
+                let builtin = if append { "appendFile" } else { "writeFile" };
+                let path = self.expect_string_value(path, builtin)?;
+                let contents = self.expect_string_value(contents, builtin)?;
+                let resolved = io.resolve_path(&path);
+                if append {
+                    OpenOptions::new()
+                        .create(true)
+                        .append(true)
+                        .open(&resolved)
+                        .and_then(|mut file| file.write_all(contents.as_bytes()))
+                        .map_err(|err| {
+                            RuntimeError::builtin(format!(
+                                "appendFile failed for `{}`: {err}",
+                                resolved.display()
+                            ))
+                        })?;
+                } else {
+                    fs::write(&resolved, contents).map_err(|err| {
+                        RuntimeError::builtin(format!(
+                            "writeFile failed for `{}`: {err}",
+                            resolved.display()
+                        ))
+                    })?;
+                }
+                Ok(Value::Unit)
             }
         }
     }
@@ -1360,18 +1469,6 @@ fn find_ctor_tag(arities: &[CtorRuntimeInfo], ctor: CtorId) -> u16 {
         .unwrap_or_else(|| panic!("ICE: runtime constructor metadata missing CtorId {ctor:?}"))
 }
 
-fn split_stdin_lines(stdin: &str) -> VecDeque<String> {
-    let mut lines = VecDeque::new();
-
-    for line in stdin.split_inclusive('\n') {
-        let mut line = line.strip_suffix('\n').unwrap_or(line);
-        line = line.strip_suffix('\r').unwrap_or(line);
-        lines.push_back(line.to_string());
-    }
-
-    lines
-}
-
 pub struct EvalResult {
     root: Value,
     heap: Heap,
@@ -1444,9 +1541,10 @@ impl Machine {
         entry_name: &str,
         stdin: &str,
         args: &[String],
+        cwd: &Path,
     ) -> Result<IoEvalResult, RuntimeError> {
         let bytecode = lower_to_bytecode(program);
-        Self::exec_compiled_io(&bytecode, entry_name, stdin, args)
+        Self::exec_compiled_io(&bytecode, entry_name, stdin, args, cwd)
     }
 
     pub fn exec_compiled_io(
@@ -1454,7 +1552,45 @@ impl Machine {
         entry_name: &str,
         stdin: &str,
         args: &[String],
+        cwd: &Path,
     ) -> Result<IoEvalResult, RuntimeError> {
+        let mut input = Cursor::new(stdin.as_bytes());
+        let mut stdout = Vec::new();
+        let result = Self::exec_compiled_io_with_streams(
+            program,
+            entry_name,
+            &mut input,
+            &mut stdout,
+            args,
+            cwd,
+        )?;
+        let stdout = String::from_utf8(stdout).map_err(|err| {
+            RuntimeError::builtin(format!("captured IO output was not valid UTF-8: {err}"))
+        })?;
+
+        Ok(IoEvalResult { result, stdout })
+    }
+
+    pub fn exec_io_with_streams(
+        program: &CCProgram,
+        entry_name: &str,
+        stdin: &mut dyn BufRead,
+        stdout: &mut dyn Write,
+        args: &[String],
+        cwd: &Path,
+    ) -> Result<EvalResult, RuntimeError> {
+        let bytecode = lower_to_bytecode(program);
+        Self::exec_compiled_io_with_streams(&bytecode, entry_name, stdin, stdout, args, cwd)
+    }
+
+    pub fn exec_compiled_io_with_streams(
+        program: &BytecodeProgram,
+        entry_name: &str,
+        stdin: &mut dyn BufRead,
+        stdout: &mut dyn Write,
+        args: &[String],
+        cwd: &Path,
+    ) -> Result<EvalResult, RuntimeError> {
         let Some(entry) = program.global_index_by_name(entry_name) else {
             return Err(RuntimeError {
                 code: 0,
@@ -1462,18 +1598,15 @@ impl Machine {
             });
         };
 
-        let mut vm = Vm::new_with_io(program, stdin, args.to_vec());
+        let mut vm = Vm::new(program);
+        let mut io = IoRuntime::new(stdin, stdout, args, cwd);
         let action = vm.eval_global(program, entry)?;
-        let root = vm.perform_io(program, action)?;
-        let stdout = vm.stdout;
+        let root = vm.perform_io(program, action, &mut io)?;
 
-        Ok(IoEvalResult {
-            result: EvalResult {
-                root,
-                heap: vm.heap,
-                constructor_arities: program.constructor_arities.clone(),
-            },
-            stdout,
+        Ok(EvalResult {
+            root,
+            heap: vm.heap,
+            constructor_arities: program.constructor_arities.clone(),
         })
     }
 
@@ -1697,7 +1830,7 @@ mod tests {
     }
 
     #[test]
-    fn display_uses_prelude_list_and_pair_ctor_ids() {
+    fn display_fallback_prints_structural_constructors_for_prelude_roles() {
         let list = pack(
             PRELUDE_CONS_TAG,
             2,
@@ -1740,8 +1873,8 @@ mod tests {
             ],
         );
 
-        assert_eq!(run_entry(&program, "listMain"), "[1, 2]");
-        assert_eq!(run_entry(&program, "pairMain"), "(1, 2)");
+        assert_eq!(run_entry(&program, "listMain"), "Link 1 (Link 2 Empty)");
+        assert_eq!(run_entry(&program, "pairMain"), "Tuple 1 2");
     }
 
     #[test]

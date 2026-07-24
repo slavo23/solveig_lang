@@ -73,7 +73,7 @@ cargo build --release
 The default way to compile and run a Solveig project is to point the compiler at a project root:
 
 ```bash
-cargo run -- --project-root example_project
+cargo run -- --project-root examples/smoke_suite
 ```
 
 This runs the project using the default entry configuration.
@@ -93,13 +93,13 @@ Examples:
 Compile and run a project:
 
 ```bash
-cargo run -- --project-root example_project
+cargo run -- --project-root examples/smoke_suite
 ```
 
 Compile and run a project while dumping bytecode:
 
 ```bash
-cargo run -- --project-root example_project --dump-bytecode
+cargo run -- --project-root examples/smoke_suite --dump-bytecode
 ```
 
 The CLI also has an `--entry` option for selecting a different entry inside the `main` module, but the standard project-level command above is the recommended way to run Solveig projects.
@@ -262,7 +262,7 @@ main = 42;
 then run:
 
 ```bash
-cargo run -- --project-root example_project
+cargo run -- --project-root examples/smoke_suite
 ```
 
 The compiler lowers the checked program, runs it on the VM, and prints the result.
@@ -286,6 +286,11 @@ This writes a `bytecode.txt` file containing:
 This is useful when debugging lowering, pattern matching, closure conversion, or VM execution.
 
 ## Current examples and benchmarks
+
+Example projects live under `examples/`. The old all-in-one demo is now
+`examples/smoke_suite`, and `examples/quiz_game` is an interactive IO example
+that reads questions from a text file, asks for answers, prints a score, and
+writes score files.
 
 The repository already contains nontrivial examples and benchmark-style programs, including things like:
 
