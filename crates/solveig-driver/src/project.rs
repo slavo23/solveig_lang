@@ -75,6 +75,35 @@ fn mk_virtual_prelude_file(
     })
 }
 
+fn load_virtual_prelude_module(
+    session: &Session,
+    modules: &mut HashMap<ModuleName, ModuleFile>,
+    module: &ModuleName,
+) -> Result<(), ProjectError> {
+    if modules.contains_key(module) {
+        return Ok(());
+    }
+
+    let module_file = mk_virtual_prelude_file(session, module)?;
+    let imports = module_file.imports.clone();
+    let file = module_file.parsed.file;
+    modules.insert(module.clone(), module_file);
+
+    for imp in effective_imports(session, module, &imports, file) {
+        if prelude_module(session, &imp.module).is_some() {
+            load_virtual_prelude_module(session, modules, &imp.module)?;
+        } else {
+            return Err(ResolveError::UnknownModule {
+                span: imp.span,
+                module: imp.module,
+            }
+            .into());
+        }
+    }
+
+    Ok(())
+}
+
 fn scan_module_file(session: &Session, root: &Path, file: &Path) -> Result<ModuleFile, String> {
     let source = fs::read_to_string(file)
         .map_err(|e| format!("failed to read {}: {}", file.display(), e))?;
@@ -187,12 +216,7 @@ pub fn load_project(
                 module_file.parsed.file,
             ) {
                 if prelude_module(session, &imp.module).is_some() {
-                    if !modules.contains_key(&imp.module) {
-                        modules.insert(
-                            imp.module.clone(),
-                            mk_virtual_prelude_file(session, &imp.module)?,
-                        );
-                    }
+                    load_virtual_prelude_module(session, &mut modules, &imp.module)?;
                 } else {
                     stack.push(PendingModule {
                         file: file_from_module_name(session, &root, &imp.module),

@@ -194,21 +194,6 @@ pub struct SurfaceOpSegment {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub enum SurfaceBinOp {
-    Plus,
-    Minus,
-    Mult,
-    Div,
-    Mod,
-
-    Less,
-    Greater,
-    LessOrEqual,
-    GreaterOrEqual,
-    Equal,
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub enum SurfaceUnOp {
     Neg,
 }
@@ -242,11 +227,6 @@ pub enum SurfaceExpr {
     Case(Box<Spanned<SurfaceExpr>>, Vec<Spanned<SurfaceMatchArm>>),
     IfThenElse(
         Box<Spanned<SurfaceExpr>>,
-        Box<Spanned<SurfaceExpr>>,
-        Box<Spanned<SurfaceExpr>>,
-    ),
-    BinaryOperator(
-        SurfaceBinOp,
         Box<Spanned<SurfaceExpr>>,
         Box<Spanned<SurfaceExpr>>,
     ),

@@ -336,8 +336,7 @@ fn hover_expr(
         | TermExpr::TyApp(body, _)
         | TermExpr::EvAbs(_, _, body)
         | TermExpr::EvApp(body, _)
-        | TermExpr::Anno(body, _)
-        | TermExpr::UnaryOperator(_, body) => hover_expr(body, pretty_tables, offset, best),
+        | TermExpr::Anno(body, _) => hover_expr(body, pretty_tables, offset, best),
         TermExpr::Case(scrutinee, arms) => {
             hover_expr(scrutinee, pretty_tables, offset, best);
             for arm in arms {
@@ -348,10 +347,6 @@ fn hover_expr(
             hover_expr(cond, pretty_tables, offset, best);
             hover_expr(then_branch, pretty_tables, offset, best);
             hover_expr(else_branch, pretty_tables, offset, best);
-        }
-        TermExpr::BinaryOperator(_, lhs, rhs) => {
-            hover_expr(lhs, pretty_tables, offset, best);
-            hover_expr(rhs, pretty_tables, offset, best);
         }
         TermExpr::Let(_, binder, in_expr) => {
             hover_expr(binder, pretty_tables, offset, best);
@@ -474,8 +469,7 @@ fn collect_evidence_lines(
         TermExpr::Abs(_, _, body)
         | TermExpr::TyAbs(_, _, body)
         | TermExpr::TyApp(body, _)
-        | TermExpr::Anno(body, _)
-        | TermExpr::UnaryOperator(_, body) => collect_evidence_lines(body, tables, out),
+        | TermExpr::Anno(body, _) => collect_evidence_lines(body, tables, out),
         TermExpr::Case(scrutinee, arms) => {
             collect_evidence_lines(scrutinee, tables, out);
             for arm in arms {
@@ -486,10 +480,6 @@ fn collect_evidence_lines(
             collect_evidence_lines(cond, tables, out);
             collect_evidence_lines(then_branch, tables, out);
             collect_evidence_lines(else_branch, tables, out);
-        }
-        TermExpr::BinaryOperator(_, lhs, rhs) => {
-            collect_evidence_lines(lhs, tables, out);
-            collect_evidence_lines(rhs, tables, out);
         }
         TermExpr::Let(_, binder, in_expr) => {
             collect_evidence_lines(binder, tables, out);

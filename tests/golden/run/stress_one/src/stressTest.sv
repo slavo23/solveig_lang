@@ -14,7 +14,7 @@ countDownSumGo n acc =
     else
         countDownSumGo (n - 1) (acc + n);
 
-div = 2 / 2;
+divValue = div 2 2;
 
 benchScalar : Int;
 benchScalar =

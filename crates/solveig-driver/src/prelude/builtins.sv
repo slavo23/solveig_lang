@@ -1,9 +1,11 @@
+import prelude.prim
+
 data Maybe a = Just a | Nothing;
 data Either a b = Left a | Right b
 data Pair a b = MkPair a b;
 
 even : Int -> Bool;
-even n = n % 2 == 0;
+even n = intEq (intMod n 2) 0;
 
 odd : Int -> Bool;
 odd n = not (even n);

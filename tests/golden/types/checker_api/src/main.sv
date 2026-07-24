@@ -7,7 +7,7 @@ instance Functor Box where
             Box x => Box (f x)
 
 instance Eq a => Eq (Wrap a) where
-    eq left right =
+    (==) left right =
         case left of
             Wrap x =>
                 case right of

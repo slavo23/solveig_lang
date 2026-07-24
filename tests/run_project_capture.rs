@@ -51,16 +51,16 @@ fn primitive_int_modulo_by_zero_reports_runtime_error() {
 }
 
 #[test]
-fn surface_int_division_by_zero_reports_runtime_error() {
+fn prelude_int_division_by_zero_reports_runtime_error() {
     let _guard = project_run_lock();
     let project_root =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/runtime/int_surface_div_zero");
 
     let err = run_project_capture(&project_root, "main")
-        .expect_err("surface division by zero should report a runtime error");
+        .expect_err("prelude div by zero should report a runtime error");
 
     assert!(
-        err.contains("runtime error: / division by zero"),
+        err.contains("runtime error: intDiv division by zero"),
         "unexpected error: {err}"
     );
 }

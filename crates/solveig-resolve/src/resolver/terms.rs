@@ -1,52 +1,9 @@
 impl<'a> Resolver<'a> {
-    fn surface_binop_for_symbol(&self, symbol: Symbol) -> Option<SurfaceBinOp> {
-        match self.symbol_text(symbol) {
-            "+" => Some(SurfaceBinOp::Plus),
-            "-" => Some(SurfaceBinOp::Minus),
-            "*" => Some(SurfaceBinOp::Mult),
-            "/" => Some(SurfaceBinOp::Div),
-            "%" => Some(SurfaceBinOp::Mod),
-            "==" => Some(SurfaceBinOp::Equal),
-            "<" => Some(SurfaceBinOp::Less),
-            ">" => Some(SurfaceBinOp::Greater),
-            "<=" => Some(SurfaceBinOp::LessOrEqual),
-            ">=" => Some(SurfaceBinOp::GreaterOrEqual),
-            _ => None,
-        }
-    }
-
-    fn surface_binop_to_core(&self, op: &SurfaceBinOp) -> BinOp {
-        match op {
-            SurfaceBinOp::Plus => BinOp::Plus,
-            SurfaceBinOp::Minus => BinOp::Minus,
-            SurfaceBinOp::Mult => BinOp::Mult,
-            SurfaceBinOp::Div => BinOp::Div,
-            SurfaceBinOp::Mod => BinOp::Mod,
-            SurfaceBinOp::Less => BinOp::Less,
-            SurfaceBinOp::Greater => BinOp::Greater,
-            SurfaceBinOp::LessOrEqual => BinOp::LessOrEqual,
-            SurfaceBinOp::GreaterOrEqual => BinOp::GreaterOrEqual,
-            SurfaceBinOp::Equal => BinOp::Equal,
-        }
-    }
-
     fn builtin_operator_fixity(&self, symbol: Symbol) -> Option<Fixity> {
         match self.symbol_text(symbol) {
-            "==" | "<" | ">" | "<=" | ">=" => Some(Fixity {
-                prec: 4,
-                assoc: Assoc::None,
-            }),
             "::" => Some(Fixity {
                 prec: 5,
                 assoc: Assoc::Right,
-            }),
-            "+" | "-" => Some(Fixity {
-                prec: 6,
-                assoc: Assoc::Left,
-            }),
-            "*" | "/" | "%" => Some(Fixity {
-                prec: 7,
-                assoc: Assoc::Left,
             }),
             _ => None,
         }
@@ -172,14 +129,6 @@ impl<'a> Resolver<'a> {
 
         if self.symbol_text(op.0) == "::" {
             return self.lower_list_cons_application(lhs, rhs, cx, local, bound_terms, span);
-        }
-
-        if let Some(surface_binop) = self.surface_binop_for_symbol(op.0) {
-            return TermExpr::BinaryOperator(
-                self.surface_binop_to_core(&surface_binop),
-                Box::new(self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms)),
-                Box::new(self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms)),
-            );
         }
 
         let name_ref = NameRef {
@@ -381,23 +330,23 @@ impl<'a> Resolver<'a> {
                     .collect(),
             ),
 
-            SurfaceExpr::BinaryOperator(op, lhs, rhs) => {
-                TermExpr::BinaryOperator(
-                    self.surface_binop_to_core(op),
-                    Box::new(self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms)),
-                    Box::new(self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms)),
-                )
-            }
-
             SurfaceExpr::UnaryOperator(op, rhs) => {
-                let core_unop = match op {
-                    SurfaceUnOp::Neg => UnOp::Neg,
+                let name_ref = match op {
+                    SurfaceUnOp::Neg => NameRef {
+                        segments: vec![self.session.intern("negate")],
+                    },
                 };
-
-                TermExpr::UnaryOperator(
-                    core_unop,
-                    Box::new(self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms)),
-                )
+                let op_node = TermExprNode::new(
+                    TermExpr::Var(self.resolve_term_ref_with_binders(
+                        &name_ref,
+                        self.file_span(cx, sf.1),
+                        cx,
+                        bound_terms,
+                    )),
+                    span.clone(),
+                );
+                let rhs = self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms);
+                TermExpr::App(Box::new(op_node), Box::new(rhs))
             }
 
             SurfaceExpr::Let(binder_name, binder_expr, in_expr) => {

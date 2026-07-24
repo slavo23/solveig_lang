@@ -7,7 +7,7 @@ instance Functor Box where
             Box x => Box (f x)
 
 instance Eq BoxInt where
-    eq left right =
+    (==) left right =
         case left of
             BoxInt x =>
                 case right of

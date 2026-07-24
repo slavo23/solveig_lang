@@ -1156,14 +1156,6 @@ impl<A, P> ExprNode<TermExpr<A, P>, A> {
                 Box::new(then_branch.map_anno(expr_anno, pattern_anno)),
                 Box::new(else_branch.map_anno(expr_anno, pattern_anno)),
             ),
-            TermExpr::BinaryOperator(op, lhs, rhs) => TermExpr::BinaryOperator(
-                op,
-                Box::new(lhs.map_anno(expr_anno, pattern_anno)),
-                Box::new(rhs.map_anno(expr_anno, pattern_anno)),
-            ),
-            TermExpr::UnaryOperator(op, rhs) => {
-                TermExpr::UnaryOperator(op, Box::new(rhs.map_anno(expr_anno, pattern_anno)))
-            }
             TermExpr::Let(name, binder, in_expr) => TermExpr::Let(
                 name,
                 Box::new(binder.map_anno(expr_anno, pattern_anno)),
@@ -1262,8 +1254,6 @@ pub enum TermExpr<A, P = A> {
         Box<TermExprNode<A, P>>,
         Box<TermExprNode<A, P>>,
     ),
-    BinaryOperator(BinOp, Box<TermExprNode<A, P>>, Box<TermExprNode<A, P>>),
-    UnaryOperator(UnOp, Box<TermExprNode<A, P>>),
     Let(String, Box<TermExprNode<A, P>>, Box<TermExprNode<A, P>>),
 }
 

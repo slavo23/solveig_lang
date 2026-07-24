@@ -40,7 +40,7 @@ instance BoundedLike Int where
 
 
 instance Eq a => Eq (Wrap a) where
-    eq left right =
+    (==) left right =
         case left of
             Wrap x =>
                 case right of

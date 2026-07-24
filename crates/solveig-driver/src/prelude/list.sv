@@ -1,4 +1,5 @@
 import prelude.builtins;
+import prelude.prim;
 
 data List a = Cons a (List a) | Nil;
 
@@ -50,9 +51,9 @@ range start end inclusive =
     if inclusive then
         rangeDown end start []
     else
-        rangeDown (end - 1) start [];
+        rangeDown (intSub end 1) start [];
 
 rangeDown : Int -> Int -> [Int] -> [Int];
 rangeDown current start acc =
-    if current < start then acc
-    else rangeDown (current - 1) start (current :: acc);
+    if intLt current start then acc
+    else rangeDown (intSub current 1) start (current :: acc);

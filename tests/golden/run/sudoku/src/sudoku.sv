@@ -90,8 +90,8 @@ blockRows board startRow endRow startCol endCol currentRow =
 
 blockAt : [[Int]] -> Int -> Int -> [Int];
 blockAt board row col =
-    let startRow = (row / 3) * 3 in
-    let startCol = (col / 3) * 3 in
+    let startRow = (div row 3) * 3 in
+    let startCol = (div col 3) * 3 in
         blockRows board startRow (startRow + 2) startCol (startCol + 2) 0;
 
 notInInts : Int -> [Int] -> Bool;

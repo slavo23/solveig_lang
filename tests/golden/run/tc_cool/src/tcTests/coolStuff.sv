@@ -2,7 +2,7 @@ data Tree a = EmptyTree | TreeNode (Tree a) a (Tree a)
 data Log a = MkLog [Int] a
 
 instance Eq a => Eq (Tree a) where
-    eq left right =
+    (==) left right =
         case left of
             EmptyTree =>
                 case right of
@@ -26,7 +26,7 @@ instance Functor Tree where
 
 
 instance Eq a => Eq (Log a) where
-    eq left right =
+    (==) left right =
         case left of
             MkLog leftNotes leftValue =>
                 case right of
@@ -141,7 +141,7 @@ validateSmallTree tree =
 
 safeHalf : Int -> Maybe Int
 safeHalf x =
-    if even x then Just (x / 2) else Nothing
+    if even x then Just (div x 2) else Nothing
 
 
 safeIncrementBelowLimit : Int -> Maybe Int

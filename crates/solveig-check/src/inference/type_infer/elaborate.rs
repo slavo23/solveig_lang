@@ -216,14 +216,6 @@ impl TypeChecker {
                 Box::new(self.zonk_expr(then_branch)),
                 Box::new(self.zonk_expr(else_branch)),
             ),
-            TermExpr::BinaryOperator(op, lhs, rhs) => TermExpr::BinaryOperator(
-                *op,
-                Box::new(self.zonk_expr(lhs)),
-                Box::new(self.zonk_expr(rhs)),
-            ),
-            TermExpr::UnaryOperator(op, rhs) => {
-                TermExpr::UnaryOperator(*op, Box::new(self.zonk_expr(rhs)))
-            }
             TermExpr::Let(binder_name, binder_expr, in_expr) => TermExpr::Let(
                 binder_name.clone(),
                 Box::new(self.zonk_expr(binder_expr)),

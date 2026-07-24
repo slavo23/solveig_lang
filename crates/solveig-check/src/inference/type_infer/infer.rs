@@ -44,55 +44,6 @@ impl TypeChecker {
             Literal::Str(_) => self.string_type(),
         }
     }
-    fn solve_unary_operator_inference(
-        &mut self,
-        ctx: Context,
-        op: &UnOp,
-        rhs: &TermExprNode<Span>,
-        span: Span,
-    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
-        let int_type = self.int_type();
-        let (ctx, elaborated_rhs) = self.solve_checking(ctx, rhs, &int_type)?;
-
-        let result_type = int_type.clone();
-        let elaborated = elab_node(
-            TermExpr::UnaryOperator(*op, Box::new(elaborated_rhs)),
-            span,
-            result_type.clone(),
-        );
-
-        Ok((ctx, elaborated, result_type))
-    }
-    fn solve_binary_operator_inference(
-        &mut self,
-        ctx: Context,
-        op: &BinOp,
-        lhs: &TermExprNode<Span>,
-        rhs: &TermExprNode<Span>,
-        span: Span,
-    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
-        let int_type = self.int_type();
-
-        let (ctx, elaborated_lhs) = self.solve_checking(ctx, lhs, &int_type)?;
-        let (ctx, elaborated_rhs) = self.solve_checking(ctx, rhs, &int_type)?;
-
-        let result_type = match op {
-            BinOp::Equal
-            | BinOp::Less
-            | BinOp::Greater
-            | BinOp::GreaterOrEqual
-            | BinOp::LessOrEqual => self.bool_type(),
-            _ => self.int_type(),
-        };
-
-        let elaborated = elab_node(
-            TermExpr::BinaryOperator(*op, Box::new(elaborated_lhs), Box::new(elaborated_rhs)),
-            span,
-            result_type.clone(),
-        );
-
-        Ok((ctx, elaborated, result_type))
-    }
     pub fn solve_inference(
         &mut self,
         ctx: Context,
@@ -326,13 +277,6 @@ impl TypeChecker {
 
                 let elaborated = elab_node(TermExpr::Lit(lit.clone()), span, ty.clone());
                 Ok((ctx, elaborated, ty))
-            }
-            TermExpr::BinaryOperator(op, lhs, rhs) => {
-                self.solve_binary_operator_inference(ctx, op, lhs, rhs, span)
-            }
-
-            TermExpr::UnaryOperator(op, rhs) => {
-                self.solve_unary_operator_inference(ctx, op, rhs, span)
             }
             TermExpr::Hole => {
                 let evar_id = self.fresh_evar_id();

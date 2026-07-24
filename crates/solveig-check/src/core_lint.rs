@@ -307,11 +307,6 @@ impl CoreLinter<'_> {
                 self.lint_expr(then_branch);
                 self.lint_expr(else_branch);
             }
-            TermExpr::BinaryOperator(_, lhs, rhs) => {
-                self.lint_expr(lhs);
-                self.lint_expr(rhs);
-            }
-            TermExpr::UnaryOperator(_, body) => self.lint_expr(body),
             TermExpr::Let(_, binder, body) => {
                 self.lint_expr(binder);
                 self.lint_expr(body);
@@ -699,8 +694,6 @@ fn expr_requires_source_span(node: &TermExpr<TcMetadata, Range<usize>>) -> bool 
             | TermExpr::Abs(_, _, _)
             | TermExpr::Case(_, _)
             | TermExpr::IfThenElse(_, _, _)
-            | TermExpr::BinaryOperator(_, _, _)
-            | TermExpr::UnaryOperator(_, _)
             | TermExpr::Let(_, _, _)
     )
 }

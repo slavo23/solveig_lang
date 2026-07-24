@@ -30,7 +30,7 @@ makeTree depth seed =
     if depth == 0 then
         Empty
     else
-        let weight = 1 + (((seed * 17) + 11) % 97)
+        let weight = 1 + (mod ((seed * 17) + 11) 97)
         in
         let leftSeed = (seed * 2) + 1
         in

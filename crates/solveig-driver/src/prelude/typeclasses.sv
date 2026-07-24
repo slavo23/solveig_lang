@@ -1,26 +1,48 @@
 import prelude.builtins
 import prelude.list
+import prelude.prim
+
+infix 4 ==, /=, <, <=, >, >=
+infixl 6 +, -
+infixl 7 *, /
 
 data Ordering = LT | EQ | GT
 
 class Eq a where
-    eq : a -> a -> Bool
+    (==) : a -> a -> Bool
+    (/=) : a -> a -> Bool
+    default (/=) x y = not (x == y)
+
+eq : forall a. Eq a => a -> a -> Bool
+eq x y = x == y
 
 notEq : forall a. Eq a => a -> a -> Bool
-notEq x y = not (eq x y)
+notEq x y = x /= y
 
 instance Eq Int where
-    eq a b = a == b
+    (==) a b = intEq a b
+
+instance Eq Float where
+    (==) a b = floatEq a b
+
+instance Eq Char where
+    (==) a b = charEq a b
+
+instance Eq String where
+    (==) a b = stringEq a b
+
+instance Eq () where
+    (==) _ _ = True
 
 instance Eq Bool where
-    eq a b =
+    (==) a b =
         case MkPair a b of
             MkPair True True => True
             | MkPair False False => True
             | MkPair _ _ => False
 
 instance Eq a => Eq (Maybe a) where
-    eq x y =
+    (==) x y =
         case x of
             Nothing =>
                 case y of
@@ -29,10 +51,10 @@ instance Eq a => Eq (Maybe a) where
             | Just x1 =>
                 case y of
                     Nothing => False
-                    | Just y1 => eq x1 y1
+                    | Just y1 => x1 == y1
 
 instance Eq a => Eq (List a) where
-    eq xs ys =
+    (==) xs ys =
         case xs of
             Nil =>
                 case ys of
@@ -42,56 +64,84 @@ instance Eq a => Eq (List a) where
                 case ys of
                     Nil => False
                     | Cons y ysRest =>
-                        if eq x y then eq xsRest ysRest else False
+                        if x == y then xsRest == ysRest else False
 
 instance (Eq a, Eq b) => Eq (Pair a b) where
-    eq left right =
+    (==) left right =
         case left of
             MkPair leftA leftB =>
                 case right of
                     MkPair rightA rightB =>
-                        if eq leftA rightA then eq leftB rightB else False
+                        if leftA == rightA then leftB == rightB else False
 
 class Eq a => Ord a where
     compare : a -> a -> Ordering
+    (<) : a -> a -> Bool
+    (<=) : a -> a -> Bool
+    (>) : a -> a -> Bool
+    (>=) : a -> a -> Bool
+    default (<) x y =
+        case compare x y of
+            LT => True
+            | EQ => False
+            | GT => False
+    default (<=) x y =
+        case compare x y of
+            LT => True
+            | EQ => True
+            | GT => False
+    default (>) x y =
+        case compare x y of
+            LT => False
+            | EQ => False
+            | GT => True
+    default (>=) x y =
+        case compare x y of
+            LT => False
+            | EQ => True
+            | GT => True
 
 less : forall a. Ord a => a -> a -> Bool
-less x y =
-    case compare x y of
-        LT => True
-        | EQ => False
-        | GT => False
+less x y = x < y
 
 lessEq : forall a. Ord a => a -> a -> Bool
-lessEq x y =
-    case compare x y of
-        LT => True
-        | EQ => True
-        | GT => False
+lessEq x y = x <= y
 
 greater : forall a. Ord a => a -> a -> Bool
-greater x y = less y x
+greater x y = x > y
 
 greaterEq : forall a. Ord a => a -> a -> Bool
-greaterEq x y = lessEq y x
+greaterEq x y = x >= y
 
 minOrd : forall a. Ord a => a -> a -> a
-minOrd x y = if lessEq x y then x else y
+minOrd x y = if x <= y then x else y
 
 maxOrd : forall a. Ord a => a -> a -> a
-maxOrd x y = if lessEq x y then y else x
+maxOrd x y = if x <= y then y else x
 
 clampOrd : forall a. Ord a => a -> a -> a -> a
 clampOrd low high x =
-    if less x low then low
-    else if less high x then high
+    if x < low then low
+    else if high < x then high
     else x
 
 instance Ord Int where
+    compare x y = intCompare x y
+
+instance Ord Float where
     compare x y =
-        if x < y then LT
-        else if x > y then GT
+        if floatLt x y then LT
+        else if floatGt x y then GT
         else EQ
+
+instance Ord Char where
+    compare x y = charCompare x y
+
+instance Ord String where
+    compare x y = stringCompare x y
+
+instance Ord () where
+    compare _ _ = EQ
 
 instance Ord Bool where
     compare x y =
@@ -139,6 +189,36 @@ instance (Ord a, Ord b) => Ord (Pair a b) where
                             LT => LT
                             | GT => GT
                             | EQ => compare leftB rightB
+
+class Num a where
+    (+) : a -> a -> a
+    (-) : a -> a -> a
+    (*) : a -> a -> a
+    negate : a -> a
+
+instance Num Int where
+    (+) x y = intAdd x y
+    (-) x y = intSub x y
+    (*) x y = intMul x y
+    negate x = intNeg x
+
+instance Num Float where
+    (+) x y = floatAdd x y
+    (-) x y = floatSub x y
+    (*) x y = floatMul x y
+    negate x = floatNeg x
+
+div : Int -> Int -> Int
+div x y = intDiv x y
+
+mod : Int -> Int -> Int
+mod x y = intMod x y
+
+class Num a => Fractional a where
+    (/) : a -> a -> a
+
+instance Fractional Float where
+    (/) x y = floatDiv x y
 
 class Functor f where
     fmap : forall a b. (a -> b) -> f a -> f b
