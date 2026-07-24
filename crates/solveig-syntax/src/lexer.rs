@@ -2,6 +2,8 @@ use logos::Logos;
 
 use solveig_base::{FileId, FileSpan, Session, Span, Symbol};
 
+use crate::ast::{Assoc, Fixity};
+
 #[derive(Logos, Debug, Clone, PartialEq)]
 #[logos(skip r"[ \t\r]+")]
 enum RawToken {
@@ -46,50 +48,18 @@ enum RawToken {
     KwImport,
     #[token("as")]
     KwAs,
+    #[token("infixl")]
+    KwInfixl,
+    #[token("infixr")]
+    KwInfixr,
+    #[token("infix")]
+    KwInfix,
 
-    // Multi-character operators (longest first).
-    #[token("->")]
-    Arrow,
-    #[token("=>")]
-    FatArrow,
-    #[token("::")]
-    Cons,
-    #[token("==")]
-    EqEq,
-    #[token(">=")]
-    GreaterEq,
-    #[token("<=")]
-    LessEq,
-    #[token("??")]
-    Hole,
-
-    // Single-character punctuation/operators.
-    #[token("=")]
-    Eq,
-    #[token(":")]
-    Colon,
+    // Single-character punctuation.
     #[token(";")]
     Semicolon,
-    #[token(".")]
-    Dot,
     #[token(",")]
     Comma,
-    #[token("|")]
-    Pipe,
-    #[token("+")]
-    Plus,
-    #[token("-")]
-    Minus,
-    #[token("*")]
-    Star,
-    #[token("/")]
-    Slash,
-    #[token("%")]
-    Percent,
-    #[token(">")]
-    Greater,
-    #[token("<")]
-    Less,
     #[token("(")]
     LParen,
     #[token(")")]
@@ -118,6 +88,9 @@ enum RawToken {
 
     #[regex(r"[a-z_][a-zA-Z0-9_']*")]
     Ident,
+
+    #[regex(r"[!#$%&*+\./<=>?@\\\^\|\-~:]+")]
+    Operator,
 }
 
 // -- Positioned tokens ------------------------------------------------------
@@ -173,6 +146,9 @@ pub enum Token {
     Default,
     Import,
     As,
+    Infixl,
+    Infixr,
+    Infix,
 
     Eq,
     Colon,
@@ -199,6 +175,8 @@ pub enum Token {
     Hole,
     Underscore,
     Semicolon,
+    Operator(Symbol),
+    ReservedOp(Symbol),
 
     VOpen,
     VClose,
@@ -385,36 +363,55 @@ fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Option<Token>
         RawToken::KwDefault => Token::Default,
         RawToken::KwImport => Token::Import,
         RawToken::KwAs => Token::As,
+        RawToken::KwInfixl => Token::Infixl,
+        RawToken::KwInfixr => Token::Infixr,
+        RawToken::KwInfix => Token::Infix,
 
-        RawToken::Arrow => Token::Arrow,
-        RawToken::FatArrow => Token::FatArrow,
-        RawToken::Cons => Token::Cons,
-        RawToken::EqEq => Token::EqEq,
-        RawToken::GreaterEq => Token::GreaterEq,
-        RawToken::LessEq => Token::LessEq,
-        RawToken::Hole => Token::Hole,
-
-        RawToken::Eq => Token::Eq,
-        RawToken::Colon => Token::Colon,
-        RawToken::Dot => Token::Dot,
         RawToken::Comma => Token::Comma,
-        RawToken::Pipe => Token::Pipe,
-        RawToken::Plus => Token::Plus,
-        RawToken::Minus => Token::Minus,
-        RawToken::Star => Token::Star,
-        RawToken::Slash => Token::Slash,
-        RawToken::Percent => Token::Percent,
-        RawToken::Greater => Token::Greater,
-        RawToken::Less => Token::Less,
         RawToken::LParen => Token::LParen,
         RawToken::RParen => Token::RParen,
         RawToken::LBrack => Token::LBrack,
         RawToken::RBrack => Token::RBrack,
         RawToken::Underscore => Token::Underscore,
         RawToken::Semicolon => Token::Semicolon,
+        RawToken::Operator => match slice {
+            "->" => Token::Arrow,
+            "=>" => Token::FatArrow,
+            "::" => Token::Cons,
+            "==" => Token::EqEq,
+            ">=" => Token::GreaterEq,
+            "<=" => Token::LessEq,
+            "??" => Token::Hole,
+            "=" => Token::Eq,
+            ":" => Token::Colon,
+            "." => Token::Dot,
+            "|" => Token::Pipe,
+            "+" => Token::Plus,
+            "-" => Token::Minus,
+            "*" => Token::Star,
+            "/" => Token::Slash,
+            "%" => Token::Percent,
+            ">" => Token::Greater,
+            "<" => Token::Less,
+            _ => {
+                let symbol = session.intern(slice);
+                if is_reserved_operator(slice) {
+                    Token::ReservedOp(symbol)
+                } else {
+                    Token::Operator(symbol)
+                }
+            }
+        },
     };
 
     Some(token)
+}
+
+fn is_reserved_operator(slice: &str) -> bool {
+    matches!(
+        slice,
+        ".." | ":" | "::" | "=" | "\\" | "|" | "<-" | "->" | "@" | "~" | "=>"
+    )
 }
 
 fn raw_lex(session: &Session, file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
@@ -566,19 +563,6 @@ pub fn insert_layout(tokens: Vec<PosToken>) -> Vec<PosToken> {
 
 pub fn lex(session: &Session, file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
     raw_lex(session, file, source).map(insert_layout)
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Assoc {
-    Left,
-    Right,
-    None,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Fixity {
-    pub prec: u8,
-    pub assoc: Assoc,
 }
 
 pub fn builtin_fixity(tok: &Token) -> Option<Fixity> {

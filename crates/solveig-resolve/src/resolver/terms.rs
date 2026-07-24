@@ -1,4 +1,209 @@
 impl<'a> Resolver<'a> {
+    fn surface_binop_for_symbol(&self, symbol: Symbol) -> Option<SurfaceBinOp> {
+        match self.symbol_text(symbol) {
+            "+" => Some(SurfaceBinOp::Plus),
+            "-" => Some(SurfaceBinOp::Minus),
+            "*" => Some(SurfaceBinOp::Mult),
+            "/" => Some(SurfaceBinOp::Div),
+            "%" => Some(SurfaceBinOp::Mod),
+            "==" => Some(SurfaceBinOp::Equal),
+            "<" => Some(SurfaceBinOp::Less),
+            ">" => Some(SurfaceBinOp::Greater),
+            "<=" => Some(SurfaceBinOp::LessOrEqual),
+            ">=" => Some(SurfaceBinOp::GreaterOrEqual),
+            _ => None,
+        }
+    }
+
+    fn surface_binop_to_core(&self, op: &SurfaceBinOp) -> BinOp {
+        match op {
+            SurfaceBinOp::Plus => BinOp::Plus,
+            SurfaceBinOp::Minus => BinOp::Minus,
+            SurfaceBinOp::Mult => BinOp::Mult,
+            SurfaceBinOp::Div => BinOp::Div,
+            SurfaceBinOp::Mod => BinOp::Mod,
+            SurfaceBinOp::Less => BinOp::Less,
+            SurfaceBinOp::Greater => BinOp::Greater,
+            SurfaceBinOp::LessOrEqual => BinOp::LessOrEqual,
+            SurfaceBinOp::GreaterOrEqual => BinOp::GreaterOrEqual,
+            SurfaceBinOp::Equal => BinOp::Equal,
+        }
+    }
+
+    fn builtin_operator_fixity(&self, symbol: Symbol) -> Option<Fixity> {
+        match self.symbol_text(symbol) {
+            "==" | "<" | ">" | "<=" | ">=" => Some(Fixity {
+                prec: 4,
+                assoc: Assoc::None,
+            }),
+            "::" => Some(Fixity {
+                prec: 5,
+                assoc: Assoc::Right,
+            }),
+            "+" | "-" => Some(Fixity {
+                prec: 6,
+                assoc: Assoc::Left,
+            }),
+            "*" | "/" | "%" => Some(Fixity {
+                prec: 7,
+                assoc: Assoc::Left,
+            }),
+            _ => None,
+        }
+    }
+
+    fn resolve_operator_fixity(
+        &mut self,
+        op: SpannedWrapper<Symbol>,
+        cx: &ModuleContext,
+    ) -> Result<Fixity, FixityError> {
+        if let Some(fixity) = self.builtin_operator_fixity(op.0) {
+            return Ok(fixity);
+        }
+
+        if cx.local_api.terms.contains_key(&op.0) {
+            return Ok(cx
+                .local_api
+                .fixities
+                .get(&op.0)
+                .copied()
+                .unwrap_or(Fixity::DEFAULT));
+        }
+
+        let mut candidates = Vec::new();
+        let mut imported_fixity = None;
+
+        for imp in &cx.imported_apis {
+            if let Some(def_id) = imp.api.terms.get(&op.0)
+                && !candidates.contains(def_id)
+            {
+                candidates.push(*def_id);
+                if imported_fixity.is_none() {
+                    imported_fixity = imp.api.fixities.get(&op.0).copied();
+                }
+            }
+        }
+
+        match candidates.as_slice() {
+            [_] => Ok(imported_fixity.unwrap_or(Fixity::DEFAULT)),
+            [] => {
+                self.report_unknown_name(
+                    self.file_span(cx, op.1),
+                    ResolveNameKind::Operator,
+                    self.symbol_text(op.0).to_string(),
+                );
+                Err(FixityError::UnknownOperator {
+                    span: op.1,
+                    op: op.0,
+                })
+            }
+            _ => {
+                self.report_ambiguous_import(
+                    self.file_span(cx, op.1),
+                    ResolveNameKind::Operator,
+                    op.0,
+                    candidates,
+                );
+                Err(FixityError::UnknownOperator {
+                    span: op.1,
+                    op: op.0,
+                })
+            }
+        }
+    }
+
+    fn report_fixity_error(&mut self, cx: &ModuleContext, error: FixityError) {
+        match error {
+            FixityError::UnknownOperator { .. } => {}
+            FixityError::Conflict { span, left, right } => {
+                self.errors.push(ResolveError::FixityConflict {
+                    span: self.file_span(cx, span),
+                    left,
+                    right,
+                });
+            }
+            FixityError::IllegalUnaryMinus { span } => {
+                self.errors.push(ResolveError::IllegalUnaryMinus {
+                    span: self.file_span(cx, span),
+                });
+            }
+            FixityError::ExpectedExpression { span } => {
+                self.errors.push(ResolveError::MalformedOperatorExpression {
+                    span: self.file_span(cx, span),
+                    message: "expected expression in operator sequence".to_string(),
+                });
+            }
+        }
+    }
+
+    fn lower_list_cons_application(
+        &mut self,
+        lhs: &SpannedWrapper<SurfaceExpr>,
+        rhs: &SpannedWrapper<SurfaceExpr>,
+        cx: &ModuleContext,
+        local: &LocalResolverEnv,
+        bound_terms: &HashSet<Symbol>,
+        span: Span,
+    ) -> TermExpr<Span> {
+        let cons = TermExprNode::new(
+            TermExpr::Con(prelude_list_cons_ctor_id()),
+            span.clone(),
+        );
+        let lhs = self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms);
+        let rhs = self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms);
+        let app = TermExprNode::new(
+            TermExpr::App(Box::new(cons), Box::new(lhs)),
+            span.clone(),
+        );
+
+        TermExpr::App(Box::new(app), Box::new(rhs))
+    }
+
+    fn lower_operator_application(
+        &mut self,
+        lhs: &SpannedWrapper<SurfaceExpr>,
+        op: SpannedWrapper<Symbol>,
+        rhs: &SpannedWrapper<SurfaceExpr>,
+        cx: &ModuleContext,
+        local: &LocalResolverEnv,
+        bound_terms: &HashSet<Symbol>,
+    ) -> TermExpr<Span> {
+        let span = to_core_span(SourceSpan::new(lhs.1.start, rhs.1.end));
+
+        if self.symbol_text(op.0) == "::" {
+            return self.lower_list_cons_application(lhs, rhs, cx, local, bound_terms, span);
+        }
+
+        if let Some(surface_binop) = self.surface_binop_for_symbol(op.0) {
+            return TermExpr::BinaryOperator(
+                self.surface_binop_to_core(&surface_binop),
+                Box::new(self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms)),
+                Box::new(self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms)),
+            );
+        }
+
+        let name_ref = NameRef {
+            segments: vec![op.0],
+        };
+        let op_node = TermExprNode::new(
+            TermExpr::Var(self.resolve_term_ref_with_binders(
+                &name_ref,
+                self.file_span(cx, op.1),
+                cx,
+                bound_terms,
+            )),
+            to_core_span(op.1),
+        );
+        let lhs = self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms);
+        let rhs = self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms);
+        let app = TermExprNode::new(
+            TermExpr::App(Box::new(op_node), Box::new(lhs)),
+            span.clone(),
+        );
+
+        TermExpr::App(Box::new(app), Box::new(rhs))
+    }
+
     fn resolve_term_defid(
         &mut self,
         r: &NameRef,
@@ -177,21 +382,8 @@ impl<'a> Resolver<'a> {
             ),
 
             SurfaceExpr::BinaryOperator(op, lhs, rhs) => {
-                let core_binop = match op {
-                    SurfaceBinOp::Plus => BinOp::Plus,
-                    SurfaceBinOp::Minus => BinOp::Minus,
-                    SurfaceBinOp::Mult => BinOp::Mult,
-                    SurfaceBinOp::Div => BinOp::Div,
-                    SurfaceBinOp::Mod => BinOp::Mod,
-                    SurfaceBinOp::Less => BinOp::Less,
-                    SurfaceBinOp::Greater => BinOp::Greater,
-                    SurfaceBinOp::LessOrEqual => BinOp::LessOrEqual,
-                    SurfaceBinOp::GreaterOrEqual => BinOp::GreaterOrEqual,
-                    SurfaceBinOp::Equal => BinOp::Equal,
-                };
-
                 TermExpr::BinaryOperator(
-                    core_binop,
+                    self.surface_binop_to_core(op),
                     Box::new(self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms)),
                     Box::new(self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms)),
                 )
@@ -223,6 +415,27 @@ impl<'a> Resolver<'a> {
                     Box::new(resolved_binder),
                     Box::new(resolved_in_expr),
                 )
+            }
+
+            SurfaceExpr::OperatorApply(lhs, op, rhs) => self.lower_operator_application(
+                lhs,
+                *op,
+                rhs,
+                cx,
+                local,
+                bound_terms,
+            ),
+
+            SurfaceExpr::OpSeq(first, segments) => {
+                match resolve_op_seq(first, segments, |op| self.resolve_operator_fixity(op, cx)) {
+                    Ok(expr) => {
+                        return self.resolve_surface_expr_in_module(&expr, cx, local, bound_terms);
+                    }
+                    Err(error) => {
+                        self.report_fixity_error(cx, error);
+                        TermExpr::Hole
+                    }
+                }
             }
         };
 

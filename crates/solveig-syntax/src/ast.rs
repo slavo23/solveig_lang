@@ -4,6 +4,26 @@ pub type Spanned<T> = (T, Span);
 
 pub type SpannedWrapper<T> = Spanned<T>;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Assoc {
+    Left,
+    Right,
+    None,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Fixity {
+    pub prec: u8,
+    pub assoc: Assoc,
+}
+
+impl Fixity {
+    pub const DEFAULT: Self = Self {
+        prec: 9,
+        assoc: Assoc::Left,
+    };
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct NameRef {
     pub segments: Vec<Symbol>,
@@ -105,6 +125,10 @@ pub enum SurfaceDefinition {
         name: Spanned<Symbol>,
         ty: Spanned<SurfaceTy>,
     },
+    FixityDef {
+        fixity: Fixity,
+        ops: Vec<Spanned<Symbol>>,
+    },
     DataDef {
         name: Spanned<Symbol>,
         ty_params: Vec<Spanned<Symbol>>,
@@ -155,6 +179,18 @@ pub enum SurfacePattern {
 pub struct SurfaceMatchArm {
     pub pattern: Spanned<SurfacePattern>,
     pub expr: Spanned<SurfaceExpr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceOpOperand {
+    pub prefix_minuses: Vec<Span>,
+    pub expr: Spanned<SurfaceExpr>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct SurfaceOpSegment {
+    pub op: Spanned<Symbol>,
+    pub rhs: SurfaceOpOperand,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -215,4 +251,10 @@ pub enum SurfaceExpr {
         Box<Spanned<SurfaceExpr>>,
     ),
     UnaryOperator(SurfaceUnOp, Box<Spanned<SurfaceExpr>>),
+    OperatorApply(
+        Box<Spanned<SurfaceExpr>>,
+        Spanned<Symbol>,
+        Box<Spanned<SurfaceExpr>>,
+    ),
+    OpSeq(Box<SurfaceOpOperand>, Vec<SurfaceOpSegment>),
 }

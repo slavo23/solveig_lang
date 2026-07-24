@@ -11,7 +11,9 @@ use solveig_ast::ast::{
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
-use solveig_syntax::ast::{ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition};
+use solveig_syntax::ast::{
+    Fixity, ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition,
+};
 
 #[derive(Debug, Clone)]
 pub struct ModuleTable {
@@ -79,20 +81,24 @@ impl DefPath<'_> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolveNameKind {
     Term,
+    Operator,
     TypeConstructor,
     Constructor,
     Class,
     Signature,
+    Fixity,
 }
 
 impl ResolveNameKind {
     fn as_str(self) -> &'static str {
         match self {
             Self::Term => "term",
+            Self::Operator => "operator",
             Self::TypeConstructor => "type constructor",
             Self::Constructor => "constructor",
             Self::Class => "class",
             Self::Signature => "signature",
+            Self::Fixity => "fixity",
         }
     }
 }
@@ -129,6 +135,18 @@ pub enum ResolveError {
         span: FileSpan,
         name: Symbol,
         params: usize,
+    },
+    FixityConflict {
+        span: FileSpan,
+        left: Symbol,
+        right: Symbol,
+    },
+    IllegalUnaryMinus {
+        span: FileSpan,
+    },
+    MalformedOperatorExpression {
+        span: FileSpan,
+        message: String,
     },
     CyclicImports {
         span: FileSpan,
@@ -245,6 +263,34 @@ impl ResolveError {
                     if *params == 1 { "" } else { "s" }
                 ),
             )),
+            Self::FixityConflict { span, left, right } => Diagnostic::error(
+                "RES0008",
+                "conflicting operator fixities",
+            )
+            .with_label(Label::primary(
+                *span,
+                format!(
+                    "operators `{}` and `{}` have the same precedence but cannot be mixed without parentheses",
+                    session.str(*left),
+                    session.str(*right)
+                ),
+            )),
+            Self::IllegalUnaryMinus { span } => Diagnostic::error(
+                "RES0009",
+                "illegal unary minus",
+            )
+            .with_label(Label::primary(
+                *span,
+                "prefix `-` is not allowed as the right operand of this operator",
+            ))
+            .with_notes(vec![
+                "add parentheses if the negative expression is intended here".to_string(),
+            ]),
+            Self::MalformedOperatorExpression { span, message } => Diagnostic::error(
+                "RES0010",
+                "malformed operator expression",
+            )
+            .with_label(Label::primary(*span, message.clone())),
             Self::CyclicImports { span, modules } => {
                 Diagnostic::error("RES0007", "cyclic module imports").with_label(Label::primary(
                     *span,
@@ -286,6 +332,7 @@ pub struct ModuleApi {
     pub types: HashMap<Symbol, DefId>,
     pub constructors: HashMap<Symbol, DefId>,
     pub classes: HashMap<Symbol, DefId>,
+    pub fixities: HashMap<Symbol, Fixity>,
 
     pub class_methods: HashMap<Symbol, Vec<Symbol>>,
 }
@@ -300,6 +347,9 @@ impl ModuleApi {
                 for name in names {
                     if let Some(sym) = self.terms.get(name) {
                         out.terms.insert(*name, *sym);
+                        if let Some(fixity) = self.fixities.get(name) {
+                            out.fixities.insert(*name, *fixity);
+                        }
                     }
 
                     if let Some(sym) = self.types.get(name) {
@@ -326,6 +376,9 @@ impl ModuleApi {
                             for method_name in method_names {
                                 if let Some(method_sym) = self.terms.get(method_name) {
                                     out.terms.insert(*method_name, *method_sym);
+                                    if let Some(fixity) = self.fixities.get(method_name) {
+                                        out.fixities.insert(*method_name, *fixity);
+                                    }
                                 }
                             }
                         }
@@ -911,6 +964,7 @@ pub fn build_module_api(
     let mut types = HashMap::<Symbol, FileSpan>::new();
     let mut seen_constructors = HashMap::<Symbol, FileSpan>::new();
     let mut classes = HashMap::<Symbol, FileSpan>::new();
+    let mut fixity_defs = HashMap::<Symbol, FileSpan>::new();
 
     for def in &parsed.defs {
         match &def.0 {
@@ -1000,6 +1054,20 @@ pub fn build_module_api(
                 }
 
                 api.class_methods.insert(class_name, method_names);
+            }
+
+            SurfaceDefinition::FixityDef { fixity, ops } => {
+                for op in ops {
+                    check_duplicate(
+                        &mut fixity_defs,
+                        parsed.file,
+                        op.1,
+                        ResolveNameKind::Fixity,
+                        op.0,
+                    )?;
+
+                    api.fixities.insert(op.0, *fixity);
+                }
             }
 
             SurfaceDefinition::InstanceDef { .. } => {}

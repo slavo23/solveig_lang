@@ -1,0 +1,8 @@
+[RES0003] Error: unknown operator `<+>`
+   ╭─[ $WORKSPACE/tests/golden/diag/unknown_operator/src/main.sv:1:10 ]
+   │
+ 1 │ main = 1 <+> 2
+   │          ─┬─
+   │           ╰─── no operator named `<+>` is in scope here
+───╯
+resolve error

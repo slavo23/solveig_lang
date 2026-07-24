@@ -1,17 +1,13 @@
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 
 use crate::ast::*;
-use crate::lexer::{self, Assoc, Fixity, LexError, PosToken, Token, builtin_fixity};
+use crate::lexer::{self, LexError, PosToken, Token};
 
 type S<T> = (T, Span);
 
 type NameSpan = (Symbol, usize, usize);
 
 type LambdaParam = (S<Symbol>, Option<S<SurfaceTy>>);
-
-type BinOpInfo = (Token, usize, usize);
-
-type StackedOp = (Token, usize, usize, Fixity);
 
 fn mk_span(start: usize, end: usize) -> Span {
     Span::from_usize_range(start..end)
@@ -255,6 +251,10 @@ impl<'a> Parser<'a> {
         match self.current_kind() {
             Token::Ident(symbol) => format!("identifier `{}`", self.token_text(*symbol)),
             Token::UpperIdent(symbol) => format!("constructor `{}`", self.token_text(*symbol)),
+            Token::Operator(symbol) => format!("operator `{}`", self.token_text(*symbol)),
+            Token::ReservedOp(symbol) => {
+                format!("reserved operator `{}`", self.token_text(*symbol))
+            }
             Token::Int(value) => format!("integer literal `{value}`"),
             Token::Float(value) => format!("float literal `{value}`"),
             Token::Char(value) => format!("char literal `{value}`"),
@@ -314,6 +314,100 @@ impl<'a> Parser<'a> {
                 "expected module name, got {}",
                 self.describe_current()
             ))),
+        }
+    }
+
+    fn fixed_operator_text(token: &Token) -> Option<&'static str> {
+        match token {
+            Token::Plus => Some("+"),
+            Token::Minus => Some("-"),
+            Token::Star => Some("*"),
+            Token::Slash => Some("/"),
+            Token::Percent => Some("%"),
+            Token::EqEq => Some("=="),
+            Token::Less => Some("<"),
+            Token::Greater => Some(">"),
+            Token::LessEq => Some("<="),
+            Token::GreaterEq => Some(">="),
+            Token::Cons => Some("::"),
+            Token::Dot => Some("."),
+            _ => None,
+        }
+    }
+
+    fn current_operator_symbol(&self) -> Option<(Symbol, bool)> {
+        match self.current_kind() {
+            Token::Operator(symbol) => Some((*symbol, false)),
+            token => Self::fixed_operator_text(token)
+                .map(|text| (self.session.intern(text), matches!(token, Token::Cons))),
+        }
+    }
+
+    fn is_infix_operator(&self) -> bool {
+        self.current_operator_symbol().is_some()
+    }
+
+    fn expect_operator_symbol(&mut self, allow_cons_syntax: bool) -> Result<NameSpan, ParseError> {
+        let Some((symbol, is_cons_syntax)) = self.current_operator_symbol() else {
+            return Err(self.error(format!(
+                "expected operator, got {}",
+                self.describe_current()
+            )));
+        };
+
+        let text = self.token_text(symbol);
+        if is_cons_syntax && !allow_cons_syntax {
+            return Err(self.error("list cons `::` is reserved syntax, not an operator name"));
+        }
+
+        if text.starts_with(':') && !is_cons_syntax {
+            return Err(self.error(
+                "operators starting with `:` are reserved for future constructor operators",
+            ));
+        }
+
+        let token = self.advance();
+        Ok((symbol, token.start, token.end))
+    }
+
+    fn parse_parenthesized_operator_name(&mut self) -> Result<NameSpan, ParseError> {
+        let start = self.expect(&Token::LParen)?.start;
+        let (symbol, _, _) = self.expect_operator_symbol(false)?;
+        let end = self.expect(&Token::RParen)?.end;
+        Ok((symbol, start, end))
+    }
+
+    fn starts_parenthesized_operator_name(&self) -> bool {
+        if !self.at(&Token::LParen) {
+            return false;
+        }
+
+        self.tokens
+            .get(self.pos + 1)
+            .is_some_and(|token| match &token.kind {
+                Token::Operator(_) => true,
+                other => Self::fixed_operator_text(other)
+                    .is_some_and(|text| text != "::" && !text.starts_with(':')),
+            })
+            && self
+                .tokens
+                .get(self.pos + 2)
+                .is_some_and(|token| matches!(token.kind, Token::RParen))
+    }
+
+    fn expect_value_name(&mut self) -> Result<NameSpan, ParseError> {
+        if self.starts_parenthesized_operator_name() {
+            self.parse_parenthesized_operator_name()
+        } else {
+            self.expect_ident()
+        }
+    }
+
+    fn parse_import_name(&mut self) -> Result<Symbol, ParseError> {
+        if self.starts_parenthesized_operator_name() {
+            Ok(self.parse_parenthesized_operator_name()?.0)
+        } else {
+            self.expect_module_name_segment()
         }
     }
 
@@ -381,7 +475,14 @@ impl<'a> Parser<'a> {
     fn is_top_level_sync_keyword(&self) -> bool {
         matches!(
             self.current_kind(),
-            Token::Data | Token::Sig | Token::Class | Token::Instance | Token::Import
+            Token::Data
+                | Token::Sig
+                | Token::Class
+                | Token::Instance
+                | Token::Import
+                | Token::Infixl
+                | Token::Infixr
+                | Token::Infix
         )
     }
 
@@ -473,7 +574,7 @@ impl<'a> Parser<'a> {
             self.advance();
             let mut names = Vec::new();
             while !self.at(&Token::RParen) {
-                names.push(self.expect_module_name_segment()?);
+                names.push(self.parse_import_name()?);
                 if !self.at(&Token::Comma) {
                     break;
                 }
@@ -524,12 +625,13 @@ impl<'a> Parser<'a> {
             Token::Data => self.parse_data_def(),
             Token::Class => self.parse_class_def(),
             Token::Instance => self.parse_instance_def(),
+            Token::Infixl | Token::Infixr | Token::Infix => self.parse_fixity_def(),
             _ => self.parse_func_or_sig(),
         }
     }
 
     fn parse_func_or_sig(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        let (name, start, end) = self.expect_ident()?;
+        let (name, start, end) = self.expect_value_name()?;
         let name = sp(name, start, end);
 
         if self.at(&Token::Colon) {
@@ -548,6 +650,53 @@ impl<'a> Parser<'a> {
         let body = self.parse_expr()?;
 
         Ok(SurfaceDefinition::FunDef { name, body, params })
+    }
+
+    fn parse_fixity_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
+        let assoc = match self.current_kind() {
+            Token::Infixl => Assoc::Left,
+            Token::Infixr => Assoc::Right,
+            Token::Infix => Assoc::None,
+            _ => {
+                return Err(self.error(format!(
+                    "expected fixity declaration, got {}",
+                    self.describe_current()
+                )));
+            }
+        };
+        self.advance();
+
+        let prec = match self.current_kind() {
+            Token::Int(value) => {
+                let value = *value;
+                self.advance();
+                u8::try_from(value)
+                    .ok()
+                    .filter(|value| *value <= 9)
+                    .ok_or_else(|| self.error("fixity precedence must be in the range 0..9"))?
+            }
+            _ => Fixity::DEFAULT.prec,
+        };
+
+        let mut ops = Vec::new();
+        loop {
+            let (op, start, end) = if self.starts_parenthesized_operator_name() {
+                self.parse_parenthesized_operator_name()?
+            } else {
+                self.expect_operator_symbol(false)?
+            };
+            ops.push(sp(op, start, end));
+
+            if !self.at(&Token::Comma) {
+                break;
+            }
+            self.advance();
+        }
+
+        Ok(SurfaceDefinition::FixityDef {
+            fixity: Fixity { prec, assoc },
+            ops,
+        })
     }
 
     fn parse_data_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
@@ -690,7 +839,7 @@ impl<'a> Parser<'a> {
 
             if self.at(&Token::Default) {
                 self.advance();
-                let (mname, ms, me) = self.expect_ident()?;
+                let (mname, ms, me) = self.expect_value_name()?;
                 let mut mparams = Vec::new();
                 while matches!(self.current_kind(), Token::Ident(_) | Token::Underscore) {
                     let (p, ps, pe) = self.expect_binder()?;
@@ -706,7 +855,7 @@ impl<'a> Parser<'a> {
                 continue;
             }
 
-            let (mname, ms, me) = self.expect_ident()?;
+            let (mname, ms, me) = self.expect_value_name()?;
             self.expect(&Token::Colon)?;
             let mty = self.parse_type()?;
             methods.push(ClassMethod {
@@ -768,7 +917,7 @@ impl<'a> Parser<'a> {
             if self.at(&Token::VClose) || self.at_eof() {
                 break;
             }
-            let (mname, ms, me) = self.expect_ident()?;
+            let (mname, ms, me) = self.expect_value_name()?;
             let mut mparams = Vec::new();
             while matches!(self.current_kind(), Token::Ident(_) | Token::Underscore) {
                 let (p, ps, pe) = self.expect_binder()?;
@@ -876,7 +1025,7 @@ impl<'a> Parser<'a> {
         };
 
         let mut segments = vec![first];
-        while self.at(&Token::Dot) {
+        while self.current_dot_is_qualified_separator() {
             match self.tokens.get(self.pos + 1).map(|token| &token.kind) {
                 Some(Token::Ident(name)) | Some(Token::UpperIdent(name)) => {
                     let name = *name;
@@ -893,6 +1042,22 @@ impl<'a> Parser<'a> {
             start,
             self.tokens[self.pos.saturating_sub(1)].end,
         ))
+    }
+
+    fn current_dot_is_qualified_separator(&self) -> bool {
+        if !self.at(&Token::Dot) || self.pos == 0 {
+            return false;
+        }
+
+        let previous = &self.tokens[self.pos - 1];
+        let dot = self.current();
+        let Some(next) = self.tokens.get(self.pos + 1) else {
+            return false;
+        };
+
+        previous.end == dot.start
+            && dot.end == next.start
+            && matches!(next.kind, Token::Ident(_) | Token::UpperIdent(_))
     }
 
     fn is_case_block_follower(&self) -> bool {
@@ -1145,37 +1310,50 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_op_chain(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        let mut items = vec![self.parse_unary()?];
-        let mut ops = Vec::new();
+        let first = self.parse_op_operand()?;
+        let mut segments = Vec::new();
 
-        while builtin_fixity(self.current_kind()).is_some() {
-            let token = self.advance();
-            ops.push((token.kind.clone(), token.start, token.end));
-            items.push(self.parse_unary()?);
+        while self.is_infix_operator() {
+            let (op, start, end) = self.expect_operator_symbol(true)?;
+            let rhs = self.parse_op_operand()?;
+            segments.push(SurfaceOpSegment {
+                op: sp(op, start, end),
+                rhs,
+            });
         }
 
-        if ops.is_empty() {
-            Ok(items
-                .pop()
-                .expect("operator chain always has one expression"))
+        if segments.is_empty() && first.prefix_minuses.is_empty() {
+            Ok(first.expr)
         } else {
-            rearrange_ops(self.session, items, ops)
-        }
-    }
-
-    fn parse_unary(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        if self.at(&Token::Minus) {
-            let start = self.advance().start;
-            let operand = self.parse_app()?;
-            let end = span_end(&operand);
+            let start = first
+                .prefix_minuses
+                .first()
+                .map(|span| span.start as usize)
+                .unwrap_or_else(|| span_start(&first.expr));
+            let end = segments
+                .last()
+                .map(|segment| span_end(&segment.rhs.expr))
+                .unwrap_or_else(|| span_end(&first.expr));
             Ok(sp(
-                SurfaceExpr::UnaryOperator(SurfaceUnOp::Neg, Box::new(operand)),
+                SurfaceExpr::OpSeq(Box::new(first), segments),
                 start,
                 end,
             ))
-        } else {
-            self.parse_app()
         }
+    }
+
+    fn parse_op_operand(&mut self) -> Result<SurfaceOpOperand, ParseError> {
+        let mut prefix_minuses = Vec::new();
+        while self.at(&Token::Minus) {
+            let token = self.advance();
+            prefix_minuses.push(mk_span(token.start, token.end));
+        }
+
+        let expr = self.parse_app()?;
+        Ok(SurfaceOpOperand {
+            prefix_minuses,
+            expr,
+        })
     }
 
     fn parse_app(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
@@ -1258,6 +1436,18 @@ impl<'a> Parser<'a> {
                 Ok(sp(expr, start, end))
             }
             Token::LParen => {
+                if self.starts_parenthesized_operator_name() {
+                    let (symbol, start, end) = self.parse_parenthesized_operator_name()?;
+                    let name_ref = sp(
+                        NameRef {
+                            segments: vec![symbol],
+                        },
+                        start,
+                        end,
+                    );
+                    return Ok(sp(SurfaceExpr::Var(name_ref), start, end));
+                }
+
                 self.advance();
                 if self.at(&Token::RParen) {
                     let end = self.advance().end;
@@ -1391,78 +1581,6 @@ impl<'a> Parser<'a> {
             .unwrap_or_else(|| span_end(&scrutinee));
         Ok(sp(SurfaceExpr::Case(Box::new(scrutinee), arms), start, end))
     }
-}
-
-fn rearrange_ops(
-    session: &Session,
-    mut items: Vec<S<SurfaceExpr>>,
-    ops: Vec<BinOpInfo>,
-) -> Result<S<SurfaceExpr>, ParseError> {
-    let mut expr_stack = vec![items.remove(0)];
-    let mut op_stack: Vec<StackedOp> = Vec::new();
-
-    for (op, rhs) in ops.into_iter().zip(items) {
-        let fixity = builtin_fixity(&op.0).expect("operator fixity must exist");
-
-        while let Some((_, _, _, top_fixity)) = op_stack.last() {
-            let should_pop = top_fixity.prec > fixity.prec
-                || (top_fixity.prec == fixity.prec && matches!(top_fixity.assoc, Assoc::Left));
-            if !should_pop {
-                break;
-            }
-
-            let (top_op, start, end, _) = op_stack.pop().expect("operator stack is non-empty");
-            let right = expr_stack.pop().expect("rhs expression exists");
-            let left = expr_stack.pop().expect("lhs expression exists");
-            expr_stack.push(make_binop(session, top_op, left, right, start, end));
-        }
-
-        op_stack.push((op.0, op.1, op.2, fixity));
-        expr_stack.push(rhs);
-    }
-
-    while let Some((op, start, end, _)) = op_stack.pop() {
-        let right = expr_stack.pop().expect("rhs expression exists");
-        let left = expr_stack.pop().expect("lhs expression exists");
-        expr_stack.push(make_binop(session, op, left, right, start, end));
-    }
-
-    Ok(expr_stack.pop().expect("final expression exists"))
-}
-
-fn make_binop(
-    session: &Session,
-    op: Token,
-    lhs: S<SurfaceExpr>,
-    rhs: S<SurfaceExpr>,
-    _op_start: usize,
-    _op_end: usize,
-) -> S<SurfaceExpr> {
-    let (start, end) = merge_span(&lhs, &rhs);
-
-    if matches!(op, Token::Cons) {
-        return cons_expr(session, lhs, rhs, start, end);
-    }
-
-    let op = match op {
-        Token::Plus => SurfaceBinOp::Plus,
-        Token::Minus => SurfaceBinOp::Minus,
-        Token::Star => SurfaceBinOp::Mult,
-        Token::Slash => SurfaceBinOp::Div,
-        Token::Percent => SurfaceBinOp::Mod,
-        Token::EqEq => SurfaceBinOp::Equal,
-        Token::Less => SurfaceBinOp::Less,
-        Token::Greater => SurfaceBinOp::Greater,
-        Token::LessEq => SurfaceBinOp::LessOrEqual,
-        Token::GreaterEq => SurfaceBinOp::GreaterOrEqual,
-        _ => unreachable!("unknown operator in rearrangement"),
-    };
-
-    sp(
-        SurfaceExpr::BinaryOperator(op, Box::new(lhs), Box::new(rhs)),
-        start,
-        end,
-    )
 }
 
 pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
