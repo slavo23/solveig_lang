@@ -10,6 +10,7 @@ use solveig_ast::ast::{
     symbol_display_name,
 };
 use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile};
+use solveig_check::core_lint::{CoreLintEnv, lint_checked_module};
 use solveig_check::inference::holes::hole_diagnostics;
 use solveig_check::inference::type_infer::{
     CheckedModule, TcMetadata, TypeCheckEnv, check_and_elab_module,
@@ -39,6 +40,16 @@ pub struct Compilation {
 pub struct CompileOptions {
     pub dump_bytecode: bool,
     pub dump_evidence: bool,
+    pub verify_core: bool,
+}
+
+impl CompileOptions {
+    pub fn test_support() -> Self {
+        Self {
+            verify_core: true,
+            ..Self::default()
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +98,7 @@ impl Compilation {
             CompileOptions {
                 dump_bytecode,
                 dump_evidence: false,
+                verify_core: false,
             },
         )?;
         println!("{output}");
@@ -104,11 +116,11 @@ impl Compilation {
     }
 
     pub fn run_project_capture(&self, entry_name: &str) -> Result<String, String> {
-        self.compile_project_capture(entry_name, CompileOptions::default())
+        self.compile_project_capture(entry_name, CompileOptions::test_support())
     }
 
     pub fn checked_project_schemes(&self) -> Result<BTreeMap<String, String>, String> {
-        let merged = self.check_and_merge_project()?;
+        let merged = self.check_and_merge_project(true)?;
         let pretty_tables = PrettyTables {
             tycons: &merged.tycon_table,
             classes: &merged.class_table,
@@ -135,7 +147,7 @@ impl Compilation {
         entry_name: &str,
         options: CompileOptions,
     ) -> Result<String, String> {
-        let merged = self.check_and_merge_project()?;
+        let merged = self.check_and_merge_project(options.verify_core)?;
 
         if options.dump_evidence {
             dump_solved_evidence(&merged);
@@ -155,9 +167,9 @@ impl Compilation {
         Ok(result.display().to_string())
     }
 
-    fn check_and_merge_project(&self) -> Result<CheckedModule, String> {
+    fn check_and_merge_project(&self, verify_core: bool) -> Result<CheckedModule, String> {
         self.artifacts.replace(None);
-        let checked_project = check_project_modules(&self.project_root)?;
+        let checked_project = check_project_modules(&self.project_root, verify_core)?;
         let merged = merge_checked_modules(checked_project.modules.clone())?;
 
         self.artifacts
@@ -488,7 +500,7 @@ pub fn checked_project_schemes(project_root: &Path) -> Result<BTreeMap<String, S
     Compilation::new(project_root).checked_project_schemes()
 }
 
-fn check_project_modules(project_root: &Path) -> Result<CheckedProject, String> {
+fn check_project_modules(project_root: &Path, verify_core: bool) -> Result<CheckedProject, String> {
     let session = Session::new();
     let entry_file = find_entry_file(project_root)?;
     let (_root, project) = match load_project(&session, &entry_file) {
@@ -516,7 +528,7 @@ fn check_project_modules(project_root: &Path) -> Result<CheckedProject, String> 
     };
     let parsed = parse_project(&project);
 
-    let mut state = match FrontendState::new(&session, &project, &parsed, &order) {
+    let mut state = match FrontendState::new(&session, &project, &parsed, &order, verify_core) {
         Ok(state) => state,
         Err(errors) => {
             push_resolve_errors(&session, Some(&project.module_table), errors);
@@ -525,6 +537,20 @@ fn check_project_modules(project_root: &Path) -> Result<CheckedProject, String> 
         }
     };
     state.check_all(&order)?;
+
+    if verify_core {
+        let merged = merge_checked_modules(state.checked_modules.clone())?;
+        let lint_env = CoreLintEnv::from_module(&merged).with_files(state.module_files.clone());
+        let diagnostics = lint_checked_module(&merged, &lint_env);
+
+        if !diagnostics.is_empty() {
+            for diagnostic in diagnostics {
+                session.diagnostics().push(diagnostic);
+            }
+            emit_session_diagnostics(&session)?;
+            return Err(FrontendPhase::Core.error_message().to_string());
+        }
+    }
 
     if !session.diagnostics().is_empty() {
         emit_session_diagnostics(&session)?;
@@ -566,6 +592,7 @@ struct FrontendState<'a> {
     checked: HashMap<ModuleId, CheckedModule>,
     module_files: HashMap<ModuleId, FileId>,
     next_instance_id: u32,
+    verify_core: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -574,6 +601,7 @@ enum FrontendPhase {
     Kind,
     Type,
     Hole,
+    Core,
 }
 
 impl FrontendPhase {
@@ -583,6 +611,7 @@ impl FrontendPhase {
             Self::Kind => "kind error",
             Self::Type => "type error",
             Self::Hole => "Program has unfilled holes. Aborting compilation",
+            Self::Core => "core verification failed",
         }
     }
 }
@@ -593,6 +622,7 @@ impl<'a> FrontendState<'a> {
         project: &'a Project,
         parsed: &'a ParsedProject,
         order: &[ModuleName],
+        verify_core: bool,
     ) -> Result<Self, Vec<ResolveError>> {
         let mut apis = HashMap::new();
         let mut errors = Vec::new();
@@ -628,6 +658,7 @@ impl<'a> FrontendState<'a> {
             checked: HashMap::new(),
             module_files: HashMap::new(),
             next_instance_id: 0,
+            verify_core,
         })
     }
 
@@ -821,6 +852,19 @@ impl<'a> FrontendState<'a> {
             }
 
             return Err(FrontendPhase::Hole);
+        }
+
+        if self.verify_core {
+            let lint_env = CoreLintEnv::from_typecheck_env(&checked_raw.module, &check_env)
+                .with_file(module_id, file);
+            let diagnostics = lint_checked_module(&checked_raw.module, &lint_env);
+
+            if !diagnostics.is_empty() {
+                for diagnostic in diagnostics {
+                    self.session.diagnostics().push(diagnostic);
+                }
+                return Err(FrontendPhase::Core);
+            }
         }
 
         Ok(checked_raw.module)

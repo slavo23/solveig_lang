@@ -13,6 +13,8 @@ struct Cli {
     dump_bytecode: bool,
     #[arg(long, default_value = "false")]
     dump_evidence: bool,
+    #[arg(long, default_value = "false")]
+    verify_core: bool,
 }
 
 fn main() {
@@ -24,6 +26,7 @@ fn main() {
         CompileOptions {
             dump_bytecode: cli.dump_bytecode,
             dump_evidence: cli.dump_evidence,
+            verify_core: cli.verify_core,
         },
     ) {
         eprintln!("{err}");

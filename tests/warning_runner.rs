@@ -9,6 +9,7 @@ fn warning_diagnostics_do_not_fail_compile() {
     let output = Command::new(env!("CARGO_BIN_EXE_solveig"))
         .arg("--project-root")
         .arg(&case_root)
+        .arg("--verify-core")
         .output()
         .unwrap_or_else(|err| {
             panic!(

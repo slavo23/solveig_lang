@@ -73,6 +73,7 @@ fn run_cli(case_root: &Path) -> Output {
     Command::new(env!("CARGO_BIN_EXE_solveig"))
         .arg("--project-root")
         .arg(case_root)
+        .arg("--verify-core")
         .output()
         .unwrap_or_else(|err| {
             panic!(
