@@ -5,18 +5,20 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING,
-    BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT,
-    BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB,
-    BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE,
-    BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE,
-    BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB,
-    BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT,
-    BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE,
-    BUILTIN_STRING_TO_CHARS, BuiltinDefinition, BuiltinId, COMPILER_PRELUDE_PRIM_MODULE,
-    ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Ev, InstanceId, ModuleId,
-    PRIM_TYS, PrettyTables, Scheme, TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr,
-    def_display_name, prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
+    BUILTIN_BIND_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_STRING,
+    BUILTIN_CHARS_TO_STRING, BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ,
+    BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL,
+    BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB, BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING,
+    BUILTIN_GET_ARGS, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE, BUILTIN_INT_DIV, BUILTIN_INT_EQ,
+    BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD,
+    BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING,
+    BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_LINE,
+    BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
+    BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BuiltinDefinition,
+    BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassTable, CtorId,
+    CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, PRIM_TYS, PrettyTables, Scheme, TermExpr,
+    TermExprNode, TyConId, TyConTable, TypeExpr, def_display_name, legacy_tyvar_id,
+    prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
     register_def_display_name, register_symbol_display_name, symbol_display_name,
 };
 use solveig_base::utils::diagnostics::Diagnostic;
@@ -79,6 +81,11 @@ struct CheckedProject {
     source_files: Vec<SourceFile>,
 }
 
+struct CapturedRun {
+    output: String,
+    performed_io: bool,
+}
+
 impl CompilationArtifacts {
     fn from_checked_project(project: &CheckedProject) -> Self {
         let (tycon_table, class_table) = checked_project_tables(&project.modules);
@@ -106,15 +113,21 @@ impl Compilation {
         entry_name: &str,
         dump_bytecode: bool,
     ) -> Result<(), String> {
-        let output = self.compile_project_capture(
+        let capture = self.compile_project_capture_inner(
             entry_name,
             CompileOptions {
                 dump_bytecode,
                 dump_evidence: false,
                 verify_core: false,
             },
+            "",
+            &[],
         )?;
-        println!("{output}");
+        if capture.performed_io {
+            print!("{}", capture.output);
+        } else {
+            println!("{}", capture.output);
+        }
         Ok(())
     }
 
@@ -123,13 +136,35 @@ impl Compilation {
         entry_name: &str,
         options: CompileOptions,
     ) -> Result<(), String> {
-        let output = self.compile_project_capture(entry_name, options)?;
-        println!("{output}");
+        let capture = self.compile_project_capture_inner(entry_name, options, "", &[])?;
+        if capture.performed_io {
+            print!("{}", capture.output);
+        } else {
+            println!("{}", capture.output);
+        }
         Ok(())
     }
 
     pub fn run_project_capture(&self, entry_name: &str) -> Result<String, String> {
         self.compile_project_capture(entry_name, CompileOptions::test_support())
+    }
+
+    pub fn run_project_capture_with_stdin(
+        &self,
+        entry_name: &str,
+        stdin: &str,
+    ) -> Result<String, String> {
+        self.run_project_capture_with_stdin_and_args(entry_name, stdin, &[])
+    }
+
+    pub fn run_project_capture_with_stdin_and_args(
+        &self,
+        entry_name: &str,
+        stdin: &str,
+        args: &[String],
+    ) -> Result<String, String> {
+        self.compile_project_capture_inner(entry_name, CompileOptions::test_support(), stdin, args)
+            .map(|capture| capture.output)
     }
 
     pub fn checked_project_schemes(&self) -> Result<BTreeMap<String, String>, String> {
@@ -163,6 +198,17 @@ impl Compilation {
         entry_name: &str,
         options: CompileOptions,
     ) -> Result<String, String> {
+        self.compile_project_capture_inner(entry_name, options, "", &[])
+            .map(|capture| capture.output)
+    }
+
+    fn compile_project_capture_inner(
+        &self,
+        entry_name: &str,
+        options: CompileOptions,
+        stdin: &str,
+        args: &[String],
+    ) -> Result<CapturedRun, String> {
         let checked_project = self.check_project(options.verify_core)?;
         let merged = merge_checked_modules(checked_project.modules.clone())?;
 
@@ -183,9 +229,21 @@ impl Compilation {
         }
 
         let entry_fq = format!("main.{entry_name}");
-        let result =
-            Machine::exec(&cc, &entry_fq).map_err(|err| format!("runtime error: {err}"))?;
-        Ok(result.display().to_string())
+        if entry_returns_io(&merged, &entry_fq) {
+            let result = Machine::exec_io(&cc, &entry_fq, stdin, args)
+                .map_err(|err| format!("runtime error: {err}"))?;
+            Ok(CapturedRun {
+                output: result.stdout,
+                performed_io: true,
+            })
+        } else {
+            let result =
+                Machine::exec(&cc, &entry_fq).map_err(|err| format!("runtime error: {err}"))?;
+            Ok(CapturedRun {
+                output: result.display().to_string(),
+                performed_io: false,
+            })
+        }
     }
 
     fn check_project(&self, verify_core: bool) -> Result<CheckedProject, String> {
@@ -215,6 +273,22 @@ fn checked_project_tables(modules: &[CheckedModule]) -> (TyConTable, ClassTable)
     }
 
     (tycon_table, class_table)
+}
+
+fn entry_returns_io(module: &CheckedModule, entry_name: &str) -> bool {
+    module
+        .func_schemes
+        .iter()
+        .find(|(def_id, _)| def_display_name(**def_id) == entry_name)
+        .is_some_and(|(_, scheme)| scheme_returns_io(scheme))
+}
+
+fn scheme_returns_io(scheme: &Scheme) -> bool {
+    let (_, _, ty) = scheme.ty.peel_scheme_like();
+    matches!(
+        ty,
+        TypeExpr::TyApp(func, _) if matches!(*func, TypeExpr::TyCon(id) if id == PRIM_TYS.io)
+    )
 }
 
 fn verify_lowering_core(
@@ -556,6 +630,23 @@ pub fn run_project_capture(project_root: &Path, entry_name: &str) -> Result<Stri
     Compilation::new(project_root).run_project_capture(entry_name)
 }
 
+pub fn run_project_capture_with_stdin(
+    project_root: &Path,
+    entry_name: &str,
+    stdin: &str,
+) -> Result<String, String> {
+    Compilation::new(project_root).run_project_capture_with_stdin(entry_name, stdin)
+}
+
+pub fn run_project_capture_with_stdin_and_args(
+    project_root: &Path,
+    entry_name: &str,
+    stdin: &str,
+    args: &[String],
+) -> Result<String, String> {
+    Compilation::new(project_root).run_project_capture_with_stdin_and_args(entry_name, stdin, args)
+}
+
 pub fn checked_project_schemes(project_root: &Path) -> Result<BTreeMap<String, String>, String> {
     Compilation::new(project_root).checked_project_schemes()
 }
@@ -710,14 +801,15 @@ fn primitive_builtin_specs() -> Vec<PrimitiveBuiltinSpec> {
     let string = TypeExpr::make_con_id(PRIM_TYS.string);
     let bool_ty = TypeExpr::make_con_id(PRIM_TYS.bool);
     let ordering = TypeExpr::make_con_id(prelude_ordering_tycon_id());
+    let list = TypeExpr::make_con_id(prelude_list_tycon_id());
     let maybe_char = TypeExpr::make_app(
         TypeExpr::make_con_id(prelude_maybe_tycon_id()),
         char_ty.clone(),
     );
-    let char_list = TypeExpr::make_app(
-        TypeExpr::make_con_id(prelude_list_tycon_id()),
-        char_ty.clone(),
-    );
+    let char_list = TypeExpr::make_app(list.clone(), char_ty.clone());
+    let string_list = TypeExpr::make_app(list, string.clone());
+    let a = TypeExpr::make_var("a".to_string());
+    let b = TypeExpr::make_var("b".to_string());
 
     vec![
         prim_spec(
@@ -940,7 +1032,50 @@ fn primitive_builtin_specs() -> Vec<PrimitiveBuiltinSpec> {
             "charsToString",
             BUILTIN_CHARS_TO_STRING,
             1,
-            unary(char_list, string),
+            unary(char_list, string.clone()),
+        ),
+        prim_spec(
+            "pureIO",
+            BUILTIN_PURE_IO,
+            1,
+            poly_arr(&["a"], &[a.clone()], io_of(a.clone())),
+        ),
+        prim_spec(
+            "bindIO",
+            BUILTIN_BIND_IO,
+            2,
+            poly_arr(
+                &["a", "b"],
+                &[
+                    io_of(a.clone()),
+                    TypeExpr::make_arr(a.clone(), io_of(b.clone())),
+                ],
+                io_of(b.clone()),
+            ),
+        ),
+        prim_spec(
+            "printLine",
+            BUILTIN_PRINT_LINE,
+            1,
+            unary(string.clone(), io_of(TypeExpr::TyUnit)),
+        ),
+        prim_spec(
+            "printStr",
+            BUILTIN_PRINT_STR,
+            1,
+            unary(string.clone(), io_of(TypeExpr::TyUnit)),
+        ),
+        prim_spec(
+            "readLine",
+            BUILTIN_READ_LINE,
+            0,
+            Scheme::mono(io_of(string)),
+        ),
+        prim_spec(
+            "getArgs",
+            BUILTIN_GET_ARGS,
+            0,
+            Scheme::mono(io_of(string_list)),
         ),
     ]
 }
@@ -972,12 +1107,33 @@ fn ternary(a: TypeExpr, b: TypeExpr, c: TypeExpr, ret: TypeExpr) -> Scheme {
 }
 
 fn arr(args: &[TypeExpr], ret: TypeExpr) -> Scheme {
-    let ty = args
-        .iter()
+    Scheme::mono(arr_ty(args, ret))
+}
+
+fn arr_ty(args: &[TypeExpr], ret: TypeExpr) -> TypeExpr {
+    args.iter()
         .rev()
         .cloned()
-        .fold(ret, |body, arg| TypeExpr::make_arr(arg, body));
-    Scheme::mono(ty)
+        .fold(ret, |body, arg| TypeExpr::make_arr(arg, body))
+}
+
+fn poly_arr(vars: &[&str], args: &[TypeExpr], ret: TypeExpr) -> Scheme {
+    poly(vars, arr_ty(args, ret))
+}
+
+fn poly(vars: &[&str], ty: TypeExpr) -> Scheme {
+    Scheme {
+        quantifiers: vars
+            .iter()
+            .map(|name| (legacy_tyvar_id(name), Kind::Star))
+            .collect(),
+        predicates: Vec::new(),
+        ty,
+    }
+}
+
+fn io_of(value: TypeExpr) -> TypeExpr {
+    TypeExpr::make_app(TypeExpr::make_con_id(PRIM_TYS.io), value)
 }
 
 impl<'a> FrontendState<'a> {

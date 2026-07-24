@@ -237,6 +237,11 @@ instance Functor (Pair e) where
         case pair of
             MkPair e x => MkPair e (f x)
 
+instance Functor IO where
+    fmap f action =
+        prelude.builtins.bindIO action (fun value =>
+            prelude.builtins.pureIO (f value))
+
 class Functor f => Applicative f where
     pure : forall a. a -> f a
     apply : forall a b. f (a -> b) -> f a -> f b
@@ -262,6 +267,14 @@ instance Applicative List where
     pure x = [x]
 
     apply fs xs = concat (map (fun f => map f xs) fs)
+
+instance Applicative IO where
+    pure value = prelude.builtins.pureIO value
+
+    apply actionF actionX =
+        prelude.builtins.bindIO actionF (fun f =>
+            prelude.builtins.bindIO actionX (fun x =>
+                prelude.builtins.pureIO (f x)))
 
 class Applicative m => Monad m where
     bind : forall a b. m a -> (a -> m b) -> m b
@@ -304,6 +317,21 @@ instance Monad Maybe where
 
 instance Monad List where
     bind xs f = concat (map f xs)
+
+instance Monad IO where
+    bind action f = prelude.builtins.bindIO action f
+
+getArgs : IO [String]
+getArgs = prelude.prim.getArgs
+
+seqIO : forall a b. IO a -> IO b -> IO b
+seqIO left right = prelude.builtins.bindIO left (fun ignored => right)
+
+mapIO_ : forall a. (a -> IO ()) -> [a] -> IO ()
+mapIO_ f xs =
+    case xs of
+        [] => prelude.builtins.pureIO ()
+        | y :: ys => prelude.builtins.bindIO (f y) (fun ignored => mapIO_ f ys)
 
 class Semigroup a where
     appendS : a -> a -> a

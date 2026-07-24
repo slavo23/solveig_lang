@@ -4,11 +4,12 @@ use solveig_ast::ast::{Literal, string_literal_value};
 use super::bytecode::{
     BytePattern, BytecodeProgram, ChunkKind, Instr, MatchArm, lower_to_bytecode,
 };
-use super::heap::{BoundPrefix, Heap, HeapObject, PayloadRef, PayloadStore};
+use super::heap::{BoundPrefix, Heap, HeapObject, IoAction, PayloadRef, PayloadStore};
 use super::values::{BoolCache, Continuation, GlobalSlot, NullaryCtorCache, ObjId, Value};
 use crate::builtins::{self, VmCtx};
 use crate::display::DisplayValue;
 use solveig_lower::closure_ir::CCProgram;
+use std::collections::VecDeque;
 use std::fmt;
 
 struct Vm {
@@ -24,6 +25,9 @@ struct Vm {
     globals: Vec<GlobalSlot>,
     nullary_ctors: NullaryCtorCache,
     bools: BoolCache,
+    stdin: VecDeque<String>,
+    stdout: String,
+    args: Vec<String>,
 }
 
 #[inline]
@@ -52,11 +56,16 @@ fn mark_payload(
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum InvokeMode {
     Call,
+    HaltCall,
     TailCall,
 }
 
 impl Vm {
     fn new(program: &BytecodeProgram) -> Self {
+        Self::new_with_io(program, "", Vec::new())
+    }
+
+    fn new_with_io(program: &BytecodeProgram, stdin: &str, args: Vec<String>) -> Self {
         let max_tag = program
             .constructor_arities
             .iter()
@@ -82,6 +91,9 @@ impl Vm {
                 true_val: Value::Unit,
                 false_val: Value::Unit,
             },
+            stdin: split_stdin_lines(stdin),
+            stdout: String::new(),
+            args,
         };
 
         vm.init_nullary(&program.constructor_arities);
@@ -180,6 +192,28 @@ impl Vm {
                     Children::None
                 }
                 Some(HeapObject::Str { .. }) => Children::None,
+                Some(HeapObject::IoAction(action)) => {
+                    match action {
+                        IoAction::Pure(value) | IoAction::Print { text: value, .. } => {
+                            if let Value::Obj(child) = value {
+                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
+                            }
+                        }
+                        IoAction::Bind {
+                            action,
+                            continuation,
+                        } => {
+                            if let Value::Obj(child) = action {
+                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
+                            }
+                            if let Value::Obj(child) = continuation {
+                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
+                            }
+                        }
+                        IoAction::ReadLine | IoAction::GetArgs => {}
+                    }
+                    Children::None
+                }
                 None => Children::None,
             };
 
@@ -353,8 +387,12 @@ impl Vm {
         let args_start = self.stack.len() - arg_count;
 
         match mode {
-            InvokeMode::Call => {
-                self.push_caller_continuation();
+            InvokeMode::Call | InvokeMode::HaltCall => {
+                if matches!(mode, InvokeMode::HaltCall) {
+                    self.continuations.push(Continuation::Halt);
+                } else {
+                    self.push_caller_continuation();
+                }
                 self.chunk = chunk_id;
                 self.pc = 0;
                 self.frame_base = args_start;
@@ -640,6 +678,10 @@ impl Vm {
             HeapObject::Str { .. } => {
                 panic!("ICE: heap string reached callable-object invocation");
             }
+
+            HeapObject::IoAction(_) => {
+                panic!("ICE: IO action reached callable-object invocation");
+            }
         }
     }
 
@@ -732,6 +774,91 @@ impl Vm {
         self.stack.truncate(args_start);
 
         Ok(result)
+    }
+
+    fn call_value_for_result(
+        &mut self,
+        program: &BytecodeProgram,
+        callee: Value,
+        args: &[Value],
+    ) -> Result<Value, RuntimeError> {
+        for arg in args {
+            self.push(*arg);
+        }
+
+        match self.invoke_value(program, InvokeMode::HaltCall, callee, args.len()) {
+            Some(value) => Ok(value),
+            None => self.dispatch(program),
+        }
+    }
+
+    fn perform_io(
+        &mut self,
+        program: &BytecodeProgram,
+        action: Value,
+    ) -> Result<Value, RuntimeError> {
+        match self.expect_io_action(action)? {
+            IoAction::Pure(value) => Ok(value),
+            IoAction::Bind {
+                action,
+                continuation,
+            } => {
+                let value = self.perform_io(program, action)?;
+                let next = self.call_value_for_result(program, continuation, &[value])?;
+                self.perform_io(program, next)
+            }
+            IoAction::Print { text, newline } => {
+                let text = self.expect_string_value(text, "IO print")?;
+                self.stdout.push_str(&text);
+                if newline {
+                    self.stdout.push('\n');
+                }
+                Ok(Value::Unit)
+            }
+            IoAction::ReadLine => {
+                let line = self.stdin.pop_front().unwrap_or_default();
+                Ok(self.heap.alloc_str(&line))
+            }
+            IoAction::GetArgs => {
+                let mut arg_values = Vec::with_capacity(self.args.len());
+                for arg in &self.args {
+                    arg_values.push(self.heap.alloc_str(arg));
+                }
+
+                let mut ctx = VmCtx::new(
+                    &mut self.heap,
+                    &program.constructor_arities,
+                    &self.nullary_ctors,
+                    self.bools.true_val,
+                    self.bools.false_val,
+                );
+                ctx.alloc_list_from_values(&arg_values, "getArgs")
+            }
+        }
+    }
+
+    fn expect_io_action(&self, value: Value) -> Result<IoAction, RuntimeError> {
+        match value {
+            Value::Obj(id) => match self.heap.get(id) {
+                HeapObject::IoAction(action) => Ok(*action),
+                _ => Err(RuntimeError::builtin(
+                    "main returned a non-IO heap value while performing IO".to_string(),
+                )),
+            },
+            _ => Err(RuntimeError::builtin(
+                "main returned a non-IO value while performing IO".to_string(),
+            )),
+        }
+    }
+
+    fn expect_string_value(&self, value: Value, context: &str) -> Result<String, RuntimeError> {
+        match value {
+            Value::Obj(id) => match self.heap.get(id) {
+                HeapObject::Str { bytes } => Ok(self.heap.str_value(*bytes).to_string()),
+                _ => Err(RuntimeError::builtin(format!("{context} expected String"))),
+            },
+            _ => Err(RuntimeError::builtin(format!("{context} expected String"))),
+        }
     }
 
     fn dispatch_match(&mut self, arms: &[MatchArm], scrutinee: Value, else_pc: u32) {
@@ -1233,10 +1360,27 @@ fn find_ctor_tag(arities: &[CtorRuntimeInfo], ctor: CtorId) -> u16 {
         .unwrap_or_else(|| panic!("ICE: runtime constructor metadata missing CtorId {ctor:?}"))
 }
 
+fn split_stdin_lines(stdin: &str) -> VecDeque<String> {
+    let mut lines = VecDeque::new();
+
+    for line in stdin.split_inclusive('\n') {
+        let mut line = line.strip_suffix('\n').unwrap_or(line);
+        line = line.strip_suffix('\r').unwrap_or(line);
+        lines.push_back(line.to_string());
+    }
+
+    lines
+}
+
 pub struct EvalResult {
     root: Value,
     heap: Heap,
     constructor_arities: Vec<CtorRuntimeInfo>,
+}
+
+pub struct IoEvalResult {
+    pub result: EvalResult,
+    pub stdout: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1292,6 +1436,44 @@ impl Machine {
             root,
             heap: vm.heap,
             constructor_arities: program.constructor_arities.clone(),
+        })
+    }
+
+    pub fn exec_io(
+        program: &CCProgram,
+        entry_name: &str,
+        stdin: &str,
+        args: &[String],
+    ) -> Result<IoEvalResult, RuntimeError> {
+        let bytecode = lower_to_bytecode(program);
+        Self::exec_compiled_io(&bytecode, entry_name, stdin, args)
+    }
+
+    pub fn exec_compiled_io(
+        program: &BytecodeProgram,
+        entry_name: &str,
+        stdin: &str,
+        args: &[String],
+    ) -> Result<IoEvalResult, RuntimeError> {
+        let Some(entry) = program.global_index_by_name(entry_name) else {
+            return Err(RuntimeError {
+                code: 0,
+                message: format!("entry '{entry_name}' not found"),
+            });
+        };
+
+        let mut vm = Vm::new_with_io(program, stdin, args.to_vec());
+        let action = vm.eval_global(program, entry)?;
+        let root = vm.perform_io(program, action)?;
+        let stdout = vm.stdout;
+
+        Ok(IoEvalResult {
+            result: EvalResult {
+                root,
+                heap: vm.heap,
+                constructor_arities: program.constructor_arities.clone(),
+            },
+            stdout,
         })
     }
 

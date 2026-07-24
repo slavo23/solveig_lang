@@ -35,6 +35,16 @@ pub enum HeapObject {
     Str {
         bytes: ByteRef,
     },
+    IoAction(IoAction),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum IoAction {
+    Pure(Value),
+    Bind { action: Value, continuation: Value },
+    Print { text: Value, newline: bool },
+    ReadLine,
+    GetArgs,
 }
 
 #[derive(Debug)]
@@ -152,7 +162,10 @@ impl Heap {
             HeapObject::PartialCtor { applied_args, .. } => self.payloads.free_span(*applied_args),
             HeapObject::DataN { fields, .. } => self.payloads.free_span(*fields),
             HeapObject::Str { bytes } => self.bytes.free_span(*bytes),
-            HeapObject::Data0 { .. } | HeapObject::Data1 { .. } | HeapObject::Data2 { .. } => {}
+            HeapObject::Data0 { .. }
+            | HeapObject::Data1 { .. }
+            | HeapObject::Data2 { .. }
+            | HeapObject::IoAction(_) => {}
         }
     }
 

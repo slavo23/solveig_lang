@@ -1,20 +1,22 @@
 use std::cmp::Ordering;
 
 use solveig_ast::ast::{
-    BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING,
-    BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT,
-    BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB,
-    BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE,
-    BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE,
-    BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB,
-    BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT,
-    BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE,
-    BUILTIN_STRING_TO_CHARS, BuiltinId, CtorId, CtorRuntimeInfo, prelude_list_cons_ctor_id,
-    prelude_list_nil_ctor_id, prelude_maybe_just_ctor_id, prelude_maybe_nothing_ctor_id,
-    prelude_ordering_eq_ctor_id, prelude_ordering_gt_ctor_id, prelude_ordering_lt_ctor_id,
+    BUILTIN_BIND_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_STRING,
+    BUILTIN_CHARS_TO_STRING, BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ,
+    BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL,
+    BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB, BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING,
+    BUILTIN_GET_ARGS, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE, BUILTIN_INT_DIV, BUILTIN_INT_EQ,
+    BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD,
+    BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING,
+    BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_LINE,
+    BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
+    BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BuiltinId, CtorId,
+    CtorRuntimeInfo, prelude_list_cons_ctor_id, prelude_list_nil_ctor_id,
+    prelude_maybe_just_ctor_id, prelude_maybe_nothing_ctor_id, prelude_ordering_eq_ctor_id,
+    prelude_ordering_gt_ctor_id, prelude_ordering_lt_ctor_id,
 };
 
-use crate::heap::{Heap, HeapObject};
+use crate::heap::{Heap, HeapObject, IoAction};
 use crate::values::{NullaryCtorCache, Value};
 use crate::vm::RuntimeError;
 
@@ -58,6 +60,10 @@ impl<'a> VmCtx<'a> {
 
     fn alloc_str(&mut self, value: &str) -> Value {
         self.heap.alloc_str(value)
+    }
+
+    fn alloc_io_action(&mut self, action: IoAction) -> Value {
+        self.heap.alloc(HeapObject::IoAction(action))
     }
 
     fn ctor_info(&self, ctor: CtorId, builtin: &str) -> Result<&CtorRuntimeInfo, RuntimeError> {
@@ -107,7 +113,7 @@ impl<'a> VmCtx<'a> {
         Ok(self.heap.alloc(HeapObject::Data1 { tag, field }))
     }
 
-    fn alloc_list_from_values(
+    pub(crate) fn alloc_list_from_values(
         &mut self,
         values: &[Value],
         builtin: &str,
@@ -180,6 +186,12 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_CHAR_COMPARE, "charCompare", 2, char_compare),
     builtin!(BUILTIN_STRING_TO_CHARS, "stringToChars", 1, string_to_chars),
     builtin!(BUILTIN_CHARS_TO_STRING, "charsToString", 1, chars_to_string),
+    builtin!(BUILTIN_PURE_IO, "pureIO", 1, pure_io),
+    builtin!(BUILTIN_BIND_IO, "bindIO", 2, bind_io),
+    builtin!(BUILTIN_PRINT_LINE, "printLine", 1, print_line),
+    builtin!(BUILTIN_PRINT_STR, "printStr", 1, print_str),
+    builtin!(BUILTIN_READ_LINE, "readLine", 0, read_line),
+    builtin!(BUILTIN_GET_ARGS, "getArgs", 0, get_args),
 ];
 
 // D3 primitive semantics:
@@ -428,6 +440,44 @@ fn chars_to_string(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, Runtime
     let value = expect_value(args, 0, "charsToString")?;
     let string = expect_char_list(ctx, value, "charsToString")?;
     Ok(ctx.alloc_str(&string))
+}
+
+fn pure_io(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let value = expect_value(args, 0, "pureIO")?;
+    Ok(ctx.alloc_io_action(IoAction::Pure(value)))
+}
+
+fn bind_io(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let action = expect_value(args, 0, "bindIO")?;
+    let continuation = expect_value(args, 1, "bindIO")?;
+    Ok(ctx.alloc_io_action(IoAction::Bind {
+        action,
+        continuation,
+    }))
+}
+
+fn print_line(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let text = expect_value(args, 0, "printLine")?;
+    Ok(ctx.alloc_io_action(IoAction::Print {
+        text,
+        newline: true,
+    }))
+}
+
+fn print_str(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let text = expect_value(args, 0, "printStr")?;
+    Ok(ctx.alloc_io_action(IoAction::Print {
+        text,
+        newline: false,
+    }))
+}
+
+fn read_line(ctx: &mut VmCtx<'_>, _args: &[Value]) -> Result<Value, RuntimeError> {
+    Ok(ctx.alloc_io_action(IoAction::ReadLine))
+}
+
+fn get_args(ctx: &mut VmCtx<'_>, _args: &[Value]) -> Result<Value, RuntimeError> {
+    Ok(ctx.alloc_io_action(IoAction::GetArgs))
 }
 
 fn ordering_value(

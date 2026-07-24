@@ -3,7 +3,7 @@ use std::fs;
 use std::panic;
 use std::path::{Path, PathBuf};
 
-use solveig_driver::run_project_capture;
+use solveig_driver::run_project_capture_with_stdin_and_args;
 
 #[test]
 fn golden_run_cases() {
@@ -25,14 +25,18 @@ fn golden_run_cases() {
             .and_then(|name| name.to_str())
             .unwrap_or("<invalid-case-name>");
 
-        let actual = panic::catch_unwind(|| run_project_capture(&case_root, "main"))
-            .unwrap_or_else(|payload| {
-                panic!(
-                    "golden run case `{case_name}` panicked:\n{}",
-                    panic_message(&payload)
-                )
-            })
-            .unwrap_or_else(|err| panic!("golden run case `{case_name}` failed:\n{err}"));
+        let stdin = case_stdin(case_name, &case_root);
+        let args = case_args(case_name, &case_root);
+        let actual = panic::catch_unwind(|| {
+            run_project_capture_with_stdin_and_args(&case_root, "main", &stdin, &args)
+        })
+        .unwrap_or_else(|payload| {
+            panic!(
+                "golden run case `{case_name}` panicked:\n{}",
+                panic_message(&payload)
+            )
+        })
+        .unwrap_or_else(|err| panic!("golden run case `{case_name}` failed:\n{err}"));
 
         let expected_path = case_root.join("expected.txt");
 
@@ -60,6 +64,30 @@ fn golden_run_cases() {
             "golden run case `{case_name}` changed:\n{}",
             diff_preview(&expected, &actual)
         );
+    }
+}
+
+fn case_stdin(case_name: &str, case_root: &Path) -> String {
+    let stdin_path = case_root.join("stdin.txt");
+    match fs::read_to_string(&stdin_path) {
+        Ok(stdin) => stdin,
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(err) => panic!(
+            "failed to read stdin for `{case_name}` at {}: {err}",
+            stdin_path.display()
+        ),
+    }
+}
+
+fn case_args(case_name: &str, case_root: &Path) -> Vec<String> {
+    let args_path = case_root.join("args.txt");
+    match fs::read_to_string(&args_path) {
+        Ok(args) => args.lines().map(|arg| arg.to_string()).collect(),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+        Err(err) => panic!(
+            "failed to read args for `{case_name}` at {}: {err}",
+            args_path.display()
+        ),
     }
 }
 

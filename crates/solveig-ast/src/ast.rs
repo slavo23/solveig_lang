@@ -404,6 +404,12 @@ pub const BUILTIN_CHAR_EQ: BuiltinId = BuiltinId(33);
 pub const BUILTIN_CHAR_COMPARE: BuiltinId = BuiltinId(34);
 pub const BUILTIN_STRING_TO_CHARS: BuiltinId = BuiltinId(35);
 pub const BUILTIN_CHARS_TO_STRING: BuiltinId = BuiltinId(36);
+pub const BUILTIN_PURE_IO: BuiltinId = BuiltinId(37);
+pub const BUILTIN_BIND_IO: BuiltinId = BuiltinId(38);
+pub const BUILTIN_PRINT_LINE: BuiltinId = BuiltinId(39);
+pub const BUILTIN_PRINT_STR: BuiltinId = BuiltinId(40);
+pub const BUILTIN_READ_LINE: BuiltinId = BuiltinId(41);
+pub const BUILTIN_GET_ARGS: BuiltinId = BuiltinId(42);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrimTys {

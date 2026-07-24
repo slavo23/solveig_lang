@@ -102,6 +102,7 @@ impl DisplayValue<'_> {
                 HeapObject::Str { bytes } => {
                     format!("\"{}\"", escape_string_literal(self.heap.str_value(*bytes)))
                 }
+                HeapObject::IoAction(_) => "<io>".into(),
             },
         }
     }

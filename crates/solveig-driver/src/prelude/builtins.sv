@@ -4,6 +4,21 @@ data Maybe a = Just a | Nothing;
 data Either a b = Left a | Right b
 data Pair a b = MkPair a b;
 
+pureIO : forall a. a -> IO a;
+pureIO value = prelude.prim.pureIO value;
+
+bindIO : forall a b. IO a -> (a -> IO b) -> IO b;
+bindIO action continuation = prelude.prim.bindIO action continuation;
+
+printLine : String -> IO ();
+printLine text = prelude.prim.printLine text;
+
+printStr : String -> IO ();
+printStr text = prelude.prim.printStr text;
+
+readLine : IO String;
+readLine = prelude.prim.readLine;
+
 even : Int -> Bool;
 even n = intEq (intMod n 2) 0;
 
