@@ -1,3 +1,15 @@
+fn peel_ev_apps(
+    expr: &TermExprNode<TcMetadata, Span>,
+) -> &TermExprNode<TcMetadata, Span> {
+    let mut head = expr;
+
+    while let TermExpr::EvApp(inner, _) = &head.node {
+        head = inner.as_ref();
+    }
+
+    head
+}
+
 fn rewrite_expr(
     expr: &TermExprNode<TcMetadata, Span>,
     env: &EvidenceEnv,
@@ -57,6 +69,33 @@ fn rewrite_expr(
             }
         }
 
+        // C2/C3 bridge: checked core now carries explicit evidence. Until C3
+        // replaces this pass with dictionary lowering from Ev, the old
+        // class_elab rewrite remains the runtime path and ignores these nodes.
+        TermExpr::EvAbs(_, _, body) => {
+            return rewrite_expr(
+                body,
+                env,
+                class_info,
+                method_to_class,
+                constrained_funcs,
+                instances,
+                tables,
+            );
+        }
+
+        TermExpr::EvApp(inner, _) => {
+            return rewrite_expr(
+                inner,
+                env,
+                class_info,
+                method_to_class,
+                constrained_funcs,
+                instances,
+                tables,
+            );
+        }
+
         TermExpr::Abs(param, ann, body) => TermExpr::Abs(
             param.clone(),
             ann.clone(),
@@ -99,10 +138,11 @@ fn rewrite_expr(
                 })
                 .collect::<Vec<_>>();
 
-            let rebuilt = if let TermExpr::Var(var_ref) = &head.node {
+            let lookup_head = peel_ev_apps(head);
+            let rebuilt = if let TermExpr::Var(var_ref) = &lookup_head.node {
                 let name = var_display_name(var_ref);
                 if let Some(info) = constrained_funcs.get(&name) {
-                    let actual_head_ty = head.anno.inferred_type.clone();
+                    let actual_head_ty = lookup_head.anno.inferred_type.clone();
                     let mut subst = HashMap::<TyVarId, TypeExpr>::new();
 
                     if match_type_pattern(&info.body_ty, &actual_head_ty, &mut subst) {

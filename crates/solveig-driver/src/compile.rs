@@ -225,6 +225,8 @@ fn hover_expr(
         TermExpr::Abs(_, _, body)
         | TermExpr::TyAbs(_, _, body)
         | TermExpr::TyApp(body, _)
+        | TermExpr::EvAbs(_, _, body)
+        | TermExpr::EvApp(body, _)
         | TermExpr::Anno(body, _)
         | TermExpr::UnaryOperator(_, body) => hover_expr(body, pretty_tables, offset, best),
         TermExpr::Case(scrutinee, arms) => {

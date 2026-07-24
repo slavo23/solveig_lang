@@ -6,6 +6,46 @@ fn elab_node(
     TermExprNode::new(node, TcMetadata::new(span, ty))
 }
 
+// Following Wadler-Blott dictionary translation and the typechecker-zoo
+// type-classes elaborator, scheme instantiation applies type arguments first
+// and then one evidence argument per predicate. C2 records placeholders here;
+// `zonk_ev` replaces them with the C1 solver's concrete evidence after
+// constraint solving.
+fn wrap_ev_apps(
+    mut expr: TermExprNode<TcMetadata, Span>,
+    evvars: Vec<EvVarId>,
+    span: Span,
+    ty: TypeExpr,
+) -> TermExprNode<TcMetadata, Span> {
+    for ev in evvars {
+        expr = elab_node(
+            TermExpr::EvApp(Box::new(expr), Ev::Placeholder(ev)),
+            span.clone(),
+            ty.clone(),
+        );
+    }
+    expr
+}
+
+// A qualified scheme `forall a. P => t` elaborates as type lambdas outside
+// evidence lambdas: TyAbs(... EvAbs(d : P, body) ...). The recursive checking
+// path creates the TyAbs nodes while this helper binds the predicate givens.
+fn wrap_ev_abs(
+    mut body: TermExprNode<TcMetadata, Span>,
+    givens: Vec<GivenEvidence>,
+    span: Span,
+    ty: TypeExpr,
+) -> TermExprNode<TcMetadata, Span> {
+    for given in givens.into_iter().rev() {
+        body = elab_node(
+            TermExpr::EvAbs(given.ev, given.pred, Box::new(body)),
+            span.clone(),
+            ty.clone(),
+        );
+    }
+    body
+}
+
 impl TypeChecker {
     fn zonk_scheme(&self, scheme: &Scheme) -> Scheme {
         Scheme {
@@ -95,6 +135,28 @@ impl TypeChecker {
             _ => ty.clone(),
         }
     }
+    fn zonk_ev(&self, ev: &Ev) -> Ev {
+        match ev {
+            Ev::Var(evvar) => Ev::Var(*evvar),
+            Ev::Placeholder(evvar) => {
+                let solved = self.evidence_solutions.get(evvar).unwrap_or_else(|| {
+                    panic!(
+                        "ICE: unsolved evidence placeholder {:?} survived constraint solving",
+                        evvar
+                    )
+                });
+                self.zonk_ev(solved)
+            }
+            Ev::Inst(instance, ty_args, evidence_args) => Ev::Inst(
+                *instance,
+                ty_args.iter().map(|ty| self.zonk_type(ty)).collect(),
+                evidence_args.iter().map(|ev| self.zonk_ev(ev)).collect(),
+            ),
+            Ev::Super(root, class, index) => {
+                Ev::Super(Box::new(self.zonk_ev(root)), *class, *index)
+            }
+        }
+    }
     pub fn zonk_expr(
         &self,
         expr: &TermExprNode<TcMetadata, Span>,
@@ -123,6 +185,14 @@ impl TypeChecker {
             }
             TermExpr::TyApp(inner, ty_arg) => {
                 TermExpr::TyApp(Box::new(self.zonk_expr(inner)), self.zonk_type(ty_arg))
+            }
+            TermExpr::EvAbs(ev, pred, body) => TermExpr::EvAbs(
+                *ev,
+                self.zonk_predicate(pred),
+                Box::new(self.zonk_expr(body)),
+            ),
+            TermExpr::EvApp(inner, ev) => {
+                TermExpr::EvApp(Box::new(self.zonk_expr(inner)), self.zonk_ev(ev))
             }
             TermExpr::Anno(inner, ty) => {
                 TermExpr::Anno(Box::new(self.zonk_expr(inner)), self.zonk_type(ty))

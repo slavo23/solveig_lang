@@ -44,6 +44,7 @@ pub struct KindMetaId(pub u32);
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Ev {
     Var(EvVarId),
+    Placeholder(EvVarId),
     Inst(InstanceId, Vec<TypeExpr>, Vec<Ev>),
     Super(Box<Ev>, ClassId, usize),
 }
@@ -1010,6 +1011,12 @@ impl<A, P> ExprNode<TermExpr<A, P>, A> {
             TermExpr::TyApp(inner, ty) => {
                 TermExpr::TyApp(Box::new(inner.map_anno(expr_anno, pattern_anno)), ty)
             }
+            TermExpr::EvAbs(ev, pred, body) => {
+                TermExpr::EvAbs(ev, pred, Box::new(body.map_anno(expr_anno, pattern_anno)))
+            }
+            TermExpr::EvApp(inner, ev) => {
+                TermExpr::EvApp(Box::new(inner.map_anno(expr_anno, pattern_anno)), ev)
+            }
             TermExpr::Anno(inner, ty) => {
                 TermExpr::Anno(Box::new(inner.map_anno(expr_anno, pattern_anno)), ty)
             }
@@ -1118,6 +1125,8 @@ pub enum TermExpr<A, P = A> {
     Abs(String, Option<TypeExpr>, Box<TermExprNode<A, P>>),
     TyAbs(String, Kind, Box<TermExprNode<A, P>>),
     TyApp(Box<TermExprNode<A, P>>, TypeExpr),
+    EvAbs(EvVarId, Predicate, Box<TermExprNode<A, P>>),
+    EvApp(Box<TermExprNode<A, P>>, Ev),
     Anno(Box<TermExprNode<A, P>>, TypeExpr),
     Con(CtorId),
     Case(Box<TermExprNode<A, P>>, Vec<CaseArmNode<A, P>>),

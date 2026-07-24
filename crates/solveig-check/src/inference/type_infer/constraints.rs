@@ -115,7 +115,11 @@ impl TypeChecker {
         self.wanteds.extend(zonked);
         evvars
     }
-    fn with_givens<R>(&mut self, preds: Vec<Predicate>, f: impl FnOnce(&mut Self) -> R) -> R {
+    fn with_givens<R>(
+        &mut self,
+        preds: Vec<Predicate>,
+        f: impl FnOnce(&mut Self) -> R,
+    ) -> (Vec<GivenEvidence>, R) {
         let old_len = self.givens.len();
 
         let new_givens = preds
@@ -126,10 +130,10 @@ impl TypeChecker {
             })
             .collect::<Vec<_>>();
 
-        self.givens.extend(new_givens);
+        self.givens.extend(new_givens.clone());
         let result = f(self);
         self.givens.truncate(old_len);
-        result
+        (new_givens, result)
     }
     fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, TypeExpr>) -> Predicate {
         Predicate {
@@ -738,5 +742,106 @@ mod entailment_tests {
             checker.evidence_solution(destinations[0]),
             Some(&Ev::Inst(InstanceId(0), Vec::new(), Vec::new()))
         );
+    }
+
+    #[test]
+    fn qualified_checking_wraps_body_in_evidence_abstraction() {
+        let mut checker = tiny_checker();
+        let expected = TypeExpr::make_qualified(vec![pred(EQ, tycon(INT))], TypeExpr::TyUnit);
+        let expr = TermExprNode::new(TermExpr::Unit, 0..1);
+
+        let (_, elaborated) = checker
+            .solve_checking(Context::new(), &expr, &expected)
+            .expect("qualified checking should succeed");
+
+        match elaborated.node {
+            TermExpr::EvAbs(_, actual_pred, body) => {
+                assert_eq!(actual_pred, pred(EQ, tycon(INT)));
+                assert!(matches!(body.node, TermExpr::Unit));
+            }
+            other => panic!("expected evidence abstraction, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn zonking_replaces_evidence_placeholders() {
+        let mut checker = tiny_checker();
+        let destinations = checker.add_wanteds(vec![pred(EQ, tycon(INT))], 0..1);
+        let base = elab_node(TermExpr::Unit, 0..1, TypeExpr::TyUnit);
+        let expr = wrap_ev_apps(base, destinations, 0..1, TypeExpr::TyUnit);
+
+        let unresolved = checker.unresolved_wanteds();
+        assert!(unresolved.is_empty());
+
+        let zonked = checker.zonk_expr(&expr);
+        match zonked.node {
+            TermExpr::EvApp(_, Ev::Inst(instance, ty_args, sub_evidence)) => {
+                assert_eq!(instance, InstanceId(0));
+                assert!(ty_args.is_empty());
+                assert!(sub_evidence.is_empty());
+            }
+            other => panic!("expected solved instance evidence, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn global_scheme_instantiation_wraps_reference_in_placeholder_application() {
+        let mut checker = tiny_checker();
+        let def_id = DefId {
+            module: ModuleId(9),
+            name: solveig_base::Symbol(42),
+        };
+        checker.func_schemes.insert(
+            def_id,
+            Scheme {
+                quantifiers: Vec::new(),
+                predicates: vec![pred(EQ, tycon(INT))],
+                ty: TypeExpr::TyUnit,
+            },
+        );
+        let expr = TermExprNode::new(TermExpr::Var(VarRef::Global(def_id)), 0..1);
+
+        let (_, elaborated, inferred_ty) = checker
+            .solve_inference(Context::new(), &expr)
+            .expect("global instantiation should infer");
+
+        assert_eq!(inferred_ty, TypeExpr::TyUnit);
+        match &elaborated.node {
+            TermExpr::EvApp(inner, Ev::Placeholder(ev)) => {
+                assert_eq!(checker.wanteds.len(), 1);
+                assert_eq!(checker.wanteds[0].ev, *ev);
+                assert!(matches!(inner.node, TermExpr::Var(VarRef::Global(id)) if id == def_id));
+            }
+            other => panic!("expected placeholder evidence application, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn subsumption_context_wanteds_wrap_checked_expression() {
+        let mut checker = tiny_checker();
+        let local_symbol = solveig_ast::ast::legacy_symbol_id("localQualified");
+        let local_name = "localQualified".to_string();
+        let expr = TermExprNode::new(TermExpr::Var(VarRef::Local(local_symbol)), 0..1);
+        let qualified_type =
+            TypeExpr::make_qualified(vec![pred(EQ, tycon(INT))], TypeExpr::TyUnit);
+        let ctx = Context::new().add_entry(ContextEntry::TypedVar {
+            var_name: local_name,
+            ty: qualified_type,
+        });
+
+        let (_, elaborated) = checker
+            .solve_checking(ctx, &expr, &TypeExpr::TyUnit)
+            .expect("subsumption should discharge qualified left context");
+
+        match &elaborated.node {
+            TermExpr::EvApp(inner, Ev::Placeholder(ev)) => {
+                assert_eq!(checker.wanteds.len(), 1);
+                assert_eq!(checker.wanteds[0].ev, *ev);
+                assert!(
+                    matches!(inner.node, TermExpr::Var(VarRef::Local(symbol)) if symbol == local_symbol)
+                );
+            }
+            other => panic!("expected subsumption evidence application, got {other:?}"),
+        }
     }
 }

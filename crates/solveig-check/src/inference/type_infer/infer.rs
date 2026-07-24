@@ -103,11 +103,13 @@ impl TypeChecker {
                     && let Some(scheme) = self.func_schemes.get(def_id).cloned()
                 {
                     let (ctx, preds, instantiated_ty) = self.instantiate_scheme(ctx, &scheme);
-                    self.add_wanteds(preds, span.clone());
+                    let evidence_args = self.add_wanteds(preds, span.clone());
 
                     let instantiated_ty = ctx.apply(&instantiated_ty);
                     let elaborated =
-                        elab_node(TermExpr::Var(name.clone()), span, instantiated_ty.clone());
+                        elab_node(TermExpr::Var(name.clone()), span.clone(), instantiated_ty.clone());
+                    let elaborated =
+                        wrap_ev_apps(elaborated, evidence_args, span, instantiated_ty.clone());
                     return Ok((ctx, elaborated, instantiated_ty));
                 }
                 if let VarRef::Global(def_id) = name
@@ -116,11 +118,13 @@ impl TypeChecker {
                     let (ctx, preds, instantiated_ty) =
                         self.instantiate_scheme(ctx, &method_scheme);
 
-                    self.add_wanteds(preds, span.clone());
+                    let evidence_args = self.add_wanteds(preds, span.clone());
 
                     let instantiated_ty = ctx.apply(&instantiated_ty);
                     let elaborated =
-                        elab_node(TermExpr::Var(name.clone()), span, instantiated_ty.clone());
+                        elab_node(TermExpr::Var(name.clone()), span.clone(), instantiated_ty.clone());
+                    let elaborated =
+                        wrap_ev_apps(elaborated, evidence_args, span, instantiated_ty.clone());
                     return Ok((ctx, elaborated, instantiated_ty));
                 }
 
@@ -323,6 +327,9 @@ impl TypeChecker {
                 let elaborated = elab_node(TermExpr::Hole, span, evar_type.clone());
                 Ok((extended_ctx, elaborated, evar_type))
             }
+            TermExpr::EvAbs(_, _, _) | TermExpr::EvApp(_, _) => {
+                panic!("ICE: evidence terms are introduced after source expression inference")
+            }
         }
     }
     fn solve_app_inference(
@@ -369,8 +376,15 @@ impl TypeChecker {
                 )
             }
             TypeExpr::TyForAll(_, preds, body) => {
-                self.add_wanteds(preds.clone(), span.clone());
-                self.solve_app_inference(ctx, body, argument, elaborated_function, span, arg_span)
+                let evidence_args = self.add_wanteds(preds.clone(), span.clone());
+                let body_type = (**body).clone();
+                let wrapped_function = wrap_ev_apps(
+                    elaborated_function.clone(),
+                    evidence_args,
+                    span.clone(),
+                    body_type.clone(),
+                );
+                self.solve_app_inference(ctx, &body_type, argument, &wrapped_function, span, arg_span)
             }
             TypeExpr::TyArr(domain, codomain) => {
                 let (delta, elaborated_argument) = self.solve_checking(ctx, argument, domain)?;

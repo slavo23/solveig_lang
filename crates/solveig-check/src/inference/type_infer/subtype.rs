@@ -117,9 +117,10 @@ impl TypeChecker {
             }
             (_, TypeExpr::TyForAll(_, preds, body)) => {
                 let preds = preds.clone();
-                self.with_givens(preds, |checker| {
+                let (_, result) = self.with_givens(preds, |checker| {
                     checker.solve_subtype_inner(ctx, left, body, origin_span)
-                })
+                });
+                result
             }
 
             (TypeExpr::TyExVar(evar_id), _)
@@ -269,9 +270,10 @@ impl TypeChecker {
             }
             TypeExpr::TyForAll(_, preds, body) => {
                 let preds = preds.clone();
-                self.with_givens(preds, |checker| {
+                let (_, result) = self.with_givens(preds, |checker| {
                     checker.instantiate_left(ctx, evar_id, body, origin_span)
-                })
+                });
+                result
             }
 
             _ => Err(()),

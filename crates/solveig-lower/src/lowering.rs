@@ -126,6 +126,8 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
 
         TermExpr::TyAbs(_, _, body) => lower_expr(ctx, body),
         TermExpr::TyApp(inner, _) => lower_expr(ctx, inner),
+        TermExpr::EvAbs(_, _, body) => lower_expr(ctx, body),
+        TermExpr::EvApp(inner, _) => lower_expr(ctx, inner),
         TermExpr::Anno(inner, _) => lower_expr(ctx, inner),
 
         TermExpr::Case(scrutinee, arms) => {

@@ -152,7 +152,12 @@ impl TypeChecker {
             }
             (_, TypeExpr::TyForAll(_, preds, body)) => {
                 let preds = preds.clone();
-                self.with_givens(preds, |checker| checker.solve_checking(ctx, expr, body))
+                let (givens, result) =
+                    self.with_givens(preds, |checker| checker.solve_checking(ctx, expr, body));
+                let (delta, elaborated_body) = result?;
+                let result_type = delta.apply(expected_type);
+                let elaborated = wrap_ev_abs(elaborated_body, givens, span, result_type);
+                Ok((delta, elaborated))
             }
 
             _ => {
@@ -160,12 +165,20 @@ impl TypeChecker {
                     self.solve_inference(ctx, expr)?;
                 let inferred_applied = inferred_ctx.apply(&inferred_type);
                 let expected_applied = inferred_ctx.apply(expected_type);
+                let wanted_start = self.wanteds.len();
                 let delta = self.solve_subtype(
                     inferred_ctx,
                     &inferred_applied,
                     &expected_applied,
                     self.get_file_span(span),
                 )?;
+                let evidence_args = self.wanteds[wanted_start..]
+                    .iter()
+                    .map(|wanted| wanted.ev)
+                    .collect::<Vec<_>>();
+                let result_type = delta.apply(&expected_applied);
+                let elaborated_expr =
+                    wrap_ev_apps(elaborated_expr, evidence_args, expr.anno.clone(), result_type);
                 Ok((delta, elaborated_expr))
             }
         }
