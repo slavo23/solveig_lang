@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::{Mutex, OnceLock};
 
 use solveig_base::Symbol;
@@ -1483,15 +1484,16 @@ pub struct Scheme {
     pub ty: TypeExpr,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ClassMethodDef {
     pub id: DefId,
     pub name: String,
     pub short_name: String,
     pub scheme: Scheme,
+    pub default_body: Option<TermExprNode<Range<usize>>>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ClassDefinition {
     pub id: ClassId,
     pub name: String,
@@ -1501,14 +1503,14 @@ pub struct ClassDefinition {
     pub methods: Vec<ClassMethodDef>,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct ClassInfo {
     pub name: Symbol,
     pub short_name: Symbol,
     pub definition: ClassDefinition,
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default)]
 pub struct ClassTable {
     entries: Vec<(ClassId, ClassInfo)>,
 }
@@ -1708,7 +1710,10 @@ impl<A, P> InstanceMethodDef<A, P> {
 #[derive(Clone, Debug)]
 pub struct InstanceDefinition<A, P = A> {
     pub id: InstanceId,
+    pub span: Range<usize>,
     pub def_module: ModuleId,
+    pub class_module: Option<ModuleId>,
+    pub type_module: Option<ModuleId>,
     pub context: Vec<Predicate>,
     pub context_evidence: Vec<EvVarId>,
     pub head: Predicate,
@@ -1728,7 +1733,10 @@ impl<A, P> InstanceDefinition<A, P> {
     {
         InstanceDefinition {
             id: self.id,
+            span: self.span,
             def_module: self.def_module,
+            class_module: self.class_module,
+            type_module: self.type_module,
             context: self.context,
             context_evidence: self.context_evidence,
             head: self.head,
@@ -1790,7 +1798,10 @@ impl<A, P> InstanceTable<A, P> {
     pub fn insert_definition(&mut self, definition: InstanceDefinition<A, P>) -> InstanceId {
         let InstanceDefinition {
             id,
+            span: _,
             def_module,
+            class_module: _,
+            type_module: _,
             context,
             context_evidence: _,
             head,

@@ -616,7 +616,10 @@ mod entailment_tests {
     ) -> InstanceDefinition<Span> {
         InstanceDefinition {
             id,
+            span: 0..0,
             def_module: ModuleId(0),
+            class_module: Some(ModuleId(0)),
+            type_module: Some(ModuleId(0)),
             context,
             context_evidence: Vec::new(),
             head,

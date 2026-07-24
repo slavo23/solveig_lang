@@ -230,6 +230,7 @@ impl<'a> Resolver<'a> {
                     ty_params,
                     superclasses,
                     methods,
+                    defaults,
                 } => {
                     if ty_params.len() != 1 {
                         self.errors.push(ResolveError::ClassArity {
@@ -302,6 +303,17 @@ impl<'a> Resolver<'a> {
                                 name: self.qualified_def_name(method_id),
                                 short_name: self.symbol_text(method.name.0).to_string(),
                                 scheme,
+                                default_body: defaults
+                                    .iter()
+                                    .find(|default| default.name.0 == method.name.0)
+                                    .map(|default| {
+                                        self.wrap_function_body_without_signature_in_module(
+                                            &default.body,
+                                            &default.params,
+                                            cx,
+                                            local,
+                                        )
+                                    }),
                             }
                         })
                         .collect::<Vec<_>>();
@@ -370,6 +382,62 @@ impl<'a> Resolver<'a> {
 
         Ok(kinded_class_defs)
     }
+    fn unreported_tycon_defid(&self, r: &NameRef, cx: &ModuleContext) -> Option<DefId> {
+        match r.segments.as_slice() {
+            [name] => cx
+                .builtins
+                .types
+                .get(name)
+                .or_else(|| cx.local_api.types.get(name))
+                .copied()
+                .or_else(|| {
+                    let mut candidates = cx
+                        .imported_apis
+                        .iter()
+                        .filter_map(|imp| imp.api.types.get(name).copied())
+                        .collect::<Vec<_>>();
+                    candidates.sort_unstable();
+                    candidates.dedup();
+
+                    match candidates.as_slice() {
+                        [id] => Some(*id),
+                        _ => None,
+                    }
+                }),
+
+            [_first, rest @ ..] => {
+                let local_name = *rest
+                    .last()
+                    .expect("ICE: qualified type constructor name must have a last segment");
+
+                if cx.module.0.as_slice() == r.prefix() {
+                    return cx.local_api.types.get(&local_name).copied();
+                }
+
+                self.imported_by_alias_or_module(r, cx)
+                    .and_then(|imp| imp.api.types.get(&local_name).copied())
+            }
+
+            [] => None,
+        }
+    }
+
+    fn instance_type_head_module(
+        &self,
+        ty: &SpannedWrapper<SurfaceTy>,
+        cx: &ModuleContext,
+    ) -> Option<ModuleId> {
+        match &ty.0 {
+            SurfaceTy::Con(con) => self.unreported_tycon_defid(&con.0, cx).map(|id| id.module),
+            SurfaceTy::App(lhs, _) => self.instance_type_head_module(lhs, cx),
+            SurfaceTy::Unit
+            | SurfaceTy::Var(_)
+            | SurfaceTy::Arr(_, _)
+            | SurfaceTy::ForAll(_, _)
+            | SurfaceTy::Qualified(_, _) => None,
+        }
+    }
+
     fn resolve_instance_defs(
         &mut self,
         module_name: &ModuleName,
@@ -392,14 +460,21 @@ impl<'a> Resolver<'a> {
                 continue;
             };
 
-            let resolved_class_name = self.resolve_class_ref(
-                &NameRef {
-                    segments: vec![class_name.0],
-                },
-                self.file_span(cx, class_name.1),
-                cx,
-                local,
-            );
+            let class_ref = NameRef {
+                segments: vec![class_name.0],
+            };
+            let class_span = self.file_span(cx, class_name.1);
+            let class_def_id = self.resolve_class_defid(&class_ref, class_span, cx, local);
+            let resolved_class_name = match class_def_id {
+                Some(def_id) => {
+                    self.record_resolution(class_span, def_id);
+                    self.qualified_def_name(def_id)
+                }
+                None => self.unresolved_name(&class_ref),
+            };
+            let type_module = args
+                .first()
+                .and_then(|arg| self.instance_type_head_module(arg, cx));
 
             let raw_head = Predicate::legacy(
                 resolved_class_name,
@@ -475,7 +550,10 @@ impl<'a> Resolver<'a> {
                     u32::try_from(instance_defs.len())
                         .expect("ICE: module instance count does not fit in u32"),
                 ),
+                span: defn.1.to_usize_range(),
                 def_module: cx.module_id,
+                class_module: class_def_id.map(|id| id.module),
+                type_module,
                 context: checked_context,
                 context_evidence: Vec::new(),
                 head: checked_head,

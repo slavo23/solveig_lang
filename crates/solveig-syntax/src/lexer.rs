@@ -40,6 +40,8 @@ enum RawToken {
     KwInstance,
     #[token("where")]
     KwWhere,
+    #[token("default")]
+    KwDefault,
     #[token("import")]
     KwImport,
     #[token("as")]
@@ -156,6 +158,7 @@ pub enum Token {
     Class,
     Instance,
     Where,
+    Default,
     Import,
     As,
 
@@ -291,6 +294,7 @@ fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Option<Token>
         RawToken::KwClass => Token::Class,
         RawToken::KwInstance => Token::Instance,
         RawToken::KwWhere => Token::Where,
+        RawToken::KwDefault => Token::Default,
         RawToken::KwImport => Token::Import,
         RawToken::KwAs => Token::As,
 

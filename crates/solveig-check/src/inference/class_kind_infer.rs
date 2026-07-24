@@ -311,6 +311,7 @@ impl ClassKindInferencer {
                     name: method.name.clone(),
                     short_name: method.short_name.clone(),
                     scheme,
+                    default_body: method.default_body.clone(),
                 })
             })
             .collect::<Result<Vec<_>, KindError>>()?;
@@ -386,6 +387,7 @@ mod tests {
                     predicates: Vec::new(),
                     ty: TypeExpr::TyCon(tycon_id),
                 },
+                default_body: None,
             }],
         };
 

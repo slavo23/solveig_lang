@@ -115,6 +115,7 @@ pub enum SurfaceDefinition {
         ty_params: Vec<Spanned<Symbol>>,
         superclasses: Vec<Spanned<SurfacePredicate>>,
         methods: Vec<ClassMethod>,
+        defaults: Vec<InstanceMethod>,
     },
     InstanceDef {
         context: Vec<Spanned<SurfacePredicate>>,

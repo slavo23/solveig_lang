@@ -673,11 +673,31 @@ impl<'a> Parser<'a> {
         }
 
         let mut methods = Vec::new();
+        let mut defaults = Vec::new();
         loop {
             self.skip_separators();
             if self.at(&Token::VClose) || self.at_eof() {
                 break;
             }
+
+            if self.at(&Token::Default) {
+                self.advance();
+                let (mname, ms, me) = self.expect_ident()?;
+                let mut mparams = Vec::new();
+                while matches!(self.current_kind(), Token::Ident(_) | Token::Underscore) {
+                    let (p, ps, pe) = self.expect_binder()?;
+                    mparams.push(sp(p, ps, pe));
+                }
+                self.expect(&Token::Eq)?;
+                let mbody = self.parse_expr()?;
+                defaults.push(InstanceMethod {
+                    name: sp(mname, ms, me),
+                    params: mparams,
+                    body: mbody,
+                });
+                continue;
+            }
+
             let (mname, ms, me) = self.expect_ident()?;
             self.expect(&Token::Colon)?;
             let mty = self.parse_type()?;
@@ -696,6 +716,7 @@ impl<'a> Parser<'a> {
             ty_params,
             superclasses,
             methods,
+            defaults,
         })
     }
 

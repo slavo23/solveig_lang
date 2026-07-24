@@ -340,6 +340,7 @@ mod tests {
                         name: "C.method".to_string(),
                         short_name: "method".to_string(),
                         scheme: Scheme::mono(TypeExpr::TyUnit),
+                        default_body: None,
                     }],
                 },
             )]),

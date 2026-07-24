@@ -878,6 +878,7 @@ mod tests {
                 name: format!("{name}.method"),
                 short_name: "method".to_string(),
                 scheme: scheme(Vec::new()),
+                default_body: None,
             }],
         }
     }

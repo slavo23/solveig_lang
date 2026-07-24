@@ -185,6 +185,30 @@ impl TypeChecker {
     }
 }
 
+fn orphan_instance_warning(
+    inst: &InstanceDefinition<Span>,
+    env: &TypeCheckEnv,
+    file: FileId,
+) -> Option<TypeError> {
+    if inst.class_module == Some(inst.def_module) || inst.type_module == Some(inst.def_module) {
+        return None;
+    }
+
+    let class_name = env.display_class_name(inst.head.class_id);
+    let instance_type = inst
+        .head
+        .args
+        .first()
+        .map(|ty| ty.pretty_with_tables(env.pretty_tables()))
+        .unwrap_or_else(|| "_".to_string());
+
+    Some(TypeError::OrphanInstance {
+        span: file_span(file, inst.span.clone()),
+        class_name,
+        instance_type,
+    })
+}
+
 pub fn check_and_elab_module(
     module: &ResolvedModule<Span>,
     env: &TypeCheckEnv,
@@ -206,6 +230,61 @@ pub fn check_and_elab_module(
         let overlap_errors = checker.check_instance_overlaps();
         if !overlap_errors.is_empty() {
             return Err(overlap_errors);
+        }
+    }
+
+    for class_def in &module.class_defs {
+        for method in &class_def.methods {
+            let Some(default_body) = &method.default_body else {
+                continue;
+            };
+
+            let expected_scheme =
+                TypeChecker::class_method_scheme_for_term_lookup(class_def, method);
+            let expected_type = TypeChecker::scheme_to_type(&expected_scheme);
+
+            let mut checker = TypeChecker::with_env(env, file);
+            checker.func_schemes = available_func_schemes.clone();
+
+            match checker.solve_checking(Context::new(), default_body, &expected_type) {
+                Ok((_final_ctx, elaborated_default)) => {
+                    let unresolved = checker.unresolved_wanteds();
+
+                    if unresolved.is_empty() {
+                        let _ = checker.zonk_expr(&elaborated_default);
+                    } else {
+                        let cause = checker.wanteds_error(unresolved);
+
+                        errors.push(TypeError::InstanceMethodTypeMismatch {
+                            span: file_span(file, default_body.anno.clone()),
+                            method: method.short_name.clone(),
+                            class_name: class_def.name.clone(),
+                            expected: checker.pretty_scheme(&expected_scheme),
+                            cause: Box::new(cause),
+                        });
+                    }
+                }
+
+                Err(cause) => {
+                    errors.push(TypeError::InstanceMethodTypeMismatch {
+                        span: file_span(file, default_body.anno.clone()),
+                        method: method.short_name.clone(),
+                        class_name: class_def.name.clone(),
+                        expected: checker.pretty_scheme(&expected_scheme),
+                        cause: Box::new(cause),
+                    });
+                }
+            }
+
+            checker.finalize_holes();
+            all_holes.extend(checker.holes);
+            all_warnings.extend(checker.warnings);
+        }
+    }
+
+    for inst in &module.instance_defs {
+        if let Some(warning) = orphan_instance_warning(inst, env, file) {
+            all_warnings.push(warning);
         }
     }
 
@@ -278,25 +357,37 @@ pub fn check_and_elab_module(
         let mut checked_methods = Vec::new();
 
         for inst_method in &inst.methods {
-            let class_method = class_def.methods.iter().find(|method| {
+            if !class_def.methods.iter().any(|method| {
                 method.name == inst_method.name || method.short_name == inst_method.name
+            }) {
+                errors.push(TypeError::UnboundVariable {
+                    span: file_span(file, inst_method.body.anno.clone()),
+                    name: format!(
+                        "instance method `{}` not found in class `{}`",
+                        inst_method.name, inst_class_name
+                    ),
+                });
+            }
+        }
+
+        let instance_quantifiers = TypeChecker::instance_quantifiers(inst);
+
+        for class_method in &class_def.methods {
+            let explicit_method = inst.methods.iter().find(|method| {
+                class_method.name == method.name || class_method.short_name == method.name
             });
-
-            let class_method = match class_method {
-                Some(class_method) => class_method,
-                None => {
-                    errors.push(TypeError::UnboundVariable {
-                        span: file_span(file, inst_method.body.anno.clone()),
-                        name: format!(
-                            "instance method `{}` not found in class `{}`",
-                            inst_method.name, inst_class_name
-                        ),
-                    });
-                    continue;
-                }
+            let (method_name, method_body) = if let Some(inst_method) = explicit_method {
+                (inst_method.name.clone(), &inst_method.body)
+            } else if let Some(default_body) = &class_method.default_body {
+                (class_method.short_name.clone(), default_body)
+            } else {
+                errors.push(TypeError::MissingInstanceMethod {
+                    span: file_span(file, inst.span.clone()),
+                    method: class_method.short_name.clone(),
+                    class_name: inst_class_name.clone(),
+                });
+                continue;
             };
-
-            let instance_quantifiers = TypeChecker::instance_quantifiers(inst);
 
             let expected_scheme = TypeChecker::specialize_class_method_for_instance(
                 class_def,
@@ -311,7 +402,7 @@ pub fn check_and_elab_module(
             let mut checker = TypeChecker::with_env(env, file);
             checker.func_schemes = available_func_schemes.clone();
 
-            match checker.solve_checking(Context::new(), &inst_method.body, &expected_type) {
+            match checker.solve_checking(Context::new(), method_body, &expected_type) {
                 Ok((_final_ctx, elaborated_method)) => {
                     let unresolved = checker.unresolved_wanteds();
 
@@ -319,15 +410,15 @@ pub fn check_and_elab_module(
                         let zonked_method = checker.zonk_expr(&elaborated_method);
 
                         checked_methods.push(InstanceMethodDef {
-                            name: inst_method.name.clone(),
+                            name: method_name.clone(),
                             body: zonked_method,
                         });
                     } else {
                         let cause = checker.wanteds_error(unresolved);
 
                         errors.push(TypeError::InstanceMethodTypeMismatch {
-                            span: file_span(file, inst_method.body.anno.clone()),
-                            method: inst_method.name.clone(),
+                            span: file_span(file, method_body.anno.clone()),
+                            method: method_name.clone(),
                             class_name: inst_class_name.clone(),
                             expected: checker.pretty_scheme(&expected_scheme),
                             cause: Box::new(cause),
@@ -337,8 +428,8 @@ pub fn check_and_elab_module(
 
                 Err(cause) => {
                     errors.push(TypeError::InstanceMethodTypeMismatch {
-                        span: file_span(file, inst_method.body.anno.clone()),
-                        method: inst_method.name.clone(),
+                        span: file_span(file, method_body.anno.clone()),
+                        method: method_name.clone(),
                         class_name: inst_class_name.clone(),
                         expected: checker.pretty_scheme(&expected_scheme),
                         cause: Box::new(cause),
@@ -353,7 +444,10 @@ pub fn check_and_elab_module(
 
         checked_instance_defs.push(InstanceDefinition {
             id: inst.id,
+            span: inst.span.clone(),
             def_module: inst.def_module,
+            class_module: inst.class_module,
+            type_module: inst.type_module,
             context: inst.context.clone(),
             context_evidence,
             head: inst.head.clone(),
