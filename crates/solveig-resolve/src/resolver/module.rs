@@ -25,8 +25,14 @@ impl<'a> Resolver<'a> {
             return Err(ResolverError::Resolve(errors));
         }
 
-        let (data_defs, local_tycon_kind_ids, constructor_types) =
+        let (mut data_defs, mut local_tycon_kind_ids, mut constructor_types) =
             self.resolve_data_defs(module_name, raw_data_defs, imported)?;
+        self.seed_compiler_prelude_defs(
+            module_name,
+            &mut data_defs,
+            &mut local_tycon_kind_ids,
+            &mut constructor_types,
+        );
 
         let mut all_tycon_kind_ids = imported.tycon_kind_ids.clone();
         all_tycon_kind_ids.extend(local_tycon_kind_ids.clone());
@@ -100,5 +106,22 @@ impl<'a> Resolver<'a> {
             module,
             resolutions: self.resolutions,
         })
+    }
+
+    fn seed_compiler_prelude_defs(
+        &self,
+        module_name: &ModuleName,
+        data_defs: &mut Vec<DataDefinition>,
+        local_tycon_kind_ids: &mut HashMap<TyConId, Kind>,
+        constructor_types: &mut HashMap<CtorId, TypeExpr>,
+    ) {
+        if module_name.as_string(self.session) != COMPILER_PRELUDE_BUILTINS_MODULE {
+            return;
+        }
+
+        data_defs.insert(0, compiler_bool_data_definition());
+        local_tycon_kind_ids.extend(compiler_primitive_tycon_kinds());
+        local_tycon_kind_ids.insert(PRIM_TYS.bool, Kind::Star);
+        constructor_types.extend(compiler_bool_constructor_types());
     }
 }

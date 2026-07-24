@@ -286,6 +286,127 @@ pub fn legacy_symbol_id(name: &str) -> Symbol {
     id
 }
 
+pub const COMPILER_PRELUDE_BUILTINS_MODULE: &str = "prelude.builtins";
+pub const COMPILER_INT_NAME: &str = "prelude.builtins.Int";
+pub const COMPILER_FLOAT_NAME: &str = "prelude.builtins.Float";
+pub const COMPILER_CHAR_NAME: &str = "prelude.builtins.Char";
+pub const COMPILER_STRING_NAME: &str = "prelude.builtins.String";
+pub const COMPILER_IO_NAME: &str = "prelude.builtins.IO";
+pub const COMPILER_BOOL_NAME: &str = "prelude.builtins.Bool";
+pub const COMPILER_TRUE_NAME: &str = "prelude.builtins.True";
+pub const COMPILER_FALSE_NAME: &str = "prelude.builtins.False";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PrimTys {
+    pub int: TyConId,
+    pub float: TyConId,
+    pub char: TyConId,
+    pub string: TyConId,
+    pub io: TyConId,
+    pub bool: TyConId,
+    pub true_ctor: CtorId,
+    pub false_ctor: CtorId,
+}
+
+pub const PRIM_TYS: PrimTys = PrimTys {
+    int: TyConId(0),
+    float: TyConId(1),
+    char: TyConId(2),
+    string: TyConId(3),
+    io: TyConId(4),
+    bool: TyConId(5),
+    true_ctor: CtorId(0),
+    false_ctor: CtorId(1),
+};
+
+impl PrimTys {
+    pub fn open_primitive_tycon_ids(self) -> [TyConId; 4] {
+        [self.int, self.float, self.char, self.string]
+    }
+}
+
+pub fn compiler_primitive_tycon_infos() -> Vec<(TyConId, TyConInfo)> {
+    vec![
+        compiler_primitive_tycon_info(PRIM_TYS.int, COMPILER_INT_NAME, "Int", Kind::Star),
+        compiler_primitive_tycon_info(PRIM_TYS.float, COMPILER_FLOAT_NAME, "Float", Kind::Star),
+        compiler_primitive_tycon_info(PRIM_TYS.char, COMPILER_CHAR_NAME, "Char", Kind::Star),
+        compiler_primitive_tycon_info(PRIM_TYS.string, COMPILER_STRING_NAME, "String", Kind::Star),
+        compiler_primitive_tycon_info(
+            PRIM_TYS.io,
+            COMPILER_IO_NAME,
+            "IO",
+            Kind::make_arrow(Kind::Star, Kind::Star),
+        ),
+    ]
+}
+
+pub fn compiler_primitive_tycon_kinds() -> HashMap<TyConId, Kind> {
+    compiler_primitive_tycon_infos()
+        .into_iter()
+        .map(|(id, info)| (id, info.kind))
+        .collect()
+}
+
+pub fn compiler_bool_data_definition() -> DataDefinition {
+    let bool_ty = TypeExpr::make_con_id(PRIM_TYS.bool);
+
+    DataDefinition {
+        name: COMPILER_BOOL_NAME.to_string(),
+        short_name: "Bool".to_string(),
+        ty_params: Vec::new(),
+        tycon_kind: Kind::Star,
+        constructors: vec![
+            ConstructorDef {
+                id: PRIM_TYS.true_ctor,
+                name: COMPILER_TRUE_NAME.to_string(),
+                short_name: "True".to_string(),
+                fields: Vec::new(),
+                full_type: bool_ty.clone(),
+            },
+            ConstructorDef {
+                id: PRIM_TYS.false_ctor,
+                name: COMPILER_FALSE_NAME.to_string(),
+                short_name: "False".to_string(),
+                fields: Vec::new(),
+                full_type: bool_ty,
+            },
+        ],
+    }
+}
+
+pub fn compiler_bool_constructor_types() -> HashMap<CtorId, TypeExpr> {
+    compiler_bool_data_definition()
+        .constructors
+        .into_iter()
+        .map(|ctor| (ctor.id, ctor.full_type))
+        .collect()
+}
+
+fn compiler_primitive_tycon_info(
+    id: TyConId,
+    name: &str,
+    short_name: &str,
+    kind: Kind,
+) -> (TyConId, TyConInfo) {
+    (
+        id,
+        TyConInfo {
+            name: legacy_symbol_id(name),
+            short_name: legacy_symbol_id(short_name),
+            kind,
+            definition: TyConDefinition::Primitive,
+        },
+    )
+}
+
+fn tycon_id_for_data_definition(name: &str) -> TyConId {
+    if name == COMPILER_BOOL_NAME {
+        PRIM_TYS.bool
+    } else {
+        legacy_tycon_id(name)
+    }
+}
+
 pub fn register_symbol_display_name(symbol: Symbol, name: &str) {
     let mut registry = legacy_term_name_registry()
         .lock()
@@ -921,36 +1042,33 @@ pub fn identity_tables_from_defs(
     let mut class_table = ClassTable::new();
     let mut next_ctor_tag = 0_u16;
 
-    for data_def in data_defs {
-        let tycon_id = legacy_tycon_id(&data_def.name);
+    for (id, info) in compiler_primitive_tycon_infos() {
+        tycon_table.insert_with_id(id, info);
+    }
 
-        tycon_table.insert_with_id(
-            tycon_id,
-            TyConInfo {
-                name: legacy_symbol_id(&data_def.name),
-                short_name: legacy_symbol_id(&data_def.short_name),
-                kind: data_def.tycon_kind.clone(),
-                definition: TyConDefinition::Data(data_def.clone()),
-            },
+    if let Some(bool_def) = data_defs
+        .iter()
+        .find(|data_def| data_def.name == COMPILER_BOOL_NAME)
+    {
+        insert_data_definition_identity(
+            bool_def,
+            &mut tycon_table,
+            &mut ctor_table,
+            &mut next_ctor_tag,
         );
+    }
 
-        for ctor_def in &data_def.constructors {
-            ctor_table.insert_with_id(
-                ctor_def.id,
-                CtorInfo {
-                    name: legacy_symbol_id(&ctor_def.name),
-                    short_name: legacy_symbol_id(&ctor_def.short_name),
-                    tycon: tycon_id,
-                    fields: ctor_def.fields.clone(),
-                    full_type: ctor_def.full_type.clone(),
-                    tag: next_ctor_tag,
-                },
-            );
-
-            next_ctor_tag = next_ctor_tag
-                .checked_add(1)
-                .expect("ICE: constructor tag overflow while rebuilding identity tables");
+    for data_def in data_defs {
+        if data_def.name == COMPILER_BOOL_NAME {
+            continue;
         }
+
+        insert_data_definition_identity(
+            data_def,
+            &mut tycon_table,
+            &mut ctor_table,
+            &mut next_ctor_tag,
+        );
     }
 
     for class_def in class_defs {
@@ -965,6 +1083,43 @@ pub fn identity_tables_from_defs(
     }
 
     (tycon_table, ctor_table, class_table)
+}
+
+fn insert_data_definition_identity(
+    data_def: &DataDefinition,
+    tycon_table: &mut TyConTable,
+    ctor_table: &mut CtorTable,
+    next_ctor_tag: &mut u16,
+) {
+    let tycon_id = tycon_id_for_data_definition(&data_def.name);
+
+    tycon_table.insert_with_id(
+        tycon_id,
+        TyConInfo {
+            name: legacy_symbol_id(&data_def.name),
+            short_name: legacy_symbol_id(&data_def.short_name),
+            kind: data_def.tycon_kind.clone(),
+            definition: TyConDefinition::Data(data_def.clone()),
+        },
+    );
+
+    for ctor_def in &data_def.constructors {
+        ctor_table.insert_with_id(
+            ctor_def.id,
+            CtorInfo {
+                name: legacy_symbol_id(&ctor_def.name),
+                short_name: legacy_symbol_id(&ctor_def.short_name),
+                tycon: tycon_id,
+                fields: ctor_def.fields.clone(),
+                full_type: ctor_def.full_type.clone(),
+                tag: *next_ctor_tag,
+            },
+        );
+
+        *next_ctor_tag = (*next_ctor_tag)
+            .checked_add(1)
+            .expect("ICE: constructor tag overflow while rebuilding identity tables");
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

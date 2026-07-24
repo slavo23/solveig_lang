@@ -25,6 +25,18 @@ applyTwice f x = f (f x)
 useMap : [Int] -> [Int]
 useMap xs = map (fun x => x + 1) xs
 
+floatId : Float -> Float
+floatId x = x
+
+charId : Char -> Char
+charId x = x
+
+stringId : String -> String
+stringId x = x
+
+ioIntId : IO Int -> IO Int
+ioIntId x = x
+
 sumViaFoldr : [Int] -> Int
 sumViaFoldr xs = foldr (fun x => fun acc => x + acc) 0 xs
 

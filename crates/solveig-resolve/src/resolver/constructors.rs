@@ -1,13 +1,20 @@
 impl<'a> Resolver<'a> {
-    fn resolve_ctor_ref(&mut self, r: &NameRef, span: FileSpan, cx: &ModuleContext) -> String {
+    fn resolve_ctor_id(&mut self, r: &NameRef, span: FileSpan, cx: &ModuleContext) -> CtorId {
         match self.resolve_ctor_defid(r, span, cx) {
             Some(def_id) => {
                 self.record_resolution(span, def_id);
-                self.qualified_def_name(def_id)
+                let qualified_name = self.qualified_def_name(def_id);
+
+                cx.builtins
+                    .constructor_ids
+                    .get(&def_id)
+                    .copied()
+                    .unwrap_or_else(|| legacy_ctor_id(&qualified_name))
             }
-            None => self.unresolved_name(r),
+            None => legacy_ctor_id(&self.unresolved_name(r)),
         }
     }
+
     fn resolve_ctor_defid(
         &mut self,
         r: &NameRef,
@@ -112,11 +119,11 @@ impl<'a> Resolver<'a> {
             }
             SurfacePattern::Wild => Pattern::Wild,
             SurfacePattern::Con(con_name, args) => Pattern::Con(
-                legacy_ctor_id(&self.resolve_ctor_ref(
+                self.resolve_ctor_id(
                     &con_name.0,
                     self.file_span(cx, con_name.1),
                     cx,
-                )),
+                ),
                 args.iter()
                     .map(|arg| self.resolve_surface_pattern_in_module(arg, cx))
                     .collect(),
@@ -226,8 +233,14 @@ impl<'a> Resolver<'a> {
         ),
         KindError,
     > {
+        let mut data_tycon_kind_env = imported.tycon_kind_ids.clone();
+        if module_name.as_string(self.session) == COMPILER_PRELUDE_BUILTINS_MODULE {
+            data_tycon_kind_env.extend(compiler_primitive_tycon_kinds());
+            data_tycon_kind_env.insert(PRIM_TYS.bool, Kind::Star);
+        }
+
         let (inferred_data, _all_tycon_kinds) =
-            infer_all_data_kinds_with_env(raw_data_defs, imported.tycon_kind_ids.clone())?;
+            infer_all_data_kinds_with_env(raw_data_defs, data_tycon_kind_env)?;
 
         let mut data_defs = Vec::new();
         let mut local_tycon_kind_ids = HashMap::new();

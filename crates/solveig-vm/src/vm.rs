@@ -1202,7 +1202,7 @@ impl EvalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solveig_ast::ast::{BinOp, legacy_ctor_id};
+    use solveig_ast::ast::{BinOp, PRIM_TYS, legacy_ctor_id};
     use solveig_lower::closure_ir::{CCCaseArm, CCExpr, CCFunction, CCGlobalDef, CCPattern};
     use std::rc::Rc;
 
@@ -1359,14 +1359,14 @@ mod tests {
     ) -> CCProgram {
         let mut constructor_arities = vec![
             CtorRuntimeInfo {
-                ctor: legacy_ctor_id("True"),
+                ctor: PRIM_TYS.true_ctor,
                 name: "True".to_string(),
                 short_name: "True".to_string(),
                 tag: TRUE_TAG,
                 arity: 0,
             },
             CtorRuntimeInfo {
-                ctor: legacy_ctor_id("False"),
+                ctor: PRIM_TYS.false_ctor,
                 name: "False".to_string(),
                 short_name: "False".to_string(),
                 tag: FALSE_TAG,

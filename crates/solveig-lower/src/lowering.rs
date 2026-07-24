@@ -209,7 +209,6 @@ fn build_constructor_table<A, P>(
     module: &ResolvedModule<A, P>,
 ) -> HashMap<CtorId, LowerConstructorInfo> {
     let mut table = HashMap::new();
-    let mut next_tag: u16 = 0;
     for data_def in &module.data_defs {
         for constructor_def in &data_def.constructors {
             let table_info = module
@@ -227,11 +226,10 @@ fn build_constructor_table<A, P>(
                 LowerConstructorInfo {
                     name: symbol_display_name(table_info.name),
                     short_name: symbol_display_name(table_info.short_name),
-                    tag: next_tag,
+                    tag: table_info.tag,
                     arity,
                 },
             );
-            next_tag += 1;
         }
     }
     table

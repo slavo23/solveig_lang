@@ -1,13 +1,20 @@
 impl<'a> Resolver<'a> {
-    fn resolve_tycon_ref(&mut self, r: &NameRef, span: FileSpan, cx: &ModuleContext) -> String {
+    fn resolve_tycon_id(&mut self, r: &NameRef, span: FileSpan, cx: &ModuleContext) -> TyConId {
         match self.resolve_tycon_defid(r, span, cx) {
             Some(def_id) => {
                 self.record_resolution(span, def_id);
-                self.qualified_def_name(def_id)
+                let qualified_name = self.qualified_def_name(def_id);
+
+                cx.builtins
+                    .type_ids
+                    .get(&def_id)
+                    .copied()
+                    .unwrap_or_else(|| legacy_tycon_id(&qualified_name))
             }
-            None => self.unresolved_name(r),
+            None => legacy_tycon_id(&self.unresolved_name(r)),
         }
     }
+
     fn resolve_tycon_defid(
         &mut self,
         r: &NameRef,
@@ -126,7 +133,7 @@ impl<'a> Resolver<'a> {
             SurfaceTy::Unit => TypeExpr::TyUnit,
 
             SurfaceTy::Con(con) => {
-                TypeExpr::make_con(self.resolve_tycon_ref(&con.0, self.file_span(cx, con.1), cx))
+                TypeExpr::make_con_id(self.resolve_tycon_id(&con.0, self.file_span(cx, con.1), cx))
             }
 
             SurfaceTy::App(lhs, rhs) => TypeExpr::make_app(

@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use solveig_ast::ast::{
-    CaseArmNode, CtorId, CtorTable, Literal, Pattern, PatternNode, Predicate, PrettyTables,
-    TyConId, TyVarId, TypeExpr, symbol_display_name,
+    CaseArmNode, CtorId, CtorTable, Literal, PRIM_TYS, Pattern, PatternNode, Predicate,
+    PrettyTables, TyConId, TyVarId, TypeExpr, symbol_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -25,7 +25,6 @@ pub fn check_case(
     let checker = ExhaustivenessChecker {
         constructor_env,
         ctor_table,
-        pretty_tables,
     };
 
     let scrutinee_type = normalize_type(scrutinee_type);
@@ -166,13 +165,10 @@ struct ConstructorEnv {
     by_tycon: HashMap<TyConId, Vec<CtorId>>,
 }
 
-fn is_open_primitive_type(ty: &TypeExpr, pretty_tables: PrettyTables<'_>) -> bool {
+fn is_open_primitive_type(ty: &TypeExpr) -> bool {
     match normalize_type(ty) {
-        TypeExpr::TyCon(id) => matches!(
-            tycon_table_short_name(id, pretty_tables).as_str(),
-            "Int" | "String"
-        ),
-        TypeExpr::TyApp(lhs, _) => is_open_primitive_type(&lhs, pretty_tables),
+        TypeExpr::TyCon(id) => PRIM_TYS.open_primitive_tycon_ids().contains(&id),
+        TypeExpr::TyApp(lhs, _) => is_open_primitive_type(&lhs),
         _ => false,
     }
 }
@@ -223,12 +219,8 @@ impl ConstructorEnv {
         env
     }
 
-    fn constructors_for_type(
-        &self,
-        ty: &TypeExpr,
-        pretty_tables: PrettyTables<'_>,
-    ) -> Option<Vec<CtorId>> {
-        if is_open_primitive_type(ty, pretty_tables) {
+    fn constructors_for_type(&self, ty: &TypeExpr) -> Option<Vec<CtorId>> {
+        if is_open_primitive_type(ty) {
             return None;
         }
 
@@ -261,7 +253,6 @@ impl ConstructorEnv {
 struct ExhaustivenessChecker<'a> {
     constructor_env: ConstructorEnv,
     ctor_table: &'a CtorTable,
-    pretty_tables: PrettyTables<'a>,
 }
 
 impl ExhaustivenessChecker<'_> {
@@ -334,10 +325,7 @@ impl ExhaustivenessChecker<'_> {
         types: &[TypeExpr],
         first_type: &TypeExpr,
     ) -> Option<Vec<Witness>> {
-        let Some(constructors) = self
-            .constructor_env
-            .constructors_for_type(first_type, self.pretty_tables)
-        else {
+        let Some(constructors) = self.constructor_env.constructors_for_type(first_type) else {
             let rest = self.useful_default_tail(matrix, vector, types)?;
 
             let mut out = Vec::with_capacity(1 + rest.len());
@@ -719,14 +707,6 @@ fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable) -> String {
         .unwrap_or_else(|| panic!("ICE: exhaustiveness constructor table missing CtorId {id:?}"))
 }
 
-fn tycon_table_short_name(id: TyConId, pretty_tables: PrettyTables<'_>) -> String {
-    pretty_tables
-        .tycons
-        .get(id)
-        .map(|info| symbol_display_name(info.short_name))
-        .unwrap_or_else(|| panic!("ICE: exhaustiveness type table missing TyConId {id:?}"))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -929,8 +909,8 @@ mod tests {
     fn test_constructor_fixtures() -> TestConstructorFixtures {
         let mut constructors = HashMap::new();
 
-        constructors.insert(legacy_ctor_id("False"), bool_ty());
-        constructors.insert(legacy_ctor_id("True"), bool_ty());
+        constructors.insert(ctor_id("True"), bool_ty());
+        constructors.insert(ctor_id("False"), bool_ty());
 
         constructors.insert(legacy_ctor_id("Nothing"), forall("a", maybe_ty(tyvar("a"))));
         constructors.insert(
@@ -961,7 +941,7 @@ mod tests {
         let mut tycon_table = TyConTable::new();
         for name in ["Bool", "Int", "Maybe", "List", "Pair"] {
             tycon_table.insert_with_id(
-                legacy_tycon_id(name),
+                tycon_id(name),
                 TyConInfo {
                     name: legacy_symbol_id(name),
                     short_name: legacy_symbol_id(name),
@@ -972,8 +952,8 @@ mod tests {
         }
 
         let mut ctor_table = CtorTable::new();
-        insert_ctor(&mut ctor_table, "False", "Bool", 0, &constructors);
-        insert_ctor(&mut ctor_table, "True", "Bool", 1, &constructors);
+        insert_ctor(&mut ctor_table, "True", "Bool", 0, &constructors);
+        insert_ctor(&mut ctor_table, "False", "Bool", 1, &constructors);
         insert_ctor(&mut ctor_table, "Nothing", "Maybe", 2, &constructors);
         insert_ctor(&mut ctor_table, "Just", "Maybe", 3, &constructors);
         insert_ctor(&mut ctor_table, "Nil", "List", 4, &constructors);
@@ -994,13 +974,13 @@ mod tests {
         tag: u16,
         constructor_types: &HashMap<CtorId, TypeExpr>,
     ) {
-        let ctor_id = legacy_ctor_id(ctor_name);
+        let ctor_id = ctor_id(ctor_name);
         ctor_table.insert_with_id(
             ctor_id,
             CtorInfo {
                 name: legacy_symbol_id(ctor_name),
                 short_name: legacy_symbol_id(ctor_name),
-                tycon: legacy_tycon_id(tycon_name),
+                tycon: tycon_id(tycon_name),
                 fields: Vec::new(),
                 full_type: constructor_types
                     .get(&ctor_id)
@@ -1026,10 +1006,7 @@ mod tests {
     }
 
     fn con(name: &str, args: Vec<Pattern<Span>>) -> Pattern<Span> {
-        Pattern::Con(
-            legacy_ctor_id(name),
-            args.into_iter().map(pattern_node).collect(),
-        )
+        Pattern::Con(ctor_id(name), args.into_iter().map(pattern_node).collect())
     }
 
     fn wild() -> Pattern<Span> {
@@ -1065,7 +1042,23 @@ mod tests {
     }
 
     fn tycon(name: &str) -> TypeExpr {
-        TypeExpr::make_con(name.to_string())
+        TypeExpr::make_con_id(tycon_id(name))
+    }
+
+    fn tycon_id(name: &str) -> TyConId {
+        match name {
+            "Bool" => PRIM_TYS.bool,
+            "Int" => PRIM_TYS.int,
+            _ => legacy_tycon_id(name),
+        }
+    }
+
+    fn ctor_id(name: &str) -> CtorId {
+        match name {
+            "True" => PRIM_TYS.true_ctor,
+            "False" => PRIM_TYS.false_ctor,
+            _ => legacy_ctor_id(name),
+        }
     }
 
     fn tyvar(name: &str) -> TypeExpr {

@@ -17,7 +17,8 @@ use solveig_report::emit_diagnostics;
 use solveig_resolve::project::{
     BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleTable,
     ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi, TypedDisplayMaps,
-    build_module_api, build_typed_module_api, effective_imports, module_order_checked,
+    build_module_api, build_typed_module_api, compiler_builtin_api, effective_imports,
+    module_order_checked, seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::ModuleName;
@@ -319,6 +320,7 @@ impl<'a> FrontendState<'a> {
     ) -> Result<Self, Vec<ResolveError>> {
         let mut apis = HashMap::new();
         let mut errors = Vec::new();
+        let builtins = Rc::new(compiler_builtin_api(session, &project.module_table));
 
         for module_name in order {
             let module_id = project
@@ -326,7 +328,8 @@ impl<'a> FrontendState<'a> {
                 .id(module_name)
                 .expect("ICE: checked module order referenced unknown module");
             match build_module_api(module_id, parsed.get(session, module_name)) {
-                Ok(api) => {
+                Ok(mut api) => {
+                    seed_compiler_prelude_module_api(session, module_name, module_id, &mut api);
                     apis.insert(module_name.clone(), Rc::new(api));
                 }
                 Err(error) => errors.push(error),
@@ -341,7 +344,7 @@ impl<'a> FrontendState<'a> {
             session,
             project,
             parsed,
-            builtins: Rc::new(BuiltinApi::default()),
+            builtins,
             apis,
             typed_apis: HashMap::new(),
             resolutions: HashMap::new(),

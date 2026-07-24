@@ -32,6 +32,10 @@ fn checker_api_golden_types() {
         ("main.constLocal", "∀ (a : *) (b : *). a -> b -> a"),
         ("main.applyTwice", "∀ (a : *). (a -> a) -> a -> a"),
         ("main.useMap", "List Int -> List Int"),
+        ("main.floatId", "Float -> Float"),
+        ("main.charId", "Char -> Char"),
+        ("main.stringId", "String -> String"),
+        ("main.ioIntId", "IO Int -> IO Int"),
         ("main.sumViaFoldr", "List Int -> Int"),
         (
             "main.mapBox",

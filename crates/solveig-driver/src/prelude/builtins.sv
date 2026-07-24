@@ -1,8 +1,6 @@
-data Bool = True | False;
 data Maybe a = Just a | Nothing;
 data Either a b = Left a | Right b
 data Pair a b = MkPair a b;
-data Int = MkInt;
 
 even : Int -> Bool;
 even n = n % 2 == 0;
