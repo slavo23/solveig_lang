@@ -5,9 +5,18 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    BUILTIN_PRIM_ADD_INT, BuiltinDefinition, COMPILER_PRIM_ADD_INT_NAME, ClassDefinition, ClassId,
-    ClassTable, CtorId, CtorTable, DefId, Ev, InstanceId, ModuleId, PRIM_TYS, PrettyTables, Scheme,
-    TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, def_display_name,
+    BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING,
+    BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT,
+    BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB,
+    BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE,
+    BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE,
+    BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB,
+    BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT,
+    BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE,
+    BUILTIN_STRING_TO_CHARS, BuiltinDefinition, BuiltinId, COMPILER_PRELUDE_PRIM_MODULE,
+    ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Ev, InstanceId, ModuleId,
+    PRIM_TYS, PrettyTables, Scheme, TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr,
+    def_display_name, prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
     register_def_display_name, register_symbol_display_name, symbol_display_name,
 };
 use solveig_base::utils::diagnostics::Diagnostic;
@@ -675,30 +684,310 @@ fn seed_primitive_builtin_terms(session: &Session, modules: &ModuleTable, api: &
         return;
     };
 
-    let prim_add_int_symbol = session.intern("primAddInt");
-    let prim_add_int_def = DefId {
-        module: module_id,
-        name: prim_add_int_symbol,
-    };
-    register_symbol_display_name(prim_add_int_symbol, "primAddInt");
-    register_def_display_name(prim_add_int_def, COMPILER_PRIM_ADD_INT_NAME);
+    for spec in primitive_builtin_specs() {
+        let symbol = session.intern(spec.short_name);
+        let id = DefId {
+            module: module_id,
+            name: symbol,
+        };
+        let full_name = format!("{COMPILER_PRELUDE_PRIM_MODULE}.{}", spec.short_name);
 
-    let int_ty = TypeExpr::make_con_id(PRIM_TYS.int);
-    let scheme = Scheme::mono(TypeExpr::make_arr(
-        int_ty.clone(),
-        TypeExpr::make_arr(int_ty.clone(), int_ty),
-    ));
+        register_symbol_display_name(symbol, spec.short_name);
+        register_def_display_name(id, &full_name);
 
-    let builtin = BuiltinDefinition {
-        id: prim_add_int_def,
-        name: COMPILER_PRIM_ADD_INT_NAME.to_string(),
-        short_name: "primAddInt".to_string(),
-        builtin: BUILTIN_PRIM_ADD_INT,
-        arity: 2,
+        api.builtin_defs.push(BuiltinDefinition {
+            id,
+            name: full_name,
+            short_name: spec.short_name.to_string(),
+            builtin: spec.builtin,
+            arity: spec.arity,
+            scheme: spec.scheme,
+        });
+    }
+}
+
+struct PrimitiveBuiltinSpec {
+    short_name: &'static str,
+    builtin: BuiltinId,
+    arity: usize,
+    scheme: Scheme,
+}
+
+fn primitive_builtin_specs() -> Vec<PrimitiveBuiltinSpec> {
+    let int = TypeExpr::make_con_id(PRIM_TYS.int);
+    let float = TypeExpr::make_con_id(PRIM_TYS.float);
+    let char_ty = TypeExpr::make_con_id(PRIM_TYS.char);
+    let string = TypeExpr::make_con_id(PRIM_TYS.string);
+    let bool_ty = TypeExpr::make_con_id(PRIM_TYS.bool);
+    let ordering = TypeExpr::make_con_id(prelude_ordering_tycon_id());
+    let maybe_char = TypeExpr::make_app(
+        TypeExpr::make_con_id(prelude_maybe_tycon_id()),
+        char_ty.clone(),
+    );
+    let char_list = TypeExpr::make_app(
+        TypeExpr::make_con_id(prelude_list_tycon_id()),
+        char_ty.clone(),
+    );
+
+    vec![
+        prim_spec(
+            "intAdd",
+            BUILTIN_INT_ADD,
+            2,
+            binary(int.clone(), int.clone()),
+        ),
+        prim_spec(
+            "intSub",
+            BUILTIN_INT_SUB,
+            2,
+            binary(int.clone(), int.clone()),
+        ),
+        prim_spec(
+            "intMul",
+            BUILTIN_INT_MUL,
+            2,
+            binary(int.clone(), int.clone()),
+        ),
+        prim_spec(
+            "intDiv",
+            BUILTIN_INT_DIV,
+            2,
+            binary(int.clone(), int.clone()),
+        ),
+        prim_spec(
+            "intMod",
+            BUILTIN_INT_MOD,
+            2,
+            binary(int.clone(), int.clone()),
+        ),
+        prim_spec(
+            "intNeg",
+            BUILTIN_INT_NEG,
+            1,
+            unary(int.clone(), int.clone()),
+        ),
+        prim_spec(
+            "intEq",
+            BUILTIN_INT_EQ,
+            2,
+            binary(int.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "intLt",
+            BUILTIN_INT_LT,
+            2,
+            binary(int.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "intLe",
+            BUILTIN_INT_LE,
+            2,
+            binary(int.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "intGt",
+            BUILTIN_INT_GT,
+            2,
+            binary(int.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "intGe",
+            BUILTIN_INT_GE,
+            2,
+            binary(int.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "intCompare",
+            BUILTIN_INT_COMPARE,
+            2,
+            binary(int.clone(), ordering.clone()),
+        ),
+        prim_spec(
+            "floatAdd",
+            BUILTIN_FLOAT_ADD,
+            2,
+            binary(float.clone(), float.clone()),
+        ),
+        prim_spec(
+            "floatSub",
+            BUILTIN_FLOAT_SUB,
+            2,
+            binary(float.clone(), float.clone()),
+        ),
+        prim_spec(
+            "floatMul",
+            BUILTIN_FLOAT_MUL,
+            2,
+            binary(float.clone(), float.clone()),
+        ),
+        prim_spec(
+            "floatDiv",
+            BUILTIN_FLOAT_DIV,
+            2,
+            binary(float.clone(), float.clone()),
+        ),
+        prim_spec(
+            "floatNeg",
+            BUILTIN_FLOAT_NEG,
+            1,
+            unary(float.clone(), float.clone()),
+        ),
+        prim_spec(
+            "floatEq",
+            BUILTIN_FLOAT_EQ,
+            2,
+            binary(float.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "floatLt",
+            BUILTIN_FLOAT_LT,
+            2,
+            binary(float.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "floatLe",
+            BUILTIN_FLOAT_LE,
+            2,
+            binary(float.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "floatGt",
+            BUILTIN_FLOAT_GT,
+            2,
+            binary(float.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "floatGe",
+            BUILTIN_FLOAT_GE,
+            2,
+            binary(float.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "intToFloat",
+            BUILTIN_INT_TO_FLOAT,
+            1,
+            unary(int.clone(), float.clone()),
+        ),
+        prim_spec(
+            "floatToInt",
+            BUILTIN_FLOAT_TO_INT,
+            1,
+            unary(float.clone(), int.clone()),
+        ),
+        prim_spec(
+            "intToString",
+            BUILTIN_INT_TO_STRING,
+            1,
+            unary(int.clone(), string.clone()),
+        ),
+        prim_spec(
+            "floatToString",
+            BUILTIN_FLOAT_TO_STRING,
+            1,
+            unary(float.clone(), string.clone()),
+        ),
+        prim_spec(
+            "charToString",
+            BUILTIN_CHAR_TO_STRING,
+            1,
+            unary(char_ty.clone(), string.clone()),
+        ),
+        prim_spec(
+            "stringLength",
+            BUILTIN_STRING_LENGTH,
+            1,
+            unary(string.clone(), int.clone()),
+        ),
+        prim_spec(
+            "stringAppend",
+            BUILTIN_STRING_APPEND,
+            2,
+            binary(string.clone(), string.clone()),
+        ),
+        prim_spec(
+            "stringSlice",
+            BUILTIN_STRING_SLICE,
+            3,
+            ternary(string.clone(), int.clone(), int.clone(), string.clone()),
+        ),
+        prim_spec(
+            "stringCharAt",
+            BUILTIN_STRING_CHAR_AT,
+            2,
+            arr(&[string.clone(), int.clone()], maybe_char),
+        ),
+        prim_spec(
+            "stringEq",
+            BUILTIN_STRING_EQ,
+            2,
+            binary(string.clone(), bool_ty.clone()),
+        ),
+        prim_spec(
+            "stringCompare",
+            BUILTIN_STRING_COMPARE,
+            2,
+            binary(string.clone(), ordering.clone()),
+        ),
+        prim_spec(
+            "charEq",
+            BUILTIN_CHAR_EQ,
+            2,
+            binary(char_ty.clone(), bool_ty),
+        ),
+        prim_spec(
+            "charCompare",
+            BUILTIN_CHAR_COMPARE,
+            2,
+            binary(char_ty.clone(), ordering),
+        ),
+        prim_spec(
+            "stringToChars",
+            BUILTIN_STRING_TO_CHARS,
+            1,
+            unary(string.clone(), char_list.clone()),
+        ),
+        prim_spec(
+            "charsToString",
+            BUILTIN_CHARS_TO_STRING,
+            1,
+            unary(char_list, string),
+        ),
+    ]
+}
+
+fn prim_spec(
+    short_name: &'static str,
+    builtin: BuiltinId,
+    arity: usize,
+    scheme: Scheme,
+) -> PrimitiveBuiltinSpec {
+    PrimitiveBuiltinSpec {
+        short_name,
+        builtin,
+        arity,
         scheme,
-    };
+    }
+}
 
-    api.builtin_defs.push(builtin);
+fn unary(arg: TypeExpr, ret: TypeExpr) -> Scheme {
+    arr(&[arg], ret)
+}
+
+fn binary(arg: TypeExpr, ret: TypeExpr) -> Scheme {
+    arr(&[arg.clone(), arg], ret)
+}
+
+fn ternary(a: TypeExpr, b: TypeExpr, c: TypeExpr, ret: TypeExpr) -> Scheme {
+    arr(&[a, b, c], ret)
+}
+
+fn arr(args: &[TypeExpr], ret: TypeExpr) -> Scheme {
+    let ty = args
+        .iter()
+        .rev()
+        .cloned()
+        .fold(ret, |body, arg| TypeExpr::make_arr(arg, body));
+    Scheme::mono(ty)
 }
 
 impl<'a> FrontendState<'a> {

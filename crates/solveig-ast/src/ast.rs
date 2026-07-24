@@ -355,12 +355,55 @@ pub const COMPILER_IO_NAME: &str = "prelude.builtins.IO";
 pub const COMPILER_BOOL_NAME: &str = "prelude.builtins.Bool";
 pub const COMPILER_TRUE_NAME: &str = "prelude.builtins.True";
 pub const COMPILER_FALSE_NAME: &str = "prelude.builtins.False";
-pub const COMPILER_PRIM_ADD_INT_NAME: &str = "prelude.prim.primAddInt";
+pub const PRELUDE_MAYBE_NAME: &str = "prelude.builtins.Maybe";
+pub const PRELUDE_MAYBE_JUST_NAME: &str = "prelude.builtins.Just";
+pub const PRELUDE_MAYBE_NOTHING_NAME: &str = "prelude.builtins.Nothing";
+pub const PRELUDE_LIST_NAME: &str = "prelude.list.List";
 pub const PRELUDE_LIST_NIL_NAME: &str = "prelude.list.Nil";
 pub const PRELUDE_LIST_CONS_NAME: &str = "prelude.list.Cons";
 pub const PRELUDE_PAIR_MKPAIR_NAME: &str = "prelude.builtins.MkPair";
+pub const PRELUDE_ORDERING_NAME: &str = "prelude.typeclasses.Ordering";
+pub const PRELUDE_ORDERING_LT_NAME: &str = "prelude.typeclasses.LT";
+pub const PRELUDE_ORDERING_EQ_NAME: &str = "prelude.typeclasses.EQ";
+pub const PRELUDE_ORDERING_GT_NAME: &str = "prelude.typeclasses.GT";
 
-pub const BUILTIN_PRIM_ADD_INT: BuiltinId = BuiltinId(0);
+pub const BUILTIN_INT_ADD: BuiltinId = BuiltinId(0);
+pub const BUILTIN_INT_SUB: BuiltinId = BuiltinId(1);
+pub const BUILTIN_INT_MUL: BuiltinId = BuiltinId(2);
+pub const BUILTIN_INT_DIV: BuiltinId = BuiltinId(3);
+pub const BUILTIN_INT_MOD: BuiltinId = BuiltinId(4);
+pub const BUILTIN_INT_NEG: BuiltinId = BuiltinId(5);
+pub const BUILTIN_INT_EQ: BuiltinId = BuiltinId(6);
+pub const BUILTIN_INT_LT: BuiltinId = BuiltinId(7);
+pub const BUILTIN_INT_LE: BuiltinId = BuiltinId(8);
+pub const BUILTIN_INT_GT: BuiltinId = BuiltinId(9);
+pub const BUILTIN_INT_GE: BuiltinId = BuiltinId(10);
+pub const BUILTIN_INT_COMPARE: BuiltinId = BuiltinId(11);
+pub const BUILTIN_FLOAT_ADD: BuiltinId = BuiltinId(12);
+pub const BUILTIN_FLOAT_SUB: BuiltinId = BuiltinId(13);
+pub const BUILTIN_FLOAT_MUL: BuiltinId = BuiltinId(14);
+pub const BUILTIN_FLOAT_DIV: BuiltinId = BuiltinId(15);
+pub const BUILTIN_FLOAT_NEG: BuiltinId = BuiltinId(16);
+pub const BUILTIN_FLOAT_EQ: BuiltinId = BuiltinId(17);
+pub const BUILTIN_FLOAT_LT: BuiltinId = BuiltinId(18);
+pub const BUILTIN_FLOAT_LE: BuiltinId = BuiltinId(19);
+pub const BUILTIN_FLOAT_GT: BuiltinId = BuiltinId(20);
+pub const BUILTIN_FLOAT_GE: BuiltinId = BuiltinId(21);
+pub const BUILTIN_INT_TO_FLOAT: BuiltinId = BuiltinId(22);
+pub const BUILTIN_FLOAT_TO_INT: BuiltinId = BuiltinId(23);
+pub const BUILTIN_INT_TO_STRING: BuiltinId = BuiltinId(24);
+pub const BUILTIN_FLOAT_TO_STRING: BuiltinId = BuiltinId(25);
+pub const BUILTIN_CHAR_TO_STRING: BuiltinId = BuiltinId(26);
+pub const BUILTIN_STRING_LENGTH: BuiltinId = BuiltinId(27);
+pub const BUILTIN_STRING_APPEND: BuiltinId = BuiltinId(28);
+pub const BUILTIN_STRING_SLICE: BuiltinId = BuiltinId(29);
+pub const BUILTIN_STRING_CHAR_AT: BuiltinId = BuiltinId(30);
+pub const BUILTIN_STRING_EQ: BuiltinId = BuiltinId(31);
+pub const BUILTIN_STRING_COMPARE: BuiltinId = BuiltinId(32);
+pub const BUILTIN_CHAR_EQ: BuiltinId = BuiltinId(33);
+pub const BUILTIN_CHAR_COMPARE: BuiltinId = BuiltinId(34);
+pub const BUILTIN_STRING_TO_CHARS: BuiltinId = BuiltinId(35);
+pub const BUILTIN_CHARS_TO_STRING: BuiltinId = BuiltinId(36);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrimTys {
@@ -448,6 +491,22 @@ pub fn compiler_bool_constructor_types() -> HashMap<CtorId, TypeExpr> {
         .collect()
 }
 
+pub fn prelude_maybe_tycon_id() -> TyConId {
+    legacy_tycon_id(PRELUDE_MAYBE_NAME)
+}
+
+pub fn prelude_maybe_just_ctor_id() -> CtorId {
+    legacy_ctor_id(PRELUDE_MAYBE_JUST_NAME)
+}
+
+pub fn prelude_maybe_nothing_ctor_id() -> CtorId {
+    legacy_ctor_id(PRELUDE_MAYBE_NOTHING_NAME)
+}
+
+pub fn prelude_list_tycon_id() -> TyConId {
+    legacy_tycon_id(PRELUDE_LIST_NAME)
+}
+
 pub fn prelude_list_nil_ctor_id() -> CtorId {
     legacy_ctor_id(PRELUDE_LIST_NIL_NAME)
 }
@@ -458,6 +517,22 @@ pub fn prelude_list_cons_ctor_id() -> CtorId {
 
 pub fn prelude_pair_mkpair_ctor_id() -> CtorId {
     legacy_ctor_id(PRELUDE_PAIR_MKPAIR_NAME)
+}
+
+pub fn prelude_ordering_tycon_id() -> TyConId {
+    legacy_tycon_id(PRELUDE_ORDERING_NAME)
+}
+
+pub fn prelude_ordering_lt_ctor_id() -> CtorId {
+    legacy_ctor_id(PRELUDE_ORDERING_LT_NAME)
+}
+
+pub fn prelude_ordering_eq_ctor_id() -> CtorId {
+    legacy_ctor_id(PRELUDE_ORDERING_EQ_NAME)
+}
+
+pub fn prelude_ordering_gt_ctor_id() -> CtorId {
+    legacy_ctor_id(PRELUDE_ORDERING_GT_NAME)
 }
 
 pub fn runtime_ctor_role(ctor: CtorId) -> CtorRuntimeRole {

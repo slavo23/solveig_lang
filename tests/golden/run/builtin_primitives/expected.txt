@@ -1,0 +1,1 @@
+(([42, 7, 42, 3, 1, -9, 3], [True, True, True, True, True]), (([3.75, 3.25, 7, 3.5, -1.5, 5], [True, True, True, True, True]), (["42", "2.5", "x", "solveig", "cde", "ok"], ((5, ['A', 'z']), (Just 'b', (Nothing, (True, (LT, (LT, (True, GT))))))))))

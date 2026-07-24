@@ -131,6 +131,11 @@ impl NullaryCtorCache {
         self.tags[tag as usize].expect("missing nullary constructor")
     }
 
+    #[inline]
+    pub fn try_get(&self, tag: u16) -> Option<Value> {
+        self.tags.get(tag as usize).and_then(|slot| *slot)
+    }
+
     pub fn set(&mut self, tag: u16, val: Value) {
         self.tags[tag as usize] = Some(val);
     }

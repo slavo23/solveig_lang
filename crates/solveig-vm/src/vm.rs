@@ -246,12 +246,12 @@ impl Vm {
     }
 
     #[inline]
-    fn push_bool(&mut self, b: bool) {
-        self.push(if b {
+    fn bool_value(&self, b: bool) -> Value {
+        if b {
             self.bools.true_val
         } else {
             self.bools.false_val
-        });
+        }
     }
 
     #[inline(always)]
@@ -697,6 +697,7 @@ impl Vm {
 
     fn call_builtin(
         &mut self,
+        program: &BytecodeProgram,
         id: solveig_ast::ast::BuiltinId,
         arg_count: usize,
     ) -> Result<Value, RuntimeError> {
@@ -720,7 +721,13 @@ impl Vm {
             .checked_sub(arg_count)
             .expect("ICE: builtin call stack underflow");
         let args = self.stack[args_start..].to_vec();
-        let mut ctx = VmCtx::new(&mut self.heap);
+        let mut ctx = VmCtx::new(
+            &mut self.heap,
+            &program.constructor_arities,
+            &self.nullary_ctors,
+            self.bools.true_val,
+            self.bools.false_val,
+        );
         let result = (builtin.run)(&mut ctx, &args)?;
         self.stack.truncate(args_start);
 
@@ -960,27 +967,32 @@ impl Vm {
                 Instr::Unary(op) => {
                     let rhs = self.pop_int();
                     self.push(match op {
-                        solveig_ast::ast::UnOp::Neg => Value::Int(-rhs),
+                        solveig_ast::ast::UnOp::Neg => Value::Int(rhs.wrapping_neg()),
                     });
                 }
                 Instr::Binary(op) => {
                     let rhs = self.pop_int();
                     let lhs = self.pop_int();
-                    match op {
-                        solveig_ast::ast::BinOp::Plus => self.push(Value::Int(lhs + rhs)),
-                        solveig_ast::ast::BinOp::Minus => self.push(Value::Int(lhs - rhs)),
-                        solveig_ast::ast::BinOp::Mult => self.push(Value::Int(lhs * rhs)),
-                        solveig_ast::ast::BinOp::Div => self.push(Value::Int(lhs / rhs)),
-                        solveig_ast::ast::BinOp::Less => self.push_bool(lhs < rhs),
-                        solveig_ast::ast::BinOp::Greater => self.push_bool(lhs > rhs),
-                        solveig_ast::ast::BinOp::LessOrEqual => self.push_bool(lhs <= rhs),
-                        solveig_ast::ast::BinOp::GreaterOrEqual => self.push_bool(lhs >= rhs),
-                        solveig_ast::ast::BinOp::Equal => self.push_bool(lhs == rhs),
-                        solveig_ast::ast::BinOp::Mod => self.push(Value::Int(lhs % rhs)),
-                    }
+                    let result = match op {
+                        solveig_ast::ast::BinOp::Plus => Value::Int(lhs.wrapping_add(rhs)),
+                        solveig_ast::ast::BinOp::Minus => Value::Int(lhs.wrapping_sub(rhs)),
+                        solveig_ast::ast::BinOp::Mult => Value::Int(lhs.wrapping_mul(rhs)),
+                        solveig_ast::ast::BinOp::Div => {
+                            Value::Int(builtins::int_div_trap(lhs, rhs, "/")?)
+                        }
+                        solveig_ast::ast::BinOp::Less => self.bool_value(lhs < rhs),
+                        solveig_ast::ast::BinOp::Greater => self.bool_value(lhs > rhs),
+                        solveig_ast::ast::BinOp::LessOrEqual => self.bool_value(lhs <= rhs),
+                        solveig_ast::ast::BinOp::GreaterOrEqual => self.bool_value(lhs >= rhs),
+                        solveig_ast::ast::BinOp::Equal => self.bool_value(lhs == rhs),
+                        solveig_ast::ast::BinOp::Mod => {
+                            Value::Int(builtins::int_mod_trap(lhs, rhs, "%")?)
+                        }
+                    };
+                    self.push(result);
                 }
                 Instr::CallBuiltin { id, arg_count } => {
-                    let result = self.call_builtin(id, arg_count as usize)?;
+                    let result = self.call_builtin(program, id, arg_count as usize)?;
                     self.push(result);
                 }
                 Instr::Pack {
