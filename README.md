@@ -1,351 +1,283 @@
 # Solveig
 
-Solveig is a small typed functional programming language and compiler project.
+Solveig is a small typed functional programming language and compiler written
+in Rust. It has a real front-to-back pipeline: parser, resolver, kind checker,
+bidirectional type checker with typeclass evidence, lowering, closure
+conversion, bytecode generation, and execution on a custom VM.
 
-It is designed around a principled core:
+The language is still experimental, but it is now practical enough to run
+nontrivial examples, interactive terminal programs, and simple text-file IO.
 
-- algebraic data types
-- pattern matching
-- first-class functions
-- explicit polymorphism with `forall`
-- a module system
-- a compiler-owned prelude
-- a simple custom bytecode VM
+## Quick Start
 
-Solveig is not trying to be a production language yet. It is a language and compiler project meant to stay understandable, inspectable, and pleasant to evolve.
-
-## What Solveig currently supports
-
-At the language level, Solveig currently supports:
-
-- modules and imports
-- top-level signatures and function definitions
-- algebraic data types
-- pattern matching with `case ... of`
-- `let ... in ...`
-- `if ... then ... else ...`
-- integer literals
-- arithmetic and comparison operators
-- list literals like `[1, 2, 3]`
-- cons expressions and patterns with `::`
-- explicit `forall` in types
-- semicolon-separated top-level declarations
-
-The compiler also ships with compiler-owned prelude modules. Non-prelude modules get `prelude.builtins` and `prelude.list` implicitly, so common list and builtin functionality is available without manual imports.
-
-## High-level pipeline
-
-Solveig currently goes through the following pipeline:
-
-1. Parse surface modules
-2. Resolve names and imports
-3. Typecheck and elaborate modules
-4. Lower to internal IR
-5. Closure-convert to closure IR
-6. Lower to bytecode
-7. Execute on the custom VM
-
-The project is structured so that modules are checked in dependency order before whole-program lowering and execution.
-
-## Why this project exists
-
-Solveig is a place to experiment with:
-
-- typed functional language design
-- explicit polymorphism and higher-rank ideas
-- module-aware checking
-- lowering and elaboration
-- custom bytecode and VM design
-- diagnostics and compiler architecture
-
-The goal is not only to make the language more expressive, but also to keep the implementation clean enough that its behavior is easy to reason about.
-
-## Building the compiler
-
-Solveig is a Rust project.
-
-Build it with:
+Build the compiler:
 
 ```bash
-cargo build --release
+cargo build --workspace
 ```
 
-The default way to compile and run a Solveig project is to point the compiler at a project root:
+Run the smoke example suite:
 
 ```bash
 cargo run -- --project-root examples/smoke_suite
 ```
 
-This runs the project using the default entry configuration.
+Run the interactive quiz example:
 
-## Command line options
+```bash
+cargo run -- --project-root examples/quiz_game
+```
 
-The compiler currently supports these CLI options:
+Run all tests:
+
+```bash
+cargo test --workspace
+```
+
+Run clippy:
+
+```bash
+cargo clippy --workspace --all-targets
+```
+
+## Command Line
+
+The CLI runs a Solveig project by pointing at a project root:
+
+```bash
+cargo run -- --project-root <path>
+```
+
+Useful options:
 
 ```text
---project-root <path>   Path to the Solveig project root
--e, --entry <name>      Entry function inside the `main` module
---dump-bytecode         Dump lowered bytecode to `bytecode.txt`
+--project-root <path>   Path to the Solveig project root. Defaults to `.`
+-e, --entry <name>      Entry function inside the `main` module. Defaults to `main`
+--dump-bytecode         Write lowered bytecode to `bytecode.txt`
+--dump-evidence         Print solved typeclass evidence
+--verify-core           Run the core linter during compilation
+--                      Remaining arguments are passed to Solveig `getArgs`
 ```
 
 Examples:
 
-Compile and run a project:
-
 ```bash
 cargo run -- --project-root examples/smoke_suite
-```
-
-Compile and run a project while dumping bytecode:
-
-```bash
 cargo run -- --project-root examples/smoke_suite --dump-bytecode
+cargo run -- --project-root examples/quiz_game
+cargo run -- --project-root my-project -- first second third
 ```
 
-The CLI also has an `--entry` option for selecting a different entry inside the `main` module, but the standard project-level command above is the recommended way to run Solveig projects.
+Inside Solveig, program args are available through:
 
-## Project layout
+```solveig
+getArgs : IO [String]
+```
 
-A Solveig project is a tree of `.sv` files under `src/`.
+## Project Layout
 
-The compiler currently looks for the root entry source file at:
+A Solveig project is a directory with source files under `src/`.
+
+```text
+my-project/
+`-- src/
+    |-- main.sv
+    `-- math/
+        `-- stats.sv
+```
+
+The compiler looks for:
 
 ```text
 <project-root>/src/main.sv
 ```
 
-Module names are derived from file paths. For example:
+Module names come from file paths:
 
 ```text
-src/main.sv              -> main
-src/math/list.sv         -> math.list
-src/data/tree.sv         -> data.tree
+src/main.sv          -> main
+src/math/stats.sv    -> math.stats
 ```
 
-A typical layout might look like this:
-
-```text
-my-project/
-├── Cargo.toml
-├── src/
-│   ├── main.sv
-│   ├── math/
-│   │   └── list.sv
-│   └── data/
-│       └── tree.sv
-```
-
-## Imports
-
-Solveig supports module imports, aliasing, and selective imports.
-
-Examples:
+The default entry is `main.main`, written in source as:
 
 ```solveig
-import math.list;
-import math.list as list;
-import math.list (sum, length);
+main : Int
+main = 42
 ```
 
-In addition to explicit imports, ordinary modules implicitly receive the compiler-owned prelude modules.
+Run it with:
 
-## A quick syntax tour
-
-### Top-level signatures and definitions
-
-Top-level items are separated by semicolons.
-
-```solveig
-id : forall a. a -> a;
-id x = x;
-
-const : forall a b. a -> b -> a;
-const x y = x;
+```bash
+cargo run -- --project-root my-project
 ```
 
-### Data types
+## Language Features
+
+Solveig currently supports:
+
+- algebraic data types
+- pattern matching with exhaustiveness checking
+- first-class functions and lambdas
+- `let` expressions
+- `if ... then ... else ...`
+- modules, imports, aliases, and selective imports
+- explicit `forall`
+- higher-rank type annotations
+- single-parameter typeclasses with superclasses
+- typeclass evidence elaboration into runtime dictionaries
+- default class methods
+- orphan instance warnings
+- user-defined symbolic operators
+- Haskell-style fixity declarations
+- `Int`, `Float`, `Char`, `String`, `Bool`, and `()`
+- list syntax: `[]`, `::`, and `[1, 2, 3]`
+- `Eq`, `Ord`, `Num`, `Fractional`, `Functor`, `Applicative`, `Monad`, and `Show`
+- value display through `Show`
+- monadic `IO`
+- terminal input/output
+- program args through `getArgs`
+- project-relative UTF-8 text file IO
+- structured diagnostics with stable codes
+- typed holes, used by the checker and future LSP work
+
+## Small Examples
+
+Functions:
 
 ```solveig
-data Tree a = Leaf | Node (Tree a) a (Tree a);
+double : Int -> Int
+double x = x + x
+
+main : Int
+main = double 21
 ```
 
-### Pattern matching
+Data and pattern matching:
 
 ```solveig
-size : forall a. Tree a -> Int;
+data Tree a = Leaf | Node (Tree a) a (Tree a)
+
+size : forall a. Tree a -> Int
 size tree =
     case tree of
         Leaf => 0
-      | Node left _ right => 1 + size left + size right;
+        | Node left value right => 1 + size left + size right
+
+main : Int
+main = size (Node Leaf 10 (Node Leaf 20 Leaf))
 ```
 
-### Lists
-
-Lists can be written directly:
+Lists:
 
 ```solveig
-xs : [Int];
-xs = [1, 2, 3, 4];
-```
-
-And matched like this:
-
-```solveig
-sum : [Int] -> Int;
+sum : [Int] -> Int
 sum xs =
     case xs of
         [] => 0
-      | x :: rest => x + sum rest;
+        | x :: rest => x + sum rest
+
+main : [Int]
+main = map (fun x => x * x) [1, 2, 3, 4]
 ```
 
-### Let expressions
+IO:
 
 ```solveig
-doublePlusOne : Int -> Int;
-doublePlusOne x =
-    let y = x + x in
-        y + 1;
+main : IO ()
+main =
+    seqIO
+        (printStr "name> ")
+        (bindIO readLine (fun name =>
+            printLine (appendString "hello, " name)))
 ```
 
-### If expressions
+Text files:
 
 ```solveig
-absInt : Int -> Int;
-absInt n =
-    if n < 0 then
-        0 - n
-    else
-        n;
+main : IO ()
+main =
+    bindIO (readFile "input.txt") (fun contents =>
+        writeFile "copy.txt" contents)
 ```
 
-### Lambda expressions
+## Prelude
+
+Ordinary modules implicitly import:
+
+- `prelude.builtins`
+- `prelude.list`
+- `prelude.typeclasses`
+
+The low-level `prelude.prim` module exists for primitive operations, but it is
+not imported implicitly. Most programs should use the public Prelude wrappers
+and typeclasses instead.
+
+See [docs/prelude.md](docs/prelude.md) for signatures and examples.
+
+## Diagnostics
+
+Diagnostics are phase-prefixed:
+
+- `PAR0001` for parser errors
+- `RES....` for name resolution, imports, fixity, and operators
+- `KIND....` for kind errors
+- `TC....` for type checking and typeclass errors or warnings
+
+Example:
 
 ```solveig
-inc : Int -> Int;
-inc =
-    fun x => x + 1;
+main : String
+main = "left" + "right"
 ```
 
-## A small example
+This reports `TC0013` because `+` is the `Num` method and there is no
+`Num String` instance.
 
-```solveig
-data Tree a = Leaf | Node (Tree a) a (Tree a);
+See [docs/diagnostics.md](docs/diagnostics.md) for the full code index.
 
-insertInt : Int -> Tree Int -> Tree Int;
-insertInt x tree =
-    case tree of
-        Leaf => Node Leaf x Leaf
-      | Node left y right =>
-            if x < y then
-                Node (insertInt x left) y right
-            else if x > y then
-                Node left y (insertInt x right)
-            else
-                tree;
+## Examples In This Repository
 
-fromListInt : [Int] -> Tree Int;
-fromListInt xs =
-    case xs of
-        [] => Leaf
-      | x :: rest => insertInt x (fromListInt rest);
-```
+- `examples/smoke_suite` keeps the old all-in-one demonstration project. It
+  imports and evaluates algorithms and typeclass stress cases.
+- `examples/quiz_game` reads questions from `questions.txt`, prompts on stdin,
+  scores answers, writes `last-score.txt`, and appends `score-history.txt`.
+- `tests/golden/run/` contains small executable regression cases.
+- `tests/golden/diag/` contains diagnostic regression cases.
 
-## Running code
+## Implementation Pipeline
 
-If `src/main.sv` contains:
+The current VM pipeline is:
 
-```solveig
-main : Int;
-main = 42;
-```
+1. Parse source modules.
+2. Resolve imports, names, constructors, classes, and operators.
+3. Infer/check kinds.
+4. Typecheck and elaborate expressions.
+5. Solve typeclass constraints and insert evidence.
+6. Run the core linter when requested and in tests.
+7. Lower checked core to IR.
+8. Desugar evidence into dictionaries.
+9. Closure-convert.
+10. Lower to bytecode.
+11. Execute on the custom VM.
 
-then run:
+The VM remains the reference runtime. A Cranelift backend is planned later.
 
-```bash
-cargo run -- --project-root examples/smoke_suite
-```
+## Current Limitations
 
-The compiler lowers the checked program, runs it on the VM, and prints the result.
+- There is no `do` notation yet. The agreed future direction is generic
+  `Monad` desugaring with indentation-sensitive blocks.
+- File IO is whole-file UTF-8 text IO. There are no handles or binary file
+  operations yet.
+- `/` is currently `Fractional` and only has a `Float` instance. Use `div` and
+  `mod` for Int division and modulo.
+- `String` concatenation is `appendString`; `+` is numeric.
+- Float literal patterns are rejected.
+- Constructor operators and backtick infix are reserved for later work.
+- The Cranelift backend, REPL, and LSP server are planned but not complete.
 
-## Bytecode dumping
+## More Documentation
 
-To inspect the lowered bytecode:
-
-```bash
-cargo run -- --project-root . --entry main --dump-bytecode
-```
-
-This writes a `bytecode.txt` file containing:
-
-- globals
-- constructors
-- chunks
-- instructions
-- expanded match table information
-
-This is useful when debugging lowering, pattern matching, closure conversion, or VM execution.
-
-## Current examples and benchmarks
-
-Example projects live under `examples/`. The old all-in-one demo is now
-`examples/smoke_suite`, and `examples/quiz_game` is an interactive IO example
-that reads questions from a text file, asks for answers, prints a score, and
-writes score files.
-
-The repository already contains nontrivial examples and benchmark-style programs, including things like:
-
-- binary tree code
-- N-Queens
-- Sudoku
-- Brainfuck
-- quicksort
-- stress tests and VM benchmarks
-
-These are useful both as language examples and as runtime/compiler tests.
-
-## Current status
-
-Solveig already has a meaningful end-to-end pipeline and can run substantial examples.
-
-At the same time, it is still actively evolving. The current emphasis is on:
-
-- keeping the design principled
-- improving diagnostics and ergonomics
-- growing the standard library
-- refining the language surface
-- adding features only when they fit the existing architecture cleanly
-
-## Near-term direction
-
-The most likely near-term areas of work are:
-
-- cleaner project/compiler structure
-- better diagnostics
-- more examples and benchmarks
-- more practical standard-library modules
-- additional language features that fit the current core cleanly
-
-## Notes
-
-A few practical notes about the current state of the language:
-
-- the prelude is compiler-owned
-- modules are checked in dependency order
-- import cycles are rejected
-- the runtime is based on a custom bytecode VM
-- the implementation is intentionally kept understandable rather than overly magical
-
-## Summary
-
-Solveig is a small, typed functional language project with a real compiler pipeline and custom VM.
-
-It is a good fit for experimenting with:
-
-- type systems
-- elaboration
-- lowering pipelines
-- bytecode design
-- runtime behavior
-- compiler structure
-
-while still having a language that is pleasant enough to write real examples in.
+- [docs/tutorial.md](docs/tutorial.md)
+- [docs/prelude.md](docs/prelude.md)
+- [docs/diagnostics.md](docs/diagnostics.md)
