@@ -1,4 +1,5 @@
-use solveig_ast::ast::{CtorRuntimeInfo, Literal, ctor_display_name};
+use solveig_ast::ast::CtorRuntimeInfo;
+use solveig_ast::ast::Literal;
 
 use super::bytecode::{
     BytePattern, BytecodeProgram, ChunkKind, Instr, MatchArm, lower_to_bytecode,
@@ -1145,10 +1146,7 @@ fn chunk_arity(program: &BytecodeProgram, chunk_id: usize) -> usize {
 fn find_bool_tag(arities: &[CtorRuntimeInfo], name: &str) -> u16 {
     arities
         .iter()
-        .find(|info| {
-            let ctor_name = ctor_display_name(info.ctor);
-            info.arity == 0 && (ctor_name.ends_with(&format!(".{}", name)) || ctor_name == name)
-        })
+        .find(|info| info.arity == 0 && (info.name == name || info.short_name == name))
         .map(|info| info.tag)
         .unwrap_or_else(|| panic!("'{}' constructor not found", name))
 }
@@ -1362,11 +1360,15 @@ mod tests {
         let mut constructor_arities = vec![
             CtorRuntimeInfo {
                 ctor: legacy_ctor_id("True"),
+                name: "True".to_string(),
+                short_name: "True".to_string(),
                 tag: TRUE_TAG,
                 arity: 0,
             },
             CtorRuntimeInfo {
                 ctor: legacy_ctor_id("False"),
+                name: "False".to_string(),
+                short_name: "False".to_string(),
                 tag: FALSE_TAG,
                 arity: 0,
             },
@@ -1375,6 +1377,8 @@ mod tests {
         constructor_arities.extend(extra_constructors.iter().map(|(name, tag, arity)| {
             CtorRuntimeInfo {
                 ctor: legacy_ctor_id(name),
+                name: (*name).to_string(),
+                short_name: (*name).to_string(),
                 tag: *tag,
                 arity: *arity,
             }

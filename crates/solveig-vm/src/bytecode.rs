@@ -1,4 +1,4 @@
-use solveig_ast::ast::{BinOp, CtorRuntimeInfo, Literal, UnOp, ctor_display_name};
+use solveig_ast::ast::{BinOp, CtorRuntimeInfo, Literal, UnOp};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
@@ -122,13 +122,13 @@ impl BytecodeProgram {
         self.constructor_arities
             .iter()
             .find(|info| info.tag == tag)
-            .map(|info| ctor_display_name(info.ctor))
+            .map(|info| info.name.clone())
     }
 
     pub fn constructor_tag(&self, name: &str) -> Option<u16> {
         self.constructor_arities
             .iter()
-            .find(|info| ctor_display_name(info.ctor) == name)
+            .find(|info| info.name == name || info.short_name == name)
             .map(|info| info.tag)
     }
 
@@ -162,9 +162,7 @@ impl BytecodeProgram {
         for info in &self.constructor_arities {
             out.push_str(&format!(
                 "tag {:>3}  arity {:>2}  {}\n",
-                info.tag,
-                info.arity,
-                ctor_display_name(info.ctor)
+                info.tag, info.arity, info.name
             ));
         }
 

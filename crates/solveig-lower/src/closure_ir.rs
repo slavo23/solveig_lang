@@ -1,4 +1,4 @@
-use solveig_ast::ast::{BinOp, CtorRuntimeInfo, Literal, UnOp, ctor_display_name};
+use solveig_ast::ast::{BinOp, CtorRuntimeInfo, Literal, UnOp};
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -99,13 +99,13 @@ impl CCProgram {
         self.constructor_arities
             .iter()
             .find(|info| info.tag == tag)
-            .map(|info| ctor_display_name(info.ctor))
+            .map(|info| info.name.clone())
     }
 
     pub fn constructor_tag(&self, name: &str) -> Option<u16> {
         self.constructor_arities
             .iter()
-            .find(|info| ctor_display_name(info.ctor) == name)
+            .find(|info| info.name == name || info.short_name == name)
             .map(|info| info.tag)
     }
 

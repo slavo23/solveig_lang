@@ -1044,6 +1044,8 @@ pub struct ConstructorDef {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CtorRuntimeInfo {
     pub ctor: CtorId,
+    pub name: String,
+    pub short_name: String,
     pub tag: u16,
     pub arity: u16,
 }

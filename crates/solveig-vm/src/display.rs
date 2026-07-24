@@ -1,6 +1,6 @@
 use crate::heap::{Heap, HeapObject};
 use crate::values::Value;
-use solveig_ast::ast::{CtorRuntimeInfo, ctor_display_name};
+use solveig_ast::ast::CtorRuntimeInfo;
 
 pub struct DisplayValue<'a> {
     pub root: Value,
@@ -14,18 +14,11 @@ impl std::fmt::Display for DisplayValue<'_> {
     }
 }
 
-fn base_name(name: &str) -> &str {
-    name.rsplit('.').next().unwrap_or(name)
-}
-
 fn tag_name(arities: &[CtorRuntimeInfo], tag: u16) -> String {
     arities
         .iter()
         .find(|info| info.tag == tag)
-        .map(|info| {
-            let name = ctor_display_name(info.ctor);
-            base_name(&name).to_string()
-        })
+        .map(|info| info.short_name.clone())
         .unwrap_or_else(|| "<?>".to_string())
 }
 

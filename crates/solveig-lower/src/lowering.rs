@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    CaseArm, CtorId, CtorRuntimeInfo, DataDefinition, Literal, Pattern, PatternNode,
-    ResolvedModule, TermExpr, TermExprNode, VarRef, ctor_display_name, var_display_name,
+    CaseArm, CtorId, CtorRuntimeInfo, Literal, Pattern, PatternNode, ResolvedModule, TermExpr,
+    TermExprNode, VarRef, symbol_display_name, var_display_name,
 };
 
 use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
@@ -11,7 +11,15 @@ use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
 struct LowerCtx {
     scope: Vec<String>,
     globals: HashMap<String, usize>,
-    constructors: HashMap<CtorId, (u16, u16)>,
+    constructors: HashMap<CtorId, LowerConstructorInfo>,
+}
+
+#[derive(Clone, Debug)]
+struct LowerConstructorInfo {
+    name: String,
+    short_name: String,
+    tag: u16,
+    arity: u16,
 }
 
 impl LowerCtx {
@@ -26,13 +34,26 @@ impl LowerCtx {
         if let Some(&global_index) = self.globals.get(&name) {
             return Rc::new(IRExpr::FVar(global_index));
         }
-        if let Some(&(tag, arity)) = self
-            .constructors
-            .get(&solveig_ast::ast::legacy_ctor_id(&name))
-        {
-            return Rc::new(IRExpr::Con { tag, arity });
+        if let Some(info) = self.constructor_named(&name) {
+            return Rc::new(IRExpr::Con {
+                tag: info.tag,
+                arity: info.arity,
+            });
         }
         panic!("unbound variable during lowering: {}", name);
+    }
+
+    fn constructor_named(&self, name: &str) -> Option<&LowerConstructorInfo> {
+        self.constructors
+            .values()
+            .find(|info| info.name == name || info.short_name == name)
+    }
+
+    fn constructor_name_for_error(&self, id: CtorId) -> String {
+        self.constructors
+            .get(&id)
+            .map(|info| info.name.clone())
+            .unwrap_or_else(|| format!("C{}", id.0))
     }
 
     fn push(&mut self, name: &str) {
@@ -78,13 +99,16 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
         TermExpr::Var(name) => ctx.resolve_var(name),
         TermExpr::Lit(Literal::Int(n)) => Rc::new(IRExpr::Int(*n)),
         TermExpr::Con(id) => {
-            let &(tag, arity) = ctx.constructors.get(id).unwrap_or_else(|| {
+            let info = ctx.constructors.get(id).unwrap_or_else(|| {
                 panic!(
                     "unknown constructor during lowering: {}",
-                    ctor_display_name(*id)
+                    ctx.constructor_name_for_error(*id)
                 )
             });
-            Rc::new(IRExpr::Con { tag, arity })
+            Rc::new(IRExpr::Con {
+                tag: info.tag,
+                arity: info.arity,
+            })
         }
 
         TermExpr::Abs(param, _, body) => {
@@ -166,25 +190,47 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> IRPattern {
         Pattern::Wild => IRPattern::Wild,
         Pattern::Lit(lit_val) => IRPattern::Lit(lit_val.clone()),
         Pattern::Con(id, sub_patterns) => {
-            let &(tag, _) = ctx.constructors.get(id).unwrap_or_else(|| {
-                panic!("unknown constructor in pattern: {}", ctor_display_name(*id))
+            let info = ctx.constructors.get(id).unwrap_or_else(|| {
+                panic!(
+                    "unknown constructor in pattern: {}",
+                    ctx.constructor_name_for_error(*id)
+                )
             });
             let sub_ir_patterns = sub_patterns
                 .iter()
                 .map(|sub_pattern| lower_pattern(ctx, sub_pattern))
                 .collect();
-            IRPattern::Con(tag, sub_ir_patterns)
+            IRPattern::Con(info.tag, sub_ir_patterns)
         }
     }
 }
 
-fn build_constructor_table(data_defs: &[DataDefinition]) -> HashMap<CtorId, (u16, u16)> {
+fn build_constructor_table<A, P>(
+    module: &ResolvedModule<A, P>,
+) -> HashMap<CtorId, LowerConstructorInfo> {
     let mut table = HashMap::new();
     let mut next_tag: u16 = 0;
-    for data_def in data_defs {
+    for data_def in &module.data_defs {
         for constructor_def in &data_def.constructors {
+            let table_info = module
+                .ctor_table
+                .get(constructor_def.id)
+                .unwrap_or_else(|| {
+                    panic!(
+                        "ICE: lowering constructor table missing CtorId {:?}",
+                        constructor_def.id
+                    )
+                });
             let arity = constructor_def.fields.len() as u16;
-            table.insert(constructor_def.id, (next_tag, arity));
+            table.insert(
+                constructor_def.id,
+                LowerConstructorInfo {
+                    name: symbol_display_name(table_info.name),
+                    short_name: symbol_display_name(table_info.short_name),
+                    tag: next_tag,
+                    arity,
+                },
+            );
             next_tag += 1;
         }
     }
@@ -192,17 +238,11 @@ fn build_constructor_table(data_defs: &[DataDefinition]) -> HashMap<CtorId, (u16
 }
 
 pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
-    let constructors = build_constructor_table(&module.data_defs);
+    let constructors = build_constructor_table(module);
 
     let mut globals: HashMap<String, usize> = HashMap::new();
     for (index, func_def) in module.func_defs.iter().enumerate() {
         globals.insert(func_def.name.clone(), index);
-    }
-
-    for (id, &(_, _)) in &constructors {
-        if !globals.contains_key(&ctor_display_name(*id)) {
-            // Don't shadow function names
-        }
     }
 
     let mut ctx = LowerCtx {
@@ -225,10 +265,12 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
 
     let constructor_arities = constructors
         .iter()
-        .map(|(ctor, &(tag, arity))| CtorRuntimeInfo {
+        .map(|(ctor, info)| CtorRuntimeInfo {
             ctor: *ctor,
-            tag,
-            arity,
+            name: info.name.clone(),
+            short_name: info.short_name.clone(),
+            tag: info.tag,
+            arity: info.arity,
         })
         .collect();
 
