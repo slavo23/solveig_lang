@@ -130,6 +130,15 @@ impl ClassKindInferencer {
             }
 
             TypeExpr::TyApp(lhs, rhs) => {
+                if matches!(**lhs, TypeExpr::TyForAll(_, _, _))
+                    || matches!(**rhs, TypeExpr::TyForAll(_, _, _))
+                {
+                    return Err(KindError::cannot_unify(
+                        Kind::Star,
+                        Kind::make_arrow(Kind::Star, Kind::Star),
+                    ));
+                }
+
                 let lhs_kind = self.infer_type_kind(lhs, env)?;
                 let rhs_kind = self.infer_type_kind(rhs, env)?;
                 let result_kind = self.fresh_meta();
@@ -138,33 +147,30 @@ impl ClassKindInferencer {
                 Ok(self.apply_kind(&result_kind))
             }
 
-            TypeExpr::TyForAll(var_name, _old_kind, body) => {
-                let fresh = self.fresh_meta();
-                let old = env.insert(*var_name, fresh.clone());
-
-                let body_kind = self.infer_type_kind(body, env)?;
-                self.unify(body_kind, Kind::Star)?;
-
-                match old {
-                    Some(prev) => {
-                        env.insert(*var_name, prev);
-                    }
-                    None => {
-                        env.remove(var_name);
-                    }
+            TypeExpr::TyForAll(binders, preds, body) => {
+                let mut old_bindings = Vec::with_capacity(binders.len());
+                for (name, _) in binders {
+                    old_bindings.push((*name, env.insert(*name, self.fresh_meta())));
                 }
 
-                Ok(Kind::Star)
-            }
-
-            #[allow(unreachable_patterns)]
-            TypeExpr::Qualified(preds, body) => {
                 for pred in preds {
                     self.check_predicate(pred, env)?;
                 }
 
                 let body_kind = self.infer_type_kind(body, env)?;
                 self.unify(body_kind, Kind::Star)?;
+
+                for (name, old) in old_bindings.into_iter().rev() {
+                    match old {
+                        Some(prev) => {
+                            env.insert(name, prev);
+                        }
+                        None => {
+                            env.remove(&name);
+                        }
+                    }
+                }
+
                 Ok(Kind::Star)
             }
         }
@@ -184,16 +190,17 @@ impl ClassKindInferencer {
                 self.zonk_type_with_env(lhs, env),
                 self.zonk_type_with_env(rhs, env),
             ),
-            TypeExpr::TyForAll(name, _kind, body) => {
-                let kind = env
-                    .get(name)
-                    .map(|k| self.zonk_kind_for_binder(k))
-                    .unwrap_or(Kind::Star);
-
-                TypeExpr::make_forall_id(*name, kind, self.zonk_type_with_env(body, env))
-            }
-            #[allow(unreachable_patterns)]
-            TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
+            TypeExpr::TyForAll(binders, preds, body) => TypeExpr::make_forall_group(
+                binders
+                    .iter()
+                    .map(|(name, _)| {
+                        let kind = env
+                            .get(name)
+                            .map(|k| self.zonk_kind_for_binder(k))
+                            .unwrap_or(Kind::Star);
+                        (*name, kind)
+                    })
+                    .collect(),
                 preds
                     .iter()
                     .map(|p| self.zonk_predicate_with_env(p, env))

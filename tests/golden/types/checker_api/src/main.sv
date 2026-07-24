@@ -58,10 +58,19 @@ useRank2 f =
     let boolResult = f True in
     if boolResult then intResult + 1 else 0
 
+useRank2Eq : (forall a. Eq a => a -> a -> Bool) -> Bool
+useRank2Eq f =
+    let intResult = f 1 1 in
+    let boolResult = f True True in
+    if intResult then boolResult else False
+
 polyId : forall a. a -> a
 polyId x = x
 
 rank2Result : Int
 rank2Result = useRank2 polyId
+
+rank2EqResult : Bool
+rank2EqResult = useRank2Eq eq
 
 main = if lessInt then rank2Result else 0

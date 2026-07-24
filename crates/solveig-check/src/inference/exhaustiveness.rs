@@ -604,10 +604,6 @@ fn strip_type_prefixes(mut ty: TypeExpr) -> TypeExpr {
                 ty = *body;
             }
 
-            TypeExpr::Qualified(_, body) => {
-                ty = *body;
-            }
-
             other => return other,
         }
     }
@@ -627,8 +623,7 @@ fn type_head_tycon(ty: &TypeExpr) -> Option<TyConId> {
         | TypeExpr::TyVar(_)
         | TypeExpr::TyExVar(_)
         | TypeExpr::TyArr(_, _)
-        | TypeExpr::TyForAll(_, _, _)
-        | TypeExpr::Qualified(_, _) => None,
+        | TypeExpr::TyForAll(_, _, _) => None,
     }
 }
 
@@ -685,27 +680,28 @@ fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<TyVarId, TypeExpr>) -> TypeExp
             TypeExpr::make_app(subst_type_vars(lhs, subst), subst_type_vars(rhs, subst))
         }
 
-        TypeExpr::TyForAll(name, kind, body) => {
+        TypeExpr::TyForAll(binders, predicates, body) => {
             let mut scoped_subst = subst.clone();
-            scoped_subst.remove(name);
+            for (name, _) in binders {
+                scoped_subst.remove(name);
+            }
 
-            TypeExpr::make_forall_id(*name, kind.clone(), subst_type_vars(body, &scoped_subst))
+            TypeExpr::make_forall_group(
+                binders.clone(),
+                predicates
+                    .iter()
+                    .map(|pred| Predicate {
+                        class_id: pred.class_id,
+                        args: pred
+                            .args
+                            .iter()
+                            .map(|arg| subst_type_vars(arg, &scoped_subst))
+                            .collect(),
+                    })
+                    .collect(),
+                subst_type_vars(body, &scoped_subst),
+            )
         }
-
-        TypeExpr::Qualified(predicates, body) => TypeExpr::make_qualified(
-            predicates
-                .iter()
-                .map(|pred| Predicate {
-                    class_id: pred.class_id,
-                    args: pred
-                        .args
-                        .iter()
-                        .map(|arg| subst_type_vars(arg, subst))
-                        .collect(),
-                })
-                .collect(),
-            subst_type_vars(body, subst),
-        ),
     }
 }
 

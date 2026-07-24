@@ -398,6 +398,15 @@ impl SignatureKindInferencer {
             }
 
             TypeExpr::TyApp(lhs, rhs) => {
+                if matches!(**lhs, TypeExpr::TyForAll(_, _, _))
+                    || matches!(**rhs, TypeExpr::TyForAll(_, _, _))
+                {
+                    return Err(KindError::cannot_unify(
+                        Kind::Star,
+                        Kind::make_arrow(Kind::Star, Kind::Star),
+                    ));
+                }
+
                 let (lhs_kind, lhs_kinded) = self.infer_and_rebuild(lhs, env)?;
                 let (rhs_kind, rhs_kinded) = self.infer_and_rebuild(rhs, env)?;
                 let result_kind = self.fresh_meta();
@@ -408,29 +417,15 @@ impl SignatureKindInferencer {
                 ))
             }
 
-            TypeExpr::TyForAll(var_name, _old_kind, body) => {
-                let fresh = self.fresh_meta();
-                let old = env.insert(*var_name, fresh.clone());
-                let (body_kind, body_kinded) = self.infer_and_rebuild(body, env)?;
-                self.unify(body_kind, Kind::Star)?;
-
-                match old {
-                    Some(prev) => {
-                        env.insert(*var_name, prev);
-                    }
-                    None => {
-                        env.remove(var_name);
-                    }
+            TypeExpr::TyForAll(binders, preds, body) => {
+                let mut binder_metas = Vec::with_capacity(binders.len());
+                let mut old_bindings = Vec::with_capacity(binders.len());
+                for (name, _) in binders {
+                    let fresh = self.fresh_meta();
+                    old_bindings.push((*name, env.insert(*name, fresh.clone())));
+                    binder_metas.push((*name, fresh));
                 }
 
-                let solved_binder_kind = self.zonk_kind_for_binder(&fresh);
-                Ok((
-                    Kind::Star,
-                    TypeExpr::TyForAll(*var_name, solved_binder_kind, Box::new(body_kinded)),
-                ))
-            }
-
-            TypeExpr::Qualified(preds, body) => {
                 let rebuilt_preds = preds
                     .iter()
                     .map(|pred| self.infer_predicate(pred, env))
@@ -439,17 +434,35 @@ impl SignatureKindInferencer {
                 let (body_kind, body_kinded) = self.infer_and_rebuild(body, env)?;
                 self.unify(body_kind, Kind::Star)?;
 
+                for (name, old) in old_bindings.into_iter().rev() {
+                    match old {
+                        Some(prev) => {
+                            env.insert(name, prev);
+                        }
+                        None => {
+                            env.remove(&name);
+                        }
+                    }
+                }
+
                 Ok((
                     Kind::Star,
-                    TypeExpr::Qualified(rebuilt_preds, Box::new(body_kinded)),
+                    TypeExpr::make_forall_group(
+                        binder_metas
+                            .into_iter()
+                            .map(|(name, kind)| (name, self.zonk_kind_for_binder(&kind)))
+                            .collect(),
+                        rebuilt_preds,
+                        body_kinded,
+                    ),
                 ))
             }
         }
     }
 
     fn collect_outer_foralls(ty: &TypeExpr, out: &mut Vec<(TyVarId, Kind)>) {
-        if let TypeExpr::TyForAll(name, kind, body) = ty {
-            out.push((*name, kind.clone()));
+        if let TypeExpr::TyForAll(binders, _, body) = ty {
+            out.extend(binders.iter().cloned());
             Self::collect_outer_foralls(body, out);
         }
     }
@@ -474,19 +487,19 @@ impl SignatureKindInferencer {
                 Self::collect_free_tyvars_in_type(rhs, bound, seen, out);
             }
 
-            TypeExpr::TyForAll(name, _, body) => {
-                bound.push(*name);
-                Self::collect_free_tyvars_in_type(body, bound, seen, out);
-                bound.pop();
-            }
-
-            TypeExpr::Qualified(preds, body) => {
+            TypeExpr::TyForAll(binders, preds, body) => {
+                for (name, _) in binders {
+                    bound.push(*name);
+                }
                 for pred in preds {
                     for arg in &pred.args {
                         Self::collect_free_tyvars_in_type(arg, bound, seen, out);
                     }
                 }
                 Self::collect_free_tyvars_in_type(body, bound, seen, out);
+                for _ in binders {
+                    bound.pop();
+                }
             }
         }
     }

@@ -10,17 +10,14 @@ impl TypeChecker {
                 Self::free_type_vars_in_type(rhs, out);
             }
 
-            TypeExpr::TyForAll(name, _, body) => {
-                Self::free_type_vars_in_type(body, out);
-                out.remove(name);
-            }
-
-            TypeExpr::Qualified(preds, body) => {
+            TypeExpr::TyForAll(binders, preds, body) => {
                 for pred in preds {
                     Self::free_type_vars_in_predicate(pred, out);
                 }
-
                 Self::free_type_vars_in_type(body, out);
+                for (name, _) in binders {
+                    out.remove(name);
+                }
             }
 
             TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}
@@ -345,7 +342,6 @@ impl TypeChecker {
             },
 
             TypeExpr::TyForAll(_, _, body) => Self::match_instance_type(body, target, subst),
-            TypeExpr::Qualified(_, body) => Self::match_instance_type(body, target, subst),
 
             TypeExpr::TyExVar(name) => matches!(target, TypeExpr::TyExVar(other) if name == other),
         }
@@ -439,10 +435,7 @@ impl TypeChecker {
                 Self::collect_exvars_in_type(lhs, acc);
                 Self::collect_exvars_in_type(rhs, acc);
             }
-            TypeExpr::TyForAll(_, _, body) => {
-                Self::collect_exvars_in_type(body, acc);
-            }
-            TypeExpr::Qualified(preds, body) => {
+            TypeExpr::TyForAll(_, preds, body) => {
                 for pred in preds {
                     for arg in &pred.args {
                         Self::collect_exvars_in_type(arg, acc);

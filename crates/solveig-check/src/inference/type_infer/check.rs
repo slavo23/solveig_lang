@@ -16,11 +16,19 @@ impl TypeChecker {
 
             (
                 TermExpr::TyAbs(param, _kind, body),
-                TypeExpr::TyForAll(quantifier, quant_kind, body_type),
-            ) => {
+                TypeExpr::TyForAll(binders, preds, body_type),
+            ) if let Some((quantifier, quant_kind)) = binders.first() => {
                 let param_id = legacy_tyvar_id(param);
-                let substituted_body_type =
-                    body_type.substitute(*quantifier, &TypeExpr::TyVar(param_id));
+                let ty_arg = TypeExpr::TyVar(param_id);
+                let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
+                let substituted_body_type = TypeExpr::make_forall_group(
+                    binders[1..].to_vec(),
+                    preds
+                        .iter()
+                        .map(|pred| Self::substitute_predicate(pred, &subst))
+                        .collect(),
+                    body_type.substitute(*quantifier, &ty_arg),
+                );
                 let universal_entry = Self::universal_entry(param_id, quant_kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
 
@@ -117,12 +125,18 @@ impl TypeChecker {
                 Ok((ctx, elaborated))
             }
 
-            (_, TypeExpr::TyForAll(quantifier, kind, body_type)) => {
+            (_, TypeExpr::TyForAll(binders, preds, body_type)) if !binders.is_empty() => {
+                let (quantifier, kind) = &binders[0];
                 let universal_entry = Self::universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
+                let body_type = TypeExpr::make_forall_group(
+                    binders[1..].to_vec(),
+                    preds.clone(),
+                    (**body_type).clone(),
+                );
 
                 let (delta, elaborated_body) =
-                    self.solve_checking(extended_ctx, expr, body_type)?;
+                    self.solve_checking(extended_ctx, expr, &body_type)?;
 
                 let result_type = expected_type.clone();
                 let elaborated = elab_node(
@@ -136,7 +150,7 @@ impl TypeChecker {
                 );
                 Ok((delta.until(&universal_entry), elaborated))
             }
-            (_, TypeExpr::Qualified(preds, body)) => {
+            (_, TypeExpr::TyForAll(_, preds, body)) => {
                 let preds = preds.clone();
                 self.with_givens(preds, |checker| checker.solve_checking(ctx, expr, body))
             }

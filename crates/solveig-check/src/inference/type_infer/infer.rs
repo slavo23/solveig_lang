@@ -245,8 +245,18 @@ impl TypeChecker {
                 let inner_type_applied = delta.apply(&inner_type);
 
                 match inner_type_applied {
-                    TypeExpr::TyForAll(quantifier, _kind, body) => {
-                        let result_type = body.substitute(quantifier, ty_arg);
+                    TypeExpr::TyForAll(ref binders, ref preds, ref body)
+                        if let Some((quantifier, _)) = binders.first() =>
+                    {
+                        let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
+                        let result_type = TypeExpr::make_forall_group(
+                            binders[1..].to_vec(),
+                            preds
+                                .iter()
+                                .map(|pred| Self::substitute_predicate(pred, &subst))
+                                .collect(),
+                            body.substitute(*quantifier, ty_arg),
+                        );
                         let elaborated = elab_node(
                             TermExpr::TyApp(Box::new(elaborated_inner), ty_arg.clone()),
                             span,
@@ -327,13 +337,22 @@ impl TypeChecker {
         let function_type = ctx.apply(function_type);
 
         match &function_type {
-            TypeExpr::TyForAll(quantifier, kind, body) => {
+            TypeExpr::TyForAll(binders, preds, body) if !binders.is_empty() => {
+                let (quantifier, kind) = &binders[0];
                 let fresh_evar = self.fresh_evar_id();
                 let evar_entry = ContextEntry::ExVar(fresh_evar, kind.clone());
                 let extended_ctx = ctx.add_entry(evar_entry);
 
                 let ty_arg = Self::evar_type(fresh_evar);
-                let instantiated_type = body.substitute(*quantifier, &ty_arg);
+                let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
+                let instantiated_type = TypeExpr::make_forall_group(
+                    binders[1..].to_vec(),
+                    preds
+                        .iter()
+                        .map(|pred| Self::substitute_predicate(pred, &subst))
+                        .collect(),
+                    body.substitute(*quantifier, &ty_arg),
+                );
 
                 let wrapped_function = TermExprNode::new(
                     TermExpr::TyApp(Box::new(elaborated_function.clone()), ty_arg),
@@ -348,6 +367,10 @@ impl TypeChecker {
                     span,
                     arg_span,
                 )
+            }
+            TypeExpr::TyForAll(_, preds, body) => {
+                self.add_wanteds(preds.clone(), span.clone());
+                self.solve_app_inference(ctx, body, argument, elaborated_function, span, arg_span)
             }
             TypeExpr::TyArr(domain, codomain) => {
                 let (delta, elaborated_argument) = self.solve_checking(ctx, argument, domain)?;

@@ -147,17 +147,7 @@ impl TypeChecker {
         }
     }
     fn scheme_to_type(scheme: &Scheme) -> TypeExpr {
-        let mut ty = scheme.ty.clone();
-
-        if !scheme.predicates.is_empty() {
-            ty = TypeExpr::make_qualified(scheme.predicates.clone(), ty);
-        }
-
-        for (id, kind) in scheme.quantifiers.iter().rev() {
-            ty = TypeExpr::make_forall_id(*id, kind.clone(), ty);
-        }
-
-        ty
+        scheme.to_type_expr()
     }
     fn type_to_scheme(ty: &TypeExpr) -> Scheme {
         let (quantifiers, predicates, body) = ty.peel_scheme_like();

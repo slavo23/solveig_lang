@@ -105,10 +105,9 @@ pub enum Ty {
     TyVar(TyVarId),
     TyExVar(EvarId),
     TyArr(Box<Ty>, Box<Ty>),
-    TyForAll(TyVarId, Kind, Box<Ty>),
+    TyForAll(Vec<(TyVarId, Kind)>, Vec<Predicate>, Box<Ty>),
     TyCon(TyConId),
     TyApp(Box<Ty>, Box<Ty>),
-    Qualified(Vec<Predicate>, Box<Ty>),
 }
 
 pub type TypeExpr = Ty;
@@ -477,9 +476,7 @@ impl Ty {
                 lhs.occurs_check(evar_id) || rhs.occurs_check(evar_id)
             }
 
-            Self::TyForAll(_, _kind, body) => body.occurs_check(evar_id),
-
-            Self::Qualified(preds, body) => {
+            Self::TyForAll(_, preds, body) => {
                 preds
                     .iter()
                     .any(|pred| pred.args.iter().any(|arg| arg.occurs_check(evar_id)))
@@ -490,28 +487,17 @@ impl Ty {
         }
     }
 
-    pub fn peel_qualified(&self) -> (Vec<Predicate>, TypeExpr) {
-        match self {
-            TypeExpr::Qualified(preds, body) => (preds.clone(), (**body).clone()),
-            other => (Vec::new(), other.clone()),
-        }
-    }
-
     pub fn peel_scheme_like(&self) -> (Vec<(TyVarId, Kind)>, Vec<Predicate>, TypeExpr) {
-        let (quants, rest) = self.peel_forall();
-        let (preds, ty) = rest.peel_qualified();
-        (quants, preds, ty)
-    }
-
-    pub fn peel_forall(&self) -> (Vec<(TyVarId, Kind)>, TypeExpr) {
         let mut current_ty = self.clone();
         let mut quants_with_kinds = vec![];
-        while let TypeExpr::TyForAll(q, _kind, body) = current_ty {
+        let mut predicates = vec![];
+        while let TypeExpr::TyForAll(mut quants, mut preds, body) = current_ty {
+            quants_with_kinds.append(&mut quants);
+            predicates.append(&mut preds);
             current_ty = *body;
-            quants_with_kinds.push((q, _kind));
         }
 
-        (quants_with_kinds, current_ty)
+        (quants_with_kinds, predicates, current_ty)
     }
 
     pub fn peel_arrow(&self) -> Option<(TypeExpr, TypeExpr)> {
@@ -551,15 +537,34 @@ impl Ty {
     }
 
     pub fn make_forall(quant_name: String, kind: Kind, body: TypeExpr) -> TypeExpr {
-        TypeExpr::TyForAll(legacy_tyvar_id(&quant_name), kind, Box::new(body))
+        Self::make_forall_id(legacy_tyvar_id(&quant_name), kind, body)
     }
 
     pub fn make_forall_id(quant_id: TyVarId, kind: Kind, body: TypeExpr) -> TypeExpr {
-        TypeExpr::TyForAll(quant_id, kind, Box::new(body))
+        Self::make_forall_group(vec![(quant_id, kind)], Vec::new(), body)
     }
 
     pub fn make_qualified(predicates: Vec<Predicate>, body: TypeExpr) -> TypeExpr {
-        TypeExpr::Qualified(predicates, Box::new(body))
+        Self::make_forall_group(Vec::new(), predicates, body)
+    }
+
+    pub fn make_forall_group(
+        mut binders: Vec<(TyVarId, Kind)>,
+        mut predicates: Vec<Predicate>,
+        body: TypeExpr,
+    ) -> TypeExpr {
+        if binders.is_empty() && predicates.is_empty() {
+            return body;
+        }
+
+        match body {
+            TypeExpr::TyForAll(mut body_binders, mut body_predicates, body_body) => {
+                binders.append(&mut body_binders);
+                predicates.append(&mut body_predicates);
+                TypeExpr::TyForAll(binders, predicates, body_body)
+            }
+            body => TypeExpr::TyForAll(binders, predicates, Box::new(body)),
+        }
     }
 
     pub fn substitute(&self, var_id: TyVarId, with_type: &TypeExpr) -> TypeExpr {
@@ -584,32 +589,27 @@ impl Ty {
                 rhs.substitute(var_id, with_type),
             ),
 
-            Self::TyForAll(quantifier, kind, body) => {
-                if *quantifier == var_id {
-                    Self::make_forall_id(*quantifier, kind.clone(), (**body).clone())
+            Self::TyForAll(binders, preds, body) => {
+                if binders.iter().any(|(quantifier, _)| *quantifier == var_id) {
+                    Self::make_forall_group(binders.clone(), preds.clone(), (**body).clone())
                 } else {
-                    Self::make_forall_id(
-                        *quantifier,
-                        kind.clone(),
+                    let new_preds = preds
+                        .iter()
+                        .map(|pred| Predicate {
+                            class_id: pred.class_id,
+                            args: pred
+                                .args
+                                .iter()
+                                .map(|arg| arg.substitute(var_id, with_type))
+                                .collect(),
+                        })
+                        .collect();
+                    Self::make_forall_group(
+                        binders.clone(),
+                        new_preds,
                         body.substitute(var_id, with_type),
                     )
                 }
-            }
-
-            Self::Qualified(preds, body) => {
-                let new_preds = preds
-                    .iter()
-                    .map(|pred| Predicate {
-                        class_id: pred.class_id,
-                        args: pred
-                            .args
-                            .iter()
-                            .map(|arg| arg.substitute(var_id, with_type))
-                            .collect(),
-                    })
-                    .collect();
-
-                Self::make_qualified(new_preds, body.substitute(var_id, with_type))
             }
         }
     }
@@ -636,13 +636,7 @@ impl Ty {
                 rhs.substitute_evar(evar_id, with_type),
             ),
 
-            Self::TyForAll(quantifier, kind, body) => Self::make_forall_id(
-                *quantifier,
-                kind.clone(),
-                body.substitute_evar(evar_id, with_type),
-            ),
-
-            Self::Qualified(preds, body) => {
+            Self::TyForAll(binders, preds, body) => {
                 let new_preds = preds
                     .iter()
                     .map(|pred| Predicate {
@@ -655,7 +649,11 @@ impl Ty {
                     })
                     .collect();
 
-                Self::make_qualified(new_preds, body.substitute_evar(evar_id, with_type))
+                Self::make_forall_group(
+                    binders.clone(),
+                    new_preds,
+                    body.substitute_evar(evar_id, with_type),
+                )
             }
         }
     }
@@ -664,7 +662,7 @@ impl Ty {
 impl Pretty<Ty> for Ty {
     fn get_precedence(t: &Ty) -> u8 {
         match t {
-            TypeExpr::TyForAll(_, _, _) | TypeExpr::Qualified(_, _) => PRECEDENCE_LOOSE,
+            TypeExpr::TyForAll(_, _, _) => PRECEDENCE_LOOSE,
             TypeExpr::TyArr(_, _) => PRECEDENCE_ARR,
             TypeExpr::TyApp(_, _) => PRECEDENCE_APP,
             TypeExpr::TyUnit | TypeExpr::TyVar(_) | TypeExpr::TyExVar(_) | TypeExpr::TyCon(_) => {
@@ -690,7 +688,7 @@ impl Pretty<Ty> for Ty {
                 }
 
                 TypeExpr::TyForAll(_, _, _) => {
-                    let (kinded_quants, rest) = t.peel_forall();
+                    let (kinded_quants, preds, rest) = t.peel_scheme_like();
 
                     let peeled_quants = kinded_quants
                         .iter()
@@ -699,28 +697,33 @@ impl Pretty<Ty> for Ty {
                         })
                         .collect::<Vec<_>>();
 
-                    format!(
-                        "∀ {}. {}",
-                        peeled_quants.join(" "),
-                        traverse_helper(&rest, PRECEDENCE_LOOSE)
-                    )
-                }
-
-                TypeExpr::Qualified(preds, body) => {
-                    let preds_fmt = if preds.len() == 1 {
-                        preds[0].pretty()
+                    let prefix = if peeled_quants.is_empty() {
+                        String::new()
                     } else {
-                        format!(
-                            "({})",
-                            preds
-                                .iter()
-                                .map(|p| p.pretty())
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )
+                        format!("∀ {}. ", peeled_quants.join(" "))
                     };
 
-                    format!("{preds_fmt} => {}", traverse_helper(body, PRECEDENCE_LOOSE))
+                    if preds.is_empty() {
+                        format!("{prefix}{}", traverse_helper(&rest, PRECEDENCE_LOOSE))
+                    } else {
+                        let preds_fmt = if preds.len() == 1 {
+                            preds[0].pretty()
+                        } else {
+                            format!(
+                                "({})",
+                                preds
+                                    .iter()
+                                    .map(|p| p.pretty())
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        };
+
+                        format!(
+                            "{prefix}{preds_fmt} => {}",
+                            traverse_helper(&rest, PRECEDENCE_LOOSE)
+                        )
+                    }
                 }
 
                 TypeExpr::TyApp(f, x) => {
@@ -749,9 +752,7 @@ impl Predicate {
             .map(|arg| {
                 let s = arg.pretty();
                 match arg {
-                    TypeExpr::TyArr(_, _)
-                    | TypeExpr::TyForAll(_, _, _)
-                    | TypeExpr::Qualified(_, _) => format!("({s})"),
+                    TypeExpr::TyArr(_, _) | TypeExpr::TyForAll(_, _, _) => format!("({s})"),
                     _ => s,
                 }
             })
@@ -778,18 +779,16 @@ impl Predicate {
 }
 
 impl Scheme {
+    pub fn to_type_expr(&self) -> TypeExpr {
+        TypeExpr::make_forall_group(
+            self.quantifiers.clone(),
+            self.predicates.clone(),
+            self.ty.clone(),
+        )
+    }
+
     pub fn pretty(&self) -> String {
-        let mut ty = self.ty.clone();
-
-        if !self.predicates.is_empty() {
-            ty = TypeExpr::make_qualified(self.predicates.clone(), ty);
-        }
-
-        for (name, kind) in self.quantifiers.iter().rev() {
-            ty = TypeExpr::make_forall_id(*name, kind.clone(), ty);
-        }
-
-        ty.pretty()
+        self.to_type_expr().pretty()
     }
 
     pub fn mono(ty: TypeExpr) -> Self {
@@ -1223,7 +1222,7 @@ impl TypeExpr {
                 }
 
                 TypeExpr::TyForAll(_, _, _) => {
-                    let (kinded_quants, rest) = t.peel_forall();
+                    let (kinded_quants, preds, rest) = t.peel_scheme_like();
 
                     let peeled_quants = kinded_quants
                         .iter()
@@ -1232,31 +1231,36 @@ impl TypeExpr {
                         })
                         .collect::<Vec<_>>();
 
-                    format!(
-                        "∀ {}. {}",
-                        peeled_quants.join(" "),
-                        traverse_helper(&rest, PRECEDENCE_LOOSE, tables)
-                    )
-                }
-
-                TypeExpr::Qualified(preds, body) => {
-                    let preds_fmt = if preds.len() == 1 {
-                        preds[0].pretty_with_tables(tables)
+                    let prefix = if peeled_quants.is_empty() {
+                        String::new()
                     } else {
-                        format!(
-                            "({})",
-                            preds
-                                .iter()
-                                .map(|p| p.pretty_with_tables(tables))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )
+                        format!("∀ {}. ", peeled_quants.join(" "))
                     };
 
-                    format!(
-                        "{preds_fmt} => {}",
-                        traverse_helper(body, PRECEDENCE_LOOSE, tables)
-                    )
+                    if preds.is_empty() {
+                        format!(
+                            "{prefix}{}",
+                            traverse_helper(&rest, PRECEDENCE_LOOSE, tables)
+                        )
+                    } else {
+                        let preds_fmt = if preds.len() == 1 {
+                            preds[0].pretty_with_tables(tables)
+                        } else {
+                            format!(
+                                "({})",
+                                preds
+                                    .iter()
+                                    .map(|p| p.pretty_with_tables(tables))
+                                    .collect::<Vec<_>>()
+                                    .join(", ")
+                            )
+                        };
+
+                        format!(
+                            "{prefix}{preds_fmt} => {}",
+                            traverse_helper(&rest, PRECEDENCE_LOOSE, tables)
+                        )
+                    }
                 }
 
                 TypeExpr::TyApp(f, x) => {
@@ -1287,9 +1291,7 @@ impl Predicate {
             .map(|arg| {
                 let s = arg.pretty_with_tables(tables);
                 match arg {
-                    TypeExpr::TyArr(_, _)
-                    | TypeExpr::TyForAll(_, _, _)
-                    | TypeExpr::Qualified(_, _) => format!("({s})"),
+                    TypeExpr::TyArr(_, _) | TypeExpr::TyForAll(_, _, _) => format!("({s})"),
                     _ => s,
                 }
             })
@@ -1306,17 +1308,7 @@ impl Predicate {
 
 impl Scheme {
     pub fn pretty_with_tables(&self, tables: PrettyTables<'_>) -> String {
-        let mut ty = self.ty.clone();
-
-        if !self.predicates.is_empty() {
-            ty = TypeExpr::make_qualified(self.predicates.clone(), ty);
-        }
-
-        for (name, kind) in self.quantifiers.iter().rev() {
-            ty = TypeExpr::make_forall_id(*name, kind.clone(), ty);
-        }
-
-        ty.pretty_with_tables(tables)
+        self.to_type_expr().pretty_with_tables(tables)
     }
 }
 

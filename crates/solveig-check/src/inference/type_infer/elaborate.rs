@@ -81,10 +81,8 @@ impl TypeChecker {
             TypeExpr::TyApp(lhs, rhs) => {
                 TypeExpr::make_app(self.zonk_type(lhs), self.zonk_type(rhs))
             }
-            TypeExpr::TyForAll(quantifier, kind, body) => {
-                TypeExpr::make_forall_id(*quantifier, kind.clone(), self.zonk_type(body))
-            }
-            TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
+            TypeExpr::TyForAll(binders, preds, body) => TypeExpr::make_forall_group(
+                binders.clone(),
                 preds
                     .iter()
                     .map(|pred| solveig_ast::ast::Predicate {

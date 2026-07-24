@@ -69,8 +69,7 @@ fn collect_evars_inner(ty: &TypeExpr, acc: &mut Vec<EvarId>) {
             collect_evars_inner(a, acc);
             collect_evars_inner(b, acc);
         }
-        TypeExpr::TyForAll(_, _, body) => collect_evars_inner(body, acc),
-        TypeExpr::Qualified(preds, body) => {
+        TypeExpr::TyForAll(_, preds, body) => {
             for pred in preds {
                 for arg in &pred.args {
                     collect_evars_inner(arg, acc);
@@ -88,9 +87,6 @@ fn types_match(candidate: &TypeExpr, goal: &TypeExpr) -> bool {
 
         (TypeExpr::TyForAll(_, _, body), _) => types_match(body, goal),
         (_, TypeExpr::TyForAll(_, _, body)) => types_match(candidate, body),
-
-        (TypeExpr::Qualified(_, body), _) => types_match(body, goal),
-        (_, TypeExpr::Qualified(_, body)) => types_match(candidate, body),
 
         (TypeExpr::TyUnit, TypeExpr::TyUnit) => true,
         (TypeExpr::TyVar(a), TypeExpr::TyVar(b)) => a == b,
@@ -110,8 +106,8 @@ fn types_match(candidate: &TypeExpr, goal: &TypeExpr) -> bool {
 
 fn heads_match(a: &TypeExpr, b: &TypeExpr) -> bool {
     match (a, b) {
-        (TypeExpr::Qualified(_, body), rhs) => heads_match(body, rhs),
-        (lhs, TypeExpr::Qualified(_, body)) => heads_match(lhs, body),
+        (TypeExpr::TyForAll(_, _, body), rhs) => heads_match(body, rhs),
+        (lhs, TypeExpr::TyForAll(_, _, body)) => heads_match(lhs, body),
 
         (TypeExpr::TyCon(x), TypeExpr::TyCon(y)) => x == y,
         (TypeExpr::TyApp(f, _), TypeExpr::TyApp(g, _)) => heads_match(f, g),

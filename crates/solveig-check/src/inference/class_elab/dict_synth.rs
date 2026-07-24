@@ -139,7 +139,6 @@ fn match_type_pattern(
         },
 
         TypeExpr::TyForAll(_, _, body) => match_type_pattern(body, actual, subst),
-        TypeExpr::Qualified(_, body) => match_type_pattern(body, actual, subst),
 
         TypeExpr::TyExVar(name) => matches!(actual, TypeExpr::TyExVar(other) if name == other),
     }
@@ -590,17 +589,14 @@ fn free_type_vars_in_type(ty: &TypeExpr, out: &mut Vec<TyVarId>) {
             free_type_vars_in_type(rhs, out);
         }
 
-        TypeExpr::TyForAll(name, _, body) => {
-            free_type_vars_in_type(body, out);
-            out.retain(|v| v != name);
-        }
-
-        TypeExpr::Qualified(preds, body) => {
+        TypeExpr::TyForAll(binders, preds, body) => {
             for pred in preds {
                 free_type_vars_in_predicate(pred, out);
             }
-
             free_type_vars_in_type(body, out);
+            for (name, _) in binders {
+                out.retain(|v| v != name);
+            }
         }
 
         TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}

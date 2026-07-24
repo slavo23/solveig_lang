@@ -48,8 +48,13 @@ fn checker_api_golden_types() {
         ("main.lessInt", "Bool"),
         ("main.wrapNotEqInt", "Bool"),
         ("main.useRank2", "(∀ (a : *). a -> a) -> Int"),
+        (
+            "main.useRank2Eq",
+            "(∀ (a : *). Eq a => a -> a -> Bool) -> Bool",
+        ),
         ("main.polyId", "∀ (a : *). a -> a"),
         ("main.rank2Result", "Int"),
+        ("main.rank2EqResult", "Bool"),
     ];
 
     for (name, expected_scheme) in expected {

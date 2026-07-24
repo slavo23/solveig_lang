@@ -29,22 +29,28 @@ fn mangle_type(ty: &TypeExpr, tables: PrettyTables<'_>) -> String {
         TypeExpr::TyArr(a, b) => {
             format!("Arr_{}_{}", mangle_type(a, tables), mangle_type(b, tables))
         }
-        TypeExpr::TyForAll(name, _, body) => {
-            format!(
-                "Forall_{}_{}",
-                sanitize_name(&tyvar_display_name(*name)),
-                mangle_type(body, tables)
-            )
+        TypeExpr::TyForAll(binders, preds, body) => {
+            let mut mangled = mangle_type(body, tables);
+            if !preds.is_empty() {
+                mangled = format!(
+                    "Qual_{}_{}",
+                    preds
+                        .iter()
+                        .map(|pred| mangle_predicate(pred, tables))
+                        .collect::<Vec<_>>()
+                        .join("_"),
+                    mangled
+                );
+            }
+            for (name, _) in binders.iter().rev() {
+                mangled = format!(
+                    "Forall_{}_{}",
+                    sanitize_name(&tyvar_display_name(*name)),
+                    mangled
+                );
+            }
+            mangled
         }
-        TypeExpr::Qualified(preds, body) => format!(
-            "Qual_{}_{}",
-            preds
-                .iter()
-                .map(|pred| mangle_predicate(pred, tables))
-                .collect::<Vec<_>>()
-                .join("_"),
-            mangle_type(body, tables)
-        ),
     }
 }
 fn mangle_predicate(pred: &Predicate, tables: PrettyTables<'_>) -> String {

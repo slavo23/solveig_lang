@@ -136,10 +136,11 @@ impl DataKindInferencer {
             TypeExpr::TyCon(n) => TypeExpr::TyCon(*n),
             TypeExpr::TyArr(l, r) => TypeExpr::make_arr(self.apply_type(l), self.apply_type(r)),
             TypeExpr::TyApp(l, r) => TypeExpr::make_app(self.apply_type(l), self.apply_type(r)),
-            TypeExpr::TyForAll(name, kind, body) => {
-                TypeExpr::make_forall_id(*name, self.zonk(kind), self.apply_type(body))
-            }
-            TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
+            TypeExpr::TyForAll(binders, preds, body) => TypeExpr::make_forall_group(
+                binders
+                    .iter()
+                    .map(|(name, kind)| (*name, self.zonk(kind)))
+                    .collect(),
                 preds.iter().map(|p| self.apply_predicate(p)).collect(),
                 self.apply_type(body),
             ),
@@ -261,6 +262,15 @@ impl DataKindInferencer {
             }
 
             TypeExpr::TyApp(fun, arg) => {
+                if matches!(**fun, TypeExpr::TyForAll(_, _, _))
+                    || matches!(**arg, TypeExpr::TyForAll(_, _, _))
+                {
+                    return Err(KindError::cannot_unify(
+                        Kind::Star,
+                        Kind::make_arrow(Kind::Star, Kind::Star),
+                    ));
+                }
+
                 let (fun_kind, fun_r) = self.infer_kind(fun, tycon_env, var_env)?;
                 let (arg_kind, arg_r) = self.infer_kind(arg, tycon_env, var_env)?;
                 let fun_kind = self.apply_kind(&fun_kind);
@@ -272,25 +282,22 @@ impl DataKindInferencer {
                 ))
             }
 
-            TypeExpr::TyForAll(v, _old_k, body) => {
-                let fresh = self.fresh_meta();
+            TypeExpr::TyForAll(binders, preds, body) => {
                 let mut new_env = var_env.clone();
-                new_env.insert(*v, fresh.clone());
-                let (bk, br) = self.infer_kind(body, tycon_env, &new_env)?;
-                self.unify(bk, Kind::Star)?;
-                let solved_k = self.zonk(&fresh);
-                Ok((Kind::Star, TypeExpr::TyForAll(*v, solved_k, Box::new(br))))
-            }
+                let mut binder_metas = Vec::with_capacity(binders.len());
+                for (name, _) in binders {
+                    let fresh = self.fresh_meta();
+                    new_env.insert(*name, fresh.clone());
+                    binder_metas.push((*name, fresh));
+                }
 
-            TypeExpr::Qualified(preds, body) => {
                 let mut rebuilt_preds = Vec::with_capacity(preds.len());
-
                 for pred in preds {
                     let rebuilt_args = pred
                         .args
                         .iter()
                         .map(|arg| {
-                            let (arg_kind, arg_r) = self.infer_kind(arg, tycon_env, var_env)?;
+                            let (arg_kind, arg_r) = self.infer_kind(arg, tycon_env, &new_env)?;
                             self.unify(arg_kind, Kind::Star)?;
                             Ok(arg_r)
                         })
@@ -302,12 +309,19 @@ impl DataKindInferencer {
                     });
                 }
 
-                let (body_kind, body_r) = self.infer_kind(body, tycon_env, var_env)?;
-                self.unify(body_kind, Kind::Star)?;
+                let (bk, br) = self.infer_kind(body, tycon_env, &new_env)?;
+                self.unify(bk, Kind::Star)?;
 
                 Ok((
                     Kind::Star,
-                    TypeExpr::Qualified(rebuilt_preds, Box::new(body_r)),
+                    TypeExpr::make_forall_group(
+                        binder_metas
+                            .into_iter()
+                            .map(|(name, kind)| (name, self.zonk(&kind)))
+                            .collect(),
+                        rebuilt_preds,
+                        br,
+                    ),
                 ))
             }
         }
@@ -496,8 +510,7 @@ fn collect_tycon_refs(ty: &TypeExpr, out: &mut HashSet<TyConId>) {
             collect_tycon_refs(l, out);
             collect_tycon_refs(r, out);
         }
-        TypeExpr::TyForAll(_, _, body) => collect_tycon_refs(body, out),
-        TypeExpr::Qualified(preds, body) => {
+        TypeExpr::TyForAll(_, preds, body) => {
             for pred in preds {
                 for arg in &pred.args {
                     collect_tycon_refs(arg, out);

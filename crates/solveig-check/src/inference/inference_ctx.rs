@@ -73,11 +73,8 @@ impl Context {
                 ty.clone()
             }
 
-            TypeExpr::TyForAll(quantifier, kind, body) => {
-                TypeExpr::make_forall_id(*quantifier, kind.clone(), self.apply(body))
-            }
-
-            TypeExpr::Qualified(preds, body) => TypeExpr::make_qualified(
+            TypeExpr::TyForAll(binders, preds, body) => TypeExpr::make_forall_group(
+                binders.clone(),
                 preds.iter().map(|p| self.apply_predicate(p)).collect(),
                 self.apply(body),
             ),
@@ -243,9 +240,48 @@ impl Context {
 
             TypeExpr::TyArr(_, _) => Ok(Kind::Star),
 
-            TypeExpr::TyForAll(_, _, _) => Ok(Kind::Star),
+            TypeExpr::TyForAll(binders, preds, body) => {
+                let mut extended = self.clone();
+                for (id, kind) in binders {
+                    extended = extended.add_entry(ContextEntry::UniVar {
+                        id: *id,
+                        name: tyvar_display_name(*id),
+                        kind: kind.clone(),
+                    });
+                }
+
+                for pred in preds {
+                    for arg in &pred.args {
+                        let arg_kind = extended.kind_of_type(arg, tycon_kinds)?;
+                        if arg_kind != Kind::Star {
+                            return Err(format!(
+                                "predicate argument must have kind *, got {}",
+                                arg_kind.pretty()
+                            ));
+                        }
+                    }
+                }
+
+                let body_kind = extended.kind_of_type(body, tycon_kinds)?;
+                if body_kind == Kind::Star {
+                    Ok(Kind::Star)
+                } else {
+                    Err(format!(
+                        "scheme type body must have kind *, got {}",
+                        body_kind.pretty()
+                    ))
+                }
+            }
 
             TypeExpr::TyApp(func, arg) => {
+                if matches!(**func, TypeExpr::TyForAll(_, _, _))
+                    || matches!(**arg, TypeExpr::TyForAll(_, _, _))
+                {
+                    return Err(
+                        "scheme type cannot appear directly in type application".to_string()
+                    );
+                }
+
                 let func_kind = self.kind_of_type(func, tycon_kinds)?;
                 let arg_kind = self.kind_of_type(arg, tycon_kinds)?;
                 match func_kind {
@@ -258,30 +294,6 @@ impl Context {
                     other => Err(format!("cannot apply non-arrow kind: {}", other.pretty())),
                 }
             }
-
-            TypeExpr::Qualified(preds, body) => {
-                for pred in preds {
-                    for arg in &pred.args {
-                        let arg_kind = self.kind_of_type(arg, tycon_kinds)?;
-                        if arg_kind != Kind::Star {
-                            return Err(format!(
-                                "predicate argument must have kind *, got {}",
-                                arg_kind.pretty()
-                            ));
-                        }
-                    }
-                }
-
-                let body_kind = self.kind_of_type(body, tycon_kinds)?;
-                if body_kind == Kind::Star {
-                    Ok(Kind::Star)
-                } else {
-                    Err(format!(
-                        "qualified type body must have kind *, got {}",
-                        body_kind.pretty()
-                    ))
-                }
-            }
         }
     }
 
@@ -290,22 +302,26 @@ impl Context {
             TypeExpr::TyUnit | TypeExpr::TyCon(_) => true,
             TypeExpr::TyVar(id) => self.has_universal_id(*id),
             TypeExpr::TyExVar(id) => self.has_unsolved_evar_id(*id) || self.has_solved_evar_id(*id),
-            TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
-                self.type_well_formed(lhs) && self.type_well_formed(rhs)
+            TypeExpr::TyArr(lhs, rhs) => self.type_well_formed(lhs) && self.type_well_formed(rhs),
+            TypeExpr::TyApp(lhs, rhs) => {
+                !matches!(**lhs, TypeExpr::TyForAll(_, _, _))
+                    && !matches!(**rhs, TypeExpr::TyForAll(_, _, _))
+                    && self.type_well_formed(lhs)
+                    && self.type_well_formed(rhs)
             }
-            TypeExpr::TyForAll(quantifier, kind, body) => {
-                let extended = self.clone().add_entry(ContextEntry::UniVar {
-                    id: *quantifier,
-                    name: tyvar_display_name(*quantifier),
-                    kind: kind.clone(),
-                });
-                extended.type_well_formed(body)
-            }
-            TypeExpr::Qualified(preds, body) => {
+            TypeExpr::TyForAll(binders, preds, body) => {
+                let mut extended = self.clone();
+                for (id, kind) in binders {
+                    extended = extended.add_entry(ContextEntry::UniVar {
+                        id: *id,
+                        name: tyvar_display_name(*id),
+                        kind: kind.clone(),
+                    });
+                }
                 preds
                     .iter()
-                    .all(|pred| pred.args.iter().all(|arg| self.type_well_formed(arg)))
-                    && self.type_well_formed(body)
+                    .all(|pred| pred.args.iter().all(|arg| extended.type_well_formed(arg)))
+                    && extended.type_well_formed(body)
             }
         }
     }
