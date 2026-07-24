@@ -9,10 +9,22 @@ pub struct TcMetadata {
 type TcResult<T> = Result<T, TypeError>;
 
 #[derive(Clone, Debug)]
+struct GivenEvidence {
+    ev: EvVarId,
+    pred: Predicate,
+}
+
+#[derive(Clone, Debug)]
 struct Wanted {
+    ev: EvVarId,
     pred: Predicate,
     span: Span,
-    givens: Vec<Predicate>,
+    givens: Vec<GivenEvidence>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Unsolved {
+    pub pred: Predicate,
 }
 
 impl TcMetadata {
@@ -34,14 +46,15 @@ pub struct TypeChecker {
     constructor_types: HashMap<CtorId, TypeExpr>,
     func_schemes: HashMap<DefId, Scheme>,
     class_defs: HashMap<ClassId, ClassDefinition>,
-    instance_defs: Vec<InstanceDefinition<Span>>,
+    instance_table: InstanceTable<Span>,
     tycon_table: TyConTable,
     ctor_table: CtorTable,
     class_table: ClassTable,
     tycon_kinds: HashMap<TyConId, Kind>,
-    givens: Vec<Predicate>,
+    givens: Vec<GivenEvidence>,
     wanteds: Vec<Wanted>,
     evar_solutions: HashMap<EvarId, TypeExpr>,
+    evidence_solutions: HashMap<EvVarId, Ev>,
     holes: Vec<HoleInfo>,
     warnings: Vec<TypeError>,
 }
@@ -60,7 +73,7 @@ impl TypeChecker {
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
             class_defs: HashMap::new(),
-            instance_defs: Vec::new(),
+            instance_table: InstanceTable::new(),
             tycon_table: TyConTable::new(),
             ctor_table: CtorTable::new(),
             class_table: ClassTable::new(),
@@ -68,6 +81,7 @@ impl TypeChecker {
             givens: Vec::new(),
             wanteds: Vec::new(),
             evar_solutions: HashMap::new(),
+            evidence_solutions: HashMap::new(),
             holes: Vec::new(),
             warnings: Vec::new(),
         }
@@ -79,7 +93,7 @@ impl TypeChecker {
             constructor_types: env.constructor_types.clone(),
             func_schemes: env.func_schemes.clone(),
             class_defs: env.class_defs.clone(),
-            instance_defs: env.instance_defs.clone(),
+            instance_table: InstanceTable::from_definitions(env.instance_defs.clone()),
             tycon_table: env.tycon_table.clone(),
             ctor_table: env.ctor_table.clone(),
             class_table: env.class_table.clone(),
@@ -87,6 +101,7 @@ impl TypeChecker {
             givens: Vec::new(),
             wanteds: Vec::new(),
             evar_solutions: HashMap::new(),
+            evidence_solutions: HashMap::new(),
             holes: Vec::new(),
             warnings: Vec::new(),
         }
@@ -134,6 +149,9 @@ impl TypeChecker {
     }
     fn fresh_tyvar_id(&mut self) -> TyVarId {
         TyVarId(self.fresh_id())
+    }
+    fn fresh_evvar_id(&mut self) -> EvVarId {
+        EvVarId(self.fresh_id())
     }
     fn evar_type(id: EvarId) -> TypeExpr {
         TypeExpr::make_evar(id)
@@ -192,6 +210,9 @@ impl TypeChecker {
                 }
             })
         })
+    }
+    pub fn evidence_solution(&self, ev: EvVarId) -> Option<&Ev> {
+        self.evidence_solutions.get(&ev)
     }
 }
 

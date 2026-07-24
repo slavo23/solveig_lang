@@ -222,9 +222,15 @@ pub fn check_and_elab_module(
             // for its own superclass obligations. This avoids accepting recursive proofs
             // such as constructing `Eq Int` through the `Ord Int` dictionary currently
             // being checked.
-            checker
+            let superclass_instance_defs = env
                 .instance_defs
-                .retain(|candidate| candidate.head != inst.head || candidate.context != inst.context);
+                .iter()
+                .filter(|candidate| {
+                    candidate.head != inst.head || candidate.context != inst.context
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            checker.instance_table = InstanceTable::from_definitions(superclass_instance_defs);
 
             let missing_superclasses = superclass_obligations
                 .iter()
@@ -329,6 +335,7 @@ pub fn check_and_elab_module(
         }
 
         checked_instance_defs.push(InstanceDefinition {
+            def_module: inst.def_module,
             context: inst.context.clone(),
             head: inst.head.clone(),
             methods: checked_methods,

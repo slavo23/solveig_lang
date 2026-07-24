@@ -88,27 +88,45 @@ impl TypeChecker {
 
         (ctx, instantiated_preds, instantiated_ty)
     }
-    fn add_wanteds(&mut self, preds: Vec<Predicate>, span: Span) {
+    fn add_wanteds(&mut self, preds: Vec<Predicate>, span: Span) -> Vec<EvVarId> {
         let givens = self
             .givens
             .iter()
-            .map(|pred| self.zonk_predicate(pred))
-            .collect::<Vec<_>>();
-
-        let zonked = preds
-            .into_iter()
-            .map(|pred| Wanted {
-                pred: self.zonk_predicate(&pred),
-                span: span.clone(),
-                givens: givens.clone(),
+            .map(|given| GivenEvidence {
+                ev: given.ev,
+                pred: self.zonk_predicate(&given.pred),
             })
             .collect::<Vec<_>>();
 
+        let mut evvars = Vec::new();
+        let mut zonked = Vec::new();
+
+        for pred in preds {
+            let ev = self.fresh_evvar_id();
+            evvars.push(ev);
+            zonked.push(Wanted {
+                ev,
+                pred: self.zonk_predicate(&pred),
+                span: span.clone(),
+                givens: givens.clone(),
+            });
+        }
+
         self.wanteds.extend(zonked);
+        evvars
     }
     fn with_givens<R>(&mut self, preds: Vec<Predicate>, f: impl FnOnce(&mut Self) -> R) -> R {
         let old_len = self.givens.len();
-        self.givens.extend(preds);
+
+        let new_givens = preds
+            .into_iter()
+            .map(|pred| GivenEvidence {
+                ev: self.fresh_evvar_id(),
+                pred: self.zonk_predicate(&pred),
+            })
+            .collect::<Vec<_>>();
+
+        self.givens.extend(new_givens);
         let result = f(self);
         self.givens.truncate(old_len);
         result
@@ -169,33 +187,6 @@ impl TypeChecker {
             .map(|pred| Self::instantiate_predicate_with_subst(pred, &subst))
             .map(|pred| self.zonk_predicate(&pred))
             .collect()
-    }
-    fn predicate_entails(
-        &self,
-        given: &Predicate,
-        wanted: &Predicate,
-        seen: &mut HashSet<Predicate>,
-    ) -> bool {
-        let given = self.zonk_predicate(given);
-        let wanted = self.zonk_predicate(wanted);
-
-        if given == wanted {
-            return true;
-        }
-
-        if !seen.insert(given.clone()) {
-            return false;
-        }
-
-        for superclass_pred in self.superclass_predicates_for_given(&given) {
-            if self.predicate_entails(&superclass_pred, &wanted, seen) {
-                seen.remove(&given);
-                return true;
-            }
-        }
-
-        seen.remove(&given);
-        false
     }
     fn specialize_superclasses_for_instance(
         class_def: &ClassDefinition,
@@ -270,43 +261,20 @@ impl TypeChecker {
         }
     }
     fn check_instance_overlaps(&self) -> Vec<TypeError> {
-        let mut errors = Vec::new();
-        let instances = &self.instance_defs;
-
-        for (i, inst_a) in instances.iter().enumerate() {
-            for inst_b in instances.iter().skip(i + 1) {
-                if inst_a.head.class_id != inst_b.head.class_id {
-                    continue;
-                }
-                if inst_a.head.args.len() != inst_b.head.args.len() {
-                    continue;
-                }
-
-                let mut subst = HashMap::new();
-                let overlaps = inst_a
-                    .head
-                    .args
+        self.instance_table
+            .overlaps()
+            .into_iter()
+            .map(|overlap| TypeError::OverlappingInstances {
+                span: self.get_file_span(0..0),
+                class_name: self.display_class_name(overlap.class),
+                instance_type: overlap
+                    .instance_args
                     .iter()
-                    .zip(inst_b.head.args.iter())
-                    .all(|(a, b)| Self::match_instance_type(a, b, &mut subst));
-
-                if overlaps {
-                    errors.push(TypeError::OverlappingInstances {
-                        span: self.get_file_span(0..0),
-                        class_name: self.display_class_name(inst_a.head.class_id),
-                        instance_type: inst_b
-                            .head
-                            .args
-                            .iter()
-                            .map(|a| self.pretty_type(a))
-                            .collect::<Vec<_>>()
-                            .join(" "),
-                    });
-                }
-            }
-        }
-
-        errors
+                    .map(|arg| self.pretty_type(arg))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            })
+            .collect()
     }
     fn match_instance_type(
         pattern: &TypeExpr,
@@ -346,69 +314,186 @@ impl TypeChecker {
             TypeExpr::TyExVar(name) => matches!(target, TypeExpr::TyExVar(other) if name == other),
         }
     }
-    fn discharge_predicate_with_givens(&self, pred: &Predicate, givens: &[Predicate]) -> bool {
-        self.discharge_predicate_with_givens_inner(pred, givens, &mut HashSet::new())
+    fn match_predicate_pattern(
+        pattern: &Predicate,
+        target: &Predicate,
+    ) -> Option<HashMap<TyVarId, TypeExpr>> {
+        if pattern.class_id != target.class_id || pattern.args.len() != target.args.len() {
+            return None;
+        }
+
+        let mut subst = HashMap::<TyVarId, TypeExpr>::new();
+
+        for (pattern_arg, target_arg) in pattern.args.iter().zip(target.args.iter()) {
+            if !Self::match_instance_type(pattern_arg, target_arg, &mut subst) {
+                return None;
+            }
+        }
+
+        Some(subst)
     }
-    fn discharge_predicate_with_givens_inner(
-        &self,
-        pred: &Predicate,
-        givens: &[Predicate],
-        seen: &mut HashSet<Predicate>,
-    ) -> bool {
-        let pred = self.zonk_predicate(pred);
+    fn evidence_ty_args_for_instance(
+        instance_head: &Predicate,
+        instance_context: &[Predicate],
+        subst: &HashMap<TyVarId, TypeExpr>,
+    ) -> Vec<TypeExpr> {
+        let mut vars = BTreeSet::new();
 
-        if givens
-            .iter()
-            .any(|given| self.predicate_entails(given, &pred, &mut HashSet::new()))
-        {
-            return true;
+        for pred in instance_context {
+            Self::free_type_vars_in_predicate(pred, &mut vars);
         }
 
-        if !seen.insert(pred.clone()) {
-            return false;
-        }
+        Self::free_type_vars_in_predicate(instance_head, &mut vars);
 
-        for inst in &self.instance_defs {
-            if inst.head.class_id != pred.class_id || inst.head.args.len() != pred.args.len() {
-                continue;
-            }
-
-            let mut subst = HashMap::<TyVarId, TypeExpr>::new();
-
-            let head_matches =
-                inst.head
-                    .args
-                    .iter()
-                    .zip(pred.args.iter())
-                    .all(|(head_arg, wanted_arg)| {
-                        let wanted_arg = self.zonk_type(wanted_arg);
-                        Self::match_instance_type(head_arg, &wanted_arg, &mut subst)
-                    });
-
-            if !head_matches {
-                continue;
-            }
-
-            let all_context_ok = inst.context.iter().all(|ctx_pred| {
-                let instantiated = Self::instantiate_predicate_with_subst(ctx_pred, &subst);
-                self.discharge_predicate_with_givens_inner(&instantiated, givens, seen)
-            });
-
-            if all_context_ok {
-                seen.remove(&pred);
-                return true;
-            }
-        }
-
-        seen.remove(&pred);
-        false
-    }
-    fn unresolved_wanteds(&self) -> Vec<Wanted> {
-        self.wanteds
-            .iter()
-            .filter(|wanted| !self.discharge_predicate_with_givens(&wanted.pred, &wanted.givens))
-            .cloned()
+        vars.into_iter()
+            .map(|id| subst.get(&id).cloned().unwrap_or(TypeExpr::TyVar(id)))
             .collect()
+    }
+    fn discharge_predicate_with_givens(&mut self, pred: &Predicate, givens: &[Predicate]) -> bool {
+        let mut evidence_givens = Vec::new();
+
+        for pred in givens {
+            evidence_givens.push(GivenEvidence {
+                ev: self.fresh_evvar_id(),
+                pred: self.zonk_predicate(pred),
+            });
+        }
+
+        self.entail(&evidence_givens, pred).is_ok()
+    }
+    // THIH §7.3 defines entailment as superclass closure over givens followed
+    // by instance matching (`bySuper` then `byInst`). C1 keeps the same search
+    // order and attaches evidence to each successful derivation step.
+    fn entail(&self, givens: &[GivenEvidence], wanted: &Predicate) -> Result<Ev, Unsolved> {
+        self.entail_inner(givens, wanted, &mut HashSet::new())
+    }
+    fn entail_inner(
+        &self,
+        givens: &[GivenEvidence],
+        wanted: &Predicate,
+        seen: &mut HashSet<Predicate>,
+    ) -> Result<Ev, Unsolved> {
+        let wanted = self.zonk_predicate(wanted);
+
+        for given in givens {
+            if self.zonk_predicate(&given.pred) == wanted {
+                return Ok(Ev::Var(given.ev));
+            }
+        }
+
+        for given in givens.iter().rev() {
+            if let Some(evidence) =
+                self.superclass_evidence_from_given(given, &wanted, &mut HashSet::new())
+            {
+                return Ok(evidence);
+            }
+        }
+
+        if !seen.insert(wanted.clone()) {
+            return Err(Unsolved { pred: wanted });
+        }
+
+        for (instance_id, inst) in self.instance_table.iter() {
+            if inst.class != wanted.class_id || inst.head.args.len() != wanted.args.len() {
+                continue;
+            }
+
+            let Some(subst) = Self::match_predicate_pattern(&inst.head, &wanted) else {
+                continue;
+            };
+
+            let mut sub_evidence = Vec::new();
+            let mut solved_context = true;
+
+            for ctx_pred in &inst.context {
+                let instantiated = Self::instantiate_predicate_with_subst(ctx_pred, &subst);
+                match self.entail_inner(givens, &instantiated, seen) {
+                    Ok(evidence) => sub_evidence.push(evidence),
+                    Err(_) => {
+                        solved_context = false;
+                        break;
+                    }
+                }
+            }
+
+            if solved_context {
+                seen.remove(&wanted);
+                return Ok(Ev::Inst(
+                    instance_id,
+                    Self::evidence_ty_args_for_instance(&inst.head, &inst.context, &subst),
+                    sub_evidence,
+                ));
+            }
+        }
+
+        seen.remove(&wanted);
+        Err(Unsolved { pred: wanted })
+    }
+    fn superclass_evidence_from_given(
+        &self,
+        given: &GivenEvidence,
+        wanted: &Predicate,
+        seen: &mut HashSet<Predicate>,
+    ) -> Option<Ev> {
+        self.superclass_evidence_from_predicate(
+            self.zonk_predicate(&given.pred),
+            Ev::Var(given.ev),
+            wanted,
+            seen,
+        )
+    }
+    fn superclass_evidence_from_predicate(
+        &self,
+        source: Predicate,
+        source_ev: Ev,
+        wanted: &Predicate,
+        seen: &mut HashSet<Predicate>,
+    ) -> Option<Ev> {
+        let source = self.zonk_predicate(&source);
+        let wanted = self.zonk_predicate(wanted);
+
+        if source == wanted {
+            return Some(source_ev);
+        }
+
+        if !seen.insert(source.clone()) {
+            return None;
+        }
+
+        for (index, superclass_pred) in self
+            .superclass_predicates_for_given(&source)
+            .into_iter()
+            .enumerate()
+        {
+            let superclass_ev = Ev::Super(Box::new(source_ev.clone()), source.class_id, index);
+
+            if let Some(evidence) = self.superclass_evidence_from_predicate(
+                superclass_pred,
+                superclass_ev,
+                &wanted,
+                seen,
+            ) {
+                seen.remove(&source);
+                return Some(evidence);
+            }
+        }
+
+        seen.remove(&source);
+        None
+    }
+    fn unresolved_wanteds(&mut self) -> Vec<Wanted> {
+        let mut unresolved = Vec::new();
+
+        for wanted in self.wanteds.clone() {
+            match self.entail(&wanted.givens, &wanted.pred) {
+                Ok(evidence) => {
+                    self.evidence_solutions.insert(wanted.ev, evidence);
+                }
+                Err(_) => unresolved.push(wanted),
+            }
+        }
+
+        unresolved
     }
     fn wanteds_error(&self, wanteds: Vec<Wanted>) -> TypeError {
         let span = wanteds
@@ -473,5 +558,185 @@ impl TypeChecker {
         }
 
         result
+    }
+}
+
+#[cfg(test)]
+mod entailment_tests {
+    use super::*;
+    use solveig_ast::ast::{InstanceId, ModuleId};
+
+    const EQ: ClassId = ClassId(1);
+    const ORD: ClassId = ClassId(2);
+    const INT: TyConId = TyConId(10);
+    const MAYBE: TyConId = TyConId(11);
+    const LIST: TyConId = TyConId(12);
+    const PAIR: TyConId = TyConId(13);
+
+    fn tycon(id: TyConId) -> TypeExpr {
+        TypeExpr::TyCon(id)
+    }
+
+    fn var(name: &str) -> TypeExpr {
+        TypeExpr::TyVar(legacy_tyvar_id(name))
+    }
+
+    fn app(func: TypeExpr, arg: TypeExpr) -> TypeExpr {
+        TypeExpr::make_app(func, arg)
+    }
+
+    fn maybe(arg: TypeExpr) -> TypeExpr {
+        app(tycon(MAYBE), arg)
+    }
+
+    fn list(arg: TypeExpr) -> TypeExpr {
+        app(tycon(LIST), arg)
+    }
+
+    fn pair(left: TypeExpr, right: TypeExpr) -> TypeExpr {
+        app(app(tycon(PAIR), left), right)
+    }
+
+    fn pred(class_id: ClassId, arg: TypeExpr) -> Predicate {
+        Predicate {
+            class_id,
+            args: vec![arg],
+        }
+    }
+
+    fn instance(head: Predicate, context: Vec<Predicate>) -> InstanceDefinition<Span> {
+        InstanceDefinition {
+            def_module: ModuleId(0),
+            context,
+            head,
+            methods: Vec::new(),
+        }
+    }
+
+    fn tiny_checker() -> TypeChecker {
+        let a = var("a");
+        let b = var("b");
+        let instance_defs = vec![
+            instance(pred(EQ, tycon(INT)), Vec::new()),
+            instance(pred(EQ, maybe(a.clone())), vec![pred(EQ, a.clone())]),
+            instance(pred(EQ, list(a.clone())), vec![pred(EQ, a.clone())]),
+            instance(
+                pred(EQ, pair(a.clone(), b.clone())),
+                vec![pred(EQ, a.clone()), pred(EQ, b.clone())],
+            ),
+        ];
+
+        let env = TypeCheckEnv {
+            constructor_types: HashMap::new(),
+            func_schemes: HashMap::new(),
+            class_defs: HashMap::from([
+                (
+                    EQ,
+                    ClassDefinition {
+                        id: EQ,
+                        name: "test.Eq".to_string(),
+                        short_name: "Eq".to_string(),
+                        params: vec![("a".to_string(), Kind::Star)],
+                        superclasses: Vec::new(),
+                        methods: Vec::new(),
+                    },
+                ),
+                (
+                    ORD,
+                    ClassDefinition {
+                        id: ORD,
+                        name: "test.Ord".to_string(),
+                        short_name: "Ord".to_string(),
+                        params: vec![("a".to_string(), Kind::Star)],
+                        superclasses: vec![pred(EQ, var("a"))],
+                        methods: Vec::new(),
+                    },
+                ),
+            ]),
+            instance_defs,
+            tycon_table: TyConTable::new(),
+            ctor_table: CtorTable::new(),
+            class_table: ClassTable::new(),
+            tycon_kinds: HashMap::new(),
+        };
+
+        TypeChecker::with_env(&env, FileId(0))
+    }
+
+    #[test]
+    fn entailment_returns_structural_evidence() {
+        let checker = tiny_checker();
+        let int = tycon(INT);
+        let maybe_int = maybe(int.clone());
+        let list_maybe_int = list(maybe_int.clone());
+        let a = var("a");
+        let given_ev = EvVarId(77);
+        let missing = tycon(TyConId(99));
+
+        let cases = vec![
+            (
+                "nested instance context",
+                Vec::new(),
+                pred(EQ, list_maybe_int),
+                Ok(Ev::Inst(
+                    InstanceId(2),
+                    vec![maybe_int],
+                    vec![Ev::Inst(
+                        InstanceId(1),
+                        vec![int.clone()],
+                        vec![Ev::Inst(InstanceId(0), Vec::new(), Vec::new())],
+                    )],
+                )),
+            ),
+            (
+                "superclass from given",
+                vec![GivenEvidence {
+                    ev: given_ev,
+                    pred: pred(ORD, a.clone()),
+                }],
+                pred(EQ, a),
+                Ok(Ev::Super(Box::new(Ev::Var(given_ev)), ORD, 0)),
+            ),
+            (
+                "missing instance",
+                Vec::new(),
+                pred(EQ, missing),
+                Err(pred(EQ, tycon(TyConId(99)))),
+            ),
+        ];
+
+        for (name, givens, wanted, expected) in cases {
+            let actual = checker.entail(&givens, &wanted).map_err(|err| err.pred);
+            assert_eq!(actual, expected, "{name}");
+        }
+    }
+
+    #[test]
+    fn instance_table_overlap_detection_unifies_both_heads() {
+        let table = InstanceTable::from_definitions(vec![
+            instance(pred(EQ, pair(var("a"), tycon(INT))), Vec::new()),
+            instance(pred(EQ, pair(tycon(PRIM_TYS.bool), var("b"))), Vec::new()),
+        ]);
+
+        let overlaps = table.overlaps();
+
+        assert_eq!(overlaps.len(), 1);
+        assert_eq!(overlaps[0].first, InstanceId(0));
+        assert_eq!(overlaps[0].second, InstanceId(1));
+        assert_eq!(overlaps[0].class, EQ);
+    }
+
+    #[test]
+    fn wanted_solving_records_evidence_by_destination() {
+        let mut checker = tiny_checker();
+        let destinations = checker.add_wanteds(vec![pred(EQ, tycon(INT))], 0..1);
+
+        let unresolved = checker.unresolved_wanteds();
+
+        assert!(unresolved.is_empty());
+        assert_eq!(
+            checker.evidence_solution(destinations[0]),
+            Some(&Ev::Inst(InstanceId(0), Vec::new(), Vec::new()))
+        );
     }
 }

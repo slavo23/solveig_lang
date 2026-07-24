@@ -471,6 +471,7 @@ impl<'a> Resolver<'a> {
                 .collect::<Vec<_>>();
 
             instance_defs.push(InstanceDefinition {
+                def_module: cx.module_id,
                 context: checked_context,
                 head: checked_head,
                 methods: resolved_methods,
