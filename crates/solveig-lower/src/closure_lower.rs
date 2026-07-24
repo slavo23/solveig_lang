@@ -224,6 +224,10 @@ impl<'a> ExprLowerer<'a> {
                 tag: *tag,
                 arity: *arity,
             }),
+            IRExpr::CallBuiltin(id, args) => Rc::new(CCExpr::CallBuiltin {
+                id: *id,
+                args: args.iter().map(|arg| self.lower_expr(arg)).collect(),
+            }),
             IRExpr::UnaryOp(op, rhs) => Rc::new(CCExpr::UnaryOp(*op, self.lower_expr(rhs))),
             IRExpr::BinaryOp(op, lhs, rhs) => Rc::new(CCExpr::BinaryOp(
                 *op,

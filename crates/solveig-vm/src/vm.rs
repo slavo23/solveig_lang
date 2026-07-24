@@ -6,6 +6,7 @@ use super::bytecode::{
 };
 use super::heap::{BoundPrefix, Heap, HeapObject, PayloadRef, PayloadStore};
 use super::values::{BoolCache, Continuation, GlobalSlot, NullaryCtorCache, ObjId, Value};
+use crate::builtins::{self, VmCtx};
 use crate::display::DisplayValue;
 use solveig_lower::closure_ir::CCProgram;
 use std::fmt;
@@ -689,6 +690,38 @@ impl Vm {
         }
     }
 
+    fn call_builtin(
+        &mut self,
+        id: solveig_ast::ast::BuiltinId,
+        arg_count: usize,
+    ) -> Result<Value, RuntimeError> {
+        let Some(builtin) = builtins::lookup(id) else {
+            return Err(RuntimeError::builtin(format!(
+                "unknown builtin id {}",
+                id.0
+            )));
+        };
+
+        if arg_count != builtin.arity {
+            return Err(RuntimeError::builtin(format!(
+                "builtin `{}` expected {} arguments, got {}",
+                builtin.name, builtin.arity, arg_count
+            )));
+        }
+
+        let args_start = self
+            .stack
+            .len()
+            .checked_sub(arg_count)
+            .expect("ICE: builtin call stack underflow");
+        let args = self.stack[args_start..].to_vec();
+        let mut ctx = VmCtx::new(&mut self.heap);
+        let result = (builtin.run)(&mut ctx, &args)?;
+        self.stack.truncate(args_start);
+
+        Ok(result)
+    }
+
     fn dispatch_match(&mut self, arms: &[MatchArm], scrutinee: Value, else_pc: u32) {
         for arm in arms {
             match &arm.pattern {
@@ -927,6 +960,10 @@ impl Vm {
                         solveig_ast::ast::BinOp::Equal => self.push_bool(lhs == rhs),
                         solveig_ast::ast::BinOp::Mod => self.push(Value::Int(lhs % rhs)),
                     }
+                }
+                Instr::CallBuiltin { id, arg_count } => {
+                    let result = self.call_builtin(id, arg_count as usize)?;
+                    self.push(result);
                 }
                 Instr::Pack {
                     tag,
@@ -1174,6 +1211,10 @@ impl RuntimeError {
             code,
             message: crate::bytecode::trap_message(code),
         }
+    }
+
+    pub(crate) fn builtin(message: String) -> Self {
+        Self { code: 2, message }
     }
 }
 

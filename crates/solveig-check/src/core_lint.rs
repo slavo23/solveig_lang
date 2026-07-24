@@ -888,6 +888,7 @@ mod tests {
             data_defs: Vec::new(),
             class_defs: Vec::new(),
             instance_defs: Vec::new(),
+            builtin_defs: Vec::new(),
             tycon_table: TyConTable::new(),
             ctor_table: CtorTable::new(),
             class_table: ClassTable::new(),

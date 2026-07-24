@@ -6,8 +6,8 @@ use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{
-    ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Kind, ModuleId, PRIM_TYS,
-    TyConId, TyConTable, TypeExpr, symbol_display_name,
+    BuiltinDefinition, ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Kind,
+    ModuleId, PRIM_TYS, TyConId, TyConTable, TypeExpr, symbol_display_name,
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
@@ -550,6 +550,7 @@ pub type ImportedApi = Imported<ModuleApi>;
 pub type ImportedTypedApi = Imported<TypedModuleApi>;
 
 const COMPILER_PRELUDE_BUILTINS_SEGMENTS: [&str; 2] = ["prelude", "builtins"];
+const COMPILER_PRELUDE_PRIM_SEGMENTS: [&str; 2] = ["prelude", "prim"];
 
 #[derive(Debug, Clone, Default)]
 pub struct BuiltinApi {
@@ -559,11 +560,21 @@ pub struct BuiltinApi {
     pub classes: HashMap<Symbol, DefId>,
     pub type_ids: HashMap<DefId, TyConId>,
     pub constructor_ids: HashMap<DefId, CtorId>,
+    pub builtin_defs: Vec<BuiltinDefinition>,
 }
 
 pub fn compiler_prelude_builtins_module(session: &Session) -> ModuleName {
     ModuleName(
         COMPILER_PRELUDE_BUILTINS_SEGMENTS
+            .iter()
+            .map(|segment| session.intern(segment))
+            .collect(),
+    )
+}
+
+pub fn compiler_prelude_prim_module(session: &Session) -> ModuleName {
+    ModuleName(
+        COMPILER_PRELUDE_PRIM_SEGMENTS
             .iter()
             .map(|segment| session.intern(segment))
             .collect(),
@@ -595,21 +606,26 @@ pub fn seed_compiler_prelude_module_api(
     session: &Session,
     module_name: &ModuleName,
     module_id: ModuleId,
+    builtins: &BuiltinApi,
     api: &mut ModuleApi,
 ) {
-    if module_name != &compiler_prelude_builtins_module(session) {
-        return;
+    if module_name == &compiler_prelude_builtins_module(session) {
+        for (name, _id) in compiler_type_entries() {
+            let symbol = session.intern(name);
+            api.types.insert(symbol, local_def_id(module_id, symbol));
+        }
+
+        for (name, _id) in compiler_constructor_entries() {
+            let symbol = session.intern(name);
+            api.constructors
+                .insert(symbol, local_def_id(module_id, symbol));
+        }
     }
 
-    for (name, _id) in compiler_type_entries() {
-        let symbol = session.intern(name);
-        api.types.insert(symbol, local_def_id(module_id, symbol));
-    }
-
-    for (name, _id) in compiler_constructor_entries() {
-        let symbol = session.intern(name);
-        api.constructors
-            .insert(symbol, local_def_id(module_id, symbol));
+    for builtin in &builtins.builtin_defs {
+        if builtin.id.module == module_id {
+            api.terms.insert(builtin.id.name, builtin.id);
+        }
     }
 }
 
@@ -1138,6 +1154,7 @@ mod tests {
             data_defs: vec![data_def],
             class_defs: Vec::new(),
             instance_defs: Vec::new(),
+            builtin_defs: Vec::new(),
             tycon_table,
             ctor_table,
             class_table: ClassTable::new(),

@@ -1,4 +1,4 @@
-use solveig_ast::ast::{BinOp, CtorRuntimeInfo, Literal, UnOp};
+use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, Literal, UnOp};
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -11,6 +11,10 @@ pub enum CCExpr {
     CtorFn {
         tag: u16,
         arity: u16,
+    },
+    CallBuiltin {
+        id: BuiltinId,
+        args: Vec<Rc<CCExpr>>,
     },
     UnaryOp(UnOp, Rc<CCExpr>),
     BinaryOp(BinOp, Rc<CCExpr>, Rc<CCExpr>),

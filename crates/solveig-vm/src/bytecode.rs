@@ -1,4 +1,4 @@
-use solveig_ast::ast::{BinOp, CtorRuntimeInfo, Literal, UnOp};
+use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, Literal, UnOp};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
@@ -27,6 +27,10 @@ pub enum Instr {
     },
     Unary(UnOp),
     Binary(BinOp),
+    CallBuiltin {
+        id: BuiltinId,
+        arg_count: u16,
+    },
     Pack {
         tag: u16,
         arity: u16,
@@ -343,6 +347,18 @@ impl BytecodeLowerer {
                 builder.emit(Instr::TailCallKnown { chunk, arg_count });
             }
 
+            CCExpr::CallBuiltin { id, args } => {
+                for arg in args {
+                    self.compile_expr(builder, env, arg);
+                }
+
+                let arg_count = u16::try_from(args.len())
+                    .unwrap_or_else(|_| panic!("arg count {} does not fit in u16", args.len()));
+
+                builder.emit(Instr::CallBuiltin { id: *id, arg_count });
+                builder.emit(Instr::Return);
+            }
+
             CCExpr::Let(binder, body) => {
                 self.compile_expr(builder, env, binder);
 
@@ -498,6 +514,17 @@ impl BytecodeLowerer {
                     .unwrap_or_else(|_| panic!("arg count {} does not fit in u16", args.len()));
 
                 builder.emit(Instr::CallKnown { chunk, arg_count });
+            }
+
+            CCExpr::CallBuiltin { id, args } => {
+                for arg in args {
+                    self.compile_expr(builder, env, arg);
+                }
+
+                let arg_count = u16::try_from(args.len())
+                    .unwrap_or_else(|_| panic!("arg count {} does not fit in u16", args.len()));
+
+                builder.emit(Instr::CallBuiltin { id: *id, arg_count });
             }
 
             CCExpr::Let(binder, body) => {
@@ -793,6 +820,9 @@ fn format_instr(instr: &Instr) -> String {
         }
         Instr::Unary(op) => format!("Unary {:?}", op),
         Instr::Binary(op) => format!("Binary {:?}", op),
+        Instr::CallBuiltin { id, arg_count } => {
+            format!("CallBuiltin id={} arg_count={arg_count}", id.0)
+        }
         Instr::Pack {
             tag,
             arity,

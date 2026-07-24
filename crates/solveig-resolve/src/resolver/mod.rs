@@ -3,13 +3,13 @@ use std::env;
 use std::ops::Range;
 
 use solveig_ast::ast::{
-    BinOp, COMPILER_PRELUDE_BUILTINS_MODULE, CaseArm, CaseArmNode, ClassDefinition, ClassId,
-    ClassMethodDef, ConstructorDef, CtorId, DataDefinition, DefId, InstanceDefinition,
-    InstanceMethodDef, Kind, KindMetaId, Literal, ModuleId, PRIM_TYS, Pattern, PatternNode,
-    Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TyConId, TypeExpr,
-    UnOp, VarRef, compiler_bool_constructor_types, compiler_bool_data_definition,
-    compiler_primitive_tycon_kinds, legacy_class_id, legacy_ctor_id, legacy_tycon_id,
-    register_def_display_name, register_symbol_display_name, tyvar_display_name,
+    BinOp, BuiltinDefinition, COMPILER_PRELUDE_BUILTINS_MODULE, CaseArm, CaseArmNode,
+    ClassDefinition, ClassId, ClassMethodDef, ConstructorDef, CtorId, DataDefinition, DefId,
+    InstanceDefinition, InstanceMethodDef, Kind, KindMetaId, Literal, ModuleId, PRIM_TYS, Pattern,
+    PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode,
+    TyConId, TypeExpr, UnOp, VarRef, compiler_bool_constructor_types,
+    compiler_bool_data_definition, compiler_primitive_tycon_kinds, legacy_class_id, legacy_ctor_id,
+    legacy_tycon_id, register_def_display_name, register_symbol_display_name, tyvar_display_name,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use solveig_check::data_kind_infer::{

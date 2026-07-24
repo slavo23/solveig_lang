@@ -12,6 +12,7 @@ use solveig_syntax::parser;
 const PRELUDE_BUILTINS_SRC: &str = include_str!("./prelude/builtins.sv");
 const PRELUDE_LIST_SRC: &str = include_str!("./prelude/list.sv");
 const PRELUDE_TYPECLASS_SRC: &str = include_str!("./prelude/typeclasses.sv");
+const PRELUDE_PRIM_SRC: &str = "";
 
 #[derive(Debug, Clone)]
 pub enum ProjectError {
@@ -36,6 +37,7 @@ fn prelude_module(session: &Session, module: &ModuleName) -> Option<&'static str
         "prelude.builtins" => Some(PRELUDE_BUILTINS_SRC),
         "prelude.list" => Some(PRELUDE_LIST_SRC),
         "prelude.typeclasses" => Some(PRELUDE_TYPECLASS_SRC),
+        "prelude.prim" => Some(PRELUDE_PRIM_SRC),
         _ => None,
     }
 }

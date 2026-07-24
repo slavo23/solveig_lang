@@ -220,7 +220,11 @@ pub fn check_and_elab_module(
     let mut checked_instance_defs = Vec::new();
 
     let mut available_func_schemes = env.func_schemes.clone();
-    let mut checked_func_schemes = HashMap::<DefId, Scheme>::new();
+    let mut checked_func_schemes = module
+        .builtin_defs
+        .iter()
+        .map(|builtin| (builtin.id, builtin.scheme.clone()))
+        .collect::<HashMap<DefId, Scheme>>();
 
     let mut all_holes = Vec::new();
     let mut all_warnings = Vec::new();
@@ -537,6 +541,7 @@ pub fn check_and_elab_module(
                 data_defs: module.data_defs.clone(),
                 class_defs: module.class_defs.clone(),
                 instance_defs: checked_instance_defs,
+                builtin_defs: module.builtin_defs.clone(),
                 tycon_table: module.tycon_table.clone(),
                 ctor_table: module.ctor_table.clone(),
                 class_table: module.class_table.clone(),

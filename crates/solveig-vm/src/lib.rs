@@ -1,3 +1,4 @@
+pub mod builtins;
 pub mod bytecode;
 pub mod display;
 pub mod heap;

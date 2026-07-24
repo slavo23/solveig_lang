@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Ev, InstanceId, ModuleId,
-    PrettyTables, Scheme, TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, def_display_name,
-    symbol_display_name,
+    BUILTIN_PRIM_ADD_INT, BuiltinDefinition, COMPILER_PRIM_ADD_INT_NAME, ClassDefinition, ClassId,
+    ClassTable, CtorId, CtorTable, DefId, Ev, InstanceId, ModuleId, PRIM_TYS, PrettyTables, Scheme,
+    TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, def_display_name,
+    register_def_display_name, register_symbol_display_name, symbol_display_name,
 };
 use solveig_base::utils::diagnostics::Diagnostic;
 use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap};
@@ -22,8 +23,8 @@ use solveig_report::emit_diagnostics;
 use solveig_resolve::project::{
     BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleTable,
     ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi, TypedDisplayMaps,
-    build_module_api, build_typed_module_api, compiler_builtin_api, effective_imports,
-    module_order_checked, seed_compiler_prelude_module_api,
+    build_module_api, build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module,
+    effective_imports, module_order_checked, seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::ModuleName;
@@ -662,6 +663,44 @@ impl FrontendPhase {
     }
 }
 
+fn driver_builtin_api(session: &Session, modules: &ModuleTable) -> BuiltinApi {
+    let mut api = compiler_builtin_api(session, modules);
+    seed_primitive_builtin_terms(session, modules, &mut api);
+    api
+}
+
+fn seed_primitive_builtin_terms(session: &Session, modules: &ModuleTable, api: &mut BuiltinApi) {
+    let prim_module = compiler_prelude_prim_module(session);
+    let Some(module_id) = modules.id(&prim_module) else {
+        return;
+    };
+
+    let prim_add_int_symbol = session.intern("primAddInt");
+    let prim_add_int_def = DefId {
+        module: module_id,
+        name: prim_add_int_symbol,
+    };
+    register_symbol_display_name(prim_add_int_symbol, "primAddInt");
+    register_def_display_name(prim_add_int_def, COMPILER_PRIM_ADD_INT_NAME);
+
+    let int_ty = TypeExpr::make_con_id(PRIM_TYS.int);
+    let scheme = Scheme::mono(TypeExpr::make_arr(
+        int_ty.clone(),
+        TypeExpr::make_arr(int_ty.clone(), int_ty),
+    ));
+
+    let builtin = BuiltinDefinition {
+        id: prim_add_int_def,
+        name: COMPILER_PRIM_ADD_INT_NAME.to_string(),
+        short_name: "primAddInt".to_string(),
+        builtin: BUILTIN_PRIM_ADD_INT,
+        arity: 2,
+        scheme,
+    };
+
+    api.builtin_defs.push(builtin);
+}
+
 impl<'a> FrontendState<'a> {
     fn new(
         session: &'a Session,
@@ -672,7 +711,7 @@ impl<'a> FrontendState<'a> {
     ) -> Result<Self, Vec<ResolveError>> {
         let mut apis = HashMap::new();
         let mut errors = Vec::new();
-        let builtins = Rc::new(compiler_builtin_api(session, &project.module_table));
+        let builtins = Rc::new(driver_builtin_api(session, &project.module_table));
 
         for module_name in order {
             let module_id = project
@@ -681,7 +720,13 @@ impl<'a> FrontendState<'a> {
                 .expect("ICE: checked module order referenced unknown module");
             match build_module_api(module_id, parsed.get(session, module_name)) {
                 Ok(mut api) => {
-                    seed_compiler_prelude_module_api(session, module_name, module_id, &mut api);
+                    seed_compiler_prelude_module_api(
+                        session,
+                        module_name,
+                        module_id,
+                        &builtins,
+                        &mut api,
+                    );
                     apis.insert(module_name.clone(), Rc::new(api));
                 }
                 Err(error) => errors.push(error),
@@ -1042,6 +1087,7 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
     let mut data_defs = Vec::new();
     let mut class_defs = Vec::new();
     let mut instance_defs = Vec::new();
+    let mut builtin_defs = Vec::new();
     let mut tycon_kinds = HashMap::new();
     let mut constructor_types = HashMap::new();
     let mut func_schemes = HashMap::new();
@@ -1052,6 +1098,7 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
             data_defs: module_data_defs,
             class_defs: module_class_defs,
             instance_defs: module_instance_defs,
+            builtin_defs: module_builtin_defs,
             tycon_table: module_tycon_table,
             ctor_table: module_ctor_table,
             class_table: _,
@@ -1064,6 +1111,7 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
         data_defs.extend(module_data_defs);
         class_defs.extend(module_class_defs);
         instance_defs.extend(module_instance_defs);
+        builtin_defs.extend(module_builtin_defs);
         extend_unique_tycon(&mut tycon_kinds, module_tycon_kinds, &module_tycon_table)?;
         extend_unique_ctor(
             &mut constructor_types,
@@ -1078,6 +1126,7 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
         data_defs,
         class_defs,
         instance_defs,
+        builtin_defs,
         tycon_table: Default::default(),
         ctor_table: Default::default(),
         class_table: Default::default(),

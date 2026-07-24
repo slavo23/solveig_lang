@@ -1,4 +1,4 @@
-use solveig_ast::ast::{BinOp, CtorRuntimeInfo, Literal, UnOp};
+use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, Literal, UnOp};
 use std::rc::Rc;
 
 #[derive(Debug, Clone)]
@@ -9,6 +9,7 @@ pub enum IRExpr {
     Int(i64),
     BinaryOp(BinOp, Rc<IRExpr>, Rc<IRExpr>),
     UnaryOp(UnOp, Rc<IRExpr>),
+    CallBuiltin(BuiltinId, Vec<Rc<IRExpr>>),
 
     Abs(Rc<IRExpr>),
     App(Rc<IRExpr>, Rc<IRExpr>),

@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    CaseArm, ClassId, CtorId, CtorRuntimeInfo, DefId, Ev, EvVarId, InstanceDefinition, Literal,
-    Pattern, PatternNode, ResolvedModule, TermExpr, TermExprNode, VarRef, runtime_ctor_role,
-    symbol_display_name, var_display_name,
+    BuiltinDefinition, CaseArm, ClassId, CtorId, CtorRuntimeInfo, DefId, Ev, EvVarId,
+    InstanceDefinition, Literal, Pattern, PatternNode, ResolvedModule, TermExpr, TermExprNode,
+    VarRef, runtime_ctor_role, symbol_display_name, var_display_name,
 };
 
 use super::dicts::{DictLayout, DictLayouts, instance_global_name};
@@ -200,6 +200,22 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
             Rc::new(IRExpr::Let(lowered_binder, lowered_in_expr))
         }
         TermExpr::Hole => panic!("Program is incomplete and contains holes. Aborting compilation."),
+    }
+}
+
+fn lower_builtin_global(def: &BuiltinDefinition) -> IRGlobalDef {
+    let args = (0..def.arity)
+        .map(|index| Rc::new(IRExpr::BVar(def.arity - index - 1)))
+        .collect::<Vec<_>>();
+    let mut body = Rc::new(IRExpr::CallBuiltin(def.builtin, args));
+
+    for _ in 0..def.arity {
+        body = Rc::new(IRExpr::Abs(body));
+    }
+
+    IRGlobalDef {
+        name: def.name.clone(),
+        body,
     }
 }
 
@@ -499,11 +515,12 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
     for (index, func_def) in module.func_defs.iter().enumerate() {
         globals.insert(func_def.name.clone(), index);
     }
+    for (offset, builtin_def) in module.builtin_defs.iter().enumerate() {
+        globals.insert(builtin_def.name.clone(), module.func_defs.len() + offset);
+    }
+    let instance_offset = module.func_defs.len() + module.builtin_defs.len();
     for (offset, inst) in module.instance_defs.iter().enumerate() {
-        globals.insert(
-            instance_global_name(inst.id),
-            module.func_defs.len() + offset,
-        );
+        globals.insert(instance_global_name(inst.id), instance_offset + offset);
     }
 
     let mut ctx = LowerCtx {
@@ -524,6 +541,8 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
             }
         })
         .collect::<Vec<_>>();
+
+    ir_globals.extend(module.builtin_defs.iter().map(lower_builtin_global));
 
     ir_globals.extend(
         module
@@ -609,6 +628,7 @@ mod tests {
                     body: node(TermExpr::Unit),
                 }],
             }],
+            builtin_defs: Vec::new(),
             tycon_table: TyConTable::new(),
             ctor_table: Default::default(),
             class_table: ClassTable::new(),

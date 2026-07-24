@@ -40,6 +40,9 @@ pub struct InstanceId(pub u32);
 pub struct EvVarId(pub u32);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct BuiltinId(pub u16);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct KindMetaId(pub u32);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -302,6 +305,7 @@ pub fn legacy_symbol_id(name: &str) -> Symbol {
 }
 
 pub const COMPILER_PRELUDE_BUILTINS_MODULE: &str = "prelude.builtins";
+pub const COMPILER_PRELUDE_PRIM_MODULE: &str = "prelude.prim";
 pub const COMPILER_INT_NAME: &str = "prelude.builtins.Int";
 pub const COMPILER_FLOAT_NAME: &str = "prelude.builtins.Float";
 pub const COMPILER_CHAR_NAME: &str = "prelude.builtins.Char";
@@ -310,9 +314,12 @@ pub const COMPILER_IO_NAME: &str = "prelude.builtins.IO";
 pub const COMPILER_BOOL_NAME: &str = "prelude.builtins.Bool";
 pub const COMPILER_TRUE_NAME: &str = "prelude.builtins.True";
 pub const COMPILER_FALSE_NAME: &str = "prelude.builtins.False";
+pub const COMPILER_PRIM_ADD_INT_NAME: &str = "prelude.prim.primAddInt";
 pub const PRELUDE_LIST_NIL_NAME: &str = "prelude.list.Nil";
 pub const PRELUDE_LIST_CONS_NAME: &str = "prelude.list.Cons";
 pub const PRELUDE_PAIR_MKPAIR_NAME: &str = "prelude.builtins.MkPair";
+
+pub const BUILTIN_PRIM_ADD_INT: BuiltinId = BuiltinId(0);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrimTys {
@@ -1164,6 +1171,16 @@ pub struct TermDefinition<A, P = A> {
     pub body: TermExprNode<A, P>,
 }
 
+#[derive(Clone, Debug)]
+pub struct BuiltinDefinition {
+    pub id: DefId,
+    pub name: String,
+    pub short_name: String,
+    pub builtin: BuiltinId,
+    pub arity: usize,
+    pub scheme: Scheme,
+}
+
 impl<A, P> TermDefinition<A, P> {
     pub fn map_anno<B, Q, FE, FP>(
         self,
@@ -1189,6 +1206,7 @@ pub struct ResolvedModule<A, P = A> {
     pub data_defs: Vec<DataDefinition>,
     pub class_defs: Vec<ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<A, P>>,
+    pub builtin_defs: Vec<BuiltinDefinition>,
     pub tycon_table: TyConTable,
     pub ctor_table: CtorTable,
     pub class_table: ClassTable,
@@ -1225,6 +1243,7 @@ impl<A, P> ResolvedModule<A, P> {
                 .into_iter()
                 .map(|inst| inst.map_anno(expr_anno, pattern_anno))
                 .collect(),
+            builtin_defs: self.builtin_defs,
             tycon_table: self.tycon_table,
             ctor_table: self.ctor_table,
             class_table: self.class_table,
@@ -2194,6 +2213,7 @@ mod tests {
             data_defs: vec![data_def],
             class_defs: vec![class_def],
             instance_defs: Vec::new(),
+            builtin_defs: Vec::new(),
             tycon_table: TyConTable::new(),
             ctor_table: CtorTable::new(),
             class_table: ClassTable::new(),

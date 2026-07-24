@@ -57,7 +57,7 @@ impl<'a> Resolver<'a> {
             return Err(ResolverError::Resolve(errors));
         }
 
-        let func_schemes = self.resolve_signatures(
+        let mut func_schemes = self.resolve_signatures(
             module_name,
             parsed,
             cx,
@@ -66,6 +66,8 @@ impl<'a> Resolver<'a> {
             &local_tycon_kind_ids,
             &class_defs,
         )?;
+        let mut builtin_defs = Vec::new();
+        self.seed_compiler_builtin_terms(cx, &mut func_schemes, &mut builtin_defs);
         if let Some(errors) = self.take_errors() {
             return Err(ResolverError::Resolve(errors));
         }
@@ -92,6 +94,7 @@ impl<'a> Resolver<'a> {
             data_defs,
             class_defs,
             instance_defs,
+            builtin_defs,
             tycon_table: Default::default(),
             ctor_table: Default::default(),
             class_table: Default::default(),
@@ -123,5 +126,21 @@ impl<'a> Resolver<'a> {
         local_tycon_kind_ids.extend(compiler_primitive_tycon_kinds());
         local_tycon_kind_ids.insert(PRIM_TYS.bool, Kind::Star);
         constructor_types.extend(compiler_bool_constructor_types());
+    }
+
+    fn seed_compiler_builtin_terms(
+        &self,
+        cx: &ModuleContext,
+        func_schemes: &mut HashMap<DefId, Scheme>,
+        builtin_defs: &mut Vec<BuiltinDefinition>,
+    ) {
+        for builtin in &cx.builtins.builtin_defs {
+            if builtin.id.module != cx.module_id {
+                continue;
+            }
+
+            func_schemes.insert(builtin.id, builtin.scheme.clone());
+            builtin_defs.push(builtin.clone());
+        }
     }
 }

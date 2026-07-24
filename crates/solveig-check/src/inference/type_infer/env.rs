@@ -380,6 +380,7 @@ mod tests {
                 methods: Vec::new(),
             }],
             instance_defs: Vec::new(),
+            builtin_defs: Vec::new(),
             tycon_table: Default::default(),
             ctor_table: Default::default(),
             class_table: Default::default(),
