@@ -964,6 +964,112 @@ pub type TermExprNode<A, P = A> = ExprNode<TermExpr<A, P>, A>;
 pub type PatternNode<A> = ExprNode<Pattern<A>, A>;
 pub type CaseArmNode<A, P = A> = ExprNode<CaseArm<A, P>, P>;
 
+impl<A, P> ExprNode<TermExpr<A, P>, A> {
+    pub fn map_anno<B, Q, FE, FP>(
+        self,
+        expr_anno: &mut FE,
+        pattern_anno: &mut FP,
+    ) -> ExprNode<TermExpr<B, Q>, B>
+    where
+        FE: FnMut(A) -> B,
+        FP: FnMut(P) -> Q,
+    {
+        let anno = expr_anno(self.anno);
+        let node = match self.node {
+            TermExpr::Unit => TermExpr::Unit,
+            TermExpr::Var(var) => TermExpr::Var(var),
+            TermExpr::Lit(lit) => TermExpr::Lit(lit),
+            TermExpr::Hole => TermExpr::Hole,
+            TermExpr::App(func, arg) => TermExpr::App(
+                Box::new(func.map_anno(expr_anno, pattern_anno)),
+                Box::new(arg.map_anno(expr_anno, pattern_anno)),
+            ),
+            TermExpr::Abs(param, annotation, body) => TermExpr::Abs(
+                param,
+                annotation,
+                Box::new(body.map_anno(expr_anno, pattern_anno)),
+            ),
+            TermExpr::TyAbs(param, kind, body) => TermExpr::TyAbs(
+                param,
+                kind,
+                Box::new(body.map_anno(expr_anno, pattern_anno)),
+            ),
+            TermExpr::TyApp(inner, ty) => {
+                TermExpr::TyApp(Box::new(inner.map_anno(expr_anno, pattern_anno)), ty)
+            }
+            TermExpr::Anno(inner, ty) => {
+                TermExpr::Anno(Box::new(inner.map_anno(expr_anno, pattern_anno)), ty)
+            }
+            TermExpr::Con(id) => TermExpr::Con(id),
+            TermExpr::Case(scrutinee, arms) => TermExpr::Case(
+                Box::new(scrutinee.map_anno(expr_anno, pattern_anno)),
+                arms.into_iter()
+                    .map(|arm| arm.map_anno(expr_anno, pattern_anno))
+                    .collect(),
+            ),
+            TermExpr::IfThenElse(cond, then_branch, else_branch) => TermExpr::IfThenElse(
+                Box::new(cond.map_anno(expr_anno, pattern_anno)),
+                Box::new(then_branch.map_anno(expr_anno, pattern_anno)),
+                Box::new(else_branch.map_anno(expr_anno, pattern_anno)),
+            ),
+            TermExpr::BinaryOperator(op, lhs, rhs) => TermExpr::BinaryOperator(
+                op,
+                Box::new(lhs.map_anno(expr_anno, pattern_anno)),
+                Box::new(rhs.map_anno(expr_anno, pattern_anno)),
+            ),
+            TermExpr::UnaryOperator(op, rhs) => {
+                TermExpr::UnaryOperator(op, Box::new(rhs.map_anno(expr_anno, pattern_anno)))
+            }
+            TermExpr::Let(name, binder, in_expr) => TermExpr::Let(
+                name,
+                Box::new(binder.map_anno(expr_anno, pattern_anno)),
+                Box::new(in_expr.map_anno(expr_anno, pattern_anno)),
+            ),
+        };
+
+        ExprNode::new(node, anno)
+    }
+}
+
+impl<A> ExprNode<Pattern<A>, A> {
+    pub fn map_anno<B, F>(self, anno: &mut F) -> ExprNode<Pattern<B>, B>
+    where
+        F: FnMut(A) -> B,
+    {
+        let mapped_anno = anno(self.anno);
+        let node = match self.node {
+            Pattern::Con(id, args) => {
+                Pattern::Con(id, args.into_iter().map(|arg| arg.map_anno(anno)).collect())
+            }
+            Pattern::Lit(lit) => Pattern::Lit(lit),
+            Pattern::Var(name) => Pattern::Var(name),
+            Pattern::Wild => Pattern::Wild,
+        };
+
+        ExprNode::new(node, mapped_anno)
+    }
+}
+
+impl<A, P> ExprNode<CaseArm<A, P>, P> {
+    pub fn map_anno<B, Q, FE, FP>(
+        self,
+        expr_anno: &mut FE,
+        pattern_anno: &mut FP,
+    ) -> ExprNode<CaseArm<B, Q>, Q>
+    where
+        FE: FnMut(A) -> B,
+        FP: FnMut(P) -> Q,
+    {
+        let anno = pattern_anno(self.anno);
+        let node = CaseArm {
+            pattern: self.node.pattern.map_anno(pattern_anno),
+            expr: self.node.expr.map_anno(expr_anno, pattern_anno),
+        };
+
+        ExprNode::new(node, anno)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Literal {
     Int(i64),
@@ -1035,6 +1141,26 @@ pub struct TermDefinition<A, P = A> {
     pub body: TermExprNode<A, P>,
 }
 
+impl<A, P> TermDefinition<A, P> {
+    pub fn map_anno<B, Q, FE, FP>(
+        self,
+        expr_anno: &mut FE,
+        pattern_anno: &mut FP,
+    ) -> TermDefinition<B, Q>
+    where
+        FE: FnMut(A) -> B,
+        FP: FnMut(P) -> Q,
+    {
+        TermDefinition {
+            id: self.id,
+            name: self.name,
+            short_name: self.short_name,
+            signature: self.signature,
+            body: self.body.map_anno(expr_anno, pattern_anno),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ResolvedModule<A, P = A> {
     pub data_defs: Vec<DataDefinition>,
@@ -1057,6 +1183,37 @@ impl<A, P> ResolvedModule<A, P> {
         self.tycon_table = tycon_table;
         self.ctor_table = ctor_table;
         self.class_table = class_table;
+    }
+
+    pub fn map_anno<B, Q, FE, FP>(
+        self,
+        expr_anno: &mut FE,
+        pattern_anno: &mut FP,
+    ) -> ResolvedModule<B, Q>
+    where
+        FE: FnMut(A) -> B,
+        FP: FnMut(P) -> Q,
+    {
+        ResolvedModule {
+            data_defs: self.data_defs,
+            class_defs: self.class_defs,
+            instance_defs: self
+                .instance_defs
+                .into_iter()
+                .map(|inst| inst.map_anno(expr_anno, pattern_anno))
+                .collect(),
+            tycon_table: self.tycon_table,
+            ctor_table: self.ctor_table,
+            class_table: self.class_table,
+            tycon_kinds: self.tycon_kinds,
+            constructor_types: self.constructor_types,
+            func_schemes: self.func_schemes,
+            func_defs: self
+                .func_defs
+                .into_iter()
+                .map(|def| def.map_anno(expr_anno, pattern_anno))
+                .collect(),
+        }
     }
 }
 
@@ -1509,11 +1666,50 @@ pub struct InstanceMethodDef<A, P = A> {
     pub body: TermExprNode<A, P>,
 }
 
+impl<A, P> InstanceMethodDef<A, P> {
+    pub fn map_anno<B, Q, FE, FP>(
+        self,
+        expr_anno: &mut FE,
+        pattern_anno: &mut FP,
+    ) -> InstanceMethodDef<B, Q>
+    where
+        FE: FnMut(A) -> B,
+        FP: FnMut(P) -> Q,
+    {
+        InstanceMethodDef {
+            name: self.name,
+            body: self.body.map_anno(expr_anno, pattern_anno),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct InstanceDefinition<A, P = A> {
     pub context: Vec<Predicate>,
     pub head: Predicate,
     pub methods: Vec<InstanceMethodDef<A, P>>,
+}
+
+impl<A, P> InstanceDefinition<A, P> {
+    pub fn map_anno<B, Q, FE, FP>(
+        self,
+        expr_anno: &mut FE,
+        pattern_anno: &mut FP,
+    ) -> InstanceDefinition<B, Q>
+    where
+        FE: FnMut(A) -> B,
+        FP: FnMut(P) -> Q,
+    {
+        InstanceDefinition {
+            context: self.context,
+            head: self.head,
+            methods: self
+                .methods
+                .into_iter()
+                .map(|method| method.map_anno(expr_anno, pattern_anno))
+                .collect(),
+        }
+    }
 }
 
 #[cfg(test)]

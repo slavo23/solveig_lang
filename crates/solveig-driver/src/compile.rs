@@ -1,12 +1,14 @@
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
     ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, ModuleId, PrettyTables, Scheme,
-    TyConId, TyConTable, TypeExpr, def_display_name, symbol_display_name,
+    TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, def_display_name, symbol_display_name,
 };
-use solveig_base::{FileSpan, IntoDiagnostic, Session};
+use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile};
 use solveig_check::inference::holes::hole_diagnostics;
 use solveig_check::inference::type_infer::{
     CheckedModule, TcMetadata, TypeCheckEnv, check_and_elab_module,
@@ -29,12 +31,42 @@ use crate::project::{ProjectError, load_project, parse_project};
 #[derive(Debug, Clone)]
 pub struct Compilation {
     project_root: PathBuf,
+    artifacts: Rc<RefCell<Option<CompilationArtifacts>>>,
+}
+
+#[derive(Clone, Debug)]
+struct CompilationArtifacts {
+    checked: HashMap<ModuleId, CheckedModule>,
+    module_files: HashMap<ModuleId, FileId>,
+    source_files: Vec<SourceFile>,
+    tycon_table: TyConTable,
+    class_table: ClassTable,
+}
+
+struct CheckedProject {
+    modules: Vec<CheckedModule>,
+    checked: HashMap<ModuleId, CheckedModule>,
+    module_files: HashMap<ModuleId, FileId>,
+    source_files: Vec<SourceFile>,
+}
+
+impl CompilationArtifacts {
+    fn from_checked_project(project: &CheckedProject, merged: &CheckedModule) -> Self {
+        Self {
+            checked: project.checked.clone(),
+            module_files: project.module_files.clone(),
+            source_files: project.source_files.clone(),
+            tycon_table: merged.tycon_table.clone(),
+            class_table: merged.class_table.clone(),
+        }
+    }
 }
 
 impl Compilation {
     pub fn new(project_root: impl Into<PathBuf>) -> Self {
         Self {
             project_root: project_root.into(),
+            artifacts: Rc::new(RefCell::new(None)),
         }
     }
 
@@ -43,18 +75,200 @@ impl Compilation {
         entry_name: &str,
         dump_bytecode: bool,
     ) -> Result<(), String> {
-        let output = compile_project_capture(&self.project_root, entry_name, dump_bytecode)?;
+        let output = self.compile_project_capture(entry_name, dump_bytecode)?;
         println!("{output}");
         Ok(())
     }
 
     pub fn run_project_capture(&self, entry_name: &str) -> Result<String, String> {
-        compile_project_capture(&self.project_root, entry_name, false)
+        self.compile_project_capture(entry_name, false)
     }
 
     pub fn checked_project_schemes(&self) -> Result<BTreeMap<String, String>, String> {
-        checked_project_schemes_impl(&self.project_root)
+        let merged = self.check_and_merge_project()?;
+        let pretty_tables = PrettyTables {
+            tycons: &merged.tycon_table,
+            classes: &merged.class_table,
+        };
+        let mut schemes = BTreeMap::new();
+
+        for (id, scheme) in &merged.func_schemes {
+            schemes.insert(
+                def_display_name(*id),
+                scheme.pretty_with_tables(pretty_tables),
+            );
+        }
+
+        Ok(schemes)
     }
+
+    pub fn hover(&self, file: impl AsRef<Path>, offset: usize) -> Option<String> {
+        let artifacts = self.artifacts.borrow();
+        hover_in_artifacts(artifacts.as_ref()?, file.as_ref(), offset)
+    }
+
+    fn compile_project_capture(
+        &self,
+        entry_name: &str,
+        dump_bytecode: bool,
+    ) -> Result<String, String> {
+        let merged = self.check_and_merge_project()?;
+        let elaborated = solveig_check::inference::class_elab::elaborate_typeclasses(&merged);
+        let ir = lower_module(&elaborated);
+        let cc = lower_to_closure_ir(&ir);
+
+        if dump_bytecode {
+            Machine::dump_bytecode(&cc, "bytecode.txt")
+                .map_err(|e| format!("failed to dump bytecode: {e}"))?;
+        }
+
+        let entry_fq = format!("main.{entry_name}");
+        let result =
+            Machine::exec(&cc, &entry_fq).map_err(|err| format!("runtime error: {err}"))?;
+        Ok(result.display().to_string())
+    }
+
+    fn check_and_merge_project(&self) -> Result<CheckedModule, String> {
+        self.artifacts.replace(None);
+        let checked_project = check_project_modules(&self.project_root)?;
+        let merged = merge_checked_modules(checked_project.modules.clone())?;
+
+        self.artifacts
+            .replace(Some(CompilationArtifacts::from_checked_project(
+                &checked_project,
+                &merged,
+            )));
+
+        Ok(merged)
+    }
+}
+
+#[derive(Clone, Debug)]
+struct HoverCandidate {
+    span: Range<usize>,
+    ty: String,
+}
+
+fn hover_in_artifacts(
+    artifacts: &CompilationArtifacts,
+    file: &Path,
+    offset: usize,
+) -> Option<String> {
+    let file_id = source_file_id(artifacts, file)?;
+    let pretty_tables = PrettyTables {
+        tycons: &artifacts.tycon_table,
+        classes: &artifacts.class_table,
+    };
+    let mut best = None;
+
+    for (module_id, checked) in &artifacts.checked {
+        if artifacts.module_files.get(module_id) != Some(&file_id) {
+            continue;
+        }
+
+        for func_def in &checked.func_defs {
+            hover_expr(&func_def.body, pretty_tables, offset, &mut best);
+        }
+
+        for instance in &checked.instance_defs {
+            for method in &instance.methods {
+                hover_expr(&method.body, pretty_tables, offset, &mut best);
+            }
+        }
+    }
+
+    best.map(|candidate| candidate.ty)
+}
+
+fn source_file_id(artifacts: &CompilationArtifacts, file: &Path) -> Option<FileId> {
+    artifacts
+        .source_files
+        .iter()
+        .enumerate()
+        .find(|(_, source)| source.path == file)
+        .or_else(|| {
+            artifacts
+                .source_files
+                .iter()
+                .enumerate()
+                .find(|(_, source)| file.is_relative() && source.path.ends_with(file))
+        })
+        .map(|(index, _)| FileId(index as u32))
+}
+
+fn hover_expr(
+    expr: &TermExprNode<TcMetadata, Range<usize>>,
+    pretty_tables: PrettyTables<'_>,
+    offset: usize,
+    best: &mut Option<HoverCandidate>,
+) {
+    if !span_contains_offset(&expr.anno.span, offset) {
+        return;
+    }
+
+    consider_hover_candidate(
+        best,
+        expr.anno.span.clone(),
+        expr.anno.inferred_type.pretty_with_tables(pretty_tables),
+    );
+
+    match &expr.node {
+        TermExpr::Unit
+        | TermExpr::Var(_)
+        | TermExpr::Lit(_)
+        | TermExpr::Hole
+        | TermExpr::Con(_) => {}
+        TermExpr::App(func, arg) => {
+            hover_expr(func, pretty_tables, offset, best);
+            hover_expr(arg, pretty_tables, offset, best);
+        }
+        TermExpr::Abs(_, _, body)
+        | TermExpr::TyAbs(_, _, body)
+        | TermExpr::TyApp(body, _)
+        | TermExpr::Anno(body, _)
+        | TermExpr::UnaryOperator(_, body) => hover_expr(body, pretty_tables, offset, best),
+        TermExpr::Case(scrutinee, arms) => {
+            hover_expr(scrutinee, pretty_tables, offset, best);
+            for arm in arms {
+                hover_expr(&arm.node.expr, pretty_tables, offset, best);
+            }
+        }
+        TermExpr::IfThenElse(cond, then_branch, else_branch) => {
+            hover_expr(cond, pretty_tables, offset, best);
+            hover_expr(then_branch, pretty_tables, offset, best);
+            hover_expr(else_branch, pretty_tables, offset, best);
+        }
+        TermExpr::BinaryOperator(_, lhs, rhs) => {
+            hover_expr(lhs, pretty_tables, offset, best);
+            hover_expr(rhs, pretty_tables, offset, best);
+        }
+        TermExpr::Let(_, binder, in_expr) => {
+            hover_expr(binder, pretty_tables, offset, best);
+            hover_expr(in_expr, pretty_tables, offset, best);
+        }
+    }
+}
+
+fn span_contains_offset(span: &Range<usize>, offset: usize) -> bool {
+    if span.start == span.end {
+        offset == span.start
+    } else {
+        span.start <= offset && offset < span.end
+    }
+}
+
+fn consider_hover_candidate(best: &mut Option<HoverCandidate>, span: Range<usize>, ty: String) {
+    let replace = best
+        .as_ref()
+        .is_none_or(|current| span_len(&span) <= span_len(&current.span));
+
+    if replace {
+        *best = Some(HoverCandidate { span, ty });
+    }
+}
+
+fn span_len(span: &Range<usize>) -> usize {
+    span.end.saturating_sub(span.start)
 }
 
 pub fn compile_and_run_project(
@@ -73,47 +287,7 @@ pub fn checked_project_schemes(project_root: &Path) -> Result<BTreeMap<String, S
     Compilation::new(project_root).checked_project_schemes()
 }
 
-fn checked_project_schemes_impl(project_root: &Path) -> Result<BTreeMap<String, String>, String> {
-    let checked_modules = check_project_modules(project_root)?;
-    let merged = merge_checked_modules(checked_modules)?;
-    let pretty_tables = PrettyTables {
-        tycons: &merged.tycon_table,
-        classes: &merged.class_table,
-    };
-    let mut schemes = BTreeMap::new();
-
-    for (id, scheme) in &merged.func_schemes {
-        schemes.insert(
-            def_display_name(*id),
-            scheme.pretty_with_tables(pretty_tables),
-        );
-    }
-
-    Ok(schemes)
-}
-
-fn compile_project_capture(
-    project_root: &Path,
-    entry_name: &str,
-    dump_bytecode: bool,
-) -> Result<String, String> {
-    let checked_modules = check_project_modules(project_root)?;
-    let merged = merge_checked_modules(checked_modules)?;
-    let elaborated = solveig_check::inference::class_elab::elaborate_typeclasses(&merged);
-    let ir = lower_module(&elaborated);
-    let cc = lower_to_closure_ir(&ir);
-
-    if dump_bytecode {
-        Machine::dump_bytecode(&cc, "bytecode.txt")
-            .map_err(|e| format!("failed to dump bytecode: {e}"))?;
-    }
-
-    let entry_fq = format!("main.{entry_name}");
-    let result = Machine::exec(&cc, &entry_fq).map_err(|err| format!("runtime error: {err}"))?;
-    Ok(result.display().to_string())
-}
-
-fn check_project_modules(project_root: &Path) -> Result<Vec<CheckedModule>, String> {
+fn check_project_modules(project_root: &Path) -> Result<CheckedProject, String> {
     let session = Session::new();
     let entry_file = find_entry_file(project_root)?;
     let (_root, project) = match load_project(&session, &entry_file) {
@@ -155,7 +329,8 @@ fn check_project_modules(project_root: &Path) -> Result<Vec<CheckedModule>, Stri
         emit_session_diagnostics(&session)?;
     }
 
-    Ok(state.checked_modules)
+    let source_files = session.source_map().files().to_vec();
+    Ok(state.into_checked_project(source_files))
 }
 
 fn emit_session_diagnostics(session: &Session) -> Result<(), String> {
@@ -178,113 +353,6 @@ fn push_resolve_errors(
     }
 }
 
-fn erase_tc_expr_to_span_expr(
-    expr: solveig_ast::ast::TermExprNode<
-        solveig_check::inference::type_infer::TcMetadata,
-        std::ops::Range<usize>,
-    >,
-) -> solveig_ast::ast::TermExprNode<std::ops::Range<usize>, std::ops::Range<usize>> {
-    let anno = expr.anno.span.clone();
-
-    let node = match expr.node {
-        solveig_ast::ast::TermExpr::Var(name) => solveig_ast::ast::TermExpr::Var(name),
-        solveig_ast::ast::TermExpr::Con(name) => solveig_ast::ast::TermExpr::Con(name),
-        solveig_ast::ast::TermExpr::Unit => solveig_ast::ast::TermExpr::Unit,
-        solveig_ast::ast::TermExpr::Lit(lit) => solveig_ast::ast::TermExpr::Lit(lit),
-        solveig_ast::ast::TermExpr::Hole => solveig_ast::ast::TermExpr::Hole,
-
-        solveig_ast::ast::TermExpr::Abs(param, ann, body) => {
-            solveig_ast::ast::TermExpr::Abs(param, ann, Box::new(erase_tc_expr_to_span_expr(*body)))
-        }
-
-        solveig_ast::ast::TermExpr::App(f, x) => solveig_ast::ast::TermExpr::App(
-            Box::new(erase_tc_expr_to_span_expr(*f)),
-            Box::new(erase_tc_expr_to_span_expr(*x)),
-        ),
-
-        solveig_ast::ast::TermExpr::TyAbs(name, kind, body) => solveig_ast::ast::TermExpr::TyAbs(
-            name,
-            kind,
-            Box::new(erase_tc_expr_to_span_expr(*body)),
-        ),
-
-        solveig_ast::ast::TermExpr::TyApp(inner, ty) => {
-            solveig_ast::ast::TermExpr::TyApp(Box::new(erase_tc_expr_to_span_expr(*inner)), ty)
-        }
-
-        solveig_ast::ast::TermExpr::Anno(inner, ty) => {
-            solveig_ast::ast::TermExpr::Anno(Box::new(erase_tc_expr_to_span_expr(*inner)), ty)
-        }
-
-        solveig_ast::ast::TermExpr::Case(scrutinee, arms) => solveig_ast::ast::TermExpr::Case(
-            Box::new(erase_tc_expr_to_span_expr(*scrutinee)),
-            arms.into_iter()
-                .map(|arm| {
-                    solveig_ast::ast::CaseArmNode::new(
-                        solveig_ast::ast::CaseArm {
-                            pattern: arm.node.pattern,
-                            expr: erase_tc_expr_to_span_expr(arm.node.expr),
-                        },
-                        arm.anno,
-                    )
-                })
-                .collect(),
-        ),
-
-        solveig_ast::ast::TermExpr::IfThenElse(c, t, e) => solveig_ast::ast::TermExpr::IfThenElse(
-            Box::new(erase_tc_expr_to_span_expr(*c)),
-            Box::new(erase_tc_expr_to_span_expr(*t)),
-            Box::new(erase_tc_expr_to_span_expr(*e)),
-        ),
-
-        solveig_ast::ast::TermExpr::BinaryOperator(op, l, r) => {
-            solveig_ast::ast::TermExpr::BinaryOperator(
-                op,
-                Box::new(erase_tc_expr_to_span_expr(*l)),
-                Box::new(erase_tc_expr_to_span_expr(*r)),
-            )
-        }
-
-        solveig_ast::ast::TermExpr::UnaryOperator(op, rhs) => {
-            solveig_ast::ast::TermExpr::UnaryOperator(
-                op,
-                Box::new(erase_tc_expr_to_span_expr(*rhs)),
-            )
-        }
-
-        solveig_ast::ast::TermExpr::Let(name, binder, in_expr) => solveig_ast::ast::TermExpr::Let(
-            name,
-            Box::new(erase_tc_expr_to_span_expr(*binder)),
-            Box::new(erase_tc_expr_to_span_expr(*in_expr)),
-        ),
-    };
-
-    solveig_ast::ast::TermExprNode::new(node, anno)
-}
-
-type CheckedInstanceDef = solveig_ast::ast::InstanceDefinition<TcMetadata, std::ops::Range<usize>>;
-type ResolvedInstanceDef =
-    solveig_ast::ast::InstanceDefinition<std::ops::Range<usize>, std::ops::Range<usize>>;
-
-fn erase_checked_instance_defs_to_resolved(
-    defs: Vec<CheckedInstanceDef>,
-) -> Vec<ResolvedInstanceDef> {
-    defs.into_iter()
-        .map(|inst| solveig_ast::ast::InstanceDefinition {
-            context: inst.context,
-            head: inst.head,
-            methods: inst
-                .methods
-                .into_iter()
-                .map(|m| solveig_ast::ast::InstanceMethodDef {
-                    name: m.name,
-                    body: erase_tc_expr_to_span_expr(m.body),
-                })
-                .collect(),
-        })
-        .collect()
-}
-
 struct FrontendState<'a> {
     session: &'a Session,
     project: &'a Project,
@@ -294,6 +362,8 @@ struct FrontendState<'a> {
     typed_apis: HashMap<ModuleName, SharedTypedModuleApi>,
     resolutions: HashMap<ModuleId, Vec<(FileSpan, DefId)>>,
     checked_modules: Vec<CheckedModule>,
+    checked: HashMap<ModuleId, CheckedModule>,
+    module_files: HashMap<ModuleId, FileId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -353,7 +423,18 @@ impl<'a> FrontendState<'a> {
             typed_apis: HashMap::new(),
             resolutions: HashMap::new(),
             checked_modules: Vec::new(),
+            checked: HashMap::new(),
+            module_files: HashMap::new(),
         })
+    }
+
+    fn into_checked_project(self, source_files: Vec<SourceFile>) -> CheckedProject {
+        CheckedProject {
+            modules: self.checked_modules,
+            checked: self.checked,
+            module_files: self.module_files,
+            source_files,
+        }
     }
 
     fn check_all(&mut self, order: &[ModuleName]) -> Result<(), String> {
@@ -395,6 +476,8 @@ impl<'a> FrontendState<'a> {
             ));
 
             self.typed_apis.insert(module_name.clone(), typed_api);
+            self.module_files.insert(module_id, parsed.file);
+            self.checked.insert(module_id, checked.clone());
             self.checked_modules.push(checked);
         }
 
@@ -499,11 +582,11 @@ impl<'a> FrontendState<'a> {
         for (id, info) in imported_class_table.iter() {
             check_env.class_table.insert_with_id(id, info.clone());
         }
-        check_env
-            .instance_defs
-            .extend(erase_checked_instance_defs_to_resolved(
-                imported_instance_defs,
-            ));
+        check_env.instance_defs.extend(
+            imported_instance_defs
+                .into_iter()
+                .map(|inst| inst.map_anno(&mut |meta| meta.span, &mut |span| span)),
+        );
 
         let checked_raw = match check_and_elab_module(&resolved, &check_env, file) {
             Ok(c) => c,
@@ -596,7 +679,7 @@ struct ImportedTypeInfo {
     tycon_kinds: HashMap<TyConId, solveig_ast::ast::Kind>,
     constructor_types: HashMap<CtorId, solveig_ast::ast::TypeExpr>,
     class_defs: HashMap<ClassId, ClassDefinition>,
-    instance_defs: Vec<CheckedInstanceDef>,
+    instance_defs: Vec<solveig_ast::ast::InstanceDefinition<TcMetadata, Range<usize>>>,
     tycon_table: TyConTable,
     ctor_table: CtorTable,
     class_table: ClassTable,

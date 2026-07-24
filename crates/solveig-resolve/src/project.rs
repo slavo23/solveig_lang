@@ -6,10 +6,8 @@ use petgraph::algo::{tarjan_scc, toposort};
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{
-    COMPILER_BOOL_NAME, COMPILER_CHAR_NAME, COMPILER_FALSE_NAME, COMPILER_FLOAT_NAME,
-    COMPILER_INT_NAME, COMPILER_IO_NAME, COMPILER_PRELUDE_BUILTINS_MODULE, COMPILER_STRING_NAME,
-    COMPILER_TRUE_NAME, ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Kind,
-    ModuleId, PRIM_TYS, TyConId, TyConTable, TypeExpr, symbol_display_name,
+    ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Kind, ModuleId, PRIM_TYS,
+    TyConId, TyConTable, TypeExpr, symbol_display_name,
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
@@ -551,6 +549,8 @@ pub struct Imported<T> {
 pub type ImportedApi = Imported<ModuleApi>;
 pub type ImportedTypedApi = Imported<TypedModuleApi>;
 
+const COMPILER_PRELUDE_BUILTINS_SEGMENTS: [&str; 2] = ["prelude", "builtins"];
+
 #[derive(Debug, Clone, Default)]
 pub struct BuiltinApi {
     pub terms: HashMap<Symbol, DefId>,
@@ -563,8 +563,8 @@ pub struct BuiltinApi {
 
 pub fn compiler_prelude_builtins_module(session: &Session) -> ModuleName {
     ModuleName(
-        COMPILER_PRELUDE_BUILTINS_MODULE
-            .split('.')
+        COMPILER_PRELUDE_BUILTINS_SEGMENTS
+            .iter()
             .map(|segment| session.intern(segment))
             .collect(),
     )
@@ -578,12 +578,12 @@ pub fn compiler_builtin_api(session: &Session, modules: &ModuleTable) -> Builtin
     };
 
     for (name, id) in compiler_type_entries() {
-        let symbol = session.intern(short_compiler_name(name));
+        let symbol = session.intern(name);
         api.type_ids.insert(local_def_id(module_id, symbol), id);
     }
 
     for (name, id) in compiler_constructor_entries() {
-        let symbol = session.intern(short_compiler_name(name));
+        let symbol = session.intern(name);
         api.constructor_ids
             .insert(local_def_id(module_id, symbol), id);
     }
@@ -602,12 +602,12 @@ pub fn seed_compiler_prelude_module_api(
     }
 
     for (name, _id) in compiler_type_entries() {
-        let symbol = session.intern(short_compiler_name(name));
+        let symbol = session.intern(name);
         api.types.insert(symbol, local_def_id(module_id, symbol));
     }
 
     for (name, _id) in compiler_constructor_entries() {
-        let symbol = session.intern(short_compiler_name(name));
+        let symbol = session.intern(name);
         api.constructors
             .insert(symbol, local_def_id(module_id, symbol));
     }
@@ -615,26 +615,17 @@ pub fn seed_compiler_prelude_module_api(
 
 fn compiler_type_entries() -> [(&'static str, TyConId); 6] {
     [
-        (COMPILER_INT_NAME, PRIM_TYS.int),
-        (COMPILER_FLOAT_NAME, PRIM_TYS.float),
-        (COMPILER_CHAR_NAME, PRIM_TYS.char),
-        (COMPILER_STRING_NAME, PRIM_TYS.string),
-        (COMPILER_IO_NAME, PRIM_TYS.io),
-        (COMPILER_BOOL_NAME, PRIM_TYS.bool),
+        ("Int", PRIM_TYS.int),
+        ("Float", PRIM_TYS.float),
+        ("Char", PRIM_TYS.char),
+        ("String", PRIM_TYS.string),
+        ("IO", PRIM_TYS.io),
+        ("Bool", PRIM_TYS.bool),
     ]
 }
 
 fn compiler_constructor_entries() -> [(&'static str, CtorId); 2] {
-    [
-        (COMPILER_TRUE_NAME, PRIM_TYS.true_ctor),
-        (COMPILER_FALSE_NAME, PRIM_TYS.false_ctor),
-    ]
-}
-
-fn short_compiler_name(name: &str) -> &str {
-    name.rsplit('.')
-        .next()
-        .expect("ICE: compiler builtin name must have a final segment")
+    [("True", PRIM_TYS.true_ctor), ("False", PRIM_TYS.false_ctor)]
 }
 
 #[derive(Debug, Clone)]
