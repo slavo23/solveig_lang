@@ -125,13 +125,6 @@ impl BytecodeProgram {
             .map(|info| info.name.clone())
     }
 
-    pub fn constructor_tag(&self, name: &str) -> Option<u16> {
-        self.constructor_arities
-            .iter()
-            .find(|info| info.name == name || info.short_name == name)
-            .map(|info| info.tag)
-    }
-
     pub fn constructor_arity(&self, tag: u16) -> Option<u16> {
         self.constructor_arities
             .iter()
@@ -824,8 +817,15 @@ fn format_instr(instr: &Instr) -> String {
 
 fn format_trap(code: u16) -> String {
     match code {
-        NON_EXHAUSTIVE_CASE_TRAP => "\"non-exhaustive case\"".to_string(),
+        NON_EXHAUSTIVE_CASE_TRAP => format!("{:?}", trap_message(code)),
         other => format!("code={other}"),
+    }
+}
+
+pub fn trap_message(code: u16) -> String {
+    match code {
+        NON_EXHAUSTIVE_CASE_TRAP => "non-exhaustive case".to_string(),
+        other => format!("runtime trap code {other}"),
     }
 }
 

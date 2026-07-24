@@ -295,6 +295,9 @@ pub const COMPILER_IO_NAME: &str = "prelude.builtins.IO";
 pub const COMPILER_BOOL_NAME: &str = "prelude.builtins.Bool";
 pub const COMPILER_TRUE_NAME: &str = "prelude.builtins.True";
 pub const COMPILER_FALSE_NAME: &str = "prelude.builtins.False";
+pub const PRELUDE_LIST_NIL_NAME: &str = "prelude.list.Nil";
+pub const PRELUDE_LIST_CONS_NAME: &str = "prelude.list.Cons";
+pub const PRELUDE_PAIR_MKPAIR_NAME: &str = "prelude.builtins.MkPair";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct PrimTys {
@@ -380,6 +383,30 @@ pub fn compiler_bool_constructor_types() -> HashMap<CtorId, TypeExpr> {
         .into_iter()
         .map(|ctor| (ctor.id, ctor.full_type))
         .collect()
+}
+
+pub fn prelude_list_nil_ctor_id() -> CtorId {
+    legacy_ctor_id(PRELUDE_LIST_NIL_NAME)
+}
+
+pub fn prelude_list_cons_ctor_id() -> CtorId {
+    legacy_ctor_id(PRELUDE_LIST_CONS_NAME)
+}
+
+pub fn prelude_pair_mkpair_ctor_id() -> CtorId {
+    legacy_ctor_id(PRELUDE_PAIR_MKPAIR_NAME)
+}
+
+pub fn runtime_ctor_role(ctor: CtorId) -> CtorRuntimeRole {
+    if ctor == prelude_list_nil_ctor_id() {
+        CtorRuntimeRole::PreludeListNil
+    } else if ctor == prelude_list_cons_ctor_id() {
+        CtorRuntimeRole::PreludeListCons
+    } else if ctor == prelude_pair_mkpair_ctor_id() {
+        CtorRuntimeRole::PreludePair
+    } else {
+        CtorRuntimeRole::Ordinary
+    }
 }
 
 fn compiler_primitive_tycon_info(
@@ -1198,10 +1225,19 @@ pub struct ConstructorDef {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct CtorRuntimeInfo {
     pub ctor: CtorId,
+    pub role: CtorRuntimeRole,
     pub name: String,
     pub short_name: String,
     pub tag: u16,
     pub arity: u16,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CtorRuntimeRole {
+    Ordinary,
+    PreludeListNil,
+    PreludeListCons,
+    PreludePair,
 }
 
 #[derive(Clone, Debug, PartialEq)]

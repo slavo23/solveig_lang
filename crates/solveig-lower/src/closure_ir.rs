@@ -102,13 +102,6 @@ impl CCProgram {
             .map(|info| info.name.clone())
     }
 
-    pub fn constructor_tag(&self, name: &str) -> Option<u16> {
-        self.constructor_arities
-            .iter()
-            .find(|info| info.name == name || info.short_name == name)
-            .map(|info| info.tag)
-    }
-
     pub fn constructor_arity(&self, tag: u16) -> Option<u16> {
         self.constructor_arities
             .iter()

@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use solveig_ast::ast::{
     CaseArm, CtorId, CtorRuntimeInfo, Literal, Pattern, PatternNode, ResolvedModule, TermExpr,
-    TermExprNode, VarRef, symbol_display_name, var_display_name,
+    TermExprNode, VarRef, runtime_ctor_role, symbol_display_name, var_display_name,
 };
 
 use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
@@ -265,6 +265,7 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
         .iter()
         .map(|(ctor, info)| CtorRuntimeInfo {
             ctor: *ctor,
+            role: runtime_ctor_role(*ctor),
             name: info.name.clone(),
             short_name: info.short_name.clone(),
             tag: info.tag,

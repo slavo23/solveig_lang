@@ -1,5 +1,5 @@
-use solveig_ast::ast::CtorRuntimeInfo;
 use solveig_ast::ast::Literal;
+use solveig_ast::ast::{CtorId, CtorRuntimeInfo, PRIM_TYS};
 
 use super::bytecode::{
     BytePattern, BytecodeProgram, ChunkKind, Instr, MatchArm, lower_to_bytecode,
@@ -8,6 +8,7 @@ use super::heap::{BoundPrefix, Heap, HeapObject, PayloadRef, PayloadStore};
 use super::values::{BoolCache, Continuation, GlobalSlot, NullaryCtorCache, ObjId, Value};
 use crate::display::DisplayValue;
 use solveig_lower::closure_ir::CCProgram;
+use std::fmt;
 
 struct Vm {
     chunk: usize,
@@ -94,8 +95,8 @@ impl Vm {
             }
         }
 
-        let true_tag = find_bool_tag(arities, "True");
-        let false_tag = find_bool_tag(arities, "False");
+        let true_tag = find_ctor_tag(arities, PRIM_TYS.true_ctor);
+        let false_tag = find_ctor_tag(arities, PRIM_TYS.false_ctor);
         self.bools.true_val = self.nullary_ctors.get(true_tag);
         self.bools.false_val = self.nullary_ctors.get(false_tag);
     }
@@ -299,7 +300,11 @@ impl Vm {
         None
     }
 
-    fn eval_global(&mut self, program: &BytecodeProgram, index: usize) -> Value {
+    fn eval_global(
+        &mut self,
+        program: &BytecodeProgram,
+        index: usize,
+    ) -> Result<Value, RuntimeError> {
         match self.start_global_eval(
             program,
             index,
@@ -307,7 +312,7 @@ impl Vm {
                 global_index: index,
             },
         ) {
-            Some(val) => val,
+            Some(val) => Ok(val),
             None => self.dispatch(program),
         }
     }
@@ -861,7 +866,7 @@ impl Vm {
         }
     }
 
-    fn dispatch(&mut self, program: &BytecodeProgram) -> Value {
+    fn dispatch(&mut self, program: &BytecodeProgram) -> Result<Value, RuntimeError> {
         let mut code = &program.chunks[self.chunk].code;
         loop {
             let instr = unsafe { *code.get_unchecked(self.pc) };
@@ -983,7 +988,7 @@ impl Vm {
                     if let Some(val) = self.invoke_value(program, InvokeMode::TailCall, callee, n)
                         && let Some(done) = self.resume_after_return(val)
                     {
-                        return done;
+                        return Ok(done);
                     }
 
                     code = &program.chunks[self.chunk].code;
@@ -996,7 +1001,7 @@ impl Vm {
                         self.invoke_known_function(program, InvokeMode::TailCall, chunk_id, n)
                         && let Some(done) = self.resume_after_return(val)
                     {
-                        return done;
+                        return Ok(done);
                     }
 
                     code = &program.chunks[self.chunk].code;
@@ -1005,7 +1010,7 @@ impl Vm {
                     let result = self.pop();
 
                     if let Some(done) = self.resume_after_return(result) {
-                        return done;
+                        return Ok(done);
                     }
 
                     code = &program.chunks[self.chunk].code;
@@ -1022,7 +1027,7 @@ impl Vm {
                     let table = &program.chunks[self.chunk].match_tables[table_idx as usize];
                     self.dispatch_match(&table.arms, scrutinee, table.else_target);
                 }
-                Instr::Trap(msg) => panic!("{}", msg),
+                Instr::Trap(code) => return Err(RuntimeError::trap(code)),
             }
         }
     }
@@ -1143,12 +1148,12 @@ fn chunk_arity(program: &BytecodeProgram, chunk_id: usize) -> usize {
     arity
 }
 
-fn find_bool_tag(arities: &[CtorRuntimeInfo], name: &str) -> u16 {
+fn find_ctor_tag(arities: &[CtorRuntimeInfo], ctor: CtorId) -> u16 {
     arities
         .iter()
-        .find(|info| info.arity == 0 && (info.name == name || info.short_name == name))
+        .find(|info| info.arity == 0 && info.ctor == ctor)
         .map(|info| info.tag)
-        .unwrap_or_else(|| panic!("'{}' constructor not found", name))
+        .unwrap_or_else(|| panic!("ICE: runtime constructor metadata missing CtorId {ctor:?}"))
 }
 
 pub struct EvalResult {
@@ -1157,27 +1162,56 @@ pub struct EvalResult {
     constructor_arities: Vec<CtorRuntimeInfo>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeError {
+    pub code: u16,
+    pub message: String,
+}
+
+impl RuntimeError {
+    fn trap(code: u16) -> Self {
+        Self {
+            code,
+            message: crate::bytecode::trap_message(code),
+        }
+    }
+}
+
+impl fmt::Display for RuntimeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.message)
+    }
+}
+
+impl std::error::Error for RuntimeError {}
+
 pub struct Machine;
 
 impl Machine {
-    pub fn exec(program: &CCProgram, entry_name: &str) -> EvalResult {
+    pub fn exec(program: &CCProgram, entry_name: &str) -> Result<EvalResult, RuntimeError> {
         let bytecode = lower_to_bytecode(program);
         Self::exec_compiled(&bytecode, entry_name)
     }
 
-    pub fn exec_compiled(program: &BytecodeProgram, entry_name: &str) -> EvalResult {
-        let entry = program
-            .global_index_by_name(entry_name)
-            .unwrap_or_else(|| panic!("entry '{}' not found", entry_name));
+    pub fn exec_compiled(
+        program: &BytecodeProgram,
+        entry_name: &str,
+    ) -> Result<EvalResult, RuntimeError> {
+        let Some(entry) = program.global_index_by_name(entry_name) else {
+            return Err(RuntimeError {
+                code: 0,
+                message: format!("entry '{entry_name}' not found"),
+            });
+        };
 
         let mut vm = Vm::new(program);
-        let root = vm.eval_global(program, entry);
+        let root = vm.eval_global(program, entry)?;
 
-        EvalResult {
+        Ok(EvalResult {
             root,
             heap: vm.heap,
             constructor_arities: program.constructor_arities.clone(),
-        }
+        })
     }
 
     pub fn dump_bytecode<P: AsRef<std::path::Path>>(
@@ -1202,7 +1236,10 @@ impl EvalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solveig_ast::ast::{BinOp, PRIM_TYS, legacy_ctor_id};
+    use solveig_ast::ast::{
+        BinOp, CtorId, legacy_ctor_id, prelude_list_cons_ctor_id, prelude_list_nil_ctor_id,
+        prelude_pair_mkpair_ctor_id, runtime_ctor_role,
+    };
     use solveig_lower::closure_ir::{CCCaseArm, CCExpr, CCFunction, CCGlobalDef, CCPattern};
     use std::rc::Rc;
 
@@ -1210,6 +1247,10 @@ mod tests {
     const FALSE_TAG: u16 = 1;
     const NIL_TAG: u16 = 2;
     const CONS_TAG: u16 = 3;
+    const PRELUDE_NIL_TAG: u16 = 4;
+    const PRELUDE_CONS_TAG: u16 = 5;
+    const PRELUDE_PAIR_TAG: u16 = 6;
+    const USER_PAIR_TAG: u16 = 7;
 
     #[test]
     fn tail_recursive_countdown_uses_bounded_vm_stack() {
@@ -1348,8 +1389,113 @@ mod tests {
         assert_eq!(run(&program), "31");
     }
 
+    #[test]
+    fn trap_returns_runtime_error() {
+        let program = program(
+            vec![global("main", case(int(0), Vec::new()))],
+            Vec::new(),
+            &[],
+        );
+
+        let err = match Machine::exec(&program, "main") {
+            Ok(_) => panic!("ICE: trap test unexpectedly evaluated successfully"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.code, 1);
+        assert_eq!(err.message, "non-exhaustive case");
+    }
+
+    #[test]
+    fn bool_cache_uses_ctor_ids_not_names() {
+        let program = program_with_bool_names(
+            vec![global(
+                "main",
+                if_then_else(bin(BinOp::Less, int(1), int(2)), int(42), int(0)),
+            )],
+            Vec::new(),
+            &[],
+            "DefinitelyTrue",
+            "DefinitelyFalse",
+        );
+
+        assert_eq!(run(&program), "42");
+    }
+
+    #[test]
+    fn display_uses_prelude_list_and_pair_ctor_ids() {
+        let list = pack(
+            PRELUDE_CONS_TAG,
+            2,
+            vec![
+                int(1),
+                pack(
+                    PRELUDE_CONS_TAG,
+                    2,
+                    vec![int(2), pack(PRELUDE_NIL_TAG, 0, Vec::new())],
+                ),
+            ],
+        );
+        let pair = pack(PRELUDE_PAIR_TAG, 2, vec![int(1), int(2)]);
+
+        let program = program_with_ctors(
+            vec![global("listMain", list), global("pairMain", pair)],
+            Vec::new(),
+            &[
+                ctor_spec(
+                    prelude_list_nil_ctor_id(),
+                    "renamed.list.Empty",
+                    "Empty",
+                    PRELUDE_NIL_TAG,
+                    0,
+                ),
+                ctor_spec(
+                    prelude_list_cons_ctor_id(),
+                    "renamed.list.Link",
+                    "Link",
+                    PRELUDE_CONS_TAG,
+                    2,
+                ),
+                ctor_spec(
+                    prelude_pair_mkpair_ctor_id(),
+                    "renamed.pair.Tuple",
+                    "Tuple",
+                    PRELUDE_PAIR_TAG,
+                    2,
+                ),
+            ],
+        );
+
+        assert_eq!(run_entry(&program, "listMain"), "[1, 2]");
+        assert_eq!(run_entry(&program, "pairMain"), "(1, 2)");
+    }
+
+    #[test]
+    fn display_does_not_tuple_user_pair_by_name() {
+        let program = program_with_ctors(
+            vec![global("main", pack(USER_PAIR_TAG, 2, vec![int(1), int(2)]))],
+            Vec::new(),
+            &[ctor_spec(
+                legacy_ctor_id("main.MkPair"),
+                "main.MkPair",
+                "MkPair",
+                USER_PAIR_TAG,
+                2,
+            )],
+        );
+
+        assert_eq!(run(&program), "MkPair 1 2");
+    }
+
     fn run(program: &CCProgram) -> String {
-        Machine::exec(program, "main").display().to_string()
+        run_entry(program, "main")
+    }
+
+    fn run_entry(program: &CCProgram, entry_name: &str) -> String {
+        Machine::exec(program, entry_name)
+            .expect("VM test program should evaluate successfully")
+            .display()
+            .to_string()
     }
 
     fn program(
@@ -1357,37 +1503,87 @@ mod tests {
         functions: Vec<CCFunction>,
         extra_constructors: &[(&str, u16, u16)],
     ) -> CCProgram {
+        program_with_bool_names(globals, functions, extra_constructors, "True", "False")
+    }
+
+    fn program_with_bool_names(
+        globals: Vec<CCGlobalDef>,
+        functions: Vec<CCFunction>,
+        extra_constructors: &[(&str, u16, u16)],
+        true_name: &'static str,
+        false_name: &'static str,
+    ) -> CCProgram {
+        let extra_constructors = extra_constructors
+            .iter()
+            .map(|(name, tag, arity)| ctor_spec(legacy_ctor_id(name), *name, *name, *tag, *arity))
+            .collect::<Vec<_>>();
+
+        program_with_bool_ctor_specs(
+            globals,
+            functions,
+            &extra_constructors,
+            true_name,
+            false_name,
+        )
+    }
+
+    fn program_with_ctors(
+        globals: Vec<CCGlobalDef>,
+        functions: Vec<CCFunction>,
+        extra_constructors: &[TestCtorSpec],
+    ) -> CCProgram {
+        program_with_bool_ctor_specs(globals, functions, extra_constructors, "True", "False")
+    }
+
+    fn program_with_bool_ctor_specs(
+        globals: Vec<CCGlobalDef>,
+        functions: Vec<CCFunction>,
+        extra_constructors: &[TestCtorSpec],
+        true_name: &'static str,
+        false_name: &'static str,
+    ) -> CCProgram {
+        let true_spec = ctor_spec(PRIM_TYS.true_ctor, true_name, true_name, TRUE_TAG, 0);
+        let false_spec = ctor_spec(PRIM_TYS.false_ctor, false_name, false_name, FALSE_TAG, 0);
         let mut constructor_arities = vec![
-            CtorRuntimeInfo {
-                ctor: PRIM_TYS.true_ctor,
-                name: "True".to_string(),
-                short_name: "True".to_string(),
-                tag: TRUE_TAG,
-                arity: 0,
-            },
-            CtorRuntimeInfo {
-                ctor: PRIM_TYS.false_ctor,
-                name: "False".to_string(),
-                short_name: "False".to_string(),
-                tag: FALSE_TAG,
-                arity: 0,
-            },
+            ctor_runtime_info(&true_spec),
+            ctor_runtime_info(&false_spec),
         ];
 
-        constructor_arities.extend(extra_constructors.iter().map(|(name, tag, arity)| {
-            CtorRuntimeInfo {
-                ctor: legacy_ctor_id(name),
-                name: (*name).to_string(),
-                short_name: (*name).to_string(),
-                tag: *tag,
-                arity: *arity,
-            }
-        }));
+        constructor_arities.extend(extra_constructors.iter().map(ctor_runtime_info));
 
         CCProgram {
             globals,
             functions,
             constructor_arities,
+        }
+    }
+
+    struct TestCtorSpec {
+        ctor: CtorId,
+        name: String,
+        short_name: String,
+        tag: u16,
+        arity: u16,
+    }
+
+    fn ctor_spec(ctor: CtorId, name: &str, short_name: &str, tag: u16, arity: u16) -> TestCtorSpec {
+        TestCtorSpec {
+            ctor,
+            name: name.to_string(),
+            short_name: short_name.to_string(),
+            tag,
+            arity,
+        }
+    }
+
+    fn ctor_runtime_info(spec: &TestCtorSpec) -> CtorRuntimeInfo {
+        CtorRuntimeInfo {
+            ctor: spec.ctor,
+            role: runtime_ctor_role(spec.ctor),
+            name: spec.name.clone(),
+            short_name: spec.short_name.clone(),
+            tag: spec.tag,
+            arity: spec.arity,
         }
     }
 

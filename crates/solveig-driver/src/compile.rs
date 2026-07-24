@@ -109,7 +109,7 @@ fn compile_project_capture(
     }
 
     let entry_fq = format!("main.{entry_name}");
-    let result = Machine::exec(&cc, &entry_fq);
+    let result = Machine::exec(&cc, &entry_fq).map_err(|err| format!("runtime error: {err}"))?;
     Ok(result.display().to_string())
 }
 

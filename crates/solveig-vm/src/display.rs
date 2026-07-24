@@ -1,6 +1,6 @@
 use crate::heap::{Heap, HeapObject};
 use crate::values::Value;
-use solveig_ast::ast::CtorRuntimeInfo;
+use solveig_ast::ast::{CtorRuntimeInfo, CtorRuntimeRole};
 
 pub struct DisplayValue<'a> {
     pub root: Value,
@@ -15,15 +15,25 @@ impl std::fmt::Display for DisplayValue<'_> {
 }
 
 fn tag_name(arities: &[CtorRuntimeInfo], tag: u16) -> String {
-    arities
-        .iter()
-        .find(|info| info.tag == tag)
+    tag_info(arities, tag)
         .map(|info| info.short_name.clone())
         .unwrap_or_else(|| "<?>".to_string())
 }
 
-fn tag_is(arities: &[CtorRuntimeInfo], tag: u16, expected: &str) -> bool {
-    tag_name(arities, tag) == expected
+fn tag_info(arities: &[CtorRuntimeInfo], tag: u16) -> Option<&CtorRuntimeInfo> {
+    arities.iter().find(|info| info.tag == tag)
+}
+
+fn tag_has_role(arities: &[CtorRuntimeInfo], tag: u16, role: CtorRuntimeRole) -> bool {
+    tag_info(arities, tag)
+        .map(|info| info.role == role)
+        .unwrap_or(false)
+}
+
+fn tag_has_short_name(arities: &[CtorRuntimeInfo], tag: u16, expected: &str) -> bool {
+    tag_info(arities, tag)
+        .map(|info| info.short_name == expected)
+        .unwrap_or(false)
 }
 
 impl DisplayValue<'_> {
@@ -114,13 +124,13 @@ impl DisplayValue<'_> {
             match val {
                 Value::Obj(id) => match self.heap.get(id) {
                     HeapObject::Data0 { tag } => {
-                        if tag_is(self.arities, *tag, "Z") {
+                        if tag_has_short_name(self.arities, *tag, "Z") {
                             return Some(n.to_string());
                         }
                         return None;
                     }
                     HeapObject::Data1 { tag, field } => {
-                        if tag_is(self.arities, *tag, "S") {
+                        if tag_has_short_name(self.arities, *tag, "S") {
                             n += 1;
                             val = *field;
                             continue;
@@ -141,7 +151,7 @@ impl DisplayValue<'_> {
             match val {
                 Value::Obj(id) => match self.heap.get(id) {
                     HeapObject::Data0 { tag } => {
-                        if tag_is(self.arities, *tag, "Nil") {
+                        if tag_has_role(self.arities, *tag, CtorRuntimeRole::PreludeListNil) {
                             return Some(format!("[{}]", items.join(", ")));
                         }
                         return None;
@@ -151,7 +161,7 @@ impl DisplayValue<'_> {
                         field0,
                         field1,
                     } => {
-                        if tag_is(self.arities, *tag, "Cons") {
+                        if tag_has_role(self.arities, *tag, CtorRuntimeRole::PreludeListCons) {
                             items.push(self.render(*field0));
                             val = *field1;
                             continue;
@@ -174,8 +184,7 @@ impl DisplayValue<'_> {
                     field0,
                     field1,
                 } => {
-                    let name = tag_name(self.arities, *tag);
-                    if name == "Pair" || name == "MkPair" {
+                    if tag_has_role(self.arities, *tag, CtorRuntimeRole::PreludePair) {
                         Some(format!(
                             "({}, {})",
                             self.render(*field0),
