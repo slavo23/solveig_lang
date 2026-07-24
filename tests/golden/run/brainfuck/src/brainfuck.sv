@@ -38,6 +38,24 @@ bindState st f =
             case runState st s of
                 Pair x s1 => runState (f x) s1);
 
+instance Functor (State s) where
+    fmap f st =
+        State
+            (fun s =>
+                case runState st s of
+                    Pair x s1 => Pair (f x) s1);
+
+instance Applicative (State s) where
+    pure x = pureState x;
+
+    apply stF stX =
+        bindState stF (fun f =>
+            bindState stX (fun x =>
+                pureState (f x)));
+
+instance Monad (State s) where
+    bind st f = bindState st f;
+
 getState : forall s. State s s;
 getState =
     State (fun s => Pair s s);
@@ -126,13 +144,14 @@ writeOutState =
 
 execLoop : [BF] -> State BFState ();
 execLoop body =
-    bindState getState
-        (fun st =>
-            if currentCell st == 0 then
-                pureState ()
-            else
-                bindState (execProgram body)
-                    (fun _ => execLoop body));
+    do
+        st <- getState
+        if currentCell st == 0 then
+            pureState ()
+        else
+            do
+                execProgram body
+                execLoop body;
 
 execInstr : BF -> State BFState ();
 execInstr instr =
@@ -149,9 +168,9 @@ execProgram : [BF] -> State BFState ();
 execProgram prog =
     case prog of
         [] => pureState ()
-      | i :: rest =>
-            bindState (execInstr i)
-                (fun _ => execProgram rest);
+      | i :: rest => do
+            execInstr i
+            execProgram rest;
 
 runProgramState : [BF] -> [Int] -> BFState;
 runProgramState prog input =

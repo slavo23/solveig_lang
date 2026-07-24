@@ -1,2 +1,4 @@
 main : IO ()
-main = bindIO readLine (fun line => printLine line)
+main = do
+    line <- readLine
+    printLine line

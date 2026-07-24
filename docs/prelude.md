@@ -69,11 +69,10 @@ Example:
 
 ```solveig
 main : IO ()
-main =
-    seqIO
-        (printStr "name> ")
-        (bindIO readLine (fun name =>
-            printLine (appendString "hello, " name)))
+main = do
+    printStr "name> "
+    name <- readLine
+    printLine (appendString "hello, " name)
 ```
 
 ### Strings And Booleans
@@ -225,13 +224,19 @@ filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
 ```
 
 Instances are provided for `Maybe`, `List`, and `IO` where appropriate.
+Solveig's `do` notation desugars through this generic `Monad` class. A bind
+statement `x <- action` uses `bind`, an ordinary expression statement before
+the final line uses `thenM`, and the final statement is returned directly.
 
 Example:
 
 ```solveig
 readTwo : IO [String]
-readTwo = mapM (fun prompt =>
-    seqIO (printStr prompt) readLine) ["first> ", "second> "]
+readTwo = mapM
+    (fun prompt => do
+        printStr prompt
+        readLine)
+    ["first> ", "second> "]
 ```
 
 ### IO Helpers
@@ -250,7 +255,9 @@ Example:
 
 ```solveig
 main : IO ()
-main = bindIO getArgs (fun args => mapIO_ printLine args)
+main = do
+    args <- getArgs
+    mapIO_ printLine args
 ```
 
 ### Show

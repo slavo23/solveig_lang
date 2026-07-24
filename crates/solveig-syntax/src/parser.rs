@@ -1069,6 +1069,7 @@ impl<'a> Parser<'a> {
                 | Token::Then
                 | Token::Else
                 | Token::In
+                | Token::BindArrow
                 | Token::Semicolon
                 | Token::VSemi
                 | Token::VClose
@@ -1294,6 +1295,7 @@ impl<'a> Parser<'a> {
         let expr = match self.current_kind() {
             Token::Fun => return self.parse_lambda(),
             Token::Let => return self.parse_let(),
+            Token::Do => return self.parse_do(),
             Token::If => return self.parse_if(),
             Token::Case => return self.parse_case(),
             _ => self.parse_op_chain()?,
@@ -1534,6 +1536,89 @@ impl<'a> Parser<'a> {
             start,
             end,
         ))
+    }
+
+    fn parse_do(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
+        let start = self.expect(&Token::Do)?.start;
+
+        let implicit_layout = if self.at(&Token::VOpen) {
+            self.advance();
+            true
+        } else {
+            false
+        };
+
+        let mut statements = Vec::new();
+        loop {
+            self.skip_separators();
+
+            if self.at(&Token::VClose) {
+                if implicit_layout {
+                    self.advance();
+                }
+                break;
+            }
+
+            if self.at_eof() || (implicit_layout && self.is_case_block_follower()) {
+                break;
+            }
+
+            let stmt_start = self.current_start();
+            let stmt = self.parse_do_statement()?;
+            let stmt_end = match &stmt {
+                SurfaceDoStmt::Bind { expr, .. }
+                | SurfaceDoStmt::Let { expr, .. }
+                | SurfaceDoStmt::Expr(expr) => span_end(expr),
+            };
+            statements.push(sp(stmt, stmt_start, stmt_end));
+        }
+
+        if statements.is_empty() {
+            return Err(self.error("do block must contain at least one statement"));
+        }
+
+        let last = statements
+            .last()
+            .expect("ICE: checked non-empty do block before reading final statement");
+        if !matches!(last.0, SurfaceDoStmt::Expr(_)) {
+            return Err(ParseError {
+                span: FileSpan::new(self.file, last.1),
+                message: "final do statement must be an expression".to_string(),
+            });
+        }
+
+        let end = span_end(last);
+        Ok(sp(SurfaceExpr::Do(statements), start, end))
+    }
+
+    fn parse_do_statement(&mut self) -> Result<SurfaceDoStmt, ParseError> {
+        if self.at(&Token::Let) {
+            self.advance();
+            let (name, start, end) = self.expect_ident()?;
+            self.expect(&Token::Eq)?;
+            let expr = self.parse_expr()?;
+            return Ok(SurfaceDoStmt::Let {
+                binder: sp(name, start, end),
+                expr,
+            });
+        }
+
+        if matches!(self.current_kind(), Token::Ident(_) | Token::Underscore)
+            && self
+                .tokens
+                .get(self.pos + 1)
+                .is_some_and(|token| matches!(token.kind, Token::BindArrow))
+        {
+            let (name, start, end) = self.expect_binder()?;
+            self.expect(&Token::BindArrow)?;
+            let expr = self.parse_expr()?;
+            return Ok(SurfaceDoStmt::Bind {
+                binder: sp(name, start, end),
+                expr,
+            });
+        }
+
+        Ok(SurfaceDoStmt::Expr(self.parse_expr()?))
     }
 
     fn parse_case(&mut self) -> Result<S<SurfaceExpr>, ParseError> {

@@ -86,13 +86,12 @@ fn io_streams_prompt_readline_and_program_args() {
     let project_root = write_temp_project(
         "io_streams",
         r#"main : IO ()
-main =
-    seqIO
-        (printStr "name> ")
-        (bindIO readLine (fun name =>
-            seqIO
-                (printLine name)
-                (bindIO getArgs (fun args => mapIO_ printLine args))))
+main = do
+    printStr "name> "
+    name <- readLine
+    printLine name
+    args <- getArgs
+    mapIO_ printLine args
 "#,
     );
 
@@ -124,12 +123,11 @@ fn file_io_reads_writes_and_appends_project_relative_text() {
     let project_root = write_temp_project(
         "file_io",
         r#"main : IO ()
-main =
-    seqIO
-        (writeFile "score.txt" "seed\n")
-        (seqIO
-            (appendFile "score.txt" "extra\n")
-            (bindIO (readFile "score.txt") (fun contents => printStr contents)))
+main = do
+    writeFile "score.txt" "seed\n"
+    appendFile "score.txt" "extra\n"
+    contents <- readFile "score.txt"
+    printStr contents
 "#,
     );
 
@@ -150,7 +148,9 @@ fn cli_passes_program_args_after_separator() {
     let project_root = write_temp_project(
         "cli_args",
         r#"main : IO ()
-main = bindIO getArgs (fun args => mapIO_ printLine args)
+main = do
+    args <- getArgs
+    mapIO_ printLine args
 "#,
     );
 

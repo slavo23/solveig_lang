@@ -135,6 +135,7 @@ Solveig currently supports:
 - `Eq`, `Ord`, `Num`, `Fractional`, `Functor`, `Applicative`, `Monad`, and `Show`
 - value display through `Show`
 - monadic `IO`
+- indentation-sensitive `do` notation over the generic `Monad` class
 - terminal input/output
 - program args through `getArgs`
 - project-relative UTF-8 text file IO
@@ -185,20 +186,19 @@ IO:
 
 ```solveig
 main : IO ()
-main =
-    seqIO
-        (printStr "name> ")
-        (bindIO readLine (fun name =>
-            printLine (appendString "hello, " name)))
+main = do
+    printStr "name> "
+    name <- readLine
+    printLine (appendString "hello, " name)
 ```
 
 Text files:
 
 ```solveig
 main : IO ()
-main =
-    bindIO (readFile "input.txt") (fun contents =>
-        writeFile "copy.txt" contents)
+main = do
+    contents <- readFile "input.txt"
+    writeFile "copy.txt" contents
 ```
 
 ## Prelude
@@ -265,8 +265,9 @@ The VM remains the reference runtime. A Cranelift backend is planned later.
 
 ## Current Limitations
 
-- There is no `do` notation yet. The agreed future direction is generic
-  `Monad` desugaring with indentation-sensitive blocks.
+- `do` notation supports variable binds, `_` binds, local `let` statements, and
+  expression statements. Pattern binds are reserved for a later failure-semantics
+  decision.
 - File IO is whole-file UTF-8 text IO. There are no handles or binary file
   operations yet.
 - `/` is currently `Fractional` and only has a `Float` instance. Use `div` and

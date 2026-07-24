@@ -181,6 +181,19 @@ pub struct SurfaceMatchArm {
     pub expr: Spanned<SurfaceExpr>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum SurfaceDoStmt {
+    Bind {
+        binder: Spanned<Symbol>,
+        expr: Spanned<SurfaceExpr>,
+    },
+    Let {
+        binder: Spanned<Symbol>,
+        expr: Spanned<SurfaceExpr>,
+    },
+    Expr(Spanned<SurfaceExpr>),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurfaceOpOperand {
     pub prefix_minuses: Vec<Span>,
@@ -225,6 +238,7 @@ pub enum SurfaceExpr {
     ),
     Con(Spanned<NameRef>),
     Case(Box<Spanned<SurfaceExpr>>, Vec<Spanned<SurfaceMatchArm>>),
+    Do(Vec<Spanned<SurfaceDoStmt>>),
     IfThenElse(
         Box<Spanned<SurfaceExpr>>,
         Box<Spanned<SurfaceExpr>>,

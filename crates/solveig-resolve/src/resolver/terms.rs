@@ -153,6 +153,90 @@ impl<'a> Resolver<'a> {
         TermExpr::App(Box::new(app), Box::new(rhs))
     }
 
+    fn prelude_typeclasses_var(
+        &self,
+        name: &'static str,
+        span: SourceSpan,
+    ) -> SpannedWrapper<SurfaceExpr> {
+        (
+            SurfaceExpr::Var((
+                NameRef {
+                    segments: vec![
+                        self.session.intern("prelude"),
+                        self.session.intern("typeclasses"),
+                        self.session.intern(name),
+                    ],
+                },
+                span,
+            )),
+            span,
+        )
+    }
+
+    fn surface_app(
+        &self,
+        func: SpannedWrapper<SurfaceExpr>,
+        arg: SpannedWrapper<SurfaceExpr>,
+    ) -> SpannedWrapper<SurfaceExpr> {
+        let span = SourceSpan::new(func.1.start, arg.1.end);
+        (SurfaceExpr::App(Box::new(func), Box::new(arg)), span)
+    }
+
+    fn surface_call2(
+        &self,
+        name: &'static str,
+        first: SpannedWrapper<SurfaceExpr>,
+        second: SpannedWrapper<SurfaceExpr>,
+        span: SourceSpan,
+    ) -> SpannedWrapper<SurfaceExpr> {
+        let callee = self.prelude_typeclasses_var(name, span);
+        let applied = self.surface_app(callee, first);
+        self.surface_app(applied, second)
+    }
+
+    fn desugar_do_statements(
+        &self,
+        statements: &[SpannedWrapper<SurfaceDoStmt>],
+    ) -> SpannedWrapper<SurfaceExpr> {
+        let (last, prefix) = statements
+            .split_last()
+            .expect("ICE: parser must reject empty do blocks before resolution");
+
+        let mut body = match &last.0 {
+            SurfaceDoStmt::Expr(expr) => expr.clone(),
+            SurfaceDoStmt::Bind { .. } | SurfaceDoStmt::Let { .. } => (SurfaceExpr::Hole, last.1),
+        };
+
+        for statement in prefix.iter().rev() {
+            body = match &statement.0 {
+                SurfaceDoStmt::Expr(action) => {
+                    self.surface_call2("thenM", action.clone(), body, statement.1)
+                }
+                SurfaceDoStmt::Bind { binder, expr } => {
+                    if self.symbol_text(binder.0) == "_" {
+                        self.surface_call2("thenM", expr.clone(), body, statement.1)
+                    } else {
+                        let lambda_span = SourceSpan::new(binder.1.start, body.1.end);
+                        let lambda = (
+                            SurfaceExpr::Abs(vec![(*binder, None)], Box::new(body)),
+                            lambda_span,
+                        );
+                        self.surface_call2("bind", expr.clone(), lambda, statement.1)
+                    }
+                }
+                SurfaceDoStmt::Let { binder, expr } => {
+                    let span = SourceSpan::new(statement.1.start, body.1.end);
+                    (
+                        SurfaceExpr::Let(*binder, Box::new(expr.clone()), Box::new(body)),
+                        span,
+                    )
+                }
+            };
+        }
+
+        body
+    }
+
     fn resolve_term_defid(
         &mut self,
         r: &NameRef,
@@ -329,6 +413,11 @@ impl<'a> Resolver<'a> {
                     .map(|arm| self.resolve_surface_case_arm_in_module(arm, cx, local, bound_terms))
                     .collect(),
             ),
+
+            SurfaceExpr::Do(statements) => {
+                let expr = self.desugar_do_statements(statements);
+                return self.resolve_surface_expr_in_module(&expr, cx, local, bound_terms);
+            }
 
             SurfaceExpr::UnaryOperator(op, rhs) => {
                 let name_ref = match op {

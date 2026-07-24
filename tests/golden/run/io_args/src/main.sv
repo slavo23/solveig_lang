@@ -1,2 +1,4 @@
 main : IO ()
-main = bindIO getArgs (fun args => mapIO_ printLine args)
+main = do
+    args <- getArgs
+    mapIO_ printLine args

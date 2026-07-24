@@ -112,11 +112,11 @@ treeMapM : forall m a b. Monad m => (a -> m b) -> Tree a -> m (Tree b)
 treeMapM f tree =
     case tree of
         EmptyTree => pure EmptyTree
-        | TreeNode left x right =>
-            bind (treeMapM f left) (fun newLeft =>
-                bind (f x) (fun newX =>
-                    bind (treeMapM f right) (fun newRight =>
-                        pure (TreeNode newLeft newX newRight))))
+        | TreeNode left x right => do
+            newLeft <- treeMapM f left
+            newX <- f x
+            newRight <- treeMapM f right
+            pure (TreeNode newLeft newX newRight)
 
 
 validateNonNegative : Int -> Maybe Int
@@ -154,24 +154,24 @@ safePipeline = composeK safeHalf safeIncrementBelowLimit
 
 
 choosePair : [Int] -> [Int] -> [Pair Int Int]
-choosePair xs ys =
-    bind xs (fun x =>
-        bind ys (fun y =>
-            pure (MkPair x y)))
+choosePair xs ys = do
+    x <- xs
+    y <- ys
+    pure (MkPair x y)
 
 
 orderedPairs : [Int] -> [Pair Int Int]
-orderedPairs xs =
-    bind xs (fun x =>
-        bind xs (fun y =>
-            if less x y then [MkPair x y] else []))
+orderedPairs xs = do
+    x <- xs
+    y <- xs
+    if less x y then [MkPair x y] else []
 
 
 pythagoreanTiny : [Pair Int Int]
-pythagoreanTiny =
-    bind [3, 4, 5, 6] (fun x =>
-        bind [3, 4, 5, 6] (fun y =>
-            if eq (x * x + y * y) 25 then [MkPair x y] else []))
+pythagoreanTiny = do
+    x <- [3, 4, 5, 6]
+    y <- [3, 4, 5, 6]
+    if eq (x * x + y * y) 25 then [MkPair x y] else []
 
 
 allBooleanAssignments3 : [[Bool]]
@@ -205,10 +205,10 @@ logDouble x =
 
 
 loggedProgram : Log Int
-loggedProgram =
-    bind (logStep 3) (fun x =>
-        bind (logDouble x) (fun y =>
-            pure (y + 1)))
+loggedProgram = do
+    x <- logStep 3
+    y <- logDouble x
+    pure (y + 1)
 
 
 loggedTree : Log (Tree Int)

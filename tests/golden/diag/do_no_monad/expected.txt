@@ -1,0 +1,11 @@
+[TC0013] Error: unsatisfied type class constraints: Monad Box
+   ╭─[ $WORKSPACE/tests/golden/diag/do_no_monad/src/main.sv:5:5 ]
+   │
+ 5 │     x <- Box 1
+   │     ─────┬────
+   │          ╰────── constraints arise from this expression
+   │
+   │ Note: no matching instance found for:
+   │         Monad Box
+───╯
+type error

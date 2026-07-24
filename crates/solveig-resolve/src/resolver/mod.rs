@@ -20,8 +20,8 @@ use solveig_check::inference::class_kind_infer::ClassKindInferencer;
 use solveig_check::signature_infer::{KindError, SignatureKindInferencer};
 use solveig_syntax::ast::{
     Assoc, Fixity, ModuleName, NameRef, ParsedModule, SpannedWrapper, SurfaceDefinition,
-    SurfaceExpr, SurfaceLiteral, SurfaceMatchArm, SurfacePattern, SurfacePredicate, SurfaceTy,
-    SurfaceUnOp,
+    SurfaceDoStmt, SurfaceExpr, SurfaceLiteral, SurfaceMatchArm, SurfacePattern, SurfacePredicate,
+    SurfaceTy, SurfaceUnOp,
 };
 use solveig_syntax::fixity::{FixityError, resolve_op_seq};
 

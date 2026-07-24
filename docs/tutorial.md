@@ -354,7 +354,7 @@ Parenthesize mixed operators when fixities would be ambiguous:
 main = (a <+> b) <*> c
 ```
 
-## 12. Monadic IO
+## 12. Do Notation And Monadic IO
 
 An executable IO program has `main : IO ()` or, more generally, `main : IO a`.
 IO programs print explicitly; Solveig does not print the returned value of an
@@ -365,16 +365,31 @@ main : IO ()
 main = printLine "hello from IO"
 ```
 
-Sequence actions with `bindIO`:
+Sequence actions with `do`:
 
 ```solveig
 main : IO ()
-main =
-    seqIO
-        (printStr "name> ")
-        (bindIO readLine (fun name =>
-            printLine (appendString "hello, " name)))
+main = do
+    printStr "name> "
+    name <- readLine
+    printLine (appendString "hello, " name)
 ```
+
+`do` notation is not IO-only. It desugars through the generic `Monad` class:
+`x <- action` uses `bind`, ordinary expression statements use `thenM`, and the
+last statement is the result expression.
+
+```solveig
+maybeAnswer : Maybe Int
+maybeAnswer = do
+    x <- Just 2
+    y <- Just 40
+    pure (x + y)
+```
+
+The first version supports variable binds, `_ <- action`, local
+`let name = expr` statements, and ordinary expression statements. Pattern
+binds are reserved for later.
 
 Run it:
 
@@ -386,15 +401,14 @@ Pass program args after `--`:
 
 ```solveig
 main : IO ()
-main = bindIO getArgs (fun args => mapIO_ printLine args)
+main = do
+    args <- getArgs
+    mapIO_ printLine args
 ```
 
 ```bash
 cargo run -- --project-root args-demo -- first second
 ```
-
-`do` notation is not implemented yet. The agreed future direction is generic
-`Monad` desugaring with indentation-sensitive blocks.
 
 ## 13. File IO
 
@@ -410,11 +424,10 @@ Relative paths are resolved against the project root.
 
 ```solveig
 main : IO ()
-main =
-    bindIO (readFile "input.txt") (fun contents =>
-        seqIO
-            (printLine contents)
-            (writeFile "copy.txt" contents))
+main = do
+    contents <- readFile "input.txt"
+    printLine contents
+    writeFile "copy.txt" contents
 ```
 
 The repository includes a richer example:

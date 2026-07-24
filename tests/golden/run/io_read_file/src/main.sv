@@ -1,3 +1,5 @@
 main : IO ()
 main =
-    bindIO (readFile "questions.txt") (fun contents => printStr contents)
+    do
+        contents <- readFile "questions.txt"
+        printStr contents

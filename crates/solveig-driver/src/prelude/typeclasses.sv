@@ -283,19 +283,23 @@ thenM : forall m a b. Monad m => m a -> m b -> m b
 thenM mx my = bind mx (fun x => my)
 
 join : forall m a. Monad m => m (m a) -> m a
-join mmx = bind mmx (fun mx => mx)
+join mmx = do
+    mx <- mmx
+    mx
 
 composeK : forall m a b c. Monad m => (a -> m b) -> (b -> m c) -> a -> m c
-composeK f g x = bind (f x) g
+composeK f g x = do
+    y <- f x
+    g y
 
 mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]
 mapM f xs =
     case xs of
         [] => pure []
-        | y :: ys =>
-            bind (f y) (fun z =>
-                bind (mapM f ys) (fun zs =>
-                    pure (z :: zs)))
+        | y :: ys => do
+            z <- f y
+            zs <- mapM f ys
+            pure (z :: zs)
 
 sequence : forall m a. Monad m => [m a] -> m [a]
 sequence xs = mapM (fun x => x) xs
@@ -304,10 +308,10 @@ filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
 filterM p xs =
     case xs of
         [] => pure []
-        | y :: ys =>
-            bind (p y) (fun keep =>
-                bind (filterM p ys) (fun zs =>
-                    if keep then pure (y :: zs) else pure zs))
+        | y :: ys => do
+            keep <- p y
+            zs <- filterM p ys
+            if keep then pure (y :: zs) else pure zs
 
 instance Monad Maybe where
     bind mx f =
@@ -325,13 +329,15 @@ getArgs : IO [String]
 getArgs = prelude.prim.getArgs
 
 seqIO : forall a b. IO a -> IO b -> IO b
-seqIO left right = prelude.builtins.bindIO left (fun ignored => right)
+seqIO left right = thenM left right
 
 mapIO_ : forall a. (a -> IO ()) -> [a] -> IO ()
 mapIO_ f xs =
     case xs of
         [] => prelude.builtins.pureIO ()
-        | y :: ys => prelude.builtins.bindIO (f y) (fun ignored => mapIO_ f ys)
+        | y :: ys => do
+            f y
+            mapIO_ f ys
 
 class Show a where
     show : a -> String

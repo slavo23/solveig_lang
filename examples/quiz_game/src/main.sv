@@ -80,11 +80,11 @@ askCard : QuizCard -> IO (Pair QuizCard String)
 askCard card =
     case card of
         QuizCard question expected =>
-            seqIO
-                (printLine question)
-                (seqIO
-                    (printStr "> ")
-                    (bindIO readLine (fun answer => pureIO (MkPair card answer))))
+            do
+                printLine question
+                printStr "> "
+                answer <- readLine
+                pure (MkPair card answer)
 
 askCards : [QuizCard] -> IO [Pair QuizCard String]
 askCards cards = mapM askCard cards
@@ -105,7 +105,9 @@ scoreResponses responses =
     case responses of
         [] => statePure ()
         | response :: rest =>
-            stateBind (scoreResponse response) (fun ignored => scoreResponses rest)
+            do
+                scoreResponse response
+                scoreResponses rest
 
 scoreQuiz : [Pair QuizCard String] -> Int
 scoreQuiz responses =
@@ -127,16 +129,14 @@ withNewline text = appendString text "\n"
 
 main : IO ()
 main =
-    bindIO (readFile "questions.txt") (fun contents =>
-        let cards = parseQuiz contents in
-            seqIO
-                (printLine "Solveig quiz")
-                (bindIO (askCards cards) (fun responses =>
-                    let score = scoreQuiz responses in
-                    let total = lengthCards cards in
-                    let summary = summaryLine score total in
-                        seqIO
-                            (printLine summary)
-                            (seqIO
-                                (writeFile "last-score.txt" (withNewline summary))
-                                (appendFile "score-history.txt" (withNewline summary))))))
+    do
+        contents <- readFile "questions.txt"
+        let cards = parseQuiz contents
+        printLine "Solveig quiz"
+        responses <- askCards cards
+        let score = scoreQuiz responses
+        let total = lengthCards cards
+        let summary = summaryLine score total
+        printLine summary
+        writeFile "last-score.txt" (withNewline summary)
+        appendFile "score-history.txt" (withNewline summary)

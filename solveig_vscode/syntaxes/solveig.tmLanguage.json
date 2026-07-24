@@ -350,7 +350,7 @@
           "name": "keyword.control.lambda.solveig"
         },
         {
-          "match": "\\b(case|of|if|then|else)\\b",
+          "match": "\\b(case|of|if|then|else|do)\\b",
           "name": "keyword.control.conditional.solveig"
         },
         {
@@ -423,7 +423,7 @@
     "keywords": {
       "patterns": [
         {
-          "match": "\\b(case|of|if|then|else)\\b",
+          "match": "\\b(case|of|if|then|else|do)\\b",
           "name": "keyword.control.conditional.solveig"
         },
         {
@@ -461,6 +461,10 @@
         {
           "match": "->",
           "name": "keyword.operator.arrow.solveig"
+        },
+        {
+          "match": "<-",
+          "name": "keyword.operator.bind-arrow.solveig"
         },
         {
           "match": "::",

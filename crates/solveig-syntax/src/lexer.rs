@@ -18,6 +18,8 @@ enum RawToken {
     KwLet,
     #[token("in")]
     KwIn,
+    #[token("do")]
+    KwDo,
     #[token("fun")]
     KwFun,
     #[token("forall")]
@@ -131,6 +133,7 @@ pub enum Token {
 
     Let,
     In,
+    Do,
     Fun,
     Forall,
     Case,
@@ -153,6 +156,7 @@ pub enum Token {
     Eq,
     Colon,
     Arrow,
+    BindArrow,
     FatArrow,
     Cons,
     Pipe,
@@ -348,6 +352,7 @@ fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Option<Token>
 
         RawToken::KwLet => Token::Let,
         RawToken::KwIn => Token::In,
+        RawToken::KwDo => Token::Do,
         RawToken::KwFun => Token::Fun,
         RawToken::KwForall => Token::Forall,
         RawToken::KwCase => Token::Case,
@@ -376,6 +381,7 @@ fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Option<Token>
         RawToken::Semicolon => Token::Semicolon,
         RawToken::Operator => match slice {
             "->" => Token::Arrow,
+            "<-" => Token::BindArrow,
             "=>" => Token::FatArrow,
             "::" => Token::Cons,
             "==" => Token::EqEq,
@@ -450,7 +456,7 @@ enum LayoutContext {
 }
 
 fn opens_layout(tok: &Token) -> bool {
-    matches!(tok, Token::Of | Token::Where)
+    matches!(tok, Token::Of | Token::Where | Token::Do)
 }
 
 fn is_layout_continuation(tok: &Token) -> bool {

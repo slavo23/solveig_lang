@@ -1,3 +1,5 @@
 main : IO ()
 main =
-    bindIO (pureIO "pure-value") (fun value => printLine value)
+    do
+        value <- pureIO "pure-value"
+        printLine value

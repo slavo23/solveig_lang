@@ -1,5 +1,6 @@
 main : IO ()
 main =
-    seqIO
-        (printStr "alpha")
-        (seqIO (printStr "-") (printLine "omega"))
+    do
+        printStr "alpha"
+        printStr "-"
+        printLine "omega"
