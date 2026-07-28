@@ -3,6 +3,8 @@
 
 /// Defines parsed surface syntax nodes.
 pub mod ast;
+/// Builds and navigates lossless concrete syntax trees.
+pub mod cst;
 /// Resolves infix fixity and unary minus precedence.
 pub mod fixity;
 /// Tokenizes Solveig source text into spanned tokens.

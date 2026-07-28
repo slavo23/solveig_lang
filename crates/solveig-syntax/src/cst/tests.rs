@@ -1,0 +1,149 @@
+use super::*;
+
+use std::fs;
+use std::path::{Path, PathBuf};
+
+use solveig_base::Session;
+
+use crate::ast::ParsedModule;
+use crate::lexer::Token;
+use crate::parser::parse_source;
+
+fn parse_test_source(source: &str) -> ParsedModule {
+    let session = Session::new();
+    let file = session.add_file("test.sv", source);
+
+    parse_source(&session, file, source)
+}
+
+#[test]
+fn cst_reconstructs_text_and_supports_navigation() {
+    let source = "main : IO ()\nmain = do\n    -- retain\n    printLine \"ok\"\n";
+    let parsed = parse_test_source(source);
+    let tree = &parsed.cst;
+
+    assert_eq!(tree.reconstruct_text(source), source);
+    assert_eq!(tree.file(), parsed.file);
+    assert_eq!(tree.node(tree.root()).kind(), SyntaxKind::Module);
+    assert!(
+        tree.children(tree.root())
+            .iter()
+            .any(|child| matches!(child, NodeOrToken::Node(id)
+                if tree.node(*id).kind() == SyntaxKind::DefinitionList))
+    );
+
+    let whitespace_offset = source.find("    --").expect("fixture has indentation");
+    let whitespace = tree
+        .token_at_offset(whitespace_offset)
+        .expect("indentation should be a trivia token");
+    assert_eq!(tree.token(whitespace).kind, Token::Whitespace);
+
+    let print_offset = source.find("printLine").expect("fixture has function call");
+    let print_token = tree
+        .token_at_offset(print_offset)
+        .expect("function name should have a token");
+    assert!(matches!(tree.token(print_token).kind, Token::Ident(_)));
+
+    let token_parent = tree
+        .token_parent(print_token)
+        .expect("tokens should have parent nodes");
+    assert_eq!(tree.node(token_parent).kind(), SyntaxKind::NamePath);
+
+    let node = tree
+        .node_at_offset(print_offset)
+        .expect("function name should have a syntax node");
+    assert_eq!(tree.node(node).kind(), SyntaxKind::NamePath);
+
+    let parent = tree.parent(node).expect("name path should be nested");
+    assert_eq!(tree.node(parent).kind(), SyntaxKind::AtomExpr);
+}
+
+#[test]
+fn cst_retains_error_node_diagnostics() {
+    let source = "bad :\nmain = ()\n";
+    let parsed = parse_test_source(source);
+    let tree = &parsed.cst;
+
+    assert_eq!(tree.reconstruct_text(source), source);
+
+    let (_, error) = tree
+        .nodes()
+        .find(|(_, node)| node.kind() == SyntaxKind::Error)
+        .expect("recovering parser should emit an error node");
+
+    assert!(
+        error
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code == "PAR0001")
+    );
+}
+
+#[test]
+fn cst_parent_links_match_child_edges() {
+    let parsed = parse_test_source("main : IO ()\nmain = pure ()\n");
+    let tree = &parsed.cst;
+    let mut seen_tokens = vec![false; tree.tokens().len()];
+
+    for (id, node) in tree.nodes() {
+        for child in node.children() {
+            match child {
+                NodeOrToken::Node(child) => {
+                    assert_eq!(tree.parent(*child), Some(id));
+                }
+                NodeOrToken::Token(token) => {
+                    assert_eq!(tree.token_parent(*token), Some(id));
+                    seen_tokens[token.index()] = true;
+                }
+            }
+        }
+    }
+
+    assert!(seen_tokens.iter().all(|seen| *seen));
+}
+
+#[test]
+fn cst_round_trips_repository_solveig_sources() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("syntax crate should live under crates/");
+    let mut files = Vec::new();
+    collect_solveig_sources(repo, &mut files);
+    files.sort();
+
+    let session = Session::new();
+    for path in files {
+        let source = fs::read_to_string(&path)
+            .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
+        let file = session.add_file(&path, source.clone());
+        let parsed = parse_source(&session, file, &source);
+
+        assert_eq!(
+            parsed.cst.reconstruct_text(&source),
+            source,
+            "CST reconstruction changed {}",
+            path.display()
+        );
+    }
+}
+
+fn collect_solveig_sources(root: &Path, files: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(root).unwrap_or_else(|err| {
+        panic!("failed to read directory {}: {err}", root.display());
+    }) {
+        let entry = entry.expect("directory entry should be readable");
+        let path = entry.path();
+        let file_name = path.file_name().and_then(|name| name.to_str());
+
+        if matches!(file_name, Some(".git" | "target")) {
+            continue;
+        }
+
+        if path.is_dir() {
+            collect_solveig_sources(&path, files);
+        } else if path.extension().is_some_and(|ext| ext == "sv") {
+            files.push(path);
+        }
+    }
+}

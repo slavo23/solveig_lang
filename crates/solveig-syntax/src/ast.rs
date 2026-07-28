@@ -5,6 +5,7 @@ use std::cell::Ref;
 
 use solveig_base::{FileId, Session, Span, Symbol};
 
+use crate::cst::SyntaxTree;
 use crate::lexer::PosToken;
 use crate::syntax::Event;
 
@@ -101,6 +102,7 @@ pub struct ParsedModule {
     pub file: FileId,
     pub tokens: Vec<PosToken>,
     pub events: Vec<Event>,
+    pub cst: SyntaxTree,
     pub imports: Vec<ImportDecl>,
     pub defs: SurfaceProgram,
 }

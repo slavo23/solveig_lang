@@ -6,6 +6,7 @@ use std::cell::Ref;
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 
 use crate::ast::*;
+use crate::cst::SyntaxTree;
 use crate::lexer::{self, LexError, PosToken, Token};
 use crate::syntax::{Event, SyntaxKind};
 
@@ -646,15 +647,18 @@ pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModu
             let error = ParseError::from(error);
             let diagnostic = error.to_diagnostic();
             session.diagnostics().push(diagnostic.clone());
+            let events = vec![
+                Event::StartNode(SyntaxKind::Module),
+                Event::Error(diagnostic),
+                Event::FinishNode,
+            ];
+            let cst = SyntaxTree::from_events(file, Vec::new(), &events);
 
             return ParsedModule {
                 file,
                 tokens: Vec::new(),
-                events: vec![
-                    Event::StartNode(SyntaxKind::Module),
-                    Event::Error(diagnostic),
-                    Event::FinishNode,
-                ],
+                events,
+                cst,
                 imports: Vec::new(),
                 defs: Vec::new(),
             };

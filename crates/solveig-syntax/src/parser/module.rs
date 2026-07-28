@@ -20,10 +20,15 @@ impl Parser<'_> {
             this.emit_remaining_tokens();
             (imports, defs)
         });
+        let tokens = self.tokens.clone();
+        let events = self.events.clone();
+        let cst = SyntaxTree::from_events(self.file, tokens.clone(), &events);
+
         ParsedModule {
             file: self.file,
-            tokens: self.tokens.clone(),
-            events: self.events.clone(),
+            tokens,
+            events,
+            cst,
             imports,
             defs,
         }
