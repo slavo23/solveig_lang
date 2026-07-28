@@ -21,7 +21,7 @@ impl Parser<'_> {
                 this.advance();
                 let ty = this.parse_type()?;
                 let end = span_end(&ty);
-                return Ok(sp(SurfaceExpr::Ann(Box::new(expr), ty), start, end));
+                return Ok(this.sp(SurfaceExpr::Ann(Box::new(expr), ty), start, end));
             }
 
             Ok(expr)
@@ -36,9 +36,11 @@ impl Parser<'_> {
             while this.is_infix_operator() {
                 let (op, start, end) = this.expect_operator_symbol(true)?;
                 let rhs = this.parse_op_operand()?;
+                let cst_id = this.current_cst_id();
                 segments.push(SurfaceOpSegment {
-                    op: sp(op, start, end),
+                    op: this.sp(op, start, end),
                     rhs,
+                    cst_id,
                 });
             }
 
@@ -53,11 +55,7 @@ impl Parser<'_> {
                     || span_end(&first.expr),
                     |segment| span_end(&segment.rhs.expr),
                 );
-                Ok(sp(
-                    SurfaceExpr::OpSeq(Box::new(first), segments),
-                    start,
-                    end,
-                ))
+                Ok(this.sp(SurfaceExpr::OpSeq(Box::new(first), segments), start, end))
             }
         })
     }
@@ -74,6 +72,7 @@ impl Parser<'_> {
             Ok(SurfaceOpOperand {
                 prefix_minuses,
                 expr,
+                cst_id: this.current_cst_id(),
             })
         })
     }
@@ -84,7 +83,7 @@ impl Parser<'_> {
             while this.is_atom_start() {
                 let arg = this.parse_atom()?;
                 let (start, end) = merge_span(&func, &arg);
-                func = sp(SurfaceExpr::App(Box::new(func), Box::new(arg)), start, end);
+                func = this.sp(SurfaceExpr::App(Box::new(func), Box::new(arg)), start, end);
             }
             Ok(func)
         })
@@ -113,7 +112,7 @@ impl Parser<'_> {
                 Token::Int(value) => {
                     let value = *value;
                     let token = this.advance();
-                    Ok(sp(
+                    Ok(this.sp(
                         SurfaceExpr::Literal(SurfaceLiteral::Int(value)),
                         token.start,
                         token.end,
@@ -122,7 +121,7 @@ impl Parser<'_> {
                 Token::Float(value) => {
                     let value = *value;
                     let token = this.advance();
-                    Ok(sp(
+                    Ok(this.sp(
                         SurfaceExpr::Literal(SurfaceLiteral::Float(value)),
                         token.start,
                         token.end,
@@ -131,7 +130,7 @@ impl Parser<'_> {
                 Token::Char(value) => {
                     let value = *value;
                     let token = this.advance();
-                    Ok(sp(
+                    Ok(this.sp(
                         SurfaceExpr::Literal(SurfaceLiteral::Char(value)),
                         token.start,
                         token.end,
@@ -140,7 +139,7 @@ impl Parser<'_> {
                 Token::Str(value) => {
                     let value = value.clone();
                     let token = this.advance();
-                    Ok(sp(
+                    Ok(this.sp(
                         SurfaceExpr::Literal(SurfaceLiteral::Str(value)),
                         token.start,
                         token.end,
@@ -148,7 +147,7 @@ impl Parser<'_> {
                 }
                 Token::Hole | Token::Underscore => {
                     let token = this.advance();
-                    Ok(sp(SurfaceExpr::Hole, token.start, token.end))
+                    Ok(this.sp(SurfaceExpr::Hole, token.start, token.end))
                 }
                 Token::Ident(_) | Token::UpperIdent(_) => {
                     let name_ref = this.parse_name_path()?;
@@ -158,35 +157,40 @@ impl Parser<'_> {
                     } else {
                         SurfaceExpr::Var(name_ref)
                     };
-                    Ok(sp(expr, start, end))
+                    Ok(this.sp(expr, start, end))
                 }
                 Token::LParen => {
                     if this.starts_parenthesized_operator_name() {
                         let (symbol, start, end) = this.parse_parenthesized_operator_name()?;
-                        let name_ref = sp(
+                        let name_ref = this.sp(
                             NameRef {
                                 segments: vec![symbol],
                             },
                             start,
                             end,
                         );
-                        return Ok(sp(SurfaceExpr::Var(name_ref), start, end));
+                        return Ok(this.sp(SurfaceExpr::Var(name_ref), start, end));
                     }
 
                     this.advance();
                     if this.at(&Token::RParen) {
                         let end = this.advance().end;
-                        return Ok(sp(SurfaceExpr::Unit, start, end));
+                        return Ok(this.sp(SurfaceExpr::Unit, start, end));
                     }
                     let inner = this.parse_expr()?;
                     let end = this.expect(&Token::RParen)?.end;
-                    Ok(sp(inner.0, start, end))
+                    Ok(this.sp(inner.0, start, end))
                 }
                 Token::LBrack => {
                     this.advance();
                     if this.at(&Token::RBrack) {
                         let end = this.advance().end;
-                        return Ok(list_nil_expr(this.session, start, end));
+                        return Ok(list_nil_expr(
+                            this.session,
+                            start,
+                            end,
+                            this.current_cst_id(),
+                        ));
                     }
                     let mut elems = vec![this.parse_expr()?];
                     while this.at(&Token::Comma) {
@@ -194,7 +198,13 @@ impl Parser<'_> {
                         elems.push(this.parse_expr()?);
                     }
                     let end = this.expect(&Token::RBrack)?.end;
-                    Ok(list_expr(this.session, elems, start, end))
+                    Ok(list_expr(
+                        this.session,
+                        elems,
+                        start,
+                        end,
+                        this.current_cst_id(),
+                    ))
                 }
                 _ => Err(this.error(format!(
                     "expected expression, got {}",
@@ -216,17 +226,17 @@ impl Parser<'_> {
                     this.expect(&Token::Colon)?;
                     let ty = this.parse_type()?;
                     this.expect(&Token::RParen)?;
-                    params.push((sp(name, start, end), Some(ty)));
+                    params.push((this.sp(name, start, end), Some(ty)));
                 } else {
                     let (name, start, end) = this.expect_binder()?;
-                    params.push((sp(name, start, end), None));
+                    params.push((this.sp(name, start, end), None));
                 }
             }
 
             this.expect(&Token::FatArrow)?;
             let body = this.parse_expr()?;
             let end = span_end(&body);
-            Ok(sp(SurfaceExpr::Abs(params, Box::new(body)), start, end))
+            Ok(this.sp(SurfaceExpr::Abs(params, Box::new(body)), start, end))
         })
     }
 
@@ -239,9 +249,9 @@ impl Parser<'_> {
             this.expect(&Token::In)?;
             let body = this.parse_expr()?;
             let end = span_end(&body);
-            Ok(sp(
+            Ok(this.sp(
                 SurfaceExpr::Let(
-                    sp(name, name_start, name_end),
+                    this.sp(name, name_start, name_end),
                     Box::new(binding),
                     Box::new(body),
                 ),
@@ -260,7 +270,7 @@ impl Parser<'_> {
             this.expect(&Token::Else)?;
             let else_branch = this.parse_expr()?;
             let end = span_end(&else_branch);
-            Ok(sp(
+            Ok(this.sp(
                 SurfaceExpr::IfThenElse(
                     Box::new(cond),
                     Box::new(then_branch),
@@ -305,7 +315,7 @@ impl Parser<'_> {
                     | SurfaceDoStmt::Let { expr, .. }
                     | SurfaceDoStmt::Expr(expr) => span_end(expr),
                 };
-                statements.push(sp(stmt, stmt_start, stmt_end));
+                statements.push(sp(stmt, stmt_start, stmt_end, this.completed_cst_id()));
             }
 
             if statements.is_empty() {
@@ -323,7 +333,7 @@ impl Parser<'_> {
             }
 
             let end = span_end(last);
-            Ok(sp(SurfaceExpr::Do(statements), start, end))
+            Ok(this.sp(SurfaceExpr::Do(statements), start, end))
         })
     }
 
@@ -335,7 +345,7 @@ impl Parser<'_> {
                 this.expect(&Token::Eq)?;
                 let expr = this.parse_expr()?;
                 return Ok(SurfaceDoStmt::Let {
-                    binder: sp(name, start, end),
+                    binder: this.sp(name, start, end),
                     expr,
                 });
             }
@@ -349,7 +359,7 @@ impl Parser<'_> {
                 this.expect(&Token::BindArrow)?;
                 let expr = this.parse_expr()?;
                 return Ok(SurfaceDoStmt::Bind {
-                    binder: sp(name, start, end),
+                    binder: this.sp(name, start, end),
                     expr,
                 });
             }
@@ -396,13 +406,13 @@ impl Parser<'_> {
                     this.expect(&Token::FatArrow)?;
                     let expr = this.parse_expr()?;
                     let end = span_end(&expr);
-                    Ok(sp(SurfaceMatchArm { pattern, expr }, start, end))
+                    Ok(this.sp(SurfaceMatchArm { pattern, expr }, start, end))
                 })?;
                 arms.push(arm);
             }
 
             let end = arms.last().map_or_else(|| span_end(&scrutinee), span_end);
-            Ok(sp(SurfaceExpr::Case(Box::new(scrutinee), arms), start, end))
+            Ok(this.sp(SurfaceExpr::Case(Box::new(scrutinee), arms), start, end))
         })
     }
 }

@@ -31,7 +31,7 @@ impl Parser<'_> {
                 }
             }
 
-            Ok(sp(
+            Ok(this.sp(
                 NameRef { segments },
                 start,
                 this.tokens[this.pos.saturating_sub(1)].end,

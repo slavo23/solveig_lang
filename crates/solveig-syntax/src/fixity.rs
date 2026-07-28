@@ -6,6 +6,7 @@ use solveig_base::{Span, Symbol};
 use crate::ast::{
     Assoc, Fixity, Spanned, SurfaceExpr, SurfaceOpOperand, SurfaceOpSegment, SurfaceUnOp,
 };
+use crate::cst::CstId;
 
 fn mk_span(start: usize, end: usize) -> Span {
     Span::from_usize_range(start..end)
@@ -19,8 +20,8 @@ fn span_end<T>(spanned: &Spanned<T>) -> usize {
     spanned.1.end as usize
 }
 
-fn sp<T>(value: T, start: usize, end: usize) -> Spanned<T> {
-    (value, mk_span(start, end))
+fn sp<T>(value: T, start: usize, end: usize, cst_id: CstId) -> Spanned<T> {
+    (value, mk_span(start, end), cst_id)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -132,10 +133,12 @@ fn op_conflict(op1: &ActiveOp, op2: &Op) -> Option<FixityError> {
 fn make_unary_minus(minus_span: Span, rhs: Spanned<SurfaceExpr>) -> Spanned<SurfaceExpr> {
     let start = minus_span.start as usize;
     let end = span_end(&rhs);
+    let cst_id = rhs.2;
     sp(
         SurfaceExpr::UnaryOperator(SurfaceUnOp::Neg, Box::new(rhs)),
         start,
         end,
+        cst_id,
     )
 }
 
@@ -146,10 +149,12 @@ fn make_operator_apply(
 ) -> Spanned<SurfaceExpr> {
     let start = span_start(&lhs);
     let end = span_end(&rhs);
+    let cst_id = op.2;
     sp(
         SurfaceExpr::OperatorApply(Box::new(lhs), op, Box::new(rhs)),
         start,
         end,
+        cst_id,
     )
 }
 
@@ -249,8 +254,12 @@ mod tests {
         Span::from_usize_range(start..end)
     }
 
+    fn cst_id() -> CstId {
+        CstId::new(0)
+    }
+
     fn sp<T>(value: T, start: usize, end: usize) -> Spanned<T> {
-        (value, mk_span(start, end))
+        (value, mk_span(start, end), cst_id())
     }
 
     fn var(session: &Session, name: &str, start: usize) -> Spanned<SurfaceExpr> {
@@ -272,6 +281,7 @@ mod tests {
         SurfaceOpOperand {
             prefix_minuses: Vec::new(),
             expr,
+            cst_id: cst_id(),
         }
     }
 
@@ -284,6 +294,7 @@ mod tests {
         SurfaceOpSegment {
             op: sp(session.intern(op), start, start + op.len()),
             rhs,
+            cst_id: cst_id(),
         }
     }
 
@@ -423,6 +434,7 @@ mod tests {
         let first = SurfaceOpOperand {
             prefix_minuses: vec![mk_span(0, 1)],
             expr: var(&session, "a", 1),
+            cst_id: cst_id(),
         };
         let expr = resolve_op_seq(
             &first,
@@ -436,6 +448,7 @@ mod tests {
         let first = SurfaceOpOperand {
             prefix_minuses: vec![mk_span(0, 1)],
             expr: var(&session, "a", 1),
+            cst_id: cst_id(),
         };
         let expr = resolve_op_seq(
             &first,
@@ -453,7 +466,9 @@ mod tests {
                 rhs: SurfaceOpOperand {
                     prefix_minuses: vec![mk_span(4, 5)],
                     expr: var(&session, "b", 5),
+                    cst_id: cst_id(),
                 },
+                cst_id: cst_id(),
             }],
             lookup(&session, &fixities),
         );

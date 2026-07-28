@@ -197,7 +197,7 @@ impl<'a> Resolver<'a> {
                 continue;
             };
 
-            let (name, _span) = spanned_name;
+            let (name, _span, _) = spanned_name;
             let fn_id = self.local_def_id(cx, *name);
             let fn_name = self.qualified_def_name(fn_id);
             let raw_scheme = self.resolve_surface_scheme(ty, cx, local);

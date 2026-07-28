@@ -157,6 +157,7 @@ impl<'a> Resolver<'a> {
         &self,
         name: &'static str,
         span: SourceSpan,
+        cst_id: solveig_syntax::cst::CstId,
     ) -> SpannedWrapper<SurfaceExpr> {
         (
             SurfaceExpr::Var((
@@ -168,8 +169,10 @@ impl<'a> Resolver<'a> {
                     ],
                 },
                 span,
+                cst_id,
             )),
             span,
+            cst_id,
         )
     }
 
@@ -179,7 +182,8 @@ impl<'a> Resolver<'a> {
         arg: SpannedWrapper<SurfaceExpr>,
     ) -> SpannedWrapper<SurfaceExpr> {
         let span = SourceSpan::new(func.1.start, arg.1.end);
-        (SurfaceExpr::App(Box::new(func), Box::new(arg)), span)
+        let cst_id = func.2;
+        (SurfaceExpr::App(Box::new(func), Box::new(arg)), span, cst_id)
     }
 
     fn surface_call2(
@@ -188,8 +192,9 @@ impl<'a> Resolver<'a> {
         first: SpannedWrapper<SurfaceExpr>,
         second: SpannedWrapper<SurfaceExpr>,
         span: SourceSpan,
+        cst_id: solveig_syntax::cst::CstId,
     ) -> SpannedWrapper<SurfaceExpr> {
-        let callee = self.prelude_typeclasses_var(name, span);
+        let callee = self.prelude_typeclasses_var(name, span, cst_id);
         let applied = self.surface_app(callee, first);
         self.surface_app(applied, second)
     }
@@ -206,24 +211,27 @@ impl<'a> Resolver<'a> {
 
         let mut body = match &last.0 {
             SurfaceDoStmt::Expr(expr) => expr.clone(),
-            SurfaceDoStmt::Bind { .. } | SurfaceDoStmt::Let { .. } => (SurfaceExpr::Hole, last.1),
+            SurfaceDoStmt::Bind { .. } | SurfaceDoStmt::Let { .. } => {
+                (SurfaceExpr::Hole, last.1, last.2)
+            }
         };
 
         for statement in prefix.iter().rev() {
             body = match &statement.0 {
                 SurfaceDoStmt::Expr(action) => {
-                    self.surface_call2("thenM", action.clone(), body, statement.1)
+                    self.surface_call2("thenM", action.clone(), body, statement.1, statement.2)
                 }
                 SurfaceDoStmt::Bind { binder, expr } => {
                     if self.symbol_text(binder.0) == "_" {
-                        self.surface_call2("thenM", expr.clone(), body, statement.1)
+                        self.surface_call2("thenM", expr.clone(), body, statement.1, statement.2)
                     } else {
                         let lambda_span = SourceSpan::new(binder.1.start, body.1.end);
                         let lambda = (
                             SurfaceExpr::Abs(vec![(*binder, None)], Box::new(body)),
                             lambda_span,
+                            statement.2,
                         );
-                        self.surface_call2("bind", expr.clone(), lambda, statement.1)
+                        self.surface_call2("bind", expr.clone(), lambda, statement.1, statement.2)
                     }
                 }
                 SurfaceDoStmt::Let { binder, expr } => {
@@ -231,6 +239,7 @@ impl<'a> Resolver<'a> {
                     (
                         SurfaceExpr::Let(*binder, Box::new(expr.clone()), Box::new(body)),
                         span,
+                        statement.2,
                     )
                 }
             };
@@ -592,7 +601,7 @@ impl<'a> Resolver<'a> {
                     body,
                     params,
                 } => {
-                    let (name, _span) = spanned_name;
+                    let (name, _span, _) = spanned_name;
                     let fn_id = self.local_def_id(cx, *name);
                     let fn_name = self.qualified_def_name(fn_id);
                     let sig = func_schemes.get(&fn_id).cloned();

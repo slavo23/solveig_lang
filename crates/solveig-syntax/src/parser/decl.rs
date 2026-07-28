@@ -7,7 +7,7 @@ impl Parser<'_> {
     pub(super) fn parse_func_or_sig(&mut self) -> Result<SurfaceDefinition, ParseError> {
         self.node(SyntaxKind::FunctionOrSignature, |this| {
             let (name, start, end) = this.expect_value_name()?;
-            let name = sp(name, start, end);
+            let name = this.sp(name, start, end);
 
             if this.at(&Token::Colon) {
                 this.advance();
@@ -18,7 +18,7 @@ impl Parser<'_> {
             let mut params = Vec::new();
             while matches!(this.current_kind(), Token::Ident(_) | Token::Underscore) {
                 let (param, start, end) = this.expect_binder()?;
-                params.push(sp(param, start, end));
+                params.push(this.sp(param, start, end));
             }
 
             this.expect(&Token::Eq)?;
@@ -62,7 +62,7 @@ impl Parser<'_> {
                 } else {
                     this.expect_operator_symbol(false)?
                 };
-                ops.push(sp(op, start, end));
+                ops.push(this.sp(op, start, end));
 
                 if !this.at(&Token::Comma) {
                     break;
@@ -81,12 +81,12 @@ impl Parser<'_> {
         self.node(SyntaxKind::DataDef, |this| {
             this.expect(&Token::Data)?;
             let (name, start, end) = this.expect_upper()?;
-            let name = sp(name, start, end);
+            let name = this.sp(name, start, end);
 
             let mut ty_params = Vec::new();
             while matches!(this.current_kind(), Token::Ident(_)) {
                 let (param, start, end) = this.expect_ident()?;
-                ty_params.push(sp(param, start, end));
+                ty_params.push(this.sp(param, start, end));
             }
 
             this.expect(&Token::Eq)?;
@@ -100,7 +100,7 @@ impl Parser<'_> {
                 let start = this.current_start();
                 let ctor = this.parse_constructor()?;
                 let end = this.current_start();
-                constructors.push(sp(ctor, start, end));
+                constructors.push(sp(ctor, start, end, this.completed_cst_id()));
 
                 if !this.at(&Token::Pipe) {
                     break;
@@ -123,7 +123,7 @@ impl Parser<'_> {
                 params.push(this.parse_type_atom()?);
             }
             Ok(SurfaceConstructor {
-                name: sp(name, start, end),
+                name: this.sp(name, start, end),
                 params,
             })
         })
@@ -154,7 +154,7 @@ impl Parser<'_> {
 
             let end = args.last().map_or_else(|| span_end(&class_name), span_end);
 
-            Ok(sp(SurfacePredicate { class_name, args }, start, end))
+            Ok(this.sp(SurfacePredicate { class_name, args }, start, end))
         })
     }
 
@@ -200,7 +200,7 @@ impl Parser<'_> {
             let mut ty_params = Vec::new();
             while matches!(this.current_kind(), Token::Ident(_)) {
                 let (p, ps, pe) = this.expect_ident()?;
-                ty_params.push(sp(p, ps, pe));
+                ty_params.push(this.sp(p, ps, pe));
             }
 
             if ty_params.is_empty() {
@@ -229,14 +229,15 @@ impl Parser<'_> {
                     let mut mparams = Vec::new();
                     while matches!(this.current_kind(), Token::Ident(_) | Token::Underscore) {
                         let (p, ps, pe) = this.expect_binder()?;
-                        mparams.push(sp(p, ps, pe));
+                        mparams.push(this.sp(p, ps, pe));
                     }
                     this.expect(&Token::Eq)?;
                     let mbody = this.parse_expr()?;
                     defaults.push(InstanceMethod {
-                        name: sp(mname, ms, me),
+                        name: this.sp(mname, ms, me),
                         params: mparams,
                         body: mbody,
+                        cst_id: this.current_cst_id(),
                     });
                     continue;
                 }
@@ -245,8 +246,9 @@ impl Parser<'_> {
                 this.expect(&Token::Colon)?;
                 let mty = this.parse_type()?;
                 methods.push(ClassMethod {
-                    name: sp(mname, ms, me),
+                    name: this.sp(mname, ms, me),
                     ty: mty,
+                    cst_id: this.current_cst_id(),
                 });
             }
 
@@ -255,7 +257,7 @@ impl Parser<'_> {
             }
 
             Ok(SurfaceDefinition::ClassDef {
-                name: sp(name, ns, ne),
+                name: this.sp(name, ns, ne),
                 ty_params,
                 superclasses,
                 methods,
@@ -311,14 +313,15 @@ impl Parser<'_> {
                 let mut mparams = Vec::new();
                 while matches!(this.current_kind(), Token::Ident(_) | Token::Underscore) {
                     let (p, ps, pe) = this.expect_binder()?;
-                    mparams.push(sp(p, ps, pe));
+                    mparams.push(this.sp(p, ps, pe));
                 }
                 this.expect(&Token::Eq)?;
                 let mbody = this.parse_expr()?;
                 methods.push(InstanceMethod {
-                    name: sp(mname, ms, me),
+                    name: this.sp(mname, ms, me),
                     params: mparams,
                     body: mbody,
+                    cst_id: this.current_cst_id(),
                 });
             }
 
@@ -328,7 +331,7 @@ impl Parser<'_> {
 
             Ok(SurfaceDefinition::InstanceDef {
                 context,
-                class_name: sp(cname, cs, ce),
+                class_name: this.sp(cname, cs, ce),
                 args,
                 methods,
             })

@@ -187,7 +187,7 @@ impl<'a> Resolver<'a> {
                     ty_params,
                     constructors,
                 } => {
-                    let (name, _span) = spanned_name;
+                    let (name, _span, _) = spanned_name;
                     let data_name = self.qualified_def_name(self.local_def_id(cx, *name));
 
                     self.push_tyvar_scope();

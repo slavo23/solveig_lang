@@ -4,8 +4,8 @@
 use super::*;
 
 impl Parser<'_> {
-    pub(super) fn parse_module(&mut self) -> ParsedModule {
-        let (imports, defs) = self.node_value(SyntaxKind::Module, |this| {
+    pub(super) fn parse_module_surface(&mut self) -> (Vec<ImportDecl>, SurfaceProgram) {
+        self.node_value(SyntaxKind::Module, |this| {
             if this.at(&Token::VOpen) {
                 this.advance();
             }
@@ -19,19 +19,7 @@ impl Parser<'_> {
 
             this.emit_remaining_tokens();
             (imports, defs)
-        });
-        let tokens = self.tokens.clone();
-        let events = self.events.clone();
-        let cst = SyntaxTree::from_events(self.file, tokens.clone(), &events);
-
-        ParsedModule {
-            file: self.file,
-            tokens,
-            events,
-            cst,
-            imports,
-            defs,
-        }
+        })
     }
 
     pub(super) fn parse_imports(&mut self) -> Vec<ImportDecl> {
@@ -91,6 +79,7 @@ impl Parser<'_> {
                 alias,
                 spec,
                 span: mk_span(start, end),
+                cst_id: this.current_cst_id(),
             })
         })
     }
@@ -109,7 +98,7 @@ impl Parser<'_> {
                 match this.parse_definition() {
                     Ok(def) => {
                         let end = this.current_start();
-                        defs.push(sp(def, start, end));
+                        defs.push(sp(def, start, end, this.completed_cst_id()));
                     }
                     Err(error) => {
                         this.recover_top_level_as_error_node(&error);

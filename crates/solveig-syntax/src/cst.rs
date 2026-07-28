@@ -12,7 +12,7 @@ use crate::syntax::{Event, SyntaxKind};
 pub struct CstId(u32);
 
 impl CstId {
-    fn new(index: usize) -> Self {
+    pub(crate) fn new(index: usize) -> Self {
         Self(u32::try_from(index).expect("ICE: CST node arena exceeded u32 capacity"))
     }
 

@@ -6,11 +6,16 @@ use std::cell::Ref;
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 
 use crate::ast::*;
-use crate::cst::SyntaxTree;
+use crate::cst::{CstId, SyntaxTree};
 use crate::lexer::{self, LexError, PosToken, Token};
 use crate::syntax::{Event, SyntaxKind};
 
-type S<T> = (T, Span);
+use lists::{
+    cons_pattern, int_pattern, list_expr, list_nil_expr, list_nil_pattern, list_pattern, list_ty,
+    literal_pattern,
+};
+
+type S<T> = Spanned<T>;
 
 type NameSpan = (Symbol, usize, usize);
 
@@ -20,8 +25,8 @@ fn mk_span(start: usize, end: usize) -> Span {
     Span::from_usize_range(start..end)
 }
 
-fn sp<T>(value: T, start: usize, end: usize) -> S<T> {
-    (value, mk_span(start, end))
+fn sp<T>(value: T, start: usize, end: usize, cst_id: CstId) -> S<T> {
+    (value, mk_span(start, end), cst_id)
 }
 
 fn span_start<T>(spanned: &S<T>) -> usize {
@@ -38,121 +43,6 @@ fn merge_span<T, U>(start: &S<T>, end: &S<U>) -> (usize, usize) {
 
 fn is_ctor_like(name: &str) -> bool {
     name.chars().next().is_some_and(char::is_uppercase)
-}
-
-fn qref(session: &Session, segments: &[&str], start: usize, end: usize) -> S<NameRef> {
-    sp(
-        NameRef {
-            segments: segments
-                .iter()
-                .map(|segment| session.intern(segment))
-                .collect(),
-        },
-        start,
-        end,
-    )
-}
-
-fn list_nil_pattern(session: &Session, start: usize, end: usize) -> S<SurfacePattern> {
-    sp(
-        SurfacePattern::Con(
-            qref(session, &["prelude", "list", "Nil"], start, end),
-            vec![],
-        ),
-        start,
-        end,
-    )
-}
-
-fn list_nil_expr(session: &Session, start: usize, end: usize) -> S<SurfaceExpr> {
-    sp(
-        SurfaceExpr::Con(qref(session, &["prelude", "list", "Nil"], start, end)),
-        start,
-        end,
-    )
-}
-
-fn list_ty(session: &Session, elem_ty: S<SurfaceTy>, start: usize, end: usize) -> S<SurfaceTy> {
-    let list_con = sp(
-        SurfaceTy::Con(qref(session, &["prelude", "list", "List"], start, start)),
-        start,
-        start,
-    );
-    sp(
-        SurfaceTy::App(Box::new(list_con), Box::new(elem_ty)),
-        start,
-        end,
-    )
-}
-
-fn int_pattern(value: i64, start: usize, end: usize) -> S<SurfacePattern> {
-    sp(SurfacePattern::Lit(SurfaceLiteral::Int(value)), start, end)
-}
-
-fn literal_pattern(literal: SurfaceLiteral, start: usize, end: usize) -> S<SurfacePattern> {
-    sp(SurfacePattern::Lit(literal), start, end)
-}
-
-fn cons_pattern(
-    session: &Session,
-    head: S<SurfacePattern>,
-    tail: S<SurfacePattern>,
-) -> S<SurfacePattern> {
-    let (start, end) = merge_span(&head, &tail);
-    sp(
-        SurfacePattern::Con(
-            qref(session, &["prelude", "list", "Cons"], start, start),
-            vec![head, tail],
-        ),
-        start,
-        end,
-    )
-}
-
-fn list_pattern(
-    session: &Session,
-    elems: Vec<S<SurfacePattern>>,
-    _start: usize,
-    end: usize,
-) -> S<SurfacePattern> {
-    elems
-        .into_iter()
-        .rev()
-        .fold(list_nil_pattern(session, end, end), |acc, elem| {
-            cons_pattern(session, elem, acc)
-        })
-}
-
-fn cons_expr(
-    session: &Session,
-    head: S<SurfaceExpr>,
-    tail: S<SurfaceExpr>,
-    start: usize,
-    end: usize,
-) -> S<SurfaceExpr> {
-    let cons = sp(
-        SurfaceExpr::Con(qref(session, &["prelude", "list", "Cons"], start, start)),
-        start,
-        start,
-    );
-    let app = sp(SurfaceExpr::App(Box::new(cons), Box::new(head)), start, end);
-    sp(SurfaceExpr::App(Box::new(app), Box::new(tail)), start, end)
-}
-
-fn list_expr(
-    session: &Session,
-    elems: Vec<S<SurfaceExpr>>,
-    _start: usize,
-    end: usize,
-) -> S<SurfaceExpr> {
-    elems
-        .into_iter()
-        .rev()
-        .fold(list_nil_expr(session, end, end), |acc, elem| {
-            let start = span_start(&elem);
-            let end = span_end(&acc);
-            cons_expr(session, elem, acc, start, end)
-        })
 }
 
 #[derive(Debug, Clone)]
@@ -195,12 +85,21 @@ pub struct Parser<'a> {
     tokens: Vec<PosToken>,
     events: Vec<Event>,
     pos: usize,
+    emit_events: bool,
+    report_diagnostics: bool,
+    cst_nodes: Vec<(CstId, SyntaxKind)>,
+    next_node: usize,
+    node_stack: Vec<CstId>,
+    last_finished_node: Option<CstId>,
 }
 
 #[derive(Clone, Copy)]
 struct ParserCheckpoint {
     pos: usize,
     events_len: usize,
+    next_node: usize,
+    node_stack_len: usize,
+    last_finished_node: Option<CstId>,
 }
 
 impl<'a> Parser<'a> {
@@ -211,6 +110,28 @@ impl<'a> Parser<'a> {
             tokens,
             events: Vec::new(),
             pos: 0,
+            emit_events: true,
+            report_diagnostics: true,
+            cst_nodes: Vec::new(),
+            next_node: 0,
+            node_stack: Vec::new(),
+            last_finished_node: None,
+        }
+    }
+
+    fn from_cst(session: &'a Session, file: FileId, cst: &SyntaxTree) -> Self {
+        Self {
+            session,
+            file,
+            tokens: cst.tokens().to_vec(),
+            events: Vec::new(),
+            pos: 0,
+            emit_events: false,
+            report_diagnostics: false,
+            cst_nodes: cst.nodes().map(|(id, node)| (id, node.kind())).collect(),
+            next_node: 0,
+            node_stack: Vec::new(),
+            last_finished_node: None,
         }
     }
 
@@ -218,20 +139,76 @@ impl<'a> Parser<'a> {
         ParserCheckpoint {
             pos: self.pos,
             events_len: self.events.len(),
+            next_node: self.next_node,
+            node_stack_len: self.node_stack.len(),
+            last_finished_node: self.last_finished_node,
         }
     }
 
     fn restore(&mut self, checkpoint: ParserCheckpoint) {
         self.pos = checkpoint.pos;
         self.events.truncate(checkpoint.events_len);
+        self.next_node = checkpoint.next_node;
+        self.node_stack.truncate(checkpoint.node_stack_len);
+        self.last_finished_node = checkpoint.last_finished_node;
     }
 
-    fn start_node(&mut self, kind: SyntaxKind) {
-        self.events.push(Event::StartNode(kind));
+    fn start_node(&mut self, kind: SyntaxKind) -> CstId {
+        let cst_id = if self.cst_nodes.is_empty() {
+            CstId::new(self.next_node)
+        } else {
+            match self.cst_nodes.get(self.next_node).copied() {
+                Some((cst_id, cst_kind)) if cst_kind == kind => {
+                    self.next_node += 1;
+                    cst_id
+                }
+                Some((cst_id, _)) => self.node_stack.last().copied().unwrap_or(cst_id),
+                None => *self
+                    .node_stack
+                    .last()
+                    .expect("ICE: AST lowering visited past CST root scope"),
+            }
+        };
+
+        if self.cst_nodes.is_empty() {
+            self.next_node += 1;
+        }
+        self.node_stack.push(cst_id);
+        self.last_finished_node = None;
+
+        if self.emit_events {
+            self.events.push(Event::StartNode(kind));
+        }
+
+        cst_id
     }
 
     fn finish_node(&mut self) {
-        self.events.push(Event::FinishNode);
+        let cst_id = self
+            .node_stack
+            .pop()
+            .expect("ICE: parser finished a syntax node without starting one");
+        self.last_finished_node = Some(cst_id);
+
+        if self.emit_events {
+            self.events.push(Event::FinishNode);
+        }
+    }
+
+    fn current_cst_id(&self) -> CstId {
+        *self
+            .node_stack
+            .last()
+            .expect("ICE: parser built AST outside a syntax node")
+    }
+
+    fn completed_cst_id(&self) -> CstId {
+        self.last_finished_node
+            .expect("ICE: parser expected a completed syntax node")
+    }
+
+    fn sp<T>(&self, value: T, start: usize, end: usize) -> S<T> {
+        sp(value, start, end, self.current_cst_id())
     }
 
     fn node<T>(
@@ -290,7 +267,9 @@ impl<'a> Parser<'a> {
 
     fn emit_remaining_tokens(&mut self) {
         while self.pos < self.tokens.len() {
-            self.events.push(Event::Token(self.pos));
+            if self.emit_events {
+                self.events.push(Event::Token(self.pos));
+            }
             self.pos += 1;
         }
     }
@@ -326,7 +305,9 @@ impl<'a> Parser<'a> {
 
         let index = self.current_index();
         for token_index in self.pos..=index {
-            self.events.push(Event::Token(token_index));
+            if self.emit_events {
+                self.events.push(Event::Token(token_index));
+            }
         }
         self.pos = index + 1;
 
@@ -347,7 +328,9 @@ impl<'a> Parser<'a> {
 
     fn push_error_diagnostic(&mut self, error: &ParseError) -> Diagnostic {
         let diagnostic = error.to_diagnostic();
-        self.session.diagnostics().push(diagnostic.clone());
+        if self.report_diagnostics {
+            self.session.diagnostics().push(diagnostic.clone());
+        }
         diagnostic
     }
 
@@ -626,7 +609,9 @@ impl<'a> Parser<'a> {
     fn recover_top_level_as_error_node(&mut self, error: &ParseError) {
         let diagnostic = self.push_error_diagnostic(error);
         self.start_node(SyntaxKind::Error);
-        self.events.push(Event::Error(diagnostic));
+        if self.emit_events {
+            self.events.push(Event::Error(diagnostic));
+        }
         self.recover_top_level();
         self.finish_node();
     }
@@ -634,17 +619,29 @@ impl<'a> Parser<'a> {
 
 mod decl;
 mod expr;
+mod lists;
 mod module;
 mod name_path;
 mod pattern;
 #[cfg(test)]
 mod tests;
 mod ty;
+
+fn parse_source_events(
+    session: &Session,
+    file: FileId,
+    source: &str,
+) -> Result<(Vec<PosToken>, Vec<Event>), ParseError> {
+    let tokens = lexer::lex(session, file, source)?;
+    let mut parser = Parser::new(session, file, tokens);
+    let _ = parser.parse_module_surface();
+    Ok((parser.tokens, parser.events))
+}
+
 pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
-    let tokens = match lexer::lex(session, file, source) {
-        Ok(tokens) => tokens,
+    let (tokens, events) = match parse_source_events(session, file, source) {
+        Ok((tokens, events)) => (tokens, events),
         Err(error) => {
-            let error = ParseError::from(error);
             let diagnostic = error.to_diagnostic();
             session.diagnostics().push(diagnostic.clone());
             let events = vec![
@@ -656,8 +653,6 @@ pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModu
 
             return ParsedModule {
                 file,
-                tokens: Vec::new(),
-                events,
                 cst,
                 imports: Vec::new(),
                 defs: Vec::new(),
@@ -665,5 +660,21 @@ pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModu
         }
     };
 
-    Parser::new(session, file, tokens).parse_module()
+    let cst = SyntaxTree::from_events(file, tokens, &events);
+    let mut parser = Parser::from_cst(session, file, &cst);
+    let (imports, defs) = parser.parse_module_surface();
+    if !parser.cst_nodes.is_empty() {
+        assert_eq!(
+            parser.next_node,
+            parser.cst_nodes.len(),
+            "ICE: AST lowering did not visit every CST node"
+        );
+    }
+
+    ParsedModule {
+        file,
+        cst,
+        imports,
+        defs,
+    }
 }

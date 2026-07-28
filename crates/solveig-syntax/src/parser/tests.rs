@@ -10,6 +10,13 @@ fn parse_test_source(source: &str) -> ParsedModule {
     parse_source(&session, file, source)
 }
 
+fn parse_test_events(source: &str) -> (Vec<PosToken>, Vec<Event>) {
+    let session = Session::new();
+    let file = session.add_file("test.sv", source);
+
+    parse_source_events(&session, file, source).expect("test source should lex")
+}
+
 fn event_balance(events: &[Event]) -> isize {
     events.iter().fold(0isize, |depth, event| match event {
         Event::StartNode(_) => depth + 1,
@@ -40,51 +47,67 @@ fn error_event_is_inside_error_node(events: &[Event]) -> bool {
 #[test]
 fn parser_emits_balanced_events_over_full_token_stream() {
     let source = "main : IO ()\nmain = do\n    printLine \"ok\"\n";
-    let parsed = parse_test_source(source);
+    let (tokens, events) = parse_test_events(source);
 
-    assert_eq!(event_balance(&parsed.events), 0);
+    assert_eq!(event_balance(&events), 0);
     assert!(matches!(
-        parsed.events.first(),
+        events.first(),
         Some(Event::StartNode(SyntaxKind::Module))
     ));
-    assert!(matches!(parsed.events.last(), Some(Event::FinishNode)));
-    assert!(
-        parsed
-            .events
-            .contains(&Event::StartNode(SyntaxKind::FunctionOrSignature))
-    );
-    assert!(
-        parsed
-            .events
-            .contains(&Event::StartNode(SyntaxKind::DoExpr))
-    );
+    assert!(matches!(events.last(), Some(Event::FinishNode)));
+    assert!(events.contains(&Event::StartNode(SyntaxKind::FunctionOrSignature)));
+    assert!(events.contains(&Event::StartNode(SyntaxKind::DoExpr)));
 
-    let token_events = parsed
-        .events
+    let token_events = events
         .iter()
         .filter_map(|event| match event {
             Event::Token(index) => Some(*index),
             Event::StartNode(_) | Event::FinishNode | Event::Error(_) => None,
         })
         .collect::<Vec<_>>();
-    let all_token_indices = (0..parsed.tokens.len()).collect::<Vec<_>>();
+    let all_token_indices = (0..tokens.len()).collect::<Vec<_>>();
     assert_eq!(token_events, all_token_indices);
 }
 
 #[test]
 fn parser_emits_error_event_and_node_during_recovery() {
+    let (_, events) = parse_test_events("bad :\nmain = ()\n");
     let parsed = parse_test_source("bad :\nmain = ()\n");
 
     assert!(
-        parsed
-            .events
+        events
             .iter()
             .any(|event| matches!(event, Event::Error(diagnostic)
             if diagnostic.code == "PAR0001"))
     );
-    assert!(parsed.events.contains(&Event::StartNode(SyntaxKind::Error)));
-    assert!(error_event_is_inside_error_node(&parsed.events));
+    assert!(events.contains(&Event::StartNode(SyntaxKind::Error)));
+    assert!(error_event_is_inside_error_node(&events));
     assert_eq!(parsed.defs.len(), 1);
+}
+
+#[test]
+fn lowered_ast_nodes_point_into_cst_arena() {
+    let parsed = parse_test_source("main : IO ()\nmain = do\n    printLine \"ok\"\n");
+    let sig = &parsed.defs[0];
+    let main = &parsed.defs[1];
+
+    assert_eq!(
+        parsed.cst.node(sig.2).kind(),
+        SyntaxKind::FunctionOrSignature
+    );
+    assert_eq!(
+        parsed.cst.node(main.2).kind(),
+        SyntaxKind::FunctionOrSignature
+    );
+
+    let SurfaceDefinition::FunDef { name, body, .. } = &main.0 else {
+        panic!("expected main function definition");
+    };
+    assert_eq!(
+        parsed.cst.node(name.2).kind(),
+        SyntaxKind::FunctionOrSignature
+    );
+    assert_eq!(parsed.cst.node(body.2).kind(), SyntaxKind::DoExpr);
 }
 
 #[test]
@@ -102,16 +125,16 @@ fn parser_events_cover_every_token_for_repository_sources() {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
         let file = session.add_file(&path, source.clone());
-        let parsed = parse_source(&session, file, &source);
-        let token_events = parsed
-            .events
+        let (tokens, events) = parse_source_events(&session, file, &source)
+            .unwrap_or_else(|err| panic!("failed to parse events for {}: {err:?}", path.display()));
+        let token_events = events
             .iter()
             .filter_map(|event| match event {
                 Event::Token(index) => Some(*index),
                 Event::StartNode(_) | Event::FinishNode | Event::Error(_) => None,
             })
             .collect::<Vec<_>>();
-        let all_token_indices = (0..parsed.tokens.len()).collect::<Vec<_>>();
+        let all_token_indices = (0..tokens.len()).collect::<Vec<_>>();
 
         assert_eq!(
             token_events,

@@ -10,7 +10,12 @@ impl Parser<'_> {
             if this.at(&Token::Cons) {
                 this.advance();
                 let tail = this.parse_pattern()?;
-                Ok(cons_pattern(this.session, head, tail))
+                Ok(cons_pattern(
+                    this.session,
+                    head,
+                    tail,
+                    this.current_cst_id(),
+                ))
             } else {
                 Ok(head)
             }
@@ -27,7 +32,7 @@ impl Parser<'_> {
                     args.push(this.parse_pattern_arg()?);
                 }
                 let end = args.last().map_or_else(|| span_end(&name_ref), span_end);
-                Ok(sp(SurfacePattern::Con(name_ref, args), start, end))
+                Ok(this.sp(SurfacePattern::Con(name_ref, args), start, end))
             } else {
                 this.parse_pattern_arg()
             }
@@ -42,7 +47,12 @@ impl Parser<'_> {
                 Token::Int(value) => {
                     let value = *value;
                     let token = this.advance();
-                    Ok(int_pattern(value, token.start, token.end))
+                    Ok(int_pattern(
+                        value,
+                        token.start,
+                        token.end,
+                        this.current_cst_id(),
+                    ))
                 }
 
                 Token::Float(value) => {
@@ -52,6 +62,7 @@ impl Parser<'_> {
                         SurfaceLiteral::Float(value),
                         token.start,
                         token.end,
+                        this.current_cst_id(),
                     ))
                 }
 
@@ -62,6 +73,7 @@ impl Parser<'_> {
                         SurfaceLiteral::Char(value),
                         token.start,
                         token.end,
+                        this.current_cst_id(),
                     ))
                 }
 
@@ -72,6 +84,7 @@ impl Parser<'_> {
                         SurfaceLiteral::Str(value),
                         token.start,
                         token.end,
+                        this.current_cst_id(),
                     ))
                 }
 
@@ -84,7 +97,12 @@ impl Parser<'_> {
                             })?;
 
                             let int_token = this.advance();
-                            Ok(int_pattern(value, minus.start, int_token.end))
+                            Ok(int_pattern(
+                                value,
+                                minus.start,
+                                int_token.end,
+                                this.current_cst_id(),
+                            ))
                         }
 
                         Token::Float(value) => {
@@ -94,6 +112,7 @@ impl Parser<'_> {
                                 SurfaceLiteral::Float(value),
                                 minus.start,
                                 float_token.end,
+                                this.current_cst_id(),
                             ))
                         }
 
@@ -106,7 +125,7 @@ impl Parser<'_> {
 
                 Token::Underscore => {
                     let token = this.advance();
-                    Ok(sp(SurfacePattern::Wild, token.start, token.end))
+                    Ok(this.sp(SurfacePattern::Wild, token.start, token.end))
                 }
 
                 Token::Ident(_) => {
@@ -114,7 +133,7 @@ impl Parser<'_> {
                     let end = span_end(&name_ref);
 
                     if name_ref.0.segments.len() == 1 {
-                        Ok(sp(SurfacePattern::Var(name_ref.0.last()), start, end))
+                        Ok(this.sp(SurfacePattern::Var(name_ref.0.last()), start, end))
                     } else {
                         Err(this.error(format!(
                             "qualified variable patterns are not supported: {}",
@@ -126,7 +145,7 @@ impl Parser<'_> {
                 Token::UpperIdent(_) => {
                     let name_ref = this.parse_name_path()?;
                     let end = span_end(&name_ref);
-                    Ok(sp(SurfacePattern::Con(name_ref, vec![]), start, end))
+                    Ok(this.sp(SurfacePattern::Con(name_ref, vec![]), start, end))
                 }
 
                 Token::LParen => {
@@ -138,7 +157,7 @@ impl Parser<'_> {
 
                     let inner = this.parse_pattern()?;
                     let end = this.expect(&Token::RParen)?.end;
-                    Ok(sp(inner.0, start, end))
+                    Ok(this.sp(inner.0, start, end))
                 }
 
                 Token::LBrack => {
@@ -146,7 +165,12 @@ impl Parser<'_> {
 
                     if this.at(&Token::RBrack) {
                         let end = this.advance().end;
-                        return Ok(list_nil_pattern(this.session, start, end));
+                        return Ok(list_nil_pattern(
+                            this.session,
+                            start,
+                            end,
+                            this.current_cst_id(),
+                        ));
                     }
 
                     let mut elems = vec![this.parse_pattern()?];
@@ -157,7 +181,13 @@ impl Parser<'_> {
                     }
 
                     let end = this.expect(&Token::RBrack)?.end;
-                    Ok(list_pattern(this.session, elems, start, end))
+                    Ok(list_pattern(
+                        this.session,
+                        elems,
+                        start,
+                        end,
+                        this.current_cst_id(),
+                    ))
                 }
 
                 _ => Err(this.error(format!("expected pattern, got {}", this.describe_current()))),

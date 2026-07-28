@@ -5,11 +5,9 @@ use std::cell::Ref;
 
 use solveig_base::{FileId, Session, Span, Symbol};
 
-use crate::cst::SyntaxTree;
-use crate::lexer::PosToken;
-use crate::syntax::Event;
+use crate::cst::{CstId, SyntaxTree};
 
-pub type Spanned<T> = (T, Span);
+pub type Spanned<T> = (T, Span, CstId);
 
 pub type SpannedWrapper<T> = Spanned<T>;
 
@@ -95,13 +93,12 @@ pub struct ImportDecl {
     pub alias: Symbol,
     pub spec: ImportSpec,
     pub span: Span,
+    pub cst_id: CstId,
 }
 
 #[derive(Debug, Clone)]
 pub struct ParsedModule {
     pub file: FileId,
-    pub tokens: Vec<PosToken>,
-    pub events: Vec<Event>,
     pub cst: SyntaxTree,
     pub imports: Vec<ImportDecl>,
     pub defs: SurfaceProgram,
@@ -117,6 +114,7 @@ pub struct SurfacePredicate {
 pub struct ClassMethod {
     pub name: Spanned<Symbol>,
     pub ty: Spanned<SurfaceTy>,
+    pub cst_id: CstId,
 }
 
 #[derive(Debug, Clone)]
@@ -124,6 +122,7 @@ pub struct InstanceMethod {
     pub name: Spanned<Symbol>,
     pub params: Vec<Spanned<Symbol>>,
     pub body: Spanned<SurfaceExpr>,
+    pub cst_id: CstId,
 }
 
 #[derive(Debug, Clone)]
@@ -210,12 +209,14 @@ pub enum SurfaceDoStmt {
 pub struct SurfaceOpOperand {
     pub prefix_minuses: Vec<Span>,
     pub expr: Spanned<SurfaceExpr>,
+    pub cst_id: CstId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SurfaceOpSegment {
     pub op: Spanned<Symbol>,
     pub rhs: SurfaceOpOperand,
+    pub cst_id: CstId,
 }
 
 #[derive(Debug, Clone, PartialEq)]
