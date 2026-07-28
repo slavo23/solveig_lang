@@ -1,0 +1,8 @@
+[RES0012] Error: type alias `PairWith` is partially applied
+   ╭─[ $WORKSPACE/tests/golden/diag/type_alias_partial/src/main.sv:3:7 ]
+   │
+ 3 │ bad : PairWith
+   │       ────┬───
+   │           ╰───── type aliases must be fully applied; expected 1 argument, but found 0
+───╯
+resolve error

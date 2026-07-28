@@ -35,6 +35,7 @@ pub fn build_module_api(
     let mut term_defs = FxHashMap::<Symbol, FileSpan>::default();
     let mut term_sigs = FxHashMap::<Symbol, FileSpan>::default();
     let mut types = FxHashMap::<Symbol, FileSpan>::default();
+    let mut type_aliases = FxHashMap::<Symbol, FileSpan>::default();
     let mut seen_constructors = FxHashMap::<Symbol, FileSpan>::default();
     let mut classes = FxHashMap::<Symbol, FileSpan>::default();
     let mut fixity_defs = FxHashMap::<Symbol, FileSpan>::default();
@@ -80,6 +81,15 @@ pub fn build_module_api(
 
                 api.types.insert(name.0, local_def_id(module_id, name.0));
 
+                if let Some(previous) = type_aliases.get(&name.0).copied() {
+                    return Err(ResolveError::DuplicateDefinition {
+                        span: file_span(parsed.file, name.1),
+                        previous: Some(previous),
+                        kind: ResolveNameKind::TypeConstructor,
+                        name: name.0,
+                    });
+                }
+
                 for ctor in constructors {
                     check_duplicate(
                         &mut seen_constructors,
@@ -92,6 +102,28 @@ pub fn build_module_api(
                     api.constructors
                         .insert(ctor.0.name.0, local_def_id(module_id, ctor.0.name.0));
                 }
+            }
+
+            SurfaceDefinition::TypeAliasDef { name, .. } => {
+                check_duplicate(
+                    &mut type_aliases,
+                    parsed.file,
+                    name.1,
+                    ResolveNameKind::TypeAlias,
+                    name.0,
+                )?;
+
+                if let Some(previous) = types.get(&name.0).copied() {
+                    return Err(ResolveError::DuplicateDefinition {
+                        span: file_span(parsed.file, name.1),
+                        previous: Some(previous),
+                        kind: ResolveNameKind::TypeAlias,
+                        name: name.0,
+                    });
+                }
+
+                api.type_aliases
+                    .insert(name.0, local_def_id(module_id, name.0));
             }
 
             SurfaceDefinition::ClassDef { name, methods, .. } => {
@@ -156,6 +188,7 @@ pub fn build_typed_module_api(
     module_id: ModuleId,
     module_name: &ModuleName,
     checked: &CheckedModule,
+    type_aliases: FxHashMap<DefId, TypeAlias>,
 ) -> TypedModuleApi {
     let mut api = TypedModuleApi::default();
     let prefix = module_name.as_string(session) + ".";
@@ -163,6 +196,7 @@ pub fn build_typed_module_api(
     api.tycon_table = checked.tycon_table.clone();
     api.ctor_table = checked.ctor_table.clone();
     api.class_table = checked.class_table.clone();
+    api.type_aliases = type_aliases;
 
     for (id, scheme) in &checked.func_schemes {
         if id.module == module_id {

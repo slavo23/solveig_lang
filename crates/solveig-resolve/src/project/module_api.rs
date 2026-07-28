@@ -66,258 +66,11 @@ impl DefPath<'_> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResolveNameKind {
-    Term,
-    Operator,
-    TypeConstructor,
-    Constructor,
-    Class,
-    Signature,
-    Fixity,
-}
-
-impl ResolveNameKind {
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Term => "term",
-            Self::Operator => "operator",
-            Self::TypeConstructor => "type constructor",
-            Self::Constructor => "constructor",
-            Self::Class => "class",
-            Self::Signature => "signature",
-            Self::Fixity => "fixity",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ResolveError {
-    AmbiguousImport {
-        span: FileSpan,
-        kind: ResolveNameKind,
-        name: Symbol,
-        candidates: Vec<DefId>,
-    },
-    UnknownModule {
-        span: FileSpan,
-        module: ModuleName,
-    },
-    UnknownName {
-        span: FileSpan,
-        kind: ResolveNameKind,
-        name: String,
-    },
-    DuplicateDefinition {
-        span: FileSpan,
-        previous: Option<FileSpan>,
-        kind: ResolveNameKind,
-        name: Symbol,
-    },
-    ClassArity {
-        span: FileSpan,
-        class_name: String,
-        actual: usize,
-    },
-    SignatureArity {
-        span: FileSpan,
-        name: Symbol,
-        params: usize,
-    },
-    FixityConflict {
-        span: FileSpan,
-        left: Symbol,
-        right: Symbol,
-    },
-    IllegalUnaryMinus {
-        span: FileSpan,
-    },
-    MalformedOperatorExpression {
-        span: FileSpan,
-        message: String,
-    },
-    CyclicImports {
-        span: FileSpan,
-        modules: Vec<ModuleName>,
-    },
-}
-
-impl ResolveError {
-    pub fn to_diagnostic(&self, session: &Session, modules: Option<&ModuleTable>) -> Diagnostic {
-        match self {
-            Self::AmbiguousImport {
-                span,
-                kind,
-                name,
-                candidates,
-            } => {
-                let mut notes = Vec::new();
-                if let Some(modules) = modules {
-                    let rendered = candidates
-                        .iter()
-                        .map(|candidate| modules.def_path(*candidate).render(session))
-                        .collect::<Vec<_>>()
-                        .join(", ");
-
-                    if !rendered.is_empty() {
-                        notes.push(format!("candidates: {rendered}"));
-                    }
-                }
-
-                Diagnostic::error(
-                    "RES0001",
-                    format!(
-                        "ambiguous imported {} `{}`",
-                        kind.as_str(),
-                        session.str(*name)
-                    ),
-                )
-                .with_label(Label::primary(
-                    *span,
-                    format!(
-                        "`{}` is provided by more than one imported module",
-                        session.str(*name)
-                    ),
-                ))
-                .with_notes(notes)
-            }
-            Self::UnknownModule { span, module } => Diagnostic::error(
-                "RES0002",
-                format!("unknown module `{}`", module.as_string(session)),
-            )
-            .with_label(Label::primary(
-                *span,
-                format!("module `{}` could not be found", module.as_string(session)),
-            )),
-            Self::UnknownName { span, kind, name } => {
-                Diagnostic::error("RES0003", format!("unknown {} `{}`", kind.as_str(), name))
-                    .with_label(Label::primary(
-                        *span,
-                        format!("no {} named `{}` is in scope here", kind.as_str(), name),
-                    ))
-            }
-            Self::DuplicateDefinition {
-                span,
-                previous,
-                kind,
-                name,
-            } => {
-                let mut diagnostic = Diagnostic::error(
-                    "RES0004",
-                    format!(
-                        "duplicate {} definition `{}`",
-                        kind.as_str(),
-                        session.str(*name)
-                    ),
-                )
-                .with_label(Label::primary(
-                    *span,
-                    format!("`{}` is defined again here", session.str(*name)),
-                ));
-
-                if let Some(previous) = previous {
-                    diagnostic = diagnostic.with_label(Label::secondary(
-                        *previous,
-                        format!("previous definition of `{}` is here", session.str(*name)),
-                    ));
-                }
-
-                diagnostic
-            }
-            Self::ClassArity {
-                span,
-                class_name,
-                actual,
-            } => Diagnostic::error(
-                "RES0005",
-                format!("class `{class_name}` must have exactly one parameter"),
-            )
-            .with_label(Label::primary(
-                *span,
-                format!("expected exactly one class parameter, but found {actual}"),
-            )),
-            Self::SignatureArity { span, name, params } => Diagnostic::error(
-                "RES0006",
-                format!(
-                    "function `{}` has more parameters than its signature accepts",
-                    session.str(*name)
-                ),
-            )
-            .with_label(Label::primary(
-                *span,
-                format!(
-                    "this definition has {} parameter{}, but the signature is not a function type",
-                    params,
-                    if *params == 1 { "" } else { "s" }
-                ),
-            )),
-            Self::FixityConflict { span, left, right } => Diagnostic::error(
-                "RES0008",
-                "conflicting operator fixities",
-            )
-            .with_label(Label::primary(
-                *span,
-                format!(
-                    "operators `{}` and `{}` have the same precedence but cannot be mixed without parentheses",
-                    session.str(*left),
-                    session.str(*right)
-                ),
-            )),
-            Self::IllegalUnaryMinus { span } => Diagnostic::error(
-                "RES0009",
-                "illegal unary minus",
-            )
-            .with_label(Label::primary(
-                *span,
-                "prefix `-` is not allowed as the right operand of this operator",
-            ))
-            .with_notes(vec![
-                "add parentheses if the negative expression is intended here".to_string(),
-            ]),
-            Self::MalformedOperatorExpression { span, message } => Diagnostic::error(
-                "RES0010",
-                "malformed operator expression",
-            )
-            .with_label(Label::primary(*span, message.clone())),
-            Self::CyclicImports { span, modules } => {
-                Diagnostic::error("RES0007", "cyclic module imports").with_label(Label::primary(
-                    *span,
-                    format!(
-                        "cycle: {}",
-                        modules
-                            .iter()
-                            .map(|module| module.as_string(session))
-                            .collect::<Vec<_>>()
-                            .join(" -> ")
-                    ),
-                ))
-            }
-        }
-    }
-}
-
-impl<'a> IntoDiagnostic<(&'a Session, Option<&'a ModuleTable>)> for ResolveError {
-    fn into_diagnostic(
-        self,
-        (session, modules): (&'a Session, Option<&'a ModuleTable>),
-    ) -> Diagnostic {
-        self.to_diagnostic(session, modules)
-    }
-}
-
-impl<'a> IntoDiagnostic<(&'a Session, Option<&'a ModuleTable>)> for &ResolveError {
-    fn into_diagnostic(
-        self,
-        (session, modules): (&'a Session, Option<&'a ModuleTable>),
-    ) -> Diagnostic {
-        self.to_diagnostic(session, modules)
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct ModuleApi {
     pub terms: FxHashMap<Symbol, DefId>,
     pub types: FxHashMap<Symbol, DefId>,
+    pub type_aliases: FxHashMap<Symbol, DefId>,
     pub constructors: FxHashMap<Symbol, DefId>,
     pub classes: FxHashMap<Symbol, DefId>,
     pub fixities: FxHashMap<Symbol, Fixity>,
@@ -342,6 +95,10 @@ impl ModuleApi {
 
                     if let Some(sym) = self.types.get(name) {
                         out.types.insert(*name, *sym);
+                    }
+
+                    if let Some(sym) = self.type_aliases.get(name) {
+                        out.type_aliases.insert(*name, *sym);
                     }
 
                     if let Some(sym) = self.constructors.get(name) {
@@ -379,11 +136,20 @@ impl ModuleApi {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct TypeAlias {
+    pub id: DefId,
+    pub params: Vec<TyVarId>,
+    pub ty: Ty,
+    pub span: FileSpan,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct TypedModuleApi {
     pub term_schemes: FxHashMap<DefId, solveig_ast::ast::Scheme>,
     pub type_kinds: FxHashMap<DefId, Kind>,
     pub type_ids: FxHashMap<DefId, solveig_ast::ast::TyConId>,
+    pub type_aliases: FxHashMap<DefId, TypeAlias>,
     pub constructor_types: FxHashMap<DefId, Ty>,
     pub constructor_ids: FxHashMap<DefId, CtorId>,
     pub class_defs: FxHashMap<DefId, solveig_ast::ast::ClassDefinition>,
@@ -463,6 +229,12 @@ impl TypedModuleApi {
                             if let Some(id) = self.type_ids.get(sym) {
                                 out.type_ids.insert(*sym, *id);
                             }
+                        }
+                    }
+
+                    for (sym, alias) in &self.type_aliases {
+                        if &sym.name == name {
+                            out.type_aliases.insert(*sym, alias.clone());
                         }
                     }
 

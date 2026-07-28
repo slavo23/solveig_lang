@@ -7,6 +7,7 @@ struct FrontendState<'a> {
     apis: FxHashMap<ModuleName, SharedModuleApi>,
     typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
     resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
+    resolved_type_aliases: FxHashMap<ModuleId, FxHashMap<DefId, TypeAlias>>,
     checked_modules: Vec<CheckedModule>,
     checked: FxHashMap<ModuleId, CheckedModule>,
     module_files: FxHashMap<ModuleId, FileId>,
@@ -122,6 +123,7 @@ impl<'a> FrontendState<'a> {
             apis,
             typed_apis,
             resolutions: FxHashMap::default(),
+            resolved_type_aliases: FxHashMap::default(),
             checked_modules,
             checked,
             module_files,
@@ -188,6 +190,9 @@ impl<'a> FrontendState<'a> {
                 module_id,
                 module_name,
                 &checked,
+                self.resolved_type_aliases
+                    .remove(&module_id)
+                    .unwrap_or_default(),
             ));
 
             self.typed_apis.insert(module_name.clone(), typed_api);
@@ -378,6 +383,7 @@ impl<'a> FrontendState<'a> {
         let resolver_imports = ResolverImports {
             tycon_kind_ids: self.collect_imported_kind_ids(&imports),
             class_param_kind_ids: self.collect_imported_class_param_kind_ids(&imports),
+            type_aliases: self.collect_imported_type_aliases(&imports),
         };
 
         let resolver = Resolver::new(self.session, self.names, &self.project.module_table);
@@ -395,6 +401,8 @@ impl<'a> FrontendState<'a> {
             };
         self.resolutions
             .insert(module_id, resolved_info.resolutions.clone());
+        self.resolved_type_aliases
+            .insert(module_id, resolved_info.type_aliases.clone());
         let mut resolved = resolved_info.module;
         self.stamp_instance_ids(&mut resolved);
 
@@ -541,6 +549,21 @@ impl<'a> FrontendState<'a> {
 
         out
     }
+
+    fn collect_imported_type_aliases(
+        &self,
+        imports: &[EffectiveImport],
+    ) -> FxHashMap<DefId, TypeAlias> {
+        let mut out = FxHashMap::default();
+
+        for imp in imports {
+            if let Some(api) = self.typed_apis.get(&imp.module) {
+                out.extend(api.filtered(&imp.spec).type_aliases);
+            }
+        }
+
+        out
+    }
 }
 
 struct ImportedTypeInfo {
@@ -592,4 +615,3 @@ fn collect_imported_type_info(imports: &[ImportedTypedApi]) -> ImportedTypeInfo 
         class_table,
     }
 }
-

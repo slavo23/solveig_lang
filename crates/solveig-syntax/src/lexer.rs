@@ -32,6 +32,8 @@ enum RawToken {
     KwElse,
     #[token("data")]
     KwData,
+    #[token("type")]
+    KwType,
     #[token("sig")]
     KwSig,
     #[token("class")]
@@ -164,6 +166,7 @@ pub enum Token {
     Then,
     Else,
     Data,
+    Type,
     Sig,
     Class,
     Instance,
@@ -410,6 +413,7 @@ fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Token {
         RawToken::KwThen => Token::Then,
         RawToken::KwElse => Token::Else,
         RawToken::KwData => Token::Data,
+        RawToken::KwType => Token::Type,
         RawToken::KwSig => Token::Sig,
         RawToken::KwClass => Token::Class,
         RawToken::KwInstance => Token::Instance,

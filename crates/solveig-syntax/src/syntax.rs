@@ -12,6 +12,7 @@ pub enum SyntaxKind {
     FunctionOrSignature,
     FixityDef,
     DataDef,
+    TypeAliasDef,
     Constructor,
     ClassDef,
     InstanceDef,

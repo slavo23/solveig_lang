@@ -145,6 +145,11 @@ pub enum SurfaceDefinition {
         ty_params: Vec<Spanned<Symbol>>,
         constructors: Vec<Spanned<SurfaceConstructor>>,
     },
+    TypeAliasDef {
+        name: Spanned<Symbol>,
+        ty_params: Vec<Spanned<Symbol>>,
+        ty: Spanned<SurfaceTy>,
+    },
     ClassDef {
         name: Spanned<Symbol>,
         ty_params: Vec<Spanned<Symbol>>,

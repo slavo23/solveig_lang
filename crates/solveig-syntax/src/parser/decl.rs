@@ -115,6 +115,29 @@ impl Parser<'_> {
         })
     }
 
+    pub(super) fn parse_type_alias_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
+        self.node(SyntaxKind::TypeAliasDef, |this| {
+            this.expect(&Token::Type)?;
+            let (name, start, end) = this.expect_upper()?;
+            let name = this.sp(name, start, end);
+
+            let mut ty_params = Vec::new();
+            while matches!(this.current_kind(), Token::Ident(_)) {
+                let (param, start, end) = this.expect_ident()?;
+                ty_params.push(this.sp(param, start, end));
+            }
+
+            this.expect(&Token::Eq)?;
+            let ty = this.parse_type()?;
+
+            Ok(SurfaceDefinition::TypeAliasDef {
+                name,
+                ty_params,
+                ty,
+            })
+        })
+    }
+
     pub(super) fn parse_constructor(&mut self) -> Result<SurfaceConstructor, ParseError> {
         self.node(SyntaxKind::Constructor, |this| {
             let (name, start, end) = this.expect_upper()?;

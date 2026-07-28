@@ -7,7 +7,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{
     BuiltinDefinition, ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Kind,
-    ModuleId, Names, PRIM_TYS, Ty, TyConId, TyConTable,
+    ModuleId, Names, PRIM_TYS, Ty, TyConId, TyConTable, TyVarId,
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
@@ -16,6 +16,7 @@ use solveig_syntax::ast::{
 };
 
 mod api_build;
+mod diagnostics;
 mod graph;
 mod imports;
 mod module_api;
@@ -23,6 +24,7 @@ mod module_api;
 mod tests;
 
 pub use api_build::*;
+pub use diagnostics::*;
 pub use graph::*;
 pub use imports::*;
 pub(crate) use module_api::local_def_id;

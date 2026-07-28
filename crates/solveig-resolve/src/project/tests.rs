@@ -95,7 +95,14 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
         func_defs: Vec::new(),
     };
 
-    let api = build_typed_module_api(&session, &names, module_id, &module_name, &checked);
+    let api = build_typed_module_api(
+        &session,
+        &names,
+        module_id,
+        &module_name,
+        &checked,
+        FxHashMap::default(),
+    );
     let type_def = super::local_def_id(module_id, session.intern("Widget"));
     let ctor_def = super::local_def_id(module_id, session.intern("MkWidget"));
 

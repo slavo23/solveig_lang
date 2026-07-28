@@ -429,7 +429,10 @@ impl<'a> Resolver<'a> {
         cx: &ModuleContext,
     ) -> Option<ModuleId> {
         match &ty.0 {
-            SurfaceTy::Con(con) => self.unreported_tycon_defid(&con.0, cx).map(|id| id.module),
+            SurfaceTy::Con(con) => self
+                .unreported_tycon_defid(&con.0, cx)
+                .or_else(|| self.unreported_type_alias_defid(&con.0, cx))
+                .map(|id| id.module),
             SurfaceTy::App(lhs, _) => self.instance_type_head_module(lhs, cx),
             SurfaceTy::Unit
             | SurfaceTy::Var(_)

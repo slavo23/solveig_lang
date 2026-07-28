@@ -113,6 +113,7 @@ impl Parser<'_> {
     pub(super) fn parse_definition(&mut self) -> Result<SurfaceDefinition, ParseError> {
         match self.current_kind() {
             Token::Data => self.parse_data_def(),
+            Token::Type => self.parse_type_alias_def(),
             Token::Class => self.parse_class_def(),
             Token::Instance => self.parse_instance_def(),
             Token::Infixl | Token::Infixr | Token::Infix => self.parse_fixity_def(),

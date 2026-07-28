@@ -26,7 +26,7 @@ use solveig_syntax::ast::{
 };
 use solveig_syntax::fixity::{FixityError, resolve_op_seq};
 
-use crate::project::{ModuleContext, ModuleTable, ResolveError, ResolveNameKind};
+use crate::project::{ModuleContext, ModuleTable, ResolveError, ResolveNameKind, TypeAlias};
 
 type Span = Range<usize>;
 
@@ -70,12 +70,14 @@ fn trace_predicates(session: &Session, module: &ModuleName, label: &str, predica
 pub struct ResolverImports {
     pub tycon_kind_ids: FxHashMap<TyConId, Kind>,
     pub class_param_kind_ids: FxHashMap<ClassId, Vec<Kind>>,
+    pub type_aliases: FxHashMap<DefId, TypeAlias>,
 }
 
 #[derive(Debug)]
 pub struct ResolvedModuleInfo<A> {
     pub module: ResolvedModule<A>,
     pub resolutions: Vec<(FileSpan, DefId)>,
+    pub type_aliases: FxHashMap<DefId, TypeAlias>,
 }
 
 #[derive(Debug)]
@@ -100,26 +102,36 @@ struct LocalResolverEnv {
     /// already-built API made local class names like `Functor` leak through as raw
     /// predicate names in some paths.
     classes: FxHashMap<Symbol, DefId>,
+    type_aliases: FxHashMap<Symbol, SpannedWrapper<SurfaceDefinition>>,
 }
 
 impl LocalResolverEnv {
     fn from_parsed_module(module_id: ModuleId, parsed: &ParsedModule) -> Self {
-        let classes = parsed
-            .defs
-            .iter()
-            .filter_map(|defn| match &defn.0 {
-                SurfaceDefinition::ClassDef { name, .. } => Some((
-                    name.0,
-                    DefId {
-                        module: module_id,
-                        name: name.0,
-                    },
-                )),
-                _ => None,
-            })
-            .collect();
+        let mut classes = FxHashMap::default();
+        let mut type_aliases = FxHashMap::default();
 
-        Self { classes }
+        for defn in &parsed.defs {
+            match &defn.0 {
+                SurfaceDefinition::ClassDef { name, .. } => {
+                    classes.insert(
+                        name.0,
+                        DefId {
+                            module: module_id,
+                            name: name.0,
+                        },
+                    );
+                }
+                SurfaceDefinition::TypeAliasDef { name, .. } => {
+                    type_aliases.insert(name.0, defn.clone());
+                }
+                _ => {}
+            }
+        }
+
+        Self {
+            classes,
+            type_aliases,
+        }
     }
 }
 
@@ -130,6 +142,9 @@ pub struct Resolver<'a> {
     errors: Vec<ResolveError>,
     resolutions: Vec<(FileSpan, DefId)>,
     tyvar_scopes: Vec<FxHashMap<Symbol, TyVarId>>,
+    type_aliases: FxHashMap<DefId, TypeAlias>,
+    imported_type_aliases: FxHashMap<DefId, TypeAlias>,
+    type_alias_stack: Vec<DefId>,
 }
 
 impl<'a> Resolver<'a> {
@@ -141,6 +156,9 @@ impl<'a> Resolver<'a> {
             errors: Vec::new(),
             resolutions: Vec::new(),
             tyvar_scopes: Vec::new(),
+            type_aliases: FxHashMap::default(),
+            imported_type_aliases: FxHashMap::default(),
+            type_alias_stack: Vec::new(),
         }
     }
     fn symbol_text(&self, symbol: Symbol) -> String {

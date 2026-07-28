@@ -564,6 +564,7 @@ impl<'a> Parser<'a> {
         matches!(
             self.current_kind(),
             Token::Data
+                | Token::Type
                 | Token::Sig
                 | Token::Class
                 | Token::Instance

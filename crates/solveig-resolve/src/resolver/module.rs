@@ -7,18 +7,25 @@ impl<'a> Resolver<'a> {
         imported: &ResolverImports,
     ) -> Result<ResolvedModuleInfo<Span>, ResolverError> {
         let local = LocalResolverEnv::from_parsed_module(cx.module_id, parsed);
+        self.imported_type_aliases = imported.type_aliases.clone();
 
         trace(
             self.session,
             module_name,
             format!(
-                "start: defs={}, imported_tycons={}, imported_classes={}, local_classes={:?}",
+                "start: defs={}, imported_tycons={}, imported_classes={}, imported_aliases={}, local_classes={:?}",
                 parsed.defs.len(),
                 imported.tycon_kind_ids.len(),
                 imported.class_param_kind_ids.len(),
+                imported.type_aliases.len(),
                 local.classes
             ),
         );
+
+        self.resolve_type_aliases(cx, &local);
+        if let Some(errors) = self.take_errors() {
+            return Err(ResolverError::Resolve(errors));
+        }
 
         let raw_data_defs = self.collect_raw_data_defs(module_name, parsed, cx, &local);
         if let Some(errors) = self.take_errors() {
@@ -108,6 +115,7 @@ impl<'a> Resolver<'a> {
         Ok(ResolvedModuleInfo {
             module,
             resolutions: self.resolutions,
+            type_aliases: self.type_aliases,
         })
     }
 
