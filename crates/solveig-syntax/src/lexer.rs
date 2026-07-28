@@ -1,5 +1,5 @@
 //! Tokenization for Solveig source text.
-//! The parser consumes these tokens along with byte spans for diagnostics.
+//! The parser consumes the significant tokens; later CST phases keep trivia.
 
 use logos::Logos;
 
@@ -8,14 +8,7 @@ use solveig_base::{FileId, FileSpan, Session, Span, Symbol};
 use crate::ast::{Assoc, Fixity};
 
 #[derive(Logos, Debug, Clone, PartialEq)]
-#[logos(skip r"[ \t\r]+")]
 enum RawToken {
-    #[token("\n")]
-    Newline,
-
-    #[regex(r"--[^\n]*", logos::skip, allow_greedy = true)]
-    LineComment,
-
     // Keywords (must appear before identifiers).
     #[token("let")]
     KwLet,
@@ -107,6 +100,7 @@ pub struct PosToken {
     pub end: usize,
     pub line: u32,
     pub col: u32,
+    synthetic: bool,
 }
 
 impl PosToken {
@@ -117,11 +111,31 @@ impl PosToken {
             end,
             line,
             col,
+            synthetic: false,
         }
     }
 
     fn virtual_at(kind: Token, anchor: &Self) -> Self {
-        Self::new(kind, anchor.start, anchor.start, anchor.line, anchor.col)
+        Self {
+            kind,
+            start: anchor.start,
+            end: anchor.start,
+            line: anchor.line,
+            col: anchor.col,
+            synthetic: true,
+        }
+    }
+
+    pub fn is_synthetic(&self) -> bool {
+        self.synthetic
+    }
+
+    pub fn source_text<'a>(&self, source: &'a str) -> &'a str {
+        if self.synthetic {
+            ""
+        } else {
+            &source[self.start..self.end]
+        }
     }
 }
 
@@ -133,6 +147,11 @@ pub enum Token {
     Str(String),
     Ident(Symbol),
     UpperIdent(Symbol),
+
+    Whitespace,
+    Newline,
+    LineComment,
+    BlockComment,
 
     Let,
     In,
@@ -190,6 +209,15 @@ pub enum Token {
     VSemi,
 
     Eof,
+}
+
+impl Token {
+    pub fn is_trivia(&self) -> bool {
+        matches!(
+            self,
+            Token::Whitespace | Token::Newline | Token::LineComment | Token::BlockComment
+        )
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,42 +301,6 @@ fn decode_unicode_escape(chars: &mut std::str::Chars<'_>) -> Option<char> {
     char::from_u32(scalar)
 }
 
-fn strip_block_comments(source: &str) -> String {
-    let bytes = source.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    let mut depth = 0u32;
-
-    while i < bytes.len() {
-        let starts_comment = i + 1 < bytes.len() && bytes[i] == b'{' && bytes[i + 1] == b'-';
-        let ends_comment = i + 1 < bytes.len() && bytes[i] == b'-' && bytes[i + 1] == b'}';
-
-        if starts_comment {
-            depth += 1;
-            out.extend_from_slice(b"  ");
-            i += 2;
-            continue;
-        }
-
-        if depth > 0 && ends_comment {
-            depth -= 1;
-            out.extend_from_slice(b"  ");
-            i += 2;
-            continue;
-        }
-
-        if depth > 0 {
-            out.push(if bytes[i] == b'\n' { b'\n' } else { b' ' });
-        } else {
-            out.push(bytes[i]);
-        }
-
-        i += 1;
-    }
-
-    String::from_utf8(out).expect("block comment stripping broke UTF-8")
-}
-
 fn compute_line_starts(source: &str) -> Vec<usize> {
     let mut starts = vec![0];
     for (i, byte) in source.bytes().enumerate() {
@@ -343,9 +335,63 @@ fn lex_error(
     }
 }
 
-fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Option<Token> {
-    let token = match raw {
-        RawToken::Newline | RawToken::LineComment => return None,
+fn trivia_at(source: &str, offset: usize) -> Option<(Token, usize)> {
+    let bytes = source.as_bytes();
+    let byte = bytes[offset];
+
+    match byte {
+        b' ' | b'\t' | b'\r' => {
+            let mut end = offset + 1;
+            while end < bytes.len() && matches!(bytes[end], b' ' | b'\t' | b'\r') {
+                end += 1;
+            }
+            Some((Token::Whitespace, end))
+        }
+        b'\n' => {
+            let mut end = offset + 1;
+            while end < bytes.len() && bytes[end] == b'\n' {
+                end += 1;
+            }
+            Some((Token::Newline, end))
+        }
+        b'-' if bytes.get(offset + 1) == Some(&b'-') => {
+            let end = source[offset..]
+                .find('\n')
+                .map_or(bytes.len(), |line_end| offset + line_end);
+            Some((Token::LineComment, end))
+        }
+        b'{' if bytes.get(offset + 1) == Some(&b'-') => {
+            Some((Token::BlockComment, block_comment_end(source, offset)))
+        }
+        _ => None,
+    }
+}
+
+fn block_comment_end(source: &str, start: usize) -> usize {
+    let bytes = source.as_bytes();
+    let mut depth = 1u32;
+    let mut offset = start + 2;
+
+    while offset + 1 < bytes.len() {
+        if bytes[offset] == b'{' && bytes[offset + 1] == b'-' {
+            depth += 1;
+            offset += 2;
+        } else if bytes[offset] == b'-' && bytes[offset + 1] == b'}' {
+            depth -= 1;
+            offset += 2;
+            if depth == 0 {
+                return offset;
+            }
+        } else {
+            offset += 1;
+        }
+    }
+
+    bytes.len()
+}
+
+fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Token {
+    match raw {
         RawToken::Int(n) => Token::Int(n),
         RawToken::Float(n) => Token::Float(n),
         RawToken::Char(ch) => Token::Char(ch),
@@ -411,9 +457,7 @@ fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Option<Token>
                 }
             }
         },
-    };
-
-    Some(token)
+    }
 }
 
 fn is_reserved_operator(slice: &str) -> bool {
@@ -424,26 +468,42 @@ fn is_reserved_operator(slice: &str) -> bool {
 }
 
 fn raw_lex(session: &Session, file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
-    let cleaned = strip_block_comments(source);
     let line_starts = compute_line_starts(source);
     let mut out = Vec::new();
+    let mut offset = 0usize;
 
-    let mut lexer = RawToken::lexer(cleaned.as_str());
-    while let Some(result) = lexer.next() {
+    while offset < source.len() {
+        let (line, col) = offset_to_line_col(&line_starts, offset);
+
+        if let Some((kind, end)) = trivia_at(source, offset) {
+            out.push(PosToken::new(kind, offset, end, line, col));
+            offset = end;
+            continue;
+        }
+
+        let mut lexer = RawToken::lexer(&source[offset..]);
+        let Some(result) = lexer.next() else {
+            break;
+        };
         let span = lexer.span();
-        let (line, col) = offset_to_line_col(&line_starts, span.start);
+        let start = offset + span.start;
+        let end = offset + span.end;
 
         let raw = match result {
-            Ok(token) => token,
-            Err(()) => return Err(lex_error(source, file, span.start, line, col, span.end)),
+            Ok(token) if span.start == 0 => token,
+            Ok(_) => panic!("ICE: lexer skipped non-trivia input before token"),
+            Err(()) => return Err(lex_error(source, file, start, line, col, end)),
         };
 
-        let slice = &source[span.start..span.end];
-        let Some(kind) = map_raw_token(raw, slice, session) else {
-            continue;
-        };
+        let slice = &source[start..end];
+        let kind = map_raw_token(raw, slice, session);
+        out.push(PosToken::new(kind, start, end, line, col));
+        offset = end;
+    }
 
-        out.push(PosToken::new(kind, span.start, span.end, line, col));
+    if offset != source.len() {
+        let (line, col) = offset_to_line_col(&line_starts, offset);
+        return Err(lex_error(source, file, offset, line, col, source.len()));
     }
 
     let eof_offset = source.len();
@@ -481,7 +541,9 @@ fn effective_layout_col(tokens: &[PosToken], index: usize) -> u32 {
     let token = &tokens[index];
 
     if matches!(token.kind, Token::Pipe)
-        && let Some(next) = tokens.get(index + 1)
+        && let Some(next) = tokens[index + 1..]
+            .iter()
+            .find(|token| !token.kind.is_trivia())
         && next.line == token.line
     {
         return next.col;
@@ -502,6 +564,11 @@ pub fn insert_layout(tokens: &[PosToken]) -> Vec<PosToken> {
     let mut need_top_level_block = true;
 
     for (index, token) in tokens.iter().enumerate() {
+        if token.kind.is_trivia() {
+            out.push(token.clone());
+            continue;
+        }
+
         let col = effective_layout_col(tokens, index);
 
         if need_top_level_block && token.kind != Token::Eof {
@@ -573,6 +640,16 @@ pub fn insert_layout(tokens: &[PosToken]) -> Vec<PosToken> {
 pub fn lex(session: &Session, file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
     raw_lex(session, file, source).map(|tokens| insert_layout(&tokens))
 }
+
+pub fn parser_tokens(tokens: Vec<PosToken>) -> Vec<PosToken> {
+    tokens
+        .into_iter()
+        .filter(|token| !token.kind.is_trivia())
+        .collect()
+}
+
+#[cfg(test)]
+mod tests;
 
 pub fn builtin_fixity(tok: &Token) -> Option<Fixity> {
     match tok {

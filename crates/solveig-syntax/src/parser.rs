@@ -536,7 +536,7 @@ mod pattern;
 mod ty;
 pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
     let tokens = match lexer::lex(session, file, source) {
-        Ok(tokens) => tokens,
+        Ok(tokens) => lexer::parser_tokens(tokens),
         Err(error) => {
             let error = ParseError::from(error);
             session.diagnostics().push(error.to_diagnostic());
