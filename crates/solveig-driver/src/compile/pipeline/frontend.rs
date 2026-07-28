@@ -8,13 +8,20 @@ struct FrontendState<'a> {
     typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
     resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
     resolved_type_aliases: FxHashMap<ModuleId, FxHashMap<DefId, TypeAlias>>,
-    checked_modules: Vec<CheckedModule>,
     checked: FxHashMap<ModuleId, CheckedModule>,
     module_files: FxHashMap<ModuleId, FileId>,
     next_instance_id: u32,
     verify_core: bool,
     prelude_cache: Option<PreludeCache>,
+    freshly_checked_modules: Vec<ModuleName>,
+    reused_modules: Vec<ModuleName>,
 }
+
+type FrontendCaches<'cache> = (
+    Option<&'cache PreludeCache>,
+    Option<&'cache IncrementalCache>,
+    &'cache FxHashSet<ModuleName>,
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) enum FrontendPhase {
@@ -47,11 +54,15 @@ impl<'a> FrontendState<'a> {
         parsed: &'a ParsedProject,
         order: &[ModuleName],
         verify_core: bool,
-        prelude_cache: Option<&PreludeCache>,
+        caches: FrontendCaches<'_>,
     ) -> Result<Self, Vec<ResolveError>> {
         let mut apis = FxHashMap::default();
         let mut errors = Vec::new();
-        if let Some(cache) = prelude_cache {
+        let (prelude_cache, incremental_cache, reusable_modules) = caches;
+        let incremental_cache = incremental_cache.filter(|_| !reusable_modules.is_empty());
+        if let Some(cache) = incremental_cache {
+            *names = cache.names.clone();
+        } else if let Some(cache) = prelude_cache {
             *names = cache.names.clone();
         }
         let builtins = prelude_cache.map_or_else(
@@ -69,6 +80,23 @@ impl<'a> FrontendState<'a> {
                     .unwrap_or_else(|| {
                         panic!(
                             "ICE: usable prelude cache missing API for {}",
+                            module_name.as_string(session)
+                        )
+                    })
+                    .clone();
+                apis.insert(module_name.clone(), api);
+                continue;
+            }
+
+            if reusable_modules.contains(module_name)
+                && let Some(cache) = incremental_cache
+            {
+                let api = cache
+                    .apis
+                    .get(module_name)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "ICE: reusable cache missing API for {}",
                             module_name.as_string(session)
                         )
                     })
@@ -100,19 +128,62 @@ impl<'a> FrontendState<'a> {
             return Err(errors);
         }
 
-        let typed_apis = prelude_cache
+        let mut typed_apis = prelude_cache
             .map(|cache| cache.typed_apis.clone())
             .unwrap_or_default();
-        let checked_modules = prelude_cache
-            .map(|cache| cache.checked_modules.clone())
-            .unwrap_or_default();
-        let checked = prelude_cache
+        let mut checked = prelude_cache
             .map(|cache| cache.checked.clone())
             .unwrap_or_default();
-        let module_files = prelude_cache
+        let mut module_files = prelude_cache
             .map(|cache| cache.module_files.clone())
             .unwrap_or_default();
-        let next_instance_id = prelude_cache.map_or(0, |cache| cache.next_instance_id);
+        let mut next_instance_id = prelude_cache.map_or(0, |cache| cache.next_instance_id);
+
+        if let Some(cache) = incremental_cache {
+            next_instance_id = next_instance_id.max(cache.next_instance_id);
+
+            for module_name in reusable_modules {
+                let module_id = project
+                    .module_table
+                    .id(module_name)
+                    .expect("ICE: reusable module missing from current module table");
+                typed_apis.insert(
+                    module_name.clone(),
+                    cache
+                        .typed_apis
+                        .get(module_name)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "ICE: reusable cache missing typed API for {}",
+                                module_name.as_string(session)
+                            )
+                        })
+                        .clone(),
+                );
+                checked.insert(
+                    module_id,
+                    cache
+                        .checked
+                        .get(&module_id)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "ICE: reusable cache missing checked module {}",
+                                module_name.as_string(session)
+                            )
+                        })
+                        .clone(),
+                );
+                module_files.insert(
+                    module_id,
+                    *cache.module_files.get(&module_id).unwrap_or_else(|| {
+                        panic!(
+                            "ICE: reusable cache missing file for {}",
+                            module_name.as_string(session)
+                        )
+                    }),
+                );
+            }
+        }
 
         Ok(Self {
             session,
@@ -124,36 +195,93 @@ impl<'a> FrontendState<'a> {
             typed_apis,
             resolutions: FxHashMap::default(),
             resolved_type_aliases: FxHashMap::default(),
-            checked_modules,
             checked,
             module_files,
             next_instance_id,
             verify_core,
             prelude_cache: prelude_cache.cloned(),
+            freshly_checked_modules: Vec::new(),
+            reused_modules: Vec::new(),
         })
     }
 
     fn into_checked_project(
         self,
         source_files: Vec<SourceFile>,
-    ) -> (CheckedProject, Option<PreludeCache>) {
+        order: &[ModuleName],
+    ) -> (
+        CheckedProject,
+        Option<PreludeCache>,
+        Option<IncrementalCache>,
+        Vec<String>,
+        Vec<String>,
+    ) {
         let docs = self
             .typed_apis
             .values()
             .flat_map(|api| api.docs.iter().map(|(id, doc)| (*id, doc.clone())))
             .collect();
+        let modules = order
+            .iter()
+            .filter_map(|module_name| {
+                let module_id = self.project.module_table.id(module_name)?;
+                self.checked.get(&module_id).cloned()
+            })
+            .collect();
+        let incremental_cache = self.capture_incremental_cache();
+        let freshly_checked_modules = module_names_as_strings(self.session, &self.freshly_checked_modules);
+        let reused_modules = module_names_as_strings(self.session, &self.reused_modules);
 
         (
             CheckedProject {
                 names: self.names.clone(),
-                modules: self.checked_modules,
+                modules,
                 checked: self.checked,
                 module_files: self.module_files,
                 source_files,
                 docs,
             },
             self.prelude_cache,
+            Some(incremental_cache),
+            freshly_checked_modules,
+            reused_modules,
         )
+    }
+
+    fn capture_incremental_cache(&self) -> IncrementalCache {
+        let mut module_ids = FxHashMap::default();
+        let mut source_hashes = FxHashMap::default();
+
+        for (module_name, module_file) in &self.project.modules {
+            if is_compiler_prelude_module(self.session, module_name) {
+                continue;
+            }
+
+            let module_id = self
+                .project
+                .module_table
+                .id(module_name)
+                .expect("ICE: cache capture referenced unknown module");
+
+            if !self.checked.contains_key(&module_id) {
+                continue;
+            }
+
+            module_ids.insert(module_name.clone(), module_id);
+            source_hashes.insert(module_name.clone(), module_file.source_hash);
+        }
+
+        IncrementalCache {
+            module_ids,
+            source_hashes,
+            names: self.names.clone(),
+            apis: self.apis.clone(),
+            typed_apis: self.typed_apis.clone(),
+            checked: self.checked.clone(),
+            module_files: self.module_files.clone(),
+            next_instance_id: self.next_instance_id,
+            verified_core: self.verify_core,
+        }
     }
 
     fn check_all(&mut self, order: &[ModuleName]) -> Option<FrontendPhase> {
@@ -167,6 +295,7 @@ impl<'a> FrontendState<'a> {
                 .id(module_name)
                 .expect("ICE: checked module order referenced unknown module");
             if self.checked.contains_key(&module_id) {
+                self.reused_modules.push(module_name.clone());
                 continue;
             }
 
@@ -182,6 +311,7 @@ impl<'a> FrontendState<'a> {
                 continue;
             }
 
+            self.freshly_checked_modules.push(module_name.clone());
             let checked = match self.check_module(module_name) {
                 Ok(checked) => checked,
                 Err(phase) => {
@@ -206,7 +336,6 @@ impl<'a> FrontendState<'a> {
             self.typed_apis.insert(module_name.clone(), typed_api);
             self.module_files.insert(module_id, parsed.file);
             self.checked.insert(module_id, checked.clone());
-            self.checked_modules.push(checked);
             if is_compiler_prelude_module(self.session, module_name) {
                 self.capture_prelude_cache(order);
             }
@@ -240,7 +369,6 @@ impl<'a> FrontendState<'a> {
         let mut typed_apis = FxHashMap::default();
         let mut checked = FxHashMap::default();
         let mut module_files = FxHashMap::default();
-        let mut checked_modules = Vec::new();
 
         for module_name in &prelude_names {
             let module_id = self
@@ -309,26 +437,6 @@ impl<'a> FrontendState<'a> {
             );
         }
 
-        for module_name in &prelude_names {
-            let module_id = *module_ids.get(module_name).unwrap_or_else(|| {
-                panic!(
-                    "ICE: prelude cache missing module id for {}",
-                    module_name.as_string(self.session)
-                )
-            });
-            checked_modules.push(
-                checked
-                    .get(&module_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: prelude cache missing checked module {}",
-                            module_name.as_string(self.session)
-                        )
-                    })
-                    .clone(),
-            );
-        }
-
         self.prelude_cache = Some(PreludeCache {
             project_modules,
             module_ids,
@@ -336,7 +444,6 @@ impl<'a> FrontendState<'a> {
             builtins: self.builtins.clone(),
             apis,
             typed_apis,
-            checked_modules,
             checked,
             module_files,
             next_instance_id: self.next_instance_id,
@@ -574,52 +681,11 @@ impl<'a> FrontendState<'a> {
     }
 }
 
-struct ImportedTypeInfo {
-    func_schemes: FxHashMap<DefId, Scheme>,
-    tycon_kinds: FxHashMap<TyConId, solveig_ast::ast::Kind>,
-    constructor_types: FxHashMap<CtorId, solveig_ast::ast::Ty>,
-    class_defs: FxHashMap<ClassId, ClassDefinition>,
-    instance_defs: Vec<solveig_ast::ast::InstanceDefinition<TcMetadata, Range<usize>>>,
-    tycon_table: TyConTable,
-    ctor_table: CtorTable,
-    class_table: ClassTable,
+fn module_names_as_strings(session: &Session, modules: &[ModuleName]) -> Vec<String> {
+    modules
+        .iter()
+        .map(|module| module.as_string(session))
+        .collect()
 }
 
-fn collect_imported_type_info(imports: &[ImportedTypedApi]) -> ImportedTypeInfo {
-    let mut func_schemes = FxHashMap::default();
-    let mut tycon_kinds = FxHashMap::default();
-    let mut constructor_types = FxHashMap::default();
-    let mut class_defs = FxHashMap::default();
-    let mut instance_defs = Vec::new();
-    let mut tycon_table = TyConTable::new();
-    let mut ctor_table = CtorTable::new();
-    let mut class_table = ClassTable::new();
-
-    for imp in imports {
-        let mut display_maps = TypedDisplayMaps {
-            func_schemes: &mut func_schemes,
-            tycon_kinds: &mut tycon_kinds,
-            constructor_types: &mut constructor_types,
-            class_defs: &mut class_defs,
-            tycon_table: &mut tycon_table,
-            ctor_table: &mut ctor_table,
-            class_table: &mut class_table,
-            instance_defs: &mut instance_defs,
-        };
-
-        imp.api
-            .filtered(&imp.spec)
-            .extend_display_maps(&mut display_maps);
-    }
-
-    ImportedTypeInfo {
-        func_schemes,
-        tycon_kinds,
-        constructor_types,
-        class_defs,
-        instance_defs,
-        tycon_table,
-        ctor_table,
-        class_table,
-    }
-}
+include!("frontend/imported_type_info.rs");

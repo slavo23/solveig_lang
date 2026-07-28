@@ -5,12 +5,14 @@ use super::*;
 
 pub struct Compilation {
     pub(super) project_root: PathBuf,
+    pub(super) entry_file: Option<PathBuf>,
     pub(super) session: Session,
     pub(super) names: Names,
     pub(super) source_provider: SourceProvider,
     pub(super) artifacts: Option<CompilationArtifacts>,
     pub(super) checked_project: Option<CheckedProject>,
     pub(super) prelude_cache: Option<PreludeCache>,
+    pub(super) incremental_cache: Option<IncrementalCache>,
     check_result: CheckResult,
 }
 
@@ -19,6 +21,8 @@ pub struct CheckResult {
     diagnostics: Vec<Diagnostic>,
     modules: Vec<CheckedModule>,
     source_map: SourceMap,
+    freshly_checked_modules: Vec<String>,
+    reused_modules: Vec<String>,
     success: bool,
     failure_message: Option<&'static str>,
 }
@@ -53,6 +57,14 @@ impl CheckResult {
 
     pub fn source_map(&self) -> &SourceMap {
         &self.source_map
+    }
+
+    pub fn freshly_checked_modules(&self) -> &[String] {
+        &self.freshly_checked_modules
+    }
+
+    pub fn reused_modules(&self) -> &[String] {
+        &self.reused_modules
     }
 
     pub fn success(&self) -> bool {
@@ -92,7 +104,6 @@ pub(super) struct PreludeCache {
     pub(super) builtins: Rc<BuiltinApi>,
     pub(super) apis: FxHashMap<ModuleName, SharedModuleApi>,
     pub(super) typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
-    pub(super) checked_modules: Vec<CheckedModule>,
     pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
     pub(super) module_files: FxHashMap<ModuleId, FileId>,
     pub(super) next_instance_id: u32,
@@ -141,14 +152,24 @@ impl Compilation {
     pub fn new(project_root: impl Into<PathBuf>) -> Self {
         Self {
             project_root: project_root.into(),
+            entry_file: None,
             session: Session::new(),
             names: Names::new(),
             source_provider: SourceProvider::default(),
             artifacts: None,
             checked_project: None,
             prelude_cache: None,
+            incremental_cache: None,
             check_result: CheckResult::default(),
         }
+    }
+
+    pub fn for_source_file(source_file: impl Into<PathBuf>) -> Self {
+        let source_file = source_file.into();
+        let (project_root, entry_file) = discover_project_for_source_file(&source_file);
+        let mut compilation = Self::new(project_root);
+        compilation.entry_file = entry_file;
+        compilation
     }
 
     pub fn compile_and_run_project(
@@ -345,6 +366,8 @@ impl Compilation {
             diagnostics,
             modules,
             source_map,
+            freshly_checked_modules: outcome.freshly_checked_modules,
+            reused_modules: outcome.reused_modules,
             success,
             failure_message: outcome.phase.map(FrontendPhase::error_message),
         };
@@ -478,6 +501,8 @@ impl Compilation {
             diagnostics,
             modules: checked_project.modules.clone(),
             source_map: self.session.source_map().clone(),
+            freshly_checked_modules: Vec::new(),
+            reused_modules: Vec::new(),
             success: false,
             failure_message: Some(phase.error_message()),
         };
@@ -496,6 +521,18 @@ impl Compilation {
         self.checked_project = None;
         self.check_result = CheckResult::default();
     }
+}
+
+fn discover_project_for_source_file(source_file: &Path) -> (PathBuf, Option<PathBuf>) {
+    let source_dir = source_file.parent().unwrap_or_else(|| Path::new("."));
+
+    for candidate in source_dir.ancestors() {
+        if candidate.join("src").join("main.sv").is_file() {
+            return (candidate.to_path_buf(), None);
+        }
+    }
+
+    (source_dir.to_path_buf(), Some(source_file.to_path_buf()))
 }
 
 fn checked_project_tables(modules: &[CheckedModule]) -> (TyConTable, ClassTable) {

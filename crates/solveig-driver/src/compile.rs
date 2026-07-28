@@ -57,6 +57,7 @@ mod builtins;
 mod compilation;
 mod evidence_dump;
 mod hover;
+mod incremental;
 mod pipeline;
 mod show_entry;
 
@@ -70,5 +71,6 @@ pub use compilation::{
 use compilation::{CheckedProject, CompilationArtifacts, PreludeCache};
 use evidence_dump::dump_solved_evidence;
 use hover::hover_in_artifacts;
+use incremental::IncrementalCache;
 use pipeline::{FrontendPhase, merge_checked_modules, verify_lowering_core};
 use show_entry::{add_show_entry_wrapper, entry_returns_io};

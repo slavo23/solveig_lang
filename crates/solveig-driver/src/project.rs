@@ -2,6 +2,8 @@
 //! The compile facade calls this before parsing modules into the project graph.
 
 use solveig_base::FxHashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use solveig_base::{FileId, FileSpan, Session};
@@ -55,6 +57,12 @@ fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
     parser::parse_source(session, file, source)
 }
 
+fn source_hash(source: &str) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    source.hash(&mut hasher);
+    hasher.finish()
+}
+
 fn mk_virtual_prelude_file(
     session: &Session,
     module: &ModuleName,
@@ -76,6 +84,7 @@ fn mk_virtual_prelude_file(
     Ok(ModuleFile {
         name: module.clone(),
         path,
+        source_hash: source_hash(&source),
         imports,
         parsed,
     })
@@ -134,6 +143,7 @@ fn scan_module_file(
     Ok(ModuleFile {
         name,
         path: file.to_path_buf(),
+        source_hash: source_hash(&source),
         imports,
         parsed,
     })

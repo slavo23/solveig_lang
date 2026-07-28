@@ -17,6 +17,7 @@ pub struct ModuleContext {
 pub struct ModuleFile {
     pub name: ModuleName,
     pub path: PathBuf,
+    pub source_hash: u64,
     pub imports: Vec<ImportDecl>,
     pub parsed: ParsedModule,
 }
