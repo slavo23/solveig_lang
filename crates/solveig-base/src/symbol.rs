@@ -5,8 +5,8 @@ pub struct Symbol(pub u32);
 
 #[derive(Debug, Default)]
 pub struct Interner {
-    strings: Vec<&'static str>,
-    symbols: HashMap<&'static str, Symbol>,
+    strings: Vec<String>,
+    symbols: HashMap<String, Symbol>,
 }
 
 impl Interner {
@@ -21,19 +21,18 @@ impl Interner {
 
         let id = u32::try_from(self.strings.len())
             .expect("ICE: interned symbol table exceeded u32 capacity");
-        let interned: &'static str = Box::leak(text.to_owned().into_boxed_str());
         let symbol = Symbol(id);
 
-        self.strings.push(interned);
-        self.symbols.insert(interned, symbol);
+        self.strings.push(text.to_owned());
+        self.symbols.insert(text.to_owned(), symbol);
 
         symbol
     }
 
-    pub fn str(&self, symbol: Symbol) -> &'static str {
+    pub fn str(&self, symbol: Symbol) -> &str {
         self.strings
             .get(symbol.0 as usize)
-            .copied()
+            .map(String::as_str)
             .expect("ICE: symbol not present in interner")
     }
 
@@ -63,5 +62,19 @@ mod tests {
         assert_eq!(interner.str(alpha), "alpha");
         assert_eq!(interner.str(beta), "beta");
         assert_eq!(interner.len(), 2);
+    }
+
+    #[test]
+    fn interner_owns_many_strings() {
+        let mut interner = Interner::new();
+        let mut symbols = Vec::new();
+
+        for index in 0..100_000 {
+            symbols.push(interner.intern(&format!("symbol_{index}")));
+        }
+
+        assert_eq!(interner.len(), 100_000);
+        assert_eq!(interner.str(symbols[0]), "symbol_0");
+        assert_eq!(interner.str(symbols[99_999]), "symbol_99999");
     }
 }

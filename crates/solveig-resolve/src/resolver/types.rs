@@ -50,7 +50,7 @@ impl<'a> Resolver<'a> {
                         self.report_unknown_name(
                             span,
                             ResolveNameKind::TypeConstructor,
-                            self.symbol_text(*name).to_string(),
+                            self.symbol_text(*name),
                         );
                         None
                     }

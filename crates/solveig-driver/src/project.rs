@@ -164,7 +164,7 @@ pub fn module_name_from_file(
 pub fn file_from_module_name(session: &Session, root: &Path, module: &ModuleName) -> PathBuf {
     let mut out = root.to_path_buf();
     for seg in &module.0 {
-        out.push(session.str(*seg));
+        out.push(&*session.str(*seg));
     }
     out.set_extension("sv");
     out

@@ -1,3 +1,5 @@
+use std::cell::Ref;
+
 use solveig_base::{FileId, Session, Span, Symbol};
 
 pub type Spanned<T> = (T, Span);
@@ -37,7 +39,7 @@ impl NameRef {
             .expect("ICE: NameRef must have at least one segment")
     }
 
-    pub fn last_text(&self, session: &Session) -> &'static str {
+    pub fn last_text<'a>(&self, session: &'a Session) -> Ref<'a, str> {
         session.str(self.last())
     }
 
@@ -48,7 +50,7 @@ impl NameRef {
     pub fn display(&self, session: &Session) -> String {
         self.segments
             .iter()
-            .map(|segment| session.str(*segment))
+            .map(|segment| session.str(*segment).to_string())
             .collect::<Vec<_>>()
             .join(".")
     }
@@ -61,7 +63,7 @@ impl ModuleName {
     pub fn as_string(&self, session: &Session) -> String {
         self.0
             .iter()
-            .map(|segment| session.str(*segment))
+            .map(|segment| session.str(*segment).to_string())
             .collect::<Vec<_>>()
             .join(".")
     }

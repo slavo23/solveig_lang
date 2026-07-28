@@ -21,8 +21,8 @@ impl Session {
         self.interner.borrow_mut().intern(text)
     }
 
-    pub fn str(&self, symbol: Symbol) -> &'static str {
-        self.interner.borrow().str(symbol)
+    pub fn str(&self, symbol: Symbol) -> Ref<'_, str> {
+        Ref::map(self.interner.borrow(), |interner| interner.str(symbol))
     }
 
     pub fn add_file(&self, path: impl Into<PathBuf>, src: impl Into<String>) -> FileId {
@@ -54,6 +54,6 @@ mod tests {
         let two = session.intern("main");
 
         assert_eq!(one, two);
-        assert_eq!(session.str(one), "main");
+        assert_eq!(&*session.str(one), "main");
     }
 }

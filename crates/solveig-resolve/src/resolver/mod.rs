@@ -140,8 +140,8 @@ impl<'a> Resolver<'a> {
             tyvar_scopes: Vec::new(),
         }
     }
-    fn symbol_text(&self, symbol: Symbol) -> &'static str {
-        self.session.str(symbol)
+    fn symbol_text(&self, symbol: Symbol) -> String {
+        self.session.str(symbol).to_string()
     }
     fn file_span(&self, cx: &ModuleContext, span: SourceSpan) -> FileSpan {
         FileSpan::new(cx.file, span)
@@ -180,7 +180,7 @@ impl<'a> Resolver<'a> {
             .expect("ICE: attempted to pop empty type variable scope stack");
     }
     fn bind_tyvar_in_current_scope(&mut self, symbol: Symbol) -> TyVarId {
-        let name = self.symbol_text(symbol).to_string();
+        let name = self.symbol_text(symbol);
         let id = self.names.fresh_tyvar(&name);
         self.tyvar_scopes
             .last_mut()

@@ -1,3 +1,5 @@
+use std::cell::Ref;
+
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 
 use crate::ast::*;
@@ -243,7 +245,7 @@ impl<'a> Parser<'a> {
         self.session.diagnostics().push(error.to_diagnostic());
     }
 
-    fn token_text(&self, symbol: Symbol) -> &'static str {
+    fn token_text(&self, symbol: Symbol) -> Ref<'_, str> {
         self.session.str(symbol)
     }
 
@@ -355,12 +357,16 @@ impl<'a> Parser<'a> {
             )));
         };
 
-        let text = self.token_text(symbol);
         if is_cons_syntax && !allow_cons_syntax {
             return Err(self.error("list cons `::` is reserved syntax, not an operator name"));
         }
 
-        if text.starts_with(':') && !is_cons_syntax {
+        let is_reserved_constructor_operator = {
+            let text = self.token_text(symbol);
+            text.starts_with(':') && !is_cons_syntax
+        };
+
+        if is_reserved_constructor_operator {
             return Err(self.error(
                 "operators starting with `:` are reserved for future constructor operators",
             ));
@@ -751,7 +757,7 @@ impl<'a> Parser<'a> {
         let start = self.current_start();
 
         let class_name = self.parse_name_path()?;
-        if !is_ctor_like(class_name.0.last_text(self.session)) {
+        if !is_ctor_like(&class_name.0.last_text(self.session)) {
             return Err(self.error(format!(
                 "expected class name, got {}",
                 class_name.0.display(self.session)
@@ -1083,7 +1089,7 @@ impl<'a> Parser<'a> {
             Token::Ident(_) | Token::UpperIdent(_) => {
                 let name_ref = self.parse_name_path()?;
                 let end = span_end(&name_ref);
-                if is_ctor_like(name_ref.0.last_text(self.session)) {
+                if is_ctor_like(&name_ref.0.last_text(self.session)) {
                     Ok(sp(SurfaceTy::Con(name_ref), start, end))
                 } else if name_ref.0.segments.len() == 1 {
                     Ok(sp(SurfaceTy::Var(name_ref.0.last()), start, end))
@@ -1430,7 +1436,7 @@ impl<'a> Parser<'a> {
             Token::Ident(_) | Token::UpperIdent(_) => {
                 let name_ref = self.parse_name_path()?;
                 let end = span_end(&name_ref);
-                let expr = if is_ctor_like(name_ref.0.last_text(self.session)) {
+                let expr = if is_ctor_like(&name_ref.0.last_text(self.session)) {
                     SurfaceExpr::Con(name_ref)
                 } else {
                     SurfaceExpr::Var(name_ref)

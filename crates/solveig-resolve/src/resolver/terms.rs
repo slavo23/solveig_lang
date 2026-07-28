@@ -1,6 +1,6 @@
 impl<'a> Resolver<'a> {
     fn builtin_operator_fixity(&self, symbol: Symbol) -> Option<Fixity> {
-        match self.symbol_text(symbol) {
+        match self.symbol_text(symbol).as_str() {
             "::" => Some(Fixity {
                 prec: 5,
                 assoc: Assoc::Right,
@@ -47,7 +47,7 @@ impl<'a> Resolver<'a> {
                 self.report_unknown_name(
                     self.file_span(cx, op.1),
                     ResolveNameKind::Operator,
-                    self.symbol_text(op.0).to_string(),
+                    self.symbol_text(op.0),
                 );
                 Err(FixityError::UnknownOperator {
                     span: op.1,
@@ -269,7 +269,7 @@ impl<'a> Resolver<'a> {
                         self.report_unknown_name(
                             span,
                             ResolveNameKind::Term,
-                            self.symbol_text(*name).to_string(),
+                            self.symbol_text(*name),
                         );
                         None
                     }
@@ -324,7 +324,8 @@ impl<'a> Resolver<'a> {
     ) -> VarRef {
         match r.segments.as_slice() {
             [name] if bound_terms.contains(name) => {
-                self.names.register_symbol(*name, self.symbol_text(*name));
+                let name_text = self.symbol_text(*name);
+                self.names.register_symbol(*name, &name_text);
                 VarRef::Local(*name)
             }
             _ => match self.resolve_term_defid(r, span, cx) {
@@ -393,7 +394,7 @@ impl<'a> Resolver<'a> {
 
                     body_node = TermExprNode::new(
                         TermExpr::Abs(
-                            self.symbol_text(param_name.0).to_string(),
+                            self.symbol_text(param_name.0),
                             param_ty,
                             Box::new(body_node),
                         ),
@@ -452,7 +453,7 @@ impl<'a> Resolver<'a> {
                     self.resolve_surface_expr_in_module(in_expr, cx, local, &body_bound_terms);
 
                 TermExpr::Let(
-                    self.symbol_text(binder_name.0).to_string(),
+                    self.symbol_text(binder_name.0),
                     Box::new(resolved_binder),
                     Box::new(resolved_in_expr),
                 )
@@ -507,7 +508,7 @@ impl<'a> Resolver<'a> {
         for param in params.iter().rev() {
             body_node = TermExprNode::new(
                 TermExpr::Abs(
-                    self.symbol_text(param.0).to_string(),
+                    self.symbol_text(param.0),
                     None,
                     Box::new(body_node),
                 ),
@@ -548,7 +549,7 @@ impl<'a> Resolver<'a> {
                 break;
             };
 
-            annos.push((self.symbol_text(param.0).to_string(), arg_ty.clone()));
+            annos.push((self.symbol_text(param.0), arg_ty.clone()));
             remaining = ret_ty;
         }
 
@@ -611,7 +612,7 @@ impl<'a> Resolver<'a> {
                     Some(TermDefinition {
                         id: fn_id,
                         name: fn_name,
-                        short_name: self.symbol_text(*name).to_string(),
+                        short_name: self.symbol_text(*name),
                         signature: sig,
                         body: wrapped,
                     })

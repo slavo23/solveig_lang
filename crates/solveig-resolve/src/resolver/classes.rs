@@ -85,7 +85,7 @@ impl<'a> Resolver<'a> {
                 self.report_unknown_name(
                     span,
                     ResolveNameKind::Class,
-                    self.symbol_text(*name).to_string(),
+                    self.symbol_text(*name),
                 );
                 None
             }
@@ -233,7 +233,7 @@ impl<'a> Resolver<'a> {
                     if ty_params.len() != 1 {
                         self.errors.push(ResolveError::ClassArity {
                             span: self.file_span(cx, name.1),
-                            class_name: self.symbol_text(name.0).to_string(),
+                            class_name: self.symbol_text(name.0),
                             actual: ty_params.len(),
                         });
                     }
@@ -301,7 +301,7 @@ impl<'a> Resolver<'a> {
                             ClassMethodDef {
                                 id: method_id,
                                 name: self.qualified_def_name(method_id),
-                                short_name: self.symbol_text(method.name.0).to_string(),
+                                short_name: self.symbol_text(method.name.0),
                                 scheme,
                                 default_body: defaults
                                     .iter()
@@ -323,7 +323,7 @@ impl<'a> Resolver<'a> {
                         ClassDefinition {
                             id: class_id,
                             name: class_name,
-                            short_name: self.symbol_text(name.0).to_string(),
+                            short_name: self.symbol_text(name.0),
                             params: class_params,
                             superclasses: resolved_superclasses,
                             methods: resolved_methods,
@@ -489,7 +489,7 @@ impl<'a> Resolver<'a> {
             if args.len() != 1 {
                 self.errors.push(ResolveError::ClassArity {
                     span: self.file_span(cx, class_name.1),
-                    class_name: self.symbol_text(class_name.0).to_string(),
+                    class_name: self.symbol_text(class_name.0),
                     actual: args.len(),
                 });
             }
@@ -537,7 +537,7 @@ impl<'a> Resolver<'a> {
             let resolved_methods = methods
                 .iter()
                 .map(|method| InstanceMethodDef {
-                    name: self.symbol_text(method.name.0).to_string(),
+                    name: self.symbol_text(method.name.0),
                     body: self.wrap_function_body_without_signature_in_module(
                         &method.body,
                         &method.params,

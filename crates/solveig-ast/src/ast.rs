@@ -2042,7 +2042,7 @@ mod tests {
         assert_eq!(bool_id, TyConId(0));
         assert_eq!(list_id, TyConId(1));
         assert_eq!(
-            session.str(
+            &*session.str(
                 tycons
                     .get(bool_id)
                     .expect("ICE: inserted Bool type constructor must be present")

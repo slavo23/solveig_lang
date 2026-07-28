@@ -307,7 +307,7 @@ mod tests {
         map: &'a HashMap<&'static str, Fixity>,
     ) -> impl FnMut(Spanned<Symbol>) -> Result<Fixity, FixityError> + 'a {
         move |op| {
-            map.get(session.str(op.0))
+            map.get(&*session.str(op.0))
                 .copied()
                 .ok_or(FixityError::UnknownOperator {
                     span: op.1,

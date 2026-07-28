@@ -73,7 +73,7 @@ impl DefPath<'_> {
 
         let mut rendered = self.module.as_string(session);
         rendered.push('.');
-        rendered.push_str(session.str(self.name));
+        rendered.push_str(&session.str(self.name));
         rendered
     }
 }

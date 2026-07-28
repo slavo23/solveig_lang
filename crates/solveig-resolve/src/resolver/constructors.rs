@@ -50,7 +50,7 @@ impl<'a> Resolver<'a> {
                         self.report_unknown_name(
                             span,
                             ResolveNameKind::Constructor,
-                            self.symbol_text(*name).to_string(),
+                            self.symbol_text(*name),
                         );
                         None
                     }
@@ -112,7 +112,7 @@ impl<'a> Resolver<'a> {
         let span = to_core_span(sf.1);
 
         let node = match &sf.0 {
-            SurfacePattern::Var(var_name) => Pattern::Var(self.symbol_text(*var_name).to_string()),
+            SurfacePattern::Var(var_name) => Pattern::Var(self.symbol_text(*var_name)),
             SurfacePattern::Lit(lit) => Pattern::Lit(self.resolve_literal(lit)),
             SurfacePattern::Wild => Pattern::Wild,
             SurfacePattern::Con(con_name, args) => Pattern::Con(
@@ -195,7 +195,7 @@ impl<'a> Resolver<'a> {
                         .map(|constructor| RawConstructorDef {
                             name: self
                                 .qualified_def_name(self.local_def_id(cx, constructor.0.name.0)),
-                            short_name: self.symbol_text(constructor.0.name.0).to_string(),
+                            short_name: self.symbol_text(constructor.0.name.0),
                             span: self.file_span(cx, constructor.1),
                             fields: constructor
                                 .0
@@ -210,7 +210,7 @@ impl<'a> Resolver<'a> {
                     Some(RawDataDef {
                         id: self.names.tycon_id(&data_name),
                         name: data_name,
-                        short_name: self.symbol_text(*name).to_string(),
+                        short_name: self.symbol_text(*name),
                         span: self.file_span(cx, defn.1),
                         ty_params,
                         constructors,
