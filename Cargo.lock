@@ -309,8 +309,10 @@ name = "solveig"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "solveig-base",
  "solveig-driver",
  "solveig-report",
+ "solveig-syntax",
 ]
 
 [[package]]

@@ -10,6 +10,10 @@ solveig-driver = { path = "crates/solveig-driver", version = "0.1.0" }
 solveig-report = { path = "crates/solveig-report", version = "0.1.0" }
 clap = { version = "4.6.0", features = ["derive"] }
 
+[dev-dependencies]
+solveig-base = { path = "crates/solveig-base", version = "0.1.0" }
+solveig-syntax = { path = "crates/solveig-syntax", version = "0.1.0" }
+
 [lints]
 workspace = true
 

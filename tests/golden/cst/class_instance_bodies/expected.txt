@@ -1,0 +1,164 @@
+Module @0..190
+  VOpen @0..0 line=0 col=0 synthetic text=""
+  ImportList @0..0
+  DefinitionList @0..189
+    ClassDef @0..121
+      Class @0..5 line=0 col=0 text="class"
+      Whitespace @5..6 line=0 col=5 text=" "
+      UpperIdent @6..12 line=0 col=6 text="TinyEq"
+      Whitespace @12..13 line=0 col=12 text=" "
+      Ident @13..14 line=0 col=13 text="a"
+      Whitespace @14..15 line=0 col=14 text=" "
+      Where @15..20 line=0 col=15 text="where"
+      Newline @20..21 line=0 col=20 text="\n"
+      Whitespace @21..25 line=1 col=0 text="    "
+      VOpen @25..25 line=1 col=4 synthetic text=""
+      VSemi @25..25 line=1 col=4 synthetic text=""
+      Ident @25..31 line=1 col=4 text="tinyEq"
+      Whitespace @31..32 line=1 col=10 text=" "
+      Colon @32..33 line=1 col=11 text=":"
+      Type @33..48
+        QualifiedType @33..48
+          TypeArrow @33..48
+            TypeApp @33..35
+              TypeAtom @33..35
+                NamePath @33..35
+                  Whitespace @33..34 line=1 col=12 text=" "
+                  Ident @34..35 line=1 col=13 text="a"
+            Whitespace @35..36 line=1 col=14 text=" "
+            Arrow @36..38 line=1 col=15 text="->"
+            Type @38..48
+              QualifiedType @38..48
+                TypeArrow @38..48
+                  TypeApp @38..40
+                    TypeAtom @38..40
+                      NamePath @38..40
+                        Whitespace @38..39 line=1 col=17 text=" "
+                        Ident @39..40 line=1 col=18 text="a"
+                  Whitespace @40..41 line=1 col=19 text=" "
+                  Arrow @41..43 line=1 col=20 text="->"
+                  Type @43..48
+                    QualifiedType @43..48
+                      TypeArrow @43..48
+                        TypeApp @43..48
+                          TypeAtom @43..48
+                            NamePath @43..48
+                              Whitespace @43..44 line=1 col=22 text=" "
+                              UpperIdent @44..48 line=1 col=23 text="Bool"
+      Newline @48..49 line=1 col=27 text="\n"
+      Whitespace @49..53 line=2 col=0 text="    "
+      VSemi @53..53 line=2 col=4 synthetic text=""
+      Default @53..60 line=2 col=4 text="default"
+      Whitespace @60..61 line=2 col=11 text=" "
+      Ident @61..70 line=2 col=12 text="tinyNotEq"
+      Whitespace @70..71 line=2 col=21 text=" "
+      Ident @71..72 line=2 col=22 text="x"
+      Whitespace @72..73 line=2 col=23 text=" "
+      Ident @73..74 line=2 col=24 text="y"
+      Whitespace @74..75 line=2 col=25 text=" "
+      Eq @75..76 line=2 col=26 text="="
+      Expr @76..119
+        IfExpr @76..119
+          Newline @76..77 line=2 col=27 text="\n"
+          Whitespace @77..85 line=3 col=0 text="        "
+          If @85..87 line=3 col=8 text="if"
+          Expr @87..98
+            OpChain @87..98
+              OpOperand @87..98
+                AppExpr @87..98
+                  AtomExpr @87..94
+                    NamePath @87..94
+                      Whitespace @87..88 line=3 col=10 text=" "
+                      Ident @88..94 line=3 col=11 text="tinyEq"
+                  AtomExpr @94..96
+                    NamePath @94..96
+                      Whitespace @94..95 line=3 col=17 text=" "
+                      Ident @95..96 line=3 col=18 text="x"
+                  AtomExpr @96..98
+                    NamePath @96..98
+                      Whitespace @96..97 line=3 col=19 text=" "
+                      Ident @97..98 line=3 col=20 text="y"
+          Whitespace @98..99 line=3 col=21 text=" "
+          Then @99..103 line=3 col=22 text="then"
+          Expr @103..109
+            OpChain @103..109
+              OpOperand @103..109
+                AppExpr @103..109
+                  AtomExpr @103..109
+                    NamePath @103..109
+                      Whitespace @103..104 line=3 col=26 text=" "
+                      UpperIdent @104..109 line=3 col=27 text="False"
+          Whitespace @109..110 line=3 col=32 text=" "
+          Else @110..114 line=3 col=33 text="else"
+          Expr @114..119
+            OpChain @114..119
+              OpOperand @114..119
+                AppExpr @114..119
+                  AtomExpr @114..119
+                    NamePath @114..119
+                      Whitespace @114..115 line=3 col=37 text=" "
+                      UpperIdent @115..119 line=3 col=38 text="True"
+      Newline @119..121 line=3 col=42 text="\n\n"
+      VClose @121..121 line=5 col=0 synthetic text=""
+    VSemi @121..121 line=5 col=0 synthetic text=""
+    InstanceDef @121..172
+      Instance @121..129 line=5 col=0 text="instance"
+      Whitespace @129..130 line=5 col=8 text=" "
+      UpperIdent @130..136 line=5 col=9 text="TinyEq"
+      TypeAtom @136..140
+        NamePath @136..140
+          Whitespace @136..137 line=5 col=15 text=" "
+          UpperIdent @137..140 line=5 col=16 text="Int"
+      Whitespace @140..141 line=5 col=19 text=" "
+      Where @141..146 line=5 col=20 text="where"
+      Newline @146..147 line=5 col=25 text="\n"
+      Whitespace @147..151 line=6 col=0 text="    "
+      VOpen @151..151 line=6 col=4 synthetic text=""
+      VSemi @151..151 line=6 col=4 synthetic text=""
+      Ident @151..157 line=6 col=4 text="tinyEq"
+      Whitespace @157..158 line=6 col=10 text=" "
+      Ident @158..159 line=6 col=11 text="x"
+      Whitespace @159..160 line=6 col=12 text=" "
+      Ident @160..161 line=6 col=13 text="y"
+      Whitespace @161..162 line=6 col=14 text=" "
+      Eq @162..163 line=6 col=15 text="="
+      Expr @163..170
+        OpChain @163..170
+          OpOperand @163..165
+            AppExpr @163..165
+              AtomExpr @163..165
+                NamePath @163..165
+                  Whitespace @163..164 line=6 col=16 text=" "
+                  Ident @164..165 line=6 col=17 text="x"
+          Whitespace @165..166 line=6 col=18 text=" "
+          EqEq @166..168 line=6 col=19 text="=="
+          OpOperand @168..170
+            AppExpr @168..170
+              AtomExpr @168..170
+                NamePath @168..170
+                  Whitespace @168..169 line=6 col=21 text=" "
+                  Ident @169..170 line=6 col=22 text="y"
+      Newline @170..172 line=6 col=23 text="\n\n"
+      VClose @172..172 line=8 col=0 synthetic text=""
+    VSemi @172..172 line=8 col=0 synthetic text=""
+    FunctionOrSignature @172..189
+      Ident @172..176 line=8 col=0 text="main"
+      Whitespace @176..177 line=8 col=4 text=" "
+      Eq @177..178 line=8 col=5 text="="
+      Expr @178..189
+        OpChain @178..189
+          OpOperand @178..189
+            AppExpr @178..189
+              AtomExpr @178..185
+                NamePath @178..185
+                  Whitespace @178..179 line=8 col=6 text=" "
+                  Ident @179..185 line=8 col=7 text="tinyEq"
+              AtomExpr @185..187
+                Whitespace @185..186 line=8 col=13 text=" "
+                Int(1) @186..187 line=8 col=14 text="1"
+              AtomExpr @187..189
+                Whitespace @187..188 line=8 col=15 text=" "
+                Int(1) @188..189 line=8 col=16 text="1"
+  Newline @189..190 line=8 col=17 text="\n"
+  VClose @190..190 line=9 col=0 synthetic text=""
+  Eof @190..190 line=9 col=0 text=""

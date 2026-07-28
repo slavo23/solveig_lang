@@ -1,0 +1,126 @@
+Module @0..99
+  VOpen @0..0 line=0 col=0 synthetic text=""
+  ImportList @0..0
+  DefinitionList @0..98
+    FixityDef @0..11
+      Infixr @0..6 line=0 col=0 text="infixr"
+      Whitespace @6..7 line=0 col=6 text=" "
+      Int(8) @7..8 line=0 col=7 text="8"
+      Whitespace @8..9 line=0 col=8 text=" "
+      Operator @9..11 line=0 col=9 text="^^"
+    Newline @11..12 line=0 col=11 text="\n"
+    VSemi @12..12 line=1 col=0 synthetic text=""
+    FixityDef @12..24
+      Infixl @12..18 line=1 col=0 text="infixl"
+      Whitespace @18..19 line=1 col=6 text=" "
+      Int(6) @19..20 line=1 col=7 text="6"
+      Whitespace @20..21 line=1 col=8 text=" "
+      Operator @21..24 line=1 col=9 text="<+>"
+    Newline @24..26 line=1 col=12 text="\n\n"
+    VSemi @26..26 line=3 col=0 synthetic text=""
+    FunctionOrSignature @26..51
+      LParen @26..27 line=3 col=0 text="("
+      Operator @27..30 line=3 col=1 text="<+>"
+      RParen @30..31 line=3 col=4 text=")"
+      Whitespace @31..32 line=3 col=5 text=" "
+      Colon @32..33 line=3 col=6 text=":"
+      Type @33..51
+        QualifiedType @33..51
+          TypeArrow @33..51
+            TypeApp @33..37
+              TypeAtom @33..37
+                NamePath @33..37
+                  Whitespace @33..34 line=3 col=7 text=" "
+                  UpperIdent @34..37 line=3 col=8 text="Int"
+            Whitespace @37..38 line=3 col=11 text=" "
+            Arrow @38..40 line=3 col=12 text="->"
+            Type @40..51
+              QualifiedType @40..51
+                TypeArrow @40..51
+                  TypeApp @40..44
+                    TypeAtom @40..44
+                      NamePath @40..44
+                        Whitespace @40..41 line=3 col=14 text=" "
+                        UpperIdent @41..44 line=3 col=15 text="Int"
+                  Whitespace @44..45 line=3 col=18 text=" "
+                  Arrow @45..47 line=3 col=19 text="->"
+                  Type @47..51
+                    QualifiedType @47..51
+                      TypeArrow @47..51
+                        TypeApp @47..51
+                          TypeAtom @47..51
+                            NamePath @47..51
+                              Whitespace @47..48 line=3 col=21 text=" "
+                              UpperIdent @48..51 line=3 col=22 text="Int"
+    Newline @51..52 line=3 col=25 text="\n"
+    VSemi @52..52 line=4 col=0 synthetic text=""
+    FunctionOrSignature @52..69
+      LParen @52..53 line=4 col=0 text="("
+      Operator @53..56 line=4 col=1 text="<+>"
+      RParen @56..57 line=4 col=4 text=")"
+      Whitespace @57..58 line=4 col=5 text=" "
+      Ident @58..59 line=4 col=6 text="x"
+      Whitespace @59..60 line=4 col=7 text=" "
+      Ident @60..61 line=4 col=8 text="y"
+      Whitespace @61..62 line=4 col=9 text=" "
+      Eq @62..63 line=4 col=10 text="="
+      Expr @63..69
+        OpChain @63..69
+          OpOperand @63..65
+            AppExpr @63..65
+              AtomExpr @63..65
+                NamePath @63..65
+                  Whitespace @63..64 line=4 col=11 text=" "
+                  Ident @64..65 line=4 col=12 text="x"
+          Whitespace @65..66 line=4 col=13 text=" "
+          Plus @66..67 line=4 col=14 text="+"
+          OpOperand @67..69
+            AppExpr @67..69
+              AtomExpr @67..69
+                NamePath @67..69
+                  Whitespace @67..68 line=4 col=15 text=" "
+                  Ident @68..69 line=4 col=16 text="y"
+    Newline @69..71 line=4 col=17 text="\n\n"
+    VSemi @71..71 line=6 col=0 synthetic text=""
+    FunctionOrSignature @71..98
+      Ident @71..75 line=6 col=0 text="main"
+      Whitespace @75..76 line=6 col=4 text=" "
+      Eq @76..77 line=6 col=5 text="="
+      Expr @77..98
+        OpChain @77..98
+          OpOperand @77..79
+            AppExpr @77..79
+              AtomExpr @77..79
+                Whitespace @77..78 line=6 col=6 text=" "
+                Int(1) @78..79 line=6 col=7 text="1"
+          Whitespace @79..80 line=6 col=8 text=" "
+          Plus @80..81 line=6 col=9 text="+"
+          OpOperand @81..83
+            AppExpr @81..83
+              AtomExpr @81..83
+                Whitespace @81..82 line=6 col=10 text=" "
+                Int(2) @82..83 line=6 col=11 text="2"
+          Whitespace @83..84 line=6 col=12 text=" "
+          Star @84..85 line=6 col=13 text="*"
+          OpOperand @85..87
+            AppExpr @85..87
+              AtomExpr @85..87
+                Whitespace @85..86 line=6 col=14 text=" "
+                Int(3) @86..87 line=6 col=15 text="3"
+          Whitespace @87..88 line=6 col=16 text=" "
+          Operator @88..90 line=6 col=17 text="^^"
+          OpOperand @90..92
+            AppExpr @90..92
+              AtomExpr @90..92
+                Whitespace @90..91 line=6 col=19 text=" "
+                Int(4) @91..92 line=6 col=20 text="4"
+          Whitespace @92..93 line=6 col=21 text=" "
+          Operator @93..96 line=6 col=22 text="<+>"
+          OpOperand @96..98
+            AppExpr @96..98
+              AtomExpr @96..98
+                Whitespace @96..97 line=6 col=25 text=" "
+                Int(5) @97..98 line=6 col=26 text="5"
+  Newline @98..99 line=6 col=27 text="\n"
+  VClose @99..99 line=7 col=0 synthetic text=""
+  Eof @99..99 line=7 col=0 text=""

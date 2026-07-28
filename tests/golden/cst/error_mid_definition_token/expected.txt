@@ -1,0 +1,53 @@
+Module @0..42
+  VOpen @0..0 line=0 col=0 synthetic text=""
+  ImportList @0..0
+  DefinitionList @0..41
+    FunctionOrSignature @0..23
+      Ident @0..4 line=0 col=0 text="main"
+      Whitespace @4..5 line=0 col=4 text=" "
+      Eq @5..6 line=0 col=5 text="="
+      Expr @0..23
+        IfExpr @0..23
+          Newline @6..7 line=0 col=6 text="\n"
+          Whitespace @7..11 line=1 col=0 text="    "
+          If @11..13 line=1 col=4 text="if"
+          Expr @13..18
+            OpChain @13..18
+              OpOperand @13..18
+                AppExpr @13..18
+                  AtomExpr @13..18
+                    NamePath @13..18
+                      Whitespace @13..14 line=1 col=6 text=" "
+                      UpperIdent @14..18 line=1 col=7 text="True"
+          Whitespace @18..19 line=1 col=11 text=" "
+          Then @19..23 line=1 col=12 text="then"
+          Expr @0..0
+            OpChain @0..0
+              OpOperand @0..0
+                AppExpr @0..0
+                  AtomExpr @0..0
+    Error @23..33
+      diagnostic PAR0001 Error "parse error"
+        label primary @24..25 "expected expression, got RParen"
+      Whitespace @23..24 line=1 col=16 text=" "
+      RParen @24..25 line=1 col=17 text=")"
+      Whitespace @25..26 line=1 col=18 text=" "
+      Else @26..30 line=1 col=19 text="else"
+      Whitespace @30..31 line=1 col=23 text=" "
+      Int(0) @31..32 line=1 col=24 text="0"
+      Newline @32..33 line=1 col=25 text="\n"
+      VSemi @33..33 line=2 col=0 synthetic text=""
+    FunctionOrSignature @33..41
+      Ident @33..37 line=2 col=0 text="next"
+      Whitespace @37..38 line=2 col=4 text=" "
+      Eq @38..39 line=2 col=5 text="="
+      Expr @39..41
+        OpChain @39..41
+          OpOperand @39..41
+            AppExpr @39..41
+              AtomExpr @39..41
+                Whitespace @39..40 line=2 col=6 text=" "
+                Int(3) @40..41 line=2 col=7 text="3"
+  Newline @41..42 line=2 col=8 text="\n"
+  VClose @42..42 line=3 col=0 synthetic text=""
+  Eof @42..42 line=3 col=0 text=""
