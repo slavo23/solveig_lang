@@ -200,7 +200,7 @@ impl BytecodeProgram {
                         let table_ix = *table_ix as usize;
                         let table = chunk.match_tables.get(table_ix).unwrap_or_else(|| {
                             panic!(
-                                "chunk '{}' references missing match table {}",
+                                "ICE: chunk '{}' references missing match table {}",
                                 chunk.name, table_ix
                             )
                         });
@@ -292,10 +292,10 @@ impl BytecodeLowerer {
 
     fn lower_function(&self, func: &CCFunction) -> Chunk {
         let capture_count = u16::try_from(func.capture_count)
-            .unwrap_or_else(|_| panic!("too many captures in function '{}'", func.name));
+            .unwrap_or_else(|_| panic!("ICE: too many captures in function '{}'", func.name));
 
         let arity = u16::try_from(func.arity)
-            .unwrap_or_else(|_| panic!("arity too large in function '{}'", func.name));
+            .unwrap_or_else(|_| panic!("ICE: arity too large in function '{}'", func.name));
 
         let mut builder = ChunkBuilder::new_function(
             self.function_chunk_ids[&func.id],
@@ -343,8 +343,9 @@ impl BytecodeLowerer {
                     self.compile_expr(builder, env, arg);
                 }
 
-                let arg_count = u16::try_from(args.len())
-                    .unwrap_or_else(|_| panic!("arg count {} does not fit in u16", args.len()));
+                let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
+                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                });
 
                 builder.emit(Instr::TailCallN { arg_count });
             }
@@ -356,9 +357,10 @@ impl BytecodeLowerer {
 
                 let chunk = self.function_chunk_ids[func];
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("chunk id {} does not fit in u32", chunk));
-                let arg_count = u16::try_from(args.len())
-                    .unwrap_or_else(|_| panic!("arg count {} does not fit in u16", args.len()));
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk));
+                let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
+                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                });
 
                 builder.emit(Instr::TailCallKnown { chunk, arg_count });
             }
@@ -368,8 +370,9 @@ impl BytecodeLowerer {
                     self.compile_expr(builder, env, arg);
                 }
 
-                let arg_count = u16::try_from(args.len())
-                    .unwrap_or_else(|_| panic!("arg count {} does not fit in u16", args.len()));
+                let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
+                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                });
 
                 builder.emit(Instr::CallBuiltin { id: *id, arg_count });
                 builder.emit(Instr::Return);
@@ -453,13 +456,13 @@ impl BytecodeLowerer {
 
             CCExpr::Capture(index) => {
                 let slot = u16::try_from(*index)
-                    .unwrap_or_else(|_| panic!("capture index {} does not fit in u16", index));
+                    .unwrap_or_else(|_| panic!("ICE: capture index {} does not fit in u16", index));
                 builder.emit(Instr::LoadLocal(slot));
             }
 
             CCExpr::Global(index) => {
                 let idx = u32::try_from(*index)
-                    .unwrap_or_else(|_| panic!("global index {} does not fit in u32", index));
+                    .unwrap_or_else(|_| panic!("ICE: global index {} does not fit in u32", index));
                 builder.emit(Instr::LoadGlobal(idx));
             }
 
@@ -488,9 +491,9 @@ impl BytecodeLowerer {
 
                 let chunk = self.function_chunk_ids[func];
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("chunk id {} does not fit in u32", chunk));
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk));
                 let capture_count = u16::try_from(captures.len()).unwrap_or_else(|_| {
-                    panic!("capture count {} does not fit in u16", captures.len())
+                    panic!("ICE: capture count {} does not fit in u16", captures.len())
                 });
 
                 builder.emit(Instr::MakeClosure {
@@ -501,9 +504,9 @@ impl BytecodeLowerer {
             CCExpr::FunctionRef { func, arity } => {
                 let chunk = self.function_chunk_ids[func];
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("chunk id {} does not fit in u32", chunk));
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk));
                 let arity = u16::try_from(*arity)
-                    .unwrap_or_else(|_| panic!("arity {} does not fit in u16", arity));
+                    .unwrap_or_else(|_| panic!("ICE: arity {} does not fit in u16", arity));
 
                 builder.emit(Instr::PushFunctionRef { chunk, arity });
             }
@@ -515,8 +518,9 @@ impl BytecodeLowerer {
                     self.compile_expr(builder, env, arg);
                 }
 
-                let arg_count = u16::try_from(args.len())
-                    .unwrap_or_else(|_| panic!("arg count {} does not fit in u16", args.len()));
+                let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
+                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                });
 
                 builder.emit(Instr::CallN { arg_count });
             }
@@ -528,9 +532,10 @@ impl BytecodeLowerer {
 
                 let chunk = self.function_chunk_ids[func];
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("chunk id {} does not fit in u32", chunk));
-                let arg_count = u16::try_from(args.len())
-                    .unwrap_or_else(|_| panic!("arg count {} does not fit in u16", args.len()));
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk));
+                let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
+                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                });
 
                 builder.emit(Instr::CallKnown { chunk, arg_count });
             }
@@ -540,8 +545,9 @@ impl BytecodeLowerer {
                     self.compile_expr(builder, env, arg);
                 }
 
-                let arg_count = u16::try_from(args.len())
-                    .unwrap_or_else(|_| panic!("arg count {} does not fit in u16", args.len()));
+                let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
+                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                });
 
                 builder.emit(Instr::CallBuiltin { id: *id, arg_count });
             }
@@ -563,8 +569,9 @@ impl BytecodeLowerer {
                     self.compile_expr(builder, env, field);
                 }
 
-                let field_count = u16::try_from(fields.len())
-                    .unwrap_or_else(|_| panic!("field count {} does not fit in u16", fields.len()));
+                let field_count = u16::try_from(fields.len()).unwrap_or_else(|_| {
+                    panic!("ICE: field count {} does not fit in u16", fields.len())
+                });
 
                 builder.emit(Instr::Pack {
                     tag: *tag,
@@ -644,7 +651,7 @@ impl LocalEnv {
             .locals
             .len()
             .checked_sub(index + 1)
-            .unwrap_or_else(|| panic!("bad de Bruijn local index {}", index));
+            .unwrap_or_else(|| panic!("ICE: bad de Bruijn local index {}", index));
         self.locals[pos]
     }
 }
@@ -676,7 +683,7 @@ impl ChunkBuilder {
     fn new_function(id: usize, name: String, capture_count: u16, arity: u16) -> Self {
         let next_slot = capture_count
             .checked_add(arity)
-            .unwrap_or_else(|| panic!("slot overflow in function '{}'", name));
+            .unwrap_or_else(|| panic!("ICE: slot overflow in function '{}'", name));
 
         Self {
             id,
@@ -697,7 +704,7 @@ impl ChunkBuilder {
     }
 
     fn current_pc(&self) -> u32 {
-        u32::try_from(self.code.len()).unwrap_or_else(|_| panic!("program counter overflow"))
+        u32::try_from(self.code.len()).unwrap_or_else(|_| panic!("ICE: program counter overflow"))
     }
 
     fn emit_placeholder_jump(&mut self) -> usize {
@@ -709,7 +716,7 @@ impl ChunkBuilder {
     fn patch_jump(&mut self, pos: usize, target: u32) {
         match &mut self.code[pos] {
             Instr::Jump(slot) => *slot = target,
-            other => panic!("expected Jump at patch site, found {:?}", other),
+            other => panic!("ICE: expected Jump at patch site, found {:?}", other),
         }
     }
 
@@ -722,7 +729,7 @@ impl ChunkBuilder {
     fn patch_jump_if_false(&mut self, pos: usize, target: u32) {
         match &mut self.code[pos] {
             Instr::JumpIfFalse(slot) => *slot = target,
-            other => panic!("expected JumpIfFalse at patch site, found {:?}", other),
+            other => panic!("ICE: expected JumpIfFalse at patch site, found {:?}", other),
         }
     }
 
@@ -745,7 +752,7 @@ impl ChunkBuilder {
         self.next_slot = self
             .next_slot
             .checked_add(1)
-            .unwrap_or_else(|| panic!("slot overflow in chunk '{}'", self.name));
+            .unwrap_or_else(|| panic!("ICE: slot overflow in chunk '{}'", self.name));
         self.max_slot_exclusive = self.max_slot_exclusive.max(self.next_slot);
         slot
     }

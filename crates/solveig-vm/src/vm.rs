@@ -388,17 +388,24 @@ impl Vm {
         program: &BytecodeProgram,
         index: usize,
         continuation: Continuation,
-    ) -> Option<Value> {
+    ) -> Result<Option<Value>, RuntimeError> {
         let thunk_chunk = match &self.globals[index] {
-            GlobalSlot::Evaluated(val) => return Some(*val),
-            GlobalSlot::Evaluating => panic!("cyclic global {}", index),
+            GlobalSlot::Evaluated(val) => return Ok(Some(*val)),
+            GlobalSlot::Evaluating => {
+                let name = program
+                    .globals
+                    .get(index)
+                    .map(|global| global.name.as_str())
+                    .unwrap_or("<unknown>");
+                return Err(RuntimeError::cyclic_global(name));
+            }
             GlobalSlot::Thunk { chunk } => *chunk,
         };
 
         self.globals[index] = GlobalSlot::Evaluating;
         self.continuations.push(continuation);
         self.enter_thunk(program, thunk_chunk);
-        None
+        Ok(None)
     }
 
     fn eval_global(
@@ -412,13 +419,17 @@ impl Vm {
             Continuation::PublishGlobalThenHalt {
                 global_index: index,
             },
-        ) {
+        )? {
             Some(val) => Ok(val),
             None => self.dispatch(program),
         }
     }
 
-    fn push_global_or_start_eval(&mut self, program: &BytecodeProgram, index: usize) {
+    fn push_global_or_start_eval(
+        &mut self,
+        program: &BytecodeProgram,
+        index: usize,
+    ) -> Result<(), RuntimeError> {
         let continuation = Continuation::PublishGlobalThenResume {
             global_index: index,
             chunk: self.chunk,
@@ -426,9 +437,11 @@ impl Vm {
             frame_base: self.frame_base,
         };
 
-        if let Some(val) = self.start_global_eval(program, index, continuation) {
+        if let Some(val) = self.start_global_eval(program, index, continuation)? {
             self.push(val);
         }
+
+        Ok(())
     }
 
     fn enter_thunk(&mut self, program: &BytecodeProgram, chunk_id: usize) {
@@ -541,7 +554,7 @@ impl Vm {
 
         if capture_count != 0 {
             panic!(
-                "known call to captured function chunk {} (captures {}, arity {})",
+                "ICE: known call to captured function chunk {} (captures {}, arity {})",
                 chunk_id, capture_count, arity
             );
         }
@@ -552,9 +565,9 @@ impl Vm {
         } else if arg_count < arity {
             if arg_count == 0 {
                 let chunk = u32::try_from(chunk_id)
-                    .unwrap_or_else(|_| panic!("chunk id {} does not fit in u32", chunk_id));
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk_id));
                 let arity = u16::try_from(arity)
-                    .unwrap_or_else(|_| panic!("arity {} does not fit in u16", arity));
+                    .unwrap_or_else(|_| panic!("ICE: arity {} does not fit in u16", arity));
 
                 Some(Value::FunctionRef { chunk, arity })
             } else {
@@ -569,7 +582,7 @@ impl Vm {
             }
         } else {
             panic!(
-                "over-application of known function chunk {} (arity {}, got {})",
+                "ICE: over-application of known function chunk {} (arity {}, got {})",
                 chunk_id, arity, arg_count
             );
         }
@@ -619,7 +632,7 @@ impl Vm {
                     }))
                 } else {
                     panic!(
-                        "over-application of function reference (arity {}, got {})",
+                        "ICE: over-application of function reference (arity {}, got {})",
                         arity, arg_count
                     );
                 }
@@ -628,7 +641,7 @@ impl Vm {
             Value::Obj(id) => self.invoke_heap_object(program, mode, id, arg_count),
 
             _ => panic!(
-                "cannot {}call {:?}",
+                "ICE: cannot {}call {:?}",
                 if matches!(mode, InvokeMode::TailCall) {
                     "tail-"
                 } else {
@@ -676,7 +689,7 @@ impl Vm {
                     }))
                 } else {
                     panic!(
-                        "over-application of closure (arity {}, got {})",
+                        "ICE: over-application of closure (arity {}, got {})",
                         arity, arg_count
                     );
                 }
@@ -721,7 +734,7 @@ impl Vm {
                     }))
                 } else {
                     panic!(
-                        "over-application of partial (arity {}, got {})",
+                        "ICE: over-application of partial (arity {}, got {})",
                         arity, total
                     );
                 }
@@ -737,7 +750,7 @@ impl Vm {
             | HeapObject::Data1 { tag, .. }
             | HeapObject::Data2 { tag, .. }
             | HeapObject::DataN { tag, .. } => {
-                panic!("cannot apply saturated constructor tag {}", tag);
+                panic!("ICE: cannot apply saturated constructor tag {}", tag);
             }
 
             HeapObject::Str { .. } => {
@@ -798,7 +811,7 @@ impl Vm {
                 applied_args,
             })
         } else {
-            panic!("over-applied constructor tag {}", tag);
+            panic!("ICE: over-applied constructor tag {}", tag);
         }
     }
 
@@ -1182,7 +1195,7 @@ impl Vm {
                     self.store(slot, val);
                 }
                 Instr::LoadGlobal(index) => {
-                    self.push_global_or_start_eval(program, index as usize);
+                    self.push_global_or_start_eval(program, index as usize)?;
                     code = &program.chunks[self.chunk].code;
                 }
                 Instr::PushCtorFn { tag, arity } => {
@@ -1461,7 +1474,7 @@ fn chunk_function_shape(program: &BytecodeProgram, chunk_id: usize) -> (usize, u
             capture_count,
             arity,
         } => (capture_count as usize, arity as usize),
-        ChunkKind::GlobalThunk => panic!("thunk has no arity"),
+        ChunkKind::GlobalThunk => panic!("ICE: thunk has no arity"),
     }
 }
 
@@ -1505,6 +1518,13 @@ impl RuntimeError {
 
     pub(crate) fn builtin(message: String) -> Self {
         Self { code: 2, message }
+    }
+
+    fn cyclic_global(name: &str) -> Self {
+        Self {
+            code: 3,
+            message: format!("cyclic global `{name}`"),
+        }
     }
 }
 

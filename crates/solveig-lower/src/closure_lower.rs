@@ -66,7 +66,9 @@ impl ClosureLowerer {
             .into_iter()
             .enumerate()
             .map(|(id, func)| {
-                func.unwrap_or_else(|| panic!("missing closure-converted function for id {}", id))
+                func.unwrap_or_else(|| {
+                    panic!("ICE: missing closure-converted function for id {}", id)
+                })
             })
             .collect();
 
@@ -382,7 +384,9 @@ impl<'a> ExprLowerer<'a> {
             .visible
             .len()
             .checked_sub(index + 1)
-            .unwrap_or_else(|| panic!("bad de Bruijn index {} during closure lowering", index));
+            .unwrap_or_else(|| {
+                panic!("ICE: bad de Bruijn index {} during closure lowering", index)
+            });
 
         match self.visible[visible_pos] {
             VisibleBinding::Local => Rc::new(CCExpr::Local(
@@ -442,9 +446,9 @@ impl<'a> ExprLowerer<'a> {
         match self.visible.pop() {
             Some(VisibleBinding::Local) => {}
             Some(VisibleBinding::Inherited(_)) => {
-                panic!("internal error: attempted to pop inherited binding as local")
+                panic!("ICE: attempted to pop inherited binding as local")
             }
-            None => panic!("internal error: attempted to pop local from empty visible stack"),
+            None => panic!("ICE: attempted to pop local from empty visible stack"),
         }
     }
 

@@ -251,3 +251,18 @@ fn prelude_int_division_by_zero_reports_runtime_error() {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn cyclic_globals_report_runtime_error() {
+    let _guard = project_run_lock();
+    let project_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/runtime/cyclic_global");
+
+    let err = run_project_capture(&project_root, "main").expect_err("cyclic globals should report");
+
+    assert!(
+        err.to_string()
+            .contains("runtime error: cyclic global `main.left`"),
+        "unexpected error: {err}"
+    );
+}

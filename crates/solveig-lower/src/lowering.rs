@@ -52,7 +52,7 @@ impl LowerCtx {
                 arity: info.arity,
             });
         }
-        panic!("unbound variable during lowering: {}", name);
+        panic!("ICE: unbound variable during lowering: {}", name);
     }
 
     fn resolve_ev_var(&self, evvar: EvVarId) -> Rc<IRExpr> {
@@ -62,7 +62,10 @@ impl LowerCtx {
             }
         }
 
-        panic!("unbound evidence variable during lowering: {:?}", evvar);
+        panic!(
+            "ICE: unbound evidence variable during lowering: {:?}",
+            evvar
+        );
     }
 
     fn constructor_named(&self, name: &str) -> Option<&LowerConstructorInfo> {
@@ -145,7 +148,7 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
         TermExpr::Con(id) => {
             let info = ctx.constructors.get(id).unwrap_or_else(|| {
                 panic!(
-                    "unknown constructor during lowering: {}",
+                    "ICE: unknown constructor during lowering: {}",
                     ctx.constructor_name_for_error(*id)
                 )
             });
@@ -210,7 +213,7 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
 
             Rc::new(IRExpr::Let(lowered_binder, lowered_in_expr))
         }
-        TermExpr::Hole => panic!("Program is incomplete and contains holes. Aborting compilation."),
+        TermExpr::Hole => panic!("ICE: driver allowed a typed hole to reach lowering"),
     }
 }
 
@@ -374,7 +377,7 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> IRPattern {
         Pattern::Con(id, sub_patterns) => {
             let info = ctx.constructors.get(id).unwrap_or_else(|| {
                 panic!(
-                    "unknown constructor in pattern: {}",
+                    "ICE: unknown constructor in pattern during lowering: {}",
                     ctx.constructor_name_for_error(*id)
                 )
             });
@@ -686,7 +689,7 @@ mod tests {
                 ));
                 assert!(matches!(arms[0].body.as_ref(), IRExpr::BVar(0)));
             }
-            other => panic!("expected dictionary projection case, got {other:?}"),
+            other => panic!("ICE: expected dictionary projection case, got {other:?}"),
         }
     }
 }
