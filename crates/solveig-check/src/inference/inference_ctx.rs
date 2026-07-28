@@ -1,9 +1,11 @@
 //! Ordered algorithmic context for bidirectional type checking.
 //! Subtyping, instantiation, and evidence solving share this scoped state.
 
-use solveig_ast::ast::{EvarId, Kind, Predicate, Pretty, Ty, TyConId, TyVarId, tyvar_display_name};
+use solveig_ast::ast::{EvarId, Kind, Predicate, Ty, TyConId, TyVarId, tyvar_display_name};
 use solveig_base::FxHashMap;
 use std::iter::successors;
+
+use crate::signature_infer::KindError;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ContextEntry {
@@ -221,7 +223,7 @@ impl Context {
         &self,
         ty: &Ty,
         tycon_kinds: &FxHashMap<TyConId, Kind>,
-    ) -> Result<Kind, String> {
+    ) -> Result<Kind, KindError> {
         let ty = self.apply(ty);
         match &ty {
             Ty::TyUnit | Ty::TyArr(_, _) => Ok(Kind::Star),
@@ -229,15 +231,15 @@ impl Context {
             Ty::TyCon(id) => tycon_kinds
                 .get(id)
                 .cloned()
-                .ok_or_else(|| format!("unknown type constructor: T{}", id.0)),
+                .ok_or_else(|| KindError::unbound_type_constructor(format!("T{}", id.0))),
 
             Ty::TyVar(id) => self
                 .universal_kind_id(*id)
-                .ok_or_else(|| format!("unbound type variable: {}", tyvar_display_name(*id))),
+                .ok_or_else(|| KindError::unbound_type_variable(tyvar_display_name(*id))),
 
             Ty::TyExVar(id) => self
                 .evar_kind_id(*id)
-                .ok_or_else(|| format!("unknown existential: ?{}", id.0)),
+                .ok_or_else(|| KindError::unbound_type_variable(format!("?{}", id.0))),
 
             Ty::TyForAll(binders, preds, body) => {
                 let mut extended = self.clone();
@@ -253,10 +255,7 @@ impl Context {
                     for arg in &pred.args {
                         let arg_kind = extended.kind_of_type(arg, tycon_kinds)?;
                         if arg_kind != Kind::Star {
-                            return Err(format!(
-                                "predicate argument must have kind *, got {}",
-                                arg_kind.pretty()
-                            ));
+                            return Err(KindError::cannot_unify(arg_kind, Kind::Star));
                         }
                     }
                 }
@@ -265,31 +264,28 @@ impl Context {
                 if body_kind == Kind::Star {
                     Ok(Kind::Star)
                 } else {
-                    Err(format!(
-                        "scheme type body must have kind *, got {}",
-                        body_kind.pretty()
-                    ))
+                    Err(KindError::signature_must_have_kind_star(body_kind))
                 }
             }
 
             Ty::TyApp(func, arg) => {
                 if matches!(**func, Ty::TyForAll(_, _, _)) || matches!(**arg, Ty::TyForAll(_, _, _))
                 {
-                    return Err(
-                        "scheme type cannot appear directly in type application".to_string()
-                    );
+                    return Err(KindError::cannot_unify(
+                        Kind::Star,
+                        Kind::make_arrow(Kind::Star, Kind::Star),
+                    ));
                 }
 
                 let func_kind = self.kind_of_type(func, tycon_kinds)?;
                 let arg_kind = self.kind_of_type(arg, tycon_kinds)?;
                 match func_kind {
                     Kind::Arrow(domain, codomain) if *domain == arg_kind => Ok(*codomain),
-                    Kind::Arrow(domain, _) => Err(format!(
-                        "type application kind mismatch: expected {}, got {}",
-                        domain.pretty(),
-                        arg_kind.pretty()
+                    Kind::Arrow(domain, _) => Err(KindError::cannot_unify(arg_kind, *domain)),
+                    other => Err(KindError::cannot_unify(
+                        other,
+                        Kind::make_arrow(arg_kind, Kind::Star),
                     )),
-                    other => Err(format!("cannot apply non-arrow kind: {}", other.pretty())),
                 }
             }
         }
@@ -373,7 +369,10 @@ mod tests {
         let ctx = Context::new();
         let list_unit = Ty::make_app(Ty::make_con_id(list_id), Ty::TyUnit);
 
-        assert_eq!(ctx.kind_of_type(&list_unit, &tycon_kinds), Ok(Kind::Star));
+        assert!(matches!(
+            ctx.kind_of_type(&list_unit, &tycon_kinds),
+            Ok(Kind::Star)
+        ));
         assert!(
             ctx.kind_of_type(&Ty::make_con_id(other_id), &tycon_kinds)
                 .is_err()
