@@ -90,8 +90,8 @@ impl Ty {
         Self::TyExVar(id)
     }
 
-    pub fn make_named_con(names: &mut Names, name: String) -> Ty {
-        Self::TyCon(names.tycon_id(&name))
+    pub fn make_named_con(names: &mut Names, name: &str) -> Ty {
+        Self::TyCon(names.tycon_id(name))
     }
 
     pub fn make_con_id(id: TyConId) -> Ty {

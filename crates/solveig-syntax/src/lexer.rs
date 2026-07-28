@@ -1,3 +1,6 @@
+//! Tokenization for Solveig source text.
+//! The parser consumes these tokens along with byte spans for diagnostics.
+
 use logos::Logos;
 
 use solveig_base::{FileId, FileSpan, Session, Span, Symbol};
@@ -491,7 +494,7 @@ fn push_virtual(out: &mut Vec<PosToken>, kind: Token, anchor: &PosToken) {
     out.push(PosToken::virtual_at(kind, anchor));
 }
 
-pub fn insert_layout(tokens: Vec<PosToken>) -> Vec<PosToken> {
+pub fn insert_layout(tokens: &[PosToken]) -> Vec<PosToken> {
     let mut out = Vec::new();
     let mut stack: Vec<LayoutContext> = Vec::new();
     let mut pending_layout = false;
@@ -499,7 +502,7 @@ pub fn insert_layout(tokens: Vec<PosToken>) -> Vec<PosToken> {
     let mut need_top_level_block = true;
 
     for (index, token) in tokens.iter().enumerate() {
-        let col = effective_layout_col(&tokens, index);
+        let col = effective_layout_col(tokens, index);
 
         if need_top_level_block && token.kind != Token::Eof {
             need_top_level_block = false;
@@ -568,7 +571,7 @@ pub fn insert_layout(tokens: Vec<PosToken>) -> Vec<PosToken> {
 }
 
 pub fn lex(session: &Session, file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
-    raw_lex(session, file, source).map(insert_layout)
+    raw_lex(session, file, source).map(|tokens| insert_layout(&tokens))
 }
 
 pub fn builtin_fixity(tok: &Token) -> Option<Fixity> {

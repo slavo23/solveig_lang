@@ -44,18 +44,18 @@ pub struct TypeChecker {
     file: FileId,
     names: Names,
     counter: u32,
-    constructor_types: HashMap<CtorId, Ty>,
-    func_schemes: HashMap<DefId, Scheme>,
-    class_defs: HashMap<ClassId, ClassDefinition>,
+    constructor_types: FxHashMap<CtorId, Ty>,
+    func_schemes: FxHashMap<DefId, Scheme>,
+    class_defs: FxHashMap<ClassId, ClassDefinition>,
     instance_table: InstanceTable<Span>,
     tycon_table: TyConTable,
     ctor_table: CtorTable,
     class_table: ClassTable,
-    tycon_kinds: HashMap<TyConId, Kind>,
+    tycon_kinds: FxHashMap<TyConId, Kind>,
     givens: Vec<GivenEvidence>,
     wanteds: Vec<Wanted>,
-    evar_solutions: HashMap<EvarId, Ty>,
-    evidence_solutions: HashMap<EvVarId, Ev>,
+    evar_solutions: FxHashMap<EvarId, Ty>,
+    evidence_solutions: FxHashMap<EvVarId, Ev>,
     holes: Vec<HoleInfo>,
     warnings: Vec<TypeError>,
 }
@@ -72,18 +72,18 @@ impl TypeChecker {
             file: FileId(0),
             names: Names::new(),
             counter: 0,
-            constructor_types: HashMap::new(),
-            func_schemes: HashMap::new(),
-            class_defs: HashMap::new(),
+            constructor_types: FxHashMap::default(),
+            func_schemes: FxHashMap::default(),
+            class_defs: FxHashMap::default(),
             instance_table: InstanceTable::new(),
             tycon_table: TyConTable::new(),
             ctor_table: CtorTable::new(),
             class_table: ClassTable::new(),
-            tycon_kinds: HashMap::new(),
+            tycon_kinds: FxHashMap::default(),
             givens: Vec::new(),
             wanteds: Vec::new(),
-            evar_solutions: HashMap::new(),
-            evidence_solutions: HashMap::new(),
+            evar_solutions: FxHashMap::default(),
+            evidence_solutions: FxHashMap::default(),
             holes: Vec::new(),
             warnings: Vec::new(),
         }
@@ -103,8 +103,8 @@ impl TypeChecker {
             tycon_kinds: env.tycon_kinds.clone(),
             givens: Vec::new(),
             wanteds: Vec::new(),
-            evar_solutions: HashMap::new(),
-            evidence_solutions: HashMap::new(),
+            evar_solutions: FxHashMap::default(),
+            evidence_solutions: FxHashMap::default(),
             holes: Vec::new(),
             warnings: Vec::new(),
         }
@@ -134,15 +134,11 @@ impl TypeChecker {
     }
     fn display_class_name(&self, id: ClassId) -> String {
         self.class_table
-            .get(id)
-            .map(|info| self.names.symbol_display_name(info.name))
-            .unwrap_or_else(|| panic!("ICE: type checker class table missing ClassId {id:?}"))
+            .get(id).map_or_else(|| panic!("ICE: type checker class table missing ClassId {id:?}"), |info| self.names.symbol_display_name(info.name))
     }
     fn display_ctor_name(&self, id: CtorId) -> String {
         self.ctor_table
-            .get(id)
-            .map(|info| self.names.symbol_display_name(info.name))
-            .unwrap_or_else(|| panic!("ICE: type checker constructor table missing CtorId {id:?}"))
+            .get(id).map_or_else(|| panic!("ICE: type checker constructor table missing CtorId {id:?}"), |info| self.names.symbol_display_name(info.name))
     }
     fn fresh_id(&mut self) -> u32 {
         self.counter += 1;
@@ -212,14 +208,14 @@ pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
 #[derive(Clone, Debug)]
 pub struct TypeCheckEnv {
     pub names: Names,
-    pub constructor_types: HashMap<CtorId, Ty>,
-    pub func_schemes: HashMap<DefId, Scheme>,
-    pub class_defs: HashMap<ClassId, ClassDefinition>,
+    pub constructor_types: FxHashMap<CtorId, Ty>,
+    pub func_schemes: FxHashMap<DefId, Scheme>,
+    pub class_defs: FxHashMap<ClassId, ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<Span>>,
     pub tycon_table: TyConTable,
     pub ctor_table: CtorTable,
     pub class_table: ClassTable,
-    pub tycon_kinds: HashMap<TyConId, Kind>,
+    pub tycon_kinds: FxHashMap<TyConId, Kind>,
 }
 
 impl TypeCheckEnv {
@@ -277,9 +273,7 @@ impl TypeCheckEnv {
 
     fn display_class_name(&self, id: ClassId) -> String {
         self.class_table
-            .get(id)
-            .map(|info| self.names.symbol_display_name(info.name))
-            .unwrap_or_else(|| panic!("ICE: type check env class table missing ClassId {id:?}"))
+            .get(id).map_or_else(|| panic!("ICE: type check env class table missing ClassId {id:?}"), |info| self.names.symbol_display_name(info.name))
     }
 }
 
@@ -308,14 +302,14 @@ mod tests {
 
         let mut env = TypeCheckEnv {
             names: Names::new(),
-            constructor_types: HashMap::new(),
-            func_schemes: HashMap::new(),
-            class_defs: HashMap::new(),
+            constructor_types: FxHashMap::default(),
+            func_schemes: FxHashMap::default(),
+            class_defs: FxHashMap::default(),
             instance_defs: Vec::new(),
             tycon_table: TyConTable::new(),
             ctor_table: CtorTable::new(),
             class_table: ClassTable::new(),
-            tycon_kinds: HashMap::new(),
+            tycon_kinds: FxHashMap::default(),
         };
         env.func_schemes
             .insert(def_id, Scheme::mono(Ty::TyUnit));
@@ -349,9 +343,9 @@ mod tests {
         let class_id = names.class_id("C");
         let env = TypeCheckEnv {
             names,
-            constructor_types: HashMap::new(),
-            func_schemes: HashMap::new(),
-            class_defs: HashMap::from([(
+            constructor_types: FxHashMap::default(),
+            func_schemes: FxHashMap::default(),
+            class_defs: FxHashMap::from_iter([(
                 class_id,
                 ClassDefinition {
                     id: class_id,
@@ -372,7 +366,7 @@ mod tests {
             tycon_table: TyConTable::new(),
             ctor_table: CtorTable::new(),
             class_table: ClassTable::new(),
-            tycon_kinds: HashMap::new(),
+            tycon_kinds: FxHashMap::default(),
         };
 
         let mut checker = TypeChecker::with_env(&env, FileId(0));
@@ -452,9 +446,9 @@ mod tests {
             tycon_table: Default::default(),
             ctor_table: Default::default(),
             class_table: Default::default(),
-            tycon_kinds: HashMap::new(),
-            constructor_types: HashMap::new(),
-            func_schemes: HashMap::new(),
+            tycon_kinds: FxHashMap::default(),
+            constructor_types: FxHashMap::default(),
+            func_schemes: FxHashMap::default(),
             func_defs: Vec::new(),
         };
 
@@ -471,16 +465,16 @@ mod tests {
         let superclass_name = "test.Sup".to_string();
         let class_name = "test.Sub".to_string();
         let mut names = Names::new();
-        let int_ty = Ty::make_named_con(&mut names, "test.Int".to_string());
+        let int_ty = Ty::make_named_con(&mut names, "test.Int");
 
         let class_id = names.class_id(&class_name);
         let superclass_id = names.class_id(&superclass_name);
         let param = names.fresh_tyvar("a");
         let env = TypeCheckEnv {
             names: names.clone(),
-            constructor_types: HashMap::new(),
-            func_schemes: HashMap::new(),
-            class_defs: HashMap::from([(
+            constructor_types: FxHashMap::default(),
+            func_schemes: FxHashMap::default(),
+            class_defs: FxHashMap::from_iter([(
                 class_id,
                 ClassDefinition {
                     id: class_id,
@@ -489,7 +483,7 @@ mod tests {
                     params: vec![(param, Kind::Star)],
                     superclasses: vec![Predicate::named(
                         &mut names,
-                        superclass_name.clone(),
+                        &superclass_name,
                         vec![Ty::TyVar(param)],
                     )],
                     methods: Vec::new(),
@@ -499,11 +493,11 @@ mod tests {
             tycon_table: TyConTable::new(),
             ctor_table: CtorTable::new(),
             class_table: ClassTable::new(),
-            tycon_kinds: HashMap::new(),
+            tycon_kinds: FxHashMap::default(),
         };
 
         let checker = TypeChecker::with_env(&env, FileId(0));
-        let given = Predicate::named(&mut names, class_name, vec![int_ty.clone()]);
+        let given = Predicate::named(&mut names, &class_name, vec![int_ty.clone()]);
         let superclasses = checker.superclass_predicates_for_given(&given);
 
         assert_eq!(superclasses.len(), 1);
@@ -550,14 +544,14 @@ mod tests {
 
         let env = TypeCheckEnv {
             names,
-            constructor_types: HashMap::new(),
-            func_schemes: HashMap::new(),
-            class_defs: HashMap::new(),
+            constructor_types: FxHashMap::default(),
+            func_schemes: FxHashMap::default(),
+            class_defs: FxHashMap::default(),
             instance_defs: Vec::new(),
             tycon_table,
             ctor_table: CtorTable::new(),
             class_table,
-            tycon_kinds: HashMap::new(),
+            tycon_kinds: FxHashMap::default(),
         };
 
         let checker = TypeChecker::with_env(&env, FileId(0));

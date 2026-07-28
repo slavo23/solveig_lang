@@ -1,3 +1,6 @@
+//! Managed heap storage for VM values, closures, thunks, and constructors.
+//! Garbage collection and runtime allocation share this ownership boundary.
+
 use crate::values::{ObjId, Value};
 
 #[derive(Debug, Clone, Copy)]

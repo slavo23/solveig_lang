@@ -1,7 +1,7 @@
 //! Core identity tables for data constructors, type constructors, and classes.
 //! These tables bind stable IDs to the definitions retained by later compiler stages.
 
-use std::collections::HashMap;
+use solveig_base::FxHashMap;
 use std::ops::Range;
 
 use solveig_base::Symbol;
@@ -64,8 +64,8 @@ pub fn compiler_primitive_tycon_infos(names: &mut Names) -> Vec<(TyConId, TyConI
     ]
 }
 
-pub fn compiler_primitive_tycon_kinds() -> HashMap<TyConId, Kind> {
-    HashMap::from([
+pub fn compiler_primitive_tycon_kinds() -> FxHashMap<TyConId, Kind> {
+    FxHashMap::from_iter([
         (PRIM_TYS.int, Kind::Star),
         (PRIM_TYS.float, Kind::Star),
         (PRIM_TYS.char, Kind::Star),
@@ -101,7 +101,7 @@ pub fn compiler_bool_data_definition() -> DataDefinition {
     }
 }
 
-pub fn compiler_bool_constructor_types() -> HashMap<CtorId, Ty> {
+pub fn compiler_bool_constructor_types() -> FxHashMap<CtorId, Ty> {
     compiler_bool_data_definition()
         .constructors
         .into_iter()

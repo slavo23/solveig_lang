@@ -1,4 +1,8 @@
-use std::collections::{BTreeSet, HashMap, HashSet};
+//! Bidirectional type checking and evidence elaboration.
+//! Included fragments share one ordered context following the checker pipeline.
+
+use solveig_base::{FxHashMap, FxHashSet};
+use std::collections::BTreeSet;
 use std::ops::Range;
 
 use crate::inference::exhaustiveness;

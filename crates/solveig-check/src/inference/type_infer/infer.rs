@@ -12,7 +12,7 @@ impl TypeChecker {
                     return Err(TypeError::IllFormedAnnotation {
                         span: self.get_file_span(span),
                         ty: self.pretty_type(annotation),
-                        target: format!("parameter `{}`", param),
+                        target: format!("parameter `{param}`"),
                     });
                 }
                 Ok((ctx, annotation.clone()))
@@ -76,8 +76,7 @@ impl TypeChecker {
                     let instantiated_ty = ctx.apply(&instantiated_ty);
                     let elaborated =
                         elab_node(TermExpr::Var(name.clone()), span.clone(), instantiated_ty.clone());
-                    let elaborated =
-                        wrap_ev_apps(elaborated, evidence_args, span, instantiated_ty.clone());
+                    let elaborated = wrap_ev_apps(elaborated, evidence_args, span, &instantiated_ty);
                     return Ok((ctx, elaborated, instantiated_ty));
                 }
                 if let VarRef::Global(def_id) = name
@@ -91,13 +90,12 @@ impl TypeChecker {
                     let instantiated_ty = ctx.apply(&instantiated_ty);
                     let elaborated =
                         elab_node(TermExpr::Var(name.clone()), span.clone(), instantiated_ty.clone());
-                    let elaborated =
-                        wrap_ev_apps(elaborated, evidence_args, span, instantiated_ty.clone());
+                    let elaborated = wrap_ev_apps(elaborated, evidence_args, span, &instantiated_ty);
                     return Ok((ctx, elaborated, instantiated_ty));
                 }
 
                 Err(TypeError::UnboundVariable {
-                    span: self.get_file_span(span.clone()),
+                    span: self.get_file_span(span),
                     name: display_name,
                 })
             }
@@ -133,7 +131,7 @@ impl TypeChecker {
                 let final_param_type = delta.apply(&param_type);
                 let final_result_type = delta.apply(&body_expected_type);
                 let arrow_type =
-                    Ty::make_arr(final_param_type.clone(), final_result_type.clone());
+                    Ty::make_arr(final_param_type.clone(), final_result_type);
 
                 let elaborated = elab_node(
                     TermExpr::Abs(
@@ -220,7 +218,7 @@ impl TypeChecker {
                     Ty::TyForAll(ref binders, ref preds, ref body)
                         if let Some((quantifier, _)) = binders.first() =>
                     {
-                        let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
+                        let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                         let result_type = Ty::make_forall_group(
                             binders[1..].to_vec(),
                             preds
@@ -310,7 +308,7 @@ impl TypeChecker {
                 let extended_ctx = ctx.add_entry(evar_entry);
 
                 let ty_arg = Self::evar_type(fresh_evar);
-                let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
+                let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                 let instantiated_type = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds
@@ -341,7 +339,7 @@ impl TypeChecker {
                     elaborated_function.clone(),
                     evidence_args,
                     span.clone(),
-                    body_type.clone(),
+                    &body_type,
                 );
                 self.solve_app_inference(ctx, &body_type, argument, &wrapped_function, span, arg_span)
             }
@@ -400,8 +398,8 @@ impl TypeChecker {
             }
 
             other => Err(TypeError::NonFunctionApplication {
-                span: self.get_file_span(span.clone()),
-                arg_span: self.get_file_span(arg_span.clone()),
+                span: self.get_file_span(span),
+                arg_span: self.get_file_span(arg_span),
                 actual: self.pretty_type(other),
             }),
         }

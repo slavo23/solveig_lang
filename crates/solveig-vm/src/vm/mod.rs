@@ -1,3 +1,6 @@
+//! Stack virtual machine state and execution entry points.
+//! Child modules own call handling, dispatch, garbage collection, and IO actions.
+
 use crate::bytecode::{BytecodeProgram, lower_to_bytecode};
 use crate::display::DisplayValue;
 use crate::heap::{Heap, HeapObject};

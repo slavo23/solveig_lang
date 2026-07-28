@@ -15,7 +15,7 @@ fn wrap_ev_apps(
     mut expr: TermExprNode<TcMetadata, Span>,
     evvars: Vec<EvVarId>,
     span: Span,
-    ty: Ty,
+    ty: &Ty,
 ) -> TermExprNode<TcMetadata, Span> {
     for ev in evvars {
         expr = elab_node(
@@ -34,7 +34,7 @@ fn wrap_ev_abs(
     mut body: TermExprNode<TcMetadata, Span>,
     givens: Vec<GivenEvidence>,
     span: Span,
-    ty: Ty,
+    ty: &Ty,
 ) -> TermExprNode<TcMetadata, Span> {
     for given in givens.into_iter().rev() {
         body = elab_node(
@@ -141,8 +141,7 @@ impl TypeChecker {
             Ev::Placeholder(evvar) => {
                 let solved = self.evidence_solutions.get(evvar).unwrap_or_else(|| {
                     panic!(
-                        "ICE: unsolved evidence placeholder {:?} survived constraint solving",
-                        evvar
+                        "ICE: unsolved evidence placeholder {evvar:?} survived constraint solving"
                     )
                 });
                 self.zonk_ev(solved)

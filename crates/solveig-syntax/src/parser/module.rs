@@ -1,3 +1,6 @@
+//! Module header and import parsing.
+//! Project loading uses these declarations to build the dependency graph.
+
 use super::*;
 
 impl Parser<'_> {
@@ -26,7 +29,7 @@ impl Parser<'_> {
             match self.parse_import() {
                 Ok(import) => imports.push(import),
                 Err(error) => {
-                    self.report_error(error);
+                    self.report_error(&error);
                     self.recover_top_level();
                 }
             }
@@ -94,7 +97,7 @@ impl Parser<'_> {
                     defs.push(sp(def, start, end));
                 }
                 Err(error) => {
-                    self.report_error(error);
+                    self.report_error(&error);
                     self.recover_top_level();
                 }
             }

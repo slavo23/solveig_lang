@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+//! Kind inference for algebraic data declarations.
+//! Resolver output enters here before data definitions become checked module metadata.
+
+use solveig_base::{FxHashMap, FxHashSet};
 
 use solveig_ast::ast::{Kind, KindMetaId, Ty, TyConId, TyVarId, tyvar_display_name};
 use solveig_base::FileSpan;
@@ -43,7 +46,7 @@ pub struct InferredConstructorDef {
 
 pub struct DataKindInferencer {
     meta_order: Vec<KindMetaId>,
-    solutions: HashMap<KindMetaId, Kind>,
+    solutions: FxHashMap<KindMetaId, Kind>,
     next_meta: u32,
 }
 
@@ -57,7 +60,7 @@ impl DataKindInferencer {
     pub fn new() -> Self {
         Self {
             meta_order: Vec::new(),
-            solutions: HashMap::new(),
+            solutions: FxHashMap::default(),
             next_meta: 0,
         }
     }
@@ -192,20 +195,20 @@ impl DataKindInferencer {
         }
     }
 
-    fn unify(&mut self, lhs: Kind, rhs: Kind) -> Result<(), KindError> {
-        let lhs = self.apply_kind(&lhs);
-        let rhs = self.apply_kind(&rhs);
+    fn unify(&mut self, lhs: &Kind, rhs: &Kind) -> Result<(), KindError> {
+        let lhs = self.apply_kind(lhs);
+        let rhs = self.apply_kind(rhs);
 
         match (&lhs, &rhs) {
             _ if lhs == rhs => Ok(()),
 
             (Kind::Arrow(l1, r1), Kind::Arrow(l2, r2)) => {
                 let (l1, r1, l2, r2) = (*l1.clone(), *r1.clone(), *l2.clone(), *r2.clone());
-                self.unify(l1, l2)?;
+                self.unify(&l1, &l2)?;
 
                 let r1 = self.apply_kind(&r1);
                 let r2 = self.apply_kind(&r2);
-                self.unify(r1, r2)
+                self.unify(&r1, &r2)
             }
 
             (Kind::Meta(id), _) if self.is_unsolved(*id) => {
@@ -227,8 +230,8 @@ impl DataKindInferencer {
     fn infer_kind(
         &mut self,
         ty: &Ty,
-        tycon_env: &HashMap<TyConId, Kind>,
-        var_env: &HashMap<TyVarId, Kind>,
+        tycon_env: &FxHashMap<TyConId, Kind>,
+        var_env: &FxHashMap<TyVarId, Kind>,
     ) -> Result<(Kind, Ty), KindError> {
         match ty {
             Ty::TyUnit => Ok((Kind::Star, Ty::TyUnit)),
@@ -254,8 +257,8 @@ impl DataKindInferencer {
             Ty::TyArr(lhs, rhs) => {
                 let (lk, lt) = self.infer_kind(lhs, tycon_env, var_env)?;
                 let (rk, rt) = self.infer_kind(rhs, tycon_env, var_env)?;
-                self.unify(lk, Kind::Star)?;
-                self.unify(rk, Kind::Star)?;
+                self.unify(&lk, &Kind::Star)?;
+                self.unify(&rk, &Kind::Star)?;
                 Ok((Kind::Star, Ty::TyArr(Box::new(lt), Box::new(rt))))
             }
 
@@ -292,7 +295,7 @@ impl DataKindInferencer {
                         .iter()
                         .map(|arg| {
                             let (arg_kind, arg_r) = self.infer_kind(arg, tycon_env, &new_env)?;
-                            self.unify(arg_kind, Kind::Star)?;
+                            self.unify(&arg_kind, &Kind::Star)?;
                             Ok(arg_r)
                         })
                         .collect::<Result<Vec<_>, KindError>>()?;
@@ -304,7 +307,7 @@ impl DataKindInferencer {
                 }
 
                 let (bk, br) = self.infer_kind(body, tycon_env, &new_env)?;
-                self.unify(bk, Kind::Star)?;
+                self.unify(&bk, &Kind::Star)?;
 
                 Ok((
                     Kind::Star,
@@ -324,7 +327,7 @@ impl DataKindInferencer {
     fn app_kinding(&mut self, fun_kind: Kind, arg_kind: Kind) -> Result<Kind, KindError> {
         match fun_kind {
             Kind::Arrow(param_k, result_k) => {
-                self.unify(*param_k, arg_kind)?;
+                self.unify(&param_k, &arg_kind)?;
                 Ok(self.apply_kind(&result_k))
             }
 
@@ -333,7 +336,7 @@ impl DataKindInferencer {
                 let a2 = self.fresh_meta_before(id);
 
                 self.solve(id, Kind::make_arrow(a1.clone(), a2.clone()));
-                self.unify(a1, arg_kind)?;
+                self.unify(&a1, &arg_kind)?;
                 Ok(self.apply_kind(&a2))
             }
 
@@ -348,34 +351,25 @@ impl DataKindInferencer {
         &mut self,
         fields: &[Ty],
         return_type: &Ty,
-        tycon_env: &HashMap<TyConId, Kind>,
-        var_env: &HashMap<TyVarId, Kind>,
+        tycon_env: &FxHashMap<TyConId, Kind>,
+        var_env: &FxHashMap<TyVarId, Kind>,
     ) -> Result<Vec<Ty>, KindError> {
         let mut rebuilt = Vec::new();
         for field in fields {
             let (fk, fr) = self.infer_kind(field, tycon_env, var_env)?;
-            self.unify(fk, Kind::Star)?;
+            self.unify(&fk, &Kind::Star)?;
             rebuilt.push(fr);
         }
         let (ret_k, _) = self.infer_kind(return_type, tycon_env, var_env)?;
-        self.unify(ret_k, Kind::Star)?;
+        self.unify(&ret_k, &Kind::Star)?;
         Ok(rebuilt)
     }
 
     fn infer_group(
         &mut self,
         group: &[RawDataDef],
-        prior_tycons: &HashMap<TyConId, Kind>,
+        prior_tycons: &FxHashMap<TyConId, Kind>,
     ) -> Result<Vec<InferredDataDef>, KindError> {
-        let mut tycon_metas: HashMap<TyConId, Kind> = HashMap::new();
-        for def in group {
-            let meta = self.fresh_meta();
-            tycon_metas.insert(def.id, meta);
-        }
-
-        let mut tycon_env = prior_tycons.clone();
-        tycon_env.extend(tycon_metas.clone());
-
         struct DtResult {
             id: TyConId,
             name: String,
@@ -383,6 +377,15 @@ impl DataKindInferencer {
             param_metas: Vec<(TyVarId, Kind)>,
             ctor_fields: Vec<(String, String, Vec<Ty>)>,
         }
+
+        let mut tycon_metas: FxHashMap<TyConId, Kind> = FxHashMap::default();
+        for def in group {
+            let meta = self.fresh_meta();
+            tycon_metas.insert(def.id, meta);
+        }
+
+        let mut tycon_env = prior_tycons.clone();
+        tycon_env.extend(tycon_metas.clone());
 
         let mut dt_results: Vec<DtResult> = Vec::new();
 
@@ -400,10 +403,10 @@ impl DataKindInferencer {
                 .rev()
                 .fold(Kind::Star, |acc, (_, k)| Kind::make_arrow(k.clone(), acc));
 
-            self.unify(tycon_kind, expected)
+            self.unify(&tycon_kind, &expected)
                 .map_err(|error| error.with_span(def.span))?;
 
-            let var_env: HashMap<TyVarId, Kind> = param_metas
+            let var_env: FxHashMap<TyVarId, Kind> = param_metas
                 .iter()
                 .map(|(n, m)| (*n, self.apply_kind(m)))
                 .collect();
@@ -485,13 +488,12 @@ fn build_constructor_type(tycon: TyConId, ty_params: &[(TyVarId, Kind)], fields:
 
 fn default_unsolved(kind: Kind) -> Kind {
     match kind {
-        Kind::Meta(_) => Kind::Star,
-        Kind::Star => Kind::Star,
+        Kind::Meta(_) | Kind::Star => Kind::Star,
         Kind::Arrow(l, r) => Kind::make_arrow(default_unsolved(*l), default_unsolved(*r)),
     }
 }
 
-fn collect_tycon_refs(ty: &Ty, out: &mut HashSet<TyConId>) {
+fn collect_tycon_refs(ty: &Ty, out: &mut FxHashSet<TyConId>) {
     match ty {
         Ty::TyCon(id) => {
             out.insert(*id);
@@ -574,11 +576,11 @@ pub fn dependency_analysis(defs: &[RawDataDef]) -> Vec<Vec<usize>> {
         return vec![];
     }
 
-    let idx: HashMap<TyConId, usize> = defs.iter().enumerate().map(|(i, d)| (d.id, i)).collect();
+    let idx: FxHashMap<TyConId, usize> = defs.iter().enumerate().map(|(i, d)| (d.id, i)).collect();
 
     let mut adj: Vec<Vec<usize>> = vec![vec![]; n];
     for (i, def) in defs.iter().enumerate() {
-        let mut refs = HashSet::new();
+        let mut refs = FxHashSet::default();
         for c in &def.constructors {
             for f in &c.fields {
                 collect_tycon_refs(f, &mut refs);
@@ -597,12 +599,12 @@ pub fn dependency_analysis(defs: &[RawDataDef]) -> Vec<Vec<usize>> {
 }
 
 pub fn infer_all_data_kinds_with_env(
-    raw_defs: Vec<RawDataDef>,
-    initial_tycon_env: HashMap<TyConId, Kind>,
-) -> Result<(Vec<InferredDataDef>, HashMap<TyConId, Kind>), KindError> {
-    let groups = dependency_analysis(&raw_defs);
+    raw_defs: &[RawDataDef],
+    initial_tycon_env: FxHashMap<TyConId, Kind>,
+) -> Result<(Vec<InferredDataDef>, FxHashMap<TyConId, Kind>), KindError> {
+    let groups = dependency_analysis(raw_defs);
 
-    let mut tycon_env: HashMap<TyConId, Kind> = initial_tycon_env;
+    let mut tycon_env: FxHashMap<TyConId, Kind> = initial_tycon_env;
     let mut all_results: Vec<InferredDataDef> = Vec::new();
 
     for group_indices in &groups {
@@ -621,9 +623,9 @@ pub fn infer_all_data_kinds_with_env(
 }
 
 pub fn infer_all_data_kinds(
-    raw_defs: Vec<RawDataDef>,
-) -> Result<(Vec<InferredDataDef>, HashMap<TyConId, Kind>), KindError> {
-    infer_all_data_kinds_with_env(raw_defs, HashMap::new())
+    raw_defs: &[RawDataDef],
+) -> Result<(Vec<InferredDataDef>, FxHashMap<TyConId, Kind>), KindError> {
+    infer_all_data_kinds_with_env(raw_defs, FxHashMap::default())
 }
 
 fn tycon_id_display(id: TyConId) -> String {
@@ -676,8 +678,8 @@ mod tests {
         let raw = raw_data(local, "sample.Box", vec![imported_unit.clone()]);
 
         let (defs, env) = infer_all_data_kinds_with_env(
-            vec![raw],
-            HashMap::from([(imported, Kind::make_arrow(Kind::Star, Kind::Star))]),
+            &[raw],
+            FxHashMap::from_iter([(imported, Kind::make_arrow(Kind::Star, Kind::Star))]),
         )
         .expect("ICE: imported ID-keyed type constructor kind should resolve");
 

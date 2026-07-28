@@ -1,7 +1,11 @@
+//! Bytecode instruction definitions and closure IR compilation.
+//! The VM executes chunks produced here from lowered Solveig programs.
+
 use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, Literal, StrLitId, UnOp};
+use solveig_base::FxHashMap;
 use std::collections::BTreeSet;
+use std::path::Path;
 use std::rc::Rc;
-use std::{collections::HashMap, path::Path};
 
 use solveig_lower::LowerPattern;
 use solveig_lower::closure_ir::{CCExpr, CCFunction, CCGlobalDef, CCProgram};
@@ -224,13 +228,13 @@ pub fn lower_to_bytecode(program: &CCProgram) -> BytecodeProgram {
 }
 
 struct BytecodeLowerer {
-    function_chunk_ids: HashMap<usize, usize>,
+    function_chunk_ids: FxHashMap<usize, usize>,
     chunks: Vec<Chunk>,
 }
 
 impl BytecodeLowerer {
     fn new(program: &CCProgram) -> Self {
-        let mut function_chunk_ids = HashMap::new();
+        let mut function_chunk_ids = FxHashMap::default();
 
         // Reserve dense chunk ids for functions first.
         for func in &program.functions {
@@ -337,7 +341,7 @@ impl BytecodeLowerer {
 
                 let chunk = self.function_chunk_ids[func];
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk));
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {chunk} does not fit in u32"));
                 let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
                     panic!("ICE: arg count {} does not fit in u16", args.len())
                 });
@@ -436,13 +440,13 @@ impl BytecodeLowerer {
 
             CCExpr::Capture(index) => {
                 let slot = u16::try_from(*index)
-                    .unwrap_or_else(|_| panic!("ICE: capture index {} does not fit in u16", index));
+                    .unwrap_or_else(|_| panic!("ICE: capture index {index} does not fit in u16"));
                 builder.emit(Instr::LoadLocal(slot));
             }
 
             CCExpr::Global(index) => {
                 let idx = u32::try_from(*index)
-                    .unwrap_or_else(|_| panic!("ICE: global index {} does not fit in u32", index));
+                    .unwrap_or_else(|_| panic!("ICE: global index {index} does not fit in u32"));
                 builder.emit(Instr::LoadGlobal(idx));
             }
 
@@ -471,7 +475,7 @@ impl BytecodeLowerer {
 
                 let chunk = self.function_chunk_ids[func];
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk));
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {chunk} does not fit in u32"));
                 let capture_count = u16::try_from(captures.len()).unwrap_or_else(|_| {
                     panic!("ICE: capture count {} does not fit in u16", captures.len())
                 });
@@ -484,9 +488,9 @@ impl BytecodeLowerer {
             CCExpr::FunctionRef { func, arity } => {
                 let chunk = self.function_chunk_ids[func];
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk));
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {chunk} does not fit in u32"));
                 let arity = u16::try_from(*arity)
-                    .unwrap_or_else(|_| panic!("ICE: arity {} does not fit in u16", arity));
+                    .unwrap_or_else(|_| panic!("ICE: arity {arity} does not fit in u16"));
 
                 builder.emit(Instr::PushFunctionRef { chunk, arity });
             }
@@ -512,7 +516,7 @@ impl BytecodeLowerer {
 
                 let chunk = self.function_chunk_ids[func];
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk));
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {chunk} does not fit in u32"));
                 let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
                     panic!("ICE: arg count {} does not fit in u16", args.len())
                 });
@@ -631,7 +635,7 @@ impl LocalEnv {
             .locals
             .len()
             .checked_sub(index + 1)
-            .unwrap_or_else(|| panic!("ICE: bad de Bruijn local index {}", index));
+            .unwrap_or_else(|| panic!("ICE: bad de Bruijn local index {index}"));
         self.locals[pos]
     }
 }
@@ -663,7 +667,7 @@ impl ChunkBuilder {
     fn new_function(id: usize, name: String, capture_count: u16, arity: u16) -> Self {
         let next_slot = capture_count
             .checked_add(arity)
-            .unwrap_or_else(|| panic!("ICE: slot overflow in function '{}'", name));
+            .unwrap_or_else(|| panic!("ICE: slot overflow in function '{name}'"));
 
         Self {
             id,
@@ -696,7 +700,7 @@ impl ChunkBuilder {
     fn patch_jump(&mut self, pos: usize, target: u32) {
         match &mut self.code[pos] {
             Instr::Jump(slot) => *slot = target,
-            other => panic!("ICE: expected Jump at patch site, found {:?}", other),
+            other => panic!("ICE: expected Jump at patch site, found {other:?}"),
         }
     }
 
@@ -709,7 +713,7 @@ impl ChunkBuilder {
     fn patch_jump_if_false(&mut self, pos: usize, target: u32) {
         match &mut self.code[pos] {
             Instr::JumpIfFalse(slot) => *slot = target,
-            other => panic!("ICE: expected JumpIfFalse at patch site, found {:?}", other),
+            other => panic!("ICE: expected JumpIfFalse at patch site, found {other:?}"),
         }
     }
 
@@ -827,8 +831,8 @@ fn format_instr(instr: &Instr) -> String {
         Instr::PushFunctionRef { chunk, arity } => {
             format!("PushFunctionRef chunk={chunk} arity={arity}")
         }
-        Instr::Unary(op) => format!("Unary {:?}", op),
-        Instr::Binary(op) => format!("Binary {:?}", op),
+        Instr::Unary(op) => format!("Unary {op:?}"),
+        Instr::Binary(op) => format!("Binary {op:?}"),
         Instr::CallBuiltin { id, arg_count } => {
             format!("CallBuiltin id={} arg_count={arg_count}", id.0)
         }

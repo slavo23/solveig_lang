@@ -20,7 +20,7 @@ impl TypeChecker {
             ) if let Some((quantifier, quant_kind)) = binders.first() => {
                 let param_id = *quantifier;
                 let ty_arg = Ty::TyVar(param_id);
-                let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
+                let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                 let substituted_body_type = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds
@@ -156,7 +156,7 @@ impl TypeChecker {
                     self.with_givens(preds, |checker| checker.solve_checking(ctx, expr, body));
                 let (delta, elaborated_body) = result?;
                 let result_type = delta.apply(expected_type);
-                let elaborated = wrap_ev_abs(elaborated_body, givens, span, result_type);
+                let elaborated = wrap_ev_abs(elaborated_body, givens, span, &result_type);
                 Ok((delta, elaborated))
             }
 
@@ -178,7 +178,7 @@ impl TypeChecker {
                     .collect::<Vec<_>>();
                 let result_type = delta.apply(&expected_applied);
                 let elaborated_expr =
-                    wrap_ev_apps(elaborated_expr, evidence_args, expr.anno.clone(), result_type);
+                    wrap_ev_apps(elaborated_expr, evidence_args, expr.anno.clone(), &result_type);
                 Ok((delta, elaborated_expr))
             }
         }
@@ -198,9 +198,7 @@ fn orphan_instance_warning(
     let instance_type = inst
         .head
         .args
-        .first()
-        .map(|ty| ty.pretty_with_tables(env.pretty_tables()))
-        .unwrap_or_else(|| "_".to_string());
+        .first().map_or_else(|| "_".to_string(), |ty| ty.pretty_with_tables(env.pretty_tables()));
 
     Some(TypeError::OrphanInstance {
         span: file_span(file, inst.span.clone()),
@@ -225,7 +223,7 @@ pub fn check_and_elab_module(
         .builtin_defs
         .iter()
         .map(|builtin| (builtin.id, builtin.scheme.clone()))
-        .collect::<HashMap<DefId, Scheme>>();
+        .collect::<FxHashMap<DefId, Scheme>>();
 
     let mut all_holes = Vec::new();
     let mut all_warnings = Vec::new();
@@ -308,7 +306,7 @@ pub fn check_and_elab_module(
             None => {
                 errors.push(TypeError::UnboundVariable {
                     span: file_span(file, 0..0),
-                    name: format!("unknown class `{}` in instance", inst_class_name),
+                    name: format!("unknown class `{inst_class_name}` in instance"),
                 });
                 continue;
             }

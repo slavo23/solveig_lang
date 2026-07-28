@@ -1,3 +1,6 @@
+//! Runtime implementations of Solveig primitive operations.
+//! The VM dispatches builtin ids here for arithmetic, strings, files, and IO.
+
 use std::cmp::Ordering;
 
 use solveig_ast::ast::{
@@ -75,8 +78,7 @@ impl<'a> VmCtx<'a> {
             .find(|info| info.role == role)
             .ok_or_else(|| {
                 RuntimeError::builtin(format!(
-                    "{builtin} runtime constructor metadata missing for role {:?}",
-                    role
+                    "{builtin} runtime constructor metadata missing for role {role:?}"
                 ))
             })
     }

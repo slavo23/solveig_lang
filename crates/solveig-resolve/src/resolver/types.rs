@@ -178,17 +178,17 @@ impl<'a> Resolver<'a> {
         cx: &ModuleContext,
         imported: &ResolverImports,
         local: &LocalResolverEnv,
-        local_tycon_kinds: &HashMap<TyConId, Kind>,
+        local_tycon_kinds: &FxHashMap<TyConId, Kind>,
         class_defs: &[ClassDefinition],
-    ) -> Result<HashMap<DefId, Scheme>, KindError> {
-        let mut func_schemes = HashMap::new();
+    ) -> Result<FxHashMap<DefId, Scheme>, KindError> {
+        let mut func_schemes = FxHashMap::default();
 
         let mut sig_tycon_env = imported.tycon_kind_ids.clone();
         sig_tycon_env.extend(local_tycon_kinds.clone());
 
         let sig_class_env = Self::class_param_kind_env(imported, class_defs);
 
-        for defn in parsed.defs.iter() {
+        for defn in &parsed.defs {
             let SurfaceDefinition::SigDef {
                 name: spanned_name,
                 ty,
@@ -205,7 +205,7 @@ impl<'a> Resolver<'a> {
             trace_predicates(
                 self.session,
                 module_name,
-                &format!("signature {} predicates", fn_name),
+                &format!("signature {fn_name} predicates"),
                 &raw_scheme.predicates,
             );
 

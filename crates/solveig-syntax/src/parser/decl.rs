@@ -1,3 +1,6 @@
+//! Declaration parsing for modules, data types, classes, instances, and fixities.
+//! Parsed declarations feed fixity resolution and project API construction.
+
 use super::*;
 
 impl Parser<'_> {
@@ -138,10 +141,7 @@ impl Parser<'_> {
             return Err(self.error("expected at least one type argument in predicate".to_string()));
         }
 
-        let end = args
-            .last()
-            .map(span_end)
-            .unwrap_or_else(|| span_end(&class_name));
+        let end = args.last().map_or_else(|| span_end(&class_name), span_end);
 
         Ok(sp(SurfacePredicate { class_name, args }, start, end))
     }

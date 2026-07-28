@@ -69,24 +69,24 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn report_fixity_error(&mut self, cx: &ModuleContext, error: FixityError) {
+    fn report_fixity_error(&mut self, cx: &ModuleContext, error: &FixityError) {
         match error {
             FixityError::UnknownOperator { .. } => {}
             FixityError::Conflict { span, left, right } => {
                 self.errors.push(ResolveError::FixityConflict {
-                    span: self.file_span(cx, span),
-                    left,
-                    right,
+                    span: self.file_span(cx, *span),
+                    left: *left,
+                    right: *right,
                 });
             }
             FixityError::IllegalUnaryMinus { span } => {
                 self.errors.push(ResolveError::IllegalUnaryMinus {
-                    span: self.file_span(cx, span),
+                    span: self.file_span(cx, *span),
                 });
             }
             FixityError::ExpectedExpression { span } => {
                 self.errors.push(ResolveError::MalformedOperatorExpression {
-                    span: self.file_span(cx, span),
+                    span: self.file_span(cx, *span),
                     message: "expected expression in operator sequence".to_string(),
                 });
             }
@@ -99,7 +99,7 @@ impl<'a> Resolver<'a> {
         rhs: &SpannedWrapper<SurfaceExpr>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-        bound_terms: &HashSet<Symbol>,
+        bound_terms: &FxHashSet<Symbol>,
         span: Span,
     ) -> TermExpr<Span> {
         let cons = TermExprNode::new(
@@ -110,7 +110,7 @@ impl<'a> Resolver<'a> {
         let rhs = self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms);
         let app = TermExprNode::new(
             TermExpr::App(Box::new(cons), Box::new(lhs)),
-            span.clone(),
+            span,
         );
 
         TermExpr::App(Box::new(app), Box::new(rhs))
@@ -123,7 +123,7 @@ impl<'a> Resolver<'a> {
         rhs: &SpannedWrapper<SurfaceExpr>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-        bound_terms: &HashSet<Symbol>,
+        bound_terms: &FxHashSet<Symbol>,
     ) -> TermExpr<Span> {
         let span = to_core_span(SourceSpan::new(lhs.1.start, rhs.1.end));
 
@@ -147,7 +147,7 @@ impl<'a> Resolver<'a> {
         let rhs = self.resolve_surface_expr_in_module(rhs, cx, local, bound_terms);
         let app = TermExprNode::new(
             TermExpr::App(Box::new(op_node), Box::new(lhs)),
-            span.clone(),
+            span,
         );
 
         TermExpr::App(Box::new(app), Box::new(rhs))
@@ -194,6 +194,8 @@ impl<'a> Resolver<'a> {
         self.surface_app(applied, second)
     }
 
+    // Haskell 2010 Report §3.14, do expressions; Solveig keeps the same
+    // nested bind/then shape while resolving operators through Prelude names.
     fn desugar_do_statements(
         &self,
         statements: &[SpannedWrapper<SurfaceDoStmt>],
@@ -320,7 +322,7 @@ impl<'a> Resolver<'a> {
         r: &NameRef,
         span: FileSpan,
         cx: &ModuleContext,
-        bound_terms: &HashSet<Symbol>,
+        bound_terms: &FxHashSet<Symbol>,
     ) -> VarRef {
         match r.segments.as_slice() {
             [name] if bound_terms.contains(name) => {
@@ -346,7 +348,7 @@ impl<'a> Resolver<'a> {
         sf: &SpannedWrapper<SurfaceExpr>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-        bound_terms: &HashSet<Symbol>,
+        bound_terms: &FxHashSet<Symbol>,
     ) -> TermExprNode<Span> {
         let span = to_core_span(sf.1);
 
@@ -474,7 +476,7 @@ impl<'a> Resolver<'a> {
                         return self.resolve_surface_expr_in_module(&expr, cx, local, bound_terms);
                     }
                     Err(error) => {
-                        self.report_fixity_error(cx, error);
+                        self.report_fixity_error(cx, &error);
                         TermExpr::Hole
                     }
                 }
@@ -497,7 +499,7 @@ impl<'a> Resolver<'a> {
         local: &LocalResolverEnv,
     ) -> TermExprNode<Span> {
         let span = to_core_span(body.1);
-        let mut bound_terms = HashSet::new();
+        let mut bound_terms = FxHashSet::default();
 
         for param in params {
             bound_terms.insert(param.0);
@@ -528,7 +530,7 @@ impl<'a> Resolver<'a> {
         local: &LocalResolverEnv,
     ) -> TermExprNode<Span> {
         let span = to_core_span(body.1);
-        let mut bound_terms = HashSet::new();
+        let mut bound_terms = FxHashSet::default();
 
         for param in params {
             bound_terms.insert(param.0);
@@ -579,7 +581,7 @@ impl<'a> Resolver<'a> {
         parsed: &ParsedModule,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-        func_schemes: &HashMap<DefId, Scheme>,
+        func_schemes: &FxHashMap<DefId, Scheme>,
     ) -> Vec<TermDefinition<Span>> {
         parsed
             .defs

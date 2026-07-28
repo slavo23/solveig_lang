@@ -1,3 +1,6 @@
+//! Type and predicate parser for annotations, data fields, and class heads.
+//! Kind inference consumes these syntax nodes after name resolution.
+
 use super::*;
 
 impl Parser<'_> {
@@ -9,10 +12,7 @@ impl Parser<'_> {
         {
             self.advance();
             let body = self.parse_type_arrow()?;
-            let start = preds
-                .first()
-                .map(span_start)
-                .unwrap_or_else(|| span_start(&body));
+            let start = preds.first().map_or_else(|| span_start(&body), span_start);
             let end = span_end(&body);
             return Ok(sp(SurfaceTy::Qualified(preds, Box::new(body)), start, end));
         }

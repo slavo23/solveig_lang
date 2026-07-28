@@ -1,3 +1,6 @@
+//! Bytecode instruction dispatch loop.
+//! This module mutates VM stack, frames, heap, and IO state for each instruction.
+
 use super::*;
 use crate::builtins;
 use crate::bytecode::{BytecodeProgram, Instr, MatchArm};

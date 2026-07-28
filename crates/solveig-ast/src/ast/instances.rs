@@ -1,7 +1,7 @@
 //! Instance definitions, instance tables, and overlap checking.
 //! The overlap test compares instance heads structurally after separating left and right variables.
 
-use std::collections::HashMap;
+use solveig_base::FxHashMap;
 use std::ops::Range;
 
 use super::*;
@@ -196,24 +196,22 @@ enum InstanceUnifyTy {
     Arr(Box<InstanceUnifyTy>, Box<InstanceUnifyTy>),
 }
 
-type InstanceUnifySubst = HashMap<(InstanceUnifySide, TyVarId), InstanceUnifyTy>;
+type InstanceUnifySubst = FxHashMap<(InstanceUnifySide, TyVarId), InstanceUnifyTy>;
 
 fn instance_heads_unify(left: &Predicate, right: &Predicate) -> bool {
     if left.class_id != right.class_id || left.args.len() != right.args.len() {
         return false;
     }
 
-    let mut subst = HashMap::new();
+    let mut subst = FxHashMap::default();
 
     left.args
         .iter()
         .zip(right.args.iter())
         .all(|(left, right)| {
-            unify_instance_types(
-                InstanceUnifyTy::from_type(InstanceUnifySide::Left, left),
-                InstanceUnifyTy::from_type(InstanceUnifySide::Right, right),
-                &mut subst,
-            )
+            let left_ty = InstanceUnifyTy::from_type(InstanceUnifySide::Left, left);
+            let right_ty = InstanceUnifyTy::from_type(InstanceUnifySide::Right, right);
+            unify_instance_types(&left_ty, &right_ty, &mut subst)
         })
 }
 
@@ -238,16 +236,17 @@ impl InstanceUnifyTy {
 }
 
 fn unify_instance_types(
-    left: InstanceUnifyTy,
-    right: InstanceUnifyTy,
+    left: &InstanceUnifyTy,
+    right: &InstanceUnifyTy,
     subst: &mut InstanceUnifySubst,
 ) -> bool {
-    let left = apply_instance_unify_subst(&left, subst);
-    let right = apply_instance_unify_subst(&right, subst);
+    let left = apply_instance_unify_subst(left, subst);
+    let right = apply_instance_unify_subst(right, subst);
 
     match (left, right) {
-        (InstanceUnifyTy::Var(side, id), ty) => bind_instance_unify_var(side, id, ty, subst),
-        (ty, InstanceUnifyTy::Var(side, id)) => bind_instance_unify_var(side, id, ty, subst),
+        (InstanceUnifyTy::Var(side, id), ty) | (ty, InstanceUnifyTy::Var(side, id)) => {
+            bind_instance_unify_var(side, id, &ty, subst)
+        }
         (InstanceUnifyTy::Unit, InstanceUnifyTy::Unit) => true,
         (InstanceUnifyTy::Evar(a), InstanceUnifyTy::Evar(b)) => a == b,
         (InstanceUnifyTy::Con(a), InstanceUnifyTy::Con(b)) => a == b,
@@ -255,12 +254,12 @@ fn unify_instance_types(
             InstanceUnifyTy::App(left_func, left_arg),
             InstanceUnifyTy::App(right_func, right_arg),
         ) => {
-            unify_instance_types(*left_func, *right_func, subst)
-                && unify_instance_types(*left_arg, *right_arg, subst)
+            unify_instance_types(&left_func, &right_func, subst)
+                && unify_instance_types(&left_arg, &right_arg, subst)
         }
         (InstanceUnifyTy::Arr(left_arg, left_ret), InstanceUnifyTy::Arr(right_arg, right_ret)) => {
-            unify_instance_types(*left_arg, *right_arg, subst)
-                && unify_instance_types(*left_ret, *right_ret, subst)
+            unify_instance_types(&left_arg, &right_arg, subst)
+                && unify_instance_types(&left_ret, &right_ret, subst)
         }
         _ => false,
     }
@@ -269,10 +268,10 @@ fn unify_instance_types(
 fn bind_instance_unify_var(
     side: InstanceUnifySide,
     id: TyVarId,
-    ty: InstanceUnifyTy,
+    ty: &InstanceUnifyTy,
     subst: &mut InstanceUnifySubst,
 ) -> bool {
-    let ty = apply_instance_unify_subst(&ty, subst);
+    let ty = apply_instance_unify_subst(ty, subst);
 
     if ty == InstanceUnifyTy::Var(side, id) {
         return true;
@@ -288,10 +287,10 @@ fn bind_instance_unify_var(
 
 fn apply_instance_unify_subst(ty: &InstanceUnifyTy, subst: &InstanceUnifySubst) -> InstanceUnifyTy {
     match ty {
-        InstanceUnifyTy::Var(side, id) => subst
-            .get(&(*side, *id))
-            .map(|bound| apply_instance_unify_subst(bound, subst))
-            .unwrap_or_else(|| ty.clone()),
+        InstanceUnifyTy::Var(side, id) => subst.get(&(*side, *id)).map_or_else(
+            || ty.clone(),
+            |bound| apply_instance_unify_subst(bound, subst),
+        ),
         InstanceUnifyTy::App(func, arg) => InstanceUnifyTy::App(
             Box::new(apply_instance_unify_subst(func, subst)),
             Box::new(apply_instance_unify_subst(arg, subst)),

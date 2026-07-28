@@ -1,3 +1,6 @@
+//! Constructor environment support for exhaustiveness checking.
+//! The matrix algorithm uses this view to normalize types and enumerate constructors.
+
 use super::*;
 
 fn is_open_primitive_type(ty: &Ty) -> bool {
@@ -104,7 +107,7 @@ pub(super) fn instantiate_ctor_fields(
         .iter()
         .zip(ty_args)
         .map(|((param_id, _), arg)| (*param_id, arg.clone()))
-        .collect::<HashMap<_, _>>();
+        .collect::<FxHashMap<_, _>>();
 
     ctor.fields
         .iter()
@@ -112,7 +115,7 @@ pub(super) fn instantiate_ctor_fields(
         .collect()
 }
 
-fn subst_type_vars(ty: &Ty, subst: &HashMap<TyVarId, Ty>) -> Ty {
+fn subst_type_vars(ty: &Ty, subst: &FxHashMap<TyVarId, Ty>) -> Ty {
     match ty {
         Ty::TyVar(id) => subst.get(id).cloned().unwrap_or(Ty::TyVar(*id)),
 

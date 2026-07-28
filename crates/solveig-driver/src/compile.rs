@@ -1,7 +1,8 @@
 //! Driver compile facade.
 //! Child modules own compilation state, frontend orchestration, builtins, hover, Show wrappers, and evidence dumps.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use solveig_base::{FxHashMap, FxHashSet};
+use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};

@@ -1,3 +1,6 @@
+//! Fixity declaration collection and infix expression reassociation.
+//! Parsed expressions pass through this module before resolver name lookup.
+
 use solveig_base::{Span, Symbol};
 
 use crate::ast::{
@@ -121,7 +124,7 @@ fn op_conflict(op1: &ActiveOp, op2: &Op) -> Option<FixityError> {
 
     Some(FixityError::Conflict {
         span: op2.symbol.1,
-        left: op1.symbol.map(|symbol| symbol.0).unwrap_or(op2.symbol.0),
+        left: op1.symbol.map_or(op2.symbol.0, |symbol| symbol.0),
         right: op2.symbol.0,
     })
 }
@@ -150,7 +153,7 @@ fn make_operator_apply(
     )
 }
 
-// This follows the Haskell 2010 Report, section 10.6:
+// This follows the Haskell 2010 Report §10.6, Fixity Resolution:
 // https://www.haskell.org/onlinereport/haskell2010/haskellch10.html
 // Prefix `-` is represented explicitly as `Neg` tokens so resolution can
 // happen after names and imported fixities are known.
@@ -235,7 +238,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use solveig_base::FxHashMap;
 
     use solveig_base::{Session, Span};
 
@@ -304,7 +307,7 @@ mod tests {
 
     fn lookup<'a>(
         session: &'a Session,
-        map: &'a HashMap<&'static str, Fixity>,
+        map: &'a FxHashMap<&'static str, Fixity>,
     ) -> impl FnMut(Spanned<Symbol>) -> Result<Fixity, FixityError> + 'a {
         move |op| {
             map.get(&*session.str(op.0))
@@ -319,7 +322,7 @@ mod tests {
     #[test]
     fn left_associative_same_precedence_groups_left() {
         let session = Session::default();
-        let mut fixities = HashMap::new();
+        let mut fixities = FxHashMap::default();
         fixities.insert(
             "-",
             Fixity {
@@ -344,7 +347,7 @@ mod tests {
     #[test]
     fn right_associative_same_precedence_groups_right() {
         let session = Session::default();
-        let mut fixities = HashMap::new();
+        let mut fixities = FxHashMap::default();
         fixities.insert(
             "^^",
             Fixity {
@@ -369,7 +372,7 @@ mod tests {
     #[test]
     fn mixed_same_precedence_assoc_is_rejected() {
         let session = Session::default();
-        let mut fixities = HashMap::new();
+        let mut fixities = FxHashMap::default();
         fixities.insert(
             "<+>",
             Fixity {
@@ -401,7 +404,7 @@ mod tests {
     #[test]
     fn prefix_minus_follows_haskell_precedence_rule() {
         let session = Session::default();
-        let mut fixities = HashMap::new();
+        let mut fixities = FxHashMap::default();
         fixities.insert(
             "*",
             Fixity {

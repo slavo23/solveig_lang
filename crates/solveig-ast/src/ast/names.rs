@@ -1,7 +1,7 @@
 //! Explicit name and literal display tables for compiler identities.
 //! The driver owns this state and threads it through resolver, checker, and lowering.
 
-use std::collections::HashMap;
+use solveig_base::FxHashMap;
 
 use solveig_base::Symbol;
 
@@ -16,18 +16,18 @@ const NAMED_DEF_MODULE: ModuleId = ModuleId(0xffff_fffe);
 #[derive(Clone, Debug, Default)]
 pub struct Names {
     tycon_names: Vec<String>,
-    ids: HashMap<String, TyConId>,
+    ids: FxHashMap<String, TyConId>,
     ctor_names: Vec<String>,
-    ctor_ids: HashMap<String, CtorId>,
+    ctor_ids: FxHashMap<String, CtorId>,
     class_names: Vec<String>,
-    class_ids: HashMap<String, ClassId>,
+    class_ids: FxHashMap<String, ClassId>,
     symbols: Vec<String>,
-    symbol_ids: HashMap<String, Symbol>,
-    symbol_names: HashMap<Symbol, String>,
-    def_names: HashMap<DefId, String>,
+    symbol_ids: FxHashMap<String, Symbol>,
+    symbol_names: FxHashMap<Symbol, String>,
+    def_names: FxHashMap<DefId, String>,
     string_values: Vec<String>,
-    string_ids: HashMap<String, StrLitId>,
-    tyvar_names: HashMap<TyVarId, String>,
+    string_ids: FxHashMap<String, StrLitId>,
+    tyvar_names: FxHashMap<TyVarId, String>,
     next_tyvar_id: u32,
 }
 
@@ -201,10 +201,10 @@ impl Names {
     }
 
     pub fn string_literal_value(&self, id: StrLitId) -> &str {
-        self.string_values
-            .get(id.0 as usize)
-            .map(String::as_str)
-            .unwrap_or_else(|| panic!("ICE: missing string literal payload for StrLitId {id:?}"))
+        self.string_values.get(id.0 as usize).map_or_else(
+            || panic!("ICE: missing string literal payload for StrLitId {id:?}"),
+            String::as_str,
+        )
     }
 
     pub fn string_literals(&self) -> &[String] {

@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+//! Kind inference for user-written type signatures and predicates.
+//! Resolver and checker stages use this pass before term type checking.
+
+use solveig_base::{FxHashMap, FxHashSet};
 
 use solveig_ast::ast::{
     ClassId, Kind, KindMetaId, Predicate, Pretty, Scheme, Ty, TyConId, TyVarId, tyvar_display_name,
@@ -10,14 +13,14 @@ pub struct SignatureKindInfo {
     pub kinded_signature: Ty,
     pub quantified_var_kinds: Vec<(TyVarId, Kind)>,
     pub signature_kind: Kind,
-    pub kind_subst: HashMap<KindMetaId, Kind>,
+    pub kind_subst: FxHashMap<KindMetaId, Kind>,
 }
 
 #[derive(Debug, Clone)]
 pub struct SchemeKindInfo {
     pub scheme: Scheme,
     pub signature_kind: Kind,
-    pub kind_subst: HashMap<KindMetaId, Kind>,
+    pub kind_subst: FxHashMap<KindMetaId, Kind>,
 }
 
 #[derive(Debug, Clone)]
@@ -112,12 +115,12 @@ impl KindError {
             Self::UnboundTypeVariable { span, name } => {
                 let mut diagnostic = Diagnostic::error(
                     "KIND0001",
-                    format!("type variable `{}` is not in scope", name),
+                    format!("type variable `{name}` is not in scope"),
                 );
                 if let Some(span) = span {
                     diagnostic = diagnostic.with_label(Label::primary(
                         *span,
-                        format!("`{}` is used here, but no type variable was bound", name),
+                        format!("`{name}` is used here, but no type variable was bound"),
                     ));
                 }
                 diagnostic
@@ -126,12 +129,12 @@ impl KindError {
             Self::UnboundTypeConstructor { span, name } => {
                 let mut diagnostic = Diagnostic::error(
                     "KIND0002",
-                    format!("type constructor `{}` is not in scope", name),
+                    format!("type constructor `{name}` is not in scope"),
                 );
                 if let Some(span) = span {
                     diagnostic = diagnostic.with_label(Label::primary(
                         *span,
-                        format!("`{}` is used here, but no type constructor was found", name),
+                        format!("`{name}` is used here, but no type constructor was found"),
                     ));
                 }
                 diagnostic
@@ -212,9 +215,9 @@ impl IntoDiagnostic for &KindError {
 
 pub struct SignatureKindInferencer {
     next_meta: u32,
-    subst: HashMap<KindMetaId, Kind>,
-    tycon_env: HashMap<TyConId, Kind>,
-    class_env: HashMap<ClassId, Vec<Kind>>,
+    subst: FxHashMap<KindMetaId, Kind>,
+    tycon_env: FxHashMap<TyConId, Kind>,
+    class_env: FxHashMap<ClassId, Vec<Kind>>,
 }
 
 impl Default for SignatureKindInferencer {
@@ -227,28 +230,28 @@ impl SignatureKindInferencer {
     pub fn new() -> Self {
         Self {
             next_meta: 0,
-            subst: HashMap::new(),
-            tycon_env: HashMap::new(),
-            class_env: HashMap::new(),
+            subst: FxHashMap::default(),
+            tycon_env: FxHashMap::default(),
+            class_env: FxHashMap::default(),
         }
     }
 
-    pub fn with_tycon_env(tycon_env: HashMap<TyConId, Kind>) -> Self {
+    pub fn with_tycon_env(tycon_env: FxHashMap<TyConId, Kind>) -> Self {
         Self {
             next_meta: 0,
-            subst: HashMap::new(),
+            subst: FxHashMap::default(),
             tycon_env,
-            class_env: HashMap::new(),
+            class_env: FxHashMap::default(),
         }
     }
 
     pub fn with_envs(
-        tycon_env: HashMap<TyConId, Kind>,
-        class_env: HashMap<ClassId, Vec<Kind>>,
+        tycon_env: FxHashMap<TyConId, Kind>,
+        class_env: FxHashMap<ClassId, Vec<Kind>>,
     ) -> Self {
         Self {
             next_meta: 0,
-            subst: HashMap::new(),
+            subst: FxHashMap::default(),
             tycon_env,
             class_env,
         }
@@ -282,8 +285,8 @@ impl SignatureKindInferencer {
         }
     }
 
-    fn bind_meta(&mut self, var: KindMetaId, kind: Kind) -> Result<(), KindError> {
-        let kind = self.apply_kind(&kind);
+    fn bind_meta(&mut self, var: KindMetaId, kind: &Kind) -> Result<(), KindError> {
+        let kind = self.apply_kind(kind);
         if kind == Kind::Meta(var) {
             return Ok(());
         }
@@ -294,18 +297,17 @@ impl SignatureKindInferencer {
         Ok(())
     }
 
-    fn unify(&mut self, lhs: Kind, rhs: Kind) -> Result<(), KindError> {
-        let lhs = self.apply_kind(&lhs);
-        let rhs = self.apply_kind(&rhs);
+    fn unify(&mut self, lhs: &Kind, rhs: &Kind) -> Result<(), KindError> {
+        let lhs = self.apply_kind(lhs);
+        let rhs = self.apply_kind(rhs);
 
         match (lhs, rhs) {
             (Kind::Star, Kind::Star) => Ok(()),
             (Kind::Meta(left), Kind::Meta(right)) if left == right => Ok(()),
-            (Kind::Meta(v), other) => self.bind_meta(v, other),
-            (other, Kind::Meta(v)) => self.bind_meta(v, other),
+            (Kind::Meta(v), other) | (other, Kind::Meta(v)) => self.bind_meta(v, &other),
             (Kind::Arrow(l1, r1), Kind::Arrow(l2, r2)) => {
-                self.unify(*l1, *l2)?;
-                self.unify(*r1, *r2)
+                self.unify(&l1, &l2)?;
+                self.unify(&r1, &r2)
             }
             (lhs, rhs) => Err(KindError::cannot_unify(lhs, rhs)),
         }
@@ -313,8 +315,7 @@ impl SignatureKindInferencer {
 
     fn default_unsolved(kind: Kind) -> Kind {
         match kind {
-            Kind::Meta(_) => Kind::Star,
-            Kind::Star => Kind::Star,
+            Kind::Meta(_) | Kind::Star => Kind::Star,
             Kind::Arrow(lhs, rhs) => {
                 Kind::make_arrow(Self::default_unsolved(*lhs), Self::default_unsolved(*rhs))
             }
@@ -328,7 +329,7 @@ impl SignatureKindInferencer {
     fn infer_predicate(
         &mut self,
         pred: &Predicate,
-        env: &mut HashMap<TyVarId, Kind>,
+        env: &mut FxHashMap<TyVarId, Kind>,
     ) -> Result<Predicate, KindError> {
         let expected_kinds =
             self.class_env.get(&pred.class_id).cloned().ok_or_else(|| {
@@ -346,7 +347,7 @@ impl SignatureKindInferencer {
 
         for (arg, expected_kind) in pred.args.iter().zip(expected_kinds.iter()) {
             let (arg_kind, arg_kinded) = self.infer_and_rebuild(arg, env)?;
-            self.unify(arg_kind, expected_kind.clone())?;
+            self.unify(&arg_kind, expected_kind)?;
             rebuilt_args.push(arg_kinded);
         }
 
@@ -359,7 +360,7 @@ impl SignatureKindInferencer {
     fn infer_and_rebuild(
         &mut self,
         ty: &Ty,
-        env: &mut HashMap<TyVarId, Kind>,
+        env: &mut FxHashMap<TyVarId, Kind>,
     ) -> Result<(Kind, Ty), KindError> {
         match ty {
             Ty::TyUnit => Ok((Kind::Star, Ty::TyUnit)),
@@ -388,8 +389,8 @@ impl SignatureKindInferencer {
             Ty::TyArr(lhs, rhs) => {
                 let (lhs_kind, lhs_kinded) = self.infer_and_rebuild(lhs, env)?;
                 let (rhs_kind, rhs_kinded) = self.infer_and_rebuild(rhs, env)?;
-                self.unify(lhs_kind, Kind::Star)?;
-                self.unify(rhs_kind, Kind::Star)?;
+                self.unify(&lhs_kind, &Kind::Star)?;
+                self.unify(&rhs_kind, &Kind::Star)?;
                 Ok((
                     Kind::Star,
                     Ty::TyArr(Box::new(lhs_kinded), Box::new(rhs_kinded)),
@@ -408,7 +409,7 @@ impl SignatureKindInferencer {
                 let (lhs_kind, lhs_kinded) = self.infer_and_rebuild(lhs, env)?;
                 let (rhs_kind, rhs_kinded) = self.infer_and_rebuild(rhs, env)?;
                 let result_kind = self.fresh_meta();
-                self.unify(lhs_kind, Kind::make_arrow(rhs_kind, result_kind.clone()))?;
+                self.unify(&lhs_kind, &Kind::make_arrow(rhs_kind, result_kind.clone()))?;
                 Ok((
                     self.apply_kind(&result_kind),
                     Ty::TyApp(Box::new(lhs_kinded), Box::new(rhs_kinded)),
@@ -430,7 +431,7 @@ impl SignatureKindInferencer {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 let (body_kind, body_kinded) = self.infer_and_rebuild(body, env)?;
-                self.unify(body_kind, Kind::Star)?;
+                self.unify(&body_kind, &Kind::Star)?;
 
                 for (name, old) in old_bindings.into_iter().rev() {
                     match old {
@@ -468,7 +469,7 @@ impl SignatureKindInferencer {
     fn collect_free_tyvars_in_type(
         ty: &Ty,
         bound: &mut Vec<TyVarId>,
-        seen: &mut HashSet<TyVarId>,
+        seen: &mut FxHashSet<TyVarId>,
         out: &mut Vec<TyVarId>,
     ) {
         match ty {
@@ -508,7 +509,7 @@ impl SignatureKindInferencer {
             .iter()
             .map(|(name, _)| *name)
             .collect::<Vec<_>>();
-        let mut seen = bound.iter().cloned().collect::<HashSet<_>>();
+        let mut seen = bound.iter().copied().collect::<FxHashSet<_>>();
         let mut out = Vec::new();
 
         for pred in &scheme.predicates {
@@ -522,7 +523,7 @@ impl SignatureKindInferencer {
     }
 
     pub fn infer_signature(mut self, ty: &Ty) -> Result<SignatureKindInfo, KindError> {
-        let mut env = HashMap::<TyVarId, Kind>::new();
+        let mut env = FxHashMap::<TyVarId, Kind>::default();
         let (sig_kind, kinded_sig) = self.infer_and_rebuild(ty, &mut env)?;
         let sig_kind = self.apply_kind(&sig_kind);
 
@@ -545,7 +546,7 @@ impl SignatureKindInferencer {
         let implicit_quants = self.collect_implicit_quantifiers(scheme);
 
         let mut quantifier_names = Vec::new();
-        let mut env = HashMap::<TyVarId, Kind>::new();
+        let mut env = FxHashMap::<TyVarId, Kind>::default();
 
         for (name, _old_kind) in &scheme.quantifiers {
             let fresh = self.fresh_meta();
@@ -618,8 +619,8 @@ mod tests {
         };
 
         let info = SignatureKindInferencer::with_envs(
-            HashMap::from([(tycon_id, Kind::Star)]),
-            HashMap::from([(class_id, vec![Kind::Star])]),
+            FxHashMap::from_iter([(tycon_id, Kind::Star)]),
+            FxHashMap::from_iter([(class_id, vec![Kind::Star])]),
         )
         .infer_scheme(&scheme)
         .expect("ICE: ID-keyed signature kind environment should resolve test IDs");

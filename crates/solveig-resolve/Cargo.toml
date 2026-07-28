@@ -9,3 +9,6 @@ solveig-base = { path = "../solveig-base", version = "0.1.0" }
 solveig-check = { path = "../solveig-check", version = "0.1.0" }
 solveig-syntax = { path = "../solveig-syntax", version = "0.1.0" }
 petgraph = { workspace = true }
+
+[lints]
+workspace = true

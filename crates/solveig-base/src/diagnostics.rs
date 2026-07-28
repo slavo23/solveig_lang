@@ -1,3 +1,6 @@
+//! Structured diagnostic types shared by compiler stages.
+//! Each diagnostic carries source labels that the reporting crate renders later.
+
 use std::cell::RefCell;
 
 use crate::source::FileSpan;
@@ -320,14 +323,8 @@ impl DiagnosticParts {
 
 fn format_missing_patterns_note(scrutinee_type: &str, missing: &[String]) -> String {
     match missing {
-        [] => format!(
-            "scrutinee type: `{}`\nmissing pattern:\n  _",
-            scrutinee_type
-        ),
-        [one] => format!(
-            "scrutinee type: `{}`\nmissing pattern:\n  {}",
-            scrutinee_type, one
-        ),
+        [] => format!("scrutinee type: `{scrutinee_type}`\nmissing pattern:\n  _"),
+        [one] => format!("scrutinee type: `{scrutinee_type}`\nmissing pattern:\n  {one}"),
         many => format!(
             "scrutinee type: `{}`\nmissing pattern examples:\n  {}",
             scrutinee_type,
@@ -345,28 +342,28 @@ impl TypeError {
         match self {
             TypeError::UnboundVariable { span, name } => DiagnosticParts::new(
                 "TC0001",
-                format!("variable `{}` is not in scope", name),
+                format!("variable `{name}` is not in scope"),
             )
             .with_label(Label::primary(
                 *span,
-                format!("`{}` is used here, but no binding was found", name),
+                format!("`{name}` is used here, but no binding was found"),
             )),
 
             TypeError::UnknownConstructor { span, name } => {
-                DiagnosticParts::new("TC0002", format!("unknown constructor `{}`", name))
+                DiagnosticParts::new("TC0002", format!("unknown constructor `{name}`"))
                     .with_label(Label::primary(
                         *span,
-                        format!("constructor `{}` is not known here", name),
+                        format!("constructor `{name}` is not known here"),
                     ))
             }
 
             TypeError::UnknownPatternConstructor { span, name } => DiagnosticParts::new(
                 "TC0003",
-                format!("unknown constructor `{}` in pattern", name),
+                format!("unknown constructor `{name}` in pattern"),
             )
             .with_label(Label::primary(
                 *span,
-                format!("pattern uses unknown constructor `{}`", name),
+                format!("pattern uses unknown constructor `{name}`"),
             )),
 
             TypeError::EmptyCaseExpression { span } => {
@@ -383,8 +380,7 @@ impl TypeError {
                 .with_label(Label::primary(
                     *span,
                     format!(
-                        "this case expression does not cover all values of type `{}`",
-                        scrutinee_type
+                        "this case expression does not cover all values of type `{scrutinee_type}`"
                     ),
                 ))
                 .with_note(format_missing_patterns_note(scrutinee_type, missing)),
@@ -393,9 +389,9 @@ impl TypeError {
                 DiagnosticParts::new("TC0005", "type mismatch")
                     .with_label(Label::primary(
                         *span,
-                        format!("this expression has type `{}`", left),
+                        format!("this expression has type `{left}`"),
                     ))
-                    .with_note(format!("but it was required to have type `{}`", right))
+                    .with_note(format!("but it was required to have type `{right}`"))
             }
 
             TypeError::InstantiateLeftFailed { span, evar, target } => DiagnosticParts::new(
@@ -404,7 +400,7 @@ impl TypeError {
             )
             .with_label(Label::primary(
                 *span,
-                format!("could not solve `{}` as a subtype of `{}`", evar, target),
+                format!("could not solve `{evar}` as a subtype of `{target}`"),
             )),
 
             TypeError::InstantiateRightFailed { span, source, evar } => DiagnosticParts::new(
@@ -413,14 +409,14 @@ impl TypeError {
             )
             .with_label(Label::primary(
                 *span,
-                format!("could not solve `{}` as a subtype of `{}`", source, evar),
+                format!("could not solve `{source}` as a subtype of `{evar}`"),
             )),
 
             TypeError::ConstructorNotApplicable { span, actual } => {
                 DiagnosticParts::new("TC0008", "constructor is not applicable here").with_label(
                     Label::primary(
                         *span,
-                        format!("expected a function-like constructor, got `{}`", actual),
+                        format!("expected a function-like constructor, got `{actual}`"),
                     ),
                 )
             }
@@ -433,8 +429,7 @@ impl TypeError {
                 .with_label(Label::primary(
                     *span,
                     format!(
-                        "this expression is applied like a function, but has type `{}`",
-                        actual
+                        "this expression is applied like a function, but has type `{actual}`"
                     ),
                 ))
                 .with_label(Label::secondary(
@@ -452,18 +447,17 @@ impl TypeError {
             )
             .with_label(Label::primary(
                 *span,
-                format!("this expression has type `{}`", actual),
+                format!("this expression has type `{actual}`"),
             ))
             .with_note(format!(
-                "type argument `{}` can only be applied to a `forall` type",
-                ty_arg
+                "type argument `{ty_arg}` can only be applied to a `forall` type"
             )),
 
             TypeError::IllFormedAnnotation { span, ty, target } => {
                 DiagnosticParts::new("TC0011", "ill-formed type annotation").with_label(
                     Label::primary(
                         *span,
-                        format!("annotation `{}` is not well-formed for {}", ty, target),
+                        format!("annotation `{ty}` is not well-formed for {target}"),
                     ),
                 )
             }
@@ -479,8 +473,7 @@ impl TypeError {
             .with_label(Label::primary(
                 *span,
                 format!(
-                    "result existential `{}` was missing while checking case arm {}",
-                    evar, arm_index
+                    "result existential `{evar}` was missing while checking case arm {arm_index}"
                 ),
             ))
             .with_note(
@@ -492,7 +485,7 @@ impl TypeError {
 
                 DiagnosticParts::new(
                     "TC0013",
-                    format!("unsatisfied type class constraints: {}", preds),
+                    format!("unsatisfied type class constraints: {preds}"),
                 )
                 .with_label(Label::primary(*span, "constraints arise from this expression"))
                 .with_note(format!(
@@ -507,7 +500,7 @@ impl TypeError {
                 instance_type,
             } => DiagnosticParts::new(
                 "TC0014",
-                format!("overlapping instance for `{} {}`", class_name, instance_type),
+                format!("overlapping instance for `{class_name} {instance_type}`"),
             )
             .with_label(Label::primary(*span, "duplicate instance defined here"))
             .with_note("an instance for this type already exists"),
@@ -518,7 +511,7 @@ impl TypeError {
                 instance_type,
             } => DiagnosticParts::warning(
                 "TC0018",
-                format!("orphan instance for `{} {}`", class_name, instance_type),
+                format!("orphan instance for `{class_name} {instance_type}`"),
             )
             .with_label(Label::primary(
                 *span,
@@ -543,11 +536,11 @@ impl TypeError {
                 class_name,
             } => DiagnosticParts::new(
                 "TC0019",
-                format!("missing instance method `{}` for class `{}`", method, class_name),
+                format!("missing instance method `{method}` for class `{class_name}`"),
             )
             .with_label(Label::primary(
                 *span,
-                format!("this instance must define `{}` or use a class default", method),
+                format!("this instance must define `{method}` or use a class default"),
             )),
 
             TypeError::UnsupportedFloatPattern { span } => DiagnosticParts::new(
@@ -584,10 +577,7 @@ impl TypeError {
 
         let mut parts = DiagnosticParts::new(
             "TC0015",
-            format!(
-                "type mismatch in instance method `{}` of `{}`",
-                method, class_name
-            ),
+            format!("type mismatch in instance method `{method}` of `{class_name}`"),
         )
         .with_labels(cause_parts.labels)
         .with_notes(cause_parts.notes);
@@ -595,11 +585,11 @@ impl TypeError {
         if cause_anchor != Some(method_span) && !method_span.is_empty() {
             parts = parts.with_label(Label::secondary(
                 method_span,
-                format!("while checking this implementation of `{}`", method),
+                format!("while checking this implementation of `{method}`"),
             ));
         }
 
-        parts.with_note(format!("the class requires `{}`", expected))
+        parts.with_note(format!("the class requires `{expected}`"))
     }
 }
 

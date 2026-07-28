@@ -1,3 +1,6 @@
+//! Diagnostic rendering for Solveig compiler messages.
+//! This crate adapts structured diagnostics onto terminal and string outputs.
+
 use std::error::Error;
 use std::io::{self, IsTerminal, Write};
 
@@ -7,6 +10,7 @@ use solveig_base::{Diagnostic, Severity};
 
 type AriadneSpan = (String, std::ops::Range<usize>);
 
+/// Emits diagnostics to standard error using terminal color detection.
 pub fn emit_diagnostics(
     diagnostics: &[Diagnostic],
     source_map: &SourceMap,
@@ -18,6 +22,7 @@ pub fn emit_diagnostics(
     Ok(())
 }
 
+/// Renders diagnostics into a string without terminal color escapes.
 pub fn render_diagnostics_no_color(
     diagnostics: &[Diagnostic],
     source_map: &SourceMap,
@@ -28,6 +33,7 @@ pub fn render_diagnostics_no_color(
     Ok(String::from_utf8(out)?)
 }
 
+/// Writes diagnostics to the provided writer with explicit color control.
 pub fn write_diagnostics<W: Write>(
     diagnostics: &[Diagnostic],
     source_map: &SourceMap,

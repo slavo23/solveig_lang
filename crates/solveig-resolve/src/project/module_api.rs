@@ -1,9 +1,12 @@
+//! Public and typed module API structures.
+//! Resolution and later compiler stages use these maps to connect definitions across modules.
+
 use super::*;
 
 #[derive(Debug, Clone)]
 pub struct ModuleTable {
     names: Vec<ModuleName>,
-    ids: HashMap<ModuleName, ModuleId>,
+    ids: FxHashMap<ModuleName, ModuleId>,
 }
 
 impl ModuleTable {
@@ -231,7 +234,7 @@ impl ResolveError {
             )
             .with_label(Label::primary(
                 *span,
-                format!("expected exactly one class parameter, but found {}", actual),
+                format!("expected exactly one class parameter, but found {actual}"),
             )),
             Self::SignatureArity { span, name, params } => Diagnostic::error(
                 "RES0006",
@@ -313,13 +316,13 @@ impl<'a> IntoDiagnostic<(&'a Session, Option<&'a ModuleTable>)> for &ResolveErro
 
 #[derive(Debug, Clone, Default)]
 pub struct ModuleApi {
-    pub terms: HashMap<Symbol, DefId>,
-    pub types: HashMap<Symbol, DefId>,
-    pub constructors: HashMap<Symbol, DefId>,
-    pub classes: HashMap<Symbol, DefId>,
-    pub fixities: HashMap<Symbol, Fixity>,
+    pub terms: FxHashMap<Symbol, DefId>,
+    pub types: FxHashMap<Symbol, DefId>,
+    pub constructors: FxHashMap<Symbol, DefId>,
+    pub classes: FxHashMap<Symbol, DefId>,
+    pub fixities: FxHashMap<Symbol, Fixity>,
 
-    pub class_methods: HashMap<Symbol, Vec<Symbol>>,
+    pub class_methods: FxHashMap<Symbol, Vec<Symbol>>,
 }
 impl ModuleApi {
     pub fn filtered(&self, spec: &ImportSpec) -> Self {
@@ -378,12 +381,12 @@ impl ModuleApi {
 
 #[derive(Debug, Clone, Default)]
 pub struct TypedModuleApi {
-    pub term_schemes: HashMap<DefId, solveig_ast::ast::Scheme>,
-    pub type_kinds: HashMap<DefId, Kind>,
-    pub type_ids: HashMap<DefId, solveig_ast::ast::TyConId>,
-    pub constructor_types: HashMap<DefId, Ty>,
-    pub constructor_ids: HashMap<DefId, CtorId>,
-    pub class_defs: HashMap<DefId, solveig_ast::ast::ClassDefinition>,
+    pub term_schemes: FxHashMap<DefId, solveig_ast::ast::Scheme>,
+    pub type_kinds: FxHashMap<DefId, Kind>,
+    pub type_ids: FxHashMap<DefId, solveig_ast::ast::TyConId>,
+    pub constructor_types: FxHashMap<DefId, Ty>,
+    pub constructor_ids: FxHashMap<DefId, CtorId>,
+    pub class_defs: FxHashMap<DefId, solveig_ast::ast::ClassDefinition>,
     pub tycon_table: TyConTable,
     pub ctor_table: CtorTable,
     pub class_table: ClassTable,
@@ -558,10 +561,10 @@ impl TypedModuleApi {
 }
 
 pub struct TypedDisplayMaps<'a> {
-    pub func_schemes: &'a mut HashMap<DefId, solveig_ast::ast::Scheme>,
-    pub tycon_kinds: &'a mut HashMap<solveig_ast::ast::TyConId, Kind>,
-    pub constructor_types: &'a mut HashMap<CtorId, Ty>,
-    pub class_defs: &'a mut HashMap<ClassId, solveig_ast::ast::ClassDefinition>,
+    pub func_schemes: &'a mut FxHashMap<DefId, solveig_ast::ast::Scheme>,
+    pub tycon_kinds: &'a mut FxHashMap<solveig_ast::ast::TyConId, Kind>,
+    pub constructor_types: &'a mut FxHashMap<CtorId, Ty>,
+    pub class_defs: &'a mut FxHashMap<ClassId, solveig_ast::ast::ClassDefinition>,
     pub tycon_table: &'a mut TyConTable,
     pub ctor_table: &'a mut CtorTable,
     pub class_table: &'a mut ClassTable,
@@ -592,12 +595,12 @@ const COMPILER_PRELUDE_PRIM_SEGMENTS: [&str; 2] = ["prelude", "prim"];
 
 #[derive(Debug, Clone, Default)]
 pub struct BuiltinApi {
-    pub terms: HashMap<Symbol, DefId>,
-    pub types: HashMap<Symbol, DefId>,
-    pub constructors: HashMap<Symbol, DefId>,
-    pub classes: HashMap<Symbol, DefId>,
-    pub type_ids: HashMap<DefId, TyConId>,
-    pub constructor_ids: HashMap<DefId, CtorId>,
+    pub terms: FxHashMap<Symbol, DefId>,
+    pub types: FxHashMap<Symbol, DefId>,
+    pub constructors: FxHashMap<Symbol, DefId>,
+    pub classes: FxHashMap<Symbol, DefId>,
+    pub type_ids: FxHashMap<DefId, TyConId>,
+    pub constructor_ids: FxHashMap<DefId, CtorId>,
     pub builtin_defs: Vec<BuiltinDefinition>,
 }
 

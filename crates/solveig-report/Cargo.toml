@@ -6,3 +6,6 @@ edition = "2024"
 [dependencies]
 ariadne = "0.6.0"
 solveig-base = { path = "../solveig-base" }
+
+[lints]
+workspace = true

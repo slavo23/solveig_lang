@@ -47,7 +47,7 @@ impl TypeChecker {
     }
     fn instantiate_predicate_with_subst(
         pred: &Predicate,
-        subst: &HashMap<TyVarId, Ty>,
+        subst: &FxHashMap<TyVarId, Ty>,
     ) -> Predicate {
         Predicate {
             class_id: pred.class_id,
@@ -68,7 +68,7 @@ impl TypeChecker {
         scheme: &Scheme,
     ) -> (Context, Vec<Predicate>, Ty) {
         let mut ctx = ctx;
-        let mut subst = HashMap::<TyVarId, Ty>::new();
+        let mut subst = FxHashMap::<TyVarId, Ty>::default();
 
         for (name, kind) in &scheme.quantifiers {
             let fresh = self.fresh_evar_id();
@@ -135,7 +135,7 @@ impl TypeChecker {
         self.givens.truncate(old_len);
         (new_givens, result)
     }
-    fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, Ty>) -> Predicate {
+    fn substitute_predicate(pred: &Predicate, subst: &FxHashMap<TyVarId, Ty>) -> Predicate {
         Predicate {
             class_id: pred.class_id,
             args: pred
@@ -149,7 +149,7 @@ impl TypeChecker {
                 .collect(),
         }
     }
-    fn substitute_scheme(scheme: &Scheme, subst: &HashMap<TyVarId, Ty>) -> Scheme {
+    fn substitute_scheme(scheme: &Scheme, subst: &FxHashMap<TyVarId, Ty>) -> Scheme {
         Scheme {
             quantifiers: scheme.quantifiers.clone(),
 
@@ -183,7 +183,7 @@ impl TypeChecker {
             .iter()
             .zip(given.args.iter())
             .map(|((param_id, _), arg)| (*param_id, arg.clone()))
-            .collect::<HashMap<_, _>>();
+            .collect::<FxHashMap<_, _>>();
 
         class_def
             .superclasses
@@ -201,7 +201,7 @@ impl TypeChecker {
             .iter()
             .zip(instance_head.args.iter())
             .map(|((param_id, _), instance_arg)| (*param_id, instance_arg.clone()))
-            .collect::<HashMap<_, _>>();
+            .collect::<FxHashMap<_, _>>();
 
         class_def
             .superclasses
@@ -216,7 +216,7 @@ impl TypeChecker {
         instance_context: &[Predicate],
         instance_quantifiers: &[(TyVarId, Kind)],
     ) -> Scheme {
-        let mut subst = HashMap::<TyVarId, Ty>::new();
+        let mut subst = FxHashMap::<TyVarId, Ty>::default();
 
         for ((param_id, _), instance_arg) in
             class_def.params.iter().zip(instance_head.args.iter())
@@ -276,7 +276,7 @@ impl TypeChecker {
     fn match_instance_type(
         pattern: &Ty,
         target: &Ty,
-        subst: &mut HashMap<TyVarId, Ty>,
+        subst: &mut FxHashMap<TyVarId, Ty>,
     ) -> bool {
         match pattern {
             Ty::TyVar(id) => match subst.get(id) {
@@ -314,12 +314,12 @@ impl TypeChecker {
     fn match_predicate_pattern(
         pattern: &Predicate,
         target: &Predicate,
-    ) -> Option<HashMap<TyVarId, Ty>> {
+    ) -> Option<FxHashMap<TyVarId, Ty>> {
         if pattern.class_id != target.class_id || pattern.args.len() != target.args.len() {
             return None;
         }
 
-        let mut subst = HashMap::<TyVarId, Ty>::new();
+        let mut subst = FxHashMap::<TyVarId, Ty>::default();
 
         for (pattern_arg, target_arg) in pattern.args.iter().zip(target.args.iter()) {
             if !Self::match_instance_type(pattern_arg, target_arg, &mut subst) {
@@ -332,7 +332,7 @@ impl TypeChecker {
     fn evidence_ty_args_for_instance(
         instance_head: &Predicate,
         instance_context: &[Predicate],
-        subst: &HashMap<TyVarId, Ty>,
+        subst: &FxHashMap<TyVarId, Ty>,
     ) -> Vec<Ty> {
         let mut vars = BTreeSet::new();
 
@@ -363,13 +363,13 @@ impl TypeChecker {
     // by instance matching (`bySuper` then `byInst`). C1 keeps the same search
     // order and attaches evidence to each successful derivation step.
     fn entail(&self, givens: &[GivenEvidence], wanted: &Predicate) -> Result<Ev, Unsolved> {
-        self.entail_inner(givens, wanted, &mut HashSet::new())
+        self.entail_inner(givens, wanted, &mut FxHashSet::default())
     }
     fn entail_inner(
         &self,
         givens: &[GivenEvidence],
         wanted: &Predicate,
-        seen: &mut HashSet<Predicate>,
+        seen: &mut FxHashSet<Predicate>,
     ) -> Result<Ev, Unsolved> {
         let wanted = self.zonk_predicate(wanted);
 
@@ -381,7 +381,7 @@ impl TypeChecker {
 
         for given in givens.iter().rev() {
             if let Some(evidence) =
-                self.superclass_evidence_from_given(given, &wanted, &mut HashSet::new())
+                self.superclass_evidence_from_given(given, &wanted, &mut FxHashSet::default())
             {
                 return Ok(evidence);
             }
@@ -431,10 +431,11 @@ impl TypeChecker {
         &self,
         given: &GivenEvidence,
         wanted: &Predicate,
-        seen: &mut HashSet<Predicate>,
+        seen: &mut FxHashSet<Predicate>,
     ) -> Option<Ev> {
+        let source = self.zonk_predicate(&given.pred);
         self.superclass_evidence_from_predicate(
-            self.zonk_predicate(&given.pred),
+            &source,
             Ev::Var(given.ev),
             wanted,
             seen,
@@ -442,12 +443,12 @@ impl TypeChecker {
     }
     fn superclass_evidence_from_predicate(
         &self,
-        source: Predicate,
+        source: &Predicate,
         source_ev: Ev,
         wanted: &Predicate,
-        seen: &mut HashSet<Predicate>,
+        seen: &mut FxHashSet<Predicate>,
     ) -> Option<Ev> {
-        let source = self.zonk_predicate(&source);
+        let source = self.zonk_predicate(source);
         let wanted = self.zonk_predicate(wanted);
 
         if source == wanted {
@@ -466,7 +467,7 @@ impl TypeChecker {
             let superclass_ev = Ev::Super(Box::new(source_ev.clone()), source.class_id, index);
 
             if let Some(evidence) = self.superclass_evidence_from_predicate(
-                superclass_pred,
+                &superclass_pred,
                 superclass_ev,
                 &wanted,
                 seen,
@@ -495,9 +496,7 @@ impl TypeChecker {
     }
     fn wanteds_error(&self, wanteds: Vec<Wanted>) -> TypeError {
         let span = wanteds
-            .first()
-            .map(|w| self.get_file_span(w.span.clone()))
-            .unwrap_or_else(|| self.get_file_span(0..0));
+            .first().map_or_else(|| self.get_file_span(0..0), |w| self.get_file_span(w.span.clone()));
 
         TypeError::UnsatisfiedConstraints {
             span,
@@ -644,15 +643,15 @@ mod entailment_tests {
             instance_with_id(
                 InstanceId(3),
                 pred(EQ, pair(a.clone(), b.clone())),
-                vec![pred(EQ, a.clone()), pred(EQ, b.clone())],
+                vec![pred(EQ, a), pred(EQ, b)],
             ),
         ];
 
         let env = TypeCheckEnv {
             names: Names::new(),
-            constructor_types: HashMap::new(),
-            func_schemes: HashMap::new(),
-            class_defs: HashMap::from([
+            constructor_types: FxHashMap::default(),
+            func_schemes: FxHashMap::default(),
+            class_defs: FxHashMap::from_iter([
                 (
                     EQ,
                     ClassDefinition {
@@ -680,7 +679,7 @@ mod entailment_tests {
             tycon_table: TyConTable::new(),
             ctor_table: CtorTable::new(),
             class_table: ClassTable::new(),
-            tycon_kinds: HashMap::new(),
+            tycon_kinds: FxHashMap::default(),
         };
 
         TypeChecker::with_env(&env, FileId(0))
@@ -706,7 +705,7 @@ mod entailment_tests {
                     vec![maybe_int],
                     vec![Ev::Inst(
                         InstanceId(1),
-                        vec![int.clone()],
+                        vec![int],
                         vec![Ev::Inst(InstanceId(0), Vec::new(), Vec::new())],
                     )],
                 )),
@@ -795,7 +794,7 @@ mod entailment_tests {
         let mut checker = tiny_checker();
         let destinations = checker.add_wanteds(vec![pred(EQ, tycon(INT))], 0..1);
         let base = elab_node(TermExpr::Unit, 0..1, Ty::TyUnit);
-        let expr = wrap_ev_apps(base, destinations, 0..1, Ty::TyUnit);
+        let expr = wrap_ev_apps(base, destinations, 0..1, &Ty::TyUnit);
 
         let unresolved = checker.unresolved_wanteds();
         assert!(unresolved.is_empty());

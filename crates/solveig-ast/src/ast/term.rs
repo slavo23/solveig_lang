@@ -1,7 +1,7 @@
 //! Checked/core term syntax, patterns, and per-module term containers.
 //! Term annotations are generic so the checker can preserve span and type metadata.
 
-use std::collections::HashMap;
+use solveig_base::FxHashMap;
 
 use solveig_base::Symbol;
 
@@ -268,9 +268,9 @@ pub struct ResolvedModule<A, P = A> {
     pub tycon_table: TyConTable,
     pub ctor_table: CtorTable,
     pub class_table: ClassTable,
-    pub tycon_kinds: HashMap<TyConId, Kind>,
-    pub constructor_types: HashMap<CtorId, Ty>,
-    pub func_schemes: HashMap<DefId, Scheme>,
+    pub tycon_kinds: FxHashMap<TyConId, Kind>,
+    pub constructor_types: FxHashMap<CtorId, Ty>,
+    pub func_schemes: FxHashMap<DefId, Scheme>,
     pub func_defs: Vec<TermDefinition<A, P>>,
 }
 

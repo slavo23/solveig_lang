@@ -1,3 +1,6 @@
+//! VM garbage collection marking and heap accounting.
+//! Allocation paths use this module to reclaim unreachable runtime objects.
+
 use super::*;
 use crate::heap::{HeapObject, IoAction, PayloadRef, PayloadStore};
 use crate::values::{GlobalSlot, ObjId, Value};
@@ -102,7 +105,9 @@ impl Vm {
                 }) => Children::Two(*captures, *applied_args),
                 Some(HeapObject::PartialCtor { applied_args, .. }) => Children::One(*applied_args),
                 Some(HeapObject::DataN { fields, .. }) => Children::One(*fields),
-                Some(HeapObject::Data0 { .. }) => Children::None,
+                Some(HeapObject::Data0 { .. }) | Some(HeapObject::Str { .. }) | None => {
+                    Children::None
+                }
                 Some(HeapObject::Data1 { field, .. }) => {
                     if let Value::Obj(child) = field {
                         mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
@@ -118,7 +123,6 @@ impl Vm {
                     }
                     Children::None
                 }
-                Some(HeapObject::Str { .. }) => Children::None,
                 Some(HeapObject::IoAction(action)) => {
                     match action {
                         IoAction::Pure(value) | IoAction::Print { text: value, .. } => {
@@ -154,7 +158,6 @@ impl Vm {
                     }
                     Children::None
                 }
-                None => Children::None,
             };
 
             let payloads = &self.heap.payloads;
@@ -201,6 +204,8 @@ fn find_ctor_tag(arities: &[CtorRuntimeInfo], ctor: CtorId) -> u16 {
     arities
         .iter()
         .find(|info| info.arity == 0 && info.ctor == ctor)
-        .map(|info| info.tag)
-        .unwrap_or_else(|| panic!("ICE: runtime constructor metadata missing CtorId {ctor:?}"))
+        .map_or_else(
+            || panic!("ICE: runtime constructor metadata missing CtorId {ctor:?}"),
+            |info| info.tag,
+        )
 }

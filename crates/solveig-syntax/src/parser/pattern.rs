@@ -1,3 +1,6 @@
+//! Pattern parser for function equations, case arms, and bindings.
+//! Later checker passes lower these patterns into coverage matrices.
+
 use super::*;
 
 impl Parser<'_> {
@@ -20,10 +23,7 @@ impl Parser<'_> {
             while self.is_pattern_arg_start() {
                 args.push(self.parse_pattern_arg()?);
             }
-            let end = args
-                .last()
-                .map(span_end)
-                .unwrap_or_else(|| span_end(&name_ref));
+            let end = args.last().map_or_else(|| span_end(&name_ref), span_end);
             Ok(sp(SurfacePattern::Con(name_ref, args), start, end))
         } else {
             self.parse_pattern_arg()

@@ -1,19 +1,28 @@
-use std::collections::HashMap;
+//! Symbol identifiers and the shared string interner.
+//!
+//! The interner gives semantic code compact copyable ids while keeping source
+//! names available for diagnostics and pretty-printing.
 
+use crate::FxHashMap;
+
+/// Interned name identifier.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Symbol(pub u32);
 
+/// Bidirectional string-to-symbol table for a single compiler session.
 #[derive(Debug, Default)]
 pub struct Interner {
     strings: Vec<String>,
-    symbols: HashMap<String, Symbol>,
+    symbols: FxHashMap<String, Symbol>,
 }
 
 impl Interner {
+    /// Create an empty interner.
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// Return the symbol for `text`, inserting it when needed.
     pub fn intern(&mut self, text: &str) -> Symbol {
         if let Some(symbol) = self.symbols.get(text) {
             return *symbol;
@@ -29,6 +38,7 @@ impl Interner {
         symbol
     }
 
+    /// Resolve a symbol back to its interned text.
     pub fn str(&self, symbol: Symbol) -> &str {
         self.strings
             .get(symbol.0 as usize)
@@ -36,10 +46,12 @@ impl Interner {
             .expect("ICE: symbol not present in interner")
     }
 
+    /// Number of distinct interned strings.
     pub fn len(&self) -> usize {
         self.strings.len()
     }
 
+    /// Whether the interner contains no strings.
     pub fn is_empty(&self) -> bool {
         self.strings.is_empty()
     }

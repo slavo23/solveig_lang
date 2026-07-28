@@ -1,3 +1,6 @@
+//! Exhaustiveness checker regression tests.
+//! These cases preserve witness rendering and unreachable-pattern behavior.
+
 use super::*;
 use crate::inference::exhaustiveness::env::instantiate_ctor_fields;
 use solveig_ast::ast::{
@@ -232,14 +235,16 @@ struct TestConstructorFixtures {
 }
 
 fn redundancy_warnings_for_patterns(patterns: Vec<Pattern<Span>>) -> Vec<TypeError> {
-    check_patterns(bool_ty(), patterns).warnings
+    let scrutinee_type = bool_ty();
+    check_patterns(&scrutinee_type, patterns).warnings
 }
 
 fn redundancy_warnings_for_maybe_bool_patterns(patterns: Vec<Pattern<Span>>) -> Vec<TypeError> {
-    check_patterns(maybe_ty(bool_ty()), patterns).warnings
+    let scrutinee_type = maybe_ty(bool_ty());
+    check_patterns(&scrutinee_type, patterns).warnings
 }
 
-fn check_patterns(scrutinee_type: Ty, patterns: Vec<Pattern<Span>>) -> CaseDiagnostics {
+fn check_patterns(scrutinee_type: &Ty, patterns: Vec<Pattern<Span>>) -> CaseDiagnostics {
     let fixtures = test_constructor_fixtures();
     let arms = patterns.into_iter().map(arm).collect::<Vec<_>>();
     let class_table = ClassTable::new();
@@ -253,7 +258,7 @@ fn check_patterns(scrutinee_type: Ty, patterns: Vec<Pattern<Span>>) -> CaseDiagn
             tycons: &fixtures.tycon_table,
             classes: &class_table,
         },
-        &scrutinee_type,
+        scrutinee_type,
         &arms,
         span(),
     )
@@ -413,7 +418,7 @@ fn test_constructor_fixtures() -> TestConstructorFixtures {
             &mut names,
             &mut tycon_table,
             &mut ctor_table,
-            data_def,
+            &data_def,
             &mut next_tag,
         );
     }
@@ -429,7 +434,7 @@ fn insert_data_definition(
     names: &mut Names,
     tycon_table: &mut TyConTable,
     ctor_table: &mut CtorTable,
-    data_def: DataDefinition,
+    data_def: &DataDefinition,
     next_tag: &mut u16,
 ) {
     let tycon = tycon_id(&data_def.short_name);

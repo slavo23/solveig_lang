@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use solveig_base::{FxHashMap, FxHashSet};
 use std::ops::Range;
 
 use solveig_ast::ast::{

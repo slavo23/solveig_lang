@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+//! Dictionary layout planning for typeclass evidence.
+//! Lowering uses these maps to turn solved instances into runtime values.
+
+use solveig_base::FxHashMap;
 
 use solveig_ast::ast::{
     ClassId, CtorId, CtorRuntimeInfo, CtorRuntimeRole, DefId, InstanceId, ResolvedModule,
@@ -27,9 +30,9 @@ pub struct DictLayout {
 
 #[derive(Clone, Debug, Default)]
 pub struct DictLayouts {
-    classes: HashMap<ClassId, DictLayout>,
-    method_classes: HashMap<DefId, ClassId>,
-    instance_globals: HashMap<InstanceId, String>,
+    classes: FxHashMap<ClassId, DictLayout>,
+    method_classes: FxHashMap<DefId, ClassId>,
+    instance_globals: FxHashMap<InstanceId, String>,
     runtime_constructors: Vec<CtorRuntimeInfo>,
 }
 
@@ -67,7 +70,7 @@ impl DictLayouts {
                 .expect("ICE: dictionary constructor id space exhausted");
 
             let name = format!("$dict.{}", class_def.name);
-            let ctor_name = format!("{}.Mk", name);
+            let ctor_name = format!("{name}.Mk");
             let short_ctor_name = format!("Mk{}Dict", class_def.short_name);
             let layout = DictLayout {
                 class_id: class_def.id,

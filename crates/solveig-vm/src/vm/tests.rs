@@ -1,3 +1,6 @@
+//! VM execution regression tests.
+//! These cases cover bytecode dispatch, closures, thunks, constructors, and IO.
+
 use super::*;
 use crate::bytecode::Instr;
 use solveig_ast::ast::{BinOp, CtorId, CtorRuntimeRole, PRIM_TYS};

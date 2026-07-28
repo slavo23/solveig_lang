@@ -1,4 +1,8 @@
-use std::collections::{BTreeSet, HashMap};
+//! Validation for checked core terms after type checking and evidence elaboration.
+//! The driver runs this before lowering to catch internal consistency errors.
+
+use solveig_base::FxHashMap;
+use std::collections::BTreeSet;
 use std::ops::Range;
 
 use solveig_ast::ast::{
@@ -19,10 +23,10 @@ struct CoreInstance {
 
 #[derive(Clone, Debug, Default)]
 pub struct CoreLintEnv {
-    file_ids: HashMap<ModuleId, FileId>,
-    func_schemes: HashMap<DefId, Scheme>,
-    class_defs: HashMap<ClassId, ClassDefinition>,
-    instances: HashMap<InstanceId, CoreInstance>,
+    file_ids: FxHashMap<ModuleId, FileId>,
+    func_schemes: FxHashMap<DefId, Scheme>,
+    class_defs: FxHashMap<ClassId, ClassDefinition>,
+    instances: FxHashMap<InstanceId, CoreInstance>,
     ctor_table: CtorTable,
     tycon_table: TyConTable,
     class_table: ClassTable,
@@ -63,7 +67,7 @@ impl CoreLintEnv {
         self
     }
 
-    pub fn with_files(mut self, files: HashMap<ModuleId, FileId>) -> Self {
+    pub fn with_files(mut self, files: FxHashMap<ModuleId, FileId>) -> Self {
         self.file_ids.extend(files);
         self
     }
@@ -114,7 +118,7 @@ pub fn lint_checked_module(module: &CheckedModule, env: &CoreLintEnv) -> Vec<Dia
     let mut linter = CoreLinter {
         env,
         diagnostics: Vec::new(),
-        evidence_env: HashMap::new(),
+        evidence_env: FxHashMap::default(),
         current_owner: None,
     };
 
@@ -125,7 +129,7 @@ pub fn lint_checked_module(module: &CheckedModule, env: &CoreLintEnv) -> Vec<Dia
 struct CoreLinter<'a> {
     env: &'a CoreLintEnv,
     diagnostics: Vec<Diagnostic>,
-    evidence_env: HashMap<EvVarId, Predicate>,
+    evidence_env: FxHashMap<EvVarId, Predicate>,
     current_owner: Option<Owner>,
 }
 
@@ -232,7 +236,7 @@ impl CoreLinter<'_> {
                         expected,
                         &actual,
                         None,
-                        format!("instance superclass evidence {}", index),
+                        &format!("instance superclass evidence {index}"),
                     );
                 }
             }
@@ -278,7 +282,7 @@ impl CoreLinter<'_> {
                 self.lint_expr(body);
             }
             TermExpr::TyAbs(_, _, body) => self.lint_expr(body),
-            TermExpr::TyApp(body, ty) => {
+            TermExpr::TyApp(body, ty) | TermExpr::Anno(body, ty) => {
                 self.lint_type(ty);
                 self.lint_expr(body);
             }
@@ -296,10 +300,6 @@ impl CoreLinter<'_> {
                 }
             }
             TermExpr::EvApp(_, _) => self.lint_ev_app_chain(expr),
-            TermExpr::Anno(body, ty) => {
-                self.lint_type(ty);
-                self.lint_expr(body);
-            }
             TermExpr::Case(scrutinee, arms) => {
                 self.lint_expr(scrutinee);
                 for arm in arms {
@@ -352,7 +352,7 @@ impl CoreLinter<'_> {
             );
         }
 
-        let mut subst = HashMap::new();
+        let mut subst = FxHashMap::default();
         for (index, ev) in evidence.iter().enumerate() {
             let Some(actual) = self.infer_ev_predicate(ev) else {
                 continue;
@@ -366,7 +366,7 @@ impl CoreLinter<'_> {
                 expected_pred,
                 &actual,
                 Some(expr.anno.span.clone()),
-                format!("evidence argument {}", index),
+                &format!("evidence argument {index}"),
             );
             match_predicate_pattern(expected_pred, &actual, &mut subst);
         }
@@ -460,7 +460,7 @@ impl CoreLinter<'_> {
                 let subst = vars
                     .into_iter()
                     .zip(ty_args.iter().cloned())
-                    .collect::<HashMap<_, _>>();
+                    .collect::<FxHashMap<_, _>>();
 
                 for (index, (expected_context, ev)) in
                     inst.context.iter().zip(sub_evidence.iter()).enumerate()
@@ -471,7 +471,7 @@ impl CoreLinter<'_> {
                             &expected,
                             &actual,
                             None,
-                            format!("instance#{} context evidence {}", instance_id.0, index),
+                            &format!("instance#{} context evidence {}", instance_id.0, index),
                         );
                     }
                 }
@@ -584,10 +584,7 @@ impl CoreLinter<'_> {
         if self.env.ctor_table.get(id).is_none() {
             self.report(
                 Some(span.clone()),
-                format!(
-                    "ICE: constructor {:?} is missing from core constructor table",
-                    id
-                ),
+                format!("ICE: constructor {id:?} is missing from core constructor table"),
             );
         }
     }
@@ -606,9 +603,9 @@ impl CoreLinter<'_> {
         expected: &Predicate,
         actual: &Predicate,
         span: Option<Range<usize>>,
-        context: String,
+        context: &str,
     ) {
-        if !match_predicate_pattern(expected, actual, &mut HashMap::new()) {
+        if !match_predicate_pattern(expected, actual, &mut FxHashMap::default()) {
             self.report(
                 span,
                 format!(
@@ -647,8 +644,7 @@ impl CoreLinter<'_> {
         let owner = self.current_owner.clone();
         let owner_name = owner
             .as_ref()
-            .map(|owner| owner.name.clone())
-            .unwrap_or_else(|| "<module>".to_string());
+            .map_or_else(|| "<module>".to_string(), |owner| owner.name.clone());
         let mut diagnostic = Diagnostic::error(
             "CORE0001",
             format!("core verification failed in `{owner_name}`"),
@@ -741,7 +737,7 @@ fn free_type_vars_in_type(ty: &Ty, out: &mut BTreeSet<TyVarId>) {
     }
 }
 
-fn subst_from_class_head(params: &[(TyVarId, Kind)], args: &[Ty]) -> HashMap<TyVarId, Ty> {
+fn subst_from_class_head(params: &[(TyVarId, Kind)], args: &[Ty]) -> FxHashMap<TyVarId, Ty> {
     params
         .iter()
         .zip(args.iter())
@@ -749,7 +745,7 @@ fn subst_from_class_head(params: &[(TyVarId, Kind)], args: &[Ty]) -> HashMap<TyV
         .collect()
 }
 
-fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, Ty>) -> Predicate {
+fn substitute_predicate(pred: &Predicate, subst: &FxHashMap<TyVarId, Ty>) -> Predicate {
     Predicate {
         class_id: pred.class_id,
         args: pred
@@ -767,7 +763,7 @@ fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, Ty>) -> Predi
 fn match_predicate_pattern(
     pattern: &Predicate,
     actual: &Predicate,
-    subst: &mut HashMap<TyVarId, Ty>,
+    subst: &mut FxHashMap<TyVarId, Ty>,
 ) -> bool {
     pattern.class_id == actual.class_id
         && pattern.args.len() == actual.args.len()
@@ -778,7 +774,7 @@ fn match_predicate_pattern(
             .all(|(pattern, actual)| match_type_pattern(pattern, actual, subst))
 }
 
-fn match_type_pattern(pattern: &Ty, actual: &Ty, subst: &mut HashMap<TyVarId, Ty>) -> bool {
+fn match_type_pattern(pattern: &Ty, actual: &Ty, subst: &mut FxHashMap<TyVarId, Ty>) -> bool {
     match pattern {
         Ty::TyVar(id) => match subst.get(id) {
             Some(existing) => existing == actual,
@@ -885,9 +881,9 @@ mod tests {
             tycon_table: TyConTable::new(),
             ctor_table: CtorTable::new(),
             class_table: ClassTable::new(),
-            tycon_kinds: HashMap::new(),
-            constructor_types: HashMap::new(),
-            func_schemes: HashMap::new(),
+            tycon_kinds: FxHashMap::default(),
+            constructor_types: FxHashMap::default(),
+            func_schemes: FxHashMap::default(),
             func_defs: vec![TermDefinition {
                 id: names.def_id("main.main"),
                 name: "main.main".to_string(),

@@ -135,14 +135,12 @@ fn preview_around(text: &str, byte_index: usize) -> String {
         .char_indices()
         .rev()
         .nth(80)
-        .map(|(index, _)| index)
-        .unwrap_or(0);
+        .map_or(0, |(index, _)| index);
 
     let end = text[byte_index.min(text.len())..]
         .char_indices()
         .nth(160)
-        .map(|(index, _)| byte_index.min(text.len()) + index)
-        .unwrap_or(text.len());
+        .map_or(text.len(), |(index, _)| byte_index.min(text.len()) + index);
 
     let prefix = if start > 0 { "..." } else { "" };
     let suffix = if end < text.len() { "..." } else { "" };

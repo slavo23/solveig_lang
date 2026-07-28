@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+//! Lowering from checked terms into VM-oriented core syntax.
+//! This pass assigns globals, lowers constructors, and prepares IO primitives.
+
+use solveig_base::FxHashMap;
 use std::rc::Rc;
 
 use solveig_ast::ast::{
@@ -20,11 +23,11 @@ enum Binding {
 struct LowerCtx {
     names: Names,
     scope: Vec<Binding>,
-    globals: HashMap<String, usize>,
-    constructors: HashMap<CtorId, LowerConstructorInfo>,
+    globals: FxHashMap<String, usize>,
+    constructors: FxHashMap<CtorId, LowerConstructorInfo>,
     dicts: DictLayouts,
     string_constants: Vec<String>,
-    string_indices: HashMap<StrLitId, u32>,
+    string_indices: FxHashMap<StrLitId, u32>,
 }
 
 #[derive(Clone, Debug)]
@@ -53,7 +56,7 @@ impl LowerCtx {
                 arity: info.arity,
             });
         }
-        panic!("ICE: unbound variable during lowering: {}", name);
+        panic!("ICE: unbound variable during lowering: {name}");
     }
 
     fn resolve_ev_var(&self, evvar: EvVarId) -> Rc<IRExpr> {
@@ -63,10 +66,7 @@ impl LowerCtx {
             }
         }
 
-        panic!(
-            "ICE: unbound evidence variable during lowering: {:?}",
-            evvar
-        );
+        panic!("ICE: unbound evidence variable during lowering: {evvar:?}");
     }
 
     fn constructor_named(&self, name: &str) -> Option<&LowerConstructorInfo> {
@@ -78,8 +78,7 @@ impl LowerCtx {
     fn constructor_name_for_error(&self, id: CtorId) -> String {
         self.constructors
             .get(&id)
-            .map(|info| info.name.clone())
-            .unwrap_or_else(|| format!("C{}", id.0))
+            .map_or_else(|| format!("C{}", id.0), |info| info.name.clone())
     }
 
     fn push_term(&mut self, name: &str) {
@@ -110,8 +109,7 @@ impl LowerCtx {
     fn push_pattern_binders<A>(&mut self, pattern: &PatternNode<A>) {
         match &pattern.node {
             Pattern::Var(name) => self.push_term(name),
-            Pattern::Wild => {}
-            Pattern::Lit(_) => {}
+            Pattern::Wild | Pattern::Lit(_) => {}
             Pattern::Con(_, sub_patterns) => {
                 for sub_pattern in sub_patterns {
                     self.push_pattern_binders(sub_pattern);
@@ -125,8 +123,7 @@ impl LowerCtx {
             Pattern::Var(_) => {
                 self.pop();
             }
-            Pattern::Lit(_) => {}
-            Pattern::Wild => {}
+            Pattern::Lit(_) | Pattern::Wild => {}
             Pattern::Con(_, sub_patterns) => {
                 for sub_pattern in sub_patterns.iter().rev() {
                     self.pop_pattern_binders(sub_pattern);
@@ -173,7 +170,7 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
         }
 
         TermExpr::TyAbs(_, _, body) => lower_expr(ctx, body),
-        TermExpr::TyApp(inner, _) => lower_expr(ctx, inner),
+        TermExpr::TyApp(inner, _) | TermExpr::Anno(inner, _) => lower_expr(ctx, inner),
         TermExpr::EvAbs(evvar, _, body) => {
             ctx.push_evidence(*evvar);
             let lowered_body = lower_expr(ctx, body);
@@ -181,8 +178,6 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
             Rc::new(IRExpr::Abs(lowered_body))
         }
         TermExpr::EvApp(inner, ev) => lower_ev_app(ctx, inner, ev),
-        TermExpr::Anno(inner, _) => lower_expr(ctx, inner),
-
         TermExpr::Case(scrutinee, arms) => {
             let lowered_scrutinee = lower_expr(ctx, scrutinee);
             let lowered_arms = arms
@@ -250,26 +245,19 @@ fn lower_ev_app<A, P>(ctx: &mut LowerCtx, inner: &TermExprNode<A, P>, ev: &Ev) -
 fn lower_ev(ctx: &mut LowerCtx, ev: &Ev) -> Rc<IRExpr> {
     match ev {
         Ev::Var(evvar) => ctx.resolve_ev_var(*evvar),
-        Ev::Placeholder(evvar) => panic!(
-            "ICE: evidence placeholder {:?} survived into lowering",
-            evvar
-        ),
+        Ev::Placeholder(evvar) => {
+            panic!("ICE: evidence placeholder {evvar:?} survived into lowering")
+        }
         Ev::Inst(instance_id, _ty_args, evidence_args) => {
             let global_name = ctx
                 .dicts
                 .instance_global(*instance_id)
                 .unwrap_or_else(|| {
-                    panic!(
-                        "ICE: missing dictionary global for instance {:?}",
-                        instance_id
-                    )
+                    panic!("ICE: missing dictionary global for instance {instance_id:?}")
                 })
                 .to_string();
             let global_index = *ctx.globals.get(&global_name).unwrap_or_else(|| {
-                panic!(
-                    "ICE: dictionary global `{}` was not registered before lowering",
-                    global_name
-                )
+                panic!("ICE: dictionary global `{global_name}` was not registered before lowering")
             });
 
             evidence_args
@@ -302,7 +290,7 @@ fn project_dict_field(
     let layout = ctx
         .dicts
         .class(class_id)
-        .unwrap_or_else(|| panic!("ICE: missing dictionary layout for class {:?}", class_id));
+        .unwrap_or_else(|| panic!("ICE: missing dictionary layout for class {class_id:?}"));
 
     project_dict_layout_field(layout, dict, field_index)
 }
@@ -469,8 +457,8 @@ fn lower_instance_dict_global<A, P>(
 fn build_constructor_table<A, P>(
     module: &ResolvedModule<A, P>,
     names: &Names,
-) -> HashMap<CtorId, LowerConstructorInfo> {
-    let mut table = HashMap::new();
+) -> FxHashMap<CtorId, LowerConstructorInfo> {
+    let mut table = FxHashMap::default();
     for data_def in &module.data_defs {
         for constructor_def in &data_def.constructors {
             let table_info = module
@@ -498,26 +486,24 @@ fn build_constructor_table<A, P>(
 }
 
 fn next_synthetic_constructor_base(
-    constructors: &HashMap<CtorId, LowerConstructorInfo>,
+    constructors: &FxHashMap<CtorId, LowerConstructorInfo>,
 ) -> (u32, u16) {
     let next_ctor = constructors
         .keys()
         .map(|ctor| ctor.0)
         .max()
-        .map(|id| {
+        .map_or(0, |id| {
             id.checked_add(1)
                 .expect("ICE: constructor id space exhausted before dictionary lowering")
-        })
-        .unwrap_or(0);
+        });
     let next_tag = constructors
         .values()
         .map(|info| info.tag)
         .max()
-        .map(|tag| {
+        .map_or(0, |tag| {
             tag.checked_add(1)
                 .expect("ICE: constructor tag space exhausted before dictionary lowering")
-        })
-        .unwrap_or(0);
+        });
 
     (next_ctor, next_tag)
 }
@@ -527,7 +513,7 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>, names: &Names) -> IRPro
     let (next_ctor_id, next_tag) = next_synthetic_constructor_base(&constructors);
     let dicts = DictLayouts::build(module, next_ctor_id, next_tag);
 
-    let mut globals: HashMap<String, usize> = HashMap::new();
+    let mut globals: FxHashMap<String, usize> = FxHashMap::default();
     for (index, func_def) in module.func_defs.iter().enumerate() {
         globals.insert(func_def.name.clone(), index);
     }
@@ -546,7 +532,7 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>, names: &Names) -> IRPro
         constructors: constructors.clone(),
         dicts: dicts.clone(),
         string_constants: Vec::new(),
-        string_indices: HashMap::new(),
+        string_indices: FxHashMap::default(),
     };
 
     let mut ir_globals = module
@@ -654,9 +640,9 @@ mod tests {
             tycon_table: TyConTable::new(),
             ctor_table: Default::default(),
             class_table: ClassTable::new(),
-            tycon_kinds: HashMap::new(),
-            constructor_types: HashMap::new(),
-            func_schemes: HashMap::new(),
+            tycon_kinds: FxHashMap::default(),
+            constructor_types: FxHashMap::default(),
+            func_schemes: FxHashMap::default(),
             func_defs: vec![TermDefinition {
                 id: names.def_id("main.main"),
                 name: "main.main".to_string(),

@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+//! Closure conversion from lowered terms into closure IR.
+//! This pass records captures and rewrites functions for the VM compiler.
+
+use solveig_base::FxHashMap;
 use std::rc::Rc;
 
 use super::closure_ir::{CCExpr, CCFunction, CCGlobalDef, CCProgram};
@@ -68,7 +71,7 @@ impl ClosureLowerer {
             .enumerate()
             .map(|(id, func)| {
                 func.unwrap_or_else(|| {
-                    panic!("ICE: missing closure-converted function for id {}", id)
+                    panic!("ICE: missing closure-converted function for id {id}")
                 })
             })
             .collect();
@@ -161,8 +164,7 @@ impl ClosureLowerer {
 
         assert!(
             self.functions[id].is_none(),
-            "duplicate closure-converted function id {}",
-            id
+            "duplicate closure-converted function id {id}"
         );
 
         self.functions[id] = Some(function);
@@ -173,7 +175,7 @@ struct ExprLowerer<'a> {
     owner_name: String,
     state: &'a mut ClosureLowerer,
     visible: Vec<VisibleBinding>,
-    capture_slots: HashMap<usize, usize>,
+    capture_slots: FxHashMap<usize, usize>,
 }
 
 impl<'a> ExprLowerer<'a> {
@@ -182,7 +184,7 @@ impl<'a> ExprLowerer<'a> {
             owner_name,
             state,
             visible: Vec::new(),
-            capture_slots: HashMap::new(),
+            capture_slots: FxHashMap::default(),
         }
     }
 
@@ -206,7 +208,7 @@ impl<'a> ExprLowerer<'a> {
             owner_name,
             state,
             visible,
-            capture_slots: HashMap::new(),
+            capture_slots: FxHashMap::default(),
         }
     }
 
@@ -370,9 +372,7 @@ impl<'a> ExprLowerer<'a> {
             .visible
             .len()
             .checked_sub(index + 1)
-            .unwrap_or_else(|| {
-                panic!("ICE: bad de Bruijn index {} during closure lowering", index)
-            });
+            .unwrap_or_else(|| panic!("ICE: bad de Bruijn index {index} during closure lowering"));
 
         match self.visible[visible_pos] {
             VisibleBinding::Local => Rc::new(CCExpr::Local(
@@ -441,8 +441,7 @@ impl<'a> ExprLowerer<'a> {
     fn push_pattern_binders(&mut self, pattern: &LowerPattern) {
         match pattern {
             LowerPattern::Var => self.push_local(),
-            LowerPattern::Wild => {}
-            LowerPattern::Lit(_) => {}
+            LowerPattern::Wild | LowerPattern::Lit(_) => {}
             LowerPattern::Con(_, sub_patterns) => {
                 for sub_pattern in sub_patterns {
                     self.push_pattern_binders(sub_pattern);
@@ -454,8 +453,7 @@ impl<'a> ExprLowerer<'a> {
     fn pop_pattern_binders(&mut self, pattern: &LowerPattern) {
         match pattern {
             LowerPattern::Var => self.pop_local(),
-            LowerPattern::Wild => {}
-            LowerPattern::Lit(_) => {}
+            LowerPattern::Wild | LowerPattern::Lit(_) => {}
             LowerPattern::Con(_, sub_patterns) => {
                 for sub_pattern in sub_patterns.iter().rev() {
                     self.pop_pattern_binders(sub_pattern);

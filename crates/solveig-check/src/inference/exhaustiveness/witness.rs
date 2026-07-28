@@ -1,3 +1,6 @@
+//! Witness pattern construction for missing case alternatives.
+//! Exhaustiveness diagnostics render these rows back into user-facing patterns.
+
 use super::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -132,10 +135,10 @@ impl Witness {
 }
 
 pub(super) fn ctor_table_short_name(names: &Names, id: CtorId, ctor_table: &CtorTable) -> String {
-    ctor_table
-        .get(id)
-        .map(|info| names.symbol_display_name(info.short_name))
-        .unwrap_or_else(|| panic!("ICE: exhaustiveness constructor table missing CtorId {id:?}"))
+    ctor_table.get(id).map_or_else(
+        || panic!("ICE: exhaustiveness constructor table missing CtorId {id:?}"),
+        |info| names.symbol_display_name(info.short_name),
+    )
 }
 
 pub(super) fn witness_to_pattern_row(witness: &[Witness]) -> Vec<Pat> {

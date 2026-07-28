@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use solveig_base::FxHashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 

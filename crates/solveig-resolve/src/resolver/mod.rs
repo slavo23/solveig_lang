@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+//! Name resolution for terms, types, constructors, classes, and modules.
+//! Included fragments share resolver state and produce checked module identities.
+
+use solveig_base::{FxHashMap, FxHashSet};
 use std::env;
 use std::ops::Range;
 
@@ -55,7 +58,7 @@ fn trace_predicates(session: &Session, module: &ModuleName, label: &str, predica
     if resolver_trace_enabled() && !predicates.is_empty() {
         let rendered = predicates
             .iter()
-            .map(|p| format!("{:?}", p))
+            .map(|p| format!("{p:?}"))
             .collect::<Vec<_>>()
             .join(", ");
 
@@ -65,8 +68,8 @@ fn trace_predicates(session: &Session, module: &ModuleName, label: &str, predica
 
 #[derive(Debug, Clone, Default)]
 pub struct ResolverImports {
-    pub tycon_kind_ids: HashMap<TyConId, Kind>,
-    pub class_param_kind_ids: HashMap<ClassId, Vec<Kind>>,
+    pub tycon_kind_ids: FxHashMap<TyConId, Kind>,
+    pub class_param_kind_ids: FxHashMap<ClassId, Vec<Kind>>,
 }
 
 #[derive(Debug)]
@@ -96,7 +99,7 @@ struct LocalResolverEnv {
     /// against the source declarations currently being resolved. Relying only on the
     /// already-built API made local class names like `Functor` leak through as raw
     /// predicate names in some paths.
-    classes: HashMap<Symbol, DefId>,
+    classes: FxHashMap<Symbol, DefId>,
 }
 
 impl LocalResolverEnv {
@@ -126,7 +129,7 @@ pub struct Resolver<'a> {
     modules: &'a ModuleTable,
     errors: Vec<ResolveError>,
     resolutions: Vec<(FileSpan, DefId)>,
-    tyvar_scopes: Vec<HashMap<Symbol, TyVarId>>,
+    tyvar_scopes: Vec<FxHashMap<Symbol, TyVarId>>,
 }
 
 impl<'a> Resolver<'a> {
@@ -172,7 +175,7 @@ impl<'a> Resolver<'a> {
         }
     }
     fn push_tyvar_scope(&mut self) {
-        self.tyvar_scopes.push(HashMap::new());
+        self.tyvar_scopes.push(FxHashMap::default());
     }
     fn pop_tyvar_scope(&mut self) {
         self.tyvar_scopes

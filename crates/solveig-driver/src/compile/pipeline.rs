@@ -99,12 +99,12 @@ struct FrontendState<'a> {
     project: &'a Project,
     parsed: &'a ParsedProject,
     builtins: Rc<BuiltinApi>,
-    apis: HashMap<ModuleName, SharedModuleApi>,
-    typed_apis: HashMap<ModuleName, SharedTypedModuleApi>,
-    resolutions: HashMap<ModuleId, Vec<(FileSpan, DefId)>>,
+    apis: FxHashMap<ModuleName, SharedModuleApi>,
+    typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
+    resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
     checked_modules: Vec<CheckedModule>,
-    checked: HashMap<ModuleId, CheckedModule>,
-    module_files: HashMap<ModuleId, FileId>,
+    checked: FxHashMap<ModuleId, CheckedModule>,
+    module_files: FxHashMap<ModuleId, FileId>,
     next_instance_id: u32,
     verify_core: bool,
 }
@@ -141,7 +141,7 @@ impl<'a> FrontendState<'a> {
         order: &[ModuleName],
         verify_core: bool,
     ) -> Result<Self, Vec<ResolveError>> {
-        let mut apis = HashMap::new();
+        let mut apis = FxHashMap::default();
         let mut errors = Vec::new();
         let builtins = Rc::new(driver_builtin_api(session, names, &project.module_table));
 
@@ -176,11 +176,11 @@ impl<'a> FrontendState<'a> {
             parsed,
             builtins,
             apis,
-            typed_apis: HashMap::new(),
-            resolutions: HashMap::new(),
+            typed_apis: FxHashMap::default(),
+            resolutions: FxHashMap::default(),
             checked_modules: Vec::new(),
-            checked: HashMap::new(),
-            module_files: HashMap::new(),
+            checked: FxHashMap::default(),
+            module_files: FxHashMap::default(),
             next_instance_id: 0,
             verify_core,
         })
@@ -197,7 +197,7 @@ impl<'a> FrontendState<'a> {
     }
 
     fn check_all(&mut self, order: &[ModuleName]) -> Option<FrontendPhase> {
-        let mut failed_modules = HashSet::new();
+        let mut failed_modules = FxHashSet::default();
         let mut first_failure: Option<FrontendPhase> = None;
 
         for module_name in order {
@@ -247,8 +247,8 @@ impl<'a> FrontendState<'a> {
     fn collect_imported_class_param_kind_ids(
         &self,
         imports: &[EffectiveImport],
-    ) -> HashMap<ClassId, Vec<solveig_ast::ast::Kind>> {
-        let mut out = HashMap::new();
+    ) -> FxHashMap<ClassId, Vec<solveig_ast::ast::Kind>> {
+        let mut out = FxHashMap::default();
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
@@ -435,8 +435,8 @@ impl<'a> FrontendState<'a> {
     fn collect_imported_kind_ids(
         &self,
         imports: &[EffectiveImport],
-    ) -> HashMap<TyConId, solveig_ast::ast::Kind> {
-        let mut out = HashMap::new();
+    ) -> FxHashMap<TyConId, solveig_ast::ast::Kind> {
+        let mut out = FxHashMap::default();
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
@@ -457,10 +457,10 @@ impl<'a> FrontendState<'a> {
 }
 
 struct ImportedTypeInfo {
-    func_schemes: HashMap<DefId, Scheme>,
-    tycon_kinds: HashMap<TyConId, solveig_ast::ast::Kind>,
-    constructor_types: HashMap<CtorId, solveig_ast::ast::Ty>,
-    class_defs: HashMap<ClassId, ClassDefinition>,
+    func_schemes: FxHashMap<DefId, Scheme>,
+    tycon_kinds: FxHashMap<TyConId, solveig_ast::ast::Kind>,
+    constructor_types: FxHashMap<CtorId, solveig_ast::ast::Ty>,
+    class_defs: FxHashMap<ClassId, ClassDefinition>,
     instance_defs: Vec<solveig_ast::ast::InstanceDefinition<TcMetadata, Range<usize>>>,
     tycon_table: TyConTable,
     ctor_table: CtorTable,
@@ -468,10 +468,10 @@ struct ImportedTypeInfo {
 }
 
 fn collect_imported_type_info(imports: &[ImportedTypedApi]) -> ImportedTypeInfo {
-    let mut func_schemes = HashMap::new();
-    let mut tycon_kinds = HashMap::new();
-    let mut constructor_types = HashMap::new();
-    let mut class_defs = HashMap::new();
+    let mut func_schemes = FxHashMap::default();
+    let mut tycon_kinds = FxHashMap::default();
+    let mut constructor_types = FxHashMap::default();
+    let mut class_defs = FxHashMap::default();
     let mut instance_defs = Vec::new();
     let mut tycon_table = TyConTable::new();
     let mut ctor_table = CtorTable::new();
@@ -523,9 +523,9 @@ pub(super) fn merge_checked_modules(
     let mut class_defs = Vec::new();
     let mut instance_defs = Vec::new();
     let mut builtin_defs = Vec::new();
-    let mut tycon_kinds = HashMap::new();
-    let mut constructor_types = HashMap::new();
-    let mut func_schemes = HashMap::new();
+    let mut tycon_kinds = FxHashMap::default();
+    let mut constructor_types = FxHashMap::default();
+    let mut func_schemes = FxHashMap::default();
     let mut func_defs = Vec::new();
 
     for m in mods {
@@ -582,8 +582,8 @@ pub(super) fn merge_checked_modules(
 }
 
 fn extend_unique_def<T>(
-    dst: &mut HashMap<DefId, T>,
-    src: HashMap<DefId, T>,
+    dst: &mut FxHashMap<DefId, T>,
+    src: FxHashMap<DefId, T>,
     label: &'static str,
     names: &Names,
 ) -> Result<(), DriverError> {
@@ -599,8 +599,8 @@ fn extend_unique_def<T>(
 }
 
 fn extend_unique_tycon(
-    dst: &mut HashMap<TyConId, solveig_ast::ast::Kind>,
-    src: HashMap<TyConId, solveig_ast::ast::Kind>,
+    dst: &mut FxHashMap<TyConId, solveig_ast::ast::Kind>,
+    src: FxHashMap<TyConId, solveig_ast::ast::Kind>,
     tycons: &TyConTable,
     names: &Names,
 ) -> Result<(), DriverError> {
@@ -616,8 +616,8 @@ fn extend_unique_tycon(
 }
 
 fn extend_unique_ctor(
-    dst: &mut HashMap<CtorId, Ty>,
-    src: HashMap<CtorId, Ty>,
+    dst: &mut FxHashMap<CtorId, Ty>,
+    src: FxHashMap<CtorId, Ty>,
     ctors: &CtorTable,
     names: &Names,
 ) -> Result<(), DriverError> {
@@ -633,15 +633,15 @@ fn extend_unique_ctor(
 }
 
 fn tycon_name_for_error(id: TyConId, tycons: &TyConTable, names: &Names) -> String {
-    tycons
-        .get(id)
-        .map(|info| names.symbol_display_name(info.name))
-        .unwrap_or_else(|| format!("T{}", id.0))
+    tycons.get(id).map_or_else(
+        || format!("T{}", id.0),
+        |info| names.symbol_display_name(info.name),
+    )
 }
 
 fn ctor_name_for_error(id: CtorId, ctors: &CtorTable, names: &Names) -> String {
-    ctors
-        .get(id)
-        .map(|info| names.symbol_display_name(info.name))
-        .unwrap_or_else(|| format!("C{}", id.0))
+    ctors.get(id).map_or_else(
+        || format!("C{}", id.0),
+        |info| names.symbol_display_name(info.name),
+    )
 }

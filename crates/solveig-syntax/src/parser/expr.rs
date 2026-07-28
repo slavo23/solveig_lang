@@ -1,3 +1,6 @@
+//! Expression parser for Solveig terms and do-notation blocks.
+//! The syntax tree produced here is still unresolved and fixity-sensitive.
+
 use super::*;
 
 impl Parser<'_> {
@@ -42,12 +45,11 @@ impl Parser<'_> {
             let start = first
                 .prefix_minuses
                 .first()
-                .map(|span| span.start as usize)
-                .unwrap_or_else(|| span_start(&first.expr));
-            let end = segments
-                .last()
-                .map(|segment| span_end(&segment.rhs.expr))
-                .unwrap_or_else(|| span_end(&first.expr));
+                .map_or_else(|| span_start(&first.expr), |span| span.start as usize);
+            let end = segments.last().map_or_else(
+                || span_end(&first.expr),
+                |segment| span_end(&segment.rhs.expr),
+            );
             Ok(sp(
                 SurfaceExpr::OpSeq(Box::new(first), segments),
                 start,
@@ -372,10 +374,7 @@ impl Parser<'_> {
             arms.push(sp(SurfaceMatchArm { pattern, expr }, start, end));
         }
 
-        let end = arms
-            .last()
-            .map(span_end)
-            .unwrap_or_else(|| span_end(&scrutinee));
+        let end = arms.last().map_or_else(|| span_end(&scrutinee), span_end);
         Ok(sp(SurfaceExpr::Case(Box::new(scrutinee), arms), start, end))
     }
 }

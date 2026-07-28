@@ -66,7 +66,7 @@ impl TypeChecker {
     ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, Ty)> {
         if arms.is_empty() {
             return Err(TypeError::EmptyCaseExpression {
-                span: self.get_file_span(span.clone()),
+                span: self.get_file_span(span),
             });
         }
 
@@ -82,7 +82,7 @@ impl TypeChecker {
 
         for (arm_index, arm) in arms.iter().enumerate() {
             let arm_marker = ContextEntry::Marker {
-                var_name: format!("case_arm#{}", arm_index),
+                var_name: format!("case_arm#{arm_index}"),
             };
 
             let arm_ctx = theta.clone().add_entry(arm_marker.clone());

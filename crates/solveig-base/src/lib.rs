@@ -1,9 +1,24 @@
+//! Shared compiler infrastructure used across Solveig crates.
+//!
+//! This crate owns source locations, diagnostics, symbol interning, and the
+//! preferred fast hash collections for compiler-internal lookup tables.
+
+/// Defines structured diagnostics emitted by compiler stages.
 pub mod diagnostics;
+/// Owns a compiler session and its source and symbol stores.
 pub mod session;
+/// Defines source files, file ids, and byte spans.
 pub mod source;
+/// Defines interned symbols and the shared string interner.
 pub mod symbol;
 
+/// Re-exports the shared diagnostic API used by frontend and checker crates.
 pub use diagnostics::{Diagnostic, DiagnosticSink, IntoDiagnostic, Label, Severity, TypeError};
+/// Re-exports the preferred hash collections for compiler-internal maps and sets.
+pub use rustc_hash::{FxHashMap, FxHashSet};
+/// Re-exports the compiler session type.
 pub use session::Session;
+/// Re-exports source-map and span types.
 pub use source::{FileId, FileSpan, SourceFile, SourceMap, Span};
+/// Re-exports symbol interning types.
 pub use symbol::{Interner, Symbol};

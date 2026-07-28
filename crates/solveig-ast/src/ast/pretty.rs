@@ -94,19 +94,17 @@ pub struct PrettyTables<'a> {
 }
 
 fn tycon_pretty_name(id: TyConId, tables: PrettyTables<'_>) -> String {
-    tables
-        .tycons
-        .get(id)
-        .map(|info| tables.names.symbol_display_name(info.short_name))
-        .unwrap_or_else(|| panic!("ICE: pretty tables missing TyConId {id:?}"))
+    tables.tycons.get(id).map_or_else(
+        || panic!("ICE: pretty tables missing TyConId {id:?}"),
+        |info| tables.names.symbol_display_name(info.short_name),
+    )
 }
 
 fn class_pretty_name(id: ClassId, tables: PrettyTables<'_>) -> String {
-    tables
-        .classes
-        .get(id)
-        .map(|info| tables.names.symbol_display_name(info.short_name))
-        .unwrap_or_else(|| panic!("ICE: pretty tables missing ClassId {id:?}"))
+    tables.classes.get(id).map_or_else(
+        || panic!("ICE: pretty tables missing ClassId {id:?}"),
+        |info| tables.names.symbol_display_name(info.short_name),
+    )
 }
 
 impl Ty {

@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+//! Hole diagnostics for unresolved source placeholders.
+//! The checker records local context and constructor hints for later reporting.
+
+use solveig_base::FxHashMap;
 
 use solveig_ast::ast::{CtorId, CtorTable, Names, PrettyTables, Ty};
 use solveig_base::FileSpan;
@@ -14,7 +17,7 @@ pub struct HoleInfo {
 impl HoleInfo {
     pub fn suggestions(
         &self,
-        constructors: &HashMap<CtorId, Ty>,
+        constructors: &FxHashMap<CtorId, Ty>,
         ctor_table: &CtorTable,
         names: &Names,
     ) -> Vec<String> {
@@ -50,12 +53,11 @@ pub fn prettify_evars(ty: &Ty) -> Ty {
 
 fn types_match(candidate: &Ty, goal: &Ty) -> bool {
     match (candidate, goal) {
-        (Ty::TyExVar(_), _) | (_, Ty::TyExVar(_)) => true,
+        (Ty::TyExVar(_), _) | (_, Ty::TyExVar(_)) | (Ty::TyUnit, Ty::TyUnit) => true,
 
         (Ty::TyForAll(_, _, body), _) => types_match(body, goal),
         (_, Ty::TyForAll(_, _, body)) => types_match(candidate, body),
 
-        (Ty::TyUnit, Ty::TyUnit) => true,
         (Ty::TyVar(a), Ty::TyVar(b)) => a == b,
         (Ty::TyCon(a), Ty::TyCon(b)) => a == b,
 
@@ -119,7 +121,7 @@ fn applications(goal: &Ty, ctx: &[(String, Ty)]) -> Vec<String> {
 fn constructor_fills(
     goal: &Ty,
     ctx: &[(String, Ty)],
-    constructors: &HashMap<CtorId, Ty>,
+    constructors: &FxHashMap<CtorId, Ty>,
     ctor_table: &CtorTable,
     names: &Names,
 ) -> Vec<String> {
@@ -157,15 +159,15 @@ fn fill_params(params: &[Ty], ctx: &[(String, Ty)]) -> Option<Vec<String>> {
 }
 
 fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable, names: &Names) -> String {
-    ctor_table
-        .get(id)
-        .map(|info| names.symbol_display_name(info.short_name))
-        .unwrap_or_else(|| panic!("ICE: hole diagnostic constructor table missing CtorId {id:?}"))
+    ctor_table.get(id).map_or_else(
+        || panic!("ICE: hole diagnostic constructor table missing CtorId {id:?}"),
+        |info| names.symbol_display_name(info.short_name),
+    )
 }
 
 pub fn hole_diagnostics(
     holes: &[HoleInfo],
-    constructor_types: &HashMap<CtorId, Ty>,
+    constructor_types: &FxHashMap<CtorId, Ty>,
     ctor_table: &CtorTable,
     tables: PrettyTables<'_>,
 ) -> Vec<Diagnostic> {
@@ -178,7 +180,7 @@ pub fn hole_diagnostics(
 impl HoleInfo {
     pub fn to_diagnostic(
         &self,
-        constructor_types: &HashMap<CtorId, Ty>,
+        constructor_types: &FxHashMap<CtorId, Ty>,
         ctor_table: &CtorTable,
         tables: PrettyTables<'_>,
     ) -> Diagnostic {
@@ -195,10 +197,10 @@ impl HoleInfo {
         if !ctx.is_empty() {
             let bindings = ctx
                 .iter()
-                .map(|(name, ty)| format!("  {} : {}", name, ty))
+                .map(|(name, ty)| format!("  {name} : {ty}"))
                 .collect::<Vec<_>>()
                 .join("\n");
-            diag = diag.with_note(format!("bindings in scope:\n{}", bindings));
+            diag = diag.with_note(format!("bindings in scope:\n{bindings}"));
         }
 
         let suggestions = self.suggestions(constructor_types, ctor_table, tables.names);
@@ -251,7 +253,7 @@ mod tests {
         );
 
         let class_table = ClassTable::new();
-        let constructors = HashMap::from([(ctor_id, widget.clone())]);
+        let constructors = FxHashMap::from_iter([(ctor_id, widget.clone())]);
         let hole = HoleInfo {
             span: FileSpan::new(FileId(0), Span::new(0, 0)),
             expected_type: widget,

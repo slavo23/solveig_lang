@@ -1,3 +1,6 @@
+//! Recursive-descent parser for Solveig modules.
+//! Child parser modules split declarations, expressions, patterns, and types.
+
 use std::cell::Ref;
 
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
@@ -241,7 +244,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn report_error(&self, error: ParseError) {
+    fn report_error(&self, error: &ParseError) {
         self.session.diagnostics().push(error.to_diagnostic());
     }
 

@@ -1,3 +1,6 @@
+//! Project dependency graph construction and topological ordering.
+//! The driver relies on this ordering before resolving and checking modules.
+
 use super::*;
 
 #[derive(Debug, Clone)]
@@ -20,12 +23,12 @@ pub struct ModuleFile {
 
 #[derive(Debug)]
 pub struct Project {
-    pub modules: HashMap<ModuleName, ModuleFile>,
+    pub modules: FxHashMap<ModuleName, ModuleFile>,
     pub module_table: ModuleTable,
 }
 
 pub struct ParsedProject {
-    pub modules: HashMap<ModuleName, ParsedModule>,
+    pub modules: FxHashMap<ModuleName, ParsedModule>,
 }
 
 impl ParsedProject {
@@ -39,8 +42,8 @@ impl ParsedProject {
 #[derive(Debug)]
 pub struct ModuleGraph {
     pub graph: DiGraph<ModuleName, ()>,
-    pub indices: HashMap<ModuleName, NodeIndex>,
-    pub import_spans: HashMap<(ModuleName, ModuleName), FileSpan>,
+    pub indices: FxHashMap<ModuleName, NodeIndex>,
+    pub import_spans: FxHashMap<(ModuleName, ModuleName), FileSpan>,
 }
 
 pub fn build_module_graph(
@@ -48,8 +51,8 @@ pub fn build_module_graph(
     project: &Project,
 ) -> Result<ModuleGraph, ResolveError> {
     let mut graph = DiGraph::<ModuleName, ()>::new();
-    let mut indices = HashMap::new();
-    let mut import_spans = HashMap::new();
+    let mut indices = FxHashMap::default();
+    let mut import_spans = FxHashMap::default();
 
     for module_name in project.modules.keys() {
         let ix = graph.add_node(module_name.clone());

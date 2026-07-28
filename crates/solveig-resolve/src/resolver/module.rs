@@ -26,7 +26,7 @@ impl<'a> Resolver<'a> {
         }
 
         let (mut data_defs, mut local_tycon_kind_ids, mut constructor_types) =
-            self.resolve_data_defs(module_name, raw_data_defs, imported)?;
+            self.resolve_data_defs(module_name, &raw_data_defs, imported)?;
         self.seed_compiler_prelude_defs(
             module_name,
             &mut data_defs,
@@ -115,8 +115,8 @@ impl<'a> Resolver<'a> {
         &self,
         module_name: &ModuleName,
         data_defs: &mut Vec<DataDefinition>,
-        local_tycon_kind_ids: &mut HashMap<TyConId, Kind>,
-        constructor_types: &mut HashMap<CtorId, Ty>,
+        local_tycon_kind_ids: &mut FxHashMap<TyConId, Kind>,
+        constructor_types: &mut FxHashMap<CtorId, Ty>,
     ) {
         if module_name.as_string(self.session) != COMPILER_PRELUDE_BUILTINS_MODULE {
             return;
@@ -131,7 +131,7 @@ impl<'a> Resolver<'a> {
     fn seed_compiler_builtin_terms(
         &self,
         cx: &ModuleContext,
-        func_schemes: &mut HashMap<DefId, Scheme>,
+        func_schemes: &mut FxHashMap<DefId, Scheme>,
         builtin_defs: &mut Vec<BuiltinDefinition>,
     ) {
         for builtin in &cx.builtins.builtin_defs {

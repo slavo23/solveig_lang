@@ -1,3 +1,6 @@
+//! Closure-converted intermediate representation.
+//! Bytecode generation consumes these terms after lambda lifting and capture analysis.
+
 use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, UnOp};
 use std::rc::Rc;
 

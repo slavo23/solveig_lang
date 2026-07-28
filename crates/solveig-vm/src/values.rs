@@ -1,3 +1,6 @@
+//! Runtime value and stack-frame representations.
+//! Bytecode dispatch reads and writes these structures during execution.
+
 use std::hash::{Hash, Hasher};
 
 #[derive(Debug, Clone, Copy)]

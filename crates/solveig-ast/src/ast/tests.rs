@@ -1,6 +1,9 @@
+//! Tests for AST identity tables and pretty-printing helpers.
+//! These cases lock down stable IDs that later compiler stages depend on.
+
 use super::*;
+use solveig_base::FxHashMap;
 use solveig_base::{Session, Symbol};
-use std::collections::HashMap;
 
 #[test]
 fn identity_tables_allocate_dense_stable_ids() {
@@ -127,12 +130,9 @@ fn names_table_preserves_type_constructor_names() {
     assert_eq!(names.tycon_id(name), id);
     assert_ne!(names.tycon_id("test.module.OtherWidget"), id);
     assert_eq!(names.tycon_display_name(id), name);
+    assert_eq!(Ty::make_named_con(&mut names, name), Ty::TyCon(id));
     assert_eq!(
-        Ty::make_named_con(&mut names, name.to_string()),
-        Ty::TyCon(id)
-    );
-    assert_eq!(
-        Ty::make_named_con(&mut names, name.to_string()).pretty(),
+        Ty::make_named_con(&mut names, name).pretty(),
         format!("T{}", id.0)
     );
 }
@@ -157,12 +157,9 @@ fn names_table_preserves_class_names() {
     assert_eq!(names.class_id(name), id);
     assert_ne!(names.class_id("test.module.OtherClass"), id);
     assert_eq!(names.class_display_name(id), name);
+    assert_eq!(Predicate::named(&mut names, name, Vec::new()).class_id, id);
     assert_eq!(
-        Predicate::named(&mut names, name.to_string(), Vec::new()).class_id,
-        id
-    );
-    assert_eq!(
-        Predicate::named(&mut names, name.to_string(), Vec::new()).pretty(),
+        Predicate::named(&mut names, name, Vec::new()).pretty(),
         format!("K{}", id.0)
     );
 }
@@ -187,10 +184,7 @@ fn resolved_module_rebuilds_identity_tables_for_named_ids() {
             name: ctor_name.to_string(),
             short_name: "MkWidget".to_string(),
             fields: vec![Ty::TyUnit],
-            full_type: Ty::make_arr(
-                Ty::TyUnit,
-                Ty::make_named_con(&mut names, tycon_name.to_string()),
-            ),
+            full_type: Ty::make_arr(Ty::TyUnit, Ty::make_named_con(&mut names, tycon_name)),
         }],
     };
 
@@ -211,9 +205,9 @@ fn resolved_module_rebuilds_identity_tables_for_named_ids() {
         tycon_table: TyConTable::new(),
         ctor_table: CtorTable::new(),
         class_table: ClassTable::new(),
-        tycon_kinds: HashMap::new(),
-        constructor_types: HashMap::new(),
-        func_schemes: HashMap::new(),
+        tycon_kinds: FxHashMap::default(),
+        constructor_types: FxHashMap::default(),
+        func_schemes: FxHashMap::default(),
         func_defs: Vec::new(),
     };
 

@@ -79,7 +79,7 @@ impl TypeChecker {
                     .add_entry(ContextEntry::ExVar(fresh_evar, kind.clone()));
 
                 let ty_arg = Self::evar_type(fresh_evar);
-                let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
+                let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                 let instantiated_body = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds
@@ -155,6 +155,8 @@ impl TypeChecker {
 
         Ok((func_kind, arg_kind))
     }
+    // DK 2013, Fig. 10, InstL/InstR; Solveig decomposes arrows and type
+    // applications by solving the existential at its ordered context position.
     fn instantiate_left(
         &mut self,
         ctx: Context,
@@ -388,7 +390,7 @@ impl TypeChecker {
                     .add_entry(ContextEntry::ExVar(fresh_evar, kind.clone()));
 
                 let ty_arg = Self::evar_type(fresh_evar);
-                let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
+                let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                 let instantiated = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds
@@ -427,7 +429,7 @@ impl TypeChecker {
                 let fresh_evar = self.fresh_evar_id();
                 let new_ctx = ctx.add_entry(ContextEntry::ExVar(fresh_evar, kind.clone()));
                 let ty_arg = Self::evar_type(fresh_evar);
-                let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
+                let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                 let instantiated = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds

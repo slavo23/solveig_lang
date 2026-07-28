@@ -1,3 +1,6 @@
+//! Surface syntax tree for parsed Solveig modules.
+//! The parser produces these nodes before fixity resolution and name resolution.
+
 use std::cell::Ref;
 
 use solveig_base::{FileId, Session, Span, Symbol};

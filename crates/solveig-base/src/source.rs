@@ -1,3 +1,6 @@
+//! Source file storage, file identifiers, and byte spans.
+//! Compiler stages use these ids to preserve locations without owning source text.
+
 use std::ops::Range;
 use std::path::PathBuf;
 

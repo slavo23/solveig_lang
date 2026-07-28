@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+//! Kind inference for typeclass declarations and superclass predicates.
+//! This pass shares kind unification machinery with signatures and data definitions.
+
+use solveig_base::FxHashMap;
 
 use solveig_ast::ast::{
     ClassDefinition, ClassId, Kind, KindMetaId, Predicate, Scheme, Ty, TyConId, TyVarId,
@@ -9,16 +12,19 @@ use crate::signature_infer::KindError;
 
 pub struct ClassKindInferencer {
     next_meta: u32,
-    subst: HashMap<KindMetaId, Kind>,
-    tycon_env: HashMap<TyConId, Kind>,
-    class_env: HashMap<ClassId, Vec<Kind>>,
+    subst: FxHashMap<KindMetaId, Kind>,
+    tycon_env: FxHashMap<TyConId, Kind>,
+    class_env: FxHashMap<ClassId, Vec<Kind>>,
 }
 
 impl ClassKindInferencer {
-    pub fn new(tycon_env: HashMap<TyConId, Kind>, class_env: HashMap<ClassId, Vec<Kind>>) -> Self {
+    pub fn new(
+        tycon_env: FxHashMap<TyConId, Kind>,
+        class_env: FxHashMap<ClassId, Vec<Kind>>,
+    ) -> Self {
         Self {
             next_meta: 0,
-            subst: HashMap::new(),
+            subst: FxHashMap::default(),
             tycon_env,
             class_env,
         }
@@ -52,8 +58,8 @@ impl ClassKindInferencer {
         }
     }
 
-    fn bind_meta(&mut self, var: KindMetaId, kind: Kind) -> Result<(), KindError> {
-        let kind = self.apply_kind(&kind);
+    fn bind_meta(&mut self, var: KindMetaId, kind: &Kind) -> Result<(), KindError> {
+        let kind = self.apply_kind(kind);
 
         if kind == Kind::Meta(var) {
             return Ok(());
@@ -67,18 +73,17 @@ impl ClassKindInferencer {
         Ok(())
     }
 
-    fn unify(&mut self, lhs: Kind, rhs: Kind) -> Result<(), KindError> {
-        let lhs = self.apply_kind(&lhs);
-        let rhs = self.apply_kind(&rhs);
+    fn unify(&mut self, lhs: &Kind, rhs: &Kind) -> Result<(), KindError> {
+        let lhs = self.apply_kind(lhs);
+        let rhs = self.apply_kind(rhs);
 
         match (lhs, rhs) {
             (Kind::Star, Kind::Star) => Ok(()),
             (Kind::Meta(left), Kind::Meta(right)) if left == right => Ok(()),
-            (Kind::Meta(v), other) => self.bind_meta(v, other),
-            (other, Kind::Meta(v)) => self.bind_meta(v, other),
+            (Kind::Meta(v), other) | (other, Kind::Meta(v)) => self.bind_meta(v, &other),
             (Kind::Arrow(l1, r1), Kind::Arrow(l2, r2)) => {
-                self.unify(*l1, *l2)?;
-                self.unify(*r1, *r2)
+                self.unify(&l1, &l2)?;
+                self.unify(&r1, &r2)
             }
             (lhs, rhs) => Err(KindError::cannot_unify(lhs, rhs)),
         }
@@ -86,8 +91,7 @@ impl ClassKindInferencer {
 
     fn default_unsolved(kind: Kind) -> Kind {
         match kind {
-            Kind::Meta(_) => Kind::Star,
-            Kind::Star => Kind::Star,
+            Kind::Meta(_) | Kind::Star => Kind::Star,
             Kind::Arrow(lhs, rhs) => {
                 Kind::make_arrow(Self::default_unsolved(*lhs), Self::default_unsolved(*rhs))
             }
@@ -101,18 +105,16 @@ impl ClassKindInferencer {
     fn infer_type_kind(
         &mut self,
         ty: &Ty,
-        env: &mut HashMap<TyVarId, Kind>,
+        env: &mut FxHashMap<TyVarId, Kind>,
     ) -> Result<Kind, KindError> {
         match ty {
-            Ty::TyUnit => Ok(Kind::Star),
+            Ty::TyUnit | Ty::TyExVar(_) => Ok(Kind::Star),
 
             Ty::TyVar(id) => env
                 .get(id)
                 .cloned()
                 .map(|k| self.apply_kind(&k))
                 .ok_or_else(|| KindError::unbound_type_variable(tyvar_display_name(*id))),
-
-            Ty::TyExVar(_) => Ok(Kind::Star),
 
             Ty::TyCon(id) => self
                 .tycon_env
@@ -124,8 +126,8 @@ impl ClassKindInferencer {
             Ty::TyArr(lhs, rhs) => {
                 let lhs_kind = self.infer_type_kind(lhs, env)?;
                 let rhs_kind = self.infer_type_kind(rhs, env)?;
-                self.unify(lhs_kind, Kind::Star)?;
-                self.unify(rhs_kind, Kind::Star)?;
+                self.unify(&lhs_kind, &Kind::Star)?;
+                self.unify(&rhs_kind, &Kind::Star)?;
                 Ok(Kind::Star)
             }
 
@@ -142,7 +144,7 @@ impl ClassKindInferencer {
                 let rhs_kind = self.infer_type_kind(rhs, env)?;
                 let result_kind = self.fresh_meta();
 
-                self.unify(lhs_kind, Kind::make_arrow(rhs_kind, result_kind.clone()))?;
+                self.unify(&lhs_kind, &Kind::make_arrow(rhs_kind, result_kind.clone()))?;
                 Ok(self.apply_kind(&result_kind))
             }
 
@@ -157,7 +159,7 @@ impl ClassKindInferencer {
                 }
 
                 let body_kind = self.infer_type_kind(body, env)?;
-                self.unify(body_kind, Kind::Star)?;
+                self.unify(&body_kind, &Kind::Star)?;
 
                 for (name, old) in old_bindings.into_iter().rev() {
                     match old {
@@ -175,7 +177,7 @@ impl ClassKindInferencer {
         }
     }
 
-    fn zonk_type_with_env(&self, ty: &Ty, env: &HashMap<TyVarId, Kind>) -> Ty {
+    fn zonk_type_with_env(&self, ty: &Ty, env: &FxHashMap<TyVarId, Kind>) -> Ty {
         match ty {
             Ty::TyUnit => Ty::TyUnit,
             Ty::TyVar(id) => Ty::TyVar(*id),
@@ -195,8 +197,7 @@ impl ClassKindInferencer {
                     .map(|(name, _)| {
                         let kind = env
                             .get(name)
-                            .map(|k| self.zonk_kind_for_binder(k))
-                            .unwrap_or(Kind::Star);
+                            .map_or(Kind::Star, |k| self.zonk_kind_for_binder(k));
                         (*name, kind)
                     })
                     .collect(),
@@ -209,7 +210,11 @@ impl ClassKindInferencer {
         }
     }
 
-    fn zonk_predicate_with_env(&self, pred: &Predicate, env: &HashMap<TyVarId, Kind>) -> Predicate {
+    fn zonk_predicate_with_env(
+        &self,
+        pred: &Predicate,
+        env: &FxHashMap<TyVarId, Kind>,
+    ) -> Predicate {
         Predicate {
             class_id: pred.class_id,
             args: pred
@@ -223,7 +228,7 @@ impl ClassKindInferencer {
     fn check_predicate(
         &mut self,
         pred: &Predicate,
-        env: &mut HashMap<TyVarId, Kind>,
+        env: &mut FxHashMap<TyVarId, Kind>,
     ) -> Result<Predicate, KindError> {
         let expected_kinds =
             self.class_env.get(&pred.class_id).cloned().ok_or_else(|| {
@@ -239,7 +244,7 @@ impl ClassKindInferencer {
 
         for (arg, expected_kind) in pred.args.iter().zip(expected_kinds.iter()) {
             let actual_kind = self.infer_type_kind(arg, env)?;
-            self.unify(actual_kind, expected_kind.clone())?;
+            self.unify(&actual_kind, expected_kind)?;
         }
 
         Ok(self.zonk_predicate_with_env(pred, env))
@@ -248,7 +253,7 @@ impl ClassKindInferencer {
     fn infer_scheme(
         &mut self,
         scheme: &Scheme,
-        outer_env: &HashMap<TyVarId, Kind>,
+        outer_env: &FxHashMap<TyVarId, Kind>,
     ) -> Result<Scheme, KindError> {
         let mut env = outer_env.clone();
 
@@ -261,7 +266,7 @@ impl ClassKindInferencer {
         }
 
         let body_kind = self.infer_type_kind(&scheme.ty, &mut env)?;
-        self.unify(body_kind, Kind::Star)?;
+        self.unify(&body_kind, &Kind::Star)?;
 
         let quantifiers = scheme
             .quantifiers
@@ -269,8 +274,7 @@ impl ClassKindInferencer {
             .map(|(name, _)| {
                 let kind = env
                     .get(name)
-                    .map(|k| self.zonk_kind_for_binder(k))
-                    .unwrap_or(Kind::Star);
+                    .map_or(Kind::Star, |k| self.zonk_kind_for_binder(k));
                 (*name, kind)
             })
             .collect::<Vec<_>>();
@@ -294,7 +298,7 @@ impl ClassKindInferencer {
         mut self,
         class_def: &ClassDefinition,
     ) -> Result<ClassDefinition, KindError> {
-        let mut env = HashMap::<TyVarId, Kind>::new();
+        let mut env = FxHashMap::<TyVarId, Kind>::default();
 
         for (id, _kind) in &class_def.params {
             env.insert(*id, self.fresh_meta());
@@ -327,8 +331,7 @@ impl ClassKindInferencer {
             .map(|(id, _)| {
                 let kind = env
                     .get(id)
-                    .map(|k| self.zonk_kind_for_binder(k))
-                    .unwrap_or(Kind::Star);
+                    .map_or(Kind::Star, |k| self.zonk_kind_for_binder(k));
                 (*id, kind)
             })
             .collect::<Vec<_>>();
@@ -391,8 +394,8 @@ mod tests {
         };
 
         let inferred = ClassKindInferencer::new(
-            HashMap::from([(tycon_id, Kind::Star)]),
-            HashMap::from([(superclass_id, vec![Kind::Star])]),
+            FxHashMap::from_iter([(tycon_id, Kind::Star)]),
+            FxHashMap::from_iter([(superclass_id, vec![Kind::Star])]),
         )
         .infer_class(&class_def)
         .expect("ICE: ID-keyed class kind environment should resolve test IDs");

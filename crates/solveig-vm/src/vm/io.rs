@@ -1,3 +1,6 @@
+//! Runtime IO action representation and execution.
+//! Builtin IO values are interpreted here against files, stdin, stdout, and args.
+
 use super::*;
 use crate::builtins::VmCtx;
 use crate::bytecode::BytecodeProgram;

@@ -1,3 +1,6 @@
+//! Function, closure, constructor, and builtin invocation support.
+//! Dispatch delegates call setup here when bytecode applies runtime values.
+
 use super::*;
 use crate::builtins::{self, VmCtx};
 use crate::bytecode::{BytecodeProgram, ChunkKind};
@@ -79,8 +82,7 @@ impl Vm {
                 let name = program
                     .globals
                     .get(index)
-                    .map(|global| global.name.as_str())
-                    .unwrap_or("<unknown>");
+                    .map_or("<unknown>", |global| global.name.as_str());
                 return Err(RuntimeError::cyclic_global(name));
             }
             GlobalSlot::Thunk { chunk } => *chunk,
@@ -238,8 +240,7 @@ impl Vm {
 
         if capture_count != 0 {
             panic!(
-                "ICE: known call to captured function chunk {} (captures {}, arity {})",
-                chunk_id, capture_count, arity
+                "ICE: known call to captured function chunk {chunk_id} (captures {capture_count}, arity {arity})"
             );
         }
 
@@ -249,9 +250,9 @@ impl Vm {
         } else if arg_count < arity {
             if arg_count == 0 {
                 let chunk = u32::try_from(chunk_id)
-                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk_id));
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {chunk_id} does not fit in u32"));
                 let arity = u16::try_from(arity)
-                    .unwrap_or_else(|_| panic!("ICE: arity {} does not fit in u16", arity));
+                    .unwrap_or_else(|_| panic!("ICE: arity {arity} does not fit in u16"));
 
                 Some(Value::FunctionRef { chunk, arity })
             } else {
@@ -266,8 +267,7 @@ impl Vm {
             }
         } else {
             panic!(
-                "ICE: over-application of known function chunk {} (arity {}, got {})",
-                chunk_id, arity, arg_count
+                "ICE: over-application of known function chunk {chunk_id} (arity {arity}, got {arg_count})"
             );
         }
     }
@@ -316,8 +316,7 @@ impl Vm {
                     }))
                 } else {
                     panic!(
-                        "ICE: over-application of function reference (arity {}, got {})",
-                        arity, arg_count
+                        "ICE: over-application of function reference (arity {arity}, got {arg_count})"
                     );
                 }
             }
@@ -372,10 +371,7 @@ impl Vm {
                         applied_args,
                     }))
                 } else {
-                    panic!(
-                        "ICE: over-application of closure (arity {}, got {})",
-                        arity, arg_count
-                    );
+                    panic!("ICE: over-application of closure (arity {arity}, got {arg_count})");
                 }
             }
 
@@ -417,10 +413,7 @@ impl Vm {
                         applied_args,
                     }))
                 } else {
-                    panic!(
-                        "ICE: over-application of partial (arity {}, got {})",
-                        arity, total
-                    );
+                    panic!("ICE: over-application of partial (arity {arity}, got {total})");
                 }
             }
 
@@ -434,7 +427,7 @@ impl Vm {
             | HeapObject::Data1 { tag, .. }
             | HeapObject::Data2 { tag, .. }
             | HeapObject::DataN { tag, .. } => {
-                panic!("ICE: cannot apply saturated constructor tag {}", tag);
+                panic!("ICE: cannot apply saturated constructor tag {tag}");
             }
 
             HeapObject::Str { .. } => {
@@ -495,7 +488,7 @@ impl Vm {
                 applied_args,
             })
         } else {
-            panic!("ICE: over-applied constructor tag {}", tag);
+            panic!("ICE: over-applied constructor tag {tag}");
         }
     }
 

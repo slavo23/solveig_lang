@@ -64,8 +64,8 @@ impl CheckResult {
 #[derive(Clone, Debug)]
 pub(super) struct CompilationArtifacts {
     pub(super) names: Names,
-    pub(super) checked: HashMap<ModuleId, CheckedModule>,
-    pub(super) module_files: HashMap<ModuleId, FileId>,
+    pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
+    pub(super) module_files: FxHashMap<ModuleId, FileId>,
     pub(super) source_files: Vec<SourceFile>,
     pub(super) tycon_table: TyConTable,
     pub(super) class_table: ClassTable,
@@ -75,8 +75,8 @@ pub(super) struct CompilationArtifacts {
 pub(super) struct CheckedProject {
     pub(super) names: Names,
     pub(super) modules: Vec<CheckedModule>,
-    pub(super) checked: HashMap<ModuleId, CheckedModule>,
-    pub(super) module_files: HashMap<ModuleId, FileId>,
+    pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
+    pub(super) module_files: FxHashMap<ModuleId, FileId>,
     pub(super) source_files: Vec<SourceFile>,
 }
 

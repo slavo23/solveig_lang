@@ -12,3 +12,6 @@ solveig-report = { path = "../solveig-report", version = "0.1.0" }
 solveig-resolve = { path = "../solveig-resolve", version = "0.1.0" }
 solveig-syntax = { path = "../solveig-syntax", version = "0.1.0" }
 solveig-vm = { path = "../solveig-vm", version = "0.1.0" }
+
+[lints]
+workspace = true

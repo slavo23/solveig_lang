@@ -5,3 +5,6 @@ edition = "2024"
 
 [dependencies]
 solveig-base = { path = "../solveig-base", version = "0.1.0" }
+
+[lints]
+workspace = true

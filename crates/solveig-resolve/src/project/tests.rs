@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+//! Project API and module-table regression tests.
+//! These cases protect cross-module identity and display behavior.
+
+use solveig_base::FxHashMap;
 
 use solveig_ast::ast::{
     ConstructorDef, CtorInfo, DataDefinition, Names, ResolvedModule, TyConDefinition, TyConId,
@@ -38,7 +41,7 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
     let type_name = "sample.Widget";
     let ctor_name = "sample.MkWidget";
     let widget_ty = Ty::TyCon(tycon_id);
-    let ctor_ty = Ty::make_arr(Ty::TyUnit, widget_ty.clone());
+    let ctor_ty = Ty::make_arr(Ty::TyUnit, widget_ty);
 
     let data_def = DataDefinition {
         name: type_name.to_string(),
@@ -86,9 +89,9 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
         tycon_table,
         ctor_table,
         class_table: ClassTable::new(),
-        tycon_kinds: HashMap::from([(tycon_id, Kind::Star)]),
-        constructor_types: HashMap::from([(ctor_id, ctor_ty.clone())]),
-        func_schemes: HashMap::new(),
+        tycon_kinds: FxHashMap::from_iter([(tycon_id, Kind::Star)]),
+        constructor_types: FxHashMap::from_iter([(ctor_id, ctor_ty.clone())]),
+        func_schemes: FxHashMap::default(),
         func_defs: Vec::new(),
     };
 
@@ -100,10 +103,10 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
     assert_eq!(api.constructor_ids.get(&ctor_def), Some(&ctor_id));
     assert_eq!(api.type_name(&names, type_def).as_deref(), Some(type_name));
 
-    let mut tycon_kinds = HashMap::new();
-    let mut constructor_types = HashMap::new();
-    let mut func_schemes = HashMap::new();
-    let mut class_defs = HashMap::new();
+    let mut tycon_kinds = FxHashMap::default();
+    let mut constructor_types = FxHashMap::default();
+    let mut func_schemes = FxHashMap::default();
+    let mut class_defs = FxHashMap::default();
     let mut imported_tycons = TyConTable::new();
     let mut imported_ctors = CtorTable::new();
     let mut imported_classes = ClassTable::new();

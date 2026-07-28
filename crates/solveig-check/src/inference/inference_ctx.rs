@@ -1,5 +1,8 @@
+//! Ordered algorithmic context for bidirectional type checking.
+//! Subtyping, instantiation, and evidence solving share this scoped state.
+
 use solveig_ast::ast::{EvarId, Kind, Predicate, Pretty, Ty, TyConId, TyVarId, tyvar_display_name};
-use std::collections::HashMap;
+use solveig_base::FxHashMap;
 use std::iter::successors;
 
 #[derive(Clone, PartialEq, Debug)]
@@ -106,7 +109,7 @@ impl Context {
         if let Some(position) = new_entries.iter().rposition(|ent| ent == target) {
             new_entries[position] = replacement.clone();
         } else {
-            panic!("ICE: replace target {:?} not found in context", target);
+            panic!("ICE: replace target {target:?} not found in context");
         }
         Context {
             entries: new_entries,
@@ -126,7 +129,7 @@ impl Context {
                 (left, middle, right)
             }
             None => {
-                panic!("ICE: split_at target {:?} not found in context", on_entry);
+                panic!("ICE: split_at target {on_entry:?} not found in context");
             }
         }
     }
@@ -217,11 +220,11 @@ impl Context {
     pub fn kind_of_type(
         &self,
         ty: &Ty,
-        tycon_kinds: &HashMap<TyConId, Kind>,
+        tycon_kinds: &FxHashMap<TyConId, Kind>,
     ) -> Result<Kind, String> {
         let ty = self.apply(ty);
         match &ty {
-            Ty::TyUnit => Ok(Kind::Star),
+            Ty::TyUnit | Ty::TyArr(_, _) => Ok(Kind::Star),
 
             Ty::TyCon(id) => tycon_kinds
                 .get(id)
@@ -235,8 +238,6 @@ impl Context {
             Ty::TyExVar(id) => self
                 .evar_kind_id(*id)
                 .ok_or_else(|| format!("unknown existential: ?{}", id.0)),
-
-            Ty::TyArr(_, _) => Ok(Kind::Star),
 
             Ty::TyForAll(binders, preds, body) => {
                 let mut extended = self.clone();
@@ -366,7 +367,7 @@ mod tests {
     fn type_constructor_kinds_are_keyed_by_id() {
         let list_id = TyConId(7);
         let other_id = TyConId(8);
-        let mut tycon_kinds = HashMap::new();
+        let mut tycon_kinds = FxHashMap::default();
         tycon_kinds.insert(list_id, Kind::make_arrow(Kind::Star, Kind::Star));
 
         let ctx = Context::new();

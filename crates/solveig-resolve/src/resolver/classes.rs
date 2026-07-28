@@ -122,7 +122,7 @@ impl<'a> Resolver<'a> {
     fn class_param_kind_env(
         imported: &ResolverImports,
         class_defs: &[ClassDefinition],
-    ) -> HashMap<ClassId, Vec<Kind>> {
+    ) -> FxHashMap<ClassId, Vec<Kind>> {
         let mut class_env = imported.class_param_kind_ids.clone();
 
         class_env.extend(class_defs.iter().map(|class_def| {
@@ -142,8 +142,8 @@ impl<'a> Resolver<'a> {
         &self,
         context: Vec<Predicate>,
         head: Predicate,
-        all_tycon_kinds: &HashMap<TyConId, Kind>,
-        class_env: &HashMap<ClassId, Vec<Kind>>,
+        all_tycon_kinds: &FxHashMap<TyConId, Kind>,
+        class_env: &FxHashMap<ClassId, Vec<Kind>>,
     ) -> Result<(Vec<Predicate>, Predicate), KindError> {
         let context_len = context.len();
 
@@ -206,7 +206,7 @@ impl<'a> Resolver<'a> {
             .iter()
             .map(|arg| self.resolve_surface_type_in_module(arg, cx, local))
             .collect();
-        let resolved = Predicate::named(self.names, resolved_class_name, args);
+        let resolved = Predicate::named(self.names, &resolved_class_name, args);
 
         self.canonicalize_predicate(resolved, cx, local)
     }
@@ -217,7 +217,7 @@ impl<'a> Resolver<'a> {
         cx: &ModuleContext,
         imported: &ResolverImports,
         local: &LocalResolverEnv,
-        all_tycon_kinds: &HashMap<TyConId, Kind>,
+        all_tycon_kinds: &FxHashMap<TyConId, Kind>,
     ) -> Result<Vec<ClassDefinition>, KindError> {
         let raw_class_defs = parsed
             .defs
@@ -250,7 +250,7 @@ impl<'a> Resolver<'a> {
 
                     let class_head_pred = Predicate::named(
                         self.names,
-                        class_name.clone(),
+                        &class_name,
                         class_params
                             .iter()
                             .map(|(param, _)| Ty::TyVar(*param))
@@ -265,7 +265,7 @@ impl<'a> Resolver<'a> {
                     trace_predicates(
                         self.session,
                         module_name,
-                        &format!("class {} superclasses", class_name),
+                        &format!("class {class_name} superclasses"),
                         &resolved_superclasses,
                     );
 
@@ -445,12 +445,12 @@ impl<'a> Resolver<'a> {
         parsed: &ParsedModule,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-        all_tycon_kinds: &HashMap<TyConId, Kind>,
-        class_env: &HashMap<ClassId, Vec<Kind>>,
+        all_tycon_kinds: &FxHashMap<TyConId, Kind>,
+        class_env: &FxHashMap<ClassId, Vec<Kind>>,
     ) -> Result<Vec<InstanceDefinition<Span>>, KindError> {
         let mut instance_defs = Vec::new();
 
-        for defn in parsed.defs.iter() {
+        for defn in &parsed.defs {
             let SurfaceDefinition::InstanceDef {
                 context,
                 class_name,
@@ -482,7 +482,7 @@ impl<'a> Resolver<'a> {
                 .iter()
                 .map(|arg| self.resolve_surface_type_in_module(arg, cx, local))
                 .collect();
-            let raw_head = Predicate::named(self.names, resolved_class_name, resolved_args);
+            let raw_head = Predicate::named(self.names, &resolved_class_name, resolved_args);
 
             let raw_head = self.canonicalize_predicate(raw_head, cx, local);
 

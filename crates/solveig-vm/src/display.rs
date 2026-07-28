@@ -1,3 +1,6 @@
+//! Runtime value rendering for CLI and test output.
+//! The VM uses this when values escape through printing or captured results.
+
 use crate::heap::{Heap, HeapObject};
 use crate::values::Value;
 use solveig_ast::ast::CtorRuntimeInfo;
@@ -18,8 +21,7 @@ fn tag_name(arities: &[CtorRuntimeInfo], tag: u16) -> String {
     arities
         .iter()
         .find(|info| info.tag == tag)
-        .map(|info| info.short_name.clone())
-        .unwrap_or_else(|| "<?>".to_string())
+        .map_or_else(|| "<?>".to_string(), |info| info.short_name.clone())
 }
 
 impl DisplayValue<'_> {
@@ -42,7 +44,7 @@ impl DisplayValue<'_> {
                     let applied_args = self.heap.payloads.as_slice(*applied_args);
 
                     if applied_args.is_empty() {
-                        format!("<partial {}>", name)
+                        format!("<partial {name}>")
                     } else {
                         format!("<partial {} {}>", name, self.render_args(applied_args))
                     }
@@ -85,11 +87,7 @@ impl DisplayValue<'_> {
 
     fn render_atom(&self, val: Value) -> String {
         let s = self.render(val);
-        if s.contains(' ') {
-            format!("({})", s)
-        } else {
-            s
-        }
+        if s.contains(' ') { format!("({s})") } else { s }
     }
 
     fn render_args(&self, vals: &[Value]) -> String {

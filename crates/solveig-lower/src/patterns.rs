@@ -15,8 +15,7 @@ impl LowerPattern {
     pub fn binder_count(&self) -> usize {
         match self {
             LowerPattern::Var => 1,
-            LowerPattern::Wild => 0,
-            LowerPattern::Lit(_) => 0,
+            LowerPattern::Wild | LowerPattern::Lit(_) => 0,
             LowerPattern::Con(_, sub_patterns) => {
                 sub_patterns.iter().map(|p| p.binder_count()).sum()
             }

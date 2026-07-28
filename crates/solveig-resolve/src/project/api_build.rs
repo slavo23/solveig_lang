@@ -1,3 +1,6 @@
+//! Module API construction from parsed declarations.
+//! The resolver uses these APIs for imports, duplicate detection, and visibility.
+
 use super::*;
 
 fn file_span(file: FileId, span: Span) -> FileSpan {
@@ -5,7 +8,7 @@ fn file_span(file: FileId, span: Span) -> FileSpan {
 }
 
 fn check_duplicate(
-    seen: &mut HashMap<Symbol, FileSpan>,
+    seen: &mut FxHashMap<Symbol, FileSpan>,
     file: FileId,
     span: Span,
     kind: ResolveNameKind,
@@ -29,12 +32,12 @@ pub fn build_module_api(
     parsed: &ParsedModule,
 ) -> Result<ModuleApi, ResolveError> {
     let mut api = ModuleApi::default();
-    let mut term_defs = HashMap::<Symbol, FileSpan>::new();
-    let mut term_sigs = HashMap::<Symbol, FileSpan>::new();
-    let mut types = HashMap::<Symbol, FileSpan>::new();
-    let mut seen_constructors = HashMap::<Symbol, FileSpan>::new();
-    let mut classes = HashMap::<Symbol, FileSpan>::new();
-    let mut fixity_defs = HashMap::<Symbol, FileSpan>::new();
+    let mut term_defs = FxHashMap::<Symbol, FileSpan>::default();
+    let mut term_sigs = FxHashMap::<Symbol, FileSpan>::default();
+    let mut types = FxHashMap::<Symbol, FileSpan>::default();
+    let mut seen_constructors = FxHashMap::<Symbol, FileSpan>::default();
+    let mut classes = FxHashMap::<Symbol, FileSpan>::default();
+    let mut fixity_defs = FxHashMap::<Symbol, FileSpan>::default();
 
     for def in &parsed.defs {
         match &def.0 {

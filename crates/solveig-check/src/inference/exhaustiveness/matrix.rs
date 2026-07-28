@@ -1,3 +1,6 @@
+//! Pattern-matrix usefulness and coverage logic.
+//! The type checker uses this module for unreachable-arm and missing-pattern diagnostics.
+
 use super::*;
 use crate::inference::exhaustiveness::env::normalize_type;
 use crate::inference::exhaustiveness::witness::{Head, LitPat, Pat, Witness};
@@ -22,6 +25,8 @@ impl ExhaustivenessChecker<'_> {
         }
     }
 
+    // Maranget 2007, "Warnings for pattern matching"; this is the usefulness
+    // judgment over a pattern matrix, with witnesses kept for diagnostics.
     pub(super) fn useful(
         &self,
         matrix: &[Vec<Pat>],
@@ -92,14 +97,14 @@ impl ExhaustivenessChecker<'_> {
             .all(|constructor| present_constructors.contains(constructor));
 
         if has_complete_signature {
-            self.useful_wild_complete_signature(matrix, vector, types, first_type, constructors)
+            self.useful_wild_complete_signature(matrix, vector, types, first_type, &constructors)
         } else {
             self.useful_wild_incomplete_signature(
                 matrix,
                 vector,
                 types,
                 first_type,
-                constructors,
+                &constructors,
                 &present_constructors,
             )
         }
@@ -111,9 +116,9 @@ impl ExhaustivenessChecker<'_> {
         vector: &[Pat],
         types: &[Ty],
         first_type: &Ty,
-        constructors: Vec<CtorId>,
+        constructors: &[CtorId],
     ) -> Option<Vec<Witness>> {
-        for constructor_id in constructors {
+        for constructor_id in constructors.iter().copied() {
             let head = Head::Constructor(constructor_id);
 
             let Some(field_types) = self.field_types_for_head(&head, first_type) else {
@@ -154,8 +159,8 @@ impl ExhaustivenessChecker<'_> {
         vector: &[Pat],
         types: &[Ty],
         first_type: &Ty,
-        constructors: Vec<CtorId>,
-        present_constructors: &HashSet<CtorId>,
+        constructors: &[CtorId],
+        present_constructors: &FxHashSet<CtorId>,
     ) -> Option<Vec<Witness>> {
         // This is the important Maranget default-matrix rule.
         //
@@ -175,7 +180,7 @@ impl ExhaustivenessChecker<'_> {
         let rest = self.useful_default_tail(matrix, vector, types)?;
 
         let head_witness = self
-            .first_missing_constructor(&constructors, present_constructors)
+            .first_missing_constructor(constructors, present_constructors)
             .and_then(|missing_constructor| {
                 let head = Head::Constructor(missing_constructor);
                 let field_count = self.field_types_for_head(&head, first_type)?.len();
@@ -203,8 +208,8 @@ impl ExhaustivenessChecker<'_> {
         self.useful(&default_matrix, &vector[1..], &types[1..])
     }
 
-    fn present_constructors(&self, matrix: &[Vec<Pat>]) -> HashSet<CtorId> {
-        let mut present = HashSet::new();
+    fn present_constructors(&self, matrix: &[Vec<Pat>]) -> FxHashSet<CtorId> {
+        let mut present = FxHashSet::default();
 
         for row in matrix {
             let Some((head, _tail)) = row.split_first() else {
@@ -222,7 +227,7 @@ impl ExhaustivenessChecker<'_> {
     fn first_missing_constructor(
         &self,
         constructors: &[CtorId],
-        present_constructors: &HashSet<CtorId>,
+        present_constructors: &FxHashSet<CtorId>,
     ) -> Option<CtorId> {
         constructors
             .iter()

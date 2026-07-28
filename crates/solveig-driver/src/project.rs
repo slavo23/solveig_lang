@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+//! Project discovery and file loading for Solveig packages.
+//! The compile facade calls this before parsing modules into the project graph.
+
+use solveig_base::FxHashMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -76,7 +79,7 @@ fn mk_virtual_prelude_file(
 
 fn load_virtual_prelude_module(
     session: &Session,
-    modules: &mut HashMap<ModuleName, ModuleFile>,
+    modules: &mut FxHashMap<ModuleName, ModuleFile>,
     module: &ModuleName,
 ) -> Result<(), ProjectError> {
     if modules.contains_key(module) {
@@ -171,7 +174,7 @@ pub fn file_from_module_name(session: &Session, root: &Path, module: &ModuleName
 }
 
 pub fn parse_project(project: &Project) -> ParsedProject {
-    let mut modules = HashMap::new();
+    let mut modules = FxHashMap::default();
 
     for (name, file) in &project.modules {
         modules.insert(name.clone(), file.parsed.clone());
@@ -197,7 +200,7 @@ pub fn load_project(
         })?
         .to_path_buf();
 
-    let mut modules = HashMap::<ModuleName, ModuleFile>::new();
+    let mut modules = FxHashMap::<ModuleName, ModuleFile>::default();
     let mut stack = vec![PendingModule {
         file: entry_file.to_path_buf(),
         requested_module: None,

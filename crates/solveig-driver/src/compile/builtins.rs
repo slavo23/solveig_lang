@@ -227,7 +227,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "floatToString",
             BUILTIN_FLOAT_TO_STRING,
             1,
-            unary(float.clone(), string.clone()),
+            unary(float, string.clone()),
         ),
         prim_spec(
             "charToString",
@@ -257,7 +257,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "stringCharAt",
             BUILTIN_STRING_CHAR_AT,
             2,
-            arr(&[string.clone(), int.clone()], maybe_char),
+            arr(&[string.clone(), int], maybe_char),
         ),
         prim_spec(
             "stringEq",
@@ -281,7 +281,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "charCompare",
             BUILTIN_CHAR_COMPARE,
             2,
-            binary(char_ty.clone(), ordering),
+            binary(char_ty, ordering),
         ),
         prim_spec(
             "stringToChars",
@@ -308,7 +308,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             poly_arr(
                 &[a_id, b_id],
                 &[io_of(a.clone()), Ty::make_arr(a.clone(), io_of(b.clone()))],
-                io_of(b.clone()),
+                io_of(b),
             ),
         ),
         prim_spec(

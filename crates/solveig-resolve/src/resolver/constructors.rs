@@ -1,7 +1,7 @@
 type ResolvedDataDefs = (
     Vec<DataDefinition>,
-    HashMap<TyConId, Kind>,
-    HashMap<CtorId, Ty>,
+    FxHashMap<TyConId, Kind>,
+    FxHashMap<CtorId, Ty>,
 );
 
 impl<'a> Resolver<'a> {
@@ -137,14 +137,13 @@ impl<'a> Resolver<'a> {
     }
     fn collect_surface_pattern_binders(
         pat: &SpannedWrapper<SurfacePattern>,
-        out: &mut HashSet<Symbol>,
+        out: &mut FxHashSet<Symbol>,
     ) {
         match &pat.0 {
             SurfacePattern::Var(name) => {
                 out.insert(*name);
             }
-            SurfacePattern::Lit(_) => {}
-            SurfacePattern::Wild => {}
+            SurfacePattern::Lit(_) | SurfacePattern::Wild => {}
             SurfacePattern::Con(_, args) => {
                 for arg in args {
                     Self::collect_surface_pattern_binders(arg, out);
@@ -157,7 +156,7 @@ impl<'a> Resolver<'a> {
         sf: &SpannedWrapper<SurfaceMatchArm>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-        bound_terms: &HashSet<Symbol>,
+        bound_terms: &FxHashSet<Symbol>,
     ) -> CaseArmNode<Span> {
         let pattern = self.resolve_surface_pattern_in_module(&sf.0.pattern, cx);
 
@@ -230,7 +229,7 @@ impl<'a> Resolver<'a> {
     fn resolve_data_defs(
         &mut self,
         module_name: &ModuleName,
-        raw_data_defs: Vec<RawDataDef>,
+        raw_data_defs: &[RawDataDef],
         imported: &ResolverImports,
     ) -> Result<ResolvedDataDefs, KindError> {
         let mut data_tycon_kind_env = imported.tycon_kind_ids.clone();
@@ -243,8 +242,8 @@ impl<'a> Resolver<'a> {
             infer_all_data_kinds_with_env(raw_data_defs, data_tycon_kind_env)?;
 
         let mut data_defs = Vec::new();
-        let mut local_tycon_kind_ids = HashMap::new();
-        let mut constructor_types = HashMap::new();
+        let mut local_tycon_kind_ids = FxHashMap::default();
+        let mut constructor_types = FxHashMap::default();
 
         for idef in &inferred_data {
             let mut core_ctors = Vec::new();

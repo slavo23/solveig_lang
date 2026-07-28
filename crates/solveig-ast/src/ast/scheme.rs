@@ -38,9 +38,9 @@ impl Predicate {
         }
     }
 
-    pub fn named(names: &mut Names, class_name: String, args: Vec<Ty>) -> Self {
+    pub fn named(names: &mut Names, class_name: &str, args: Vec<Ty>) -> Self {
         Self {
-            class_id: names.class_id(&class_name),
+            class_id: names.class_id(class_name),
             args,
         }
     }
