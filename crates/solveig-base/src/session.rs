@@ -1,9 +1,9 @@
 use std::cell::{Ref, RefCell};
 use std::path::PathBuf;
 
+use crate::diagnostics::DiagnosticSink;
 use crate::source::{FileId, SourceMap};
 use crate::symbol::{Interner, Symbol};
-use crate::utils::diagnostics::DiagnosticSink;
 
 #[derive(Debug, Default)]
 pub struct Session {

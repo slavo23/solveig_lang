@@ -1,0 +1,614 @@
+use super::*;
+use crate::builtins::{self, VmCtx};
+use crate::bytecode::{BytecodeProgram, ChunkKind};
+use crate::heap::{BoundPrefix, HeapObject, PayloadRef, PayloadStore};
+use crate::values::{Continuation, GlobalSlot, ObjId, Value};
+
+impl Vm {
+    #[inline(always)]
+    pub(super) fn push(&mut self, val: Value) {
+        self.stack.push(val);
+    }
+
+    #[inline(always)]
+    pub(super) fn pop(&mut self) -> Value {
+        unsafe { self.stack.pop().unwrap_unchecked() }
+    }
+
+    #[inline(always)]
+    pub(super) fn pop_int(&mut self) -> i64 {
+        match self.pop() {
+            Value::Int(n) => n,
+            _ => unsafe { std::hint::unreachable_unchecked() },
+        }
+    }
+
+    #[inline]
+    pub(super) fn pop_payload(&mut self, n: usize) -> PayloadRef {
+        self.heap.alloc_payload_from_stack_tail(&mut self.stack, n)
+    }
+
+    #[inline]
+    pub(super) fn bool_value(&self, b: bool) -> Value {
+        if b {
+            self.bools.true_val
+        } else {
+            self.bools.false_val
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn load(&self, slot: u16) -> Value {
+        unsafe { *self.stack.get_unchecked(self.frame_base + slot as usize) }
+    }
+
+    #[inline(always)]
+    pub(super) fn store(&mut self, slot: u16, val: Value) {
+        unsafe {
+            *self
+                .stack
+                .get_unchecked_mut(self.frame_base + slot as usize) = val;
+        }
+    }
+
+    pub(super) fn ensure_slots(&mut self, count: usize) {
+        let needed = self.frame_base + count;
+        if self.stack.len() < needed {
+            self.stack.resize(needed, Value::Unit);
+        }
+    }
+
+    #[inline]
+    pub(super) fn push_caller_continuation(&mut self) {
+        self.continuations.push(Continuation::CallerFrame {
+            chunk: self.chunk,
+            pc: self.pc,
+            frame_base: self.frame_base,
+        });
+    }
+
+    pub(super) fn start_global_eval(
+        &mut self,
+        program: &BytecodeProgram,
+        index: usize,
+        continuation: Continuation,
+    ) -> Result<Option<Value>, RuntimeError> {
+        let thunk_chunk = match &self.globals[index] {
+            GlobalSlot::Evaluated(val) => return Ok(Some(*val)),
+            GlobalSlot::Evaluating => {
+                let name = program
+                    .globals
+                    .get(index)
+                    .map(|global| global.name.as_str())
+                    .unwrap_or("<unknown>");
+                return Err(RuntimeError::cyclic_global(name));
+            }
+            GlobalSlot::Thunk { chunk } => *chunk,
+        };
+
+        self.globals[index] = GlobalSlot::Evaluating;
+        self.continuations.push(continuation);
+        self.enter_thunk(program, thunk_chunk);
+        Ok(None)
+    }
+
+    pub(super) fn eval_global(
+        &mut self,
+        program: &BytecodeProgram,
+        index: usize,
+    ) -> Result<Value, RuntimeError> {
+        match self.start_global_eval(
+            program,
+            index,
+            Continuation::PublishGlobalThenHalt {
+                global_index: index,
+            },
+        )? {
+            Some(val) => Ok(val),
+            None => self.dispatch(program),
+        }
+    }
+
+    pub(super) fn push_global_or_start_eval(
+        &mut self,
+        program: &BytecodeProgram,
+        index: usize,
+    ) -> Result<(), RuntimeError> {
+        let continuation = Continuation::PublishGlobalThenResume {
+            global_index: index,
+            chunk: self.chunk,
+            pc: self.pc,
+            frame_base: self.frame_base,
+        };
+
+        if let Some(val) = self.start_global_eval(program, index, continuation)? {
+            self.push(val);
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn enter_thunk(&mut self, program: &BytecodeProgram, chunk_id: usize) {
+        let meta = program.chunk(chunk_id);
+        self.chunk = chunk_id;
+        self.pc = 0;
+        self.frame_base = self.stack.len();
+        self.stack
+            .resize(self.frame_base + meta.slot_count as usize, Value::Unit);
+    }
+
+    #[inline(always)]
+    pub(super) fn begin_frame(
+        &mut self,
+        program: &BytecodeProgram,
+        mode: InvokeMode,
+        chunk_id: usize,
+        arg_count: usize,
+    ) {
+        let slot_count = program.chunk(chunk_id).slot_count as usize;
+        let args_start = self.stack.len() - arg_count;
+
+        match mode {
+            InvokeMode::Call | InvokeMode::HaltCall => {
+                if matches!(mode, InvokeMode::HaltCall) {
+                    self.continuations.push(Continuation::Halt);
+                } else {
+                    self.push_caller_continuation();
+                }
+                self.chunk = chunk_id;
+                self.pc = 0;
+                self.frame_base = args_start;
+            }
+            InvokeMode::TailCall => {
+                if args_start != self.frame_base {
+                    for i in 0..arg_count {
+                        self.stack[self.frame_base + i] = self.stack[args_start + i];
+                    }
+                }
+
+                self.stack.truncate(self.frame_base + arg_count);
+                self.chunk = chunk_id;
+                self.pc = 0;
+            }
+        }
+
+        self.ensure_slots(slot_count);
+    }
+
+    #[inline(always)]
+    pub(super) fn prepend_bound_prefix(&mut self, bound: BoundPrefix, arg_count: usize) {
+        if bound.is_empty() {
+            return;
+        }
+
+        let prefix_len = bound.total_len();
+
+        for i in (0..arg_count).rev() {
+            self.stack[self.frame_base + prefix_len + i] = self.stack[self.frame_base + i];
+        }
+
+        let frame_base = self.frame_base;
+        let (heap, stack) = (&self.heap, &mut self.stack);
+
+        if !bound.captures.is_empty() {
+            heap.copy_payload_to_stack(bound.captures, stack, frame_base);
+        }
+
+        if !bound.applied_args.is_empty() {
+            heap.copy_payload_to_stack(
+                bound.applied_args,
+                stack,
+                frame_base + bound.captures.len(),
+            );
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn enter_function(
+        &mut self,
+        program: &BytecodeProgram,
+        mode: InvokeMode,
+        chunk_id: usize,
+        bound: BoundPrefix,
+        arg_count: usize,
+    ) {
+        self.begin_frame(program, mode, chunk_id, arg_count);
+        self.prepend_bound_prefix(bound, arg_count);
+    }
+
+    #[inline(always)]
+    pub(super) fn enter_known_function(
+        &mut self,
+        program: &BytecodeProgram,
+        mode: InvokeMode,
+        chunk_id: usize,
+        arg_count: usize,
+    ) {
+        self.enter_function(program, mode, chunk_id, BoundPrefix::EMPTY, arg_count);
+    }
+
+    pub(super) fn invoke_known_function(
+        &mut self,
+        program: &BytecodeProgram,
+        mode: InvokeMode,
+        chunk_id: usize,
+        arg_count: usize,
+    ) -> Option<Value> {
+        let (capture_count, arity) = chunk_function_shape(program, chunk_id);
+
+        if capture_count != 0 {
+            panic!(
+                "ICE: known call to captured function chunk {} (captures {}, arity {})",
+                chunk_id, capture_count, arity
+            );
+        }
+
+        if arg_count == arity {
+            self.enter_known_function(program, mode, chunk_id, arg_count);
+            None
+        } else if arg_count < arity {
+            if arg_count == 0 {
+                let chunk = u32::try_from(chunk_id)
+                    .unwrap_or_else(|_| panic!("ICE: chunk id {} does not fit in u32", chunk_id));
+                let arity = u16::try_from(arity)
+                    .unwrap_or_else(|_| panic!("ICE: arity {} does not fit in u16", arity));
+
+                Some(Value::FunctionRef { chunk, arity })
+            } else {
+                self.maybe_gc();
+                let applied_args = self.pop_payload(arg_count);
+
+                Some(self.alloc_heap(HeapObject::PartialApp {
+                    chunk: chunk_id,
+                    captures: PayloadStore::empty(),
+                    applied_args,
+                }))
+            }
+        } else {
+            panic!(
+                "ICE: over-application of known function chunk {} (arity {}, got {})",
+                chunk_id, arity, arg_count
+            );
+        }
+    }
+
+    #[inline(always)]
+    pub(super) fn take_callee_under_args(&mut self, arg_count: usize) -> Value {
+        let callee_pos = self.stack.len() - arg_count - 1;
+        let callee = self.stack[callee_pos];
+
+        for i in callee_pos..self.stack.len() - 1 {
+            self.stack[i] = self.stack[i + 1];
+        }
+        self.stack.pop();
+
+        callee
+    }
+
+    pub(super) fn invoke_value(
+        &mut self,
+        program: &BytecodeProgram,
+        mode: InvokeMode,
+        callee: Value,
+        arg_count: usize,
+    ) -> Option<Value> {
+        match callee {
+            Value::CtorFn { tag, arity } => {
+                self.maybe_gc();
+                Some(self.apply_constructor(tag, arity, PayloadStore::empty(), arg_count))
+            }
+
+            Value::FunctionRef { chunk, arity } => {
+                let chunk_id = chunk as usize;
+                let arity = arity as usize;
+
+                if arg_count == arity {
+                    self.enter_known_function(program, mode, chunk_id, arg_count);
+                    None
+                } else if arg_count < arity {
+                    self.maybe_gc();
+                    let applied_args = self.pop_payload(arg_count);
+
+                    Some(self.alloc_heap(HeapObject::PartialApp {
+                        chunk: chunk_id,
+                        captures: PayloadStore::empty(),
+                        applied_args,
+                    }))
+                } else {
+                    panic!(
+                        "ICE: over-application of function reference (arity {}, got {})",
+                        arity, arg_count
+                    );
+                }
+            }
+
+            Value::Obj(id) => self.invoke_heap_object(program, mode, id, arg_count),
+
+            _ => panic!(
+                "ICE: cannot {}call {:?}",
+                if matches!(mode, InvokeMode::TailCall) {
+                    "tail-"
+                } else {
+                    ""
+                },
+                callee
+            ),
+        }
+    }
+
+    pub(super) fn invoke_heap_object(
+        &mut self,
+        program: &BytecodeProgram,
+        mode: InvokeMode,
+        id: ObjId,
+        arg_count: usize,
+    ) -> Option<Value> {
+        match self.heap.get(id) {
+            HeapObject::Closure { chunk, captures } => {
+                let chunk = *chunk;
+                let captures = *captures;
+                let arity = chunk_arity(program, chunk);
+
+                if arg_count == arity {
+                    self.enter_function(
+                        program,
+                        mode,
+                        chunk,
+                        BoundPrefix {
+                            captures,
+                            applied_args: PayloadStore::empty(),
+                        },
+                        arg_count,
+                    );
+                    None
+                } else if arg_count < arity {
+                    self.maybe_gc();
+                    let applied_args = self.pop_payload(arg_count);
+                    let captures = self.heap.clone_payload(captures);
+
+                    Some(self.alloc_heap(HeapObject::PartialApp {
+                        chunk,
+                        captures,
+                        applied_args,
+                    }))
+                } else {
+                    panic!(
+                        "ICE: over-application of closure (arity {}, got {})",
+                        arity, arg_count
+                    );
+                }
+            }
+
+            HeapObject::PartialApp {
+                chunk,
+                captures,
+                applied_args,
+            } => {
+                let chunk = *chunk;
+                let captures = *captures;
+                let applied_args = *applied_args;
+                let arity = chunk_arity(program, chunk);
+                let total = applied_args.len() + arg_count;
+
+                if total == arity {
+                    self.enter_function(
+                        program,
+                        mode,
+                        chunk,
+                        BoundPrefix {
+                            captures,
+                            applied_args,
+                        },
+                        arg_count,
+                    );
+                    None
+                } else if total < arity {
+                    self.maybe_gc();
+                    let captures = self.heap.clone_payload(captures);
+                    let applied_args = self.heap.alloc_concat_payload_and_stack_tail(
+                        applied_args,
+                        &mut self.stack,
+                        arg_count,
+                    );
+
+                    Some(self.alloc_heap(HeapObject::PartialApp {
+                        chunk,
+                        captures,
+                        applied_args,
+                    }))
+                } else {
+                    panic!(
+                        "ICE: over-application of partial (arity {}, got {})",
+                        arity, total
+                    );
+                }
+            }
+
+            HeapObject::PartialCtor {
+                tag,
+                arity,
+                applied_args,
+            } => Some(self.apply_constructor(*tag, *arity, *applied_args, arg_count)),
+
+            HeapObject::Data0 { tag }
+            | HeapObject::Data1 { tag, .. }
+            | HeapObject::Data2 { tag, .. }
+            | HeapObject::DataN { tag, .. } => {
+                panic!("ICE: cannot apply saturated constructor tag {}", tag);
+            }
+
+            HeapObject::Str { .. } => {
+                panic!("ICE: heap string reached callable-object invocation");
+            }
+
+            HeapObject::IoAction(_) => {
+                panic!("ICE: IO action reached callable-object invocation");
+            }
+        }
+    }
+
+    pub(super) fn apply_constructor(
+        &mut self,
+        tag: u16,
+        arity: u16,
+        existing: PayloadRef,
+        n_new: usize,
+    ) -> Value {
+        let total = existing.len() + n_new;
+
+        if total == arity as usize {
+            if existing.is_empty() {
+                return match n_new {
+                    0 => self.alloc_heap(HeapObject::Data0 { tag }),
+                    1 => {
+                        let field = self.pop();
+                        self.alloc_heap(HeapObject::Data1 { tag, field })
+                    }
+                    2 => {
+                        let field1 = self.pop();
+                        let field0 = self.pop();
+                        self.alloc_heap(HeapObject::Data2 {
+                            tag,
+                            field0,
+                            field1,
+                        })
+                    }
+                    _ => {
+                        let fields = self.pop_payload(n_new);
+                        self.alloc_heap(HeapObject::DataN { tag, fields })
+                    }
+                };
+            }
+
+            let fields =
+                self.heap
+                    .alloc_concat_payload_and_stack_tail(existing, &mut self.stack, n_new);
+            self.alloc_heap(HeapObject::DataN { tag, fields })
+        } else if total < arity as usize {
+            let applied_args =
+                self.heap
+                    .alloc_concat_payload_and_stack_tail(existing, &mut self.stack, n_new);
+
+            self.alloc_heap(HeapObject::PartialCtor {
+                tag,
+                arity,
+                applied_args,
+            })
+        } else {
+            panic!("ICE: over-applied constructor tag {}", tag);
+        }
+    }
+
+    pub(super) fn call_builtin(
+        &mut self,
+        program: &BytecodeProgram,
+        id: solveig_ast::ast::BuiltinId,
+        arg_count: usize,
+    ) -> Result<Value, RuntimeError> {
+        let Some(builtin) = builtins::lookup(id) else {
+            return Err(RuntimeError::builtin(format!(
+                "unknown builtin id {}",
+                id.0
+            )));
+        };
+
+        if arg_count != builtin.arity {
+            return Err(RuntimeError::builtin(format!(
+                "builtin `{}` expected {} arguments, got {}",
+                builtin.name, builtin.arity, arg_count
+            )));
+        }
+
+        let args_start = self
+            .stack
+            .len()
+            .checked_sub(arg_count)
+            .expect("ICE: builtin call stack underflow");
+        let args = self.stack[args_start..].to_vec();
+        let mut ctx = VmCtx::new(
+            &mut self.heap,
+            &program.constructor_arities,
+            &self.nullary_ctors,
+            self.bools.true_val,
+            self.bools.false_val,
+        );
+        let result = (builtin.run)(&mut ctx, &args)?;
+        self.stack.truncate(args_start);
+
+        Ok(result)
+    }
+
+    pub(super) fn call_value_for_result(
+        &mut self,
+        program: &BytecodeProgram,
+        callee: Value,
+        args: &[Value],
+    ) -> Result<Value, RuntimeError> {
+        for arg in args {
+            self.push(*arg);
+        }
+
+        match self.invoke_value(program, InvokeMode::HaltCall, callee, args.len()) {
+            Some(value) => Ok(value),
+            None => self.dispatch(program),
+        }
+    }
+
+    pub(super) fn resume_after_return(&mut self, result: Value) -> Option<Value> {
+        self.stack.truncate(self.frame_base);
+
+        match self
+            .continuations
+            .pop()
+            .expect("return with empty continuation stack")
+        {
+            Continuation::Halt => Some(result),
+
+            Continuation::CallerFrame {
+                chunk,
+                pc,
+                frame_base,
+            } => {
+                self.chunk = chunk;
+                self.pc = pc;
+                self.frame_base = frame_base;
+                self.push(result);
+                None
+            }
+
+            Continuation::PublishGlobalThenHalt { global_index } => {
+                self.globals[global_index] = GlobalSlot::Evaluated(result);
+                Some(result)
+            }
+
+            Continuation::PublishGlobalThenResume {
+                global_index,
+                chunk,
+                pc,
+                frame_base,
+            } => {
+                self.globals[global_index] = GlobalSlot::Evaluated(result);
+                self.chunk = chunk;
+                self.pc = pc;
+                self.frame_base = frame_base;
+                self.push(result);
+                None
+            }
+        }
+    }
+}
+
+fn chunk_function_shape(program: &BytecodeProgram, chunk_id: usize) -> (usize, usize) {
+    match program.chunk(chunk_id).kind {
+        ChunkKind::Function {
+            capture_count,
+            arity,
+        } => (capture_count as usize, arity as usize),
+        ChunkKind::GlobalThunk => panic!("ICE: thunk has no arity"),
+    }
+}
+
+fn chunk_arity(program: &BytecodeProgram, chunk_id: usize) -> usize {
+    let (_, arity) = chunk_function_shape(program, chunk_id);
+    arity
+}

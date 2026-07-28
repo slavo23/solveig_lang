@@ -1,16 +1,16 @@
 impl TypeChecker {
-    fn free_type_vars_in_type(ty: &TypeExpr, out: &mut BTreeSet<TyVarId>) {
+    fn free_type_vars_in_type(ty: &Ty, out: &mut BTreeSet<TyVarId>) {
         match ty {
-            TypeExpr::TyVar(id) => {
+            Ty::TyVar(id) => {
                 out.insert(*id);
             }
 
-            TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
+            Ty::TyArr(lhs, rhs) | Ty::TyApp(lhs, rhs) => {
                 Self::free_type_vars_in_type(lhs, out);
                 Self::free_type_vars_in_type(rhs, out);
             }
 
-            TypeExpr::TyForAll(binders, preds, body) => {
+            Ty::TyForAll(binders, preds, body) => {
                 for pred in preds {
                     Self::free_type_vars_in_predicate(pred, out);
                 }
@@ -20,7 +20,7 @@ impl TypeChecker {
                 }
             }
 
-            TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}
+            Ty::TyUnit | Ty::TyCon(_) | Ty::TyExVar(_) => {}
         }
     }
     fn free_type_vars_in_predicate(pred: &Predicate, out: &mut BTreeSet<TyVarId>) {
@@ -47,7 +47,7 @@ impl TypeChecker {
     }
     fn instantiate_predicate_with_subst(
         pred: &Predicate,
-        subst: &HashMap<TyVarId, TypeExpr>,
+        subst: &HashMap<TyVarId, Ty>,
     ) -> Predicate {
         Predicate {
             class_id: pred.class_id,
@@ -66,9 +66,9 @@ impl TypeChecker {
         &mut self,
         ctx: Context,
         scheme: &Scheme,
-    ) -> (Context, Vec<Predicate>, TypeExpr) {
+    ) -> (Context, Vec<Predicate>, Ty) {
         let mut ctx = ctx;
-        let mut subst = HashMap::<TyVarId, TypeExpr>::new();
+        let mut subst = HashMap::<TyVarId, Ty>::new();
 
         for (name, kind) in &scheme.quantifiers {
             let fresh = self.fresh_evar_id();
@@ -135,7 +135,7 @@ impl TypeChecker {
         self.givens.truncate(old_len);
         (new_givens, result)
     }
-    fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, TypeExpr>) -> Predicate {
+    fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, Ty>) -> Predicate {
         Predicate {
             class_id: pred.class_id,
             args: pred
@@ -149,7 +149,7 @@ impl TypeChecker {
                 .collect(),
         }
     }
-    fn substitute_scheme(scheme: &Scheme, subst: &HashMap<TyVarId, TypeExpr>) -> Scheme {
+    fn substitute_scheme(scheme: &Scheme, subst: &HashMap<TyVarId, Ty>) -> Scheme {
         Scheme {
             quantifiers: scheme.quantifiers.clone(),
 
@@ -216,7 +216,7 @@ impl TypeChecker {
         instance_context: &[Predicate],
         instance_quantifiers: &[(TyVarId, Kind)],
     ) -> Scheme {
-        let mut subst = HashMap::<TyVarId, TypeExpr>::new();
+        let mut subst = HashMap::<TyVarId, Ty>::new();
 
         for ((param_id, _), instance_arg) in
             class_def.params.iter().zip(instance_head.args.iter())
@@ -231,12 +231,7 @@ impl TypeChecker {
             args: class_def
                 .params
                 .iter()
-                .map(|(param_id, _)| {
-                    subst
-                        .get(param_id)
-                        .cloned()
-                        .unwrap_or_else(|| TypeExpr::TyVar(*param_id))
-                })
+                .map(|(param_id, _)| subst.get(param_id).cloned().unwrap_or(Ty::TyVar(*param_id)))
                 .collect(),
         };
 
@@ -279,12 +274,12 @@ impl TypeChecker {
             .collect()
     }
     fn match_instance_type(
-        pattern: &TypeExpr,
-        target: &TypeExpr,
-        subst: &mut HashMap<TyVarId, TypeExpr>,
+        pattern: &Ty,
+        target: &Ty,
+        subst: &mut HashMap<TyVarId, Ty>,
     ) -> bool {
         match pattern {
-            TypeExpr::TyVar(id) => match subst.get(id) {
+            Ty::TyVar(id) => match subst.get(id) {
                 Some(existing) => existing == target,
                 None => {
                     subst.insert(*id, target.clone());
@@ -292,39 +287,39 @@ impl TypeChecker {
                 }
             },
 
-            TypeExpr::TyCon(a) => matches!(target, TypeExpr::TyCon(b) if a == b),
-            TypeExpr::TyUnit => matches!(target, TypeExpr::TyUnit),
+            Ty::TyCon(a) => matches!(target, Ty::TyCon(b) if a == b),
+            Ty::TyUnit => matches!(target, Ty::TyUnit),
 
-            TypeExpr::TyApp(f1, a1) => match target {
-                TypeExpr::TyApp(f2, a2) => {
+            Ty::TyApp(f1, a1) => match target {
+                Ty::TyApp(f2, a2) => {
                     Self::match_instance_type(f1, f2, subst)
                         && Self::match_instance_type(a1, a2, subst)
                 }
                 _ => false,
             },
 
-            TypeExpr::TyArr(a1, b1) => match target {
-                TypeExpr::TyArr(a2, b2) => {
+            Ty::TyArr(a1, b1) => match target {
+                Ty::TyArr(a2, b2) => {
                     Self::match_instance_type(a1, a2, subst)
                         && Self::match_instance_type(b1, b2, subst)
                 }
                 _ => false,
             },
 
-            TypeExpr::TyForAll(_, _, body) => Self::match_instance_type(body, target, subst),
+            Ty::TyForAll(_, _, body) => Self::match_instance_type(body, target, subst),
 
-            TypeExpr::TyExVar(name) => matches!(target, TypeExpr::TyExVar(other) if name == other),
+            Ty::TyExVar(name) => matches!(target, Ty::TyExVar(other) if name == other),
         }
     }
     fn match_predicate_pattern(
         pattern: &Predicate,
         target: &Predicate,
-    ) -> Option<HashMap<TyVarId, TypeExpr>> {
+    ) -> Option<HashMap<TyVarId, Ty>> {
         if pattern.class_id != target.class_id || pattern.args.len() != target.args.len() {
             return None;
         }
 
-        let mut subst = HashMap::<TyVarId, TypeExpr>::new();
+        let mut subst = HashMap::<TyVarId, Ty>::new();
 
         for (pattern_arg, target_arg) in pattern.args.iter().zip(target.args.iter()) {
             if !Self::match_instance_type(pattern_arg, target_arg, &mut subst) {
@@ -337,8 +332,8 @@ impl TypeChecker {
     fn evidence_ty_args_for_instance(
         instance_head: &Predicate,
         instance_context: &[Predicate],
-        subst: &HashMap<TyVarId, TypeExpr>,
-    ) -> Vec<TypeExpr> {
+        subst: &HashMap<TyVarId, Ty>,
+    ) -> Vec<Ty> {
         let mut vars = BTreeSet::new();
 
         for pred in instance_context {
@@ -348,7 +343,7 @@ impl TypeChecker {
         Self::free_type_vars_in_predicate(instance_head, &mut vars);
 
         vars.into_iter()
-            .map(|id| subst.get(&id).cloned().unwrap_or(TypeExpr::TyVar(id)))
+            .map(|id| subst.get(&id).cloned().unwrap_or(Ty::TyVar(id)))
             .collect()
     }
     fn solve_predicates_with_givens(
@@ -512,18 +507,18 @@ impl TypeChecker {
                 .collect(),
         }
     }
-    fn collect_exvars_in_type(ty: &TypeExpr, acc: &mut Vec<EvarId>) {
+    fn collect_exvars_in_type(ty: &Ty, acc: &mut Vec<EvarId>) {
         match ty {
-            TypeExpr::TyExVar(id) => {
+            Ty::TyExVar(id) => {
                 if !acc.contains(id) {
                     acc.push(*id);
                 }
             }
-            TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
+            Ty::TyArr(lhs, rhs) | Ty::TyApp(lhs, rhs) => {
                 Self::collect_exvars_in_type(lhs, acc);
                 Self::collect_exvars_in_type(rhs, acc);
             }
-            TypeExpr::TyForAll(_, preds, body) => {
+            Ty::TyForAll(_, preds, body) => {
                 for pred in preds {
                     for arg in &pred.args {
                         Self::collect_exvars_in_type(arg, acc);
@@ -531,10 +526,10 @@ impl TypeChecker {
                 }
                 Self::collect_exvars_in_type(body, acc);
             }
-            TypeExpr::TyUnit | TypeExpr::TyVar(_) | TypeExpr::TyCon(_) => {}
+            Ty::TyUnit | Ty::TyVar(_) | Ty::TyCon(_) => {}
         }
     }
-    fn generalize_top_level_type(&mut self, ctx: &Context, ty: &TypeExpr) -> TypeExpr {
+    fn generalize_top_level_type(&mut self, ctx: &Context, ty: &Ty) -> Ty {
         let zonked = self.zonk_type(&ctx.apply(ty));
 
         let mut evars = Vec::new();
@@ -551,13 +546,13 @@ impl TypeChecker {
             let (universal_id, universal) = self.fresh_universal("t");
             let kind = ctx.evar_kind_id(evar).unwrap_or(Kind::Star);
 
-            result = result.substitute_evar(evar, &TypeExpr::TyVar(universal_id));
+            result = result.substitute_evar(evar, &Ty::TyVar(universal_id));
             let _ = universal;
             binders.push((universal_id, kind));
         }
 
         for (name, kind) in binders.into_iter().rev() {
-            result = TypeExpr::make_forall_id(name, kind, result);
+            result = Ty::make_forall_id(name, kind, result);
         }
 
         result
@@ -576,36 +571,36 @@ mod entailment_tests {
     const LIST: TyConId = TyConId(12);
     const PAIR: TyConId = TyConId(13);
 
-    fn tycon(id: TyConId) -> TypeExpr {
-        TypeExpr::TyCon(id)
+    fn tycon(id: TyConId) -> Ty {
+        Ty::TyCon(id)
     }
 
-    fn var(name: &str) -> TypeExpr {
+    fn var(name: &str) -> Ty {
         let id = match name {
             "a" => TyVarId(0),
             "b" => TyVarId(1),
             other => panic!("ICE: unknown test type variable `{other}`"),
         };
-        TypeExpr::TyVar(id)
+        Ty::TyVar(id)
     }
 
-    fn app(func: TypeExpr, arg: TypeExpr) -> TypeExpr {
-        TypeExpr::make_app(func, arg)
+    fn app(func: Ty, arg: Ty) -> Ty {
+        Ty::make_app(func, arg)
     }
 
-    fn maybe(arg: TypeExpr) -> TypeExpr {
+    fn maybe(arg: Ty) -> Ty {
         app(tycon(MAYBE), arg)
     }
 
-    fn list(arg: TypeExpr) -> TypeExpr {
+    fn list(arg: Ty) -> Ty {
         app(tycon(LIST), arg)
     }
 
-    fn pair(left: TypeExpr, right: TypeExpr) -> TypeExpr {
+    fn pair(left: Ty, right: Ty) -> Ty {
         app(app(tycon(PAIR), left), right)
     }
 
-    fn pred(class_id: ClassId, arg: TypeExpr) -> Predicate {
+    fn pred(class_id: ClassId, arg: Ty) -> Predicate {
         Predicate {
             class_id,
             args: vec![arg],
@@ -779,7 +774,7 @@ mod entailment_tests {
     #[test]
     fn qualified_checking_wraps_body_in_evidence_abstraction() {
         let mut checker = tiny_checker();
-        let expected = TypeExpr::make_qualified(vec![pred(EQ, tycon(INT))], TypeExpr::TyUnit);
+        let expected = Ty::make_qualified(vec![pred(EQ, tycon(INT))], Ty::TyUnit);
         let expr = TermExprNode::new(TermExpr::Unit, 0..1);
 
         let (_, elaborated) = checker
@@ -799,8 +794,8 @@ mod entailment_tests {
     fn zonking_replaces_evidence_placeholders() {
         let mut checker = tiny_checker();
         let destinations = checker.add_wanteds(vec![pred(EQ, tycon(INT))], 0..1);
-        let base = elab_node(TermExpr::Unit, 0..1, TypeExpr::TyUnit);
-        let expr = wrap_ev_apps(base, destinations, 0..1, TypeExpr::TyUnit);
+        let base = elab_node(TermExpr::Unit, 0..1, Ty::TyUnit);
+        let expr = wrap_ev_apps(base, destinations, 0..1, Ty::TyUnit);
 
         let unresolved = checker.unresolved_wanteds();
         assert!(unresolved.is_empty());
@@ -828,7 +823,7 @@ mod entailment_tests {
             Scheme {
                 quantifiers: Vec::new(),
                 predicates: vec![pred(EQ, tycon(INT))],
-                ty: TypeExpr::TyUnit,
+                ty: Ty::TyUnit,
             },
         );
         let expr = TermExprNode::new(TermExpr::Var(VarRef::Global(def_id)), 0..1);
@@ -837,7 +832,7 @@ mod entailment_tests {
             .solve_inference(Context::new(), &expr)
             .expect("global instantiation should infer");
 
-        assert_eq!(inferred_ty, TypeExpr::TyUnit);
+        assert_eq!(inferred_ty, Ty::TyUnit);
         match &elaborated.node {
             TermExpr::EvApp(inner, Ev::Placeholder(ev)) => {
                 assert_eq!(checker.wanteds.len(), 1);
@@ -855,14 +850,14 @@ mod entailment_tests {
         let local_name = "localQualified".to_string();
         let expr = TermExprNode::new(TermExpr::Var(VarRef::Local(local_symbol)), 0..1);
         let qualified_type =
-            TypeExpr::make_qualified(vec![pred(EQ, tycon(INT))], TypeExpr::TyUnit);
+            Ty::make_qualified(vec![pred(EQ, tycon(INT))], Ty::TyUnit);
         let ctx = Context::new().add_entry(ContextEntry::TypedVar {
             var_name: local_name,
             ty: qualified_type,
         });
 
         let (_, elaborated) = checker
-            .solve_checking(ctx, &expr, &TypeExpr::TyUnit)
+            .solve_checking(ctx, &expr, &Ty::TyUnit)
             .expect("subsumption should discharge qualified left context");
 
         match &elaborated.node {

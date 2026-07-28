@@ -3,7 +3,7 @@ type Span = Range<usize>;
 #[derive(Clone, Debug)]
 pub struct TcMetadata {
     pub span: Span,
-    pub inferred_type: TypeExpr,
+    pub inferred_type: Ty,
 }
 
 type TcResult<T> = Result<T, TypeError>;
@@ -28,7 +28,7 @@ pub struct Unsolved {
 }
 
 impl TcMetadata {
-    pub fn new(span: Span, inferred_type: TypeExpr) -> Self {
+    pub fn new(span: Span, inferred_type: Ty) -> Self {
         Self {
             span,
             inferred_type,
@@ -44,7 +44,7 @@ pub struct TypeChecker {
     file: FileId,
     names: Names,
     counter: u32,
-    constructor_types: HashMap<CtorId, TypeExpr>,
+    constructor_types: HashMap<CtorId, Ty>,
     func_schemes: HashMap<DefId, Scheme>,
     class_defs: HashMap<ClassId, ClassDefinition>,
     instance_table: InstanceTable<Span>,
@@ -54,7 +54,7 @@ pub struct TypeChecker {
     tycon_kinds: HashMap<TyConId, Kind>,
     givens: Vec<GivenEvidence>,
     wanteds: Vec<Wanted>,
-    evar_solutions: HashMap<EvarId, TypeExpr>,
+    evar_solutions: HashMap<EvarId, Ty>,
     evidence_solutions: HashMap<EvVarId, Ev>,
     holes: Vec<HoleInfo>,
     warnings: Vec<TypeError>,
@@ -123,7 +123,7 @@ impl TypeChecker {
             classes: &self.class_table,
         }
     }
-    fn pretty_type(&self, ty: &TypeExpr) -> String {
+    fn pretty_type(&self, ty: &Ty) -> String {
         ty.pretty_with_tables(self.pretty_tables())
     }
     fn pretty_predicate(&self, pred: &Predicate) -> String {
@@ -154,8 +154,8 @@ impl TypeChecker {
     fn fresh_evvar_id(&mut self) -> EvVarId {
         EvVarId(self.fresh_id())
     }
-    fn evar_type(id: EvarId) -> TypeExpr {
-        TypeExpr::make_evar(id)
+    fn evar_type(id: EvarId) -> Ty {
+        Ty::make_evar(id)
     }
     fn fresh_universal(&mut self, base: &str) -> (TyVarId, String) {
         self.names.fresh_generated_tyvar(base)
@@ -167,10 +167,10 @@ impl TypeChecker {
             kind,
         }
     }
-    fn scheme_to_type(scheme: &Scheme) -> TypeExpr {
-        scheme.to_type_expr()
+    fn scheme_to_type(scheme: &Scheme) -> Ty {
+        scheme.to_ty()
     }
-    fn type_to_scheme(ty: &TypeExpr) -> Scheme {
+    fn type_to_scheme(ty: &Ty) -> Scheme {
         let (quantifiers, predicates, body) = ty.peel_scheme_like();
         Scheme {
             quantifiers,
@@ -212,7 +212,7 @@ pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
 #[derive(Clone, Debug)]
 pub struct TypeCheckEnv {
     pub names: Names,
-    pub constructor_types: HashMap<CtorId, TypeExpr>,
+    pub constructor_types: HashMap<CtorId, Ty>,
     pub func_schemes: HashMap<DefId, Scheme>,
     pub class_defs: HashMap<ClassId, ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<Span>>,
@@ -318,13 +318,13 @@ mod tests {
             tycon_kinds: HashMap::new(),
         };
         env.func_schemes
-            .insert(def_id, Scheme::mono(TypeExpr::TyUnit));
+            .insert(def_id, Scheme::mono(Ty::TyUnit));
 
         let mut checker = TypeChecker::with_env(&env, FileId(0));
         let expr = TermExprNode::new(TermExpr::Var(VarRef::Global(def_id)), 0..0);
 
         let result = checker.solve_inference(Context::new(), &expr);
-        assert!(matches!(result, Ok((_, _, TypeExpr::TyUnit))));
+        assert!(matches!(result, Ok((_, _, Ty::TyUnit))));
 
         let missing_expr = TermExprNode::new(TermExpr::Var(VarRef::Global(other_def_id)), 0..0);
         assert!(
@@ -363,7 +363,7 @@ mod tests {
                         id: method_id,
                         name: "C.method".to_string(),
                         short_name: "method".to_string(),
-                        scheme: Scheme::mono(TypeExpr::TyUnit),
+                        scheme: Scheme::mono(Ty::TyUnit),
                         default_body: None,
                     }],
                 },
@@ -379,7 +379,7 @@ mod tests {
         let expr = TermExprNode::new(TermExpr::Var(VarRef::Global(method_id)), 0..0);
 
         let result = checker.solve_inference(Context::new(), &expr);
-        assert!(matches!(result, Ok((_, _, TypeExpr::TyUnit))));
+        assert!(matches!(result, Ok((_, _, Ty::TyUnit))));
 
         let missing_expr =
             TermExprNode::new(TermExpr::Var(VarRef::Global(other_method_id)), 0..0);
@@ -404,9 +404,9 @@ mod tests {
             quantifiers: vec![(method_param, Kind::Star)],
             predicates: vec![Predicate {
                 class_id,
-                args: vec![TypeExpr::TyVar(class_param)],
+                args: vec![Ty::TyVar(class_param)],
             }],
-            ty: TypeExpr::make_arr(TypeExpr::TyVar(method_param), TypeExpr::TyVar(method_param)),
+            ty: Ty::make_arr(Ty::TyVar(method_param), Ty::TyVar(method_param)),
         };
         let class_def = ClassDefinition {
             id: class_id,
@@ -471,7 +471,7 @@ mod tests {
         let superclass_name = "test.Sup".to_string();
         let class_name = "test.Sub".to_string();
         let mut names = Names::new();
-        let int_ty = TypeExpr::make_named_con(&mut names, "test.Int".to_string());
+        let int_ty = Ty::make_named_con(&mut names, "test.Int".to_string());
 
         let class_id = names.class_id(&class_name);
         let superclass_id = names.class_id(&superclass_name);
@@ -490,7 +490,7 @@ mod tests {
                     superclasses: vec![Predicate::named(
                         &mut names,
                         superclass_name.clone(),
-                        vec![TypeExpr::TyVar(param)],
+                        vec![Ty::TyVar(param)],
                     )],
                     methods: Vec::new(),
                 },
@@ -561,7 +561,7 @@ mod tests {
         };
 
         let checker = TypeChecker::with_env(&env, FileId(0));
-        let widget = TypeExpr::TyCon(tycon_id);
+        let widget = Ty::TyCon(tycon_id);
         let pred = Predicate {
             class_id,
             args: vec![widget.clone()],

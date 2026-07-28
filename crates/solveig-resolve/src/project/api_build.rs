@@ -1,0 +1,209 @@
+use super::*;
+
+fn file_span(file: FileId, span: Span) -> FileSpan {
+    FileSpan::new(file, span)
+}
+
+fn check_duplicate(
+    seen: &mut HashMap<Symbol, FileSpan>,
+    file: FileId,
+    span: Span,
+    kind: ResolveNameKind,
+    name: Symbol,
+) -> Result<(), ResolveError> {
+    let current = file_span(file, span);
+    if let Some(previous) = seen.insert(name, current) {
+        return Err(ResolveError::DuplicateDefinition {
+            span: current,
+            previous: Some(previous),
+            kind,
+            name,
+        });
+    }
+
+    Ok(())
+}
+
+pub fn build_module_api(
+    module_id: ModuleId,
+    parsed: &ParsedModule,
+) -> Result<ModuleApi, ResolveError> {
+    let mut api = ModuleApi::default();
+    let mut term_defs = HashMap::<Symbol, FileSpan>::new();
+    let mut term_sigs = HashMap::<Symbol, FileSpan>::new();
+    let mut types = HashMap::<Symbol, FileSpan>::new();
+    let mut seen_constructors = HashMap::<Symbol, FileSpan>::new();
+    let mut classes = HashMap::<Symbol, FileSpan>::new();
+    let mut fixity_defs = HashMap::<Symbol, FileSpan>::new();
+
+    for def in &parsed.defs {
+        match &def.0 {
+            SurfaceDefinition::FunDef { name, .. } => {
+                check_duplicate(
+                    &mut term_defs,
+                    parsed.file,
+                    name.1,
+                    ResolveNameKind::Term,
+                    name.0,
+                )?;
+
+                api.terms.insert(name.0, local_def_id(module_id, name.0));
+            }
+
+            SurfaceDefinition::SigDef { name, .. } => {
+                check_duplicate(
+                    &mut term_sigs,
+                    parsed.file,
+                    name.1,
+                    ResolveNameKind::Signature,
+                    name.0,
+                )?;
+
+                api.terms
+                    .entry(name.0)
+                    .or_insert(local_def_id(module_id, name.0));
+            }
+
+            SurfaceDefinition::DataDef {
+                name, constructors, ..
+            } => {
+                check_duplicate(
+                    &mut types,
+                    parsed.file,
+                    name.1,
+                    ResolveNameKind::TypeConstructor,
+                    name.0,
+                )?;
+
+                api.types.insert(name.0, local_def_id(module_id, name.0));
+
+                for ctor in constructors {
+                    check_duplicate(
+                        &mut seen_constructors,
+                        parsed.file,
+                        ctor.0.name.1,
+                        ResolveNameKind::Constructor,
+                        ctor.0.name.0,
+                    )?;
+
+                    api.constructors
+                        .insert(ctor.0.name.0, local_def_id(module_id, ctor.0.name.0));
+                }
+            }
+
+            SurfaceDefinition::ClassDef { name, methods, .. } => {
+                let class_name = name.0;
+                check_duplicate(
+                    &mut classes,
+                    parsed.file,
+                    name.1,
+                    ResolveNameKind::Class,
+                    class_name,
+                )?;
+
+                api.classes
+                    .insert(class_name, local_def_id(module_id, class_name));
+
+                let mut method_names = Vec::new();
+
+                for method in methods {
+                    let method_name = method.name.0;
+                    check_duplicate(
+                        &mut term_defs,
+                        parsed.file,
+                        method.name.1,
+                        ResolveNameKind::Term,
+                        method_name,
+                    )?;
+
+                    api.terms
+                        .entry(method_name)
+                        .or_insert(local_def_id(module_id, method_name));
+
+                    method_names.push(method_name);
+                }
+
+                api.class_methods.insert(class_name, method_names);
+            }
+
+            SurfaceDefinition::FixityDef { fixity, ops } => {
+                for op in ops {
+                    check_duplicate(
+                        &mut fixity_defs,
+                        parsed.file,
+                        op.1,
+                        ResolveNameKind::Fixity,
+                        op.0,
+                    )?;
+
+                    api.fixities.insert(op.0, *fixity);
+                }
+            }
+
+            SurfaceDefinition::InstanceDef { .. } => {}
+        }
+    }
+
+    Ok(api)
+}
+
+pub fn build_typed_module_api(
+    session: &Session,
+    names: &Names,
+    module_id: ModuleId,
+    module_name: &ModuleName,
+    checked: &CheckedModule,
+) -> TypedModuleApi {
+    let mut api = TypedModuleApi::default();
+    let prefix = module_name.as_string(session) + ".";
+
+    api.tycon_table = checked.tycon_table.clone();
+    api.ctor_table = checked.ctor_table.clone();
+    api.class_table = checked.class_table.clone();
+
+    for (id, scheme) in &checked.func_schemes {
+        if id.module == module_id {
+            api.term_schemes.insert(*id, scheme.clone());
+        }
+    }
+
+    for (id, kind) in &checked.tycon_kinds {
+        let Some(info) = checked.tycon_table.get(*id) else {
+            continue;
+        };
+        let name = names.symbol_display_name(info.name);
+        if let Some(stripped) = name.strip_prefix(&prefix) {
+            let def_id = local_def_id(module_id, session.intern(stripped));
+            api.type_kinds.insert(def_id, kind.clone());
+            api.type_ids.insert(def_id, *id);
+        }
+    }
+
+    for (id, ty) in &checked.constructor_types {
+        let Some(info) = checked.ctor_table.get(*id) else {
+            continue;
+        };
+        let name = names.symbol_display_name(info.name);
+        if let Some(stripped) = name.strip_prefix(&prefix) {
+            let def_id = local_def_id(module_id, session.intern(stripped));
+            api.constructor_types.insert(def_id, ty.clone());
+            api.constructor_ids.insert(def_id, *id);
+        }
+    }
+
+    for class_def in &checked.class_defs {
+        let stripped = class_def
+            .name
+            .strip_prefix(&prefix)
+            .unwrap_or(&class_def.name);
+
+        api.class_defs.insert(
+            local_def_id(module_id, session.intern(stripped)),
+            class_def.clone(),
+        );
+    }
+
+    api.instance_defs = checked.instance_defs.clone();
+
+    api
+}

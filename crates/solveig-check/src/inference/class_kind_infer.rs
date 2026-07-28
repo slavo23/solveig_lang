@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use solveig_ast::ast::{
-    ClassDefinition, ClassId, Kind, KindMetaId, Predicate, Scheme, TyConId, TyVarId, TypeExpr,
+    ClassDefinition, ClassId, Kind, KindMetaId, Predicate, Scheme, Ty, TyConId, TyVarId,
     tyvar_display_name,
 };
 
@@ -100,28 +100,28 @@ impl ClassKindInferencer {
 
     fn infer_type_kind(
         &mut self,
-        ty: &TypeExpr,
+        ty: &Ty,
         env: &mut HashMap<TyVarId, Kind>,
     ) -> Result<Kind, KindError> {
         match ty {
-            TypeExpr::TyUnit => Ok(Kind::Star),
+            Ty::TyUnit => Ok(Kind::Star),
 
-            TypeExpr::TyVar(id) => env
+            Ty::TyVar(id) => env
                 .get(id)
                 .cloned()
                 .map(|k| self.apply_kind(&k))
                 .ok_or_else(|| KindError::unbound_type_variable(tyvar_display_name(*id))),
 
-            TypeExpr::TyExVar(_) => Ok(Kind::Star),
+            Ty::TyExVar(_) => Ok(Kind::Star),
 
-            TypeExpr::TyCon(id) => self
+            Ty::TyCon(id) => self
                 .tycon_env
                 .get(id)
                 .cloned()
                 .map(|k| self.apply_kind(&k))
                 .ok_or_else(|| KindError::unbound_type_constructor(tycon_id_display(*id))),
 
-            TypeExpr::TyArr(lhs, rhs) => {
+            Ty::TyArr(lhs, rhs) => {
                 let lhs_kind = self.infer_type_kind(lhs, env)?;
                 let rhs_kind = self.infer_type_kind(rhs, env)?;
                 self.unify(lhs_kind, Kind::Star)?;
@@ -129,9 +129,8 @@ impl ClassKindInferencer {
                 Ok(Kind::Star)
             }
 
-            TypeExpr::TyApp(lhs, rhs) => {
-                if matches!(**lhs, TypeExpr::TyForAll(_, _, _))
-                    || matches!(**rhs, TypeExpr::TyForAll(_, _, _))
+            Ty::TyApp(lhs, rhs) => {
+                if matches!(**lhs, Ty::TyForAll(_, _, _)) || matches!(**rhs, Ty::TyForAll(_, _, _))
                 {
                     return Err(KindError::cannot_unify(
                         Kind::Star,
@@ -147,7 +146,7 @@ impl ClassKindInferencer {
                 Ok(self.apply_kind(&result_kind))
             }
 
-            TypeExpr::TyForAll(binders, preds, body) => {
+            Ty::TyForAll(binders, preds, body) => {
                 let mut old_bindings = Vec::with_capacity(binders.len());
                 for (name, _) in binders {
                     old_bindings.push((*name, env.insert(*name, self.fresh_meta())));
@@ -176,21 +175,21 @@ impl ClassKindInferencer {
         }
     }
 
-    fn zonk_type_with_env(&self, ty: &TypeExpr, env: &HashMap<TyVarId, Kind>) -> TypeExpr {
+    fn zonk_type_with_env(&self, ty: &Ty, env: &HashMap<TyVarId, Kind>) -> Ty {
         match ty {
-            TypeExpr::TyUnit => TypeExpr::TyUnit,
-            TypeExpr::TyVar(id) => TypeExpr::TyVar(*id),
-            TypeExpr::TyExVar(id) => TypeExpr::TyExVar(*id),
-            TypeExpr::TyCon(id) => TypeExpr::TyCon(*id),
-            TypeExpr::TyArr(lhs, rhs) => TypeExpr::make_arr(
+            Ty::TyUnit => Ty::TyUnit,
+            Ty::TyVar(id) => Ty::TyVar(*id),
+            Ty::TyExVar(id) => Ty::TyExVar(*id),
+            Ty::TyCon(id) => Ty::TyCon(*id),
+            Ty::TyArr(lhs, rhs) => Ty::make_arr(
                 self.zonk_type_with_env(lhs, env),
                 self.zonk_type_with_env(rhs, env),
             ),
-            TypeExpr::TyApp(lhs, rhs) => TypeExpr::make_app(
+            Ty::TyApp(lhs, rhs) => Ty::make_app(
                 self.zonk_type_with_env(lhs, env),
                 self.zonk_type_with_env(rhs, env),
             ),
-            TypeExpr::TyForAll(binders, preds, body) => TypeExpr::make_forall_group(
+            Ty::TyForAll(binders, preds, body) => Ty::make_forall_group(
                 binders
                     .iter()
                     .map(|(name, _)| {
@@ -373,7 +372,7 @@ mod tests {
             params: vec![(param, Kind::Star)],
             superclasses: vec![Predicate {
                 class_id: superclass_id,
-                args: vec![TypeExpr::TyVar(param)],
+                args: vec![Ty::TyVar(param)],
             }],
             methods: vec![ClassMethodDef {
                 id: DefId {
@@ -385,7 +384,7 @@ mod tests {
                 scheme: Scheme {
                     quantifiers: Vec::new(),
                     predicates: Vec::new(),
-                    ty: TypeExpr::TyCon(tycon_id),
+                    ty: Ty::TyCon(tycon_id),
                 },
                 default_body: None,
             }],
@@ -400,6 +399,6 @@ mod tests {
 
         assert_eq!(inferred.id, class_id);
         assert_eq!(inferred.superclasses[0].class_id, superclass_id);
-        assert_eq!(inferred.methods[0].scheme.ty, TypeExpr::TyCon(tycon_id));
+        assert_eq!(inferred.methods[0].scheme.ty, Ty::TyCon(tycon_id));
     }
 }

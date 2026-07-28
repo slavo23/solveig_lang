@@ -6,8 +6,8 @@ use solveig_ast::ast::{
     BuiltinDefinition, COMPILER_PRELUDE_BUILTINS_MODULE, CaseArm, CaseArmNode, ClassDefinition,
     ClassId, ClassMethodDef, ConstructorDef, CtorId, DataDefinition, DefId, InstanceDefinition,
     InstanceMethodDef, Kind, KindMetaId, Literal, ModuleId, Names, PRIM_TYS, Pattern, PatternNode,
-    Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TyConId, TyVarId,
-    TypeExpr, VarRef, compiler_bool_constructor_types, compiler_bool_data_definition,
+    Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId,
+    TyVarId, VarRef, compiler_bool_constructor_types, compiler_bool_data_definition,
     compiler_primitive_tycon_kinds, prelude_list_cons_ctor_id,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};

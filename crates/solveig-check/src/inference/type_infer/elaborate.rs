@@ -1,7 +1,7 @@
 fn elab_node(
     node: TermExpr<TcMetadata, Span>,
     span: Span,
-    ty: TypeExpr,
+    ty: Ty,
 ) -> TermExprNode<TcMetadata, Span> {
     TermExprNode::new(node, TcMetadata::new(span, ty))
 }
@@ -15,7 +15,7 @@ fn wrap_ev_apps(
     mut expr: TermExprNode<TcMetadata, Span>,
     evvars: Vec<EvVarId>,
     span: Span,
-    ty: TypeExpr,
+    ty: Ty,
 ) -> TermExprNode<TcMetadata, Span> {
     for ev in evvars {
         expr = elab_node(
@@ -34,7 +34,7 @@ fn wrap_ev_abs(
     mut body: TermExprNode<TcMetadata, Span>,
     givens: Vec<GivenEvidence>,
     span: Span,
-    ty: TypeExpr,
+    ty: Ty,
 ) -> TermExprNode<TcMetadata, Span> {
     for given in givens.into_iter().rev() {
         body = elab_node(
@@ -77,7 +77,7 @@ impl TypeChecker {
                 .insert(*evar_id, solution.clone());
         }
     }
-    fn context_bindings(&self, ctx: &Context) -> Vec<(String, TypeExpr)> {
+    fn context_bindings(&self, ctx: &Context) -> Vec<(String, Ty)> {
         ctx.get_entries()
             .iter()
             .filter_map(|entry| {
@@ -89,7 +89,7 @@ impl TypeChecker {
             })
             .collect()
     }
-    fn report_hole(&mut self, ctx: &Context, span: Span, ty: &TypeExpr) {
+    fn report_hole(&mut self, ctx: &Context, span: Span, ty: &Ty) {
         self.holes.push(HoleInfo {
             span: self.get_file_span(span),
             expected_type: self.zonk_type(&ctx.apply(ty)),
@@ -106,22 +106,22 @@ impl TypeChecker {
         }
         self.holes = holes;
     }
-    pub fn zonk_type(&self, ty: &TypeExpr) -> TypeExpr {
+    pub fn zonk_type(&self, ty: &Ty) -> Ty {
         match ty {
-            TypeExpr::TyExVar(id) => {
+            Ty::TyExVar(id) => {
                 if let Some(solution) = self.evar_solutions.get(id) {
                     self.zonk_type(solution)
                 } else {
                     ty.clone()
                 }
             }
-            TypeExpr::TyArr(lhs, rhs) => {
-                TypeExpr::make_arr(self.zonk_type(lhs), self.zonk_type(rhs))
+            Ty::TyArr(lhs, rhs) => {
+                Ty::make_arr(self.zonk_type(lhs), self.zonk_type(rhs))
             }
-            TypeExpr::TyApp(lhs, rhs) => {
-                TypeExpr::make_app(self.zonk_type(lhs), self.zonk_type(rhs))
+            Ty::TyApp(lhs, rhs) => {
+                Ty::make_app(self.zonk_type(lhs), self.zonk_type(rhs))
             }
-            TypeExpr::TyForAll(binders, preds, body) => TypeExpr::make_forall_group(
+            Ty::TyForAll(binders, preds, body) => Ty::make_forall_group(
                 binders.clone(),
                 preds
                     .iter()

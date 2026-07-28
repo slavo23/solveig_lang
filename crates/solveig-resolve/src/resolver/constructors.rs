@@ -1,3 +1,9 @@
+type ResolvedDataDefs = (
+    Vec<DataDefinition>,
+    HashMap<TyConId, Kind>,
+    HashMap<CtorId, Ty>,
+);
+
 impl<'a> Resolver<'a> {
     fn resolve_ctor_id(&mut self, r: &NameRef, span: FileSpan, cx: &ModuleContext) -> CtorId {
         match self.resolve_ctor_defid(r, span, cx) {
@@ -226,14 +232,7 @@ impl<'a> Resolver<'a> {
         module_name: &ModuleName,
         raw_data_defs: Vec<RawDataDef>,
         imported: &ResolverImports,
-    ) -> Result<
-        (
-            Vec<DataDefinition>,
-            HashMap<TyConId, Kind>,
-            HashMap<CtorId, TypeExpr>,
-        ),
-        KindError,
-    > {
+    ) -> Result<ResolvedDataDefs, KindError> {
         let mut data_tycon_kind_env = imported.tycon_kind_ids.clone();
         if module_name.as_string(self.session) == COMPILER_PRELUDE_BUILTINS_MODULE {
             data_tycon_kind_env.extend(compiler_primitive_tycon_kinds());

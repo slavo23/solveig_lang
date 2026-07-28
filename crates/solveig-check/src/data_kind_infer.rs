@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use solveig_ast::ast::{Kind, KindMetaId, TyConId, TyVarId, TypeExpr, tyvar_display_name};
+use solveig_ast::ast::{Kind, KindMetaId, Ty, TyConId, TyVarId, tyvar_display_name};
 use solveig_base::FileSpan;
 
 use crate::signature_infer::KindError;
@@ -20,7 +20,7 @@ pub struct RawConstructorDef {
     pub name: String,
     pub short_name: String,
     pub span: FileSpan,
-    pub fields: Vec<TypeExpr>,
+    pub fields: Vec<Ty>,
 }
 
 #[derive(Debug, Clone)]
@@ -37,8 +37,8 @@ pub struct InferredDataDef {
 pub struct InferredConstructorDef {
     pub name: String,
     pub short_name: String,
-    pub kinded_fields: Vec<TypeExpr>,
-    pub full_type: TypeExpr,
+    pub kinded_fields: Vec<Ty>,
+    pub full_type: Ty,
 }
 
 pub struct DataKindInferencer {
@@ -126,15 +126,15 @@ impl DataKindInferencer {
         }
     }
 
-    fn apply_type(&self, ty: &TypeExpr) -> TypeExpr {
+    fn apply_type(&self, ty: &Ty) -> Ty {
         match ty {
-            TypeExpr::TyUnit => TypeExpr::TyUnit,
-            TypeExpr::TyVar(n) => TypeExpr::TyVar(*n),
-            TypeExpr::TyExVar(id) => TypeExpr::TyExVar(*id),
-            TypeExpr::TyCon(n) => TypeExpr::TyCon(*n),
-            TypeExpr::TyArr(l, r) => TypeExpr::make_arr(self.apply_type(l), self.apply_type(r)),
-            TypeExpr::TyApp(l, r) => TypeExpr::make_app(self.apply_type(l), self.apply_type(r)),
-            TypeExpr::TyForAll(binders, preds, body) => TypeExpr::make_forall_group(
+            Ty::TyUnit => Ty::TyUnit,
+            Ty::TyVar(n) => Ty::TyVar(*n),
+            Ty::TyExVar(id) => Ty::TyExVar(*id),
+            Ty::TyCon(n) => Ty::TyCon(*n),
+            Ty::TyArr(l, r) => Ty::make_arr(self.apply_type(l), self.apply_type(r)),
+            Ty::TyApp(l, r) => Ty::make_app(self.apply_type(l), self.apply_type(r)),
+            Ty::TyForAll(binders, preds, body) => Ty::make_forall_group(
                 binders
                     .iter()
                     .map(|(name, kind)| (*name, self.zonk(kind)))
@@ -226,42 +226,41 @@ impl DataKindInferencer {
 
     fn infer_kind(
         &mut self,
-        ty: &TypeExpr,
+        ty: &Ty,
         tycon_env: &HashMap<TyConId, Kind>,
         var_env: &HashMap<TyVarId, Kind>,
-    ) -> Result<(Kind, TypeExpr), KindError> {
+    ) -> Result<(Kind, Ty), KindError> {
         match ty {
-            TypeExpr::TyUnit => Ok((Kind::Star, TypeExpr::TyUnit)),
+            Ty::TyUnit => Ok((Kind::Star, Ty::TyUnit)),
 
-            TypeExpr::TyVar(id) => {
+            Ty::TyVar(id) => {
                 let kind = var_env
                     .get(id)
                     .map(|k| self.apply_kind(k))
                     .ok_or_else(|| KindError::unbound_type_variable(tyvar_display_name(*id)))?;
-                Ok((kind, TypeExpr::TyVar(*id)))
+                Ok((kind, Ty::TyVar(*id)))
             }
 
-            TypeExpr::TyExVar(id) => Ok((Kind::Star, TypeExpr::TyExVar(*id))),
+            Ty::TyExVar(id) => Ok((Kind::Star, Ty::TyExVar(*id))),
 
-            TypeExpr::TyCon(id) => {
+            Ty::TyCon(id) => {
                 let kind = tycon_env
                     .get(id)
                     .map(|k| self.apply_kind(k))
                     .ok_or_else(|| KindError::unbound_type_constructor(tycon_id_display(*id)))?;
-                Ok((kind, TypeExpr::TyCon(*id)))
+                Ok((kind, Ty::TyCon(*id)))
             }
 
-            TypeExpr::TyArr(lhs, rhs) => {
+            Ty::TyArr(lhs, rhs) => {
                 let (lk, lt) = self.infer_kind(lhs, tycon_env, var_env)?;
                 let (rk, rt) = self.infer_kind(rhs, tycon_env, var_env)?;
                 self.unify(lk, Kind::Star)?;
                 self.unify(rk, Kind::Star)?;
-                Ok((Kind::Star, TypeExpr::TyArr(Box::new(lt), Box::new(rt))))
+                Ok((Kind::Star, Ty::TyArr(Box::new(lt), Box::new(rt))))
             }
 
-            TypeExpr::TyApp(fun, arg) => {
-                if matches!(**fun, TypeExpr::TyForAll(_, _, _))
-                    || matches!(**arg, TypeExpr::TyForAll(_, _, _))
+            Ty::TyApp(fun, arg) => {
+                if matches!(**fun, Ty::TyForAll(_, _, _)) || matches!(**arg, Ty::TyForAll(_, _, _))
                 {
                     return Err(KindError::cannot_unify(
                         Kind::Star,
@@ -274,13 +273,10 @@ impl DataKindInferencer {
                 let fun_kind = self.apply_kind(&fun_kind);
                 let arg_kind = self.apply_kind(&arg_kind);
                 let result_kind = self.app_kinding(fun_kind, arg_kind)?;
-                Ok((
-                    result_kind,
-                    TypeExpr::TyApp(Box::new(fun_r), Box::new(arg_r)),
-                ))
+                Ok((result_kind, Ty::TyApp(Box::new(fun_r), Box::new(arg_r))))
             }
 
-            TypeExpr::TyForAll(binders, preds, body) => {
+            Ty::TyForAll(binders, preds, body) => {
                 let mut new_env = var_env.clone();
                 let mut binder_metas = Vec::with_capacity(binders.len());
                 for (name, _) in binders {
@@ -312,7 +308,7 @@ impl DataKindInferencer {
 
                 Ok((
                     Kind::Star,
-                    TypeExpr::make_forall_group(
+                    Ty::make_forall_group(
                         binder_metas
                             .into_iter()
                             .map(|(name, kind)| (name, self.zonk(&kind)))
@@ -350,11 +346,11 @@ impl DataKindInferencer {
 
     fn check_constructor(
         &mut self,
-        fields: &[TypeExpr],
-        return_type: &TypeExpr,
+        fields: &[Ty],
+        return_type: &Ty,
         tycon_env: &HashMap<TyConId, Kind>,
         var_env: &HashMap<TyVarId, Kind>,
-    ) -> Result<Vec<TypeExpr>, KindError> {
+    ) -> Result<Vec<Ty>, KindError> {
         let mut rebuilt = Vec::new();
         for field in fields {
             let (fk, fr) = self.infer_kind(field, tycon_env, var_env)?;
@@ -385,7 +381,7 @@ impl DataKindInferencer {
             name: String,
             short_name: String,
             param_metas: Vec<(TyVarId, Kind)>,
-            ctor_fields: Vec<(String, String, Vec<TypeExpr>)>,
+            ctor_fields: Vec<(String, String, Vec<Ty>)>,
         }
 
         let mut dt_results: Vec<DtResult> = Vec::new();
@@ -412,9 +408,9 @@ impl DataKindInferencer {
                 .map(|(n, m)| (*n, self.apply_kind(m)))
                 .collect();
 
-            let mut ret_ty = TypeExpr::TyCon(def.id);
+            let mut ret_ty = Ty::TyCon(def.id);
             for (pn, _) in &param_metas {
-                ret_ty = TypeExpr::make_app(ret_ty, TypeExpr::TyVar(*pn));
+                ret_ty = Ty::make_app(ret_ty, Ty::TyVar(*pn));
             }
 
             let mut ctor_fields = Vec::new();
@@ -448,7 +444,7 @@ impl DataKindInferencer {
 
             let mut ctors = Vec::new();
             for (cn, short_cn, fields) in &dt.ctor_fields {
-                let kf: Vec<TypeExpr> = fields.iter().map(|f| self.apply_type(f)).collect();
+                let kf: Vec<Ty> = fields.iter().map(|f| self.apply_type(f)).collect();
                 let full_type = build_constructor_type(dt.id, &ty_params, &kf);
                 ctors.push(InferredConstructorDef {
                     name: cn.clone(),
@@ -472,21 +468,17 @@ impl DataKindInferencer {
     }
 }
 
-fn build_constructor_type(
-    tycon: TyConId,
-    ty_params: &[(TyVarId, Kind)],
-    fields: &[TypeExpr],
-) -> TypeExpr {
-    let mut ret = TypeExpr::TyCon(tycon);
+fn build_constructor_type(tycon: TyConId, ty_params: &[(TyVarId, Kind)], fields: &[Ty]) -> Ty {
+    let mut ret = Ty::TyCon(tycon);
     for (p, _) in ty_params {
-        ret = TypeExpr::make_app(ret, TypeExpr::TyVar(*p));
+        ret = Ty::make_app(ret, Ty::TyVar(*p));
     }
     let mut body = ret;
     for f in fields.iter().rev() {
-        body = TypeExpr::make_arr(f.clone(), body);
+        body = Ty::make_arr(f.clone(), body);
     }
     for (p, k) in ty_params.iter().rev() {
-        body = TypeExpr::make_forall_id(*p, k.clone(), body);
+        body = Ty::make_forall_id(*p, k.clone(), body);
     }
     body
 }
@@ -499,16 +491,16 @@ fn default_unsolved(kind: Kind) -> Kind {
     }
 }
 
-fn collect_tycon_refs(ty: &TypeExpr, out: &mut HashSet<TyConId>) {
+fn collect_tycon_refs(ty: &Ty, out: &mut HashSet<TyConId>) {
     match ty {
-        TypeExpr::TyCon(id) => {
+        Ty::TyCon(id) => {
             out.insert(*id);
         }
-        TypeExpr::TyArr(l, r) | TypeExpr::TyApp(l, r) => {
+        Ty::TyArr(l, r) | Ty::TyApp(l, r) => {
             collect_tycon_refs(l, out);
             collect_tycon_refs(r, out);
         }
-        TypeExpr::TyForAll(_, preds, body) => {
+        Ty::TyForAll(_, preds, body) => {
             for pred in preds {
                 for arg in &pred.args {
                     collect_tycon_refs(arg, out);
@@ -648,7 +640,7 @@ mod tests {
         FileSpan::new(FileId(0), Span::new(0, 0))
     }
 
-    fn raw_data(id: TyConId, name: &str, fields: Vec<TypeExpr>) -> RawDataDef {
+    fn raw_data(id: TyConId, name: &str, fields: Vec<Ty>) -> RawDataDef {
         RawDataDef {
             id,
             name: name.to_string(),
@@ -669,7 +661,7 @@ mod tests {
         let alpha = TyConId(41);
         let beta = TyConId(42);
         let defs = vec![
-            raw_data(alpha, "sample.Alpha", vec![TypeExpr::TyCon(beta)]),
+            raw_data(alpha, "sample.Alpha", vec![Ty::TyCon(beta)]),
             raw_data(beta, "sample.Beta", Vec::new()),
         ];
 
@@ -680,7 +672,7 @@ mod tests {
     fn data_kind_inference_uses_imported_tycon_id_env() {
         let imported = TyConId(51);
         let local = TyConId(52);
-        let imported_unit = TypeExpr::make_app(TypeExpr::TyCon(imported), TypeExpr::TyUnit);
+        let imported_unit = Ty::make_app(Ty::TyCon(imported), Ty::TyUnit);
         let raw = raw_data(local, "sample.Box", vec![imported_unit.clone()]);
 
         let (defs, env) = infer_all_data_kinds_with_env(
@@ -697,7 +689,7 @@ mod tests {
         );
         assert_eq!(
             defs[0].constructors[0].full_type,
-            TypeExpr::make_arr(imported_unit, TypeExpr::TyCon(local))
+            Ty::make_arr(imported_unit, Ty::TyCon(local))
         );
     }
 }

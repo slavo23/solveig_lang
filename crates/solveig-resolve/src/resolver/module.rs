@@ -116,7 +116,7 @@ impl<'a> Resolver<'a> {
         module_name: &ModuleName,
         data_defs: &mut Vec<DataDefinition>,
         local_tycon_kind_ids: &mut HashMap<TyConId, Kind>,
-        constructor_types: &mut HashMap<CtorId, TypeExpr>,
+        constructor_types: &mut HashMap<CtorId, Ty>,
     ) {
         if module_name.as_string(self.session) != COMPILER_PRELUDE_BUILTINS_MODULE {
             return;

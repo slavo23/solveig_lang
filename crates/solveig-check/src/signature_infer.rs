@@ -1,14 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
 use solveig_ast::ast::{
-    ClassId, Kind, KindMetaId, Predicate, Pretty, Scheme, TyConId, TyVarId, TypeExpr,
-    tyvar_display_name,
+    ClassId, Kind, KindMetaId, Predicate, Pretty, Scheme, Ty, TyConId, TyVarId, tyvar_display_name,
 };
 use solveig_base::{Diagnostic, FileSpan, IntoDiagnostic, Label};
 
 #[derive(Debug, Clone)]
 pub struct SignatureKindInfo {
-    pub kinded_signature: TypeExpr,
+    pub kinded_signature: Ty,
     pub quantified_var_kinds: Vec<(TyVarId, Kind)>,
     pub signature_kind: Kind,
     pub kind_subst: HashMap<KindMetaId, Kind>,
@@ -359,47 +358,46 @@ impl SignatureKindInferencer {
 
     fn infer_and_rebuild(
         &mut self,
-        ty: &TypeExpr,
+        ty: &Ty,
         env: &mut HashMap<TyVarId, Kind>,
-    ) -> Result<(Kind, TypeExpr), KindError> {
+    ) -> Result<(Kind, Ty), KindError> {
         match ty {
-            TypeExpr::TyUnit => Ok((Kind::Star, TypeExpr::TyUnit)),
+            Ty::TyUnit => Ok((Kind::Star, Ty::TyUnit)),
 
-            TypeExpr::TyVar(id) => {
+            Ty::TyVar(id) => {
                 let kind = env
                     .get(id)
                     .cloned()
                     .map(|k| self.apply_kind(&k))
                     .ok_or_else(|| KindError::unbound_type_variable(tyvar_display_name(*id)))?;
-                Ok((kind, TypeExpr::TyVar(*id)))
+                Ok((kind, Ty::TyVar(*id)))
             }
 
-            TypeExpr::TyExVar(id) => Ok((Kind::Star, TypeExpr::TyExVar(*id))),
+            Ty::TyExVar(id) => Ok((Kind::Star, Ty::TyExVar(*id))),
 
-            TypeExpr::TyCon(id) => {
+            Ty::TyCon(id) => {
                 let kind = self
                     .tycon_env
                     .get(id)
                     .cloned()
                     .map(|k| self.apply_kind(&k))
                     .ok_or_else(|| KindError::unbound_type_constructor(tycon_id_display(*id)))?;
-                Ok((kind, TypeExpr::TyCon(*id)))
+                Ok((kind, Ty::TyCon(*id)))
             }
 
-            TypeExpr::TyArr(lhs, rhs) => {
+            Ty::TyArr(lhs, rhs) => {
                 let (lhs_kind, lhs_kinded) = self.infer_and_rebuild(lhs, env)?;
                 let (rhs_kind, rhs_kinded) = self.infer_and_rebuild(rhs, env)?;
                 self.unify(lhs_kind, Kind::Star)?;
                 self.unify(rhs_kind, Kind::Star)?;
                 Ok((
                     Kind::Star,
-                    TypeExpr::TyArr(Box::new(lhs_kinded), Box::new(rhs_kinded)),
+                    Ty::TyArr(Box::new(lhs_kinded), Box::new(rhs_kinded)),
                 ))
             }
 
-            TypeExpr::TyApp(lhs, rhs) => {
-                if matches!(**lhs, TypeExpr::TyForAll(_, _, _))
-                    || matches!(**rhs, TypeExpr::TyForAll(_, _, _))
+            Ty::TyApp(lhs, rhs) => {
+                if matches!(**lhs, Ty::TyForAll(_, _, _)) || matches!(**rhs, Ty::TyForAll(_, _, _))
                 {
                     return Err(KindError::cannot_unify(
                         Kind::Star,
@@ -413,11 +411,11 @@ impl SignatureKindInferencer {
                 self.unify(lhs_kind, Kind::make_arrow(rhs_kind, result_kind.clone()))?;
                 Ok((
                     self.apply_kind(&result_kind),
-                    TypeExpr::TyApp(Box::new(lhs_kinded), Box::new(rhs_kinded)),
+                    Ty::TyApp(Box::new(lhs_kinded), Box::new(rhs_kinded)),
                 ))
             }
 
-            TypeExpr::TyForAll(binders, preds, body) => {
+            Ty::TyForAll(binders, preds, body) => {
                 let mut binder_metas = Vec::with_capacity(binders.len());
                 let mut old_bindings = Vec::with_capacity(binders.len());
                 for (name, _) in binders {
@@ -447,7 +445,7 @@ impl SignatureKindInferencer {
 
                 Ok((
                     Kind::Star,
-                    TypeExpr::make_forall_group(
+                    Ty::make_forall_group(
                         binder_metas
                             .into_iter()
                             .map(|(name, kind)| (name, self.zonk_kind_for_binder(&kind)))
@@ -460,34 +458,34 @@ impl SignatureKindInferencer {
         }
     }
 
-    fn collect_outer_foralls(ty: &TypeExpr, out: &mut Vec<(TyVarId, Kind)>) {
-        if let TypeExpr::TyForAll(binders, _, body) = ty {
+    fn collect_outer_foralls(ty: &Ty, out: &mut Vec<(TyVarId, Kind)>) {
+        if let Ty::TyForAll(binders, _, body) = ty {
             out.extend(binders.iter().cloned());
             Self::collect_outer_foralls(body, out);
         }
     }
 
     fn collect_free_tyvars_in_type(
-        ty: &TypeExpr,
+        ty: &Ty,
         bound: &mut Vec<TyVarId>,
         seen: &mut HashSet<TyVarId>,
         out: &mut Vec<TyVarId>,
     ) {
         match ty {
-            TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}
+            Ty::TyUnit | Ty::TyCon(_) | Ty::TyExVar(_) => {}
 
-            TypeExpr::TyVar(id) => {
+            Ty::TyVar(id) => {
                 if !bound.contains(id) && seen.insert(*id) {
                     out.push(*id);
                 }
             }
 
-            TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
+            Ty::TyArr(lhs, rhs) | Ty::TyApp(lhs, rhs) => {
                 Self::collect_free_tyvars_in_type(lhs, bound, seen, out);
                 Self::collect_free_tyvars_in_type(rhs, bound, seen, out);
             }
 
-            TypeExpr::TyForAll(binders, preds, body) => {
+            Ty::TyForAll(binders, preds, body) => {
                 for (name, _) in binders {
                     bound.push(*name);
                 }
@@ -523,7 +521,7 @@ impl SignatureKindInferencer {
         out
     }
 
-    pub fn infer_signature(mut self, ty: &TypeExpr) -> Result<SignatureKindInfo, KindError> {
+    pub fn infer_signature(mut self, ty: &Ty) -> Result<SignatureKindInfo, KindError> {
         let mut env = HashMap::<TyVarId, Kind>::new();
         let (sig_kind, kinded_sig) = self.infer_and_rebuild(ty, &mut env)?;
         let sig_kind = self.apply_kind(&sig_kind);
@@ -614,9 +612,9 @@ mod tests {
             quantifiers: Vec::new(),
             predicates: vec![Predicate {
                 class_id,
-                args: vec![TypeExpr::TyCon(tycon_id)],
+                args: vec![Ty::TyCon(tycon_id)],
             }],
-            ty: TypeExpr::TyCon(tycon_id),
+            ty: Ty::TyCon(tycon_id),
         };
 
         let info = SignatureKindInferencer::with_envs(
@@ -626,7 +624,7 @@ mod tests {
         .infer_scheme(&scheme)
         .expect("ICE: ID-keyed signature kind environment should resolve test IDs");
 
-        assert_eq!(info.scheme.ty, TypeExpr::TyCon(tycon_id));
+        assert_eq!(info.scheme.ty, Ty::TyCon(tycon_id));
         assert_eq!(info.scheme.predicates[0].class_id, class_id);
     }
 }

@@ -3,9 +3,9 @@ impl TypeChecker {
         &mut self,
         ctx: Context,
         param: &str,
-        maybe_annotation: &Option<TypeExpr>,
+        maybe_annotation: &Option<Ty>,
         span: Span,
-    ) -> TcResult<(Context, TypeExpr)> {
+    ) -> TcResult<(Context, Ty)> {
         match maybe_annotation {
             Some(annotation) => {
                 if !ctx.type_well_formed(annotation) {
@@ -24,19 +24,19 @@ impl TypeChecker {
             }
         }
     }
-    fn int_type(&self) -> TypeExpr {
-        TypeExpr::make_con_id(PRIM_TYS.int)
+    fn int_type(&self) -> Ty {
+        Ty::make_con_id(PRIM_TYS.int)
     }
-    fn float_type(&self) -> TypeExpr {
-        TypeExpr::make_con_id(PRIM_TYS.float)
+    fn float_type(&self) -> Ty {
+        Ty::make_con_id(PRIM_TYS.float)
     }
-    fn char_type(&self) -> TypeExpr {
-        TypeExpr::make_con_id(PRIM_TYS.char)
+    fn char_type(&self) -> Ty {
+        Ty::make_con_id(PRIM_TYS.char)
     }
-    fn string_type(&self) -> TypeExpr {
-        TypeExpr::make_con_id(PRIM_TYS.string)
+    fn string_type(&self) -> Ty {
+        Ty::make_con_id(PRIM_TYS.string)
     }
-    fn literal_type(&self, lit: &Literal) -> TypeExpr {
+    fn literal_type(&self, lit: &Literal) -> Ty {
         match lit {
             Literal::Int(_) => self.int_type(),
             Literal::Float(_) => self.float_type(),
@@ -48,13 +48,13 @@ impl TypeChecker {
         &mut self,
         ctx: Context,
         expr: &TermExprNode<Span>,
-    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
+    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, Ty)> {
         let span = expr.anno.clone();
 
         match &expr.node {
             TermExpr::Unit => {
-                let elaborated = elab_node(TermExpr::Unit, span, TypeExpr::TyUnit);
-                Ok((ctx, elaborated, TypeExpr::TyUnit))
+                let elaborated = elab_node(TermExpr::Unit, span, Ty::TyUnit);
+                Ok((ctx, elaborated, Ty::TyUnit))
             }
             TermExpr::Var(name) => {
                 let display_name = self.names.var_display_name(name);
@@ -133,7 +133,7 @@ impl TypeChecker {
                 let final_param_type = delta.apply(&param_type);
                 let final_result_type = delta.apply(&body_expected_type);
                 let arrow_type =
-                    TypeExpr::make_arr(final_param_type.clone(), final_result_type.clone());
+                    Ty::make_arr(final_param_type.clone(), final_result_type.clone());
 
                 let elaborated = elab_node(
                     TermExpr::Abs(
@@ -204,7 +204,7 @@ impl TypeChecker {
                 let (delta, elaborated_body, body_type) =
                     self.solve_inference(extended_ctx, body)?;
 
-                let forall_type = TypeExpr::make_forall_id(param_id, kind.clone(), body_type);
+                let forall_type = Ty::make_forall_id(param_id, kind.clone(), body_type);
                 let elaborated = elab_node(
                     TermExpr::TyAbs(param.clone(), kind.clone(), Box::new(elaborated_body)),
                     span,
@@ -217,11 +217,11 @@ impl TypeChecker {
                 let inner_type_applied = delta.apply(&inner_type);
 
                 match inner_type_applied {
-                    TypeExpr::TyForAll(ref binders, ref preds, ref body)
+                    Ty::TyForAll(ref binders, ref preds, ref body)
                         if let Some((quantifier, _)) = binders.first() =>
                     {
                         let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
-                        let result_type = TypeExpr::make_forall_group(
+                        let result_type = Ty::make_forall_group(
                             binders[1..].to_vec(),
                             preds
                                 .iter()
@@ -294,16 +294,16 @@ impl TypeChecker {
     fn solve_app_inference(
         &mut self,
         ctx: Context,
-        function_type: &TypeExpr,
+        function_type: &Ty,
         argument: &TermExprNode<Span>,
         elaborated_function: &TermExprNode<TcMetadata, Span>,
         span: Span,
         arg_span: Span,
-    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, TypeExpr)> {
+    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, Ty)> {
         let function_type = ctx.apply(function_type);
 
         match &function_type {
-            TypeExpr::TyForAll(binders, preds, body) if !binders.is_empty() => {
+            Ty::TyForAll(binders, preds, body) if !binders.is_empty() => {
                 let (quantifier, kind) = &binders[0];
                 let fresh_evar = self.fresh_evar_id();
                 let evar_entry = ContextEntry::ExVar(fresh_evar, kind.clone());
@@ -311,7 +311,7 @@ impl TypeChecker {
 
                 let ty_arg = Self::evar_type(fresh_evar);
                 let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
-                let instantiated_type = TypeExpr::make_forall_group(
+                let instantiated_type = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds
                         .iter()
@@ -334,7 +334,7 @@ impl TypeChecker {
                     arg_span,
                 )
             }
-            TypeExpr::TyForAll(_, preds, body) => {
+            Ty::TyForAll(_, preds, body) => {
                 let evidence_args = self.add_wanteds(preds.clone(), span.clone());
                 let body_type = (**body).clone();
                 let wrapped_function = wrap_ev_apps(
@@ -345,7 +345,7 @@ impl TypeChecker {
                 );
                 self.solve_app_inference(ctx, &body_type, argument, &wrapped_function, span, arg_span)
             }
-            TypeExpr::TyArr(domain, codomain) => {
+            Ty::TyArr(domain, codomain) => {
                 let (delta, elaborated_argument) = self.solve_checking(ctx, argument, domain)?;
 
                 let result_type = delta.apply(codomain);
@@ -360,7 +360,7 @@ impl TypeChecker {
                 Ok((delta, elaborated, result_type))
             }
 
-            TypeExpr::TyExVar(evar_id) if ctx.has_unsolved_evar_id(*evar_id) => {
+            Ty::TyExVar(evar_id) if ctx.has_unsolved_evar_id(*evar_id) => {
                 let evar_entry = ContextEntry::ExVar(
                     *evar_id,
                     ctx.evar_kind_id(*evar_id)
@@ -372,7 +372,7 @@ impl TypeChecker {
                 let codomain_evar = self.fresh_evar_id();
                 let arrow_solution = ContextEntry::SolvedEVar {
                     lhs: *evar_id,
-                    rhs: TypeExpr::make_arr(
+                    rhs: Ty::make_arr(
                         Self::evar_type(domain_evar),
                         Self::evar_type(codomain_evar),
                     ),

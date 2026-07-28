@@ -4,9 +4,9 @@ use std::ops::Range;
 use solveig_ast::ast::{
     CaseArmNode, ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Ev, EvVarId,
     InstanceDefinition, InstanceId, Kind, ModuleId, Names, Pattern, PatternNode, Predicate, Scheme,
-    TermExpr, TermExprNode, TyConTable, TyVarId, TypeExpr, VarRef,
+    TermExpr, TermExprNode, Ty, TyConTable, TyVarId, VarRef,
 };
-use solveig_base::utils::diagnostics::{Diagnostic, Label};
+use solveig_base::{Diagnostic, Label};
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
 
 use crate::inference::type_infer::{CheckedModule, TcMetadata, TypeCheckEnv};
@@ -535,27 +535,27 @@ impl CoreLinter<'_> {
         }
     }
 
-    fn lint_type(&mut self, ty: &TypeExpr) {
+    fn lint_type(&mut self, ty: &Ty) {
         match ty {
-            TypeExpr::TyExVar(evar) => self.report(
+            Ty::TyExVar(evar) => self.report(
                 None,
                 format!(
                     "ICE: unresolved existential ?{} remains in checked core",
                     evar.0
                 ),
             ),
-            TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
+            Ty::TyArr(lhs, rhs) | Ty::TyApp(lhs, rhs) => {
                 self.lint_type(lhs);
                 self.lint_type(rhs);
             }
-            TypeExpr::TyForAll(_, preds, body) => {
+            Ty::TyForAll(_, preds, body) => {
                 for pred in preds {
                     self.lint_predicate(pred);
                     self.check_class_exists(pred.class_id, "forall predicate");
                 }
                 self.lint_type(body);
             }
-            TypeExpr::TyUnit | TypeExpr::TyVar(_) | TypeExpr::TyCon(_) => {}
+            Ty::TyUnit | Ty::TyVar(_) | Ty::TyCon(_) => {}
         }
     }
 
@@ -719,16 +719,16 @@ fn free_type_vars_in_predicate(pred: &Predicate, out: &mut BTreeSet<TyVarId>) {
     }
 }
 
-fn free_type_vars_in_type(ty: &TypeExpr, out: &mut BTreeSet<TyVarId>) {
+fn free_type_vars_in_type(ty: &Ty, out: &mut BTreeSet<TyVarId>) {
     match ty {
-        TypeExpr::TyVar(id) => {
+        Ty::TyVar(id) => {
             out.insert(*id);
         }
-        TypeExpr::TyArr(lhs, rhs) | TypeExpr::TyApp(lhs, rhs) => {
+        Ty::TyArr(lhs, rhs) | Ty::TyApp(lhs, rhs) => {
             free_type_vars_in_type(lhs, out);
             free_type_vars_in_type(rhs, out);
         }
-        TypeExpr::TyForAll(binders, preds, body) => {
+        Ty::TyForAll(binders, preds, body) => {
             for pred in preds {
                 free_type_vars_in_predicate(pred, out);
             }
@@ -737,14 +737,11 @@ fn free_type_vars_in_type(ty: &TypeExpr, out: &mut BTreeSet<TyVarId>) {
                 out.remove(id);
             }
         }
-        TypeExpr::TyUnit | TypeExpr::TyCon(_) | TypeExpr::TyExVar(_) => {}
+        Ty::TyUnit | Ty::TyCon(_) | Ty::TyExVar(_) => {}
     }
 }
 
-fn subst_from_class_head(
-    params: &[(TyVarId, Kind)],
-    args: &[TypeExpr],
-) -> HashMap<TyVarId, TypeExpr> {
+fn subst_from_class_head(params: &[(TyVarId, Kind)], args: &[Ty]) -> HashMap<TyVarId, Ty> {
     params
         .iter()
         .zip(args.iter())
@@ -752,7 +749,7 @@ fn subst_from_class_head(
         .collect()
 }
 
-fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, TypeExpr>) -> Predicate {
+fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, Ty>) -> Predicate {
     Predicate {
         class_id: pred.class_id,
         args: pred
@@ -770,7 +767,7 @@ fn substitute_predicate(pred: &Predicate, subst: &HashMap<TyVarId, TypeExpr>) ->
 fn match_predicate_pattern(
     pattern: &Predicate,
     actual: &Predicate,
-    subst: &mut HashMap<TyVarId, TypeExpr>,
+    subst: &mut HashMap<TyVarId, Ty>,
 ) -> bool {
     pattern.class_id == actual.class_id
         && pattern.args.len() == actual.args.len()
@@ -781,53 +778,49 @@ fn match_predicate_pattern(
             .all(|(pattern, actual)| match_type_pattern(pattern, actual, subst))
 }
 
-fn match_type_pattern(
-    pattern: &TypeExpr,
-    actual: &TypeExpr,
-    subst: &mut HashMap<TyVarId, TypeExpr>,
-) -> bool {
+fn match_type_pattern(pattern: &Ty, actual: &Ty, subst: &mut HashMap<TyVarId, Ty>) -> bool {
     match pattern {
-        TypeExpr::TyVar(id) => match subst.get(id) {
+        Ty::TyVar(id) => match subst.get(id) {
             Some(existing) => existing == actual,
             None => {
                 subst.insert(*id, actual.clone());
                 true
             }
         },
-        TypeExpr::TyCon(left) => matches!(actual, TypeExpr::TyCon(right) if left == right),
-        TypeExpr::TyUnit => matches!(actual, TypeExpr::TyUnit),
-        TypeExpr::TyArr(left_arg, left_ret) => match actual {
-            TypeExpr::TyArr(right_arg, right_ret) => {
+        Ty::TyCon(left) => matches!(actual, Ty::TyCon(right) if left == right),
+        Ty::TyUnit => matches!(actual, Ty::TyUnit),
+        Ty::TyArr(left_arg, left_ret) => match actual {
+            Ty::TyArr(right_arg, right_ret) => {
                 match_type_pattern(left_arg, right_arg, subst)
                     && match_type_pattern(left_ret, right_ret, subst)
             }
             _ => false,
         },
-        TypeExpr::TyApp(left_func, left_arg) => match actual {
-            TypeExpr::TyApp(right_func, right_arg) => {
+        Ty::TyApp(left_func, left_arg) => match actual {
+            Ty::TyApp(right_func, right_arg) => {
                 match_type_pattern(left_func, right_func, subst)
                     && match_type_pattern(left_arg, right_arg, subst)
             }
             _ => false,
         },
-        TypeExpr::TyForAll(_, _, body) => match_type_pattern(body, actual, subst),
-        TypeExpr::TyExVar(left) => matches!(actual, TypeExpr::TyExVar(right) if left == right),
+        Ty::TyForAll(_, _, body) => match_type_pattern(body, actual, subst),
+        Ty::TyExVar(left) => matches!(actual, Ty::TyExVar(right) if left == right),
     }
 }
 
-fn type_fallback_name(ty: &TypeExpr) -> String {
+fn type_fallback_name(ty: &Ty) -> String {
     match ty {
-        TypeExpr::TyUnit => "()".to_string(),
-        TypeExpr::TyVar(id) => format!("t{}", id.0),
-        TypeExpr::TyExVar(id) => format!("?{}", id.0),
-        TypeExpr::TyCon(id) => format!("T{}", id.0),
-        TypeExpr::TyArr(lhs, rhs) => {
+        Ty::TyUnit => "()".to_string(),
+        Ty::TyVar(id) => format!("t{}", id.0),
+        Ty::TyExVar(id) => format!("?{}", id.0),
+        Ty::TyCon(id) => format!("T{}", id.0),
+        Ty::TyArr(lhs, rhs) => {
             format!("{} -> {}", type_fallback_name(lhs), type_fallback_name(rhs))
         }
-        TypeExpr::TyApp(lhs, rhs) => {
+        Ty::TyApp(lhs, rhs) => {
             format!("{} {}", type_fallback_name(lhs), type_fallback_name(rhs))
         }
-        TypeExpr::TyForAll(_, _, body) => type_fallback_name(body),
+        Ty::TyForAll(_, _, body) => type_fallback_name(body),
     }
 }
 
@@ -840,14 +833,14 @@ mod tests {
     use super::*;
 
     fn meta(span: Range<usize>) -> TcMetadata {
-        TcMetadata::new(span, TypeExpr::TyUnit)
+        TcMetadata::new(span, Ty::TyUnit)
     }
 
     fn node(expr: TermExpr<TcMetadata, Range<usize>>) -> TermExprNode<TcMetadata, Range<usize>> {
         TermExprNode::new(expr, meta(0..1))
     }
 
-    fn pred(class_id: ClassId, ty: TypeExpr) -> Predicate {
+    fn pred(class_id: ClassId, ty: Ty) -> Predicate {
         Predicate {
             class_id,
             args: vec![ty],
@@ -858,7 +851,7 @@ mod tests {
         Scheme {
             quantifiers: Vec::new(),
             predicates,
-            ty: TypeExpr::TyUnit,
+            ty: Ty::TyUnit,
         }
     }
 
@@ -971,7 +964,7 @@ mod tests {
         let expected_def = names.def_id("test.needsEq");
         let class_id = ClassId(1);
         let instance_id = InstanceId(1);
-        let expected = pred(class_id, TypeExpr::TyCon(PRIM_TYS.int));
+        let expected = pred(class_id, Ty::TyCon(PRIM_TYS.int));
         let env = lint_env(
             &mut names,
             expected_def,
@@ -994,7 +987,7 @@ mod tests {
         let eq = ClassId(1);
         let other = ClassId(2);
         let instance_id = InstanceId(1);
-        let int = TypeExpr::TyCon(PRIM_TYS.int);
+        let int = Ty::TyCon(PRIM_TYS.int);
         let env = lint_env(
             &mut names,
             expected_def,
@@ -1017,7 +1010,7 @@ mod tests {
         let expected_def = names.def_id("test.needsEq");
         let class_id = ClassId(1);
         let instance_id = InstanceId(1);
-        let expected = pred(class_id, TypeExpr::TyCon(PRIM_TYS.int));
+        let expected = pred(class_id, Ty::TyCon(PRIM_TYS.int));
         let env = lint_env(
             &mut names,
             expected_def,
@@ -1040,7 +1033,7 @@ mod tests {
         let expected_def = names.def_id("test.value");
         let class_id = ClassId(1);
         let instance_id = InstanceId(1);
-        let expected = pred(class_id, TypeExpr::TyCon(PRIM_TYS.int));
+        let expected = pred(class_id, Ty::TyCon(PRIM_TYS.int));
         let mut env = lint_env(
             &mut names,
             expected_def,

@@ -1,6 +1,4 @@
-use solveig_ast::ast::{
-    EvarId, Kind, Predicate, Pretty, TyConId, TyVarId, TypeExpr, tyvar_display_name,
-};
+use solveig_ast::ast::{EvarId, Kind, Predicate, Pretty, Ty, TyConId, TyVarId, tyvar_display_name};
 use std::collections::HashMap;
 use std::iter::successors;
 
@@ -14,11 +12,11 @@ pub enum ContextEntry {
     },
     TypedVar {
         var_name: String,
-        ty: TypeExpr,
+        ty: Ty,
     },
     SolvedEVar {
         lhs: EvarId,
-        rhs: TypeExpr,
+        rhs: Ty,
     },
     Marker {
         var_name: String,
@@ -56,15 +54,15 @@ impl Context {
         }
     }
 
-    fn apply_once(&self, ty: &TypeExpr) -> TypeExpr {
+    fn apply_once(&self, ty: &Ty) -> Ty {
         match ty {
-            TypeExpr::TyVar(_) | TypeExpr::TyCon(_) | TypeExpr::TyUnit => ty.clone(),
+            Ty::TyVar(_) | Ty::TyCon(_) | Ty::TyUnit => ty.clone(),
 
-            TypeExpr::TyArr(lhs, rhs) => TypeExpr::make_arr(self.apply(lhs), self.apply(rhs)),
+            Ty::TyArr(lhs, rhs) => Ty::make_arr(self.apply(lhs), self.apply(rhs)),
 
-            TypeExpr::TyApp(lhs, rhs) => TypeExpr::make_app(self.apply(lhs), self.apply(rhs)),
+            Ty::TyApp(lhs, rhs) => Ty::make_app(self.apply(lhs), self.apply(rhs)),
 
-            TypeExpr::TyExVar(evar_id) => {
+            Ty::TyExVar(evar_id) => {
                 if let Some(ContextEntry::SolvedEVar { rhs: solved, .. }) =
                     self.find_solved_evar_id(*evar_id)
                 {
@@ -73,7 +71,7 @@ impl Context {
                 ty.clone()
             }
 
-            TypeExpr::TyForAll(binders, preds, body) => TypeExpr::make_forall_group(
+            Ty::TyForAll(binders, preds, body) => Ty::make_forall_group(
                 binders.clone(),
                 preds.iter().map(|p| self.apply_predicate(p)).collect(),
                 self.apply(body),
@@ -81,7 +79,7 @@ impl Context {
         }
     }
 
-    pub fn apply(&self, ty: &TypeExpr) -> TypeExpr {
+    pub fn apply(&self, ty: &Ty) -> Ty {
         successors(Some(ty.clone()), |prev| {
             let next = self.apply_once(prev);
             if next != *prev { Some(next) } else { None }
@@ -209,7 +207,7 @@ impl Context {
         }
     }
 
-    pub fn lookup_term_var(&self, name: &str) -> Option<TypeExpr> {
+    pub fn lookup_term_var(&self, name: &str) -> Option<Ty> {
         self.entries.iter().rev().find_map(|ent| match ent {
             ContextEntry::TypedVar { var_name, ty } if var_name == name => Some(ty.clone()),
             _ => None,
@@ -218,29 +216,29 @@ impl Context {
 
     pub fn kind_of_type(
         &self,
-        ty: &TypeExpr,
+        ty: &Ty,
         tycon_kinds: &HashMap<TyConId, Kind>,
     ) -> Result<Kind, String> {
         let ty = self.apply(ty);
         match &ty {
-            TypeExpr::TyUnit => Ok(Kind::Star),
+            Ty::TyUnit => Ok(Kind::Star),
 
-            TypeExpr::TyCon(id) => tycon_kinds
+            Ty::TyCon(id) => tycon_kinds
                 .get(id)
                 .cloned()
                 .ok_or_else(|| format!("unknown type constructor: T{}", id.0)),
 
-            TypeExpr::TyVar(id) => self
+            Ty::TyVar(id) => self
                 .universal_kind_id(*id)
                 .ok_or_else(|| format!("unbound type variable: {}", tyvar_display_name(*id))),
 
-            TypeExpr::TyExVar(id) => self
+            Ty::TyExVar(id) => self
                 .evar_kind_id(*id)
                 .ok_or_else(|| format!("unknown existential: ?{}", id.0)),
 
-            TypeExpr::TyArr(_, _) => Ok(Kind::Star),
+            Ty::TyArr(_, _) => Ok(Kind::Star),
 
-            TypeExpr::TyForAll(binders, preds, body) => {
+            Ty::TyForAll(binders, preds, body) => {
                 let mut extended = self.clone();
                 for (id, kind) in binders {
                     extended = extended.add_entry(ContextEntry::UniVar {
@@ -273,9 +271,8 @@ impl Context {
                 }
             }
 
-            TypeExpr::TyApp(func, arg) => {
-                if matches!(**func, TypeExpr::TyForAll(_, _, _))
-                    || matches!(**arg, TypeExpr::TyForAll(_, _, _))
+            Ty::TyApp(func, arg) => {
+                if matches!(**func, Ty::TyForAll(_, _, _)) || matches!(**arg, Ty::TyForAll(_, _, _))
                 {
                     return Err(
                         "scheme type cannot appear directly in type application".to_string()
@@ -297,19 +294,19 @@ impl Context {
         }
     }
 
-    pub fn type_well_formed(&self, ty: &TypeExpr) -> bool {
+    pub fn type_well_formed(&self, ty: &Ty) -> bool {
         match ty {
-            TypeExpr::TyUnit | TypeExpr::TyCon(_) => true,
-            TypeExpr::TyVar(id) => self.has_universal_id(*id),
-            TypeExpr::TyExVar(id) => self.has_unsolved_evar_id(*id) || self.has_solved_evar_id(*id),
-            TypeExpr::TyArr(lhs, rhs) => self.type_well_formed(lhs) && self.type_well_formed(rhs),
-            TypeExpr::TyApp(lhs, rhs) => {
-                !matches!(**lhs, TypeExpr::TyForAll(_, _, _))
-                    && !matches!(**rhs, TypeExpr::TyForAll(_, _, _))
+            Ty::TyUnit | Ty::TyCon(_) => true,
+            Ty::TyVar(id) => self.has_universal_id(*id),
+            Ty::TyExVar(id) => self.has_unsolved_evar_id(*id) || self.has_solved_evar_id(*id),
+            Ty::TyArr(lhs, rhs) => self.type_well_formed(lhs) && self.type_well_formed(rhs),
+            Ty::TyApp(lhs, rhs) => {
+                !matches!(**lhs, Ty::TyForAll(_, _, _))
+                    && !matches!(**rhs, Ty::TyForAll(_, _, _))
                     && self.type_well_formed(lhs)
                     && self.type_well_formed(rhs)
             }
-            TypeExpr::TyForAll(binders, preds, body) => {
+            Ty::TyForAll(binders, preds, body) => {
                 let mut extended = self.clone();
                 for (id, kind) in binders {
                     extended = extended.add_entry(ContextEntry::UniVar {
@@ -342,12 +339,12 @@ mod tests {
 
         let solved = ContextEntry::SolvedEVar {
             lhs: evar,
-            rhs: TypeExpr::TyUnit,
+            rhs: Ty::TyUnit,
         };
         let ctx = ctx.replace(&unsolved, &solved);
 
         assert!(ctx.has_solved_evar_id(evar));
-        assert_eq!(ctx.apply(&TypeExpr::make_evar(evar)), TypeExpr::TyUnit);
+        assert_eq!(ctx.apply(&Ty::make_evar(evar)), Ty::TyUnit);
     }
 
     #[test]
@@ -373,11 +370,11 @@ mod tests {
         tycon_kinds.insert(list_id, Kind::make_arrow(Kind::Star, Kind::Star));
 
         let ctx = Context::new();
-        let list_unit = TypeExpr::make_app(TypeExpr::make_con_id(list_id), TypeExpr::TyUnit);
+        let list_unit = Ty::make_app(Ty::make_con_id(list_id), Ty::TyUnit);
 
         assert_eq!(ctx.kind_of_type(&list_unit, &tycon_kinds), Ok(Kind::Star));
         assert!(
-            ctx.kind_of_type(&TypeExpr::make_con_id(other_id), &tycon_kinds)
+            ctx.kind_of_type(&Ty::make_con_id(other_id), &tycon_kinds)
                 .is_err()
         );
     }

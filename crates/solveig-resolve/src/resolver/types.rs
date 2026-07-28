@@ -109,11 +109,11 @@ impl<'a> Resolver<'a> {
         sf: &SpannedWrapper<SurfaceTy>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
-    ) -> TypeExpr {
+    ) -> Ty {
         match &sf.0 {
-            SurfaceTy::Var(var_name) => TypeExpr::TyVar(self.resolve_tyvar_symbol(*var_name)),
+            SurfaceTy::Var(var_name) => Ty::TyVar(self.resolve_tyvar_symbol(*var_name)),
 
-            SurfaceTy::Arr(lhs, rhs) => TypeExpr::make_arr(
+            SurfaceTy::Arr(lhs, rhs) => Ty::make_arr(
                 self.resolve_surface_type_in_module(lhs, cx, local),
                 self.resolve_surface_type_in_module(rhs, cx, local),
             ),
@@ -126,10 +126,10 @@ impl<'a> Resolver<'a> {
                     .collect::<Vec<_>>();
                 let body = self.resolve_surface_type_in_module(body, cx, local);
                 self.pop_tyvar_scope();
-                TypeExpr::make_forall_group(quantifiers, Vec::new(), body)
+                Ty::make_forall_group(quantifiers, Vec::new(), body)
             }
 
-            SurfaceTy::Qualified(preds, body) => TypeExpr::make_qualified(
+            SurfaceTy::Qualified(preds, body) => Ty::make_qualified(
                 preds
                     .iter()
                     .map(|pred| self.resolve_surface_predicate(pred, cx, local))
@@ -137,13 +137,13 @@ impl<'a> Resolver<'a> {
                 self.resolve_surface_type_in_module(body, cx, local),
             ),
 
-            SurfaceTy::Unit => TypeExpr::TyUnit,
+            SurfaceTy::Unit => Ty::TyUnit,
 
             SurfaceTy::Con(con) => {
-                TypeExpr::make_con_id(self.resolve_tycon_id(&con.0, self.file_span(cx, con.1), cx))
+                Ty::make_con_id(self.resolve_tycon_id(&con.0, self.file_span(cx, con.1), cx))
             }
 
-            SurfaceTy::App(lhs, rhs) => TypeExpr::make_app(
+            SurfaceTy::App(lhs, rhs) => Ty::make_app(
                 self.resolve_surface_type_in_module(lhs, cx, local),
                 self.resolve_surface_type_in_module(rhs, cx, local),
             ),
@@ -170,6 +170,7 @@ impl<'a> Resolver<'a> {
             local,
         )
     }
+    #[allow(clippy::too_many_arguments)]
     fn resolve_signatures(
         &mut self,
         module_name: &ModuleName,

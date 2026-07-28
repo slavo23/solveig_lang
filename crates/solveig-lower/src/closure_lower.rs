@@ -311,38 +311,37 @@ impl<'a> ExprLowerer<'a> {
     fn lower_application(&mut self, expr: &Rc<IRExpr>) -> Rc<CCExpr> {
         let (head, args) = collect_application_spine(expr);
 
-        if let IRExpr::Con { tag, arity } = head.as_ref() {
-            if args.len() == *arity as usize {
-                let lowered_fields = args.iter().map(|arg| self.lower_expr(arg)).collect();
+        if let IRExpr::Con { tag, arity } = head.as_ref()
+            && args.len() == *arity as usize
+        {
+            let lowered_fields = args.iter().map(|arg| self.lower_expr(arg)).collect();
 
-                return Rc::new(CCExpr::Pack {
-                    tag: *tag,
-                    arity: *arity,
-                    fields: lowered_fields,
-                });
-            }
+            return Rc::new(CCExpr::Pack {
+                tag: *tag,
+                arity: *arity,
+                fields: lowered_fields,
+            });
         }
 
-        if let IRExpr::FVar(global_index) = head.as_ref() {
-            if let Some(info) = self.state.known_global_func(*global_index) {
-                if args.len() <= info.arity {
-                    let lowered_args = args.iter().map(|arg| self.lower_expr(arg)).collect();
-                    return Rc::new(CCExpr::CallKnown {
+        if let IRExpr::FVar(global_index) = head.as_ref()
+            && let Some(info) = self.state.known_global_func(*global_index)
+        {
+            if args.len() <= info.arity {
+                let lowered_args = args.iter().map(|arg| self.lower_expr(arg)).collect();
+                return Rc::new(CCExpr::CallKnown {
+                    func: info.func_id,
+                    args: lowered_args,
+                });
+            } else {
+                let lowered_args: Vec<_> = args.iter().map(|arg| self.lower_expr(arg)).collect();
+                let (sat, rest) = lowered_args.split_at(info.arity);
+                return Rc::new(CCExpr::Call {
+                    callee: Rc::new(CCExpr::CallKnown {
                         func: info.func_id,
-                        args: lowered_args,
-                    });
-                } else {
-                    let lowered_args: Vec<_> =
-                        args.iter().map(|arg| self.lower_expr(arg)).collect();
-                    let (sat, rest) = lowered_args.split_at(info.arity);
-                    return Rc::new(CCExpr::Call {
-                        callee: Rc::new(CCExpr::CallKnown {
-                            func: info.func_id,
-                            args: sat.to_vec(),
-                        }),
-                        args: rest.to_vec(),
-                    });
-                }
+                        args: sat.to_vec(),
+                    }),
+                    args: rest.to_vec(),
+                });
             }
         }
 

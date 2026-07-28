@@ -483,9 +483,9 @@ impl<'a> Resolver<'a> {
 
         TermExprNode::new(node, span)
     }
-    fn peel_arrow<'ty>(&self, ty: &'ty TypeExpr) -> Option<(&'ty TypeExpr, &'ty TypeExpr)> {
+    fn peel_arrow<'ty>(&self, ty: &'ty Ty) -> Option<(&'ty Ty, &'ty Ty)> {
         match ty {
-            TypeExpr::TyArr(lhs, rhs) => Some((lhs, rhs)),
+            Ty::TyArr(lhs, rhs) => Some((lhs, rhs)),
             _ => None,
         }
     }
@@ -537,7 +537,7 @@ impl<'a> Resolver<'a> {
         let mut body_node = self.resolve_surface_expr_in_module(body, cx, local, &bound_terms);
 
         let mut remaining = &sig.ty;
-        let mut annos: Vec<(String, TypeExpr)> = Vec::new();
+        let mut annos: Vec<(String, Ty)> = Vec::new();
 
         for param in params {
             let Some((arg_ty, ret_ty)) = self.peel_arrow(remaining) else {

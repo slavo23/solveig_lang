@@ -134,7 +134,7 @@ pub enum SurfaceDefinition {
     DataDef {
         name: Spanned<Symbol>,
         ty_params: Vec<Spanned<Symbol>>,
-        constructors: Vec<Spanned<SufraceConstructor>>,
+        constructors: Vec<Spanned<SurfaceConstructor>>,
     },
     ClassDef {
         name: Spanned<Symbol>,
@@ -152,7 +152,7 @@ pub enum SurfaceDefinition {
 }
 
 #[derive(Debug, Clone)]
-pub struct SufraceConstructor {
+pub struct SurfaceConstructor {
     pub name: Spanned<Symbol>,
     pub params: Vec<Spanned<SurfaceTy>>,
 }

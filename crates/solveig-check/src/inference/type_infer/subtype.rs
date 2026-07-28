@@ -1,12 +1,12 @@
 impl TypeChecker {
-    fn lookup_local_term_var(&self, ctx: &Context, name: &str) -> Option<TypeExpr> {
+    fn lookup_local_term_var(&self, ctx: &Context, name: &str) -> Option<Ty> {
         ctx.lookup_term_var(name)
     }
     pub fn solve_subtype(
         &mut self,
         ctx: Context,
-        left: &TypeExpr,
-        right: &TypeExpr,
+        left: &Ty,
+        right: &Ty,
         origin_span: FileSpan,
     ) -> Result<Context, TypeError> {
         let original_left = ctx.apply(left);
@@ -26,11 +26,11 @@ impl TypeChecker {
             }),
         }
     }
-    pub fn solve_subtype_inner(
+    fn solve_subtype_inner(
         &mut self,
         ctx: Context,
-        left: &TypeExpr,
-        right: &TypeExpr,
+        left: &Ty,
+        right: &Ty,
         origin_span: Span,
     ) -> Result<Context, ()> {
         let left = &ctx.apply(left);
@@ -43,12 +43,12 @@ impl TypeChecker {
         // DK 2013, Fig. 9, <:forallL/<:forallR; B2 extends each opened
         // forall group with its qualified context instead of dropping it.
         match (left, right) {
-            (TypeExpr::TyUnit, TypeExpr::TyUnit) => Ok(ctx),
-            (TypeExpr::TyVar(name_a), TypeExpr::TyVar(name_b)) if name_a == name_b => Ok(ctx),
-            (TypeExpr::TyExVar(name_a), TypeExpr::TyExVar(name_b)) if name_a == name_b => Ok(ctx),
-            (TypeExpr::TyCon(name_a), TypeExpr::TyCon(name_b)) if name_a == name_b => Ok(ctx),
+            (Ty::TyUnit, Ty::TyUnit) => Ok(ctx),
+            (Ty::TyVar(name_a), Ty::TyVar(name_b)) if name_a == name_b => Ok(ctx),
+            (Ty::TyExVar(name_a), Ty::TyExVar(name_b)) if name_a == name_b => Ok(ctx),
+            (Ty::TyCon(name_a), Ty::TyCon(name_b)) if name_a == name_b => Ok(ctx),
 
-            (TypeExpr::TyArr(domain_a, codomain_a), TypeExpr::TyArr(domain_b, codomain_b)) => {
+            (Ty::TyArr(domain_a, codomain_a), Ty::TyArr(domain_b, codomain_b)) => {
                 let theta =
                     self.solve_subtype_inner(ctx, domain_b, domain_a, origin_span.clone())?;
                 let codomain_a_applied = theta.apply(codomain_a);
@@ -61,14 +61,14 @@ impl TypeChecker {
                 )
             }
 
-            (TypeExpr::TyApp(func_a, arg_a), TypeExpr::TyApp(func_b, arg_b)) => {
+            (Ty::TyApp(func_a, arg_a), Ty::TyApp(func_b, arg_b)) => {
                 let theta = self.solve_subtype_inner(ctx, func_b, func_a, origin_span.clone())?;
                 let arg_a_applied = theta.apply(arg_a);
                 let arg_b_applied = theta.apply(arg_b);
                 self.solve_subtype_inner(theta, &arg_a_applied, &arg_b_applied, origin_span)
             }
 
-            (TypeExpr::TyForAll(binders, preds, body), _) if !binders.is_empty() => {
+            (Ty::TyForAll(binders, preds, body), _) if !binders.is_empty() => {
                 let (quantifier, kind) = &binders[0];
                 let fresh_evar = self.fresh_evar_id();
                 let marker = ContextEntry::Marker {
@@ -80,7 +80,7 @@ impl TypeChecker {
 
                 let ty_arg = Self::evar_type(fresh_evar);
                 let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
-                let instantiated_body = TypeExpr::make_forall_group(
+                let instantiated_body = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds
                         .iter()
@@ -96,16 +96,16 @@ impl TypeChecker {
                 )?;
                 Ok(theta.until(&marker))
             }
-            (TypeExpr::TyForAll(_, preds, body), _) => {
+            (Ty::TyForAll(_, preds, body), _) => {
                 self.add_wanteds(preds.clone(), origin_span.clone());
                 self.solve_subtype_inner(ctx, body, right, origin_span)
             }
 
-            (_, TypeExpr::TyForAll(binders, preds, body)) if !binders.is_empty() => {
+            (_, Ty::TyForAll(binders, preds, body)) if !binders.is_empty() => {
                 let (quantifier, kind) = &binders[0];
                 let universal_entry = self.universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
-                let body = TypeExpr::make_forall_group(
+                let body = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds.clone(),
                     (**body).clone(),
@@ -114,7 +114,7 @@ impl TypeChecker {
                     self.solve_subtype_inner(extended_ctx, left, &body, origin_span)?;
                 Ok(theta.until(&universal_entry))
             }
-            (_, TypeExpr::TyForAll(_, preds, body)) => {
+            (_, Ty::TyForAll(_, preds, body)) => {
                 let preds = preds.clone();
                 let (_, result) = self.with_givens(preds, |checker| {
                     checker.solve_subtype_inner(ctx, left, body, origin_span)
@@ -122,13 +122,13 @@ impl TypeChecker {
                 result
             }
 
-            (TypeExpr::TyExVar(evar_id), _)
+            (Ty::TyExVar(evar_id), _)
                 if ctx.has_unsolved_evar_id(*evar_id) && !right.occurs_check(*evar_id) =>
             {
                 self.instantiate_left(ctx, *evar_id, right, origin_span)
             }
 
-            (_, TypeExpr::TyExVar(evar_id))
+            (_, Ty::TyExVar(evar_id))
                 if ctx.has_unsolved_evar_id(*evar_id) && !left.occurs_check(*evar_id) =>
             {
                 self.instantiate_right(ctx, left, *evar_id, origin_span)
@@ -141,7 +141,7 @@ impl TypeChecker {
         &self,
         ctx: &Context,
         result_evar: EvarId,
-        arg_part: &TypeExpr,
+        arg_part: &Ty,
     ) -> Result<(Kind, Kind), ()> {
         let arg_kind = ctx
             .kind_of_type(arg_part, &self.tycon_kinds)
@@ -159,7 +159,7 @@ impl TypeChecker {
         &mut self,
         ctx: Context,
         evar_id: EvarId,
-        target: &TypeExpr,
+        target: &Ty,
         origin_span: Span,
     ) -> Result<Context, ()> {
         let evar_entry = ContextEntry::ExVar(
@@ -182,7 +182,7 @@ impl TypeChecker {
         }
 
         match target {
-            TypeExpr::TyExVar(other_evar) if ctx.evar_before_id(evar_id, *other_evar) => {
+            Ty::TyExVar(other_evar) if ctx.evar_before_id(evar_id, *other_evar) => {
                 let solution = ContextEntry::SolvedEVar {
                     lhs: *other_evar,
                     rhs: Self::evar_type(evar_id),
@@ -197,7 +197,7 @@ impl TypeChecker {
                     &solution,
                 ))
             }
-            TypeExpr::TyExVar(other_evar) => {
+            Ty::TyExVar(other_evar) => {
                 let solution = ContextEntry::SolvedEVar {
                     lhs: evar_id,
                     rhs: Self::evar_type(*other_evar),
@@ -205,12 +205,12 @@ impl TypeChecker {
                 self.record_solution(&solution);
                 Ok(ctx.replace(&evar_entry, &solution))
             }
-            TypeExpr::TyArr(domain, codomain) => {
+            Ty::TyArr(domain, codomain) => {
                 let domain_evar = self.fresh_evar_id();
                 let codomain_evar = self.fresh_evar_id();
                 let arrow_solution = ContextEntry::SolvedEVar {
                     lhs: evar_id,
-                    rhs: TypeExpr::make_arr(
+                    rhs: Ty::make_arr(
                         Self::evar_type(domain_evar),
                         Self::evar_type(codomain_evar),
                     ),
@@ -227,7 +227,7 @@ impl TypeChecker {
                 let codomain_applied = theta.apply(codomain);
                 self.instantiate_left(theta, codomain_evar, &codomain_applied, origin_span)
             }
-            TypeExpr::TyApp(func_part, arg_part) => {
+            Ty::TyApp(func_part, arg_part) => {
                 let (func_kind, arg_kind) = self.tyapp_split_kinds(&ctx, evar_id, arg_part)?;
 
                 let func_evar = self.fresh_evar_id();
@@ -235,7 +235,7 @@ impl TypeChecker {
 
                 let app_solution = ContextEntry::SolvedEVar {
                     lhs: evar_id,
-                    rhs: TypeExpr::make_app(
+                    rhs: Ty::make_app(
                         Self::evar_type(func_evar),
                         Self::evar_type(arg_evar),
                     ),
@@ -255,11 +255,11 @@ impl TypeChecker {
 
                 self.instantiate_left(theta, arg_evar, &arg_applied, origin_span)
             }
-            TypeExpr::TyForAll(binders, preds, body) if !binders.is_empty() => {
+            Ty::TyForAll(binders, preds, body) if !binders.is_empty() => {
                 let (quantifier, kind) = &binders[0];
                 let universal_entry = self.universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
-                let body = TypeExpr::make_forall_group(
+                let body = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds.clone(),
                     (**body).clone(),
@@ -267,7 +267,7 @@ impl TypeChecker {
                 let delta = self.instantiate_left(extended_ctx, evar_id, &body, origin_span)?;
                 Ok(delta.until(&universal_entry))
             }
-            TypeExpr::TyForAll(_, preds, body) => {
+            Ty::TyForAll(_, preds, body) => {
                 let preds = preds.clone();
                 let (_, result) = self.with_givens(preds, |checker| {
                     checker.instantiate_left(ctx, evar_id, body, origin_span)
@@ -281,7 +281,7 @@ impl TypeChecker {
     fn instantiate_right(
         &mut self,
         ctx: Context,
-        source: &TypeExpr,
+        source: &Ty,
         evar_id: EvarId,
         origin_span: Span,
     ) -> Result<Context, ()> {
@@ -304,7 +304,7 @@ impl TypeChecker {
         }
 
         match source {
-            TypeExpr::TyExVar(other_evar) if ctx.evar_before_id(evar_id, *other_evar) => {
+            Ty::TyExVar(other_evar) if ctx.evar_before_id(evar_id, *other_evar) => {
                 let solution = ContextEntry::SolvedEVar {
                     lhs: *other_evar,
                     rhs: Self::evar_type(evar_id),
@@ -320,7 +320,7 @@ impl TypeChecker {
                 ))
             }
 
-            TypeExpr::TyExVar(other_evar) => {
+            Ty::TyExVar(other_evar) => {
                 let solution = ContextEntry::SolvedEVar {
                     lhs: evar_id,
                     rhs: Self::evar_type(*other_evar),
@@ -328,12 +328,12 @@ impl TypeChecker {
                 self.record_solution(&solution);
                 Ok(ctx.replace(&evar_entry, &solution))
             }
-            TypeExpr::TyArr(domain, codomain) => {
+            Ty::TyArr(domain, codomain) => {
                 let domain_evar = self.fresh_evar_id();
                 let codomain_evar = self.fresh_evar_id();
                 let arrow_solution = ContextEntry::SolvedEVar {
                     lhs: evar_id,
-                    rhs: TypeExpr::make_arr(
+                    rhs: Ty::make_arr(
                         Self::evar_type(domain_evar),
                         Self::evar_type(codomain_evar),
                     ),
@@ -349,7 +349,7 @@ impl TypeChecker {
                 let codomain_applied = theta.apply(codomain);
                 self.instantiate_right(theta, &codomain_applied, codomain_evar, origin_span)
             }
-            TypeExpr::TyApp(func_part, arg_part) => {
+            Ty::TyApp(func_part, arg_part) => {
                 let (func_kind, arg_kind) = self.tyapp_split_kinds(&ctx, evar_id, arg_part)?;
 
                 let func_evar = self.fresh_evar_id();
@@ -357,7 +357,7 @@ impl TypeChecker {
 
                 let app_solution = ContextEntry::SolvedEVar {
                     lhs: evar_id,
-                    rhs: TypeExpr::make_app(
+                    rhs: Ty::make_app(
                         Self::evar_type(func_evar),
                         Self::evar_type(arg_evar),
                     ),
@@ -377,7 +377,7 @@ impl TypeChecker {
 
                 self.instantiate_right(theta, &arg_applied, arg_evar, origin_span)
             }
-            TypeExpr::TyForAll(binders, preds, body) if !binders.is_empty() => {
+            Ty::TyForAll(binders, preds, body) if !binders.is_empty() => {
                 let (quantifier, kind) = &binders[0];
                 let fresh_evar = self.fresh_evar_id();
                 let marker = ContextEntry::Marker {
@@ -389,7 +389,7 @@ impl TypeChecker {
 
                 let ty_arg = Self::evar_type(fresh_evar);
                 let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
-                let instantiated = TypeExpr::make_forall_group(
+                let instantiated = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds
                         .iter()
@@ -401,7 +401,7 @@ impl TypeChecker {
                     self.instantiate_right(extended_ctx, &instantiated, evar_id, origin_span)?;
                 Ok(delta.until(&marker))
             }
-            TypeExpr::TyForAll(_, preds, body) => {
+            Ty::TyForAll(_, preds, body) => {
                 self.add_wanteds(preds.clone(), origin_span.clone());
                 self.instantiate_right(ctx, body, evar_id, origin_span)
             }
@@ -412,23 +412,23 @@ impl TypeChecker {
     fn force_arrow(
         &mut self,
         ctx: Context,
-        ty: &TypeExpr,
+        ty: &Ty,
         span: Span,
-    ) -> TcResult<(Context, TypeExpr, TypeExpr)> {
+    ) -> TcResult<(Context, Ty, Ty)> {
         let ty = ctx.apply(ty);
 
         match &ty {
-            TypeExpr::TyArr(domain, codomain) => {
+            Ty::TyArr(domain, codomain) => {
                 Ok((ctx, (**domain).clone(), (**codomain).clone()))
             }
 
-            TypeExpr::TyForAll(binders, preds, body) if !binders.is_empty() => {
+            Ty::TyForAll(binders, preds, body) if !binders.is_empty() => {
                 let (quantifier, kind) = &binders[0];
                 let fresh_evar = self.fresh_evar_id();
                 let new_ctx = ctx.add_entry(ContextEntry::ExVar(fresh_evar, kind.clone()));
                 let ty_arg = Self::evar_type(fresh_evar);
                 let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
-                let instantiated = TypeExpr::make_forall_group(
+                let instantiated = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds
                         .iter()
@@ -438,12 +438,12 @@ impl TypeChecker {
                 );
                 self.force_arrow(new_ctx, &instantiated, span)
             }
-            TypeExpr::TyForAll(_, preds, body) => {
+            Ty::TyForAll(_, preds, body) => {
                 self.add_wanteds(preds.clone(), span.clone());
                 self.force_arrow(ctx, body, span)
             }
 
-            TypeExpr::TyExVar(evar_id) if ctx.has_unsolved_evar_id(*evar_id) => {
+            Ty::TyExVar(evar_id) if ctx.has_unsolved_evar_id(*evar_id) => {
                 let evar_entry = ContextEntry::ExVar(
                     *evar_id,
                     ctx.evar_kind_id(*evar_id)
@@ -455,7 +455,7 @@ impl TypeChecker {
                 let codomain_evar = self.fresh_evar_id();
                 let arrow_solution = ContextEntry::SolvedEVar {
                     lhs: *evar_id,
-                    rhs: TypeExpr::make_arr(
+                    rhs: Ty::make_arr(
                         Self::evar_type(domain_evar),
                         Self::evar_type(codomain_evar),
                     ),

@@ -160,7 +160,7 @@ impl<'a> Resolver<'a> {
         let pseudo_scheme = Scheme {
             quantifiers: Vec::new(),
             predicates,
-            ty: TypeExpr::TyUnit,
+            ty: Ty::TyUnit,
         };
 
         let info = SignatureKindInferencer::with_envs(all_tycon_kinds.clone(), class_env.clone())
@@ -253,7 +253,7 @@ impl<'a> Resolver<'a> {
                         class_name.clone(),
                         class_params
                             .iter()
-                            .map(|(param, _)| TypeExpr::TyVar(*param))
+                            .map(|(param, _)| Ty::TyVar(*param))
                             .collect(),
                     );
 

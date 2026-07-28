@@ -3,7 +3,7 @@ use std::io::{self, IsTerminal, Write};
 
 use ariadne::{Config, Label as AriadneLabel, Report, ReportKind, sources};
 use solveig_base::SourceMap;
-use solveig_base::utils::diagnostics::{Diagnostic, Severity};
+use solveig_base::{Diagnostic, Severity};
 
 type AriadneSpan = (String, std::ops::Range<usize>);
 
@@ -95,7 +95,7 @@ fn source_cache(source_map: &SourceMap) -> impl ariadne::Cache<String> {
 
 #[cfg(test)]
 mod tests {
-    use solveig_base::utils::diagnostics::Label;
+    use solveig_base::Label;
     use solveig_base::{FileSpan, SourceMap, Span};
 
     use super::*;

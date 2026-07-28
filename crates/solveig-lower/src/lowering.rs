@@ -595,7 +595,7 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>, names: &Names) -> IRPro
 mod tests {
     use solveig_ast::ast::{
         ClassDefinition, ClassMethodDef, ClassTable, InstanceId, InstanceMethodDef, ModuleId,
-        Names, Predicate, Scheme, TermDefinition, TyConTable, TypeExpr, VarRef,
+        Names, Predicate, Scheme, TermDefinition, Ty, TyConTable, VarRef,
     };
 
     use super::*;
@@ -630,7 +630,7 @@ mod tests {
                     scheme: Scheme {
                         quantifiers: Vec::new(),
                         predicates: vec![pred.clone()],
-                        ty: TypeExpr::TyUnit,
+                        ty: Ty::TyUnit,
                     },
                     default_body: None,
                 }],

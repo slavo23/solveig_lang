@@ -3,25 +3,25 @@ impl TypeChecker {
         &mut self,
         ctx: Context,
         expr: &TermExprNode<Span>,
-        expected_type: &TypeExpr,
+        expected_type: &Ty,
     ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>)> {
         let expected_type = &ctx.apply(expected_type);
         let span = expr.anno.clone();
 
         match (&expr.node, expected_type) {
-            (TermExpr::Unit, TypeExpr::TyUnit) => {
-                let elaborated = elab_node(TermExpr::Unit, span, TypeExpr::TyUnit);
+            (TermExpr::Unit, Ty::TyUnit) => {
+                let elaborated = elab_node(TermExpr::Unit, span, Ty::TyUnit);
                 Ok((ctx, elaborated))
             }
 
             (
                 TermExpr::TyAbs(param, _kind, body),
-                TypeExpr::TyForAll(binders, preds, body_type),
+                Ty::TyForAll(binders, preds, body_type),
             ) if let Some((quantifier, quant_kind)) = binders.first() => {
                 let param_id = *quantifier;
-                let ty_arg = TypeExpr::TyVar(param_id);
+                let ty_arg = Ty::TyVar(param_id);
                 let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
-                let substituted_body_type = TypeExpr::make_forall_group(
+                let substituted_body_type = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds
                         .iter()
@@ -44,7 +44,7 @@ impl TypeChecker {
                 Ok((delta.until(&universal_entry), elaborated))
             }
 
-            (TermExpr::Abs(param, maybe_annotation, body), TypeExpr::TyArr(domain, codomain)) => {
+            (TermExpr::Abs(param, maybe_annotation, body), Ty::TyArr(domain, codomain)) => {
                 let ctx = self.check_optional_param_annotation(
                     ctx,
                     maybe_annotation,
@@ -125,11 +125,11 @@ impl TypeChecker {
                 Ok((ctx, elaborated))
             }
 
-            (_, TypeExpr::TyForAll(binders, preds, body_type)) if !binders.is_empty() => {
+            (_, Ty::TyForAll(binders, preds, body_type)) if !binders.is_empty() => {
                 let (quantifier, kind) = &binders[0];
                 let universal_entry = self.universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
-                let body_type = TypeExpr::make_forall_group(
+                let body_type = Ty::make_forall_group(
                     binders[1..].to_vec(),
                     preds.clone(),
                     (**body_type).clone(),
@@ -150,7 +150,7 @@ impl TypeChecker {
                 );
                 Ok((delta.until(&universal_entry), elaborated))
             }
-            (_, TypeExpr::TyForAll(_, preds, body)) => {
+            (_, Ty::TyForAll(_, preds, body)) => {
                 let preds = preds.clone();
                 let (givens, result) =
                     self.with_givens(preds, |checker| checker.solve_checking(ctx, expr, body));
@@ -579,7 +579,7 @@ pub fn check_and_elab_expr_in_checked_module(
     module: &CheckedModule,
     file: FileId,
     expr: &TermExprNode<Span>,
-    expected_type: &TypeExpr,
+    expected_type: &Ty,
     names: &Names,
 ) -> Result<Option<TermExprNode<TcMetadata, Span>>, TypeError> {
     let env = TypeCheckEnv::from_checked_module(module, names);
