@@ -37,17 +37,21 @@ use solveig_lower::closure_ir::CCProgram;
 use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
 use solveig_resolve::project::{
-    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleTable,
-    ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi, TypedDisplayMaps,
-    build_module_api, build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module,
-    effective_imports, module_order_checked, seed_compiler_prelude_module_api,
+    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleFile,
+    ModuleTable, ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi,
+    TypedDisplayMaps, build_module_api, build_typed_module_api, compiler_builtin_api,
+    compiler_prelude_prim_module, effective_imports, module_order_checked,
+    seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::ModuleName;
 use solveig_vm::vm::Machine;
 
 use crate::DriverError;
-use crate::project::{ProjectError, load_project, parse_project};
+use crate::project::{
+    ProjectError, is_compiler_prelude_module, load_project, load_project_with_prelude_cache,
+    parse_project,
+};
 
 mod builtins;
 mod compilation;
@@ -63,7 +67,7 @@ pub use compilation::{
     compile_and_run_project_with_options_and_args, run_project_capture,
     run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
 };
-use compilation::{CheckedProject, CompilationArtifacts};
+use compilation::{CheckedProject, CompilationArtifacts, PreludeCache};
 use evidence_dump::dump_solved_evidence;
 use hover::hover_in_artifacts;
 use pipeline::{FrontendPhase, merge_checked_modules, verify_lowering_core};

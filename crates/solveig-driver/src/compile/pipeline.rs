@@ -23,7 +23,20 @@ impl Compilation {
         verify_core: bool,
     ) -> Result<CheckProjectOutcome, DriverError> {
         let entry_file = find_entry_file(&self.project_root)?;
-        let (_root, project) = match load_project(&self.session, &entry_file) {
+        let cached_prelude_modules = self
+            .prelude_cache
+            .as_ref()
+            .map(|cache| &cache.project_modules);
+        let loaded_project = if let Some(cached_prelude_modules) = cached_prelude_modules {
+            load_project_with_prelude_cache(
+                &self.session,
+                &entry_file,
+                Some(cached_prelude_modules),
+            )
+        } else {
+            load_project(&self.session, &entry_file)
+        };
+        let (_root, project) = match loaded_project {
             Ok(project) => project,
             Err(ProjectError::Driver(error)) => return Err(error),
             Err(ProjectError::Resolve(error)) => {
@@ -53,6 +66,10 @@ impl Compilation {
             }
         };
         let parsed = parse_project(&project);
+        let prelude_cache = self
+            .prelude_cache
+            .as_ref()
+            .filter(|cache| cache.can_reuse(&project.module_table, verify_core));
 
         let mut state = match FrontendState::new(
             &self.session,
@@ -61,6 +78,7 @@ impl Compilation {
             &parsed,
             &order,
             verify_core,
+            prelude_cache,
         ) {
             Ok(state) => state,
             Err(errors) => {
@@ -74,8 +92,13 @@ impl Compilation {
         let phase = state.check_all(&order);
 
         let source_files = self.session.source_map().files().to_vec();
+        let (checked_project, prelude_cache) = state.into_checked_project(source_files);
+        if let Some(prelude_cache) = prelude_cache {
+            self.prelude_cache = Some(prelude_cache);
+        }
+
         Ok(CheckProjectOutcome {
-            checked_project: Some(state.into_checked_project(source_files)),
+            checked_project: Some(checked_project),
             phase,
         })
     }
@@ -107,6 +130,7 @@ struct FrontendState<'a> {
     module_files: FxHashMap<ModuleId, FileId>,
     next_instance_id: u32,
     verify_core: bool,
+    prelude_cache: Option<PreludeCache>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -140,12 +164,36 @@ impl<'a> FrontendState<'a> {
         parsed: &'a ParsedProject,
         order: &[ModuleName],
         verify_core: bool,
+        prelude_cache: Option<&PreludeCache>,
     ) -> Result<Self, Vec<ResolveError>> {
         let mut apis = FxHashMap::default();
         let mut errors = Vec::new();
-        let builtins = Rc::new(driver_builtin_api(session, names, &project.module_table));
+        if let Some(cache) = prelude_cache {
+            *names = cache.names.clone();
+        }
+        let builtins = prelude_cache.map_or_else(
+            || Rc::new(driver_builtin_api(session, names, &project.module_table)),
+            |cache| cache.builtins.clone(),
+        );
 
         for module_name in order {
+            if let Some(cache) = prelude_cache
+                && is_compiler_prelude_module(session, module_name)
+            {
+                let api = cache
+                    .apis
+                    .get(module_name)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "ICE: usable prelude cache missing API for {}",
+                            module_name.as_string(session)
+                        )
+                    })
+                    .clone();
+                apis.insert(module_name.clone(), api);
+                continue;
+            }
+
             let module_id = project
                 .module_table
                 .id(module_name)
@@ -169,6 +217,20 @@ impl<'a> FrontendState<'a> {
             return Err(errors);
         }
 
+        let typed_apis = prelude_cache
+            .map(|cache| cache.typed_apis.clone())
+            .unwrap_or_default();
+        let checked_modules = prelude_cache
+            .map(|cache| cache.checked_modules.clone())
+            .unwrap_or_default();
+        let checked = prelude_cache
+            .map(|cache| cache.checked.clone())
+            .unwrap_or_default();
+        let module_files = prelude_cache
+            .map(|cache| cache.module_files.clone())
+            .unwrap_or_default();
+        let next_instance_id = prelude_cache.map_or(0, |cache| cache.next_instance_id);
+
         Ok(Self {
             session,
             names,
@@ -176,24 +238,31 @@ impl<'a> FrontendState<'a> {
             parsed,
             builtins,
             apis,
-            typed_apis: FxHashMap::default(),
+            typed_apis,
             resolutions: FxHashMap::default(),
-            checked_modules: Vec::new(),
-            checked: FxHashMap::default(),
-            module_files: FxHashMap::default(),
-            next_instance_id: 0,
+            checked_modules,
+            checked,
+            module_files,
+            next_instance_id,
             verify_core,
+            prelude_cache: prelude_cache.cloned(),
         })
     }
 
-    fn into_checked_project(self, source_files: Vec<SourceFile>) -> CheckedProject {
-        CheckedProject {
-            names: self.names.clone(),
-            modules: self.checked_modules,
-            checked: self.checked,
-            module_files: self.module_files,
-            source_files,
-        }
+    fn into_checked_project(
+        self,
+        source_files: Vec<SourceFile>,
+    ) -> (CheckedProject, Option<PreludeCache>) {
+        (
+            CheckedProject {
+                names: self.names.clone(),
+                modules: self.checked_modules,
+                checked: self.checked,
+                module_files: self.module_files,
+                source_files,
+            },
+            self.prelude_cache,
+        )
     }
 
     fn check_all(&mut self, order: &[ModuleName]) -> Option<FrontendPhase> {
@@ -201,6 +270,15 @@ impl<'a> FrontendState<'a> {
         let mut first_failure: Option<FrontendPhase> = None;
 
         for module_name in order {
+            let module_id = self
+                .project
+                .module_table
+                .id(module_name)
+                .expect("ICE: checked module order referenced unknown module");
+            if self.checked.contains_key(&module_id) {
+                continue;
+            }
+
             let parsed = self.parsed.get(self.session, module_name);
             let imports =
                 effective_imports(self.session, module_name, &parsed.imports, parsed.file);
@@ -222,11 +300,6 @@ impl<'a> FrontendState<'a> {
                 }
             };
 
-            let module_id = self
-                .project
-                .module_table
-                .id(module_name)
-                .expect("ICE: checked module order referenced unknown module");
             let typed_api = Rc::new(build_typed_module_api(
                 self.session,
                 self.names,
@@ -239,9 +312,141 @@ impl<'a> FrontendState<'a> {
             self.module_files.insert(module_id, parsed.file);
             self.checked.insert(module_id, checked.clone());
             self.checked_modules.push(checked);
+            if is_compiler_prelude_module(self.session, module_name) {
+                self.capture_prelude_cache(order);
+            }
         }
 
         first_failure
+    }
+
+    fn capture_prelude_cache(&mut self, order: &[ModuleName]) {
+        let mut prelude_names = Vec::new();
+        for module_name in order {
+            if is_compiler_prelude_module(self.session, module_name) {
+                prelude_names.push(module_name.clone());
+            }
+        }
+
+        if prelude_names.iter().any(|module_name| {
+            let module_id = self
+                .project
+                .module_table
+                .id(module_name)
+                .expect("ICE: checked module order referenced unknown module");
+            !self.checked.contains_key(&module_id) || !self.typed_apis.contains_key(module_name)
+        }) {
+            return;
+        }
+
+        let mut project_modules = FxHashMap::default();
+        let mut module_ids = FxHashMap::default();
+        let mut apis = FxHashMap::default();
+        let mut typed_apis = FxHashMap::default();
+        let mut checked = FxHashMap::default();
+        let mut module_files = FxHashMap::default();
+        let mut checked_modules = Vec::new();
+
+        for module_name in &prelude_names {
+            let module_id = self
+                .project
+                .module_table
+                .id(module_name)
+                .expect("ICE: checked module order referenced unknown module");
+            project_modules.insert(
+                module_name.clone(),
+                self.project
+                    .modules
+                    .get(module_name)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "ICE: prelude cache missing project module {}",
+                            module_name.as_string(self.session)
+                        )
+                    })
+                    .clone(),
+            );
+            module_ids.insert(module_name.clone(), module_id);
+            apis.insert(
+                module_name.clone(),
+                self.apis
+                    .get(module_name)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "ICE: prelude cache missing module API {}",
+                            module_name.as_string(self.session)
+                        )
+                    })
+                    .clone(),
+            );
+            typed_apis.insert(
+                module_name.clone(),
+                self.typed_apis
+                    .get(module_name)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "ICE: prelude cache missing typed API {}",
+                            module_name.as_string(self.session)
+                        )
+                    })
+                    .clone(),
+            );
+            checked.insert(
+                module_id,
+                self.checked
+                    .get(&module_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "ICE: prelude cache missing checked module {}",
+                            module_name.as_string(self.session)
+                        )
+                    })
+                    .clone(),
+            );
+            module_files.insert(
+                module_id,
+                *self.module_files.get(&module_id).unwrap_or_else(|| {
+                    panic!(
+                        "ICE: prelude cache missing file for {}",
+                        module_name.as_string(self.session)
+                    )
+                }),
+            );
+        }
+
+        for module_name in &prelude_names {
+            let module_id = *module_ids.get(module_name).unwrap_or_else(|| {
+                panic!(
+                    "ICE: prelude cache missing module id for {}",
+                    module_name.as_string(self.session)
+                )
+            });
+            checked_modules.push(
+                checked
+                    .get(&module_id)
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "ICE: prelude cache missing checked module {}",
+                            module_name.as_string(self.session)
+                        )
+                    })
+                    .clone(),
+            );
+        }
+
+        self.prelude_cache = Some(PreludeCache {
+            project_modules,
+            module_ids,
+            names: self.names.clone(),
+            builtins: self.builtins.clone(),
+            apis,
+            typed_apis,
+            checked_modules,
+            checked,
+            module_files,
+            next_instance_id: self.next_instance_id,
+            verified_core: self.verify_core,
+        });
     }
 
     fn collect_imported_class_param_kind_ids(

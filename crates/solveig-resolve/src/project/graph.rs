@@ -13,7 +13,7 @@ pub struct ModuleContext {
     pub builtins: Rc<BuiltinApi>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ModuleFile {
     pub name: ModuleName,
     pub path: PathBuf,

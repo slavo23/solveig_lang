@@ -145,6 +145,56 @@ main = do
 }
 
 #[test]
+fn repeated_checks_reuse_compiler_prelude_cache() {
+    let project_root = write_temp_project("prelude_cache", "main = ()\n");
+    let mut compilation = Compilation::new(&project_root);
+
+    assert!(
+        compilation
+            .check(true)
+            .expect("first check should run")
+            .success(),
+        "first check should succeed"
+    );
+    let first_prelude_files = compilation
+        .source_map()
+        .files()
+        .iter()
+        .filter(|file| {
+            file.path
+                .to_string_lossy()
+                .starts_with("<compiler-prelude>/")
+        })
+        .count();
+
+    assert!(
+        compilation
+            .check(true)
+            .expect("second check should run")
+            .success(),
+        "second check should succeed"
+    );
+    let second_prelude_files = compilation
+        .source_map()
+        .files()
+        .iter()
+        .filter(|file| {
+            file.path
+                .to_string_lossy()
+                .starts_with("<compiler-prelude>/")
+        })
+        .count();
+
+    assert!(first_prelude_files > 0, "Prelude files should be loaded");
+    assert_eq!(
+        first_prelude_files, second_prelude_files,
+        "cached checks should not add another virtual Prelude file set"
+    );
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
 fn file_io_reads_writes_and_appends_project_relative_text() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(

@@ -9,6 +9,7 @@ pub struct Compilation {
     pub(super) names: Names,
     pub(super) artifacts: Option<CompilationArtifacts>,
     pub(super) checked_project: Option<CheckedProject>,
+    pub(super) prelude_cache: Option<PreludeCache>,
     check_result: CheckResult,
 }
 
@@ -80,6 +81,21 @@ pub(super) struct CheckedProject {
     pub(super) source_files: Vec<SourceFile>,
 }
 
+#[derive(Clone, Debug)]
+pub(super) struct PreludeCache {
+    pub(super) project_modules: FxHashMap<ModuleName, ModuleFile>,
+    pub(super) module_ids: FxHashMap<ModuleName, ModuleId>,
+    pub(super) names: Names,
+    pub(super) builtins: Rc<BuiltinApi>,
+    pub(super) apis: FxHashMap<ModuleName, SharedModuleApi>,
+    pub(super) typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
+    pub(super) checked_modules: Vec<CheckedModule>,
+    pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
+    pub(super) module_files: FxHashMap<ModuleId, FileId>,
+    pub(super) next_instance_id: u32,
+    pub(super) verified_core: bool,
+}
+
 struct CapturedRun {
     output: String,
 }
@@ -106,6 +122,18 @@ impl CompilationArtifacts {
     }
 }
 
+impl PreludeCache {
+    pub(super) fn can_reuse(&self, modules: &ModuleTable, verify_core: bool) -> bool {
+        if verify_core && !self.verified_core {
+            return false;
+        }
+
+        self.module_ids
+            .iter()
+            .all(|(module, cached_id)| modules.id(module) == Some(*cached_id))
+    }
+}
+
 impl Compilation {
     pub fn new(project_root: impl Into<PathBuf>) -> Self {
         Self {
@@ -114,6 +142,7 @@ impl Compilation {
             names: Names::new(),
             artifacts: None,
             checked_project: None,
+            prelude_cache: None,
             check_result: CheckResult::default(),
         }
     }

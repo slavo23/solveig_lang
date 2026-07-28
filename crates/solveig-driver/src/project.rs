@@ -47,6 +47,10 @@ fn prelude_module(session: &Session, module: &ModuleName) -> Option<&'static str
     }
 }
 
+pub(crate) fn is_compiler_prelude_module(session: &Session, module: &ModuleName) -> bool {
+    prelude_module(session, module).is_some()
+}
+
 fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
     parser::parse_source(session, file, source)
 }
@@ -81,19 +85,22 @@ fn load_virtual_prelude_module(
     session: &Session,
     modules: &mut FxHashMap<ModuleName, ModuleFile>,
     module: &ModuleName,
+    cached_prelude_modules: Option<&FxHashMap<ModuleName, ModuleFile>>,
 ) -> Result<(), ProjectError> {
     if modules.contains_key(module) {
         return Ok(());
     }
 
-    let module_file = mk_virtual_prelude_file(session, module)?;
+    let module_file = cached_prelude_modules
+        .and_then(|cached| cached.get(module).cloned())
+        .map_or_else(|| mk_virtual_prelude_file(session, module), Ok)?;
     let imports = module_file.imports.clone();
     let file = module_file.parsed.file;
     modules.insert(module.clone(), module_file);
 
     for imp in effective_imports(session, module, &imports, file) {
         if prelude_module(session, &imp.module).is_some() {
-            load_virtual_prelude_module(session, modules, &imp.module)?;
+            load_virtual_prelude_module(session, modules, &imp.module, cached_prelude_modules)?;
         } else {
             return Err(ResolveError::UnknownModule {
                 span: imp.span,
@@ -193,6 +200,14 @@ pub fn load_project(
     session: &Session,
     entry_file: &Path,
 ) -> Result<(PathBuf, Project), ProjectError> {
+    load_project_with_prelude_cache(session, entry_file, None)
+}
+
+pub(crate) fn load_project_with_prelude_cache(
+    session: &Session,
+    entry_file: &Path,
+    cached_prelude_modules: Option<&FxHashMap<ModuleName, ModuleFile>>,
+) -> Result<(PathBuf, Project), ProjectError> {
     let root = entry_file
         .parent()
         .ok_or_else(|| DriverError::SourceRootMissing {
@@ -235,7 +250,12 @@ pub fn load_project(
                 module_file.parsed.file,
             ) {
                 if prelude_module(session, &imp.module).is_some() {
-                    load_virtual_prelude_module(session, &mut modules, &imp.module)?;
+                    load_virtual_prelude_module(
+                        session,
+                        &mut modules,
+                        &imp.module,
+                        cached_prelude_modules,
+                    )?;
                 } else {
                     stack.push(PendingModule {
                         file: file_from_module_name(session, &root, &imp.module),
