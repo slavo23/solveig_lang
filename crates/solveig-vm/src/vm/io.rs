@@ -78,15 +78,52 @@ impl Vm {
         action: Value,
         io: &mut IoRuntime<'_>,
     ) -> Result<Value, RuntimeError> {
+        let checkpoint = self.temporary_roots.len();
+        self.temporary_roots.push(action);
+
+        let result = self.perform_io_inner(program, action, io);
+
+        self.temporary_roots.truncate(checkpoint);
+        result
+    }
+
+    fn perform_io_inner(
+        &mut self,
+        program: &BytecodeProgram,
+        action: Value,
+        io: &mut IoRuntime<'_>,
+    ) -> Result<Value, RuntimeError> {
         match self.expect_io_action(action)? {
             IoAction::Pure(value) => Ok(value),
             IoAction::Bind {
                 action,
                 continuation,
             } => {
-                let value = self.perform_io(program, action, io)?;
-                let next = self.call_value_for_result(program, continuation, &[value])?;
-                self.perform_io(program, next, io)
+                let bind_checkpoint = self.temporary_roots.len();
+                self.temporary_roots.push(continuation);
+
+                let value = match self.perform_io(program, action, io) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        self.temporary_roots.truncate(bind_checkpoint);
+                        return Err(err);
+                    }
+                };
+
+                let next = match self.call_value_for_result(program, continuation, &[value]) {
+                    Ok(next) => next,
+                    Err(err) => {
+                        self.temporary_roots.truncate(bind_checkpoint);
+                        return Err(err);
+                    }
+                };
+                self.temporary_roots.truncate(bind_checkpoint);
+
+                let next_checkpoint = self.temporary_roots.len();
+                self.temporary_roots.push(next);
+                let result = self.perform_io(program, next, io);
+                self.temporary_roots.truncate(next_checkpoint);
+                result
             }
             IoAction::Print { text, newline } => {
                 let mut text = self.expect_string_value(text, "IO print")?;
@@ -98,12 +135,17 @@ impl Vm {
             }
             IoAction::ReadLine => {
                 let line = io.read_line()?;
+                self.maybe_gc();
                 Ok(self.heap.alloc_str(&line))
             }
             IoAction::GetArgs => {
+                let checkpoint = self.temporary_roots.len();
                 let mut arg_values = Vec::with_capacity(io.args.len());
                 for arg in io.args {
-                    arg_values.push(self.heap.alloc_str(arg));
+                    self.maybe_gc();
+                    let value = self.heap.alloc_str(arg);
+                    arg_values.push(value);
+                    self.temporary_roots.push(value);
                 }
 
                 let mut ctx = VmCtx::new(
@@ -113,7 +155,9 @@ impl Vm {
                     self.bools.true_val,
                     self.bools.false_val,
                 );
-                ctx.alloc_list_from_values(&arg_values, "getArgs")
+                let result = ctx.alloc_list_from_values(&arg_values, "getArgs");
+                self.temporary_roots.truncate(checkpoint);
+                result
             }
             IoAction::ReadFile { path } => {
                 let path = self.expect_string_value(path, "readFile")?;
@@ -124,6 +168,7 @@ impl Vm {
                         resolved.display()
                     ))
                 })?;
+                self.maybe_gc();
                 Ok(self.heap.alloc_str(&contents))
             }
             IoAction::WriteFile {

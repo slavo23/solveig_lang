@@ -3,6 +3,10 @@
 
 use crate::values::{ObjId, Value};
 
+const DEFAULT_GC_INITIAL_THRESHOLD: usize = 32_768;
+const DEFAULT_GC_LIVE_FLOOR: usize = 65_536;
+const GC_STRESS_INTERVAL: usize = 1;
+
 #[derive(Debug, Clone, Copy)]
 pub enum HeapObject {
     Closure {
@@ -73,10 +77,20 @@ pub struct Heap {
     pub bytes: ByteStore,
     pub allocations_since_gc: usize,
     pub next_gc_at: usize,
+    pub gc_stress: bool,
+    pub gc_threshold_override: Option<usize>,
 }
 
 impl Default for Heap {
     fn default() -> Self {
+        let gc_stress = gc_stress_enabled();
+        let gc_threshold_override = gc_threshold_override();
+        let next_gc_at = if gc_stress {
+            GC_STRESS_INTERVAL
+        } else {
+            gc_threshold_override.unwrap_or(DEFAULT_GC_INITIAL_THRESHOLD)
+        };
+
         Self {
             objects: Vec::new(),
             mark_bits: Vec::new(),
@@ -84,12 +98,30 @@ impl Default for Heap {
             payloads: PayloadStore::default(),
             bytes: ByteStore::default(),
             allocations_since_gc: 0,
-            next_gc_at: 32_768,
+            next_gc_at,
+            gc_stress,
+            gc_threshold_override,
         }
     }
 }
 
 impl Heap {
+    #[inline]
+    pub fn should_collect(&self) -> bool {
+        self.allocations_since_gc >= self.next_gc_at
+    }
+
+    pub fn reset_collection_accounting(&mut self, live: usize) {
+        self.allocations_since_gc = 0;
+        self.next_gc_at = if self.gc_stress {
+            GC_STRESS_INTERVAL
+        } else if let Some(threshold) = self.gc_threshold_override {
+            threshold
+        } else {
+            live.max(DEFAULT_GC_LIVE_FLOOR) * 4
+        };
+    }
+
     #[inline]
     pub fn get(&self, id: ObjId) -> &HeapObject {
         debug_assert!(
@@ -194,6 +226,19 @@ impl Heap {
     pub fn str_value(&self, bytes: ByteRef) -> &str {
         self.bytes.as_str(bytes)
     }
+}
+
+fn gc_stress_enabled() -> bool {
+    std::env::var("SOLVEIG_GC_STRESS").is_ok_and(|value| {
+        value == "1" || value.eq_ignore_ascii_case("true") || value.eq_ignore_ascii_case("yes")
+    })
+}
+
+fn gc_threshold_override() -> Option<usize> {
+    std::env::var("SOLVEIG_GC_THRESHOLD")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .filter(|threshold| *threshold > 0)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

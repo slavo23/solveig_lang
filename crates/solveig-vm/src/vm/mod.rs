@@ -28,6 +28,7 @@ struct Vm {
     stack: Vec<Value>,
     continuations: Vec<Continuation>,
     binding_buffer: Vec<Value>,
+    temporary_roots: Vec<Value>,
 
     heap: Heap,
     globals: Vec<GlobalSlot>,
@@ -58,6 +59,7 @@ impl Vm {
             stack: Vec::with_capacity(4096),
             continuations: Vec::with_capacity(512),
             binding_buffer: Vec::with_capacity(8),
+            temporary_roots: Vec::with_capacity(8),
             heap: Heap::default(),
             globals: program
                 .globals

@@ -1,10 +1,22 @@
 //! VM garbage collection marking and heap accounting.
 //! Allocation paths use this module to reclaim unreachable runtime objects.
+//!
+//! `Roots` is the single root-set definition for the current VM: the value
+//! stack, pattern binding buffer, short-lived temporary roots, evaluated
+//! globals, nullary-constructor cache, and Bool cache. Any future VM field that
+//! can hold a `Value` across an allocation point must be added to `Roots`.
 
 use super::*;
-use crate::heap::{HeapObject, IoAction, PayloadRef, PayloadStore};
-use crate::values::{GlobalSlot, ObjId, Value};
+use crate::heap::{Heap, HeapObject, IoAction, PayloadRef, PayloadStore};
+use crate::values::{BoolCache, GlobalSlot, NullaryCtorCache, ObjId, Value};
 use solveig_ast::ast::{CtorId, PRIM_TYS};
+
+#[inline]
+fn mark_value(mark_bits: &mut [bool], value: Value, worklist: &mut Vec<ObjId>) {
+    if let Value::Obj(id) = value {
+        mark_bit(mark_bits, id, worklist);
+    }
+}
 
 #[inline]
 fn mark_bit(mark_bits: &mut [bool], id: ObjId, worklist: &mut Vec<ObjId>) {
@@ -29,10 +41,87 @@ fn mark_payload(
     }
 }
 
+pub(super) struct Roots<'a> {
+    stack: &'a [Value],
+    binding_buffer: &'a [Value],
+    temporary_roots: &'a [Value],
+    globals: &'a [GlobalSlot],
+    nullary_ctors: &'a NullaryCtorCache,
+    bools: &'a BoolCache,
+}
+
+impl<'a> Roots<'a> {
+    fn mark(&self, mark_bits: &mut [bool], worklist: &mut Vec<ObjId>) {
+        self.mark_values(mark_bits, self.stack, worklist);
+        self.mark_values(mark_bits, self.binding_buffer, worklist);
+        self.mark_values(mark_bits, self.temporary_roots, worklist);
+
+        for slot in self.globals {
+            if let GlobalSlot::Evaluated(value) = slot {
+                mark_value(mark_bits, *value, worklist);
+            }
+        }
+
+        for value in self.nullary_ctors.tags.iter().flatten() {
+            mark_value(mark_bits, *value, worklist);
+        }
+
+        mark_value(mark_bits, self.bools.true_val, worklist);
+        mark_value(mark_bits, self.bools.false_val, worklist);
+    }
+
+    fn mark_values(&self, mark_bits: &mut [bool], values: &[Value], worklist: &mut Vec<ObjId>) {
+        for &value in values {
+            mark_value(mark_bits, value, worklist);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn assert_reachable_live(&self, heap: &Heap) {
+        let mut seen = vec![false; heap.objects.len()];
+        let mut worklist = Vec::new();
+
+        self.assert_values_live(heap, self.stack, &mut seen, &mut worklist);
+        self.assert_values_live(heap, self.binding_buffer, &mut seen, &mut worklist);
+        self.assert_values_live(heap, self.temporary_roots, &mut seen, &mut worklist);
+
+        for slot in self.globals {
+            if let GlobalSlot::Evaluated(value) = slot {
+                assert_value_live(heap, *value, &mut seen, &mut worklist);
+            }
+        }
+
+        for value in self.nullary_ctors.tags.iter().flatten() {
+            assert_value_live(heap, *value, &mut seen, &mut worklist);
+        }
+
+        assert_value_live(heap, self.bools.true_val, &mut seen, &mut worklist);
+        assert_value_live(heap, self.bools.false_val, &mut seen, &mut worklist);
+
+        while let Some(id) = worklist.pop() {
+            assert_object_children_live(heap, id, &mut seen, &mut worklist);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn assert_values_live(
+        &self,
+        heap: &Heap,
+        values: &[Value],
+        seen: &mut [bool],
+        worklist: &mut Vec<ObjId>,
+    ) {
+        for &value in values {
+            assert_value_live(heap, value, seen, worklist);
+        }
+    }
+}
+
 impl Vm {
     pub(super) fn init_nullary(&mut self, arities: &[CtorRuntimeInfo]) {
         for info in arities {
             if info.arity == 0 {
+                self.maybe_gc();
                 let val = self.alloc_heap(HeapObject::Data0 { tag: info.tag });
                 self.nullary_ctors.set(info.tag, val);
             }
@@ -50,129 +139,34 @@ impl Vm {
     }
 
     pub(super) fn maybe_gc(&mut self) {
-        if self.heap.allocations_since_gc >= self.heap.next_gc_at {
+        // AOSA's GHC RTS chapter treats allocation checks as safe points; the
+        // stress knob makes that check fail at every allocation boundary.
+        if self.heap.should_collect() {
             self.collect_garbage();
         }
     }
 
     pub(super) fn collect_garbage(&mut self) {
         let mut worklist: Vec<ObjId> = Vec::new();
+        let roots = Roots {
+            stack: &self.stack,
+            binding_buffer: &self.binding_buffer,
+            temporary_roots: &self.temporary_roots,
+            globals: &self.globals,
+            nullary_ctors: &self.nullary_ctors,
+            bools: &self.bools,
+        };
 
-        for i in 0..self.stack.len() {
-            if let Value::Obj(id) = self.stack[i] {
-                mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
-            }
-        }
-
-        for &val in &self.binding_buffer {
-            if let Value::Obj(id) = val {
-                mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
-            }
-        }
-
-        for i in 0..self.globals.len() {
-            if let GlobalSlot::Evaluated(Value::Obj(id)) = self.globals[i] {
-                mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
-            }
-        }
-
-        for slot in &self.nullary_ctors.tags {
-            if let Some(Value::Obj(id)) = slot {
-                mark_bit(&mut self.heap.mark_bits, *id, &mut worklist);
-            }
-        }
-
-        if let Value::Obj(id) = self.bools.true_val {
-            mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
-        }
-        if let Value::Obj(id) = self.bools.false_val {
-            mark_bit(&mut self.heap.mark_bits, id, &mut worklist);
-        }
+        roots.mark(&mut self.heap.mark_bits, &mut worklist);
 
         while let Some(id) = worklist.pop() {
-            enum Children {
-                None,
-                One(PayloadRef),
-                Two(PayloadRef, PayloadRef),
-            }
-
-            let children = match self.heap.objects[id.0 as usize].as_ref() {
-                Some(HeapObject::Closure { captures, .. }) => Children::One(*captures),
-                Some(HeapObject::PartialApp {
-                    captures,
-                    applied_args,
-                    ..
-                }) => Children::Two(*captures, *applied_args),
-                Some(HeapObject::PartialCtor { applied_args, .. }) => Children::One(*applied_args),
-                Some(HeapObject::DataN { fields, .. }) => Children::One(*fields),
-                Some(HeapObject::Data0 { .. }) | Some(HeapObject::Str { .. }) | None => {
-                    Children::None
-                }
-                Some(HeapObject::Data1 { field, .. }) => {
-                    if let Value::Obj(child) = field {
-                        mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
-                    }
-                    Children::None
-                }
-                Some(HeapObject::Data2 { field0, field1, .. }) => {
-                    if let Value::Obj(child) = field0 {
-                        mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
-                    }
-                    if let Value::Obj(child) = field1 {
-                        mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
-                    }
-                    Children::None
-                }
-                Some(HeapObject::IoAction(action)) => {
-                    match action {
-                        IoAction::Pure(value) | IoAction::Print { text: value, .. } => {
-                            if let Value::Obj(child) = value {
-                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
-                            }
-                        }
-                        IoAction::Bind {
-                            action,
-                            continuation,
-                        } => {
-                            if let Value::Obj(child) = action {
-                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
-                            }
-                            if let Value::Obj(child) = continuation {
-                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
-                            }
-                        }
-                        IoAction::ReadLine | IoAction::GetArgs => {}
-                        IoAction::ReadFile { path } => {
-                            if let Value::Obj(child) = path {
-                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
-                            }
-                        }
-                        IoAction::WriteFile { path, contents, .. } => {
-                            if let Value::Obj(child) = path {
-                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
-                            }
-                            if let Value::Obj(child) = contents {
-                                mark_bit(&mut self.heap.mark_bits, *child, &mut worklist);
-                            }
-                        }
-                    }
-                    Children::None
-                }
-            };
-
-            let payloads = &self.heap.payloads;
-            let mark_bits = &mut self.heap.mark_bits;
-
-            match children {
-                Children::None => {}
-                Children::One(span) => {
-                    mark_payload(payloads, mark_bits, &span, &mut worklist);
-                }
-                Children::Two(a, b) => {
-                    mark_payload(payloads, mark_bits, &a, &mut worklist);
-                    mark_payload(payloads, mark_bits, &b, &mut worklist);
-                }
-            }
+            mark_object_children(
+                &self.heap.objects,
+                &self.heap.payloads,
+                &mut self.heap.mark_bits,
+                id,
+                &mut worklist,
+            );
         }
 
         self.heap.payloads.bucket1.clear();
@@ -195,8 +189,179 @@ impl Vm {
             }
         }
 
-        self.heap.allocations_since_gc = 0;
-        self.heap.next_gc_at = live.max(65_536) * 4;
+        #[cfg(debug_assertions)]
+        {
+            let roots = Roots {
+                stack: &self.stack,
+                binding_buffer: &self.binding_buffer,
+                temporary_roots: &self.temporary_roots,
+                globals: &self.globals,
+                nullary_ctors: &self.nullary_ctors,
+                bools: &self.bools,
+            };
+            roots.assert_reachable_live(&self.heap);
+        }
+
+        self.heap.reset_collection_accounting(live);
+    }
+}
+
+enum Children {
+    None,
+    One(PayloadRef),
+    Two(PayloadRef, PayloadRef),
+}
+
+fn mark_object_children(
+    objects: &[Option<HeapObject>],
+    payloads: &PayloadStore,
+    mark_bits: &mut [bool],
+    id: ObjId,
+    worklist: &mut Vec<ObjId>,
+) {
+    let children = match objects[id.0 as usize].as_ref() {
+        Some(HeapObject::Closure { captures, .. }) => Children::One(*captures),
+        Some(HeapObject::PartialApp {
+            captures,
+            applied_args,
+            ..
+        }) => Children::Two(*captures, *applied_args),
+        Some(HeapObject::PartialCtor { applied_args, .. }) => Children::One(*applied_args),
+        Some(HeapObject::DataN { fields, .. }) => Children::One(*fields),
+        Some(HeapObject::Data0 { .. }) | Some(HeapObject::Str { .. }) | None => Children::None,
+        Some(HeapObject::Data1 { field, .. }) => {
+            mark_value(mark_bits, *field, worklist);
+            Children::None
+        }
+        Some(HeapObject::Data2 { field0, field1, .. }) => {
+            mark_value(mark_bits, *field0, worklist);
+            mark_value(mark_bits, *field1, worklist);
+            Children::None
+        }
+        Some(HeapObject::IoAction(action)) => {
+            match action {
+                IoAction::Pure(value) | IoAction::Print { text: value, .. } => {
+                    mark_value(mark_bits, *value, worklist);
+                }
+                IoAction::Bind {
+                    action,
+                    continuation,
+                } => {
+                    mark_value(mark_bits, *action, worklist);
+                    mark_value(mark_bits, *continuation, worklist);
+                }
+                IoAction::ReadLine | IoAction::GetArgs => {}
+                IoAction::ReadFile { path } => {
+                    mark_value(mark_bits, *path, worklist);
+                }
+                IoAction::WriteFile { path, contents, .. } => {
+                    mark_value(mark_bits, *path, worklist);
+                    mark_value(mark_bits, *contents, worklist);
+                }
+            }
+            Children::None
+        }
+    };
+
+    match children {
+        Children::None => {}
+        Children::One(span) => mark_payload(payloads, mark_bits, &span, worklist),
+        Children::Two(a, b) => {
+            mark_payload(payloads, mark_bits, &a, worklist);
+            mark_payload(payloads, mark_bits, &b, worklist);
+        }
+    }
+}
+
+#[cfg(debug_assertions)]
+fn assert_value_live(heap: &Heap, value: Value, seen: &mut [bool], worklist: &mut Vec<ObjId>) {
+    if let Value::Obj(id) = value {
+        assert_object_live(heap, id, seen, worklist);
+    }
+}
+
+#[cfg(debug_assertions)]
+fn assert_object_live(heap: &Heap, id: ObjId, seen: &mut [bool], worklist: &mut Vec<ObjId>) {
+    let idx = id.0 as usize;
+    if idx >= heap.objects.len() || heap.objects[idx].is_none() {
+        panic!("ICE: GC root set references freed object {}", id.0);
+    }
+
+    if !seen[idx] {
+        seen[idx] = true;
+        worklist.push(id);
+    }
+}
+
+#[cfg(debug_assertions)]
+fn assert_object_children_live(
+    heap: &Heap,
+    id: ObjId,
+    seen: &mut [bool],
+    worklist: &mut Vec<ObjId>,
+) {
+    let Some(object) = heap.objects[id.0 as usize] else {
+        panic!("ICE: GC reachable object {} was freed", id.0);
+    };
+
+    match object {
+        HeapObject::Closure { captures, .. } => {
+            assert_payload_live(heap, captures, seen, worklist);
+        }
+        HeapObject::PartialApp {
+            captures,
+            applied_args,
+            ..
+        } => {
+            assert_payload_live(heap, captures, seen, worklist);
+            assert_payload_live(heap, applied_args, seen, worklist);
+        }
+        HeapObject::PartialCtor { applied_args, .. } => {
+            assert_payload_live(heap, applied_args, seen, worklist);
+        }
+        HeapObject::DataN { fields, .. } => {
+            assert_payload_live(heap, fields, seen, worklist);
+        }
+        HeapObject::Data1 { field, .. } => {
+            assert_value_live(heap, field, seen, worklist);
+        }
+        HeapObject::Data2 { field0, field1, .. } => {
+            assert_value_live(heap, field0, seen, worklist);
+            assert_value_live(heap, field1, seen, worklist);
+        }
+        HeapObject::IoAction(action) => match action {
+            IoAction::Pure(value) | IoAction::Print { text: value, .. } => {
+                assert_value_live(heap, value, seen, worklist);
+            }
+            IoAction::Bind {
+                action,
+                continuation,
+            } => {
+                assert_value_live(heap, action, seen, worklist);
+                assert_value_live(heap, continuation, seen, worklist);
+            }
+            IoAction::ReadFile { path } => {
+                assert_value_live(heap, path, seen, worklist);
+            }
+            IoAction::WriteFile { path, contents, .. } => {
+                assert_value_live(heap, path, seen, worklist);
+                assert_value_live(heap, contents, seen, worklist);
+            }
+            IoAction::ReadLine | IoAction::GetArgs => {}
+        },
+        HeapObject::Data0 { .. } | HeapObject::Str { .. } => {}
+    }
+}
+
+#[cfg(debug_assertions)]
+fn assert_payload_live(
+    heap: &Heap,
+    span: PayloadRef,
+    seen: &mut [bool],
+    worklist: &mut Vec<ObjId>,
+) {
+    for &value in heap.payloads.as_slice(span) {
+        assert_value_live(heap, value, seen, worklist);
     }
 }
 

@@ -1,7 +1,7 @@
 use std::fs;
-use std::io::Cursor;
+use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
-use std::process::{self, Command};
+use std::process::{self, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -140,6 +140,73 @@ main = do
         String::from_utf8(stdout).expect("Solveig stdout should be UTF-8"),
         "name> Solveig\none\ntwo\n"
     );
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+#[ignore = "M3 trampolines perform_io so this no longer overflows the native stack"]
+fn io_bind_chain_allocates_under_gc_stress() {
+    const STEPS: usize = 200_000;
+
+    let _guard = project_run_lock();
+    let project_root = write_temp_project(
+        "io_gc_stress",
+        &format!(
+            r#"repeat : Int -> IO ()
+repeat n =
+    if n == 0 then pureIO ()
+    else do
+        line <- readLine
+        printStr (appendString line "")
+        repeat (n - 1)
+
+main : IO ()
+main = repeat {STEPS}
+"#
+        ),
+    );
+
+    let mut child = Command::new(env!("CARGO_BIN_EXE_solveig"))
+        .arg("--project-root")
+        .arg(&project_root)
+        .env("SOLVEIG_GC_STRESS", "1")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("solveig CLI should start for IO/GC stress test");
+
+    let write_result = child
+        .stdin
+        .take()
+        .expect("stress child stdin should be piped")
+        .write_all("x\n".repeat(STEPS).as_bytes());
+
+    let output = child
+        .wait_with_output()
+        .expect("stress child should produce an exit status");
+
+    assert!(
+        write_result.is_ok(),
+        "IO/GC stress stdin write failed: {}\nstatus: {}\nstdout bytes: {}\nstderr:\n{}",
+        write_result.expect_err("checked error result should contain an error"),
+        output.status,
+        output.stdout.len(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert!(
+        output.status.success(),
+        "IO/GC stress program failed\nstatus: {}\nstdout bytes: {}\nstderr:\n{}",
+        output.status,
+        output.stdout.len(),
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let stdout = String::from_utf8(output.stdout).expect("Solveig stdout should be UTF-8");
+    assert_eq!(stdout.len(), STEPS);
+    assert!(stdout.bytes().all(|byte| byte == b'x'));
 
     let _ = fs::remove_dir_all(project_root);
 }

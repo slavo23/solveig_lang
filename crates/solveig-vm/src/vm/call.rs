@@ -321,7 +321,13 @@ impl Vm {
                 }
             }
 
-            Value::Obj(id) => self.invoke_heap_object(program, mode, id, arg_count),
+            Value::Obj(id) => {
+                let checkpoint = self.temporary_roots.len();
+                self.temporary_roots.push(Value::Obj(id));
+                let result = self.invoke_heap_object(program, mode, id, arg_count);
+                self.temporary_roots.truncate(checkpoint);
+                result
+            }
 
             _ => panic!(
                 "ICE: cannot {}call {:?}",
@@ -447,6 +453,8 @@ impl Vm {
         existing: PayloadRef,
         n_new: usize,
     ) -> Value {
+        self.maybe_gc();
+
         let total = existing.len() + n_new;
 
         if total == arity as usize {
@@ -511,6 +519,8 @@ impl Vm {
                 builtin.name, builtin.arity, arg_count
             )));
         }
+
+        self.maybe_gc();
 
         let args_start = self
             .stack
