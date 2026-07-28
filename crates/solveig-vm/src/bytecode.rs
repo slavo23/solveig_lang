@@ -3,7 +3,8 @@ use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
 
-use solveig_lower::closure_ir::{CCExpr, CCFunction, CCGlobalDef, CCPattern, CCProgram};
+use solveig_lower::LowerPattern;
+use solveig_lower::closure_ir::{CCExpr, CCFunction, CCGlobalDef, CCProgram};
 
 const NON_EXHAUSTIVE_CASE_TRAP: u16 = 1;
 
@@ -63,30 +64,9 @@ pub enum Instr {
 
 #[derive(Debug, Clone)]
 pub struct MatchArm {
-    pub pattern: BytePattern,
+    pub pattern: LowerPattern,
     pub bind_slots: Box<[u16]>,
     pub target: u32,
-}
-
-#[derive(Debug, Clone)]
-pub enum BytePattern {
-    Var,
-    Wild,
-    Con(u16, Box<[BytePattern]>),
-    Lit(Literal),
-}
-
-impl BytePattern {
-    pub fn binder_count(&self) -> usize {
-        match self {
-            BytePattern::Var => 1,
-            BytePattern::Wild => 0,
-            BytePattern::Lit(_) => 0,
-            BytePattern::Con(_, sub_patterns) => {
-                sub_patterns.iter().map(|p| p.binder_count()).sum()
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -422,7 +402,7 @@ impl BytecodeLowerer {
                     self.compile_tail_expr(builder, &arm_env, &arm.body);
 
                     compiled_arms.push(MatchArm {
-                        pattern: lower_pattern(&arm.pattern),
+                        pattern: arm.pattern.clone(),
                         bind_slots: bind_slots.into_boxed_slice(),
                         target,
                     });
@@ -620,7 +600,7 @@ impl BytecodeLowerer {
                     arm_jumps_to_end.push(jump_to_end);
 
                     compiled_arms.push(MatchArm {
-                        pattern: lower_pattern(&arm.pattern),
+                        pattern: arm.pattern.clone(),
                         bind_slots: bind_slots.into_boxed_slice(),
                         target,
                     });
@@ -888,17 +868,17 @@ pub fn trap_message(code: u16) -> String {
     }
 }
 
-fn format_pattern(pattern: &BytePattern) -> String {
+fn format_pattern(pattern: &LowerPattern) -> String {
     match pattern {
-        BytePattern::Var => "Var".to_string(),
-        BytePattern::Wild => "_".to_string(),
-        BytePattern::Lit(lit_val) => match lit_val {
+        LowerPattern::Var => "Var".to_string(),
+        LowerPattern::Wild => "_".to_string(),
+        LowerPattern::Lit(lit_val) => match lit_val {
             Literal::Int(i_val) => format!("Int({i_val})"),
             Literal::Float(value) => format!("Float({value})"),
             Literal::Char(value) => format!("Char('{}')", escape_char_literal(*value)),
             Literal::Str(id) => format!("StrLit({})", id.0),
         },
-        BytePattern::Con(tag, sub_patterns) => {
+        LowerPattern::Con(tag, sub_patterns) => {
             if sub_patterns.is_empty() {
                 format!("Con({tag})")
             } else {
@@ -910,22 +890,6 @@ fn format_pattern(pattern: &BytePattern) -> String {
                 format!("Con({tag}; [{rendered}])")
             }
         }
-    }
-}
-
-fn lower_pattern(pattern: &CCPattern) -> BytePattern {
-    match pattern {
-        CCPattern::Var => BytePattern::Var,
-        CCPattern::Wild => BytePattern::Wild,
-        CCPattern::Lit(lit_val) => BytePattern::Lit(lit_val.clone()),
-        CCPattern::Con(tag, sub_patterns) => BytePattern::Con(
-            *tag,
-            sub_patterns
-                .iter()
-                .map(lower_pattern)
-                .collect::<Vec<_>>()
-                .into_boxed_slice(),
-        ),
     }
 }
 

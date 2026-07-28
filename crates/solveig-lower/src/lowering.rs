@@ -8,7 +8,8 @@ use solveig_ast::ast::{
 };
 
 use super::dicts::{DictLayout, DictLayouts, instance_global_name};
-use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
+use super::lowered_ast::{IRExpr, IRGlobalDef, IRProgram};
+use super::patterns::{LowerCaseArm, LowerPattern};
 
 #[derive(Clone, Debug)]
 enum Binding {
@@ -323,17 +324,17 @@ fn project_dict_layout_field(
     let field_patterns = (0..arity)
         .map(|index| {
             if index == field_index {
-                IRPattern::Var
+                LowerPattern::Var
             } else {
-                IRPattern::Wild
+                LowerPattern::Wild
             }
         })
         .collect();
 
     Rc::new(IRExpr::Case {
         scrutinee: dict,
-        arms: vec![IRCaseArm {
-            pattern: IRPattern::Con(layout.tag, field_patterns),
+        arms: vec![LowerCaseArm {
+            pattern: LowerPattern::Con(layout.tag, field_patterns),
             body: Rc::new(IRExpr::BVar(0)),
         }],
     })
@@ -358,22 +359,22 @@ fn build_dict_value(layout: &DictLayout, fields: Vec<Rc<IRExpr>>) -> Rc<IRExpr> 
     )
 }
 
-fn lower_case_arm<A, P>(ctx: &mut LowerCtx, arm: &CaseArm<A, P>) -> IRCaseArm {
+fn lower_case_arm<A, P>(ctx: &mut LowerCtx, arm: &CaseArm<A, P>) -> LowerCaseArm<IRExpr> {
     let ir_pattern = lower_pattern(ctx, &arm.pattern);
     ctx.push_pattern_binders(&arm.pattern);
     let lowered_body = lower_expr(ctx, &arm.expr);
     ctx.pop_pattern_binders(&arm.pattern);
-    IRCaseArm {
+    LowerCaseArm {
         pattern: ir_pattern,
         body: lowered_body,
     }
 }
 
-fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> IRPattern {
+fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> LowerPattern {
     match &pattern.node {
-        Pattern::Var(_) => IRPattern::Var,
-        Pattern::Wild => IRPattern::Wild,
-        Pattern::Lit(lit_val) => IRPattern::Lit(lit_val.clone()),
+        Pattern::Var(_) => LowerPattern::Var,
+        Pattern::Wild => LowerPattern::Wild,
+        Pattern::Lit(lit_val) => LowerPattern::Lit(lit_val.clone()),
         Pattern::Con(id, sub_patterns) => {
             let info = ctx.constructors.get(id).unwrap_or_else(|| {
                 panic!(
@@ -385,7 +386,7 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> IRPattern {
                 .iter()
                 .map(|sub_pattern| lower_pattern(ctx, sub_pattern))
                 .collect();
-            IRPattern::Con(info.tag, sub_ir_patterns)
+            LowerPattern::Con(info.tag, sub_ir_patterns)
         }
     }
 }
@@ -684,8 +685,8 @@ mod tests {
                 assert_eq!(arms.len(), 1);
                 assert!(matches!(
                     &arms[0].pattern,
-                    IRPattern::Con(tag, fields)
-                        if *tag == dict_tag && matches!(fields.as_slice(), [IRPattern::Var])
+                    LowerPattern::Con(tag, fields)
+                        if *tag == dict_tag && matches!(fields.as_slice(), [LowerPattern::Var])
                 ));
                 assert!(matches!(arms[0].body.as_ref(), IRExpr::BVar(0)));
             }

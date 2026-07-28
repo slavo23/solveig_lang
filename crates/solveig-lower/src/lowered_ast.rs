@@ -1,5 +1,7 @@
-use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, Literal, UnOp};
+use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, UnOp};
 use std::rc::Rc;
+
+use super::patterns::LowerCaseArm;
 
 #[derive(Debug, Clone)]
 pub enum IRExpr {
@@ -23,38 +25,13 @@ pub enum IRExpr {
     },
     Case {
         scrutinee: Rc<IRExpr>,
-        arms: Vec<IRCaseArm>,
+        arms: Vec<LowerCaseArm<IRExpr>>,
     },
     IfThenElse {
         cond: Rc<IRExpr>,
         then_br: Rc<IRExpr>,
         else_br: Rc<IRExpr>,
     },
-}
-
-#[derive(Debug, Clone)]
-pub struct IRCaseArm {
-    pub pattern: IRPattern,
-    pub body: Rc<IRExpr>,
-}
-
-#[derive(Debug, Clone)]
-pub enum IRPattern {
-    Var,
-    Wild,
-    Con(u16, Vec<IRPattern>),
-    Lit(Literal),
-}
-
-impl IRPattern {
-    pub fn binder_count(&self) -> usize {
-        match self {
-            IRPattern::Var => 1,
-            IRPattern::Wild => 0,
-            IRPattern::Lit(_) => 0,
-            IRPattern::Con(_, sub_patterns) => sub_patterns.iter().map(|p| p.binder_count()).sum(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

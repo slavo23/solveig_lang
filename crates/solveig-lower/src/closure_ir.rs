@@ -1,5 +1,7 @@
-use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, Literal, UnOp};
+use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, UnOp};
 use std::rc::Rc;
+
+use super::patterns::LowerCaseArm;
 
 #[derive(Debug, Clone)]
 pub enum CCExpr {
@@ -45,38 +47,13 @@ pub enum CCExpr {
     },
     Case {
         scrutinee: Rc<CCExpr>,
-        arms: Vec<CCCaseArm>,
+        arms: Vec<LowerCaseArm<CCExpr>>,
     },
     IfThenElse {
         cond: Rc<CCExpr>,
         then_br: Rc<CCExpr>,
         else_br: Rc<CCExpr>,
     },
-}
-
-#[derive(Debug, Clone)]
-pub struct CCCaseArm {
-    pub pattern: CCPattern,
-    pub body: Rc<CCExpr>,
-}
-
-#[derive(Debug, Clone)]
-pub enum CCPattern {
-    Var,
-    Wild,
-    Con(u16, Vec<CCPattern>),
-    Lit(Literal),
-}
-
-impl CCPattern {
-    pub fn binder_count(&self) -> usize {
-        match self {
-            CCPattern::Var => 1,
-            CCPattern::Wild => 0,
-            CCPattern::Lit(_) => 0,
-            CCPattern::Con(_, sub_patterns) => sub_patterns.iter().map(|p| p.binder_count()).sum(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]

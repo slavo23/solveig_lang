@@ -1,12 +1,11 @@
 use solveig_ast::ast::{CtorId, CtorRuntimeInfo, Literal, PRIM_TYS};
 
-use super::bytecode::{
-    BytePattern, BytecodeProgram, ChunkKind, Instr, MatchArm, lower_to_bytecode,
-};
+use super::bytecode::{BytecodeProgram, ChunkKind, Instr, MatchArm, lower_to_bytecode};
 use super::heap::{BoundPrefix, Heap, HeapObject, IoAction, PayloadRef, PayloadStore};
 use super::values::{BoolCache, Continuation, GlobalSlot, NullaryCtorCache, ObjId, Value};
 use crate::builtins::{self, VmCtx};
 use crate::display::DisplayValue;
+use solveig_lower::LowerPattern;
 use solveig_lower::closure_ir::CCProgram;
 use std::fmt;
 use std::fs::{self, OpenOptions};
@@ -991,12 +990,12 @@ impl Vm {
     ) {
         for arm in arms {
             match &arm.pattern {
-                BytePattern::Var => {
+                LowerPattern::Var => {
                     self.store(arm.bind_slots[0], scrutinee);
                     self.pc = arm.target as usize;
                     return;
                 }
-                BytePattern::Lit(_) => {
+                LowerPattern::Lit(_) => {
                     self.binding_buffer.clear();
 
                     if match_pattern(
@@ -1012,12 +1011,12 @@ impl Vm {
                     }
                 }
 
-                BytePattern::Wild => {
+                LowerPattern::Wild => {
                     self.pc = arm.target as usize;
                     return;
                 }
 
-                BytePattern::Con(expected_tag, subs) => {
+                LowerPattern::Con(expected_tag, subs) => {
                     let id = match scrutinee {
                         Value::Obj(id) => id,
                         _ => continue,
@@ -1059,12 +1058,12 @@ impl Vm {
                             if let Some(_bind_count) = try_flat_bind(subs) {
                                 let mut si = 0;
 
-                                if matches!(subs[0], BytePattern::Var) {
+                                if matches!(subs[0], LowerPattern::Var) {
                                     self.store(arm.bind_slots[si], f0);
                                     si += 1;
                                 }
 
-                                if matches!(subs[1], BytePattern::Var) {
+                                if matches!(subs[1], LowerPattern::Var) {
                                     self.store(arm.bind_slots[si], f1);
                                 }
 
@@ -1086,7 +1085,7 @@ impl Vm {
 
                                 self.binding_buffer.clear();
                                 for (i, sub) in subs.iter().enumerate() {
-                                    if matches!(sub, BytePattern::Var) {
+                                    if matches!(sub, LowerPattern::Var) {
                                         self.binding_buffer.push(fields[i]);
                                     }
                                 }
@@ -1357,14 +1356,14 @@ impl Vm {
 }
 
 #[inline]
-fn try_flat_bind(subs: &[BytePattern]) -> Option<usize> {
+fn try_flat_bind(subs: &[LowerPattern]) -> Option<usize> {
     let mut count = 0;
 
     for sub in subs {
         match sub {
-            BytePattern::Var => count += 1,
-            BytePattern::Wild => {}
-            BytePattern::Lit(_) | BytePattern::Con(..) => return None,
+            LowerPattern::Var => count += 1,
+            LowerPattern::Wild => {}
+            LowerPattern::Lit(_) | LowerPattern::Con(..) => return None,
         }
     }
 
@@ -1374,7 +1373,7 @@ fn try_flat_bind(subs: &[BytePattern]) -> Option<usize> {
 fn match_pattern(
     program: &BytecodeProgram,
     heap: &Heap,
-    pattern: &BytePattern,
+    pattern: &LowerPattern,
     value: Value,
     bindings: &mut Vec<Value>,
 ) -> bool {
@@ -1391,16 +1390,16 @@ fn match_pattern(
 fn match_pattern_inner(
     program: &BytecodeProgram,
     heap: &Heap,
-    pattern: &BytePattern,
+    pattern: &LowerPattern,
     value: Value,
     bindings: &mut Vec<Value>,
 ) -> bool {
     match pattern {
-        BytePattern::Var => {
+        LowerPattern::Var => {
             bindings.push(value);
             true
         }
-        BytePattern::Lit(lit_val) => match (lit_val, value) {
+        LowerPattern::Lit(lit_val) => match (lit_val, value) {
             (Literal::Int(expected), Value::Int(actual)) => *expected == actual,
             (Literal::Float(expected), Value::Float(actual)) => {
                 expected.to_bits() == actual.to_bits()
@@ -1414,8 +1413,8 @@ fn match_pattern_inner(
             },
             _ => false,
         },
-        BytePattern::Wild => true,
-        BytePattern::Con(expected_tag, subs) => {
+        LowerPattern::Wild => true,
+        LowerPattern::Con(expected_tag, subs) => {
             let id = match value {
                 Value::Obj(id) => id,
                 _ => return false,
@@ -1673,7 +1672,8 @@ impl EvalResult {
 mod tests {
     use super::*;
     use solveig_ast::ast::{BinOp, CtorId, CtorRuntimeRole};
-    use solveig_lower::closure_ir::{CCCaseArm, CCExpr, CCFunction, CCGlobalDef, CCPattern};
+    use solveig_lower::closure_ir::{CCExpr, CCFunction, CCGlobalDef};
+    use solveig_lower::{LowerCaseArm, LowerPattern};
     use std::rc::Rc;
 
     const TRUE_TAG: u16 = 0;
@@ -1782,9 +1782,9 @@ mod tests {
             case(
                 local(1),
                 vec![
-                    arm(CCPattern::Con(NIL_TAG, vec![]), local(0)),
+                    arm(LowerPattern::Con(NIL_TAG, vec![]), local(0)),
                     arm(
-                        CCPattern::Con(CONS_TAG, vec![CCPattern::Var, CCPattern::Var]),
+                        LowerPattern::Con(CONS_TAG, vec![LowerPattern::Var, LowerPattern::Var]),
                         call_known(1, vec![local(0), bin(BinOp::Plus, local(2), local(1))]),
                     ),
                 ],
@@ -2112,12 +2112,12 @@ mod tests {
         expr(CCExpr::Pack { tag, arity, fields })
     }
 
-    fn case(scrutinee: Rc<CCExpr>, arms: Vec<CCCaseArm>) -> Rc<CCExpr> {
+    fn case(scrutinee: Rc<CCExpr>, arms: Vec<LowerCaseArm<CCExpr>>) -> Rc<CCExpr> {
         expr(CCExpr::Case { scrutinee, arms })
     }
 
-    fn arm(pattern: CCPattern, body: Rc<CCExpr>) -> CCCaseArm {
-        CCCaseArm { pattern, body }
+    fn arm(pattern: LowerPattern, body: Rc<CCExpr>) -> LowerCaseArm<CCExpr> {
+        LowerCaseArm { pattern, body }
     }
 
     fn if_then_else(cond: Rc<CCExpr>, then_br: Rc<CCExpr>, else_br: Rc<CCExpr>) -> Rc<CCExpr> {

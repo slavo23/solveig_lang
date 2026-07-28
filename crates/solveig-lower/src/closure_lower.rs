@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use super::closure_ir::{CCCaseArm, CCExpr, CCFunction, CCGlobalDef, CCPattern, CCProgram};
-use super::lowered_ast::{IRCaseArm, IRExpr, IRGlobalDef, IRPattern, IRProgram};
+use super::closure_ir::{CCExpr, CCFunction, CCGlobalDef, CCProgram};
+use super::lowered_ast::{IRExpr, IRGlobalDef, IRProgram};
+use super::patterns::{LowerCaseArm, LowerPattern};
 
 #[derive(Debug, Clone, Copy)]
 enum VisibleBinding {
@@ -354,28 +355,14 @@ impl<'a> ExprLowerer<'a> {
         })
     }
 
-    fn lower_case_arm(&mut self, arm: &IRCaseArm) -> CCCaseArm {
-        let pattern = self.lower_pattern(&arm.pattern);
-
+    fn lower_case_arm(&mut self, arm: &LowerCaseArm<IRExpr>) -> LowerCaseArm<CCExpr> {
         self.push_pattern_binders(&arm.pattern);
         let body = self.lower_expr(&arm.body);
         self.pop_pattern_binders(&arm.pattern);
 
-        CCCaseArm { pattern, body }
-    }
-
-    fn lower_pattern(&self, pattern: &IRPattern) -> CCPattern {
-        match pattern {
-            IRPattern::Var => CCPattern::Var,
-            IRPattern::Wild => CCPattern::Wild,
-            IRPattern::Lit(lit_val) => CCPattern::Lit(lit_val.clone()),
-            IRPattern::Con(tag, sub_patterns) => CCPattern::Con(
-                *tag,
-                sub_patterns
-                    .iter()
-                    .map(|sub_pattern| self.lower_pattern(sub_pattern))
-                    .collect(),
-            ),
+        LowerCaseArm {
+            pattern: arm.pattern.clone(),
+            body,
         }
     }
 
@@ -452,12 +439,12 @@ impl<'a> ExprLowerer<'a> {
         }
     }
 
-    fn push_pattern_binders(&mut self, pattern: &IRPattern) {
+    fn push_pattern_binders(&mut self, pattern: &LowerPattern) {
         match pattern {
-            IRPattern::Var => self.push_local(),
-            IRPattern::Wild => {}
-            IRPattern::Lit(_) => {}
-            IRPattern::Con(_, sub_patterns) => {
+            LowerPattern::Var => self.push_local(),
+            LowerPattern::Wild => {}
+            LowerPattern::Lit(_) => {}
+            LowerPattern::Con(_, sub_patterns) => {
                 for sub_pattern in sub_patterns {
                     self.push_pattern_binders(sub_pattern);
                 }
@@ -465,12 +452,12 @@ impl<'a> ExprLowerer<'a> {
         }
     }
 
-    fn pop_pattern_binders(&mut self, pattern: &IRPattern) {
+    fn pop_pattern_binders(&mut self, pattern: &LowerPattern) {
         match pattern {
-            IRPattern::Var => self.pop_local(),
-            IRPattern::Wild => {}
-            IRPattern::Lit(_) => {}
-            IRPattern::Con(_, sub_patterns) => {
+            LowerPattern::Var => self.pop_local(),
+            LowerPattern::Wild => {}
+            LowerPattern::Lit(_) => {}
+            LowerPattern::Con(_, sub_patterns) => {
                 for sub_pattern in sub_patterns.iter().rev() {
                     self.pop_pattern_binders(sub_pattern);
                 }
