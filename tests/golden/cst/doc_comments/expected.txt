@@ -1,0 +1,84 @@
+Module @0..222
+  LineComment @0..20 line=0 col=0 text="-- | Top-level docs."
+  Newline @20..21 line=0 col=20 text="\n"
+  VOpen @21..21 line=1 col=0 synthetic text=""
+  ImportList @0..0
+  DefinitionList @21..222
+    FunctionOrSignature @21..29
+      Ident @21..25 line=1 col=0 text="main"
+      Whitespace @25..26 line=1 col=4 text=" "
+      Eq @26..27 line=1 col=5 text="="
+      Expr @27..29
+        OpChain @27..29
+          OpOperand @27..29
+            AppExpr @27..29
+              AtomExpr @27..29
+                Whitespace @27..28 line=1 col=6 text=" "
+                Int(1) @28..29 line=1 col=7 text="1"
+    Whitespace @29..30 line=1 col=8 text=" "
+    LineComment @30..48 line=1 col=9 text="-- ^ trailing docs"
+    Newline @48..50 line=1 col=27 text="\n\n"
+    LineComment @50..65 line=3 col=0 text="-- | Type docs."
+    Newline @65..66 line=3 col=15 text="\n"
+    VSemi @66..66 line=4 col=0 synthetic text=""
+    DataDef @66..131
+      Data @66..70 line=4 col=0 text="data"
+      Whitespace @70..71 line=4 col=4 text=" "
+      UpperIdent @71..81 line=4 col=5 text="Documented"
+      Whitespace @81..82 line=4 col=15 text=" "
+      Eq @82..83 line=4 col=16 text="="
+      Constructor @83..131
+        Newline @83..84 line=4 col=17 text="\n"
+        Whitespace @84..88 line=5 col=0 text="    "
+        LineComment @88..110 line=5 col=4 text="-- | Constructor docs."
+        Newline @110..111 line=5 col=26 text="\n"
+        Whitespace @111..115 line=6 col=0 text="    "
+        UpperIdent @115..127 line=6 col=4 text="MkDocumented"
+        TypeAtom @127..131
+          NamePath @127..131
+            Whitespace @127..128 line=6 col=16 text=" "
+            UpperIdent @128..131 line=6 col=17 text="Int"
+    Newline @131..133 line=6 col=20 text="\n\n"
+    LineComment @133..149 line=8 col=0 text="-- | Class docs."
+    Newline @149..150 line=8 col=16 text="\n"
+    VSemi @150..150 line=9 col=0 synthetic text=""
+    ClassDef @150..222
+      Class @150..155 line=9 col=0 text="class"
+      Whitespace @155..156 line=9 col=5 text=" "
+      UpperIdent @156..164 line=9 col=6 text="Describe"
+      Whitespace @164..165 line=9 col=14 text=" "
+      Ident @165..166 line=9 col=15 text="a"
+      Whitespace @166..167 line=9 col=16 text=" "
+      Where @167..172 line=9 col=17 text="where"
+      Newline @172..173 line=9 col=22 text="\n"
+      Whitespace @173..177 line=10 col=0 text="    "
+      LineComment @177..194 line=10 col=4 text="-- | Method docs."
+      Newline @194..195 line=10 col=21 text="\n"
+      Whitespace @195..199 line=11 col=0 text="    "
+      VOpen @199..199 line=11 col=4 synthetic text=""
+      VSemi @199..199 line=11 col=4 synthetic text=""
+      Ident @199..207 line=11 col=4 text="describe"
+      Whitespace @207..208 line=11 col=12 text=" "
+      Colon @208..209 line=11 col=13 text=":"
+      Type @209..221
+        QualifiedType @209..221
+          TypeArrow @209..221
+            TypeApp @209..211
+              TypeAtom @209..211
+                NamePath @209..211
+                  Whitespace @209..210 line=11 col=14 text=" "
+                  Ident @210..211 line=11 col=15 text="a"
+            Whitespace @211..212 line=11 col=16 text=" "
+            Arrow @212..214 line=11 col=17 text="->"
+            Type @214..221
+              QualifiedType @214..221
+                TypeArrow @214..221
+                  TypeApp @214..221
+                    TypeAtom @214..221
+                      NamePath @214..221
+                        Whitespace @214..215 line=11 col=19 text=" "
+                        UpperIdent @215..221 line=11 col=20 text="String"
+      Newline @221..222 line=11 col=26 text="\n"
+      VClose @222..222 line=12 col=0 synthetic text=""
+  VClose @222..222 line=12 col=0 synthetic text=""
+  Eof @222..222 line=12 col=0 text=""

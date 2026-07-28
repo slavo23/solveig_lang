@@ -12,7 +12,7 @@ use solveig_ast::ast::{
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
 use solveig_syntax::ast::{
-    Fixity, ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition,
+    DocComment, Fixity, ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition,
 };
 
 mod api_build;

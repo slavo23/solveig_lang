@@ -12,7 +12,11 @@ impl Parser<'_> {
             if this.at(&Token::Colon) {
                 this.advance();
                 let ty = this.parse_type()?;
-                return Ok(SurfaceDefinition::SigDef { name, ty });
+                return Ok(SurfaceDefinition::SigDef {
+                    name,
+                    ty,
+                    docs: None,
+                });
             }
 
             let mut params = Vec::new();
@@ -24,7 +28,12 @@ impl Parser<'_> {
             this.expect(&Token::Eq)?;
             let body = this.parse_expr()?;
 
-            Ok(SurfaceDefinition::FunDef { name, body, params })
+            Ok(SurfaceDefinition::FunDef {
+                name,
+                body,
+                params,
+                docs: None,
+            })
         })
     }
 
@@ -73,6 +82,7 @@ impl Parser<'_> {
             Ok(SurfaceDefinition::FixityDef {
                 fixity: Fixity { prec, assoc },
                 ops,
+                docs: None,
             })
         })
     }
@@ -111,6 +121,7 @@ impl Parser<'_> {
                 name,
                 ty_params,
                 constructors,
+                docs: None,
             })
         })
     }
@@ -134,20 +145,24 @@ impl Parser<'_> {
                 name,
                 ty_params,
                 ty,
+                docs: None,
             })
         })
     }
 
     pub(super) fn parse_constructor(&mut self) -> Result<SurfaceConstructor, ParseError> {
         self.node(SyntaxKind::Constructor, |this| {
+            let leading_docs = this.doc_comment_before_current();
             let (name, start, end) = this.expect_upper()?;
             let mut params = Vec::new();
             while this.is_type_atom_start() {
                 params.push(this.parse_type_atom()?);
             }
+            let trailing_docs = this.doc_comment_after_previous_significant();
             Ok(SurfaceConstructor {
                 name: this.sp(name, start, end),
                 params,
+                docs: this.attached_doc_comment(leading_docs, trailing_docs),
             })
         })
     }
@@ -265,12 +280,15 @@ impl Parser<'_> {
                     continue;
                 }
 
+                let leading_docs = this.doc_comment_before_current();
                 let (mname, ms, me) = this.expect_value_name()?;
                 this.expect(&Token::Colon)?;
                 let mty = this.parse_type()?;
+                let trailing_docs = this.doc_comment_after_previous_significant();
                 methods.push(ClassMethod {
                     name: this.sp(mname, ms, me),
                     ty: mty,
+                    docs: this.attached_doc_comment(leading_docs, trailing_docs),
                     cst_id: this.current_cst_id(),
                 });
             }
@@ -285,6 +303,7 @@ impl Parser<'_> {
                 superclasses,
                 methods,
                 defaults,
+                docs: None,
             })
         })
     }
@@ -357,6 +376,7 @@ impl Parser<'_> {
                 class_name: this.sp(cname, cs, ce),
                 args,
                 methods,
+                docs: None,
             })
         })
     }

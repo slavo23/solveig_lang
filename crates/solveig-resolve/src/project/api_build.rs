@@ -27,6 +27,12 @@ fn check_duplicate(
     Ok(())
 }
 
+fn insert_docs(api: &mut ModuleApi, def_id: DefId, docs: Option<&DocComment>) {
+    if let Some(docs) = docs {
+        api.docs.entry(def_id).or_insert_with(|| docs.clone());
+    }
+}
+
 pub fn build_module_api(
     module_id: ModuleId,
     parsed: &ParsedModule,
@@ -42,7 +48,7 @@ pub fn build_module_api(
 
     for def in &parsed.defs {
         match &def.0 {
-            SurfaceDefinition::FunDef { name, .. } => {
+            SurfaceDefinition::FunDef { name, docs, .. } => {
                 check_duplicate(
                     &mut term_defs,
                     parsed.file,
@@ -51,10 +57,12 @@ pub fn build_module_api(
                     name.0,
                 )?;
 
-                api.terms.insert(name.0, local_def_id(module_id, name.0));
+                let def_id = local_def_id(module_id, name.0);
+                api.terms.insert(name.0, def_id);
+                insert_docs(&mut api, def_id, docs.as_ref());
             }
 
-            SurfaceDefinition::SigDef { name, .. } => {
+            SurfaceDefinition::SigDef { name, docs, .. } => {
                 check_duplicate(
                     &mut term_sigs,
                     parsed.file,
@@ -63,13 +71,16 @@ pub fn build_module_api(
                     name.0,
                 )?;
 
-                api.terms
-                    .entry(name.0)
-                    .or_insert(local_def_id(module_id, name.0));
+                let def_id = local_def_id(module_id, name.0);
+                api.terms.entry(name.0).or_insert(def_id);
+                insert_docs(&mut api, def_id, docs.as_ref());
             }
 
             SurfaceDefinition::DataDef {
-                name, constructors, ..
+                name,
+                constructors,
+                docs,
+                ..
             } => {
                 check_duplicate(
                     &mut types,
@@ -79,7 +90,9 @@ pub fn build_module_api(
                     name.0,
                 )?;
 
-                api.types.insert(name.0, local_def_id(module_id, name.0));
+                let def_id = local_def_id(module_id, name.0);
+                api.types.insert(name.0, def_id);
+                insert_docs(&mut api, def_id, docs.as_ref());
 
                 if let Some(previous) = type_aliases.get(&name.0).copied() {
                     return Err(ResolveError::DuplicateDefinition {
@@ -99,12 +112,13 @@ pub fn build_module_api(
                         ctor.0.name.0,
                     )?;
 
-                    api.constructors
-                        .insert(ctor.0.name.0, local_def_id(module_id, ctor.0.name.0));
+                    let ctor_id = local_def_id(module_id, ctor.0.name.0);
+                    api.constructors.insert(ctor.0.name.0, ctor_id);
+                    insert_docs(&mut api, ctor_id, ctor.0.docs.as_ref());
                 }
             }
 
-            SurfaceDefinition::TypeAliasDef { name, .. } => {
+            SurfaceDefinition::TypeAliasDef { name, docs, .. } => {
                 check_duplicate(
                     &mut type_aliases,
                     parsed.file,
@@ -122,11 +136,17 @@ pub fn build_module_api(
                     });
                 }
 
-                api.type_aliases
-                    .insert(name.0, local_def_id(module_id, name.0));
+                let def_id = local_def_id(module_id, name.0);
+                api.type_aliases.insert(name.0, def_id);
+                insert_docs(&mut api, def_id, docs.as_ref());
             }
 
-            SurfaceDefinition::ClassDef { name, methods, .. } => {
+            SurfaceDefinition::ClassDef {
+                name,
+                methods,
+                docs,
+                ..
+            } => {
                 let class_name = name.0;
                 check_duplicate(
                     &mut classes,
@@ -136,8 +156,9 @@ pub fn build_module_api(
                     class_name,
                 )?;
 
-                api.classes
-                    .insert(class_name, local_def_id(module_id, class_name));
+                let class_id = local_def_id(module_id, class_name);
+                api.classes.insert(class_name, class_id);
+                insert_docs(&mut api, class_id, docs.as_ref());
 
                 let mut method_names = Vec::new();
 
@@ -151,9 +172,9 @@ pub fn build_module_api(
                         method_name,
                     )?;
 
-                    api.terms
-                        .entry(method_name)
-                        .or_insert(local_def_id(module_id, method_name));
+                    let method_id = local_def_id(module_id, method_name);
+                    api.terms.entry(method_name).or_insert(method_id);
+                    insert_docs(&mut api, method_id, method.docs.as_ref());
 
                     method_names.push(method_name);
                 }
@@ -161,7 +182,7 @@ pub fn build_module_api(
                 api.class_methods.insert(class_name, method_names);
             }
 
-            SurfaceDefinition::FixityDef { fixity, ops } => {
+            SurfaceDefinition::FixityDef { fixity, ops, .. } => {
                 for op in ops {
                     check_duplicate(
                         &mut fixity_defs,
@@ -189,6 +210,7 @@ pub fn build_typed_module_api(
     module_name: &ModuleName,
     checked: &CheckedModule,
     type_aliases: FxHashMap<DefId, TypeAlias>,
+    docs: FxHashMap<DefId, DocComment>,
 ) -> TypedModuleApi {
     let mut api = TypedModuleApi::default();
     let prefix = module_name.as_string(session) + ".";
@@ -197,6 +219,7 @@ pub fn build_typed_module_api(
     api.ctor_table = checked.ctor_table.clone();
     api.class_table = checked.class_table.clone();
     api.type_aliases = type_aliases;
+    api.docs = docs;
 
     for (id, scheme) in &checked.func_schemes {
         if id.module == module_id {

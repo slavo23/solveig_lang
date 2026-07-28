@@ -229,6 +229,7 @@ impl<'a> Resolver<'a> {
                     superclasses,
                     methods,
                     defaults,
+                    ..
                 } => {
                     if ty_params.len() != 1 {
                         self.errors.push(ResolveError::ClassArity {
@@ -459,6 +460,7 @@ impl<'a> Resolver<'a> {
                 class_name,
                 args,
                 methods,
+                ..
             } = &defn.0
             else {
                 continue;

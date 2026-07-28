@@ -96,6 +96,20 @@ pub struct ImportDecl {
     pub cst_id: CstId,
 }
 
+/// Documentation text attached to a surface declaration.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DocComment {
+    /// Normalized comment text without the `-- |` or `-- ^` marker.
+    pub text: String,
+}
+
+impl DocComment {
+    /// Creates a documentation comment from normalized text.
+    pub fn new(text: impl Into<String>) -> Self {
+        Self { text: text.into() }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ParsedModule {
     pub file: FileId,
@@ -114,6 +128,7 @@ pub struct SurfacePredicate {
 pub struct ClassMethod {
     pub name: Spanned<Symbol>,
     pub ty: Spanned<SurfaceTy>,
+    pub docs: Option<DocComment>,
     pub cst_id: CstId,
 }
 
@@ -131,24 +146,29 @@ pub enum SurfaceDefinition {
         name: Spanned<Symbol>,
         body: Spanned<SurfaceExpr>,
         params: Vec<Spanned<Symbol>>,
+        docs: Option<DocComment>,
     },
     SigDef {
         name: Spanned<Symbol>,
         ty: Spanned<SurfaceTy>,
+        docs: Option<DocComment>,
     },
     FixityDef {
         fixity: Fixity,
         ops: Vec<Spanned<Symbol>>,
+        docs: Option<DocComment>,
     },
     DataDef {
         name: Spanned<Symbol>,
         ty_params: Vec<Spanned<Symbol>>,
         constructors: Vec<Spanned<SurfaceConstructor>>,
+        docs: Option<DocComment>,
     },
     TypeAliasDef {
         name: Spanned<Symbol>,
         ty_params: Vec<Spanned<Symbol>>,
         ty: Spanned<SurfaceTy>,
+        docs: Option<DocComment>,
     },
     ClassDef {
         name: Spanned<Symbol>,
@@ -156,19 +176,51 @@ pub enum SurfaceDefinition {
         superclasses: Vec<Spanned<SurfacePredicate>>,
         methods: Vec<ClassMethod>,
         defaults: Vec<InstanceMethod>,
+        docs: Option<DocComment>,
     },
     InstanceDef {
         context: Vec<Spanned<SurfacePredicate>>,
         class_name: Spanned<Symbol>,
         args: Vec<Spanned<SurfaceTy>>,
         methods: Vec<InstanceMethod>,
+        docs: Option<DocComment>,
     },
+}
+
+impl SurfaceDefinition {
+    /// Returns the documentation comment attached to this definition.
+    pub fn docs(&self) -> Option<&DocComment> {
+        match self {
+            Self::FunDef { docs, .. }
+            | Self::SigDef { docs, .. }
+            | Self::FixityDef { docs, .. }
+            | Self::DataDef { docs, .. }
+            | Self::TypeAliasDef { docs, .. }
+            | Self::ClassDef { docs, .. }
+            | Self::InstanceDef { docs, .. } => docs.as_ref(),
+        }
+    }
+
+    /// Replaces the documentation comment attached to this definition.
+    pub fn set_docs(&mut self, new_docs: Option<DocComment>) {
+        let docs = match self {
+            Self::FunDef { docs, .. }
+            | Self::SigDef { docs, .. }
+            | Self::FixityDef { docs, .. }
+            | Self::DataDef { docs, .. }
+            | Self::TypeAliasDef { docs, .. }
+            | Self::ClassDef { docs, .. }
+            | Self::InstanceDef { docs, .. } => docs,
+        };
+        *docs = new_docs;
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct SurfaceConstructor {
     pub name: Spanned<Symbol>,
     pub params: Vec<Spanned<SurfaceTy>>,
+    pub docs: Option<DocComment>,
 }
 
 pub type SurfaceProgram = Vec<Spanned<SurfaceDefinition>>;

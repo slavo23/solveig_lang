@@ -137,6 +137,12 @@ impl<'a> FrontendState<'a> {
         self,
         source_files: Vec<SourceFile>,
     ) -> (CheckedProject, Option<PreludeCache>) {
+        let docs = self
+            .typed_apis
+            .values()
+            .flat_map(|api| api.docs.iter().map(|(id, doc)| (*id, doc.clone())))
+            .collect();
+
         (
             CheckedProject {
                 names: self.names.clone(),
@@ -144,6 +150,7 @@ impl<'a> FrontendState<'a> {
                 checked: self.checked,
                 module_files: self.module_files,
                 source_files,
+                docs,
             },
             self.prelude_cache,
         )
@@ -193,6 +200,7 @@ impl<'a> FrontendState<'a> {
                 self.resolved_type_aliases
                     .remove(&module_id)
                     .unwrap_or_default(),
+                self.apis[module_name].docs.clone(),
             ));
 
             self.typed_apis.insert(module_name.clone(), typed_api);

@@ -24,6 +24,7 @@ impl<'a> Resolver<'a> {
             name,
             ty_params,
             ty,
+            ..
         } = defn
         else {
             panic!("ICE: local type alias cache contained a non-alias definition");
@@ -482,6 +483,7 @@ impl<'a> Resolver<'a> {
             let SurfaceDefinition::SigDef {
                 name: spanned_name,
                 ty,
+                ..
             } = &defn.0
             else {
                 continue;

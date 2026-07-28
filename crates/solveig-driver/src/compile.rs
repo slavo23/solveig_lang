@@ -44,7 +44,7 @@ use solveig_resolve::project::{
     seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
-use solveig_syntax::ast::ModuleName;
+use solveig_syntax::ast::{DocComment, ModuleName};
 use solveig_vm::vm::Machine;
 
 use crate::DriverError;
@@ -62,8 +62,8 @@ mod show_entry;
 
 use builtins::driver_builtin_api;
 pub use compilation::{
-    CheckResult, Compilation, CompileOptions, ProjectSchemes, checked_project_schemes,
-    compile_and_run_project, compile_and_run_project_with_options,
+    CheckResult, Compilation, CompileOptions, ProjectDocs, ProjectSchemes, checked_project_docs,
+    checked_project_schemes, compile_and_run_project, compile_and_run_project_with_options,
     compile_and_run_project_with_options_and_args, run_project_capture,
     run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
 };

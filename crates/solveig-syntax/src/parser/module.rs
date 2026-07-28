@@ -95,8 +95,11 @@ impl Parser<'_> {
                 }
 
                 let start = this.current_start();
+                let leading_docs = this.doc_comment_before_current();
                 match this.parse_definition() {
-                    Ok(def) => {
+                    Ok(mut def) => {
+                        let trailing_docs = this.doc_comment_after_previous_significant();
+                        def.set_docs(this.attached_doc_comment(leading_docs, trailing_docs));
                         let end = this.current_start();
                         defs.push(sp(def, start, end, this.completed_cst_id()));
                     }

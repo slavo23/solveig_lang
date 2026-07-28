@@ -619,6 +619,7 @@ impl<'a> Parser<'a> {
 }
 
 mod decl;
+mod docs;
 mod expr;
 mod lists;
 mod module;

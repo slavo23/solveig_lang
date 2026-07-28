@@ -600,6 +600,7 @@ impl<'a> Resolver<'a> {
                     name: spanned_name,
                     body,
                     params,
+                    ..
                 } => {
                     let (name, _span, _) = spanned_name;
                     let fn_id = self.local_def_id(cx, *name);

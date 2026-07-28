@@ -74,10 +74,17 @@ pub struct ModuleApi {
     pub constructors: FxHashMap<Symbol, DefId>,
     pub classes: FxHashMap<Symbol, DefId>,
     pub fixities: FxHashMap<Symbol, Fixity>,
+    pub docs: FxHashMap<DefId, DocComment>,
 
     pub class_methods: FxHashMap<Symbol, Vec<Symbol>>,
 }
 impl ModuleApi {
+    fn include_doc(&self, out: &mut Self, def_id: DefId) {
+        if let Some(doc) = self.docs.get(&def_id) {
+            out.docs.insert(def_id, doc.clone());
+        }
+    }
+
     pub fn filtered(&self, spec: &ImportSpec) -> Self {
         match spec {
             ImportSpec::All => self.clone(),
@@ -88,6 +95,7 @@ impl ModuleApi {
                 for name in names {
                     if let Some(sym) = self.terms.get(name) {
                         out.terms.insert(*name, *sym);
+                        self.include_doc(&mut out, *sym);
                         if let Some(fixity) = self.fixities.get(name) {
                             out.fixities.insert(*name, *fixity);
                         }
@@ -95,18 +103,22 @@ impl ModuleApi {
 
                     if let Some(sym) = self.types.get(name) {
                         out.types.insert(*name, *sym);
+                        self.include_doc(&mut out, *sym);
                     }
 
                     if let Some(sym) = self.type_aliases.get(name) {
                         out.type_aliases.insert(*name, *sym);
+                        self.include_doc(&mut out, *sym);
                     }
 
                     if let Some(sym) = self.constructors.get(name) {
                         out.constructors.insert(*name, *sym);
+                        self.include_doc(&mut out, *sym);
                     }
 
                     if let Some(sym) = self.classes.get(name) {
                         out.classes.insert(*name, *sym);
+                        self.include_doc(&mut out, *sym);
 
                         // Solveig's current simple import rule is:
                         //
@@ -121,6 +133,7 @@ impl ModuleApi {
                             for method_name in method_names {
                                 if let Some(method_sym) = self.terms.get(method_name) {
                                     out.terms.insert(*method_name, *method_sym);
+                                    self.include_doc(&mut out, *method_sym);
                                     if let Some(fixity) = self.fixities.get(method_name) {
                                         out.fixities.insert(*method_name, *fixity);
                                     }
@@ -153,6 +166,7 @@ pub struct TypedModuleApi {
     pub constructor_types: FxHashMap<DefId, Ty>,
     pub constructor_ids: FxHashMap<DefId, CtorId>,
     pub class_defs: FxHashMap<DefId, solveig_ast::ast::ClassDefinition>,
+    pub docs: FxHashMap<DefId, DocComment>,
     pub tycon_table: TyConTable,
     pub ctor_table: CtorTable,
     pub class_table: ClassTable,
@@ -165,6 +179,12 @@ pub struct TypedModuleApi {
 }
 
 impl TypedModuleApi {
+    fn include_doc(&self, out: &mut Self, def_id: DefId) {
+        if let Some(doc) = self.docs.get(&def_id) {
+            out.docs.insert(def_id, doc.clone());
+        }
+    }
+
     fn include_class_with_superclasses(&self, out: &mut Self, sym: &DefId) {
         if out.class_defs.contains_key(sym) {
             return;
@@ -175,6 +195,7 @@ impl TypedModuleApi {
         };
 
         out.class_defs.insert(*sym, class_def.clone());
+        self.include_doc(out, *sym);
 
         // Keep superclass definitions from the same typed API if they are present.
         // This is what lets `import M(BoundedLike)` internally retain `OrdLike`
@@ -200,6 +221,7 @@ impl TypedModuleApi {
         for method in &class_def.methods {
             if let Some(scheme) = self.term_schemes.get(&method.id) {
                 out.term_schemes.insert(method.id, scheme.clone());
+                self.include_doc(out, method.id);
             }
         }
     }
@@ -220,12 +242,14 @@ impl TypedModuleApi {
                     for (sym, scheme) in &self.term_schemes {
                         if &sym.name == name {
                             out.term_schemes.insert(*sym, scheme.clone());
+                            self.include_doc(&mut out, *sym);
                         }
                     }
 
                     for (sym, kind) in &self.type_kinds {
                         if &sym.name == name {
                             out.type_kinds.insert(*sym, kind.clone());
+                            self.include_doc(&mut out, *sym);
                             if let Some(id) = self.type_ids.get(sym) {
                                 out.type_ids.insert(*sym, *id);
                             }
@@ -235,12 +259,14 @@ impl TypedModuleApi {
                     for (sym, alias) in &self.type_aliases {
                         if &sym.name == name {
                             out.type_aliases.insert(*sym, alias.clone());
+                            self.include_doc(&mut out, *sym);
                         }
                     }
 
                     for (sym, ty) in &self.constructor_types {
                         if &sym.name == name {
                             out.constructor_types.insert(*sym, ty.clone());
+                            self.include_doc(&mut out, *sym);
                             if let Some(id) = self.constructor_ids.get(sym) {
                                 out.constructor_ids.insert(*sym, *id);
                             }

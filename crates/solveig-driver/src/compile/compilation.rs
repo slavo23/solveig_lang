@@ -23,6 +23,7 @@ pub struct CheckResult {
 }
 
 pub type ProjectSchemes = BTreeMap<String, String>;
+pub type ProjectDocs = BTreeMap<String, String>;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompileOptions {
@@ -79,6 +80,7 @@ pub(super) struct CheckedProject {
     pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
     pub(super) module_files: FxHashMap<ModuleId, FileId>,
     pub(super) source_files: Vec<SourceFile>,
+    pub(super) docs: FxHashMap<DefId, DocComment>,
 }
 
 #[derive(Clone, Debug)]
@@ -271,6 +273,28 @@ impl Compilation {
         }
 
         Ok(schemes)
+    }
+
+    pub fn checked_project_docs(&mut self) -> Result<ProjectDocs, DriverError> {
+        let failure_message = self.check(true)?.failure_message();
+        if let Some(message) = failure_message {
+            return Err(DriverError::compilation_failed(message));
+        }
+
+        let checked_project = self
+            .checked_project
+            .as_ref()
+            .expect("ICE: successful check did not retain checked project");
+        let mut docs = BTreeMap::new();
+
+        for (id, doc) in &checked_project.docs {
+            docs.insert(
+                checked_project.names.def_display_name(*id),
+                doc.text.clone(),
+            );
+        }
+
+        Ok(docs)
     }
 
     pub fn hover(&self, file: impl AsRef<Path>, offset: usize) -> Option<String> {
@@ -510,4 +534,8 @@ pub fn run_project_capture_with_stdin_and_args(
 
 pub fn checked_project_schemes(project_root: &Path) -> Result<ProjectSchemes, DriverError> {
     Compilation::new(project_root).checked_project_schemes()
+}
+
+pub fn checked_project_docs(project_root: &Path) -> Result<ProjectDocs, DriverError> {
+    Compilation::new(project_root).checked_project_docs()
 }

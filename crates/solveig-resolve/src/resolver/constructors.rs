@@ -186,6 +186,7 @@ impl<'a> Resolver<'a> {
                     name: spanned_name,
                     ty_params,
                     constructors,
+                    ..
                 } => {
                     let (name, _span, _) = spanned_name;
                     let data_name = self.qualified_def_name(self.local_def_id(cx, *name));

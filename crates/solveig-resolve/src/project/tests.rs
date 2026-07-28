@@ -7,6 +7,7 @@ use solveig_ast::ast::{
     ConstructorDef, CtorInfo, DataDefinition, Names, ResolvedModule, TyConDefinition, TyConId,
     TyConInfo,
 };
+use solveig_syntax::parser::parse_source;
 
 use super::*;
 
@@ -102,6 +103,7 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
         &module_name,
         &checked,
         FxHashMap::default(),
+        FxHashMap::default(),
     );
     let type_def = super::local_def_id(module_id, session.intern("Widget"));
     let ctor_def = super::local_def_id(module_id, session.intern("MkWidget"));
@@ -141,5 +143,88 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
         constructor_types
             .keys()
             .all(|id| *id != name_minted_ctor_id)
+    );
+}
+
+#[test]
+fn module_api_filtered_imports_retain_docs() {
+    let session = Session::new();
+    let source = r#"-- | Adds one to an integer.
+documentedIncrement : Int -> Int
+documentedIncrement n = n + 1
+
+trailingValue : Int
+trailingValue = 7 -- ^ Comes from trailing docs.
+
+-- | Holds a documented integer.
+data Documented =
+    -- | Wraps a documented integer.
+    MkDocumented Int
+
+-- | Describes values.
+class Describe a where
+    -- | Converts a value into a friendly label.
+    describe : a -> String
+"#;
+    let file = session.add_file("<test>", source);
+    let parsed = parse_source(&session, file, source);
+    let module_id = ModuleId(1);
+    let api = build_module_api(module_id, &parsed).expect("ICE: test API must build");
+    let documented_increment = session.intern("documentedIncrement");
+    let trailing_value = session.intern("trailingValue");
+    let documented = session.intern("Documented");
+    let mk_documented = session.intern("MkDocumented");
+    let describe_class = session.intern("Describe");
+    let describe_method = session.intern("describe");
+
+    let filtered = api.filtered(&ImportSpec::Only(vec![
+        documented_increment,
+        trailing_value,
+        documented,
+        mk_documented,
+        describe_class,
+    ]));
+
+    assert_eq!(
+        filtered
+            .docs
+            .get(&local_def_id(module_id, documented_increment))
+            .map(|docs| docs.text.as_str()),
+        Some("Adds one to an integer.")
+    );
+    assert_eq!(
+        filtered
+            .docs
+            .get(&local_def_id(module_id, trailing_value))
+            .map(|docs| docs.text.as_str()),
+        Some("Comes from trailing docs.")
+    );
+    assert_eq!(
+        filtered
+            .docs
+            .get(&local_def_id(module_id, documented))
+            .map(|docs| docs.text.as_str()),
+        Some("Holds a documented integer.")
+    );
+    assert_eq!(
+        filtered
+            .docs
+            .get(&local_def_id(module_id, describe_class))
+            .map(|docs| docs.text.as_str()),
+        Some("Describes values.")
+    );
+    assert_eq!(
+        filtered
+            .docs
+            .get(&local_def_id(module_id, mk_documented))
+            .map(|docs| docs.text.as_str()),
+        Some("Wraps a documented integer.")
+    );
+    assert_eq!(
+        filtered
+            .docs
+            .get(&local_def_id(module_id, describe_method))
+            .map(|docs| docs.text.as_str()),
+        Some("Converts a value into a friendly label.")
     );
 }
