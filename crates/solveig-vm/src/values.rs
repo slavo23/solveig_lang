@@ -113,6 +113,11 @@ pub enum Continuation {
     },
 }
 
+#[derive(Clone, Copy)]
+pub enum IoFrame {
+    Bind(Value),
+}
+
 pub struct BoolCache {
     pub true_val: Value,
     pub false_val: Value,

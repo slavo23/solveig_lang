@@ -3,12 +3,13 @@
 //!
 //! `Roots` is the single root-set definition for the current VM: the value
 //! stack, pattern binding buffer, short-lived temporary roots, evaluated
-//! globals, nullary-constructor cache, and Bool cache. Any future VM field that
-//! can hold a `Value` across an allocation point must be added to `Roots`.
+//! globals, nullary-constructor cache, Bool cache, current IO action, and IO
+//! continuation stack. Any future VM field that can hold a `Value` across an
+//! allocation point must be added to `Roots`.
 
 use super::*;
 use crate::heap::{Heap, HeapObject, IoAction, PayloadRef, PayloadStore};
-use crate::values::{BoolCache, GlobalSlot, NullaryCtorCache, ObjId, Value};
+use crate::values::{BoolCache, GlobalSlot, IoFrame, NullaryCtorCache, ObjId, Value};
 use solveig_ast::ast::{CtorId, PRIM_TYS};
 
 #[inline]
@@ -45,6 +46,8 @@ pub(super) struct Roots<'a> {
     stack: &'a [Value],
     binding_buffer: &'a [Value],
     temporary_roots: &'a [Value],
+    io_current: Option<Value>,
+    io_stack: &'a [IoFrame],
     globals: &'a [GlobalSlot],
     nullary_ctors: &'a NullaryCtorCache,
     bools: &'a BoolCache,
@@ -55,6 +58,7 @@ impl<'a> Roots<'a> {
         self.mark_values(mark_bits, self.stack, worklist);
         self.mark_values(mark_bits, self.binding_buffer, worklist);
         self.mark_values(mark_bits, self.temporary_roots, worklist);
+        self.mark_io(mark_bits, worklist);
 
         for slot in self.globals {
             if let GlobalSlot::Evaluated(value) = slot {
@@ -68,6 +72,18 @@ impl<'a> Roots<'a> {
 
         mark_value(mark_bits, self.bools.true_val, worklist);
         mark_value(mark_bits, self.bools.false_val, worklist);
+    }
+
+    fn mark_io(&self, mark_bits: &mut [bool], worklist: &mut Vec<ObjId>) {
+        if let Some(value) = self.io_current {
+            mark_value(mark_bits, value, worklist);
+        }
+
+        for frame in self.io_stack {
+            match frame {
+                IoFrame::Bind(continuation) => mark_value(mark_bits, *continuation, worklist),
+            }
+        }
     }
 
     fn mark_values(&self, mark_bits: &mut [bool], values: &[Value], worklist: &mut Vec<ObjId>) {
@@ -84,6 +100,7 @@ impl<'a> Roots<'a> {
         self.assert_values_live(heap, self.stack, &mut seen, &mut worklist);
         self.assert_values_live(heap, self.binding_buffer, &mut seen, &mut worklist);
         self.assert_values_live(heap, self.temporary_roots, &mut seen, &mut worklist);
+        self.assert_io_live(heap, &mut seen, &mut worklist);
 
         for slot in self.globals {
             if let GlobalSlot::Evaluated(value) = slot {
@@ -100,6 +117,21 @@ impl<'a> Roots<'a> {
 
         while let Some(id) = worklist.pop() {
             assert_object_children_live(heap, id, &mut seen, &mut worklist);
+        }
+    }
+
+    #[cfg(debug_assertions)]
+    fn assert_io_live(&self, heap: &Heap, seen: &mut [bool], worklist: &mut Vec<ObjId>) {
+        if let Some(value) = self.io_current {
+            assert_value_live(heap, value, seen, worklist);
+        }
+
+        for frame in self.io_stack {
+            match frame {
+                IoFrame::Bind(continuation) => {
+                    assert_value_live(heap, *continuation, seen, worklist);
+                }
+            }
         }
     }
 
@@ -152,6 +184,8 @@ impl Vm {
             stack: &self.stack,
             binding_buffer: &self.binding_buffer,
             temporary_roots: &self.temporary_roots,
+            io_current: self.io_current,
+            io_stack: &self.io_stack,
             globals: &self.globals,
             nullary_ctors: &self.nullary_ctors,
             bools: &self.bools,
@@ -195,6 +229,8 @@ impl Vm {
                 stack: &self.stack,
                 binding_buffer: &self.binding_buffer,
                 temporary_roots: &self.temporary_roots,
+                io_current: self.io_current,
+                io_stack: &self.io_stack,
                 globals: &self.globals,
                 nullary_ctors: &self.nullary_ctors,
                 bools: &self.bools,

@@ -3,6 +3,7 @@ use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::process::{self, Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use solveig_driver::{
@@ -145,9 +146,8 @@ main = do
 }
 
 #[test]
-#[ignore = "M3 trampolines perform_io so this no longer overflows the native stack"]
 fn io_bind_chain_allocates_under_gc_stress() {
-    const STEPS: usize = 200_000;
+    const STEPS: usize = 10_000;
 
     let _guard = project_run_lock();
     let project_root = write_temp_project(
@@ -209,6 +209,28 @@ main = repeat {STEPS}
     assert!(stdout.bytes().all(|byte| byte == b'x'));
 
     let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn million_step_io_loop_runs_on_small_native_stack() {
+    const SMALL_STACK_BYTES: usize = 2 * 1024 * 1024;
+
+    let _guard = project_run_lock();
+    let project_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/run/io_million_bind_loop");
+
+    let handle = thread::Builder::new()
+        .name("solveig-io-small-stack".to_string())
+        .stack_size(SMALL_STACK_BYTES)
+        .spawn(move || run_project_capture(&project_root, "main"))
+        .expect("small-stack IO test thread should start");
+
+    let output = handle
+        .join()
+        .expect("small-stack IO test should not panic")
+        .expect("million-step IO project should run");
+
+    assert_eq!(output, "done\n");
 }
 
 #[test]

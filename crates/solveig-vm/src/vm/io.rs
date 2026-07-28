@@ -5,7 +5,7 @@ use super::*;
 use crate::builtins::VmCtx;
 use crate::bytecode::BytecodeProgram;
 use crate::heap::{HeapObject, IoAction};
-use crate::values::Value;
+use crate::values::{IoFrame, Value};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -78,129 +78,154 @@ impl Vm {
         action: Value,
         io: &mut IoRuntime<'_>,
     ) -> Result<Value, RuntimeError> {
-        let checkpoint = self.temporary_roots.len();
-        self.temporary_roots.push(action);
+        if self.io_current.is_some() || !self.io_stack.is_empty() {
+            panic!("ICE: IO machine entered while already active");
+        }
 
-        let result = self.perform_io_inner(program, action, io);
+        self.io_current = Some(action);
+        let result = self.perform_io_loop(program, io);
 
-        self.temporary_roots.truncate(checkpoint);
+        self.io_current = None;
+        self.io_stack.clear();
         result
     }
 
-    fn perform_io_inner(
+    fn perform_io_loop(
         &mut self,
         program: &BytecodeProgram,
-        action: Value,
         io: &mut IoRuntime<'_>,
     ) -> Result<Value, RuntimeError> {
-        match self.expect_io_action(action)? {
-            IoAction::Pure(value) => Ok(value),
-            IoAction::Bind {
-                action,
-                continuation,
-            } => {
-                let bind_checkpoint = self.temporary_roots.len();
-                self.temporary_roots.push(continuation);
+        // Awkward Squad section 2 gives IO bind the sequencing contract; AOSA's
+        // GHC RTS chapter keeps resumable runtime state explicit at safe points.
+        loop {
+            let current = self
+                .io_current
+                .expect("ICE: IO machine missing current action");
 
-                let value = match self.perform_io(program, action, io) {
-                    Ok(value) => value,
-                    Err(err) => {
-                        self.temporary_roots.truncate(bind_checkpoint);
-                        return Err(err);
+            match self.expect_io_action(current)? {
+                IoAction::Pure(value) => {
+                    if let Some(value) = self.resume_io_value(program, value)? {
+                        return Ok(value);
                     }
-                };
-
-                let next = match self.call_value_for_result(program, continuation, &[value]) {
-                    Ok(next) => next,
-                    Err(err) => {
-                        self.temporary_roots.truncate(bind_checkpoint);
-                        return Err(err);
-                    }
-                };
-                self.temporary_roots.truncate(bind_checkpoint);
-
-                let next_checkpoint = self.temporary_roots.len();
-                self.temporary_roots.push(next);
-                let result = self.perform_io(program, next, io);
-                self.temporary_roots.truncate(next_checkpoint);
-                result
-            }
-            IoAction::Print { text, newline } => {
-                let mut text = self.expect_string_value(text, "IO print")?;
-                if newline {
-                    text.push('\n');
                 }
-                io.write_str(&text)?;
-                Ok(Value::Unit)
-            }
-            IoAction::ReadLine => {
-                let line = io.read_line()?;
-                self.maybe_gc();
-                Ok(self.heap.alloc_str(&line))
-            }
-            IoAction::GetArgs => {
-                let checkpoint = self.temporary_roots.len();
-                let mut arg_values = Vec::with_capacity(io.args.len());
-                for arg in io.args {
+                IoAction::Bind {
+                    action,
+                    continuation,
+                } => {
+                    self.io_stack.push(IoFrame::Bind(continuation));
+                    self.io_current = Some(action);
+                }
+                IoAction::Print { text, newline } => {
+                    let mut text = self.expect_string_value(text, "IO print")?;
+                    if newline {
+                        text.push('\n');
+                    }
+                    io.write_str(&text)?;
+                    if let Some(value) = self.resume_io_value(program, Value::Unit)? {
+                        return Ok(value);
+                    }
+                }
+                IoAction::ReadLine => {
+                    let line = io.read_line()?;
                     self.maybe_gc();
-                    let value = self.heap.alloc_str(arg);
-                    arg_values.push(value);
-                    self.temporary_roots.push(value);
+                    let value = self.heap.alloc_str(&line);
+                    if let Some(value) = self.resume_io_value(program, value)? {
+                        return Ok(value);
+                    }
                 }
+                IoAction::GetArgs => {
+                    let checkpoint = self.temporary_roots.len();
+                    let mut arg_values = Vec::with_capacity(io.args.len());
+                    for arg in io.args {
+                        self.maybe_gc();
+                        let value = self.heap.alloc_str(arg);
+                        arg_values.push(value);
+                        self.temporary_roots.push(value);
+                    }
 
-                let mut ctx = VmCtx::new(
-                    &mut self.heap,
-                    &program.constructor_arities,
-                    &self.nullary_ctors,
-                    self.bools.true_val,
-                    self.bools.false_val,
-                );
-                let result = ctx.alloc_list_from_values(&arg_values, "getArgs");
-                self.temporary_roots.truncate(checkpoint);
-                result
-            }
-            IoAction::ReadFile { path } => {
-                let path = self.expect_string_value(path, "readFile")?;
-                let resolved = io.resolve_path(&path);
-                let contents = fs::read_to_string(&resolved).map_err(|err| {
-                    RuntimeError::builtin(format!(
-                        "readFile failed for `{}`: {err}",
-                        resolved.display()
-                    ))
-                })?;
-                self.maybe_gc();
-                Ok(self.heap.alloc_str(&contents))
-            }
-            IoAction::WriteFile {
-                path,
-                contents,
-                append,
-            } => {
-                let builtin = if append { "appendFile" } else { "writeFile" };
-                let path = self.expect_string_value(path, builtin)?;
-                let contents = self.expect_string_value(contents, builtin)?;
-                let resolved = io.resolve_path(&path);
-                if append {
-                    OpenOptions::new()
-                        .create(true)
-                        .append(true)
-                        .open(&resolved)
-                        .and_then(|mut file| file.write_all(contents.as_bytes()))
-                        .map_err(|err| {
-                            RuntimeError::builtin(format!(
-                                "appendFile failed for `{}`: {err}",
-                                resolved.display()
-                            ))
-                        })?;
-                } else {
-                    fs::write(&resolved, contents).map_err(|err| {
+                    let mut ctx = VmCtx::new(
+                        &mut self.heap,
+                        &program.constructor_arities,
+                        &self.nullary_ctors,
+                        self.bools.true_val,
+                        self.bools.false_val,
+                    );
+                    let value = ctx.alloc_list_from_values(&arg_values, "getArgs");
+                    self.temporary_roots.truncate(checkpoint);
+                    let value = value?;
+                    if let Some(value) = self.resume_io_value(program, value)? {
+                        return Ok(value);
+                    }
+                }
+                IoAction::ReadFile { path } => {
+                    let path = self.expect_string_value(path, "readFile")?;
+                    let resolved = io.resolve_path(&path);
+                    let contents = fs::read_to_string(&resolved).map_err(|err| {
                         RuntimeError::builtin(format!(
-                            "writeFile failed for `{}`: {err}",
+                            "readFile failed for `{}`: {err}",
                             resolved.display()
                         ))
                     })?;
+                    self.maybe_gc();
+                    let value = self.heap.alloc_str(&contents);
+                    if let Some(value) = self.resume_io_value(program, value)? {
+                        return Ok(value);
+                    }
                 }
-                Ok(Value::Unit)
+                IoAction::WriteFile {
+                    path,
+                    contents,
+                    append,
+                } => {
+                    let builtin = if append { "appendFile" } else { "writeFile" };
+                    let path = self.expect_string_value(path, builtin)?;
+                    let contents = self.expect_string_value(contents, builtin)?;
+                    let resolved = io.resolve_path(&path);
+                    if append {
+                        OpenOptions::new()
+                            .create(true)
+                            .append(true)
+                            .open(&resolved)
+                            .and_then(|mut file| file.write_all(contents.as_bytes()))
+                            .map_err(|err| {
+                                RuntimeError::builtin(format!(
+                                    "appendFile failed for `{}`: {err}",
+                                    resolved.display()
+                                ))
+                            })?;
+                    } else {
+                        fs::write(&resolved, contents).map_err(|err| {
+                            RuntimeError::builtin(format!(
+                                "writeFile failed for `{}`: {err}",
+                                resolved.display()
+                            ))
+                        })?;
+                    }
+                    if let Some(value) = self.resume_io_value(program, Value::Unit)? {
+                        return Ok(value);
+                    }
+                }
+            }
+        }
+    }
+
+    fn resume_io_value(
+        &mut self,
+        program: &BytecodeProgram,
+        value: Value,
+    ) -> Result<Option<Value>, RuntimeError> {
+        let Some(frame) = self.io_stack.last().copied() else {
+            return Ok(Some(value));
+        };
+
+        match frame {
+            IoFrame::Bind(continuation) => {
+                let next = self.call_value_for_result(program, continuation, &[value])?;
+                self.io_stack
+                    .pop()
+                    .expect("ICE: IO continuation frame disappeared during resume");
+                self.io_current = Some(next);
+                Ok(None)
             }
         }
     }
