@@ -7,6 +7,7 @@ use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session,
 
 use crate::ast::*;
 use crate::lexer::{self, LexError, PosToken, Token};
+use crate::syntax::{Event, SyntaxKind};
 
 type S<T> = (T, Span);
 
@@ -191,7 +192,14 @@ pub struct Parser<'a> {
     session: &'a Session,
     file: FileId,
     tokens: Vec<PosToken>,
+    events: Vec<Event>,
     pos: usize,
+}
+
+#[derive(Clone, Copy)]
+struct ParserCheckpoint {
+    pos: usize,
+    events_len: usize,
 }
 
 impl<'a> Parser<'a> {
@@ -200,12 +208,94 @@ impl<'a> Parser<'a> {
             session,
             file,
             tokens,
+            events: Vec::new(),
             pos: 0,
         }
     }
 
+    fn checkpoint(&self) -> ParserCheckpoint {
+        ParserCheckpoint {
+            pos: self.pos,
+            events_len: self.events.len(),
+        }
+    }
+
+    fn restore(&mut self, checkpoint: ParserCheckpoint) {
+        self.pos = checkpoint.pos;
+        self.events.truncate(checkpoint.events_len);
+    }
+
+    fn start_node(&mut self, kind: SyntaxKind) {
+        self.events.push(Event::StartNode(kind));
+    }
+
+    fn finish_node(&mut self) {
+        self.events.push(Event::FinishNode);
+    }
+
+    fn node<T>(
+        &mut self,
+        kind: SyntaxKind,
+        parse: impl FnOnce(&mut Self) -> Result<T, ParseError>,
+    ) -> Result<T, ParseError> {
+        self.start_node(kind);
+        let result = parse(self);
+        self.finish_node();
+        result
+    }
+
+    fn node_value<T>(&mut self, kind: SyntaxKind, parse: impl FnOnce(&mut Self) -> T) -> T {
+        self.start_node(kind);
+        let value = parse(self);
+        self.finish_node();
+        value
+    }
+
+    fn significant_index_from(&self, start: usize, offset: usize) -> Option<usize> {
+        let mut seen = 0usize;
+        for (index, token) in self.tokens.iter().enumerate().skip(start) {
+            if token.kind.is_trivia() {
+                continue;
+            }
+
+            if seen == offset {
+                return Some(index);
+            }
+
+            seen += 1;
+        }
+
+        None
+    }
+
+    fn current_index(&self) -> usize {
+        self.significant_index_from(self.pos, 0)
+            .unwrap_or_else(|| self.tokens.len().saturating_sub(1))
+    }
+
+    fn previous_significant_index(&self, before: usize) -> Option<usize> {
+        self.tokens[..before.min(self.tokens.len())]
+            .iter()
+            .enumerate()
+            .rev()
+            .find(|(_, token)| !token.kind.is_trivia())
+            .map(|(index, _)| index)
+    }
+
+    fn peek_kind(&self, offset: usize) -> Option<&Token> {
+        self.significant_index_from(self.pos, offset)
+            .map(|index| &self.tokens[index].kind)
+    }
+
+    fn emit_remaining_tokens(&mut self) {
+        while self.pos < self.tokens.len() {
+            self.events.push(Event::Token(self.pos));
+            self.pos += 1;
+        }
+    }
+
     fn current(&self) -> &PosToken {
-        &self.tokens[self.pos.min(self.tokens.len().saturating_sub(1))]
+        &self.tokens[self.current_index()]
     }
 
     fn current_kind(&self) -> &Token {
@@ -224,12 +314,22 @@ impl<'a> Parser<'a> {
         matches!(self.current_kind(), Token::Eof)
     }
 
-    fn advance(&mut self) -> &PosToken {
-        let token = &self.tokens[self.pos];
-        if self.pos + 1 < self.tokens.len() {
-            self.pos += 1;
+    fn advance(&mut self) -> PosToken {
+        if self.pos >= self.tokens.len() {
+            return self
+                .tokens
+                .last()
+                .expect("ICE: parser token stream must contain EOF")
+                .clone();
         }
-        token
+
+        let index = self.current_index();
+        for token_index in self.pos..=index {
+            self.events.push(Event::Token(token_index));
+        }
+        self.pos = index + 1;
+
+        self.tokens[index].clone()
     }
 
     fn current_span(&self) -> FileSpan {
@@ -244,8 +344,10 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn report_error(&self, error: &ParseError) {
-        self.session.diagnostics().push(error.to_diagnostic());
+    fn push_error_diagnostic(&mut self, error: &ParseError) -> Diagnostic {
+        let diagnostic = error.to_diagnostic();
+        self.session.diagnostics().push(diagnostic.clone());
+        diagnostic
     }
 
     fn token_text(&self, symbol: Symbol) -> Ref<'_, str> {
@@ -268,7 +370,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect(&mut self, token: &Token) -> Result<&PosToken, ParseError> {
+    fn expect(&mut self, token: &Token) -> Result<PosToken, ParseError> {
         if self.at(token) {
             Ok(self.advance())
         } else {
@@ -391,17 +493,13 @@ impl<'a> Parser<'a> {
             return false;
         }
 
-        self.tokens
-            .get(self.pos + 1)
-            .is_some_and(|token| match &token.kind {
-                Token::Operator(_) => true,
-                other => Self::fixed_operator_text(other)
-                    .is_some_and(|text| text != "::" && !text.starts_with(':')),
-            })
-            && self
-                .tokens
-                .get(self.pos + 2)
-                .is_some_and(|token| matches!(token.kind, Token::RParen))
+        self.peek_kind(1).is_some_and(|kind| match kind {
+            Token::Operator(_) => true,
+            other => Self::fixed_operator_text(other)
+                .is_some_and(|text| text != "::" && !text.starts_with(':')),
+        }) && self
+            .peek_kind(2)
+            .is_some_and(|kind| matches!(kind, Token::RParen))
     }
 
     fn expect_value_name(&mut self) -> Result<NameSpan, ParseError> {
@@ -447,17 +545,14 @@ impl<'a> Parser<'a> {
             return false;
         }
 
-        let mut index = self.pos;
-        while index < self.tokens.len()
-            && matches!(
-                self.tokens[index].kind,
-                Token::VClose | Token::VSemi | Token::Semicolon
-            )
-        {
-            index += 1;
+        let mut offset = 0usize;
+        loop {
+            match self.peek_kind(offset) {
+                Some(Token::VClose | Token::VSemi | Token::Semicolon) => offset += 1,
+                Some(Token::Eof) | None => return true,
+                Some(_) => return false,
+            }
         }
-
-        index >= self.tokens.len() || matches!(self.tokens[index].kind, Token::Eof)
     }
 
     fn skip_top_level_junk(&mut self) {
@@ -472,7 +567,7 @@ impl<'a> Parser<'a> {
     }
 
     fn layout_depth_before_current(&self) -> usize {
-        self.tokens[..self.pos.min(self.tokens.len())]
+        self.tokens[..self.current_index().min(self.tokens.len())]
             .iter()
             .fold(0usize, |depth, token| match token.kind {
                 Token::VOpen => depth + 1,
@@ -526,6 +621,14 @@ impl<'a> Parser<'a> {
             }
         }
     }
+
+    fn recover_top_level_as_error_node(&mut self, error: &ParseError) {
+        let diagnostic = self.push_error_diagnostic(error);
+        self.start_node(SyntaxKind::Error);
+        self.events.push(Event::Error(diagnostic));
+        self.recover_top_level();
+        self.finish_node();
+    }
 }
 
 mod decl;
@@ -533,16 +636,25 @@ mod expr;
 mod module;
 mod name_path;
 mod pattern;
+#[cfg(test)]
+mod tests;
 mod ty;
 pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
     let tokens = match lexer::lex(session, file, source) {
-        Ok(tokens) => lexer::parser_tokens(tokens),
+        Ok(tokens) => tokens,
         Err(error) => {
             let error = ParseError::from(error);
-            session.diagnostics().push(error.to_diagnostic());
+            let diagnostic = error.to_diagnostic();
+            session.diagnostics().push(diagnostic.clone());
 
             return ParsedModule {
                 file,
+                tokens: Vec::new(),
+                events: vec![
+                    Event::StartNode(SyntaxKind::Module),
+                    Event::Error(diagnostic),
+                    Event::FinishNode,
+                ],
                 imports: Vec::new(),
                 defs: Vec::new(),
             };

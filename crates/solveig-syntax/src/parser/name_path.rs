@@ -2,35 +2,41 @@ use super::*;
 
 impl Parser<'_> {
     pub(super) fn parse_name_path(&mut self) -> Result<S<NameRef>, ParseError> {
-        let start = self.current_start();
+        self.node(SyntaxKind::NamePath, |this| {
+            let start = this.current_start();
 
-        let first = match self.current_kind() {
-            Token::Ident(name) | Token::UpperIdent(name) => {
-                let name = *name;
-                self.advance();
-                name
-            }
-            _ => return Err(self.error(format!("expected name, got {}", self.describe_current()))),
-        };
-
-        let mut segments = vec![first];
-        while self.current_dot_is_qualified_separator() {
-            match self.tokens.get(self.pos + 1).map(|token| &token.kind) {
-                Some(Token::Ident(name)) | Some(Token::UpperIdent(name)) => {
+            let first = match this.current_kind() {
+                Token::Ident(name) | Token::UpperIdent(name) => {
                     let name = *name;
-                    self.advance();
-                    self.advance();
-                    segments.push(name);
+                    this.advance();
+                    name
                 }
-                _ => break,
-            }
-        }
+                _ => {
+                    return Err(
+                        this.error(format!("expected name, got {}", this.describe_current()))
+                    );
+                }
+            };
 
-        Ok(sp(
-            NameRef { segments },
-            start,
-            self.tokens[self.pos.saturating_sub(1)].end,
-        ))
+            let mut segments = vec![first];
+            while this.current_dot_is_qualified_separator() {
+                match this.peek_kind(1) {
+                    Some(Token::Ident(name)) | Some(Token::UpperIdent(name)) => {
+                        let name = *name;
+                        this.advance();
+                        this.advance();
+                        segments.push(name);
+                    }
+                    _ => break,
+                }
+            }
+
+            Ok(sp(
+                NameRef { segments },
+                start,
+                this.tokens[this.pos.saturating_sub(1)].end,
+            ))
+        })
     }
 
     pub(super) fn current_dot_is_qualified_separator(&self) -> bool {
@@ -38,11 +44,16 @@ impl Parser<'_> {
             return false;
         }
 
-        let previous = &self.tokens[self.pos - 1];
-        let dot = self.current();
-        let Some(next) = self.tokens.get(self.pos + 1) else {
+        let dot_index = self.current_index();
+        let Some(previous_index) = self.previous_significant_index(dot_index) else {
             return false;
         };
+        let Some(next_index) = self.significant_index_from(dot_index + 1, 0) else {
+            return false;
+        };
+        let previous = &self.tokens[previous_index];
+        let dot = &self.tokens[dot_index];
+        let next = &self.tokens[next_index];
 
         previous.end == dot.start
             && dot.end == next.start

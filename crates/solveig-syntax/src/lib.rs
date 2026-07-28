@@ -9,3 +9,5 @@ pub mod fixity;
 pub mod lexer;
 /// Parses tokens into surface syntax modules.
 pub mod parser;
+/// Defines parser events and concrete syntax node kinds.
+pub mod syntax;

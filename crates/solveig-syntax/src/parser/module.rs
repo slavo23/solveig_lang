@@ -5,105 +5,115 @@ use super::*;
 
 impl Parser<'_> {
     pub(super) fn parse_module(&mut self) -> ParsedModule {
-        if self.at(&Token::VOpen) {
-            self.advance();
-        }
+        let (imports, defs) = self.node_value(SyntaxKind::Module, |this| {
+            if this.at(&Token::VOpen) {
+                this.advance();
+            }
 
-        let imports = self.parse_imports();
-        let defs = self.parse_definitions();
+            let imports = this.parse_imports();
+            let defs = this.parse_definitions();
 
-        if self.at(&Token::VClose) {
-            self.advance();
-        }
+            if this.at(&Token::VClose) {
+                this.advance();
+            }
 
+            this.emit_remaining_tokens();
+            (imports, defs)
+        });
         ParsedModule {
             file: self.file,
+            tokens: self.tokens.clone(),
+            events: self.events.clone(),
             imports,
             defs,
         }
     }
 
     pub(super) fn parse_imports(&mut self) -> Vec<ImportDecl> {
-        let mut imports = Vec::new();
-        while self.at(&Token::Import) {
-            match self.parse_import() {
-                Ok(import) => imports.push(import),
-                Err(error) => {
-                    self.report_error(&error);
-                    self.recover_top_level();
+        self.node_value(SyntaxKind::ImportList, |this| {
+            let mut imports = Vec::new();
+            while this.at(&Token::Import) {
+                match this.parse_import() {
+                    Ok(import) => imports.push(import),
+                    Err(error) => {
+                        this.recover_top_level_as_error_node(&error);
+                    }
                 }
+                this.skip_separators();
             }
-            self.skip_separators();
-        }
-        imports
+            imports
+        })
     }
 
     pub(super) fn parse_import(&mut self) -> Result<ImportDecl, ParseError> {
-        let start = self.current_start();
-        self.expect(&Token::Import)?;
+        self.node(SyntaxKind::ImportDecl, |this| {
+            let start = this.current_start();
+            this.expect(&Token::Import)?;
 
-        let mut segments = vec![self.expect_module_name_segment()?];
-        while self.at(&Token::Dot) {
-            self.advance();
-            segments.push(self.expect_module_name_segment()?);
-        }
-
-        let module = ModuleName(segments);
-        let alias = if self.at(&Token::As) {
-            self.advance();
-            self.expect_upper()?.0
-        } else {
-            module.default_alias()
-        };
-
-        let spec = if self.at(&Token::LParen) {
-            self.advance();
-            let mut names = Vec::new();
-            while !self.at(&Token::RParen) {
-                names.push(self.parse_import_name()?);
-                if !self.at(&Token::Comma) {
-                    break;
-                }
-                self.advance();
+            let mut segments = vec![this.expect_module_name_segment()?];
+            while this.at(&Token::Dot) {
+                this.advance();
+                segments.push(this.expect_module_name_segment()?);
             }
-            self.expect(&Token::RParen)?;
-            ImportSpec::Only(names)
-        } else {
-            ImportSpec::All
-        };
-        let end = self.current_start();
 
-        Ok(ImportDecl {
-            module,
-            alias,
-            spec,
-            span: mk_span(start, end),
+            let module = ModuleName(segments);
+            let alias = if this.at(&Token::As) {
+                this.advance();
+                this.expect_upper()?.0
+            } else {
+                module.default_alias()
+            };
+
+            let spec = if this.at(&Token::LParen) {
+                this.advance();
+                let mut names = Vec::new();
+                while !this.at(&Token::RParen) {
+                    names.push(this.parse_import_name()?);
+                    if !this.at(&Token::Comma) {
+                        break;
+                    }
+                    this.advance();
+                }
+                this.expect(&Token::RParen)?;
+                ImportSpec::Only(names)
+            } else {
+                ImportSpec::All
+            };
+            let end = this.current_start();
+
+            Ok(ImportDecl {
+                module,
+                alias,
+                spec,
+                span: mk_span(start, end),
+            })
         })
     }
 
     pub(super) fn parse_definitions(&mut self) -> SurfaceProgram {
-        let mut defs = Vec::new();
+        self.node_value(SyntaxKind::DefinitionList, |this| {
+            let mut defs = Vec::new();
 
-        loop {
-            self.skip_top_level_junk();
-            if self.at_eof() || self.is_final_module_vclose() {
-                break;
+            loop {
+                this.skip_top_level_junk();
+                if this.at_eof() || this.is_final_module_vclose() {
+                    break;
+                }
+
+                let start = this.current_start();
+                match this.parse_definition() {
+                    Ok(def) => {
+                        let end = this.current_start();
+                        defs.push(sp(def, start, end));
+                    }
+                    Err(error) => {
+                        this.recover_top_level_as_error_node(&error);
+                    }
+                }
             }
 
-            let start = self.current_start();
-            match self.parse_definition() {
-                Ok(def) => {
-                    let end = self.current_start();
-                    defs.push(sp(def, start, end));
-                }
-                Err(error) => {
-                    self.report_error(&error);
-                    self.recover_top_level();
-                }
-            }
-        }
-
-        defs
+            defs
+        })
     }
 
     pub(super) fn parse_definition(&mut self) -> Result<SurfaceDefinition, ParseError> {
