@@ -5,5 +5,4 @@
 .DS_Store
 profile.json.gz
 bytecode.txt
-plan_v1
-plan_v2
+plan_v*
