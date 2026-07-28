@@ -1,7 +1,9 @@
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+
+use solveig_driver::Compilation;
+use solveig_report::render_diagnostics_no_color;
 
 #[test]
 fn golden_diagnostic_cases() {
@@ -58,37 +60,29 @@ fn golden_diagnostic_cases() {
 }
 
 fn run_cli_case(case_root: &Path, case_name: &str) -> String {
-    let output = run_cli(case_root);
-    let actual = normalize_output(&output);
+    let mut compilation = Compilation::new(case_root);
+    let result = match compilation.check(true) {
+        Ok(result) => result,
+        Err(err) => return normalize_text(&format!("{err}\n")),
+    };
+
+    let mut actual = render_diagnostics_no_color(result.diagnostics(), result.source_map())
+        .unwrap_or_else(|err| panic!("failed to render diagnostics for `{case_name}`: {err}"));
+    if let Some(message) = result.failure_message() {
+        actual.push_str(message);
+        actual.push('\n');
+    }
 
     assert!(
-        !output.status.success(),
+        !result.success(),
         "golden diagnostic case `{case_name}` unexpectedly succeeded:\n{actual}"
     );
 
-    actual
+    normalize_text(&actual)
 }
 
-fn run_cli(case_root: &Path) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_solveig"))
-        .arg("--project-root")
-        .arg(case_root)
-        .arg("--verify-core")
-        .output()
-        .unwrap_or_else(|err| {
-            panic!(
-                "failed to run Solveig CLI for diagnostic case {}: {err}",
-                case_root.display()
-            )
-        })
-}
-
-fn normalize_output(output: &Output) -> String {
-    let mut combined = String::new();
-    combined.push_str(&String::from_utf8_lossy(&output.stdout));
-    combined.push_str(&String::from_utf8_lossy(&output.stderr));
-
-    let normalized_paths = strip_ansi(&combined).replace(env!("CARGO_MANIFEST_DIR"), "$WORKSPACE");
+fn normalize_text(actual: &str) -> String {
+    let normalized_paths = actual.replace(env!("CARGO_MANIFEST_DIR"), "$WORKSPACE");
     let normalized_paths = trim_line_end_whitespace(&normalized_paths);
 
     normalize_cyclic_imports(&normalized_paths)
@@ -126,27 +120,6 @@ fn normalize_cyclic_imports(input: &str) -> String {
 
     if input.ends_with('\n') {
         out.push('\n');
-    }
-
-    out
-}
-
-fn strip_ansi(input: &str) -> String {
-    let mut out = String::new();
-    let mut chars = input.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\u{1b}' && chars.peek() == Some(&'[') {
-            chars.next();
-
-            for next in chars.by_ref() {
-                if ('@'..='~').contains(&next) {
-                    break;
-                }
-            }
-        } else {
-            out.push(ch);
-        }
     }
 
     out

@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::io::{self, BufRead, Write};
 use std::ops::Range;
@@ -22,7 +21,7 @@ use solveig_ast::ast::{
     TermDefinition, TermExpr, TermExprNode, TyConId, TyConTable, TyVarId, TypeExpr, VarRef,
     prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
 };
-use solveig_base::utils::diagnostics::Diagnostic;
+use solveig_base::utils::diagnostics::{Diagnostic, Severity};
 use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap};
 use solveig_check::core_lint::{CoreLintEnv, lint_checked_module};
 use solveig_check::inference::holes::hole_diagnostics;
@@ -33,7 +32,6 @@ use solveig_check::inference::type_infer::{
 use solveig_lower::closure_ir::CCProgram;
 use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
-use solveig_report::emit_diagnostics;
 use solveig_resolve::project::{
     BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleTable,
     ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi, TypedDisplayMaps,
@@ -44,13 +42,29 @@ use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::ModuleName;
 use solveig_vm::vm::Machine;
 
+use crate::DriverError;
 use crate::project::{ProjectError, load_project, parse_project};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Compilation {
     project_root: PathBuf,
-    artifacts: Rc<RefCell<Option<CompilationArtifacts>>>,
+    session: Session,
+    names: Names,
+    artifacts: Option<CompilationArtifacts>,
+    checked_project: Option<CheckedProject>,
+    check_result: CheckResult,
 }
+
+#[derive(Clone, Debug, Default)]
+pub struct CheckResult {
+    diagnostics: Vec<Diagnostic>,
+    modules: Vec<CheckedModule>,
+    source_map: SourceMap,
+    success: bool,
+    failure_message: Option<&'static str>,
+}
+
+pub type ProjectSchemes = BTreeMap<String, String>;
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompileOptions {
@@ -68,6 +82,28 @@ impl CompileOptions {
     }
 }
 
+impl CheckResult {
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        &self.diagnostics
+    }
+
+    pub fn modules(&self) -> &[CheckedModule] {
+        &self.modules
+    }
+
+    pub fn source_map(&self) -> &SourceMap {
+        &self.source_map
+    }
+
+    pub fn success(&self) -> bool {
+        self.success
+    }
+
+    pub fn failure_message(&self) -> Option<&'static str> {
+        self.failure_message
+    }
+}
+
 #[derive(Clone, Debug)]
 struct CompilationArtifacts {
     names: Names,
@@ -78,6 +114,7 @@ struct CompilationArtifacts {
     class_table: ClassTable,
 }
 
+#[derive(Clone, Debug)]
 struct CheckedProject {
     names: Names,
     modules: Vec<CheckedModule>,
@@ -95,6 +132,11 @@ struct PreparedRun {
     entry_fq: String,
     entry_is_io: bool,
     show_entry: Option<String>,
+}
+
+struct CheckProjectOutcome {
+    checked_project: Option<CheckedProject>,
+    phase: Option<FrontendPhase>,
 }
 
 impl CompilationArtifacts {
@@ -116,15 +158,19 @@ impl Compilation {
     pub fn new(project_root: impl Into<PathBuf>) -> Self {
         Self {
             project_root: project_root.into(),
-            artifacts: Rc::new(RefCell::new(None)),
+            session: Session::new(),
+            names: Names::new(),
+            artifacts: None,
+            checked_project: None,
+            check_result: CheckResult::default(),
         }
     }
 
     pub fn compile_and_run_project(
-        &self,
+        &mut self,
         entry_name: &str,
         dump_bytecode: bool,
-    ) -> Result<(), String> {
+    ) -> Result<(), DriverError> {
         self.compile_and_run_project_with_options(
             entry_name,
             CompileOptions {
@@ -136,19 +182,19 @@ impl Compilation {
     }
 
     pub fn compile_and_run_project_with_options(
-        &self,
+        &mut self,
         entry_name: &str,
         options: CompileOptions,
-    ) -> Result<(), String> {
+    ) -> Result<(), DriverError> {
         self.compile_and_run_project_with_options_and_args(entry_name, options, &[])
     }
 
     pub fn compile_and_run_project_with_options_and_args(
-        &self,
+        &mut self,
         entry_name: &str,
         options: CompileOptions,
         args: &[String],
-    ) -> Result<(), String> {
+    ) -> Result<(), DriverError> {
         let stdin = io::stdin();
         let mut stdin = stdin.lock();
         let stdout = io::stdout();
@@ -158,13 +204,13 @@ impl Compilation {
     }
 
     pub fn run_project_with_streams(
-        &self,
+        &mut self,
         entry_name: &str,
         options: CompileOptions,
         stdin: &mut dyn BufRead,
         stdout: &mut dyn Write,
         args: &[String],
-    ) -> Result<(), String> {
+    ) -> Result<(), DriverError> {
         let prepared = self.prepare_project_run(entry_name, options)?;
 
         if prepared.entry_is_io {
@@ -176,48 +222,56 @@ impl Compilation {
                 args,
                 &self.project_root,
             )
-            .map_err(|err| format!("runtime error: {err}"))?;
+            .map_err(|err| DriverError::runtime(err.to_string()))?;
         } else if let Some(show_entry) = prepared.show_entry {
             let result = Machine::exec(&prepared.cc, &show_entry)
-                .map_err(|err| format!("runtime error: {err}"))?;
+                .map_err(|err| DriverError::runtime(err.to_string()))?;
             let output = result
                 .as_string()
-                .ok_or_else(|| "runtime error: Show main did not return String".to_string())?;
-            writeln!(stdout, "{output}").map_err(|err| format!("failed to write output: {err}"))?;
+                .ok_or_else(|| DriverError::runtime("Show main did not return String"))?;
+            writeln!(stdout, "{output}").map_err(|source| DriverError::WriteOutput { source })?;
         } else {
             let result = Machine::exec(&prepared.cc, &prepared.entry_fq)
-                .map_err(|err| format!("runtime error: {err}"))?;
+                .map_err(|err| DriverError::runtime(err.to_string()))?;
             writeln!(stdout, "{}", result.display())
-                .map_err(|err| format!("failed to write output: {err}"))?;
+                .map_err(|source| DriverError::WriteOutput { source })?;
         }
 
         Ok(())
     }
 
-    pub fn run_project_capture(&self, entry_name: &str) -> Result<String, String> {
+    pub fn run_project_capture(&mut self, entry_name: &str) -> Result<String, DriverError> {
         self.compile_project_capture(entry_name, CompileOptions::test_support())
     }
 
     pub fn run_project_capture_with_stdin(
-        &self,
+        &mut self,
         entry_name: &str,
         stdin: &str,
-    ) -> Result<String, String> {
+    ) -> Result<String, DriverError> {
         self.run_project_capture_with_stdin_and_args(entry_name, stdin, &[])
     }
 
     pub fn run_project_capture_with_stdin_and_args(
-        &self,
+        &mut self,
         entry_name: &str,
         stdin: &str,
         args: &[String],
-    ) -> Result<String, String> {
+    ) -> Result<String, DriverError> {
         self.compile_project_capture_inner(entry_name, CompileOptions::test_support(), stdin, args)
             .map(|capture| capture.output)
     }
 
-    pub fn checked_project_schemes(&self) -> Result<BTreeMap<String, String>, String> {
-        let checked_project = self.check_project(true)?;
+    pub fn checked_project_schemes(&mut self) -> Result<ProjectSchemes, DriverError> {
+        let failure_message = self.check(true)?.failure_message();
+        if let Some(message) = failure_message {
+            return Err(DriverError::compilation_failed(message));
+        }
+
+        let checked_project = self
+            .checked_project
+            .as_ref()
+            .expect("ICE: successful check did not retain checked project");
         let (tycon_table, class_table) = checked_project_tables(&checked_project.modules);
         let pretty_tables = PrettyTables {
             names: &checked_project.names,
@@ -239,26 +293,68 @@ impl Compilation {
     }
 
     pub fn hover(&self, file: impl AsRef<Path>, offset: usize) -> Option<String> {
-        let artifacts = self.artifacts.borrow();
-        hover_in_artifacts(artifacts.as_ref()?, file.as_ref(), offset)
+        hover_in_artifacts(self.artifacts.as_ref()?, file.as_ref(), offset)
+    }
+
+    pub fn check(&mut self, verify_core: bool) -> Result<&CheckResult, DriverError> {
+        self.artifacts = None;
+        self.checked_project = None;
+        self.session.diagnostics().drain();
+        self.names = Names::new();
+
+        let outcome = self.check_project_modules(verify_core)?;
+        let diagnostics = self.session.diagnostics().sorted_by_file_and_span();
+        let modules = outcome
+            .checked_project
+            .as_ref()
+            .map(|project| project.modules.clone())
+            .unwrap_or_default();
+        let source_map = self.session.source_map().clone();
+        let success = outcome.phase.is_none()
+            && !diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == Severity::Error);
+
+        if let Some(checked_project) = outcome.checked_project {
+            self.artifacts = Some(CompilationArtifacts::from_checked_project(&checked_project));
+            self.checked_project = Some(checked_project);
+        }
+
+        self.check_result = CheckResult {
+            diagnostics,
+            modules,
+            source_map,
+            success,
+            failure_message: outcome.phase.map(FrontendPhase::error_message),
+        };
+
+        Ok(&self.check_result)
+    }
+
+    pub fn diagnostics(&self) -> &[Diagnostic] {
+        self.check_result.diagnostics()
+    }
+
+    pub fn source_map(&self) -> &SourceMap {
+        self.check_result.source_map()
     }
 
     fn compile_project_capture(
-        &self,
+        &mut self,
         entry_name: &str,
         options: CompileOptions,
-    ) -> Result<String, String> {
+    ) -> Result<String, DriverError> {
         self.compile_project_capture_inner(entry_name, options, "", &[])
             .map(|capture| capture.output)
     }
 
     fn compile_project_capture_inner(
-        &self,
+        &mut self,
         entry_name: &str,
         options: CompileOptions,
         stdin: &str,
         args: &[String],
-    ) -> Result<CapturedRun, String> {
+    ) -> Result<CapturedRun, DriverError> {
         let prepared = self.prepare_project_run(entry_name, options)?;
 
         if prepared.entry_is_io {
@@ -269,21 +365,21 @@ impl Compilation {
                 args,
                 &self.project_root,
             )
-            .map_err(|err| format!("runtime error: {err}"))?;
+            .map_err(|err| DriverError::runtime(err.to_string()))?;
             Ok(CapturedRun {
                 output: result.stdout,
             })
         } else if let Some(show_entry) = prepared.show_entry {
             let result = Machine::exec(&prepared.cc, &show_entry)
-                .map_err(|err| format!("runtime error: {err}"))?;
+                .map_err(|err| DriverError::runtime(err.to_string()))?;
             let output = result
                 .as_string()
-                .ok_or_else(|| "runtime error: Show main did not return String".to_string())?
+                .ok_or_else(|| DriverError::runtime("Show main did not return String"))?
                 .to_string();
             Ok(CapturedRun { output })
         } else {
             let result = Machine::exec(&prepared.cc, &prepared.entry_fq)
-                .map_err(|err| format!("runtime error: {err}"))?;
+                .map_err(|err| DriverError::runtime(err.to_string()))?;
             Ok(CapturedRun {
                 output: result.display().to_string(),
             })
@@ -291,11 +387,20 @@ impl Compilation {
     }
 
     fn prepare_project_run(
-        &self,
+        &mut self,
         entry_name: &str,
         options: CompileOptions,
-    ) -> Result<PreparedRun, String> {
-        let mut checked_project = self.check_project(options.verify_core)?;
+    ) -> Result<PreparedRun, DriverError> {
+        let failure_message = self.check(options.verify_core)?.failure_message();
+        if let Some(message) = failure_message {
+            return Err(DriverError::compilation_failed(message));
+        }
+
+        let mut checked_project = self
+            .checked_project
+            .as_ref()
+            .expect("ICE: successful check did not retain checked project")
+            .clone();
         let mut merged =
             merge_checked_modules(checked_project.modules.clone(), &mut checked_project.names)?;
 
@@ -312,7 +417,13 @@ impl Compilation {
         }
 
         if options.verify_core {
-            verify_lowering_core(&merged, &checked_project)?;
+            let diagnostics = verify_lowering_core(&merged, &checked_project);
+            if !diagnostics.is_empty() {
+                self.record_post_check_failure(FrontendPhase::Core, diagnostics, &checked_project);
+                return Err(DriverError::compilation_failed(
+                    FrontendPhase::Core.error_message(),
+                ));
+            }
         }
 
         let ir = lower_module(&merged, &checked_project.names);
@@ -320,7 +431,7 @@ impl Compilation {
 
         if options.dump_bytecode {
             Machine::dump_bytecode(&cc, "bytecode.txt")
-                .map_err(|e| format!("failed to dump bytecode: {e}"))?;
+                .map_err(|source| DriverError::DumpBytecode { source })?;
         }
 
         Ok(PreparedRun {
@@ -331,15 +442,24 @@ impl Compilation {
         })
     }
 
-    fn check_project(&self, verify_core: bool) -> Result<CheckedProject, String> {
-        self.artifacts.replace(None);
-        let checked_project = check_project_modules(&self.project_root, verify_core)?;
-        self.artifacts
-            .replace(Some(CompilationArtifacts::from_checked_project(
-                &checked_project,
-            )));
+    fn record_post_check_failure(
+        &mut self,
+        phase: FrontendPhase,
+        diagnostics: Vec<Diagnostic>,
+        checked_project: &CheckedProject,
+    ) {
+        for diagnostic in diagnostics {
+            self.session.diagnostics().push(diagnostic);
+        }
 
-        Ok(checked_project)
+        let diagnostics = self.session.diagnostics().sorted_by_file_and_span();
+        self.check_result = CheckResult {
+            diagnostics,
+            modules: checked_project.modules.clone(),
+            source_map: self.session.source_map().clone(),
+            success: false,
+            failure_message: Some(phase.error_message()),
+        };
     }
 }
 
@@ -479,36 +599,10 @@ fn show_entry_expr(
 fn verify_lowering_core(
     merged: &CheckedModule,
     checked_project: &CheckedProject,
-) -> Result<(), String> {
+) -> Vec<Diagnostic> {
     let lint_env = CoreLintEnv::from_module(merged, &checked_project.names)
         .with_files(checked_project.module_files.clone());
-    let diagnostics = lint_checked_module(merged, &lint_env);
-
-    if diagnostics.is_empty() {
-        return Ok(());
-    }
-
-    emit_core_lint_diagnostics(&diagnostics, &checked_project.source_files)?;
-    Err(FrontendPhase::Core.error_message().to_string())
-}
-
-fn emit_core_lint_diagnostics(
-    diagnostics: &[Diagnostic],
-    source_files: &[SourceFile],
-) -> Result<(), String> {
-    let source_map = source_map_from_files(source_files);
-    emit_diagnostics(diagnostics, &source_map)
-        .map_err(|err| format!("failed to print diagnostics: {err}"))
-}
-
-fn source_map_from_files(source_files: &[SourceFile]) -> SourceMap {
-    let mut source_map = SourceMap::new();
-
-    for source in source_files {
-        source_map.add_file(source.path.clone(), source.src.clone());
-    }
-
-    source_map
+    lint_checked_module(merged, &lint_env)
 }
 
 #[derive(Clone, Debug)]
@@ -801,7 +895,7 @@ pub fn compile_and_run_project(
     project_root: &Path,
     entry_name: &str,
     dump_bytecode: bool,
-) -> Result<(), String> {
+) -> Result<(), DriverError> {
     Compilation::new(project_root).compile_and_run_project(entry_name, dump_bytecode)
 }
 
@@ -809,7 +903,7 @@ pub fn compile_and_run_project_with_options(
     project_root: &Path,
     entry_name: &str,
     options: CompileOptions,
-) -> Result<(), String> {
+) -> Result<(), DriverError> {
     Compilation::new(project_root).compile_and_run_project_with_options(entry_name, options)
 }
 
@@ -818,12 +912,12 @@ pub fn compile_and_run_project_with_options_and_args(
     entry_name: &str,
     options: CompileOptions,
     args: &[String],
-) -> Result<(), String> {
+) -> Result<(), DriverError> {
     Compilation::new(project_root)
         .compile_and_run_project_with_options_and_args(entry_name, options, args)
 }
 
-pub fn run_project_capture(project_root: &Path, entry_name: &str) -> Result<String, String> {
+pub fn run_project_capture(project_root: &Path, entry_name: &str) -> Result<String, DriverError> {
     Compilation::new(project_root).run_project_capture(entry_name)
 }
 
@@ -831,7 +925,7 @@ pub fn run_project_capture_with_stdin(
     project_root: &Path,
     entry_name: &str,
     stdin: &str,
-) -> Result<String, String> {
+) -> Result<String, DriverError> {
     Compilation::new(project_root).run_project_capture_with_stdin(entry_name, stdin)
 }
 
@@ -840,68 +934,76 @@ pub fn run_project_capture_with_stdin_and_args(
     entry_name: &str,
     stdin: &str,
     args: &[String],
-) -> Result<String, String> {
+) -> Result<String, DriverError> {
     Compilation::new(project_root).run_project_capture_with_stdin_and_args(entry_name, stdin, args)
 }
 
-pub fn checked_project_schemes(project_root: &Path) -> Result<BTreeMap<String, String>, String> {
+pub fn checked_project_schemes(project_root: &Path) -> Result<ProjectSchemes, DriverError> {
     Compilation::new(project_root).checked_project_schemes()
 }
 
-fn check_project_modules(project_root: &Path, verify_core: bool) -> Result<CheckedProject, String> {
-    let session = Session::new();
-    let entry_file = find_entry_file(project_root)?;
-    let (_root, project) = match load_project(&session, &entry_file) {
-        Ok(project) => project,
-        Err(ProjectError::Message(message)) => return Err(message),
-        Err(ProjectError::Resolve(error)) => {
-            push_resolve_errors(&session, None, vec![error]);
-            emit_session_diagnostics(&session)?;
-            return Err("resolve error".to_string());
-        }
-    };
-
-    if session.diagnostics().has_errors() {
-        emit_session_diagnostics(&session)?;
-        return Err("parse error".to_string());
-    }
-
-    let order = match module_order_checked(&session, &project) {
-        Ok(order) => order,
-        Err(error) => {
-            push_resolve_errors(&session, Some(&project.module_table), vec![error]);
-            emit_session_diagnostics(&session)?;
-            return Err("resolve error".to_string());
-        }
-    };
-    let parsed = parse_project(&project);
-
-    let mut names = Names::new();
-    let mut state =
-        match FrontendState::new(&session, &mut names, &project, &parsed, &order, verify_core) {
-            Ok(state) => state,
-            Err(errors) => {
-                push_resolve_errors(&session, Some(&project.module_table), errors);
-                emit_session_diagnostics(&session)?;
-                return Err("resolve error".to_string());
+impl Compilation {
+    fn check_project_modules(
+        &mut self,
+        verify_core: bool,
+    ) -> Result<CheckProjectOutcome, DriverError> {
+        let entry_file = find_entry_file(&self.project_root)?;
+        let (_root, project) = match load_project(&self.session, &entry_file) {
+            Ok(project) => project,
+            Err(ProjectError::Driver(error)) => return Err(error),
+            Err(ProjectError::Resolve(error)) => {
+                push_resolve_errors(&self.session, None, vec![error]);
+                return Ok(CheckProjectOutcome {
+                    checked_project: None,
+                    phase: Some(FrontendPhase::Resolve),
+                });
             }
         };
-    state.check_all(&order)?;
 
-    if !session.diagnostics().is_empty() {
-        emit_session_diagnostics(&session)?;
+        if self.session.diagnostics().has_errors() {
+            return Ok(CheckProjectOutcome {
+                checked_project: None,
+                phase: Some(FrontendPhase::Parse),
+            });
+        }
+
+        let order = match module_order_checked(&self.session, &project) {
+            Ok(order) => order,
+            Err(error) => {
+                push_resolve_errors(&self.session, Some(&project.module_table), vec![error]);
+                return Ok(CheckProjectOutcome {
+                    checked_project: None,
+                    phase: Some(FrontendPhase::Resolve),
+                });
+            }
+        };
+        let parsed = parse_project(&project);
+
+        let mut state = match FrontendState::new(
+            &self.session,
+            &mut self.names,
+            &project,
+            &parsed,
+            &order,
+            verify_core,
+        ) {
+            Ok(state) => state,
+            Err(errors) => {
+                push_resolve_errors(&self.session, Some(&project.module_table), errors);
+                return Ok(CheckProjectOutcome {
+                    checked_project: None,
+                    phase: Some(FrontendPhase::Resolve),
+                });
+            }
+        };
+        let phase = state.check_all(&order);
+
+        let source_files = self.session.source_map().files().to_vec();
+        Ok(CheckProjectOutcome {
+            checked_project: Some(state.into_checked_project(source_files)),
+            phase,
+        })
     }
-
-    let source_files = session.source_map().files().to_vec();
-    Ok(state.into_checked_project(source_files))
-}
-
-fn emit_session_diagnostics(session: &Session) -> Result<(), String> {
-    let diagnostics = session.diagnostics().sorted_by_file_and_span();
-    let source_map = session.source_map();
-
-    emit_diagnostics(&diagnostics, &source_map)
-        .map_err(|err| format!("failed to print diagnostics: {err}"))
 }
 
 fn push_resolve_errors(
@@ -934,6 +1036,7 @@ struct FrontendState<'a> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 enum FrontendPhase {
+    Parse,
     Resolve,
     Kind,
     Type,
@@ -944,6 +1047,7 @@ enum FrontendPhase {
 impl FrontendPhase {
     fn error_message(self) -> &'static str {
         match self {
+            Self::Parse => "parse error",
             Self::Resolve => "resolve error",
             Self::Kind => "kind error",
             Self::Type => "type error",
@@ -1422,7 +1526,7 @@ impl<'a> FrontendState<'a> {
         }
     }
 
-    fn check_all(&mut self, order: &[ModuleName]) -> Result<(), String> {
+    fn check_all(&mut self, order: &[ModuleName]) -> Option<FrontendPhase> {
         let mut failed_modules = HashSet::new();
         let mut first_failure: Option<FrontendPhase> = None;
 
@@ -1467,12 +1571,7 @@ impl<'a> FrontendState<'a> {
             self.checked_modules.push(checked);
         }
 
-        if let Some(phase) = first_failure {
-            emit_session_diagnostics(self.session)?;
-            return Err(phase.error_message().to_string());
-        }
-
-        Ok(())
+        first_failure
     }
 
     fn collect_imported_class_param_kind_ids(
@@ -1737,19 +1836,19 @@ fn collect_imported_type_info(imports: &[ImportedTypedApi]) -> ImportedTypeInfo 
     }
 }
 
-fn find_entry_file(project_root: &Path) -> Result<PathBuf, String> {
+fn find_entry_file(project_root: &Path) -> Result<PathBuf, DriverError> {
     let entry = project_root.join("src").join("main.sv");
     if entry.is_file() {
         Ok(entry)
     } else {
-        Err(format!("could not find entry file at {}", entry.display()))
+        Err(DriverError::EntryFileMissing { path: entry })
     }
 }
 
 fn merge_checked_modules(
     mods: Vec<CheckedModule>,
     names: &mut Names,
-) -> Result<CheckedModule, String> {
+) -> Result<CheckedModule, DriverError> {
     let mut data_defs = Vec::new();
     let mut class_defs = Vec::new();
     let mut instance_defs = Vec::new();
@@ -1815,12 +1914,15 @@ fn merge_checked_modules(
 fn extend_unique_def<T>(
     dst: &mut HashMap<DefId, T>,
     src: HashMap<DefId, T>,
-    label: &str,
+    label: &'static str,
     names: &Names,
-) -> Result<(), String> {
+) -> Result<(), DriverError> {
     for (k, v) in src {
         if dst.insert(k, v).is_some() {
-            return Err(format!("duplicate {label} {}", names.def_display_name(k)));
+            return Err(DriverError::DuplicateDefinition {
+                kind: label,
+                name: names.def_display_name(k),
+            });
         }
     }
     Ok(())
@@ -1831,13 +1933,13 @@ fn extend_unique_tycon(
     src: HashMap<TyConId, solveig_ast::ast::Kind>,
     tycons: &TyConTable,
     names: &Names,
-) -> Result<(), String> {
+) -> Result<(), DriverError> {
     for (k, v) in src {
         if dst.insert(k, v).is_some() {
-            return Err(format!(
-                "duplicate type constructor {}",
-                tycon_name_for_error(k, tycons, names)
-            ));
+            return Err(DriverError::DuplicateDefinition {
+                kind: "type constructor",
+                name: tycon_name_for_error(k, tycons, names),
+            });
         }
     }
     Ok(())
@@ -1848,13 +1950,13 @@ fn extend_unique_ctor(
     src: HashMap<CtorId, TypeExpr>,
     ctors: &CtorTable,
     names: &Names,
-) -> Result<(), String> {
+) -> Result<(), DriverError> {
     for (k, v) in src {
         if dst.insert(k, v).is_some() {
-            return Err(format!(
-                "duplicate constructor {}",
-                ctor_name_for_error(k, ctors, names)
-            ));
+            return Err(DriverError::DuplicateDefinition {
+                kind: "constructor",
+                name: ctor_name_for_error(k, ctors, names),
+            });
         }
     }
     Ok(())

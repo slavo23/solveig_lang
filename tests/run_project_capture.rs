@@ -125,7 +125,8 @@ main = do
     let mut stdout = Vec::new();
     let args = vec!["one".to_string(), "two".to_string()];
 
-    Compilation::new(&project_root)
+    let mut compilation = Compilation::new(&project_root);
+    compilation
         .run_project_with_streams(
             "main",
             CompileOptions::test_support(),
@@ -213,7 +214,8 @@ fn primitive_int_division_by_zero_reports_runtime_error() {
         .expect_err("intDiv division by zero should report a runtime error");
 
     assert!(
-        err.contains("runtime error: intDiv division by zero"),
+        err.to_string()
+            .contains("runtime error: intDiv division by zero"),
         "unexpected error: {err}"
     );
 }
@@ -228,7 +230,8 @@ fn primitive_int_modulo_by_zero_reports_runtime_error() {
         .expect_err("intMod modulo by zero should report a runtime error");
 
     assert!(
-        err.contains("runtime error: intMod modulo by zero"),
+        err.to_string()
+            .contains("runtime error: intMod modulo by zero"),
         "unexpected error: {err}"
     );
 }
@@ -243,7 +246,8 @@ fn prelude_int_division_by_zero_reports_runtime_error() {
         .expect_err("prelude div by zero should report a runtime error");
 
     assert!(
-        err.contains("runtime error: intDiv division by zero"),
+        err.to_string()
+            .contains("runtime error: intDiv division by zero"),
         "unexpected error: {err}"
     );
 }

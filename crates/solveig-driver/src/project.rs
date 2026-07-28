@@ -9,20 +9,22 @@ use solveig_resolve::project::{
 use solveig_syntax::ast::{ModuleName, ParsedModule};
 use solveig_syntax::parser;
 
+use crate::DriverError;
+
 const PRELUDE_BUILTINS_SRC: &str = include_str!("./prelude/builtins.sv");
 const PRELUDE_LIST_SRC: &str = include_str!("./prelude/list.sv");
 const PRELUDE_TYPECLASS_SRC: &str = include_str!("./prelude/typeclasses.sv");
 const PRELUDE_PRIM_SRC: &str = "";
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum ProjectError {
-    Message(String),
+    Driver(DriverError),
     Resolve(ResolveError),
 }
 
-impl From<String> for ProjectError {
-    fn from(message: String) -> Self {
-        Self::Message(message)
+impl From<DriverError> for ProjectError {
+    fn from(error: DriverError) -> Self {
+        Self::Driver(error)
     }
 }
 
@@ -51,11 +53,8 @@ fn mk_virtual_prelude_file(
     module: &ModuleName,
 ) -> Result<ModuleFile, ProjectError> {
     let source = prelude_module(session, module)
-        .ok_or_else(|| {
-            format!(
-                "unknown compiler prelude module {}",
-                module.as_string(session)
-            )
+        .ok_or_else(|| DriverError::UnknownCompilerPrelude {
+            module: module.as_string(session),
         })?
         .to_string();
 
@@ -104,9 +103,15 @@ fn load_virtual_prelude_module(
     Ok(())
 }
 
-fn scan_module_file(session: &Session, root: &Path, file: &Path) -> Result<ModuleFile, String> {
-    let source = fs::read_to_string(file)
-        .map_err(|e| format!("failed to read {}: {}", file.display(), e))?;
+fn scan_module_file(
+    session: &Session,
+    root: &Path,
+    file: &Path,
+) -> Result<ModuleFile, DriverError> {
+    let source = fs::read_to_string(file).map_err(|source| DriverError::ReadFile {
+        path: file.to_path_buf(),
+        source,
+    })?;
 
     let name = module_name_from_file(session, root, file)?;
     let file_id = session.add_file(file.to_path_buf(), source.clone());
@@ -125,21 +130,30 @@ pub fn module_name_from_file(
     session: &Session,
     root: &Path,
     file: &Path,
-) -> Result<ModuleName, String> {
+) -> Result<ModuleName, DriverError> {
     let rel = file
         .strip_prefix(root)
-        .map_err(|_| format!("{} is not under {}", file.display(), root.display()))?;
+        .map_err(|_| DriverError::InvalidModulePath {
+            file: file.to_path_buf(),
+            root: root.to_path_buf(),
+        })?;
 
     let mut parts = rel
         .iter()
         .map(|s| s.to_string_lossy().to_string())
         .collect::<Vec<_>>();
 
-    let last = parts.last_mut().ok_or_else(|| "empty path".to_string())?;
+    let last = parts
+        .last_mut()
+        .ok_or_else(|| DriverError::EmptyModulePath {
+            file: file.to_path_buf(),
+        })?;
     if let Some(stem) = last.strip_suffix(".sv") {
         *last = stem.to_string();
     } else {
-        return Err(format!("expected .sv file: {}", file.display()));
+        return Err(DriverError::ExpectedSolveigFile {
+            file: file.to_path_buf(),
+        });
     }
 
     Ok(ModuleName(
@@ -178,7 +192,9 @@ pub fn load_project(
 ) -> Result<(PathBuf, Project), ProjectError> {
     let root = entry_file
         .parent()
-        .ok_or_else(|| format!("cannot determine source root for {}", entry_file.display()))?
+        .ok_or_else(|| DriverError::SourceRootMissing {
+            entry_file: entry_file.to_path_buf(),
+        })?
         .to_path_buf();
 
     let mut modules = HashMap::<ModuleName, ModuleFile>::new();
@@ -191,7 +207,7 @@ pub fn load_project(
     while let Some(pending) = stack.pop() {
         let module_file = match scan_module_file(session, &root, &pending.file) {
             Ok(module_file) => module_file,
-            Err(message) => {
+            Err(error) => {
                 if !pending.file.is_file()
                     && let (Some(module), Some(span)) =
                         (pending.requested_module, pending.import_span)
@@ -199,7 +215,7 @@ pub fn load_project(
                     return Err(ResolveError::UnknownModule { span, module }.into());
                 }
 
-                return Err(ProjectError::Message(message));
+                return Err(ProjectError::Driver(error));
             }
         };
         if modules.contains_key(&module_file.name) {

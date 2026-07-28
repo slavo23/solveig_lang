@@ -18,7 +18,7 @@ fn hover_returns_checked_expression_types_after_run() {
         .map(|start| start + "if total == 10 then ".len())
         .expect("hover fixture should contain the then literal");
 
-    let compilation = Compilation::new(&project_root);
+    let mut compilation = Compilation::new(&project_root);
     let output = compilation
         .run_project_capture("main")
         .expect("hover fixture should run before hover");
@@ -50,7 +50,7 @@ fn hover_preserves_long_source_type_variable_names() {
         })
         .expect("hover fixture should contain the target expression");
 
-    let compilation = Compilation::new(&project_root);
+    let mut compilation = Compilation::new(&project_root);
     let output = compilation
         .run_project_capture("main")
         .expect("checker fixture should run before hover");

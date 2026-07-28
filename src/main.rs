@@ -1,5 +1,6 @@
 use clap::Parser;
-use solveig_driver::{CompileOptions, compile_and_run_project_with_options_and_args};
+use solveig_driver::{Compilation, CompileOptions};
+use solveig_report::emit_diagnostics;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -21,9 +22,9 @@ struct Cli {
 
 fn main() {
     let cli = Cli::parse();
+    let mut compilation = Compilation::new(&cli.project_root);
 
-    if let Err(err) = compile_and_run_project_with_options_and_args(
-        &cli.project_root,
+    let run_result = compilation.compile_and_run_project_with_options_and_args(
         &cli.entry,
         CompileOptions {
             dump_bytecode: cli.dump_bytecode,
@@ -31,7 +32,16 @@ fn main() {
             verify_core: cli.verify_core,
         },
         &cli.program_args,
-    ) {
+    );
+
+    if !compilation.diagnostics().is_empty()
+        && let Err(report_err) =
+            emit_diagnostics(compilation.diagnostics(), compilation.source_map())
+    {
+        eprintln!("failed to print diagnostics: {report_err}");
+    }
+
+    if let Err(err) = run_result {
         eprintln!("{err}");
         std::process::exit(1);
     }
