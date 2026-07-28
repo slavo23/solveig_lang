@@ -18,7 +18,7 @@ pub use diagnostics::{Diagnostic, DiagnosticSink, IntoDiagnostic, Label, Severit
 pub use rustc_hash::{FxHashMap, FxHashSet};
 /// Re-exports the compiler session type.
 pub use session::Session;
-/// Re-exports source-map and span types.
-pub use source::{FileId, FileSpan, SourceFile, SourceMap, Span};
+/// Re-exports source-map, span, and editor position types.
+pub use source::{FileId, FileSpan, PositionEncoding, SourceFile, SourceMap, SourcePosition, Span};
 /// Re-exports symbol interning types.
 pub use symbol::{Interner, Symbol};
