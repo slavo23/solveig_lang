@@ -561,7 +561,11 @@ impl<'a> Resolver<'a> {
 
         for (quant_name, quant_kind) in sig.quantifiers.clone().into_iter().rev() {
             body_node = TermExprNode::new(
-                TermExpr::TyAbs(tyvar_display_name(quant_name), quant_kind, Box::new(body_node)),
+                TermExpr::TyAbs(
+                    self.names.tyvar_display_name(quant_name),
+                    quant_kind,
+                    Box::new(body_node),
+                ),
                 span.clone(),
             );
         }

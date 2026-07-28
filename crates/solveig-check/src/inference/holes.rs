@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use solveig_ast::ast::{CtorId, CtorTable, EvarId, Names, PrettyTables, TypeExpr};
+use solveig_ast::ast::{CtorId, CtorTable, Names, PrettyTables, TypeExpr};
 use solveig_base::FileSpan;
 use solveig_base::utils::diagnostics::{Diagnostic, Label};
 
@@ -45,42 +45,7 @@ impl HoleInfo {
 }
 
 pub fn prettify_evars(ty: &TypeExpr) -> TypeExpr {
-    let evars = collect_evars(ty);
-    let mut result = ty.clone();
-    for (i, evar) in evars.iter().enumerate() {
-        let letter = (b'a' + (i as u8 % 26)) as char;
-        result = result.substitute_evar(*evar, &TypeExpr::make_var(format!("?{}", letter)));
-    }
-    result
-}
-
-fn collect_evars(ty: &TypeExpr) -> Vec<EvarId> {
-    let mut acc = Vec::new();
-    collect_evars_inner(ty, &mut acc);
-    acc
-}
-
-fn collect_evars_inner(ty: &TypeExpr, acc: &mut Vec<EvarId>) {
-    match ty {
-        TypeExpr::TyExVar(id) => {
-            if !acc.contains(id) {
-                acc.push(*id);
-            }
-        }
-        TypeExpr::TyArr(a, b) | TypeExpr::TyApp(a, b) => {
-            collect_evars_inner(a, acc);
-            collect_evars_inner(b, acc);
-        }
-        TypeExpr::TyForAll(_, preds, body) => {
-            for pred in preds {
-                for arg in &pred.args {
-                    collect_evars_inner(arg, acc);
-                }
-            }
-            collect_evars_inner(body, acc);
-        }
-        TypeExpr::TyUnit | TypeExpr::TyVar(_) | TypeExpr::TyCon(_) => {}
-    }
+    ty.clone()
 }
 
 fn types_match(candidate: &TypeExpr, goal: &TypeExpr) -> bool {

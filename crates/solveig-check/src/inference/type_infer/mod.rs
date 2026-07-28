@@ -9,7 +9,6 @@ use solveig_ast::ast::{
     DefId, Ev, EvVarId, EvarId, InstanceDefinition, InstanceMethodDef, InstanceTable, Kind,
     Literal, Names, PRIM_TYS, Pattern, PatternNode, Predicate, PrettyTables, ResolvedModule,
     Scheme, TermDefinition, TermExpr, TermExprNode, TyConId, TyConTable, TyVarId, TypeExpr, VarRef,
-    generated_tyvar_name, source_tyvar_id, tyvar_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};

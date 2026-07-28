@@ -18,7 +18,7 @@ impl TypeChecker {
                 TermExpr::TyAbs(param, _kind, body),
                 TypeExpr::TyForAll(binders, preds, body_type),
             ) if let Some((quantifier, quant_kind)) = binders.first() => {
-                let param_id = source_tyvar_id(param);
+                let param_id = *quantifier;
                 let ty_arg = TypeExpr::TyVar(param_id);
                 let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
                 let substituted_body_type = TypeExpr::make_forall_group(
@@ -29,7 +29,7 @@ impl TypeChecker {
                         .collect(),
                     body_type.substitute(*quantifier, &ty_arg),
                 );
-                let universal_entry = Self::universal_entry(param_id, quant_kind.clone());
+                let universal_entry = self.universal_entry(param_id, quant_kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
 
                 let (delta, elaborated_body) =
@@ -127,7 +127,7 @@ impl TypeChecker {
 
             (_, TypeExpr::TyForAll(binders, preds, body_type)) if !binders.is_empty() => {
                 let (quantifier, kind) = &binders[0];
-                let universal_entry = Self::universal_entry(*quantifier, kind.clone());
+                let universal_entry = self.universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let body_type = TypeExpr::make_forall_group(
                     binders[1..].to_vec(),
@@ -141,7 +141,7 @@ impl TypeChecker {
                 let result_type = expected_type.clone();
                 let elaborated = elab_node(
                     TermExpr::TyAbs(
-                        tyvar_display_name(*quantifier),
+                        self.names.tyvar_display_name(*quantifier),
                         kind.clone(),
                         Box::new(elaborated_body),
                     ),
@@ -215,6 +215,7 @@ pub fn check_and_elab_module(
     file: FileId,
 ) -> Result<TCOutput, Vec<TypeError>> {
     let mut errors = Vec::new();
+    let mut names = env.names.clone();
 
     let mut checked_defs = Vec::new();
     let mut checked_instance_defs = Vec::new();
@@ -230,7 +231,9 @@ pub fn check_and_elab_module(
     let mut all_warnings = Vec::new();
 
     {
-        let checker = TypeChecker::with_env(env, file);
+        let mut checker_env = env.clone();
+        checker_env.names = names.clone();
+        let checker = TypeChecker::with_env(&checker_env, file);
         let overlap_errors = checker.check_instance_overlaps();
         if !overlap_errors.is_empty() {
             return Err(overlap_errors);
@@ -247,7 +250,9 @@ pub fn check_and_elab_module(
                 TypeChecker::class_method_scheme_for_term_lookup(class_def, method);
             let expected_type = TypeChecker::scheme_to_type(&expected_scheme);
 
-            let mut checker = TypeChecker::with_env(env, file);
+            let mut checker_env = env.clone();
+            checker_env.names = names.clone();
+            let mut checker = TypeChecker::with_env(&checker_env, file);
             checker.func_schemes = available_func_schemes.clone();
 
             match checker.solve_checking(Context::new(), default_body, &expected_type) {
@@ -281,6 +286,7 @@ pub fn check_and_elab_module(
             }
 
             checker.finalize_holes();
+            names = checker.names.clone();
             all_holes.extend(checker.holes);
             all_warnings.extend(checker.warnings);
         }
@@ -311,7 +317,9 @@ pub fn check_and_elab_module(
         let superclass_obligations =
             TypeChecker::specialize_superclasses_for_instance(class_def, &inst.head);
 
-        let mut checker = TypeChecker::with_env(env, file);
+        let mut checker_env = env.clone();
+        checker_env.names = names.clone();
+        let mut checker = TypeChecker::with_env(&checker_env, file);
 
         // While validating `instance C t`, do not use that same instance as evidence
         // for its own superclass obligations. This avoids accepting recursive proofs
@@ -359,6 +367,7 @@ pub fn check_and_elab_module(
         }
 
         let mut checked_methods = Vec::new();
+        names = checker.names.clone();
 
         for inst_method in &inst.methods {
             if !class_def.methods.iter().any(|method| {
@@ -403,7 +412,9 @@ pub fn check_and_elab_module(
 
             let expected_type = TypeChecker::scheme_to_type(&expected_scheme);
 
-            let mut checker = TypeChecker::with_env(env, file);
+            let mut checker_env = env.clone();
+            checker_env.names = names.clone();
+            let mut checker = TypeChecker::with_env(&checker_env, file);
             checker.func_schemes = available_func_schemes.clone();
 
             match checker.solve_checking(Context::new(), method_body, &expected_type) {
@@ -442,6 +453,7 @@ pub fn check_and_elab_module(
             }
 
             checker.finalize_holes();
+            names = checker.names.clone();
             all_holes.extend(checker.holes);
             all_warnings.extend(checker.warnings);
         }
@@ -461,7 +473,9 @@ pub fn check_and_elab_module(
     }
 
     for func_def in &module.func_defs {
-        let mut checker = TypeChecker::with_env(env, file);
+        let mut checker_env = env.clone();
+        checker_env.names = names.clone();
+        let mut checker = TypeChecker::with_env(&checker_env, file);
         checker.func_schemes = available_func_schemes.clone();
 
         match &func_def.signature {
@@ -531,12 +545,14 @@ pub fn check_and_elab_module(
         }
 
         checker.finalize_holes();
+        names = checker.names.clone();
         all_holes.extend(checker.holes);
         all_warnings.extend(checker.warnings);
     }
 
     if errors.is_empty() {
         Ok(TCOutput {
+            names,
             module: ResolvedModule {
                 data_defs: module.data_defs.clone(),
                 class_defs: module.class_defs.clone(),

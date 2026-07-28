@@ -151,9 +151,6 @@ impl TypeChecker {
     fn fresh_evar_id(&mut self) -> EvarId {
         EvarId(self.fresh_id())
     }
-    fn fresh_tyvar_id(&mut self) -> TyVarId {
-        TyVarId(self.fresh_id())
-    }
     fn fresh_evvar_id(&mut self) -> EvVarId {
         EvVarId(self.fresh_id())
     }
@@ -161,13 +158,12 @@ impl TypeChecker {
         TypeExpr::make_evar(id)
     }
     fn fresh_universal(&mut self, base: &str) -> (TyVarId, String) {
-        let id = self.fresh_tyvar_id();
-        (id, generated_tyvar_name(base, id))
+        self.names.fresh_generated_tyvar(base)
     }
-    fn universal_entry(id: TyVarId, kind: Kind) -> ContextEntry {
+    fn universal_entry(&self, id: TyVarId, kind: Kind) -> ContextEntry {
         ContextEntry::UniVar {
             id,
-            name: tyvar_display_name(id),
+            name: self.names.tyvar_display_name(id),
             kind,
         }
     }
@@ -186,17 +182,8 @@ impl TypeChecker {
         class_def: &ClassDefinition,
         method: &ClassMethodDef,
     ) -> Scheme {
-        let mut quantifiers = class_def
-            .params
-            .iter()
-            .map(|(name, kind)| (source_tyvar_id(name), kind.clone()))
-            .collect::<Vec<_>>();
-
-        for (id, kind) in &method.scheme.quantifiers {
-            if !quantifiers.iter().any(|(existing, _)| existing == id) {
-                quantifiers.push((*id, kind.clone()));
-            }
-        }
+        let mut quantifiers = class_def.params.clone();
+        quantifiers.extend(method.scheme.quantifiers.clone());
 
         Scheme {
             quantifiers,
@@ -297,6 +284,7 @@ impl TypeCheckEnv {
 }
 
 pub struct TCOutput {
+    pub names: Names,
     pub module: CheckedModule,
     pub holes: Vec<HoleInfo>,
     pub diagnostics: Vec<TypeError>,
@@ -403,6 +391,49 @@ mod tests {
     }
 
     #[test]
+    fn class_method_lookup_keeps_shadowed_type_variables_distinct() {
+        let mut names = Names::new();
+        let class_id = names.class_id("C");
+        let class_param = names.fresh_tyvar("a");
+        let method_param = names.fresh_tyvar("a");
+        let method_id = DefId {
+            module: solveig_ast::ast::ModuleId(5),
+            name: solveig_base::Symbol(8),
+        };
+        let method_scheme = Scheme {
+            quantifiers: vec![(method_param, Kind::Star)],
+            predicates: vec![Predicate {
+                class_id,
+                args: vec![TypeExpr::TyVar(class_param)],
+            }],
+            ty: TypeExpr::make_arr(TypeExpr::TyVar(method_param), TypeExpr::TyVar(method_param)),
+        };
+        let class_def = ClassDefinition {
+            id: class_id,
+            name: "C".to_string(),
+            short_name: "C".to_string(),
+            params: vec![(class_param, Kind::Star)],
+            superclasses: Vec::new(),
+            methods: Vec::new(),
+        };
+        let method = ClassMethodDef {
+            id: method_id,
+            name: "C.method".to_string(),
+            short_name: "method".to_string(),
+            scheme: method_scheme,
+            default_body: None,
+        };
+
+        let lookup_scheme = TypeChecker::class_method_scheme_for_term_lookup(&class_def, &method);
+
+        assert_ne!(class_param, method_param);
+        assert_eq!(
+            lookup_scheme.quantifiers,
+            vec![(class_param, Kind::Star), (method_param, Kind::Star)]
+        );
+    }
+
+    #[test]
     fn typecheck_env_class_defs_are_keyed_by_classid() {
         let mut names = Names::new();
         let class_id = names.class_id("test.EnvClass");
@@ -444,6 +475,7 @@ mod tests {
 
         let class_id = names.class_id(&class_name);
         let superclass_id = names.class_id(&superclass_name);
+        let param = names.fresh_tyvar("a");
         let env = TypeCheckEnv {
             names: names.clone(),
             constructor_types: HashMap::new(),
@@ -454,11 +486,11 @@ mod tests {
                     id: class_id,
                     name: class_name.clone(),
                     short_name: "Sub".to_string(),
-                    params: vec![("a".to_string(), Kind::Star)],
+                    params: vec![(param, Kind::Star)],
                     superclasses: vec![Predicate::named(
                         &mut names,
                         superclass_name.clone(),
-                        vec![TypeExpr::make_var("a".to_string())],
+                        vec![TypeExpr::TyVar(param)],
                     )],
                     methods: Vec::new(),
                 },

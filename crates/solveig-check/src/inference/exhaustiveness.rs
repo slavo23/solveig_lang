@@ -4,7 +4,6 @@ use std::ops::Range;
 use solveig_ast::ast::{
     CaseArmNode, CtorId, CtorInfo, CtorTable, DataDefinition, Literal, Names, PRIM_TYS, Pattern,
     PatternNode, Predicate, PrettyTables, TyConDefinition, TyConId, TyConTable, TyVarId, TypeExpr,
-    source_tyvar_id,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -656,7 +655,7 @@ fn instantiate_ctor_fields(
         .ty_params
         .iter()
         .zip(ty_args)
-        .map(|((name, _), arg)| (source_tyvar_id(name), arg.clone()))
+        .map(|((param_id, _), arg)| (*param_id, arg.clone()))
         .collect::<HashMap<_, _>>();
 
     ctor.fields
@@ -1060,7 +1059,7 @@ mod tests {
             DataDefinition {
                 name: "Maybe".to_string(),
                 short_name: "Maybe".to_string(),
-                ty_params: vec![("a".to_string(), Kind::Star)],
+                ty_params: vec![(TyVarId(0), Kind::Star)],
                 tycon_kind: unary_kind(),
                 constructors: vec![
                     ConstructorDef {
@@ -1082,7 +1081,7 @@ mod tests {
             DataDefinition {
                 name: "List".to_string(),
                 short_name: "List".to_string(),
-                ty_params: vec![("a".to_string(), Kind::Star)],
+                ty_params: vec![(TyVarId(0), Kind::Star)],
                 tycon_kind: unary_kind(),
                 constructors: vec![
                     ConstructorDef {
@@ -1107,7 +1106,7 @@ mod tests {
             DataDefinition {
                 name: "Pair".to_string(),
                 short_name: "Pair".to_string(),
-                ty_params: vec![("a".to_string(), Kind::Star), ("b".to_string(), Kind::Star)],
+                ty_params: vec![(TyVarId(0), Kind::Star), (TyVarId(1), Kind::Star)],
                 tycon_kind: binary_kind(),
                 constructors: vec![ConstructorDef {
                     id: ctor_id("MkPair"),
@@ -1278,7 +1277,7 @@ mod tests {
     }
 
     fn tyvar(name: &str) -> TypeExpr {
-        TypeExpr::make_var(name.to_string())
+        TypeExpr::TyVar(test_tyvar_id(name))
     }
 
     fn app(func: TypeExpr, arg: TypeExpr) -> TypeExpr {
@@ -1290,6 +1289,14 @@ mod tests {
     }
 
     fn forall(name: &str, body: TypeExpr) -> TypeExpr {
-        TypeExpr::make_forall(name.to_string(), Kind::Star, body)
+        TypeExpr::make_forall_id(test_tyvar_id(name), Kind::Star, body)
+    }
+
+    fn test_tyvar_id(name: &str) -> TyVarId {
+        match name {
+            "a" => TyVarId(0),
+            "b" => TyVarId(1),
+            other => panic!("ICE: unknown test type variable `{other}`"),
+        }
     }
 }

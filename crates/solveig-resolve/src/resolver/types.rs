@@ -111,19 +111,23 @@ impl<'a> Resolver<'a> {
         local: &LocalResolverEnv,
     ) -> TypeExpr {
         match &sf.0 {
-            SurfaceTy::Var(var_name) => TypeExpr::make_var(self.symbol_text(*var_name).to_string()),
+            SurfaceTy::Var(var_name) => TypeExpr::TyVar(self.resolve_tyvar_symbol(*var_name)),
 
             SurfaceTy::Arr(lhs, rhs) => TypeExpr::make_arr(
                 self.resolve_surface_type_in_module(lhs, cx, local),
                 self.resolve_surface_type_in_module(rhs, cx, local),
             ),
 
-            SurfaceTy::ForAll(quants, body) => quants.iter().rev().fold(
-                self.resolve_surface_type_in_module(body, cx, local),
-                |acc, quant| {
-                    TypeExpr::make_forall(self.symbol_text(quant.0).to_string(), Kind::Star, acc)
-                },
-            ),
+            SurfaceTy::ForAll(quants, body) => {
+                self.push_tyvar_scope();
+                let quantifiers = quants
+                    .iter()
+                    .map(|quant| (self.bind_tyvar_in_current_scope(quant.0), Kind::Star))
+                    .collect::<Vec<_>>();
+                let body = self.resolve_surface_type_in_module(body, cx, local);
+                self.pop_tyvar_scope();
+                TypeExpr::make_forall_group(quantifiers, Vec::new(), body)
+            }
 
             SurfaceTy::Qualified(preds, body) => TypeExpr::make_qualified(
                 preds
@@ -151,7 +155,9 @@ impl<'a> Resolver<'a> {
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> Scheme {
+        self.push_tyvar_scope();
         let raw = self.resolve_surface_type_in_module(ty, cx, local);
+        self.pop_tyvar_scope();
         let (quantifiers, predicates, body_ty) = raw.peel_scheme_like();
 
         self.canonicalize_scheme_classes(

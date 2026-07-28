@@ -6,9 +6,9 @@ use solveig_ast::ast::{
     BuiltinDefinition, COMPILER_PRELUDE_BUILTINS_MODULE, CaseArm, CaseArmNode, ClassDefinition,
     ClassId, ClassMethodDef, ConstructorDef, CtorId, DataDefinition, DefId, InstanceDefinition,
     InstanceMethodDef, Kind, KindMetaId, Literal, ModuleId, Names, PRIM_TYS, Pattern, PatternNode,
-    Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TyConId, TypeExpr,
-    VarRef, compiler_bool_constructor_types, compiler_bool_data_definition,
-    compiler_primitive_tycon_kinds, prelude_list_cons_ctor_id, tyvar_display_name,
+    Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TyConId, TyVarId,
+    TypeExpr, VarRef, compiler_bool_constructor_types, compiler_bool_data_definition,
+    compiler_primitive_tycon_kinds, prelude_list_cons_ctor_id,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use solveig_check::data_kind_infer::{
@@ -126,6 +126,7 @@ pub struct Resolver<'a> {
     modules: &'a ModuleTable,
     errors: Vec<ResolveError>,
     resolutions: Vec<(FileSpan, DefId)>,
+    tyvar_scopes: Vec<HashMap<Symbol, TyVarId>>,
 }
 
 impl<'a> Resolver<'a> {
@@ -136,6 +137,7 @@ impl<'a> Resolver<'a> {
             modules,
             errors: Vec::new(),
             resolutions: Vec::new(),
+            tyvar_scopes: Vec::new(),
         }
     }
     fn symbol_text(&self, symbol: Symbol) -> &'static str {
@@ -168,6 +170,36 @@ impl<'a> Resolver<'a> {
             SurfaceLiteral::Char(value) => Literal::Char(*value),
             SurfaceLiteral::Str(value) => Literal::Str(self.names.intern_string_literal(value)),
         }
+    }
+    fn push_tyvar_scope(&mut self) {
+        self.tyvar_scopes.push(HashMap::new());
+    }
+    fn pop_tyvar_scope(&mut self) {
+        self.tyvar_scopes
+            .pop()
+            .expect("ICE: attempted to pop empty type variable scope stack");
+    }
+    fn bind_tyvar_in_current_scope(&mut self, symbol: Symbol) -> TyVarId {
+        let name = self.symbol_text(symbol).to_string();
+        let id = self.names.fresh_tyvar(&name);
+        self.tyvar_scopes
+            .last_mut()
+            .expect("ICE: attempted to bind type variable without a scope")
+            .insert(symbol, id);
+        id
+    }
+    fn resolve_tyvar_symbol(&mut self, symbol: Symbol) -> TyVarId {
+        for scope in self.tyvar_scopes.iter().rev() {
+            if let Some(id) = scope.get(&symbol) {
+                return *id;
+            }
+        }
+
+        if self.tyvar_scopes.is_empty() {
+            self.push_tyvar_scope();
+        }
+
+        self.bind_tyvar_in_current_scope(symbol)
     }
     fn imported_by_alias_or_module<'cx>(
         &self,

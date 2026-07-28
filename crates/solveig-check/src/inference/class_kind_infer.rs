@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use solveig_ast::ast::{
     ClassDefinition, ClassId, Kind, KindMetaId, Predicate, Scheme, TyConId, TyVarId, TypeExpr,
-    source_tyvar_id, tyvar_display_name,
+    tyvar_display_name,
 };
 
 use crate::signature_infer::KindError;
@@ -297,8 +297,8 @@ impl ClassKindInferencer {
     ) -> Result<ClassDefinition, KindError> {
         let mut env = HashMap::<TyVarId, Kind>::new();
 
-        for (name, _kind) in &class_def.params {
-            env.insert(source_tyvar_id(name), self.fresh_meta());
+        for (id, _kind) in &class_def.params {
+            env.insert(*id, self.fresh_meta());
         }
 
         let methods = class_def
@@ -325,12 +325,12 @@ impl ClassKindInferencer {
         let params = class_def
             .params
             .iter()
-            .map(|(name, _)| {
+            .map(|(id, _)| {
                 let kind = env
-                    .get(&source_tyvar_id(name))
+                    .get(id)
                     .map(|k| self.zonk_kind_for_binder(k))
                     .unwrap_or(Kind::Star);
-                (name.clone(), kind)
+                (*id, kind)
             })
             .collect::<Vec<_>>();
 
@@ -355,7 +355,7 @@ fn class_id_display(id: ClassId) -> String {
 
 #[cfg(test)]
 mod tests {
-    use solveig_ast::ast::{ClassMethodDef, DefId, ModuleId, source_tyvar_id};
+    use solveig_ast::ast::{ClassMethodDef, DefId, ModuleId};
     use solveig_base::Symbol;
 
     use super::*;
@@ -365,12 +365,12 @@ mod tests {
         let tycon_id = TyConId(51);
         let class_id = ClassId(52);
         let superclass_id = ClassId(53);
-        let param = source_tyvar_id("a");
+        let param = TyVarId(0);
         let class_def = ClassDefinition {
             id: class_id,
             name: "sample.WidgetLike".to_string(),
             short_name: "WidgetLike".to_string(),
-            params: vec![("a".to_string(), Kind::Star)],
+            params: vec![(param, Kind::Star)],
             superclasses: vec![Predicate {
                 class_id: superclass_id,
                 args: vec![TypeExpr::TyVar(param)],

@@ -242,17 +242,18 @@ impl<'a> Resolver<'a> {
                     let class_name = self.qualified_def_name(class_def_id);
                     let class_id = self.names.class_id(&class_name);
 
+                    self.push_tyvar_scope();
                     let class_params = ty_params
                         .iter()
-                        .map(|param| (self.symbol_text(param.0).to_string(), Kind::Star))
+                        .map(|param| (self.bind_tyvar_in_current_scope(param.0), Kind::Star))
                         .collect::<Vec<_>>();
 
                     let class_head_pred = Predicate::named(
                         self.names,
                         class_name.clone(),
-                        ty_params
+                        class_params
                             .iter()
-                            .map(|param| TypeExpr::make_var(self.symbol_text(param.0).to_string()))
+                            .map(|(param, _)| TypeExpr::TyVar(*param))
                             .collect(),
                     );
 
@@ -316,6 +317,7 @@ impl<'a> Resolver<'a> {
                             }
                         })
                         .collect::<Vec<_>>();
+                    self.pop_tyvar_scope();
 
                     Some((
                         ClassDefinition {
@@ -475,6 +477,7 @@ impl<'a> Resolver<'a> {
                 .first()
                 .and_then(|arg| self.instance_type_head_module(arg, cx));
 
+            self.push_tyvar_scope();
             let resolved_args = args
                 .iter()
                 .map(|arg| self.resolve_surface_type_in_module(arg, cx, local))
@@ -495,6 +498,7 @@ impl<'a> Resolver<'a> {
                 .iter()
                 .map(|pred| self.resolve_surface_predicate(pred, cx, local))
                 .collect::<Vec<_>>();
+            self.pop_tyvar_scope();
 
             trace_predicates(
                 self.session,

@@ -185,31 +185,35 @@ impl<'a> Resolver<'a> {
                     let (name, _span) = spanned_name;
                     let data_name = self.qualified_def_name(self.local_def_id(cx, *name));
 
+                    self.push_tyvar_scope();
+                    let ty_params = ty_params
+                        .iter()
+                        .map(|p| self.bind_tyvar_in_current_scope(p.0))
+                        .collect::<Vec<_>>();
+                    let constructors = constructors
+                        .iter()
+                        .map(|constructor| RawConstructorDef {
+                            name: self
+                                .qualified_def_name(self.local_def_id(cx, constructor.0.name.0)),
+                            short_name: self.symbol_text(constructor.0.name.0).to_string(),
+                            span: self.file_span(cx, constructor.1),
+                            fields: constructor
+                                .0
+                                .params
+                                .iter()
+                                .map(|ty| self.resolve_surface_type_in_module(ty, cx, local))
+                                .collect(),
+                        })
+                        .collect();
+                    self.pop_tyvar_scope();
+
                     Some(RawDataDef {
                         id: self.names.tycon_id(&data_name),
                         name: data_name,
                         short_name: self.symbol_text(*name).to_string(),
                         span: self.file_span(cx, defn.1),
-                        ty_params: ty_params
-                            .iter()
-                            .map(|p| self.symbol_text(p.0).to_string())
-                            .collect(),
-                        constructors: constructors
-                            .iter()
-                            .map(|constructor| RawConstructorDef {
-                                name: self.qualified_def_name(
-                                    self.local_def_id(cx, constructor.0.name.0),
-                                ),
-                                short_name: self.symbol_text(constructor.0.name.0).to_string(),
-                                span: self.file_span(cx, constructor.1),
-                                fields: constructor
-                                    .0
-                                    .params
-                                    .iter()
-                                    .map(|ty| self.resolve_surface_type_in_module(ty, cx, local))
-                                    .collect(),
-                            })
-                            .collect(),
+                        ty_params,
+                        constructors,
                     })
                 }
 

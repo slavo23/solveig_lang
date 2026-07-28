@@ -103,7 +103,7 @@ impl TypeChecker {
 
             (_, TypeExpr::TyForAll(binders, preds, body)) if !binders.is_empty() => {
                 let (quantifier, kind) = &binders[0];
-                let universal_entry = Self::universal_entry(*quantifier, kind.clone());
+                let universal_entry = self.universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let body = TypeExpr::make_forall_group(
                     binders[1..].to_vec(),
@@ -257,7 +257,7 @@ impl TypeChecker {
             }
             TypeExpr::TyForAll(binders, preds, body) if !binders.is_empty() => {
                 let (quantifier, kind) = &binders[0];
-                let universal_entry = Self::universal_entry(*quantifier, kind.clone());
+                let universal_entry = self.universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let body = TypeExpr::make_forall_group(
                     binders[1..].to_vec(),

@@ -79,6 +79,18 @@ useRank2Eq f =
 polyId : forall a. a -> a
 polyId x = x
 
+longElementId : forall element. element -> element
+longElementId value = value
+
+longElementResult : Int
+longElementResult = longElementId 7
+
+shadowRank2 : forall a. (forall a. a -> a) -> a -> a
+shadowRank2 f x = x
+
+shadowRank2Result : Int
+shadowRank2Result = shadowRank2 polyId 5
+
 rank2Result : Int
 rank2Result = useRank2 polyId
 

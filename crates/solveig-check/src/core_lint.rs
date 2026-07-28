@@ -742,13 +742,13 @@ fn free_type_vars_in_type(ty: &TypeExpr, out: &mut BTreeSet<TyVarId>) {
 }
 
 fn subst_from_class_head(
-    params: &[(String, Kind)],
+    params: &[(TyVarId, Kind)],
     args: &[TypeExpr],
 ) -> HashMap<TyVarId, TypeExpr> {
     params
         .iter()
         .zip(args.iter())
-        .map(|((param, _), arg)| (solveig_ast::ast::source_tyvar_id(param), arg.clone()))
+        .map(|((param, _), arg)| (*param, arg.clone()))
         .collect()
 }
 
@@ -863,11 +863,12 @@ mod tests {
     }
 
     fn class_def(names: &mut Names, id: ClassId, name: &str) -> ClassDefinition {
+        let param = names.fresh_tyvar("a");
         ClassDefinition {
             id,
             name: name.to_string(),
             short_name: name.to_string(),
-            params: vec![("a".to_string(), Kind::Star)],
+            params: vec![(param, Kind::Star)],
             superclasses: Vec::new(),
             methods: vec![ClassMethodDef {
                 id: names.def_id(&format!("{name}.method")),

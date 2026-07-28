@@ -19,8 +19,8 @@ use solveig_ast::ast::{
     BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinDefinition,
     BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassTable, CtorId,
     CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, Names, PRIM_TYS, PrettyTables, Scheme,
-    TermDefinition, TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, VarRef,
-    prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id, source_tyvar_id,
+    TermDefinition, TermExpr, TermExprNode, TyConId, TyConTable, TyVarId, TypeExpr, VarRef,
+    prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
 };
 use solveig_base::utils::diagnostics::Diagnostic;
 use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap};
@@ -1013,8 +1013,10 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     );
     let char_list = TypeExpr::make_app(list.clone(), char_ty.clone());
     let string_list = TypeExpr::make_app(list, string.clone());
-    let a = TypeExpr::make_var("a".to_string());
-    let b = TypeExpr::make_var("b".to_string());
+    let a_id = names.fresh_tyvar("a");
+    let b_id = names.fresh_tyvar("b");
+    let a = TypeExpr::TyVar(a_id);
+    let b = TypeExpr::TyVar(b_id);
 
     vec![
         prim_spec(
@@ -1243,14 +1245,14 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "pureIO",
             BUILTIN_PURE_IO,
             1,
-            poly_arr(&["a"], std::slice::from_ref(&a), io_of(a.clone())),
+            poly_arr(&[a_id], std::slice::from_ref(&a), io_of(a.clone())),
         ),
         prim_spec(
             "bindIO",
             BUILTIN_BIND_IO,
             2,
             poly_arr(
-                &["a", "b"],
+                &[a_id, b_id],
                 &[
                     io_of(a.clone()),
                     TypeExpr::make_arr(a.clone(), io_of(b.clone())),
@@ -1340,16 +1342,13 @@ fn arr_ty(args: &[TypeExpr], ret: TypeExpr) -> TypeExpr {
         .fold(ret, |body, arg| TypeExpr::make_arr(arg, body))
 }
 
-fn poly_arr(vars: &[&str], args: &[TypeExpr], ret: TypeExpr) -> Scheme {
+fn poly_arr(vars: &[TyVarId], args: &[TypeExpr], ret: TypeExpr) -> Scheme {
     poly(vars, arr_ty(args, ret))
 }
 
-fn poly(vars: &[&str], ty: TypeExpr) -> Scheme {
+fn poly(vars: &[TyVarId], ty: TypeExpr) -> Scheme {
     Scheme {
-        quantifiers: vars
-            .iter()
-            .map(|name| (source_tyvar_id(name), Kind::Star))
-            .collect(),
+        quantifiers: vars.iter().map(|id| (*id, Kind::Star)).collect(),
         predicates: Vec::new(),
         ty,
     }
@@ -1585,6 +1584,8 @@ impl<'a> FrontendState<'a> {
                 return Err(FrontendPhase::Type);
             }
         };
+        *self.names = checked_raw.names.clone();
+        check_env.names = checked_raw.names.clone();
 
         for diagnostic in &checked_raw.diagnostics {
             self.session

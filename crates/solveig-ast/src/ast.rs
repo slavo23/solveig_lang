@@ -136,6 +136,10 @@ pub fn evar_display_name(id: EvarId) -> String {
     format!("a^{}", id.0)
 }
 
+pub fn tyvar_fallback_name(id: TyVarId) -> String {
+    format!("t{}", id.0)
+}
+
 const NAMED_TYCON_START: u32 = 0x8000_0000;
 const NAMED_CTOR_START: u32 = 0x8000_0000;
 const NAMED_CLASS_START: u32 = 0x8000_0000;
@@ -156,6 +160,8 @@ pub struct Names {
     def_names: HashMap<DefId, String>,
     string_values: Vec<String>,
     string_ids: HashMap<String, StrLitId>,
+    tyvar_names: HashMap<TyVarId, String>,
+    next_tyvar_id: u32,
 }
 
 fn tycon_fallback_name(id: TyConId) -> String {
@@ -235,6 +241,40 @@ impl Names {
         };
         self.register_def(def_id, name);
         def_id
+    }
+
+    pub fn fresh_tyvar(&mut self, display_name: &str) -> TyVarId {
+        let id = TyVarId(self.next_tyvar_id);
+        self.next_tyvar_id = self
+            .next_tyvar_id
+            .checked_add(1)
+            .expect("ICE: type variable id table exceeded u32 capacity");
+        self.register_tyvar_name(id, display_name);
+        id
+    }
+
+    pub fn fresh_generated_tyvar(&mut self, base: &str) -> (TyVarId, String) {
+        let id = TyVarId(self.next_tyvar_id);
+        let display_name = generated_tyvar_name(base, id);
+        let allocated = self.fresh_tyvar(&display_name);
+        debug_assert_eq!(allocated, id);
+        (allocated, display_name)
+    }
+
+    pub fn register_tyvar_name(&mut self, id: TyVarId, display_name: &str) {
+        self.tyvar_names.insert(id, display_name.to_string());
+        if id.0 >= self.next_tyvar_id {
+            self.next_tyvar_id =
+                id.0.checked_add(1)
+                    .expect("ICE: type variable id table exceeded u32 capacity");
+        }
+    }
+
+    pub fn tyvar_display_name(&self, id: TyVarId) -> String {
+        self.tyvar_names
+            .get(&id)
+            .cloned()
+            .unwrap_or_else(|| tyvar_fallback_name(id))
     }
 
     pub fn tycon_display_name(&self, id: TyConId) -> String {
@@ -586,88 +626,12 @@ impl VarRef {
     }
 }
 
-const SOURCE_TYVAR_TAG: u32 = 0x8000_0000;
-const SOURCE_TYVAR_LEN_SHIFT: u32 = 24;
-const SOURCE_TYVAR_CODE_MASK: u32 = 0x00ff_ffff;
-const SOURCE_TYVAR_BASE: u32 = 40;
-const SOURCE_TYVAR_MAX_CHARS: usize = 4;
-
 pub fn generated_tyvar_name(base: &str, id: TyVarId) -> String {
     format!("{}{}", base, id.0)
 }
 
-fn encode_tyvar_char(ch: char) -> Option<u32> {
-    match ch {
-        'a'..='z' => Some(ch as u32 - 'a' as u32 + 1),
-        '0'..='9' => Some(ch as u32 - '0' as u32 + 27),
-        '_' => Some(37),
-        '\'' => Some(38),
-        '?' => Some(39),
-        _ => None,
-    }
-}
-
-fn decode_tyvar_char(code: u32) -> Option<char> {
-    match code {
-        1..=26 => char::from_u32('a' as u32 + code - 1),
-        27..=36 => char::from_u32('0' as u32 + code - 27),
-        37 => Some('_'),
-        38 => Some('\''),
-        39 => Some('?'),
-        _ => None,
-    }
-}
-
-pub fn source_tyvar_id(name: &str) -> TyVarId {
-    let chars = name.chars().collect::<Vec<_>>();
-    if !chars.is_empty() && chars.len() <= SOURCE_TYVAR_MAX_CHARS {
-        let mut code = 0_u32;
-        let mut encodable = true;
-
-        for ch in &chars {
-            if let Some(part) = encode_tyvar_char(*ch) {
-                code = code * SOURCE_TYVAR_BASE + part;
-            } else {
-                encodable = false;
-                break;
-            }
-        }
-
-        if encodable {
-            return TyVarId(
-                SOURCE_TYVAR_TAG | ((chars.len() as u32) << SOURCE_TYVAR_LEN_SHIFT) | code,
-            );
-        }
-    }
-
-    let hash = name.bytes().fold(2166136261_u32, |acc, byte| {
-        (acc ^ byte as u32).wrapping_mul(16777619)
-    });
-    TyVarId(SOURCE_TYVAR_TAG | (5 << SOURCE_TYVAR_LEN_SHIFT) | (hash & SOURCE_TYVAR_CODE_MASK))
-}
-
 pub fn tyvar_display_name(id: TyVarId) -> String {
-    if id.0 & SOURCE_TYVAR_TAG == 0 {
-        return generated_tyvar_name("t", id);
-    }
-
-    let len = ((id.0 >> SOURCE_TYVAR_LEN_SHIFT) & 0x7) as usize;
-    if !(1..=SOURCE_TYVAR_MAX_CHARS).contains(&len) {
-        return generated_tyvar_name("t", id);
-    }
-
-    let mut code = id.0 & SOURCE_TYVAR_CODE_MASK;
-    let mut chars = Vec::with_capacity(len);
-    for _ in 0..len {
-        let part = code % SOURCE_TYVAR_BASE;
-        let Some(ch) = decode_tyvar_char(part) else {
-            return generated_tyvar_name("t", id);
-        };
-        chars.push(ch);
-        code /= SOURCE_TYVAR_BASE;
-    }
-
-    chars.iter().rev().collect()
+    tyvar_fallback_name(id)
 }
 
 impl Ty {
@@ -726,15 +690,6 @@ impl Ty {
         TypeExpr::TyApp(Box::new(lhs), Box::new(rhs))
     }
 
-    pub fn make_var(var_name: String) -> TypeExpr {
-        Self::TyVar(source_tyvar_id(&var_name))
-    }
-
-    pub fn make_var_id(base: &str, id: TyVarId) -> TypeExpr {
-        let _ = base;
-        Self::TyVar(id)
-    }
-
     pub fn make_evar(id: EvarId) -> TypeExpr {
         Self::TyExVar(id)
     }
@@ -745,10 +700,6 @@ impl Ty {
 
     pub fn make_con_id(id: TyConId) -> TypeExpr {
         Self::TyCon(id)
-    }
-
-    pub fn make_forall(quant_name: String, kind: Kind, body: TypeExpr) -> TypeExpr {
-        Self::make_forall_id(source_tyvar_id(&quant_name), kind, body)
     }
 
     pub fn make_forall_id(quant_id: TyVarId, kind: Kind, body: TypeExpr) -> TypeExpr {
@@ -1390,7 +1341,7 @@ fn insert_data_definition_identity(
 pub struct DataDefinition {
     pub name: String,
     pub short_name: String,
-    pub ty_params: Vec<(String, Kind)>,
+    pub ty_params: Vec<(TyVarId, Kind)>,
     pub tycon_kind: Kind,
     pub constructors: Vec<ConstructorDef>,
 }
@@ -1560,7 +1511,7 @@ pub struct ClassDefinition {
     pub id: ClassId,
     pub name: String,
     pub short_name: String,
-    pub params: Vec<(String, Kind)>,
+    pub params: Vec<(TyVarId, Kind)>,
     pub superclasses: Vec<Predicate>,
     pub methods: Vec<ClassMethodDef>,
 }
@@ -1646,7 +1597,7 @@ impl TypeExpr {
 
             let type_fmt = match t {
                 TypeExpr::TyUnit => "()".into(),
-                TypeExpr::TyVar(id) => tyvar_display_name(*id),
+                TypeExpr::TyVar(id) => tables.names.tyvar_display_name(*id),
                 TypeExpr::TyExVar(id) => evar_display_name(*id),
                 TypeExpr::TyCon(id) => tycon_pretty_name(*id, tables),
 
@@ -1662,7 +1613,11 @@ impl TypeExpr {
                     let peeled_quants = kinded_quants
                         .iter()
                         .map(|(id, kind)| {
-                            format!("({} : {})", tyvar_display_name(*id), kind.pretty())
+                            format!(
+                                "({} : {})",
+                                tables.names.tyvar_display_name(*id),
+                                kind.pretty()
+                            )
                         })
                         .collect::<Vec<_>>();
 
@@ -2132,7 +2087,7 @@ mod tests {
                 id: ClassId(u32::MAX),
                 name: "Eq".to_string(),
                 short_name: "Eq".to_string(),
-                params: vec![("a".to_string(), Kind::Star)],
+                params: vec![(TyVarId(0), Kind::Star)],
                 superclasses: Vec::new(),
                 methods: Vec::new(),
             },
@@ -2167,15 +2122,19 @@ mod tests {
 
         assert!(TypeExpr::make_evar(needle).occurs_check(needle));
         assert!(!TypeExpr::make_evar(EvarId(3)).occurs_check(needle));
-        assert!(!TypeExpr::make_var(evar_display_name(needle)).occurs_check(needle));
+        assert!(!TypeExpr::TyVar(TyVarId(2)).occurs_check(needle));
     }
 
     #[test]
     fn generated_tyvar_names_generated_ids() {
         let id = TyVarId(9);
+        let mut names = Names::new();
+        let (fresh_id, fresh_name) = names.fresh_generated_tyvar("t");
 
         assert_eq!(generated_tyvar_name("t", id), "t9");
-        assert_eq!(TypeExpr::make_var_id("t", id), TypeExpr::TyVar(id));
+        assert_eq!(fresh_id, TyVarId(0));
+        assert_eq!(fresh_name, "t0");
+        assert_eq!(names.tyvar_display_name(fresh_id), "t0");
     }
 
     #[test]

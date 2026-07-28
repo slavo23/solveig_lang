@@ -1,8 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use solveig_ast::ast::{
-    Kind, KindMetaId, TyConId, TyVarId, TypeExpr, source_tyvar_id, tyvar_display_name,
-};
+use solveig_ast::ast::{Kind, KindMetaId, TyConId, TyVarId, TypeExpr, tyvar_display_name};
 use solveig_base::FileSpan;
 
 use crate::signature_infer::KindError;
@@ -13,7 +11,7 @@ pub struct RawDataDef {
     pub name: String,
     pub short_name: String,
     pub span: FileSpan,
-    pub ty_params: Vec<String>,
+    pub ty_params: Vec<TyVarId>,
     pub constructors: Vec<RawConstructorDef>,
 }
 
@@ -30,7 +28,7 @@ pub struct InferredDataDef {
     pub id: TyConId,
     pub name: String,
     pub short_name: String,
-    pub ty_params: Vec<(String, Kind)>,
+    pub ty_params: Vec<(TyVarId, Kind)>,
     pub tycon_kind: Kind,
     pub constructors: Vec<InferredConstructorDef>,
 }
@@ -386,7 +384,7 @@ impl DataKindInferencer {
             id: TyConId,
             name: String,
             short_name: String,
-            param_metas: Vec<(String, Kind)>,
+            param_metas: Vec<(TyVarId, Kind)>,
             ctor_fields: Vec<(String, String, Vec<TypeExpr>)>,
         }
 
@@ -398,7 +396,7 @@ impl DataKindInferencer {
             let mut param_metas = Vec::new();
             for p in &def.ty_params {
                 let m = self.fresh_meta();
-                param_metas.push((p.clone(), m));
+                param_metas.push((*p, m));
             }
 
             let expected = param_metas
@@ -411,12 +409,12 @@ impl DataKindInferencer {
 
             let var_env: HashMap<TyVarId, Kind> = param_metas
                 .iter()
-                .map(|(n, m)| (source_tyvar_id(n), self.apply_kind(m)))
+                .map(|(n, m)| (*n, self.apply_kind(m)))
                 .collect();
 
             let mut ret_ty = TypeExpr::TyCon(def.id);
             for (pn, _) in &param_metas {
-                ret_ty = TypeExpr::make_app(ret_ty, TypeExpr::make_var(pn.clone()));
+                ret_ty = TypeExpr::make_app(ret_ty, TypeExpr::TyVar(*pn));
             }
 
             let mut ctor_fields = Vec::new();
@@ -440,10 +438,10 @@ impl DataKindInferencer {
 
         let mut results = Vec::new();
         for dt in &dt_results {
-            let ty_params: Vec<(String, Kind)> = dt
+            let ty_params: Vec<(TyVarId, Kind)> = dt
                 .param_metas
                 .iter()
-                .map(|(n, m)| (n.clone(), self.zonk(m)))
+                .map(|(n, m)| (*n, self.zonk(m)))
                 .collect();
 
             let tycon_kind = self.zonk(&tycon_metas[&dt.id]);
@@ -476,19 +474,19 @@ impl DataKindInferencer {
 
 fn build_constructor_type(
     tycon: TyConId,
-    ty_params: &[(String, Kind)],
+    ty_params: &[(TyVarId, Kind)],
     fields: &[TypeExpr],
 ) -> TypeExpr {
     let mut ret = TypeExpr::TyCon(tycon);
     for (p, _) in ty_params {
-        ret = TypeExpr::make_app(ret, TypeExpr::make_var(p.clone()));
+        ret = TypeExpr::make_app(ret, TypeExpr::TyVar(*p));
     }
     let mut body = ret;
     for f in fields.iter().rev() {
         body = TypeExpr::make_arr(f.clone(), body);
     }
     for (p, k) in ty_params.iter().rev() {
-        body = TypeExpr::make_forall(p.clone(), k.clone(), body);
+        body = TypeExpr::make_forall_id(*p, k.clone(), body);
     }
     body
 }

@@ -58,6 +58,13 @@ fn checker_api_golden_types() {
             "(∀ (a : *). Eq a => a -> a -> Bool) -> Bool",
         ),
         ("main.polyId", "∀ (a : *). a -> a"),
+        ("main.longElementId", "∀ (element : *). element -> element"),
+        ("main.longElementResult", "Int"),
+        (
+            "main.shadowRank2",
+            "∀ (a : *). (∀ (a : *). a -> a) -> a -> a",
+        ),
+        ("main.shadowRank2Result", "Int"),
         ("main.rank2Result", "Int"),
         ("main.rank2EqResult", "Bool"),
     ];

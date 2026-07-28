@@ -182,7 +182,7 @@ impl TypeChecker {
             .params
             .iter()
             .zip(given.args.iter())
-            .map(|((param_name, _), arg)| (source_tyvar_id(param_name), arg.clone()))
+            .map(|((param_id, _), arg)| (*param_id, arg.clone()))
             .collect::<HashMap<_, _>>();
 
         class_def
@@ -200,9 +200,7 @@ impl TypeChecker {
             .params
             .iter()
             .zip(instance_head.args.iter())
-            .map(|((param_name, _), instance_arg)| {
-                (source_tyvar_id(param_name), instance_arg.clone())
-            })
+            .map(|((param_id, _), instance_arg)| (*param_id, instance_arg.clone()))
             .collect::<HashMap<_, _>>();
 
         class_def
@@ -220,10 +218,10 @@ impl TypeChecker {
     ) -> Scheme {
         let mut subst = HashMap::<TyVarId, TypeExpr>::new();
 
-        for ((param_name, _), instance_arg) in
+        for ((param_id, _), instance_arg) in
             class_def.params.iter().zip(instance_head.args.iter())
         {
-            subst.insert(source_tyvar_id(param_name), instance_arg.clone());
+            subst.insert(*param_id, instance_arg.clone());
         }
 
         let specialized = Self::substitute_scheme(method_scheme, &subst);
@@ -233,11 +231,11 @@ impl TypeChecker {
             args: class_def
                 .params
                 .iter()
-                .map(|(name, _)| {
+                .map(|(param_id, _)| {
                     subst
-                        .get(&source_tyvar_id(name))
+                        .get(param_id)
                         .cloned()
-                        .unwrap_or_else(|| TypeExpr::TyVar(source_tyvar_id(name)))
+                        .unwrap_or_else(|| TypeExpr::TyVar(*param_id))
                 })
                 .collect(),
         };
@@ -553,7 +551,7 @@ impl TypeChecker {
             let (universal_id, universal) = self.fresh_universal("t");
             let kind = ctx.evar_kind_id(evar).unwrap_or(Kind::Star);
 
-            result = result.substitute_evar(evar, &TypeExpr::make_var_id("t", universal_id));
+            result = result.substitute_evar(evar, &TypeExpr::TyVar(universal_id));
             let _ = universal;
             binders.push((universal_id, kind));
         }
@@ -583,7 +581,12 @@ mod entailment_tests {
     }
 
     fn var(name: &str) -> TypeExpr {
-        TypeExpr::TyVar(source_tyvar_id(name))
+        let id = match name {
+            "a" => TyVarId(0),
+            "b" => TyVarId(1),
+            other => panic!("ICE: unknown test type variable `{other}`"),
+        };
+        TypeExpr::TyVar(id)
     }
 
     fn app(func: TypeExpr, arg: TypeExpr) -> TypeExpr {
@@ -661,7 +664,7 @@ mod entailment_tests {
                         id: EQ,
                         name: "test.Eq".to_string(),
                         short_name: "Eq".to_string(),
-                        params: vec![("a".to_string(), Kind::Star)],
+                        params: vec![(TyVarId(0), Kind::Star)],
                         superclasses: Vec::new(),
                         methods: Vec::new(),
                     },
@@ -672,7 +675,7 @@ mod entailment_tests {
                         id: ORD,
                         name: "test.Ord".to_string(),
                         short_name: "Ord".to_string(),
-                        params: vec![("a".to_string(), Kind::Star)],
+                        params: vec![(TyVarId(0), Kind::Star)],
                         superclasses: vec![pred(EQ, var("a"))],
                         methods: Vec::new(),
                     },
