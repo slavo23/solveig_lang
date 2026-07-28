@@ -346,6 +346,7 @@ impl<'a> Parser<'a> {
             Token::ReservedOp(symbol) => {
                 format!("reserved operator `{}`", self.token_text(*symbol))
             }
+            Token::Backtick => "`".to_string(),
             Token::Int(value) => format!("integer literal `{value}`"),
             Token::Float(value) => format!("float literal `{value}`"),
             Token::Char(value) => format!("char literal `{value}`"),
@@ -435,7 +436,7 @@ impl<'a> Parser<'a> {
     }
 
     fn is_infix_operator(&self) -> bool {
-        self.current_operator_symbol().is_some()
+        self.current_operator_symbol().is_some() || self.starts_backticked_operator_name()
     }
 
     fn expect_operator_symbol(&mut self, allow_cons_syntax: bool) -> Result<NameSpan, ParseError> {
@@ -624,6 +625,7 @@ mod expr;
 mod lists;
 mod module;
 mod name_path;
+mod operators;
 mod pattern;
 #[cfg(test)]
 mod tests;

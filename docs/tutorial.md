@@ -348,6 +348,28 @@ Operators without declarations default to `infixl 9`. Operators starting with
 `:` are reserved for future constructor operators. The list cons operator `::`
 is special syntax today.
 
+Named functions can be used infix with backticks, and fixity declarations can
+name them the same way:
+
+```solveig
+infixr 8 `raise`
+
+raise : Int -> Int -> Int
+raise x y = x * 100 + y
+
+main = 1 `raise` 2 `raise` 3
+```
+
+Operator sections create functions:
+
+```solveig
+addOne = (+ 1)
+subtractFromTen = (10 -)
+```
+
+Following Haskell, `(- 1)` is unary negation, not an operator section. Use
+`(subtract 1)` for the function that subtracts one from its argument.
+
 Parenthesize mixed operators when fixities would be ambiguous:
 
 ```solveig

@@ -136,6 +136,7 @@ Solveig currently supports:
 - orphan instance warnings
 - user-defined symbolic operators
 - Haskell-style fixity declarations
+- operator sections and backticked infix names
 - `Int`, `Float`, `Char`, `String`, `Bool`, and `()`
 - list syntax: `[]`, `::`, and `[1, 2, 3]`
 - `Eq`, `Ord`, `Num`, `Fractional`, `Functor`, `Applicative`, `Monad`, and `Show`
@@ -282,7 +283,7 @@ The VM remains the reference runtime. A Cranelift backend is planned later.
   `mod` for Int division and modulo.
 - `String` concatenation is `appendString`; `+` is numeric.
 - Float literal patterns are rejected.
-- Constructor operators and backtick infix are reserved for later work.
+- Constructor operators are reserved for later work.
 - The Cranelift backend, REPL, and LSP server are planned but not complete.
 
 ## More Documentation

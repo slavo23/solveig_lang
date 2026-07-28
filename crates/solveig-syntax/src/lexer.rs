@@ -70,6 +70,8 @@ enum RawToken {
     RBrack,
     #[token("_", priority = 3)]
     Underscore,
+    #[token("`")]
+    Backtick,
 
     #[regex(r"[0-9]+((\.[0-9]+)([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)", |lex| lex.slice().parse::<f64>().ok())]
     Float(f64),
@@ -204,6 +206,7 @@ pub enum Token {
     Hole,
     Underscore,
     Semicolon,
+    Backtick,
     Operator(Symbol),
     ReservedOp(Symbol),
 
@@ -432,6 +435,7 @@ fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Token {
         RawToken::RBrack => Token::RBrack,
         RawToken::Underscore => Token::Underscore,
         RawToken::Semicolon => Token::Semicolon,
+        RawToken::Backtick => Token::Backtick,
         RawToken::Operator => match slice {
             "->" => Token::Arrow,
             "<-" => Token::BindArrow,

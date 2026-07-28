@@ -320,5 +320,7 @@ pub enum SurfaceExpr {
         Spanned<Symbol>,
         Box<Spanned<SurfaceExpr>>,
     ),
+    OperatorLeftSection(Box<Spanned<SurfaceExpr>>, Spanned<Symbol>),
+    OperatorRightSection(Spanned<Symbol>, Box<Spanned<SurfaceExpr>>),
     OpSeq(Box<SurfaceOpOperand>, Vec<SurfaceOpSegment>),
 }

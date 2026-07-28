@@ -66,7 +66,9 @@ impl Parser<'_> {
 
             let mut ops = Vec::new();
             loop {
-                let (op, start, end) = if this.starts_parenthesized_operator_name() {
+                let (op, start, end) = if this.starts_backticked_operator_name() {
+                    this.parse_backticked_operator_name()?
+                } else if this.starts_parenthesized_operator_name() {
                     this.parse_parenthesized_operator_name()?
                 } else {
                     this.expect_operator_symbol(false)?

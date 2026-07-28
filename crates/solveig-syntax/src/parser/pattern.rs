@@ -7,7 +7,24 @@ impl Parser<'_> {
     pub(super) fn parse_pattern(&mut self) -> Result<S<SurfacePattern>, ParseError> {
         self.node(SyntaxKind::Pattern, |this| {
             let head = this.parse_pattern_head()?;
-            if this.at(&Token::Cons) {
+            if this.starts_backticked_constructor_name() {
+                let (ctor, start, end) = this.parse_backticked_constructor_name()?;
+                let rhs = this.parse_pattern()?;
+                let ctor = this.sp(
+                    NameRef {
+                        segments: vec![ctor],
+                    },
+                    start,
+                    end,
+                );
+                let span_start = span_start(&head);
+                let span_end = span_end(&rhs);
+                Ok(this.sp(
+                    SurfacePattern::Con(ctor, vec![head, rhs]),
+                    span_start,
+                    span_end,
+                ))
+            } else if this.at(&Token::Cons) {
                 this.advance();
                 let tail = this.parse_pattern()?;
                 Ok(cons_pattern(
@@ -19,6 +36,21 @@ impl Parser<'_> {
             } else {
                 Ok(head)
             }
+        })
+    }
+
+    fn starts_backticked_constructor_name(&self) -> bool {
+        self.at(&Token::Backtick)
+            && matches!(self.peek_kind(1), Some(Token::UpperIdent(_)))
+            && matches!(self.peek_kind(2), Some(Token::Backtick))
+    }
+
+    fn parse_backticked_constructor_name(&mut self) -> Result<NameSpan, ParseError> {
+        self.node(SyntaxKind::BacktickOperator, |this| {
+            let start = this.expect(&Token::Backtick)?.start;
+            let (symbol, _, _) = this.expect_upper()?;
+            let end = this.expect(&Token::Backtick)?.end;
+            Ok((symbol, start, end))
         })
     }
 

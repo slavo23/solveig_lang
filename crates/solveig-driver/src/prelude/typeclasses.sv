@@ -214,6 +214,9 @@ div x y = intDiv x y
 mod : Int -> Int -> Int
 mod x y = intMod x y
 
+subtract : forall a. Num a => a -> a -> a
+subtract x y = y - x
+
 class Num a => Fractional a where
     (/) : a -> a -> a
 

@@ -22,6 +22,8 @@ pub enum SyntaxKind {
     Expr,
     OpChain,
     OpOperand,
+    OperatorSection,
+    BacktickOperator,
     AppExpr,
     AtomExpr,
     LambdaExpr,

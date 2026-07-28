@@ -153,6 +153,51 @@ impl<'a> Resolver<'a> {
         TermExpr::App(Box::new(app), Box::new(rhs))
     }
 
+    fn section_param_expr(
+        &mut self,
+        source_span: SourceSpan,
+        cst_id: solveig_syntax::cst::CstId,
+    ) -> (Symbol, SpannedWrapper<SurfaceExpr>) {
+        let symbol = self.session.intern("$section");
+        self.names.register_symbol(symbol, "$section");
+        (
+            symbol,
+            (
+                SurfaceExpr::Var((
+                    NameRef {
+                        segments: vec![symbol],
+                    },
+                    source_span,
+                    cst_id,
+                )),
+                source_span,
+                cst_id,
+            ),
+        )
+    }
+
+    fn lower_operator_section(
+        &mut self,
+        lhs: &SpannedWrapper<SurfaceExpr>,
+        op: SpannedWrapper<Symbol>,
+        rhs: &SpannedWrapper<SurfaceExpr>,
+        cx: &ModuleContext,
+        local: &LocalResolverEnv,
+        bound_terms: &FxHashSet<Symbol>,
+    ) -> TermExpr<Span> {
+        if let Err(error) = self.resolve_operator_fixity(op, cx) {
+            self.report_fixity_error(cx, &error);
+            return TermExpr::Hole;
+        }
+
+        let mut section_bound_terms = bound_terms.clone();
+        section_bound_terms.insert(self.session.intern("$section"));
+        let body = self.lower_operator_application(lhs, op, rhs, cx, local, &section_bound_terms);
+        let span = to_core_span(SourceSpan::new(lhs.1.start, rhs.1.end));
+        let body = TermExprNode::new(body, span);
+        TermExpr::Abs("$section".to_string(), None, Box::new(body))
+    }
+
     fn prelude_typeclasses_var(
         &self,
         name: &'static str,
@@ -478,6 +523,16 @@ impl<'a> Resolver<'a> {
                 local,
                 bound_terms,
             ),
+
+            SurfaceExpr::OperatorLeftSection(lhs, op) => {
+                let (_, rhs) = self.section_param_expr(sf.1, sf.2);
+                self.lower_operator_section(lhs, *op, &rhs, cx, local, bound_terms)
+            }
+
+            SurfaceExpr::OperatorRightSection(op, rhs) => {
+                let (_, lhs) = self.section_param_expr(sf.1, sf.2);
+                self.lower_operator_section(&lhs, *op, rhs, cx, local, bound_terms)
+            }
 
             SurfaceExpr::OpSeq(first, segments) => {
                 match resolve_op_seq(first, segments, |op| self.resolve_operator_fixity(op, cx)) {

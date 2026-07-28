@@ -190,11 +190,13 @@ class Num a where
 
 div : Int -> Int -> Int
 mod : Int -> Int -> Int
+subtract : forall a. Num a => a -> a -> a
 
 class Num a => Fractional a where
     (/) : a -> a -> a
 ```
 
+`subtract x y` is `y - x`, matching Haskell's section-friendly helper.
 `Num` instances exist for `Int` and `Float`. `Fractional` currently has only a
 `Float` instance. Int division uses `div`; `/` is not Int division.
 
