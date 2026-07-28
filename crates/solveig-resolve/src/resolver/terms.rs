@@ -103,7 +103,7 @@ impl<'a> Resolver<'a> {
         span: Span,
     ) -> TermExpr<Span> {
         let cons = TermExprNode::new(
-            TermExpr::Con(prelude_list_cons_ctor_id()),
+            TermExpr::Con(prelude_list_cons_ctor_id(self.names)),
             span.clone(),
         );
         let lhs = self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms);
@@ -324,7 +324,7 @@ impl<'a> Resolver<'a> {
     ) -> VarRef {
         match r.segments.as_slice() {
             [name] if bound_terms.contains(name) => {
-                register_symbol_display_name(*name, self.symbol_text(*name));
+                self.names.register_symbol(*name, self.symbol_text(*name));
                 VarRef::Local(*name)
             }
             _ => match self.resolve_term_defid(r, span, cx) {
@@ -333,7 +333,10 @@ impl<'a> Resolver<'a> {
                     self.qualified_def_name(def_id);
                     VarRef::Global(def_id)
                 }
-                None => VarRef::legacy_global(&self.unresolved_name(r)),
+                None => {
+                    let unresolved = self.unresolved_name(r);
+                    VarRef::named_global(self.names, &unresolved)
+                }
             },
         }
     }
@@ -361,7 +364,7 @@ impl<'a> Resolver<'a> {
                 cx,
             )),
 
-            SurfaceExpr::Literal(lit) => TermExpr::Lit(resolve_literal(lit)),
+            SurfaceExpr::Literal(lit) => TermExpr::Lit(self.resolve_literal(lit)),
 
             SurfaceExpr::App(lhs, rhs) => TermExpr::App(
                 Box::new(self.resolve_surface_expr_in_module(lhs, cx, local, bound_terms)),

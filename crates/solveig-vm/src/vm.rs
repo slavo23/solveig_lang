@@ -1,5 +1,4 @@
-use solveig_ast::ast::{CtorId, CtorRuntimeInfo, PRIM_TYS};
-use solveig_ast::ast::{Literal, string_literal_value};
+use solveig_ast::ast::{CtorId, CtorRuntimeInfo, Literal, PRIM_TYS};
 
 use super::bytecode::{
     BytePattern, BytecodeProgram, ChunkKind, Instr, MatchArm, lower_to_bytecode,
@@ -970,7 +969,13 @@ impl Vm {
         }
     }
 
-    fn dispatch_match(&mut self, arms: &[MatchArm], scrutinee: Value, else_pc: u32) {
+    fn dispatch_match(
+        &mut self,
+        program: &BytecodeProgram,
+        arms: &[MatchArm],
+        scrutinee: Value,
+        else_pc: u32,
+    ) {
         for arm in arms {
             match &arm.pattern {
                 BytePattern::Var => {
@@ -982,6 +987,7 @@ impl Vm {
                     self.binding_buffer.clear();
 
                     if match_pattern(
+                        program,
                         &self.heap,
                         &arm.pattern,
                         scrutinee,
@@ -1087,6 +1093,7 @@ impl Vm {
 
                     self.binding_buffer.clear();
                     if match_pattern(
+                        program,
                         &self.heap,
                         &arm.pattern,
                         scrutinee,
@@ -1328,7 +1335,7 @@ impl Vm {
                 Instr::Match(table_idx) => {
                     let scrutinee = self.pop();
                     let table = &program.chunks[self.chunk].match_tables[table_idx as usize];
-                    self.dispatch_match(&table.arms, scrutinee, table.else_target);
+                    self.dispatch_match(program, &table.arms, scrutinee, table.else_target);
                 }
                 Instr::Trap(code) => return Err(RuntimeError::trap(code)),
             }
@@ -1352,6 +1359,7 @@ fn try_flat_bind(subs: &[BytePattern]) -> Option<usize> {
 }
 
 fn match_pattern(
+    program: &BytecodeProgram,
     heap: &Heap,
     pattern: &BytePattern,
     value: Value,
@@ -1359,7 +1367,7 @@ fn match_pattern(
 ) -> bool {
     let checkpoint = bindings.len();
 
-    if match_pattern_inner(heap, pattern, value, bindings) {
+    if match_pattern_inner(program, heap, pattern, value, bindings) {
         true
     } else {
         bindings.truncate(checkpoint);
@@ -1368,6 +1376,7 @@ fn match_pattern(
 }
 
 fn match_pattern_inner(
+    program: &BytecodeProgram,
     heap: &Heap,
     pattern: &BytePattern,
     value: Value,
@@ -1385,9 +1394,9 @@ fn match_pattern_inner(
             }
             (Literal::Char(expected), Value::Char(actual)) => *expected == actual,
             (Literal::Str(expected), Value::Obj(id)) => match heap.get(id) {
-                HeapObject::Str { bytes } => {
-                    heap.str_value(*bytes) == string_literal_value(*expected)
-                }
+                HeapObject::Str { bytes } => program
+                    .string_literal_value(*expected)
+                    .is_some_and(|expected| heap.str_value(*bytes) == expected),
                 _ => false,
             },
             _ => false,
@@ -1405,7 +1414,7 @@ fn match_pattern_inner(
                     if *tag != *expected_tag || subs.len() != 1 {
                         return false;
                     }
-                    match_pattern_inner(heap, &subs[0], *field, bindings)
+                    match_pattern_inner(program, heap, &subs[0], *field, bindings)
                 }
                 HeapObject::Data2 {
                     tag,
@@ -1416,11 +1425,11 @@ fn match_pattern_inner(
                         return false;
                     }
                     let cp = bindings.len();
-                    if !match_pattern_inner(heap, &subs[0], *field0, bindings) {
+                    if !match_pattern_inner(program, heap, &subs[0], *field0, bindings) {
                         bindings.truncate(cp);
                         return false;
                     }
-                    if !match_pattern_inner(heap, &subs[1], *field1, bindings) {
+                    if !match_pattern_inner(program, heap, &subs[1], *field1, bindings) {
                         bindings.truncate(cp);
                         return false;
                     }
@@ -1433,7 +1442,7 @@ fn match_pattern_inner(
                     }
                     let cp = bindings.len();
                     for (sub, &field) in subs.iter().zip(fields.iter()) {
-                        if !match_pattern_inner(heap, sub, field, bindings) {
+                        if !match_pattern_inner(program, heap, sub, field, bindings) {
                             bindings.truncate(cp);
                             return false;
                         }
@@ -1643,10 +1652,7 @@ impl EvalResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solveig_ast::ast::{
-        BinOp, CtorId, legacy_ctor_id, prelude_list_cons_ctor_id, prelude_list_nil_ctor_id,
-        prelude_pair_mkpair_ctor_id, runtime_ctor_role,
-    };
+    use solveig_ast::ast::{BinOp, CtorId, CtorRuntimeRole};
     use solveig_lower::closure_ir::{CCCaseArm, CCExpr, CCFunction, CCGlobalDef, CCPattern};
     use std::rc::Rc;
 
@@ -1850,21 +1856,24 @@ mod tests {
             Vec::new(),
             &[
                 ctor_spec(
-                    prelude_list_nil_ctor_id(),
+                    CtorId(100),
+                    CtorRuntimeRole::PreludeListNil,
                     "renamed.list.Empty",
                     "Empty",
                     PRELUDE_NIL_TAG,
                     0,
                 ),
                 ctor_spec(
-                    prelude_list_cons_ctor_id(),
+                    CtorId(101),
+                    CtorRuntimeRole::PreludeListCons,
                     "renamed.list.Link",
                     "Link",
                     PRELUDE_CONS_TAG,
                     2,
                 ),
                 ctor_spec(
-                    prelude_pair_mkpair_ctor_id(),
+                    CtorId(102),
+                    CtorRuntimeRole::PreludePair,
                     "renamed.pair.Tuple",
                     "Tuple",
                     PRELUDE_PAIR_TAG,
@@ -1883,7 +1892,8 @@ mod tests {
             vec![global("main", pack(USER_PAIR_TAG, 2, vec![int(1), int(2)]))],
             Vec::new(),
             &[ctor_spec(
-                legacy_ctor_id("main.MkPair"),
+                CtorId(200),
+                CtorRuntimeRole::Ordinary,
                 "main.MkPair",
                 "MkPair",
                 USER_PAIR_TAG,
@@ -1922,7 +1932,17 @@ mod tests {
     ) -> CCProgram {
         let extra_constructors = extra_constructors
             .iter()
-            .map(|(name, tag, arity)| ctor_spec(legacy_ctor_id(name), *name, *name, *tag, *arity))
+            .enumerate()
+            .map(|(index, (name, tag, arity))| {
+                ctor_spec(
+                    CtorId(1_000 + index as u32),
+                    CtorRuntimeRole::Ordinary,
+                    name,
+                    name,
+                    *tag,
+                    *arity,
+                )
+            })
             .collect::<Vec<_>>();
 
         program_with_bool_ctor_specs(
@@ -1949,8 +1969,22 @@ mod tests {
         true_name: &'static str,
         false_name: &'static str,
     ) -> CCProgram {
-        let true_spec = ctor_spec(PRIM_TYS.true_ctor, true_name, true_name, TRUE_TAG, 0);
-        let false_spec = ctor_spec(PRIM_TYS.false_ctor, false_name, false_name, FALSE_TAG, 0);
+        let true_spec = ctor_spec(
+            PRIM_TYS.true_ctor,
+            CtorRuntimeRole::Ordinary,
+            true_name,
+            true_name,
+            TRUE_TAG,
+            0,
+        );
+        let false_spec = ctor_spec(
+            PRIM_TYS.false_ctor,
+            CtorRuntimeRole::Ordinary,
+            false_name,
+            false_name,
+            FALSE_TAG,
+            0,
+        );
         let mut constructor_arities = vec![
             ctor_runtime_info(&true_spec),
             ctor_runtime_info(&false_spec),
@@ -1963,20 +1997,30 @@ mod tests {
             functions,
             constructor_arities,
             string_constants: Vec::new(),
+            string_literals: Vec::new(),
         }
     }
 
     struct TestCtorSpec {
         ctor: CtorId,
+        role: CtorRuntimeRole,
         name: String,
         short_name: String,
         tag: u16,
         arity: u16,
     }
 
-    fn ctor_spec(ctor: CtorId, name: &str, short_name: &str, tag: u16, arity: u16) -> TestCtorSpec {
+    fn ctor_spec(
+        ctor: CtorId,
+        role: CtorRuntimeRole,
+        name: &str,
+        short_name: &str,
+        tag: u16,
+        arity: u16,
+    ) -> TestCtorSpec {
         TestCtorSpec {
             ctor,
+            role,
             name: name.to_string(),
             short_name: short_name.to_string(),
             tag,
@@ -1987,7 +2031,7 @@ mod tests {
     fn ctor_runtime_info(spec: &TestCtorSpec) -> CtorRuntimeInfo {
         CtorRuntimeInfo {
             ctor: spec.ctor,
-            role: runtime_ctor_role(spec.ctor),
+            role: spec.role,
             name: spec.name.clone(),
             short_name: spec.short_name.clone(),
             tag: spec.tag,

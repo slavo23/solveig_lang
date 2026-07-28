@@ -3,9 +3,8 @@ use std::rc::Rc;
 
 use solveig_ast::ast::{
     BuiltinDefinition, CaseArm, ClassId, CtorId, CtorRuntimeInfo, DefId, Ev, EvVarId,
-    InstanceDefinition, Literal, Pattern, PatternNode, ResolvedModule, StrLitId, TermExpr,
-    TermExprNode, VarRef, runtime_ctor_role, string_literal_value, symbol_display_name,
-    var_display_name,
+    InstanceDefinition, Literal, Names, Pattern, PatternNode, ResolvedModule, StrLitId, TermExpr,
+    TermExprNode, VarRef, runtime_ctor_role,
 };
 
 use super::dicts::{DictLayout, DictLayouts, instance_global_name};
@@ -18,6 +17,7 @@ enum Binding {
 }
 
 struct LowerCtx {
+    names: Names,
     scope: Vec<Binding>,
     globals: HashMap<String, usize>,
     constructors: HashMap<CtorId, LowerConstructorInfo>,
@@ -36,7 +36,7 @@ struct LowerConstructorInfo {
 
 impl LowerCtx {
     fn resolve_var(&self, var: &VarRef) -> Rc<IRExpr> {
-        let name = var_display_name(var);
+        let name = self.names.var_display_name(var);
 
         for (depth, binding) in self.scope.iter().rev().enumerate() {
             if matches!(binding, Binding::Term(bound_name) if bound_name == &name) {
@@ -97,7 +97,8 @@ impl LowerCtx {
 
         let index = u32::try_from(self.string_constants.len())
             .expect("ICE: string constant pool exceeded u32 capacity");
-        self.string_constants.push(string_literal_value(id));
+        self.string_constants
+            .push(self.names.string_literal_value(id).to_string());
         self.string_indices.insert(id, index);
         index
     }
@@ -463,6 +464,7 @@ fn lower_instance_dict_global<A, P>(
 
 fn build_constructor_table<A, P>(
     module: &ResolvedModule<A, P>,
+    names: &Names,
 ) -> HashMap<CtorId, LowerConstructorInfo> {
     let mut table = HashMap::new();
     for data_def in &module.data_defs {
@@ -480,8 +482,8 @@ fn build_constructor_table<A, P>(
             table.insert(
                 constructor_def.id,
                 LowerConstructorInfo {
-                    name: symbol_display_name(table_info.name),
-                    short_name: symbol_display_name(table_info.short_name),
+                    name: names.symbol_display_name(table_info.name),
+                    short_name: names.symbol_display_name(table_info.short_name),
                     tag: table_info.tag,
                     arity,
                 },
@@ -516,8 +518,8 @@ fn next_synthetic_constructor_base(
     (next_ctor, next_tag)
 }
 
-pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
-    let constructors = build_constructor_table(module);
+pub fn lower_module<A, P>(module: &ResolvedModule<A, P>, names: &Names) -> IRProgram {
+    let constructors = build_constructor_table(module, names);
     let (next_ctor_id, next_tag) = next_synthetic_constructor_base(&constructors);
     let dicts = DictLayouts::build(module, next_ctor_id, next_tag);
 
@@ -534,6 +536,7 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
     }
 
     let mut ctx = LowerCtx {
+        names: names.clone(),
         scope: Vec::new(),
         globals,
         constructors: constructors.clone(),
@@ -567,7 +570,7 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
         .iter()
         .map(|(ctor, info)| CtorRuntimeInfo {
             ctor: *ctor,
-            role: runtime_ctor_role(*ctor),
+            role: runtime_ctor_role(names, *ctor),
             name: info.name.clone(),
             short_name: info.short_name.clone(),
             tag: info.tag,
@@ -580,6 +583,7 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
         globals: ir_globals,
         constructor_arities,
         string_constants: ctx.string_constants,
+        string_literals: names.string_literals().to_vec(),
     }
 }
 
@@ -587,7 +591,7 @@ pub fn lower_module<A, P>(module: &ResolvedModule<A, P>) -> IRProgram {
 mod tests {
     use solveig_ast::ast::{
         ClassDefinition, ClassMethodDef, ClassTable, InstanceId, InstanceMethodDef, ModuleId,
-        Predicate, Scheme, TermDefinition, TyConTable, TypeExpr, VarRef, legacy_def_id,
+        Names, Predicate, Scheme, TermDefinition, TyConTable, TypeExpr, VarRef,
     };
 
     use super::*;
@@ -598,8 +602,9 @@ mod tests {
 
     #[test]
     fn class_method_evidence_application_lowers_to_dictionary_projection() {
+        let mut names = Names::new();
         let class_id = ClassId(0);
-        let method_id = legacy_def_id("test.Eq.eq");
+        let method_id = names.def_id("test.Eq.eq");
         let instance_id = InstanceId(0);
         let pred = Predicate {
             class_id,
@@ -649,7 +654,7 @@ mod tests {
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
             func_defs: vec![TermDefinition {
-                id: legacy_def_id("main.main"),
+                id: names.def_id("main.main"),
                 name: "main.main".to_string(),
                 short_name: "main".to_string(),
                 signature: None,
@@ -660,7 +665,7 @@ mod tests {
             }],
         };
 
-        let ir = lower_module(&module);
+        let ir = lower_module(&module, &names);
 
         assert_eq!(ir.globals.len(), 2);
         let dict_tag = ir

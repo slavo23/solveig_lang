@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use solveig_ast::ast::{CtorId, CtorTable, EvarId, PrettyTables, TypeExpr, symbol_display_name};
+use solveig_ast::ast::{CtorId, CtorTable, EvarId, Names, PrettyTables, TypeExpr};
 use solveig_base::FileSpan;
 use solveig_base::utils::diagnostics::{Diagnostic, Label};
 
@@ -16,6 +16,7 @@ impl HoleInfo {
         &self,
         constructors: &HashMap<CtorId, TypeExpr>,
         ctor_table: &CtorTable,
+        names: &Names,
     ) -> Vec<String> {
         let mut results = Vec::new();
         results.extend(direct_matches(&self.expected_type, &self.context));
@@ -25,6 +26,7 @@ impl HoleInfo {
             &self.context,
             constructors,
             ctor_table,
+            names,
         ));
         results.dedup();
         results
@@ -158,6 +160,7 @@ fn constructor_fills(
     ctx: &[(String, TypeExpr)],
     constructors: &HashMap<CtorId, TypeExpr>,
     ctor_table: &CtorTable,
+    names: &Names,
 ) -> Vec<String> {
     let mut results = Vec::new();
 
@@ -168,11 +171,11 @@ fn constructor_fills(
         }
 
         if params.is_empty() {
-            results.push(ctor_table_short_name(*id, ctor_table));
+            results.push(ctor_table_short_name(*id, ctor_table, names));
         } else if let Some(args) = fill_params(&params, ctx) {
             results.push(format!(
                 "{} {}",
-                ctor_table_short_name(*id, ctor_table),
+                ctor_table_short_name(*id, ctor_table, names),
                 args.join(" ")
             ));
         }
@@ -192,10 +195,10 @@ fn fill_params(params: &[TypeExpr], ctx: &[(String, TypeExpr)]) -> Option<Vec<St
         .collect()
 }
 
-fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable) -> String {
+fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable, names: &Names) -> String {
     ctor_table
         .get(id)
-        .map(|info| symbol_display_name(info.short_name))
+        .map(|info| names.symbol_display_name(info.short_name))
         .unwrap_or_else(|| panic!("ICE: hole diagnostic constructor table missing CtorId {id:?}"))
 }
 
@@ -237,7 +240,7 @@ impl HoleInfo {
             diag = diag.with_note(format!("bindings in scope:\n{}", bindings));
         }
 
-        let suggestions = self.suggestions(constructor_types, ctor_table);
+        let suggestions = self.suggestions(constructor_types, ctor_table, tables.names);
         if !suggestions.is_empty() {
             diag = diag.with_note(format!("valid fills include: {}", suggestions.join(", ")));
         }
@@ -250,8 +253,8 @@ impl HoleInfo {
 mod tests {
     use super::*;
     use solveig_ast::ast::{
-        ClassTable, CtorInfo, CtorTable, Kind, TyConDefinition, TyConId, TyConInfo, TyConTable,
-        legacy_symbol_id,
+        ClassTable, CtorInfo, CtorTable, Kind, Names, TyConDefinition, TyConId, TyConInfo,
+        TyConTable,
     };
     use solveig_base::{FileId, Span};
 
@@ -260,13 +263,14 @@ mod tests {
         let tycon_id = TyConId(42);
         let ctor_id = CtorId(7);
         let widget = TypeExpr::TyCon(tycon_id);
+        let mut names = Names::new();
 
         let mut tycon_table = TyConTable::new();
         tycon_table.insert_with_id(
             tycon_id,
             TyConInfo {
-                name: legacy_symbol_id("test.pretty.Widget"),
-                short_name: legacy_symbol_id("Widget"),
+                name: names.symbol("test.pretty.Widget"),
+                short_name: names.symbol("Widget"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Primitive,
             },
@@ -276,8 +280,8 @@ mod tests {
         ctor_table.insert_with_id(
             ctor_id,
             CtorInfo {
-                name: legacy_symbol_id("test.pretty.MakeWidget"),
-                short_name: legacy_symbol_id("MakeWidget"),
+                name: names.symbol("test.pretty.MakeWidget"),
+                short_name: names.symbol("MakeWidget"),
                 tycon: tycon_id,
                 fields: Vec::new(),
                 full_type: widget.clone(),
@@ -297,6 +301,7 @@ mod tests {
             &constructors,
             &ctor_table,
             PrettyTables {
+                names: &names,
                 tycons: &tycon_table,
                 classes: &class_table,
             },

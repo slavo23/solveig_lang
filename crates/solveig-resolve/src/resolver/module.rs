@@ -103,7 +103,7 @@ impl<'a> Resolver<'a> {
             func_schemes,
             func_defs,
         };
-        module.rebuild_identity_tables();
+        module.rebuild_identity_tables(self.names);
 
         Ok(ResolvedModuleInfo {
             module,

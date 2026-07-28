@@ -57,7 +57,7 @@ impl TypeChecker {
                 Ok((ctx, elaborated, TypeExpr::TyUnit))
             }
             TermExpr::Var(name) => {
-                let display_name = var_display_name(name);
+                let display_name = self.names.var_display_name(name);
 
                 if matches!(name, VarRef::Local(_))
                     && let Some(var_type) = self.lookup_local_term_var(&ctx, &display_name)
@@ -197,7 +197,7 @@ impl TypeChecker {
                 Ok((delta, elaborated, result_type))
             }
             TermExpr::TyAbs(param, kind, body) => {
-                let param_id = legacy_tyvar_id(param);
+                let param_id = source_tyvar_id(param);
                 let universal_entry = Self::universal_entry(param_id, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
 

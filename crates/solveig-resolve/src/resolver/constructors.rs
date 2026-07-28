@@ -9,9 +9,12 @@ impl<'a> Resolver<'a> {
                     .constructor_ids
                     .get(&def_id)
                     .copied()
-                    .unwrap_or_else(|| legacy_ctor_id(&qualified_name))
+                    .unwrap_or_else(|| self.names.ctor_id(&qualified_name))
             }
-            None => legacy_ctor_id(&self.unresolved_name(r)),
+            None => {
+                let unresolved = self.unresolved_name(r);
+                self.names.ctor_id(&unresolved)
+            }
         }
     }
 
@@ -110,9 +113,7 @@ impl<'a> Resolver<'a> {
 
         let node = match &sf.0 {
             SurfacePattern::Var(var_name) => Pattern::Var(self.symbol_text(*var_name).to_string()),
-            SurfacePattern::Lit(lit) => {
-                Pattern::Lit(resolve_literal(lit))
-            }
+            SurfacePattern::Lit(lit) => Pattern::Lit(self.resolve_literal(lit)),
             SurfacePattern::Wild => Pattern::Wild,
             SurfacePattern::Con(con_name, args) => Pattern::Con(
                 self.resolve_ctor_id(
@@ -185,7 +186,7 @@ impl<'a> Resolver<'a> {
                     let data_name = self.qualified_def_name(self.local_def_id(cx, *name));
 
                     Some(RawDataDef {
-                        id: legacy_tycon_id(&data_name),
+                        id: self.names.tycon_id(&data_name),
                         name: data_name,
                         short_name: self.symbol_text(*name).to_string(),
                         span: self.file_span(cx, defn.1),
@@ -217,7 +218,7 @@ impl<'a> Resolver<'a> {
             .collect()
     }
     fn resolve_data_defs(
-        &self,
+        &mut self,
         module_name: &ModuleName,
         raw_data_defs: Vec<RawDataDef>,
         imported: &ResolverImports,
@@ -246,7 +247,7 @@ impl<'a> Resolver<'a> {
             let mut core_ctors = Vec::new();
 
             for ctor in &idef.constructors {
-                let ctor_id = legacy_ctor_id(&ctor.name);
+                let ctor_id = self.names.ctor_id(&ctor.name);
                 constructor_types.insert(ctor_id, ctor.full_type.clone());
 
                 core_ctors.push(ConstructorDef {

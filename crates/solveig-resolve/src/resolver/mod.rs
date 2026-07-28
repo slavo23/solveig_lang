@@ -5,12 +5,10 @@ use std::ops::Range;
 use solveig_ast::ast::{
     BuiltinDefinition, COMPILER_PRELUDE_BUILTINS_MODULE, CaseArm, CaseArmNode, ClassDefinition,
     ClassId, ClassMethodDef, ConstructorDef, CtorId, DataDefinition, DefId, InstanceDefinition,
-    InstanceMethodDef, Kind, KindMetaId, Literal, ModuleId, PRIM_TYS, Pattern, PatternNode,
+    InstanceMethodDef, Kind, KindMetaId, Literal, ModuleId, Names, PRIM_TYS, Pattern, PatternNode,
     Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, TyConId, TypeExpr,
     VarRef, compiler_bool_constructor_types, compiler_bool_data_definition,
-    compiler_primitive_tycon_kinds, intern_string_literal, legacy_class_id, legacy_ctor_id,
-    legacy_tycon_id, prelude_list_cons_ctor_id, register_def_display_name,
-    register_symbol_display_name, tyvar_display_name,
+    compiler_primitive_tycon_kinds, prelude_list_cons_ctor_id, tyvar_display_name,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use solveig_check::data_kind_infer::{
@@ -40,15 +38,6 @@ fn resolver_trace_enabled() -> bool {
             !value.is_empty() && value != "0" && value != "false" && value != "off"
         }
         Err(_) => false,
-    }
-}
-
-fn resolve_literal(lit: &SurfaceLiteral) -> Literal {
-    match lit {
-        SurfaceLiteral::Int(value) => Literal::Int(*value),
-        SurfaceLiteral::Float(value) => Literal::Float(*value),
-        SurfaceLiteral::Char(value) => Literal::Char(*value),
-        SurfaceLiteral::Str(value) => Literal::Str(intern_string_literal(value)),
     }
 }
 
@@ -133,15 +122,17 @@ impl LocalResolverEnv {
 
 pub struct Resolver<'a> {
     session: &'a Session,
+    names: &'a mut Names,
     modules: &'a ModuleTable,
     errors: Vec<ResolveError>,
     resolutions: Vec<(FileSpan, DefId)>,
 }
 
 impl<'a> Resolver<'a> {
-    pub fn new(session: &'a Session, modules: &'a ModuleTable) -> Self {
+    pub fn new(session: &'a Session, names: &'a mut Names, modules: &'a ModuleTable) -> Self {
         Self {
             session,
+            names,
             modules,
             errors: Vec::new(),
             resolutions: Vec::new(),
@@ -156,9 +147,9 @@ impl<'a> Resolver<'a> {
     fn record_resolution(&mut self, span: FileSpan, def_id: DefId) {
         self.resolutions.push((span, def_id));
     }
-    fn qualified_def_name(&self, def_id: DefId) -> String {
+    fn qualified_def_name(&mut self, def_id: DefId) -> String {
         let name = self.modules.def_path(def_id).render(self.session);
-        register_def_display_name(def_id, &name);
+        self.names.register_def(def_id, &name);
         name
     }
     fn local_def_id(&self, cx: &ModuleContext, name: Symbol) -> DefId {
@@ -169,6 +160,14 @@ impl<'a> Resolver<'a> {
     }
     fn unresolved_name(&self, r: &NameRef) -> String {
         r.display(self.session)
+    }
+    fn resolve_literal(&mut self, lit: &SurfaceLiteral) -> Literal {
+        match lit {
+            SurfaceLiteral::Int(value) => Literal::Int(*value),
+            SurfaceLiteral::Float(value) => Literal::Float(*value),
+            SurfaceLiteral::Char(value) => Literal::Char(*value),
+            SurfaceLiteral::Str(value) => Literal::Str(self.names.intern_string_literal(value)),
+        }
     }
     fn imported_by_alias_or_module<'cx>(
         &self,

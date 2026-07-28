@@ -18,11 +18,9 @@ use solveig_ast::ast::{
     BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
     BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinDefinition,
     BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassTable, CtorId,
-    CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, PRIM_TYS, PrettyTables, Scheme,
+    CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, Names, PRIM_TYS, PrettyTables, Scheme,
     TermDefinition, TermExpr, TermExprNode, TyConId, TyConTable, TypeExpr, VarRef,
-    def_display_name, legacy_symbol_id, legacy_tyvar_id, prelude_list_tycon_id,
-    prelude_maybe_tycon_id, prelude_ordering_tycon_id, register_def_display_name,
-    register_symbol_display_name, symbol_display_name,
+    prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id, source_tyvar_id,
 };
 use solveig_base::utils::diagnostics::Diagnostic;
 use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap};
@@ -72,6 +70,7 @@ impl CompileOptions {
 
 #[derive(Clone, Debug)]
 struct CompilationArtifacts {
+    names: Names,
     checked: HashMap<ModuleId, CheckedModule>,
     module_files: HashMap<ModuleId, FileId>,
     source_files: Vec<SourceFile>,
@@ -80,6 +79,7 @@ struct CompilationArtifacts {
 }
 
 struct CheckedProject {
+    names: Names,
     modules: Vec<CheckedModule>,
     checked: HashMap<ModuleId, CheckedModule>,
     module_files: HashMap<ModuleId, FileId>,
@@ -102,6 +102,7 @@ impl CompilationArtifacts {
         let (tycon_table, class_table) = checked_project_tables(&project.modules);
 
         Self {
+            names: project.names.clone(),
             checked: project.checked.clone(),
             module_files: project.module_files.clone(),
             source_files: project.source_files.clone(),
@@ -219,6 +220,7 @@ impl Compilation {
         let checked_project = self.check_project(true)?;
         let (tycon_table, class_table) = checked_project_tables(&checked_project.modules);
         let pretty_tables = PrettyTables {
+            names: &checked_project.names,
             tycons: &tycon_table,
             classes: &class_table,
         };
@@ -227,7 +229,7 @@ impl Compilation {
         for module in &checked_project.modules {
             for (id, scheme) in &module.func_schemes {
                 schemes.insert(
-                    def_display_name(*id),
+                    checked_project.names.def_display_name(*id),
                     scheme.pretty_with_tables(pretty_tables),
                 );
             }
@@ -293,26 +295,27 @@ impl Compilation {
         entry_name: &str,
         options: CompileOptions,
     ) -> Result<PreparedRun, String> {
-        let checked_project = self.check_project(options.verify_core)?;
-        let mut merged = merge_checked_modules(checked_project.modules.clone())?;
+        let mut checked_project = self.check_project(options.verify_core)?;
+        let mut merged =
+            merge_checked_modules(checked_project.modules.clone(), &mut checked_project.names)?;
 
         let entry_fq = format!("main.{entry_name}");
-        let entry_is_io = entry_returns_io(&merged, &entry_fq);
+        let entry_is_io = entry_returns_io(&merged, &checked_project.names, &entry_fq);
         let show_entry = if entry_is_io {
             None
         } else {
-            add_show_entry_wrapper(&mut merged, &checked_project, &entry_fq)
+            add_show_entry_wrapper(&mut merged, &mut checked_project, &entry_fq)
         };
 
         if options.dump_evidence {
-            dump_solved_evidence(&merged);
+            dump_solved_evidence(&merged, &checked_project.names);
         }
 
         if options.verify_core {
             verify_lowering_core(&merged, &checked_project)?;
         }
 
-        let ir = lower_module(&merged);
+        let ir = lower_module(&merged, &checked_project.names);
         let cc = lower_to_closure_ir(&ir);
 
         if options.dump_bytecode {
@@ -357,8 +360,8 @@ fn checked_project_tables(modules: &[CheckedModule]) -> (TyConTable, ClassTable)
     (tycon_table, class_table)
 }
 
-fn entry_returns_io(module: &CheckedModule, entry_name: &str) -> bool {
-    entry_def(module, entry_name).is_some_and(|(_, scheme)| scheme_returns_io(scheme))
+fn entry_returns_io(module: &CheckedModule, names: &Names, entry_name: &str) -> bool {
+    entry_def(module, names, entry_name).is_some_and(|(_, scheme)| scheme_returns_io(scheme))
 }
 
 fn scheme_returns_io(scheme: &Scheme) -> bool {
@@ -374,10 +377,10 @@ const SHOW_ENTRY_SHORT_NAME: &str = "$solveig_show_main";
 
 fn add_show_entry_wrapper(
     module: &mut CheckedModule,
-    checked_project: &CheckedProject,
+    checked_project: &mut CheckedProject,
     entry_name: &str,
 ) -> Option<String> {
-    let (entry_id, _) = entry_def(module, entry_name)?;
+    let (entry_id, _) = entry_def(module, &checked_project.names, entry_name)?;
     let show_method_id = show_method_id(module)?;
     let string_ty = TypeExpr::make_con_id(PRIM_TYS.string);
     let expr = show_entry_expr(show_method_id, entry_id, entry_expr_span(module, entry_id));
@@ -386,17 +389,23 @@ fn add_show_entry_wrapper(
         .get(&entry_id.module)
         .copied()
         .unwrap_or(FileId(0));
-    let elaborated = match check_and_elab_expr_in_checked_module(module, file, &expr, &string_ty) {
+    let elaborated = match check_and_elab_expr_in_checked_module(
+        module,
+        file,
+        &expr,
+        &string_ty,
+        &checked_project.names,
+    ) {
         Ok(Some(expr)) => expr,
         Ok(None) | Err(_) => return None,
     };
     let id = DefId {
         module: entry_id.module,
-        name: legacy_symbol_id(SHOW_ENTRY_SHORT_NAME),
+        name: checked_project.names.symbol(SHOW_ENTRY_SHORT_NAME),
     };
     let scheme = Scheme::mono(string_ty);
 
-    register_def_display_name(id, SHOW_ENTRY_NAME);
+    checked_project.names.register_def(id, SHOW_ENTRY_NAME);
     module.func_schemes.insert(id, scheme.clone());
     module.func_defs.push(TermDefinition {
         id,
@@ -409,11 +418,15 @@ fn add_show_entry_wrapper(
     Some(SHOW_ENTRY_NAME.to_string())
 }
 
-fn entry_def<'a>(module: &'a CheckedModule, entry_name: &str) -> Option<(DefId, &'a Scheme)> {
+fn entry_def<'a>(
+    module: &'a CheckedModule,
+    names: &Names,
+    entry_name: &str,
+) -> Option<(DefId, &'a Scheme)> {
     module
         .func_schemes
         .iter()
-        .find(|(def_id, _)| def_display_name(**def_id) == entry_name)
+        .find(|(def_id, _)| names.def_display_name(**def_id) == entry_name)
         .map(|(def_id, scheme)| (*def_id, scheme))
 }
 
@@ -467,8 +480,8 @@ fn verify_lowering_core(
     merged: &CheckedModule,
     checked_project: &CheckedProject,
 ) -> Result<(), String> {
-    let lint_env =
-        CoreLintEnv::from_module(merged).with_files(checked_project.module_files.clone());
+    let lint_env = CoreLintEnv::from_module(merged, &checked_project.names)
+        .with_files(checked_project.module_files.clone());
     let diagnostics = lint_checked_module(merged, &lint_env);
 
     if diagnostics.is_empty() {
@@ -511,6 +524,7 @@ fn hover_in_artifacts(
 ) -> Option<String> {
     let file_id = source_file_id(artifacts, file)?;
     let pretty_tables = PrettyTables {
+        names: &artifacts.names,
         tycons: &artifacts.tycon_table,
         classes: &artifacts.class_table,
     };
@@ -623,8 +637,9 @@ fn span_len(span: &Range<usize>) -> usize {
     span.end.saturating_sub(span.start)
 }
 
-fn dump_solved_evidence(module: &CheckedModule) {
+fn dump_solved_evidence(module: &CheckedModule, names: &Names) {
     let tables = PrettyTables {
+        names,
         tycons: &module.tycon_table,
         classes: &module.class_table,
     };
@@ -861,14 +876,16 @@ fn check_project_modules(project_root: &Path, verify_core: bool) -> Result<Check
     };
     let parsed = parse_project(&project);
 
-    let mut state = match FrontendState::new(&session, &project, &parsed, &order, verify_core) {
-        Ok(state) => state,
-        Err(errors) => {
-            push_resolve_errors(&session, Some(&project.module_table), errors);
-            emit_session_diagnostics(&session)?;
-            return Err("resolve error".to_string());
-        }
-    };
+    let mut names = Names::new();
+    let mut state =
+        match FrontendState::new(&session, &mut names, &project, &parsed, &order, verify_core) {
+            Ok(state) => state,
+            Err(errors) => {
+                push_resolve_errors(&session, Some(&project.module_table), errors);
+                emit_session_diagnostics(&session)?;
+                return Err("resolve error".to_string());
+            }
+        };
     state.check_all(&order)?;
 
     if !session.diagnostics().is_empty() {
@@ -901,6 +918,7 @@ fn push_resolve_errors(
 
 struct FrontendState<'a> {
     session: &'a Session,
+    names: &'a mut Names,
     project: &'a Project,
     parsed: &'a ParsedProject,
     builtins: Rc<BuiltinApi>,
@@ -935,19 +953,24 @@ impl FrontendPhase {
     }
 }
 
-fn driver_builtin_api(session: &Session, modules: &ModuleTable) -> BuiltinApi {
+fn driver_builtin_api(session: &Session, names: &mut Names, modules: &ModuleTable) -> BuiltinApi {
     let mut api = compiler_builtin_api(session, modules);
-    seed_primitive_builtin_terms(session, modules, &mut api);
+    seed_primitive_builtin_terms(session, names, modules, &mut api);
     api
 }
 
-fn seed_primitive_builtin_terms(session: &Session, modules: &ModuleTable, api: &mut BuiltinApi) {
+fn seed_primitive_builtin_terms(
+    session: &Session,
+    names: &mut Names,
+    modules: &ModuleTable,
+    api: &mut BuiltinApi,
+) {
     let prim_module = compiler_prelude_prim_module(session);
     let Some(module_id) = modules.id(&prim_module) else {
         return;
     };
 
-    for spec in primitive_builtin_specs() {
+    for spec in primitive_builtin_specs(names) {
         let symbol = session.intern(spec.short_name);
         let id = DefId {
             module: module_id,
@@ -955,8 +978,8 @@ fn seed_primitive_builtin_terms(session: &Session, modules: &ModuleTable, api: &
         };
         let full_name = format!("{COMPILER_PRELUDE_PRIM_MODULE}.{}", spec.short_name);
 
-        register_symbol_display_name(symbol, spec.short_name);
-        register_def_display_name(id, &full_name);
+        names.register_symbol(symbol, spec.short_name);
+        names.register_def(id, &full_name);
 
         api.builtin_defs.push(BuiltinDefinition {
             id,
@@ -976,16 +999,16 @@ struct PrimitiveBuiltinSpec {
     scheme: Scheme,
 }
 
-fn primitive_builtin_specs() -> Vec<PrimitiveBuiltinSpec> {
+fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let int = TypeExpr::make_con_id(PRIM_TYS.int);
     let float = TypeExpr::make_con_id(PRIM_TYS.float);
     let char_ty = TypeExpr::make_con_id(PRIM_TYS.char);
     let string = TypeExpr::make_con_id(PRIM_TYS.string);
     let bool_ty = TypeExpr::make_con_id(PRIM_TYS.bool);
-    let ordering = TypeExpr::make_con_id(prelude_ordering_tycon_id());
-    let list = TypeExpr::make_con_id(prelude_list_tycon_id());
+    let ordering = TypeExpr::make_con_id(prelude_ordering_tycon_id(names));
+    let list = TypeExpr::make_con_id(prelude_list_tycon_id(names));
     let maybe_char = TypeExpr::make_app(
-        TypeExpr::make_con_id(prelude_maybe_tycon_id()),
+        TypeExpr::make_con_id(prelude_maybe_tycon_id(names)),
         char_ty.clone(),
     );
     let char_list = TypeExpr::make_app(list.clone(), char_ty.clone());
@@ -1325,7 +1348,7 @@ fn poly(vars: &[&str], ty: TypeExpr) -> Scheme {
     Scheme {
         quantifiers: vars
             .iter()
-            .map(|name| (legacy_tyvar_id(name), Kind::Star))
+            .map(|name| (source_tyvar_id(name), Kind::Star))
             .collect(),
         predicates: Vec::new(),
         ty,
@@ -1339,6 +1362,7 @@ fn io_of(value: TypeExpr) -> TypeExpr {
 impl<'a> FrontendState<'a> {
     fn new(
         session: &'a Session,
+        names: &'a mut Names,
         project: &'a Project,
         parsed: &'a ParsedProject,
         order: &[ModuleName],
@@ -1346,7 +1370,7 @@ impl<'a> FrontendState<'a> {
     ) -> Result<Self, Vec<ResolveError>> {
         let mut apis = HashMap::new();
         let mut errors = Vec::new();
-        let builtins = Rc::new(driver_builtin_api(session, &project.module_table));
+        let builtins = Rc::new(driver_builtin_api(session, names, &project.module_table));
 
         for module_name in order {
             let module_id = project
@@ -1374,6 +1398,7 @@ impl<'a> FrontendState<'a> {
 
         Ok(Self {
             session,
+            names,
             project,
             parsed,
             builtins,
@@ -1390,6 +1415,7 @@ impl<'a> FrontendState<'a> {
 
     fn into_checked_project(self, source_files: Vec<SourceFile>) -> CheckedProject {
         CheckedProject {
+            names: self.names.clone(),
             modules: self.checked_modules,
             checked: self.checked,
             module_files: self.module_files,
@@ -1430,6 +1456,7 @@ impl<'a> FrontendState<'a> {
                 .expect("ICE: checked module order referenced unknown module");
             let typed_api = Rc::new(build_typed_module_api(
                 self.session,
+                self.names,
                 module_id,
                 module_name,
                 &checked,
@@ -1498,7 +1525,7 @@ impl<'a> FrontendState<'a> {
             class_param_kind_ids: self.collect_imported_class_param_kind_ids(&imports),
         };
 
-        let resolver = Resolver::new(self.session, &self.project.module_table);
+        let resolver = Resolver::new(self.session, self.names, &self.project.module_table);
         let resolved_info =
             match resolver.resolve_module(module_name, parsed, &cx, &resolver_imports) {
                 Ok(resolved) => resolved,
@@ -1528,7 +1555,7 @@ impl<'a> FrontendState<'a> {
             class_table: imported_class_table,
         } = collect_imported_type_info(&imported_typed);
 
-        let mut check_env = TypeCheckEnv::from_module(&resolved);
+        let mut check_env = TypeCheckEnv::from_module(&resolved, self.names);
 
         check_env.func_schemes.extend(func_schemes);
         check_env.tycon_kinds.extend(tycon_kinds);
@@ -1718,7 +1745,10 @@ fn find_entry_file(project_root: &Path) -> Result<PathBuf, String> {
     }
 }
 
-fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, String> {
+fn merge_checked_modules(
+    mods: Vec<CheckedModule>,
+    names: &mut Names,
+) -> Result<CheckedModule, String> {
     let mut data_defs = Vec::new();
     let mut class_defs = Vec::new();
     let mut instance_defs = Vec::new();
@@ -1747,13 +1777,19 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
         class_defs.extend(module_class_defs);
         instance_defs.extend(module_instance_defs);
         builtin_defs.extend(module_builtin_defs);
-        extend_unique_tycon(&mut tycon_kinds, module_tycon_kinds, &module_tycon_table)?;
+        extend_unique_tycon(
+            &mut tycon_kinds,
+            module_tycon_kinds,
+            &module_tycon_table,
+            names,
+        )?;
         extend_unique_ctor(
             &mut constructor_types,
             module_constructor_types,
             &module_ctor_table,
+            names,
         )?;
-        extend_unique_def(&mut func_schemes, module_func_schemes, "function")?;
+        extend_unique_def(&mut func_schemes, module_func_schemes, "function", names)?;
         func_defs.extend(module_func_defs);
     }
 
@@ -1770,7 +1806,7 @@ fn merge_checked_modules(mods: Vec<CheckedModule>) -> Result<CheckedModule, Stri
         func_schemes,
         func_defs,
     };
-    module.rebuild_identity_tables();
+    module.rebuild_identity_tables(names);
 
     Ok(module)
 }
@@ -1779,10 +1815,11 @@ fn extend_unique_def<T>(
     dst: &mut HashMap<DefId, T>,
     src: HashMap<DefId, T>,
     label: &str,
+    names: &Names,
 ) -> Result<(), String> {
     for (k, v) in src {
         if dst.insert(k, v).is_some() {
-            return Err(format!("duplicate {label} {}", def_display_name(k)));
+            return Err(format!("duplicate {label} {}", names.def_display_name(k)));
         }
     }
     Ok(())
@@ -1791,13 +1828,14 @@ fn extend_unique_def<T>(
 fn extend_unique_tycon(
     dst: &mut HashMap<TyConId, solveig_ast::ast::Kind>,
     src: HashMap<TyConId, solveig_ast::ast::Kind>,
-    names: &TyConTable,
+    tycons: &TyConTable,
+    names: &Names,
 ) -> Result<(), String> {
     for (k, v) in src {
         if dst.insert(k, v).is_some() {
             return Err(format!(
                 "duplicate type constructor {}",
-                tycon_name_for_error(k, names)
+                tycon_name_for_error(k, tycons, names)
             ));
         }
     }
@@ -1807,29 +1845,30 @@ fn extend_unique_tycon(
 fn extend_unique_ctor(
     dst: &mut HashMap<CtorId, TypeExpr>,
     src: HashMap<CtorId, TypeExpr>,
-    names: &CtorTable,
+    ctors: &CtorTable,
+    names: &Names,
 ) -> Result<(), String> {
     for (k, v) in src {
         if dst.insert(k, v).is_some() {
             return Err(format!(
                 "duplicate constructor {}",
-                ctor_name_for_error(k, names)
+                ctor_name_for_error(k, ctors, names)
             ));
         }
     }
     Ok(())
 }
 
-fn tycon_name_for_error(id: TyConId, names: &TyConTable) -> String {
-    names
+fn tycon_name_for_error(id: TyConId, tycons: &TyConTable, names: &Names) -> String {
+    tycons
         .get(id)
-        .map(|info| symbol_display_name(info.name))
+        .map(|info| names.symbol_display_name(info.name))
         .unwrap_or_else(|| format!("T{}", id.0))
 }
 
-fn ctor_name_for_error(id: CtorId, names: &CtorTable) -> String {
-    names
+fn ctor_name_for_error(id: CtorId, ctors: &CtorTable, names: &Names) -> String {
+    ctors
         .get(id)
-        .map(|info| symbol_display_name(info.name))
+        .map(|info| names.symbol_display_name(info.name))
         .unwrap_or_else(|| format!("C{}", id.0))
 }

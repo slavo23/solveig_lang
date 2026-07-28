@@ -9,9 +9,12 @@ impl<'a> Resolver<'a> {
                     .type_ids
                     .get(&def_id)
                     .copied()
-                    .unwrap_or_else(|| legacy_tycon_id(&qualified_name))
+                    .unwrap_or_else(|| self.names.tycon_id(&qualified_name))
             }
-            None => legacy_tycon_id(&self.unresolved_name(r)),
+            None => {
+                let unresolved = self.unresolved_name(r);
+                self.names.tycon_id(&unresolved)
+            }
         }
     }
 

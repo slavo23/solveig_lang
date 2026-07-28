@@ -11,10 +11,8 @@ use solveig_ast::ast::{
     BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR,
     BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_STRING_APPEND,
     BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
-    BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinId, CtorId,
-    CtorRuntimeInfo, prelude_list_cons_ctor_id, prelude_list_nil_ctor_id,
-    prelude_maybe_just_ctor_id, prelude_maybe_nothing_ctor_id, prelude_ordering_eq_ctor_id,
-    prelude_ordering_gt_ctor_id, prelude_ordering_lt_ctor_id,
+    BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo,
+    CtorRuntimeRole,
 };
 
 use crate::heap::{Heap, HeapObject, IoAction};
@@ -67,25 +65,29 @@ impl<'a> VmCtx<'a> {
         self.heap.alloc(HeapObject::IoAction(action))
     }
 
-    fn ctor_info(&self, ctor: CtorId, builtin: &str) -> Result<&CtorRuntimeInfo, RuntimeError> {
+    fn ctor_info(
+        &self,
+        role: CtorRuntimeRole,
+        builtin: &str,
+    ) -> Result<&CtorRuntimeInfo, RuntimeError> {
         self.constructors
             .iter()
-            .find(|info| info.ctor == ctor)
+            .find(|info| info.role == role)
             .ok_or_else(|| {
                 RuntimeError::builtin(format!(
-                    "{builtin} runtime constructor metadata missing for CtorId {:?}",
-                    ctor
+                    "{builtin} runtime constructor metadata missing for role {:?}",
+                    role
                 ))
             })
     }
 
     fn ctor_tag_with_arity(
         &self,
-        ctor: CtorId,
+        role: CtorRuntimeRole,
         arity: u16,
         builtin: &str,
     ) -> Result<u16, RuntimeError> {
-        let info = self.ctor_info(ctor, builtin)?;
+        let info = self.ctor_info(role, builtin)?;
         if info.arity != arity {
             return Err(RuntimeError::builtin(format!(
                 "{builtin} runtime constructor `{}` expected arity {}, got {}",
@@ -95,8 +97,8 @@ impl<'a> VmCtx<'a> {
         Ok(info.tag)
     }
 
-    fn nullary_ctor(&self, ctor: CtorId, builtin: &str) -> Result<Value, RuntimeError> {
-        let tag = self.ctor_tag_with_arity(ctor, 0, builtin)?;
+    fn nullary_ctor(&self, role: CtorRuntimeRole, builtin: &str) -> Result<Value, RuntimeError> {
+        let tag = self.ctor_tag_with_arity(role, 0, builtin)?;
         self.nullary_ctors.try_get(tag).ok_or_else(|| {
             RuntimeError::builtin(format!(
                 "{builtin} runtime nullary constructor cache missing tag {tag}"
@@ -106,11 +108,11 @@ impl<'a> VmCtx<'a> {
 
     fn alloc_data1_ctor(
         &mut self,
-        ctor: CtorId,
+        role: CtorRuntimeRole,
         field: Value,
         builtin: &str,
     ) -> Result<Value, RuntimeError> {
-        let tag = self.ctor_tag_with_arity(ctor, 1, builtin)?;
+        let tag = self.ctor_tag_with_arity(role, 1, builtin)?;
         Ok(self.heap.alloc(HeapObject::Data1 { tag, field }))
     }
 
@@ -119,8 +121,8 @@ impl<'a> VmCtx<'a> {
         values: &[Value],
         builtin: &str,
     ) -> Result<Value, RuntimeError> {
-        let cons_tag = self.ctor_tag_with_arity(prelude_list_cons_ctor_id(), 2, builtin)?;
-        let mut result = self.nullary_ctor(prelude_list_nil_ctor_id(), builtin)?;
+        let cons_tag = self.ctor_tag_with_arity(CtorRuntimeRole::PreludeListCons, 2, builtin)?;
+        let mut result = self.nullary_ctor(CtorRuntimeRole::PreludeListNil, builtin)?;
 
         for value in values.iter().rev() {
             result = self.heap.alloc(HeapObject::Data2 {
@@ -399,16 +401,16 @@ fn string_char_at(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeE
     let value = expect_string_owned(ctx, args, 0, "stringCharAt")?;
     let index = expect_int(args, 1, "stringCharAt")?;
     let Some(index) = usize::try_from(index).ok() else {
-        return ctx.nullary_ctor(prelude_maybe_nothing_ctor_id(), "stringCharAt");
+        return ctx.nullary_ctor(CtorRuntimeRole::PreludeMaybeNothing, "stringCharAt");
     };
 
     match value.chars().nth(index) {
         Some(ch) => ctx.alloc_data1_ctor(
-            prelude_maybe_just_ctor_id(),
+            CtorRuntimeRole::PreludeMaybeJust,
             Value::Char(ch),
             "stringCharAt",
         ),
-        None => ctx.nullary_ctor(prelude_maybe_nothing_ctor_id(), "stringCharAt"),
+        None => ctx.nullary_ctor(CtorRuntimeRole::PreludeMaybeNothing, "stringCharAt"),
     }
 }
 
@@ -515,9 +517,9 @@ fn ordering_value(
     builtin: &str,
 ) -> Result<Value, RuntimeError> {
     let ctor = match ordering {
-        Ordering::Less => prelude_ordering_lt_ctor_id(),
-        Ordering::Equal => prelude_ordering_eq_ctor_id(),
-        Ordering::Greater => prelude_ordering_gt_ctor_id(),
+        Ordering::Less => CtorRuntimeRole::PreludeOrderingLt,
+        Ordering::Equal => CtorRuntimeRole::PreludeOrderingEq,
+        Ordering::Greater => CtorRuntimeRole::PreludeOrderingGt,
     };
     ctx.nullary_ctor(ctor, builtin)
 }
@@ -605,8 +607,8 @@ fn expect_char_list(
     mut current: Value,
     builtin: &str,
 ) -> Result<String, RuntimeError> {
-    let nil_tag = ctx.ctor_tag_with_arity(prelude_list_nil_ctor_id(), 0, builtin)?;
-    let cons_tag = ctx.ctor_tag_with_arity(prelude_list_cons_ctor_id(), 2, builtin)?;
+    let nil_tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeListNil, 0, builtin)?;
+    let cons_tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeListCons, 2, builtin)?;
     let mut out = String::new();
 
     loop {

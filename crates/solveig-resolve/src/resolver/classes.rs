@@ -200,15 +200,13 @@ impl<'a> Resolver<'a> {
             local,
         );
 
-        let resolved = Predicate::legacy(
-            resolved_class_name,
-            pred
-                .0
-                .args
-                .iter()
-                .map(|arg| self.resolve_surface_type_in_module(arg, cx, local))
-                .collect(),
-        );
+        let args = pred
+            .0
+            .args
+            .iter()
+            .map(|arg| self.resolve_surface_type_in_module(arg, cx, local))
+            .collect();
+        let resolved = Predicate::named(self.names, resolved_class_name, args);
 
         self.canonicalize_predicate(resolved, cx, local)
     }
@@ -242,14 +240,15 @@ impl<'a> Resolver<'a> {
 
                     let class_def_id = self.local_def_id(cx, name.0);
                     let class_name = self.qualified_def_name(class_def_id);
-                    let class_id = legacy_class_id(&class_name);
+                    let class_id = self.names.class_id(&class_name);
 
                     let class_params = ty_params
                         .iter()
                         .map(|param| (self.symbol_text(param.0).to_string(), Kind::Star))
                         .collect::<Vec<_>>();
 
-                    let class_head_pred = Predicate::legacy(
+                    let class_head_pred = Predicate::named(
+                        self.names,
                         class_name.clone(),
                         ty_params
                             .iter()
@@ -476,12 +475,11 @@ impl<'a> Resolver<'a> {
                 .first()
                 .and_then(|arg| self.instance_type_head_module(arg, cx));
 
-            let raw_head = Predicate::legacy(
-                resolved_class_name,
-                args.iter()
-                    .map(|arg| self.resolve_surface_type_in_module(arg, cx, local))
-                    .collect(),
-            );
+            let resolved_args = args
+                .iter()
+                .map(|arg| self.resolve_surface_type_in_module(arg, cx, local))
+                .collect();
+            let raw_head = Predicate::named(self.names, resolved_class_name, resolved_args);
 
             let raw_head = self.canonicalize_predicate(raw_head, cx, local);
 

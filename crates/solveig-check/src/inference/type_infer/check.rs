@@ -18,7 +18,7 @@ impl TypeChecker {
                 TermExpr::TyAbs(param, _kind, body),
                 TypeExpr::TyForAll(binders, preds, body_type),
             ) if let Some((quantifier, quant_kind)) = binders.first() => {
-                let param_id = legacy_tyvar_id(param);
+                let param_id = source_tyvar_id(param);
                 let ty_arg = TypeExpr::TyVar(param_id);
                 let subst = HashMap::from([(*quantifier, ty_arg.clone())]);
                 let substituted_body_type = TypeExpr::make_forall_group(
@@ -564,8 +564,9 @@ pub fn check_and_elab_expr_in_checked_module(
     file: FileId,
     expr: &TermExprNode<Span>,
     expected_type: &TypeExpr,
+    names: &Names,
 ) -> Result<Option<TermExprNode<TcMetadata, Span>>, TypeError> {
-    let env = TypeCheckEnv::from_checked_module(module);
+    let env = TypeCheckEnv::from_checked_module(module, names);
     let mut checker = TypeChecker::with_env(&env, file);
     let (_ctx, elaborated) = checker.solve_checking(Context::new(), expr, expected_type)?;
     let unresolved = checker.unresolved_wanteds();

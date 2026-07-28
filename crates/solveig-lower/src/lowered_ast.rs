@@ -62,6 +62,7 @@ pub struct IRProgram {
     pub globals: Vec<IRGlobalDef>,
     pub constructor_arities: Vec<CtorRuntimeInfo>,
     pub string_constants: Vec<String>,
+    pub string_literals: Vec<String>,
 }
 
 impl IRProgram {

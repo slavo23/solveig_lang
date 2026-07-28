@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use solveig_ast::ast::{
-    Kind, KindMetaId, TyConId, TyVarId, TypeExpr, legacy_tyvar_id, tyvar_display_name,
+    Kind, KindMetaId, TyConId, TyVarId, TypeExpr, source_tyvar_id, tyvar_display_name,
 };
 use solveig_base::FileSpan;
 
@@ -411,7 +411,7 @@ impl DataKindInferencer {
 
             let var_env: HashMap<TyVarId, Kind> = param_metas
                 .iter()
-                .map(|(n, m)| (legacy_tyvar_id(n), self.apply_kind(m)))
+                .map(|(n, m)| (source_tyvar_id(n), self.apply_kind(m)))
                 .collect();
 
             let mut ret_ty = TypeExpr::TyCon(def.id);

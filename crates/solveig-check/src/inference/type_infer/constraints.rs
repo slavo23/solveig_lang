@@ -182,7 +182,7 @@ impl TypeChecker {
             .params
             .iter()
             .zip(given.args.iter())
-            .map(|((param_name, _), arg)| (legacy_tyvar_id(param_name), arg.clone()))
+            .map(|((param_name, _), arg)| (source_tyvar_id(param_name), arg.clone()))
             .collect::<HashMap<_, _>>();
 
         class_def
@@ -201,7 +201,7 @@ impl TypeChecker {
             .iter()
             .zip(instance_head.args.iter())
             .map(|((param_name, _), instance_arg)| {
-                (legacy_tyvar_id(param_name), instance_arg.clone())
+                (source_tyvar_id(param_name), instance_arg.clone())
             })
             .collect::<HashMap<_, _>>();
 
@@ -223,7 +223,7 @@ impl TypeChecker {
         for ((param_name, _), instance_arg) in
             class_def.params.iter().zip(instance_head.args.iter())
         {
-            subst.insert(legacy_tyvar_id(param_name), instance_arg.clone());
+            subst.insert(source_tyvar_id(param_name), instance_arg.clone());
         }
 
         let specialized = Self::substitute_scheme(method_scheme, &subst);
@@ -235,9 +235,9 @@ impl TypeChecker {
                 .iter()
                 .map(|(name, _)| {
                     subst
-                        .get(&legacy_tyvar_id(name))
+                        .get(&source_tyvar_id(name))
                         .cloned()
-                        .unwrap_or_else(|| TypeExpr::TyVar(legacy_tyvar_id(name)))
+                        .unwrap_or_else(|| TypeExpr::TyVar(source_tyvar_id(name)))
                 })
                 .collect(),
         };
@@ -583,7 +583,7 @@ mod entailment_tests {
     }
 
     fn var(name: &str) -> TypeExpr {
-        TypeExpr::TyVar(legacy_tyvar_id(name))
+        TypeExpr::TyVar(source_tyvar_id(name))
     }
 
     fn app(func: TypeExpr, arg: TypeExpr) -> TypeExpr {
@@ -651,6 +651,7 @@ mod entailment_tests {
         ];
 
         let env = TypeCheckEnv {
+            names: Names::new(),
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
             class_defs: HashMap::from([
@@ -847,7 +848,7 @@ mod entailment_tests {
     #[test]
     fn subsumption_context_wanteds_wrap_checked_expression() {
         let mut checker = tiny_checker();
-        let local_symbol = solveig_ast::ast::legacy_symbol_id("localQualified");
+        let local_symbol = checker.names.symbol("localQualified");
         let local_name = "localQualified".to_string();
         let expr = TermExprNode::new(TermExpr::Var(VarRef::Local(local_symbol)), 0..1);
         let qualified_type =

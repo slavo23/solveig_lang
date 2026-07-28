@@ -100,6 +100,7 @@ pub struct CCProgram {
     pub functions: Vec<CCFunction>,
     pub constructor_arities: Vec<CtorRuntimeInfo>,
     pub string_constants: Vec<String>,
+    pub string_literals: Vec<String>,
 }
 
 impl CCProgram {

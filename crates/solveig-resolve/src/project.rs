@@ -7,7 +7,7 @@ use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{
     BuiltinDefinition, ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Kind,
-    ModuleId, PRIM_TYS, TyConId, TyConTable, TypeExpr, symbol_display_name,
+    ModuleId, Names, PRIM_TYS, TyConId, TyConTable, TypeExpr,
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
@@ -565,10 +565,10 @@ impl TypedModuleApi {
         out.instance_defs.extend(self.instance_defs.clone());
     }
 
-    pub fn type_name(&self, sym: DefId) -> Option<String> {
+    pub fn type_name(&self, names: &Names, sym: DefId) -> Option<String> {
         let id = self.type_ids.get(&sym)?;
         let info = self.tycon_table.get(*id)?;
-        Some(symbol_display_name(info.name))
+        Some(names.symbol_display_name(info.name))
     }
 }
 
@@ -1079,6 +1079,7 @@ pub fn build_module_api(
 
 pub fn build_typed_module_api(
     session: &Session,
+    names: &Names,
     module_id: ModuleId,
     module_name: &ModuleName,
     checked: &CheckedModule,
@@ -1100,7 +1101,7 @@ pub fn build_typed_module_api(
         let Some(info) = checked.tycon_table.get(*id) else {
             continue;
         };
-        let name = symbol_display_name(info.name);
+        let name = names.symbol_display_name(info.name);
         if let Some(stripped) = name.strip_prefix(&prefix) {
             let def_id = local_def_id(module_id, session.intern(stripped));
             api.type_kinds.insert(def_id, kind.clone());
@@ -1112,7 +1113,7 @@ pub fn build_typed_module_api(
         let Some(info) = checked.ctor_table.get(*id) else {
             continue;
         };
-        let name = symbol_display_name(info.name);
+        let name = names.symbol_display_name(info.name);
         if let Some(stripped) = name.strip_prefix(&prefix) {
             let def_id = local_def_id(module_id, session.intern(stripped));
             api.constructor_types.insert(def_id, ty.clone());
@@ -1142,8 +1143,8 @@ mod tests {
     use std::collections::HashMap;
 
     use solveig_ast::ast::{
-        ConstructorDef, CtorInfo, DataDefinition, ResolvedModule, TyConDefinition, TyConId,
-        TyConInfo, legacy_symbol_id,
+        ConstructorDef, CtorInfo, DataDefinition, Names, ResolvedModule, TyConDefinition, TyConId,
+        TyConInfo,
     };
 
     use super::*;
@@ -1173,6 +1174,7 @@ mod tests {
         let session = Session::new();
         let module_id = ModuleId(7);
         let module_name = ModuleName(vec![session.intern("sample")]);
+        let mut names = Names::new();
         let tycon_id = TyConId(42);
         let ctor_id = CtorId(43);
         let type_name = "sample.Widget";
@@ -1198,8 +1200,8 @@ mod tests {
         tycon_table.insert_with_id(
             tycon_id,
             TyConInfo {
-                name: legacy_symbol_id(type_name),
-                short_name: legacy_symbol_id("Widget"),
+                name: names.symbol(type_name),
+                short_name: names.symbol("Widget"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Data(data_def.clone()),
             },
@@ -1209,8 +1211,8 @@ mod tests {
         ctor_table.insert_with_id(
             ctor_id,
             CtorInfo {
-                name: legacy_symbol_id(ctor_name),
-                short_name: legacy_symbol_id("MkWidget"),
+                name: names.symbol(ctor_name),
+                short_name: names.symbol("MkWidget"),
                 tycon: tycon_id,
                 fields: vec![TypeExpr::TyUnit],
                 full_type: ctor_ty.clone(),
@@ -1232,13 +1234,13 @@ mod tests {
             func_defs: Vec::new(),
         };
 
-        let api = build_typed_module_api(&session, module_id, &module_name, &checked);
+        let api = build_typed_module_api(&session, &names, module_id, &module_name, &checked);
         let type_def = super::local_def_id(module_id, session.intern("Widget"));
         let ctor_def = super::local_def_id(module_id, session.intern("MkWidget"));
 
         assert_eq!(api.type_ids.get(&type_def), Some(&tycon_id));
         assert_eq!(api.constructor_ids.get(&ctor_def), Some(&ctor_id));
-        assert_eq!(api.type_name(type_def).as_deref(), Some(type_name));
+        assert_eq!(api.type_name(&names, type_def).as_deref(), Some(type_name));
 
         let mut tycon_kinds = HashMap::new();
         let mut constructor_types = HashMap::new();
@@ -1261,17 +1263,16 @@ mod tests {
 
         api.extend_display_maps(&mut maps);
 
+        let name_minted_tycon_id = names.tycon_id(type_name);
+        let name_minted_ctor_id = names.ctor_id(ctor_name);
+
         assert_eq!(tycon_kinds.get(&tycon_id), Some(&Kind::Star));
         assert_eq!(constructor_types.get(&ctor_id), Some(&ctor_ty));
-        assert!(
-            tycon_kinds
-                .keys()
-                .all(|id| *id != solveig_ast::ast::legacy_tycon_id(type_name))
-        );
+        assert!(tycon_kinds.keys().all(|id| *id != name_minted_tycon_id));
         assert!(
             constructor_types
                 .keys()
-                .all(|id| *id != solveig_ast::ast::legacy_ctor_id(ctor_name))
+                .all(|id| *id != name_minted_ctor_id)
         );
     }
 }

@@ -21,7 +21,6 @@ pub fn lower_to_closure_ir(program: &IRProgram) -> CCProgram {
 }
 
 struct ClosureLowerer {
-    global_indices: HashMap<String, usize>,
     known_global_funcs: Vec<Option<KnownGlobalFunc>>,
     functions: Vec<Option<CCFunction>>,
     next_func_id: usize,
@@ -30,13 +29,6 @@ struct ClosureLowerer {
 
 impl ClosureLowerer {
     fn new(program: &IRProgram) -> Self {
-        let global_indices = program
-            .globals
-            .iter()
-            .enumerate()
-            .map(|(idx, global)| (global.name.clone(), idx))
-            .collect::<HashMap<_, _>>();
-
         let mut known_global_funcs = vec![None; program.globals.len()];
         let mut functions = Vec::new();
         let mut next_func_id = 0;
@@ -54,7 +46,6 @@ impl ClosureLowerer {
         }
 
         Self {
-            global_indices,
             known_global_funcs,
             functions,
             next_func_id,
@@ -84,6 +75,7 @@ impl ClosureLowerer {
             functions,
             constructor_arities: program.constructor_arities.clone(),
             string_constants: program.string_constants.clone(),
+            string_literals: program.string_literals.clone(),
         }
     }
 

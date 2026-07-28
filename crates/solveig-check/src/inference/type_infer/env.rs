@@ -42,6 +42,7 @@ fn file_span(file: FileId, span: Span) -> FileSpan {
 
 pub struct TypeChecker {
     file: FileId,
+    names: Names,
     counter: u32,
     constructor_types: HashMap<CtorId, TypeExpr>,
     func_schemes: HashMap<DefId, Scheme>,
@@ -69,6 +70,7 @@ impl TypeChecker {
     pub fn new() -> Self {
         Self {
             file: FileId(0),
+            names: Names::new(),
             counter: 0,
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
@@ -89,6 +91,7 @@ impl TypeChecker {
     pub fn with_env(env: &TypeCheckEnv, file: FileId) -> Self {
         Self {
             file,
+            names: env.names.clone(),
             counter: 0,
             constructor_types: env.constructor_types.clone(),
             func_schemes: env.func_schemes.clone(),
@@ -106,8 +109,8 @@ impl TypeChecker {
             warnings: Vec::new(),
         }
     }
-    pub fn with_module_context(module: &ResolvedModule<Span>, file: FileId) -> Self {
-        let env = TypeCheckEnv::from_module(module);
+    pub fn with_module_context(module: &ResolvedModule<Span>, file: FileId, names: &Names) -> Self {
+        let env = TypeCheckEnv::from_module(module, names);
         Self::with_env(&env, file)
     }
     fn get_file_span(&self, span: Span) -> FileSpan {
@@ -115,6 +118,7 @@ impl TypeChecker {
     }
     fn pretty_tables(&self) -> PrettyTables<'_> {
         PrettyTables {
+            names: &self.names,
             tycons: &self.tycon_table,
             classes: &self.class_table,
         }
@@ -131,13 +135,13 @@ impl TypeChecker {
     fn display_class_name(&self, id: ClassId) -> String {
         self.class_table
             .get(id)
-            .map(|info| symbol_display_name(info.name))
+            .map(|info| self.names.symbol_display_name(info.name))
             .unwrap_or_else(|| panic!("ICE: type checker class table missing ClassId {id:?}"))
     }
     fn display_ctor_name(&self, id: CtorId) -> String {
         self.ctor_table
             .get(id)
-            .map(|info| symbol_display_name(info.name))
+            .map(|info| self.names.symbol_display_name(info.name))
             .unwrap_or_else(|| panic!("ICE: type checker constructor table missing CtorId {id:?}"))
     }
     fn fresh_id(&mut self) -> u32 {
@@ -158,7 +162,7 @@ impl TypeChecker {
     }
     fn fresh_universal(&mut self, base: &str) -> (TyVarId, String) {
         let id = self.fresh_tyvar_id();
-        (id, legacy_tyvar_name(base, id))
+        (id, generated_tyvar_name(base, id))
     }
     fn universal_entry(id: TyVarId, kind: Kind) -> ContextEntry {
         ContextEntry::UniVar {
@@ -185,7 +189,7 @@ impl TypeChecker {
         let mut quantifiers = class_def
             .params
             .iter()
-            .map(|(name, kind)| (legacy_tyvar_id(name), kind.clone()))
+            .map(|(name, kind)| (source_tyvar_id(name), kind.clone()))
             .collect::<Vec<_>>();
 
         for (id, kind) in &method.scheme.quantifiers {
@@ -220,6 +224,7 @@ pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
 
 #[derive(Clone, Debug)]
 pub struct TypeCheckEnv {
+    pub names: Names,
     pub constructor_types: HashMap<CtorId, TypeExpr>,
     pub func_schemes: HashMap<DefId, Scheme>,
     pub class_defs: HashMap<ClassId, ClassDefinition>,
@@ -231,8 +236,9 @@ pub struct TypeCheckEnv {
 }
 
 impl TypeCheckEnv {
-    pub fn from_module(module: &ResolvedModule<Span>) -> Self {
+    pub fn from_module(module: &ResolvedModule<Span>, names: &Names) -> Self {
         Self {
+            names: names.clone(),
             constructor_types: module.constructor_types.clone(),
             func_schemes: module.func_schemes.clone(),
             class_defs: module
@@ -248,11 +254,12 @@ impl TypeCheckEnv {
         }
     }
 
-    pub fn from_checked_module(module: &CheckedModule) -> Self {
+    pub fn from_checked_module(module: &CheckedModule, names: &Names) -> Self {
         let mut expr_anno = |metadata: TcMetadata| metadata.span;
         let mut pattern_anno = |span: Span| span;
 
         Self {
+            names: names.clone(),
             constructor_types: module.constructor_types.clone(),
             func_schemes: module.func_schemes.clone(),
             class_defs: module
@@ -275,6 +282,7 @@ impl TypeCheckEnv {
 
     pub fn pretty_tables(&self) -> PrettyTables<'_> {
         PrettyTables {
+            names: &self.names,
             tycons: &self.tycon_table,
             classes: &self.class_table,
         }
@@ -283,7 +291,7 @@ impl TypeCheckEnv {
     fn display_class_name(&self, id: ClassId) -> String {
         self.class_table
             .get(id)
-            .map(|info| symbol_display_name(info.name))
+            .map(|info| self.names.symbol_display_name(info.name))
             .unwrap_or_else(|| panic!("ICE: type check env class table missing ClassId {id:?}"))
     }
 }
@@ -297,7 +305,7 @@ pub struct TCOutput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use solveig_ast::ast::{ClassInfo, TyConDefinition, TyConInfo, legacy_symbol_id};
+    use solveig_ast::ast::{ClassInfo, Names, TyConDefinition, TyConInfo};
 
     #[test]
     fn global_function_schemes_are_keyed_by_defid() {
@@ -311,6 +319,7 @@ mod tests {
         };
 
         let mut env = TypeCheckEnv {
+            names: Names::new(),
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
             class_defs: HashMap::new(),
@@ -348,8 +357,10 @@ mod tests {
             name: solveig_base::Symbol(9),
         };
 
-        let class_id = solveig_ast::ast::legacy_class_id("C");
+        let mut names = Names::new();
+        let class_id = names.class_id("C");
         let env = TypeCheckEnv {
+            names,
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
             class_defs: HashMap::from([(
@@ -393,7 +404,8 @@ mod tests {
 
     #[test]
     fn typecheck_env_class_defs_are_keyed_by_classid() {
-        let class_id = solveig_ast::ast::legacy_class_id("test.EnvClass");
+        let mut names = Names::new();
+        let class_id = names.class_id("test.EnvClass");
         let module = ResolvedModule::<Span> {
             data_defs: Vec::new(),
             class_defs: vec![ClassDefinition {
@@ -415,22 +427,25 @@ mod tests {
             func_defs: Vec::new(),
         };
 
-        let env = TypeCheckEnv::from_module(&module);
+        let env = TypeCheckEnv::from_module(&module, &names);
 
         assert!(env.class_defs.contains_key(&class_id));
         assert!(!env
             .class_defs
-            .contains_key(&solveig_ast::ast::legacy_class_id("test.OtherEnvClass")));
+            .contains_key(&names.class_id("test.OtherEnvClass")));
     }
 
     #[test]
     fn superclass_lookup_uses_predicate_class_ids() {
         let superclass_name = "test.Sup".to_string();
         let class_name = "test.Sub".to_string();
-        let int_ty = TypeExpr::make_con("test.Int".to_string());
+        let mut names = Names::new();
+        let int_ty = TypeExpr::make_named_con(&mut names, "test.Int".to_string());
 
-        let class_id = solveig_ast::ast::legacy_class_id(&class_name);
+        let class_id = names.class_id(&class_name);
+        let superclass_id = names.class_id(&superclass_name);
         let env = TypeCheckEnv {
+            names: names.clone(),
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
             class_defs: HashMap::from([(
@@ -440,7 +455,8 @@ mod tests {
                     name: class_name.clone(),
                     short_name: "Sub".to_string(),
                     params: vec![("a".to_string(), Kind::Star)],
-                    superclasses: vec![Predicate::legacy(
+                    superclasses: vec![Predicate::named(
+                        &mut names,
                         superclass_name.clone(),
                         vec![TypeExpr::make_var("a".to_string())],
                     )],
@@ -455,13 +471,13 @@ mod tests {
         };
 
         let checker = TypeChecker::with_env(&env, FileId(0));
-        let given = Predicate::legacy(class_name, vec![int_ty.clone()]);
+        let given = Predicate::named(&mut names, class_name, vec![int_ty.clone()]);
         let superclasses = checker.superclass_predicates_for_given(&given);
 
         assert_eq!(superclasses.len(), 1);
         assert_eq!(
             superclasses[0].class_id,
-            solveig_ast::ast::legacy_class_id(&superclass_name)
+            superclass_id
         );
         assert_eq!(superclasses[0].args, vec![int_ty]);
     }
@@ -470,13 +486,14 @@ mod tests {
     fn typechecker_pretty_uses_env_tables() {
         let tycon_id = TyConId(88);
         let class_id = ClassId(77);
+        let mut names = Names::new();
 
         let mut tycon_table = TyConTable::new();
         tycon_table.insert_with_id(
             tycon_id,
             TyConInfo {
-                name: legacy_symbol_id("test.pretty.Widget"),
-                short_name: legacy_symbol_id("Widget"),
+                name: names.symbol("test.pretty.Widget"),
+                short_name: names.symbol("Widget"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Primitive,
             },
@@ -486,8 +503,8 @@ mod tests {
         class_table.insert_with_id(
             class_id,
             ClassInfo {
-                name: legacy_symbol_id("test.pretty.Showy"),
-                short_name: legacy_symbol_id("Showy"),
+                name: names.symbol("test.pretty.Showy"),
+                short_name: names.symbol("Showy"),
                 definition: ClassDefinition {
                     id: class_id,
                     name: "test.pretty.Showy".to_string(),
@@ -500,6 +517,7 @@ mod tests {
         );
 
         let env = TypeCheckEnv {
+            names,
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
             class_defs: HashMap::new(),

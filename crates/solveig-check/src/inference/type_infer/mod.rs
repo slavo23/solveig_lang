@@ -7,10 +7,9 @@ use crate::inference::inference_ctx::{Context, ContextEntry};
 use solveig_ast::ast::{
     CaseArm, CaseArmNode, ClassDefinition, ClassId, ClassMethodDef, ClassTable, CtorId, CtorTable,
     DefId, Ev, EvVarId, EvarId, InstanceDefinition, InstanceMethodDef, InstanceTable, Kind,
-    Literal, PRIM_TYS, Pattern, PatternNode, Predicate, PrettyTables, ResolvedModule, Scheme,
-    TermDefinition, TermExpr, TermExprNode, TyConId, TyConTable, TyVarId, TypeExpr, VarRef,
-    legacy_ctor_id, legacy_tyvar_id, legacy_tyvar_name, symbol_display_name, tyvar_display_name,
-    var_display_name,
+    Literal, Names, PRIM_TYS, Pattern, PatternNode, Predicate, PrettyTables, ResolvedModule,
+    Scheme, TermDefinition, TermExpr, TermExprNode, TyConId, TyConTable, TyVarId, TypeExpr, VarRef,
+    generated_tyvar_name, source_tyvar_id, tyvar_display_name,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};

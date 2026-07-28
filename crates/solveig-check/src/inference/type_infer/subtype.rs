@@ -1,7 +1,6 @@
 impl TypeChecker {
     fn lookup_local_term_var(&self, ctx: &Context, name: &str) -> Option<TypeExpr> {
         ctx.lookup_term_var(name)
-            .or_else(|| self.constructor_types.get(&legacy_ctor_id(name)).cloned())
     }
     pub fn solve_subtype(
         &mut self,
@@ -73,7 +72,7 @@ impl TypeChecker {
                 let (quantifier, kind) = &binders[0];
                 let fresh_evar = self.fresh_evar_id();
                 let marker = ContextEntry::Marker {
-                    var_name: solveig_ast::ast::legacy_evar_name(fresh_evar),
+                    var_name: solveig_ast::ast::evar_display_name(fresh_evar),
                 };
                 let extended_ctx = ctx
                     .add_entry(marker.clone())
@@ -382,7 +381,7 @@ impl TypeChecker {
                 let (quantifier, kind) = &binders[0];
                 let fresh_evar = self.fresh_evar_id();
                 let marker = ContextEntry::Marker {
-                    var_name: solveig_ast::ast::legacy_evar_name(fresh_evar),
+                    var_name: solveig_ast::ast::evar_display_name(fresh_evar),
                 };
                 let extended_ctx = ctx
                     .add_entry(marker.clone())

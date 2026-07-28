@@ -1,4 +1,4 @@
-use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, Literal, UnOp};
+use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, Literal, StrLitId, UnOp};
 use std::collections::BTreeSet;
 use std::rc::Rc;
 use std::{collections::HashMap, path::Path};
@@ -123,6 +123,7 @@ pub struct BytecodeProgram {
     pub globals: Vec<CompiledGlobal>,
     pub constructor_arities: Vec<CtorRuntimeInfo>,
     pub string_constants: Vec<String>,
+    pub string_literals: Vec<String>,
 }
 
 impl BytecodeProgram {
@@ -146,6 +147,10 @@ impl BytecodeProgram {
 
     pub fn global_index_by_name(&self, name: &str) -> Option<usize> {
         self.globals.iter().position(|g| g.name == name)
+    }
+
+    pub fn string_literal_value(&self, id: StrLitId) -> Option<&str> {
+        self.string_literals.get(id.0 as usize).map(String::as_str)
     }
 
     pub fn dump_to_string(&self) -> String {
@@ -275,6 +280,7 @@ impl BytecodeLowerer {
             globals,
             constructor_arities: program.constructor_arities.clone(),
             string_constants: program.string_constants.clone(),
+            string_literals: program.string_literals.clone(),
         }
     }
 

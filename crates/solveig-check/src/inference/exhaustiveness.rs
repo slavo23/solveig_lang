@@ -2,9 +2,9 @@ use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use solveig_ast::ast::{
-    CaseArmNode, CtorId, CtorInfo, CtorTable, DataDefinition, Literal, PRIM_TYS, Pattern,
+    CaseArmNode, CtorId, CtorInfo, CtorTable, DataDefinition, Literal, Names, PRIM_TYS, Pattern,
     PatternNode, Predicate, PrettyTables, TyConDefinition, TyConId, TyConTable, TyVarId, TypeExpr,
-    legacy_tyvar_id, string_literal_value, symbol_display_name,
+    source_tyvar_id,
 };
 use solveig_base::utils::diagnostics::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -23,6 +23,7 @@ pub fn check_case(
     case_span: Span,
 ) -> CaseDiagnostics {
     let data_env = DataEnv {
+        names: pretty_tables.names,
         tycon_table,
         ctor_table,
     };
@@ -98,12 +99,17 @@ impl LitPat {
         }
     }
 
-    fn pretty(&self) -> String {
+    fn pretty(&self, names: &Names) -> String {
         match self {
             LitPat::Int(value) => value.to_string(),
             LitPat::Float(bits) => f64::from_bits(*bits).to_string(),
             LitPat::Char(value) => format!("'{}'", escape_char_literal(*value)),
-            LitPat::Str(id) => format!("\"{}\"", escape_string_literal(&string_literal_value(*id))),
+            LitPat::Str(id) => {
+                format!(
+                    "\"{}\"",
+                    escape_string_literal(names.string_literal_value(*id))
+                )
+            }
         }
     }
 }
@@ -156,12 +162,12 @@ enum Witness {
 }
 
 impl Witness {
-    fn pretty(&self, ctor_table: &CtorTable) -> String {
+    fn pretty(&self, names: &Names, ctor_table: &CtorTable) -> String {
         match self {
             Witness::Wild => "_".to_string(),
 
             Witness::Head(Head::Constructor(id), args) => {
-                let name = ctor_table_short_name(*id, ctor_table);
+                let name = ctor_table_short_name(names, *id, ctor_table);
 
                 if name == "Nil" && args.is_empty() {
                     return "[]".to_string();
@@ -170,8 +176,8 @@ impl Witness {
                 if name == "Cons" && args.len() == 2 {
                     return format!(
                         "{} :: {}",
-                        args[0].pretty_atom(ctor_table),
-                        args[1].pretty(ctor_table)
+                        args[0].pretty_atom(names, ctor_table),
+                        args[1].pretty(names, ctor_table)
                     );
                 }
 
@@ -182,7 +188,7 @@ impl Witness {
                         "{} {}",
                         name,
                         args.iter()
-                            .map(|arg| arg.pretty_atom(ctor_table))
+                            .map(|arg| arg.pretty_atom(names, ctor_table))
                             .collect::<Vec<_>>()
                             .join(" ")
                     )
@@ -191,16 +197,16 @@ impl Witness {
 
             Witness::Head(Head::Literal(lit), args) => {
                 debug_assert!(args.is_empty());
-                lit.pretty()
+                lit.pretty(names)
             }
         }
     }
 
-    fn pretty_atom(&self, ctor_table: &CtorTable) -> String {
+    fn pretty_atom(&self, names: &Names, ctor_table: &CtorTable) -> String {
         match self {
-            Witness::Wild => self.pretty(ctor_table),
-            Witness::Head(_, args) if args.is_empty() => self.pretty(ctor_table),
-            Witness::Head(_, _) => format!("({})", self.pretty(ctor_table)),
+            Witness::Wild => self.pretty(names, ctor_table),
+            Witness::Head(_, args) if args.is_empty() => self.pretty(names, ctor_table),
+            Witness::Head(_, _) => format!("({})", self.pretty(names, ctor_table)),
         }
     }
 }
@@ -211,6 +217,7 @@ fn is_open_primitive_type(ty: &TypeExpr) -> bool {
 
 #[derive(Clone, Copy)]
 struct DataEnv<'a> {
+    names: &'a Names,
     tycon_table: &'a TyConTable,
     ctor_table: &'a CtorTable,
 }
@@ -269,11 +276,11 @@ impl ExhaustivenessChecker<'_> {
         match witness {
             [] => "_".to_string(),
 
-            [one] => one.pretty(self.ctor_table),
+            [one] => one.pretty(self.data_env.names, self.ctor_table),
 
             many => many
                 .iter()
-                .map(|witness| witness.pretty(self.ctor_table))
+                .map(|witness| witness.pretty(self.data_env.names, self.ctor_table))
                 .collect::<Vec<_>>()
                 .join(", "),
         }
@@ -649,7 +656,7 @@ fn instantiate_ctor_fields(
         .ty_params
         .iter()
         .zip(ty_args)
-        .map(|((name, _), arg)| (legacy_tyvar_id(name), arg.clone()))
+        .map(|((name, _), arg)| (source_tyvar_id(name), arg.clone()))
         .collect::<HashMap<_, _>>();
 
     ctor.fields
@@ -701,10 +708,10 @@ fn subst_type_vars(ty: &TypeExpr, subst: &HashMap<TyVarId, TypeExpr>) -> TypeExp
     }
 }
 
-fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable) -> String {
+fn ctor_table_short_name(names: &Names, id: CtorId, ctor_table: &CtorTable) -> String {
     ctor_table
         .get(id)
-        .map(|info| symbol_display_name(info.short_name))
+        .map(|info| names.symbol_display_name(info.short_name))
         .unwrap_or_else(|| panic!("ICE: exhaustiveness constructor table missing CtorId {id:?}"))
 }
 
@@ -712,8 +719,8 @@ fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable) -> String {
 mod tests {
     use super::*;
     use solveig_ast::ast::{
-        CaseArm, ClassTable, ConstructorDef, CtorInfo, ExprNode, Kind, TermExpr, TermExprNode,
-        TyConDefinition, TyConInfo, TyConTable, legacy_ctor_id, legacy_symbol_id, legacy_tycon_id,
+        CaseArm, ClassTable, ConstructorDef, CtorInfo, ExprNode, Kind, Names, TermExpr,
+        TermExprNode, TyConDefinition, TyConInfo, TyConTable,
     };
     use solveig_base::Severity;
 
@@ -786,6 +793,7 @@ mod tests {
 
         for case in cases {
             let actual = missing_patterns(
+                &fixtures.names,
                 &fixtures.ctor_table,
                 &fixtures.tycon_table,
                 &case.scrutinee_type,
@@ -806,6 +814,7 @@ mod tests {
         let hidden_id = CtorId(7);
         let shown_id = CtorId(9);
         let widget = TypeExpr::TyCon(tycon_id);
+        let mut names = Names::new();
         let data_def = DataDefinition {
             name: "test.pretty.Widget".to_string(),
             short_name: "Widget".to_string(),
@@ -833,8 +842,8 @@ mod tests {
         tycon_table.insert_with_id(
             tycon_id,
             TyConInfo {
-                name: legacy_symbol_id("test.pretty.Widget"),
-                short_name: legacy_symbol_id("Widget"),
+                name: names.symbol("test.pretty.Widget"),
+                short_name: names.symbol("Widget"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Data(data_def),
             },
@@ -844,8 +853,8 @@ mod tests {
         ctor_table.insert_with_id(
             hidden_id,
             CtorInfo {
-                name: legacy_symbol_id("test.pretty.Hidden"),
-                short_name: legacy_symbol_id("Hidden"),
+                name: names.symbol("test.pretty.Hidden"),
+                short_name: names.symbol("Hidden"),
                 tycon: tycon_id,
                 fields: Vec::new(),
                 full_type: widget.clone(),
@@ -855,8 +864,8 @@ mod tests {
         ctor_table.insert_with_id(
             shown_id,
             CtorInfo {
-                name: legacy_symbol_id("test.pretty.Shown"),
-                short_name: legacy_symbol_id("Shown"),
+                name: names.symbol("test.pretty.Shown"),
+                short_name: names.symbol("Shown"),
                 tycon: tycon_id,
                 fields: Vec::new(),
                 full_type: widget.clone(),
@@ -872,6 +881,7 @@ mod tests {
             &tycon_table,
             &ctor_table,
             PrettyTables {
+                names: &names,
                 tycons: &tycon_table,
                 classes: &class_table,
             },
@@ -934,6 +944,7 @@ mod tests {
     }
 
     struct TestConstructorFixtures {
+        names: Names,
         ctor_table: CtorTable,
         tycon_table: TyConTable,
     }
@@ -956,6 +967,7 @@ mod tests {
             &fixtures.tycon_table,
             &fixtures.ctor_table,
             PrettyTables {
+                names: &fixtures.names,
                 tycons: &fixtures.tycon_table,
                 classes: &class_table,
             },
@@ -977,6 +989,7 @@ mod tests {
     }
 
     fn missing_patterns(
+        names: &Names,
         ctor_table: &CtorTable,
         tycon_table: &TyConTable,
         scrutinee_type: &TypeExpr,
@@ -990,6 +1003,7 @@ mod tests {
             tycon_table,
             ctor_table,
             PrettyTables {
+                names,
                 tycons: tycon_table,
                 classes: &class_table,
             },
@@ -1006,14 +1020,15 @@ mod tests {
     }
 
     fn test_constructor_fixtures() -> TestConstructorFixtures {
+        let mut names = Names::new();
         let mut tycon_table = TyConTable::new();
         let mut ctor_table = CtorTable::new();
 
         tycon_table.insert_with_id(
             PRIM_TYS.int,
             TyConInfo {
-                name: legacy_symbol_id("Int"),
-                short_name: legacy_symbol_id("Int"),
+                name: names.symbol("Int"),
+                short_name: names.symbol("Int"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Primitive,
             },
@@ -1112,16 +1127,24 @@ mod tests {
 
         let mut next_tag = 0;
         for data_def in data_defs {
-            insert_data_definition(&mut tycon_table, &mut ctor_table, data_def, &mut next_tag);
+            insert_data_definition(
+                &mut names,
+                &mut tycon_table,
+                &mut ctor_table,
+                data_def,
+                &mut next_tag,
+            );
         }
 
         TestConstructorFixtures {
+            names,
             ctor_table,
             tycon_table,
         }
     }
 
     fn insert_data_definition(
+        names: &mut Names,
         tycon_table: &mut TyConTable,
         ctor_table: &mut CtorTable,
         data_def: DataDefinition,
@@ -1132,8 +1155,8 @@ mod tests {
         tycon_table.insert_with_id(
             tycon,
             TyConInfo {
-                name: legacy_symbol_id(&data_def.name),
-                short_name: legacy_symbol_id(&data_def.short_name),
+                name: names.symbol(&data_def.name),
+                short_name: names.symbol(&data_def.short_name),
                 kind: data_def.tycon_kind.clone(),
                 definition: TyConDefinition::Data(data_def.clone()),
             },
@@ -1143,8 +1166,8 @@ mod tests {
             ctor_table.insert_with_id(
                 constructor.id,
                 CtorInfo {
-                    name: legacy_symbol_id(&constructor.name),
-                    short_name: legacy_symbol_id(&constructor.short_name),
+                    name: names.symbol(&constructor.name),
+                    short_name: names.symbol(&constructor.short_name),
                     tycon,
                     fields: constructor.fields.clone(),
                     full_type: constructor.full_type.clone(),
@@ -1234,7 +1257,10 @@ mod tests {
         match name {
             "Bool" => PRIM_TYS.bool,
             "Int" => PRIM_TYS.int,
-            _ => legacy_tycon_id(name),
+            "Maybe" => TyConId(100),
+            "List" => TyConId(101),
+            "Pair" => TyConId(102),
+            other => panic!("ICE: unknown test type constructor `{other}`"),
         }
     }
 
@@ -1242,7 +1268,12 @@ mod tests {
         match name {
             "True" => PRIM_TYS.true_ctor,
             "False" => PRIM_TYS.false_ctor,
-            _ => legacy_ctor_id(name),
+            "Nothing" => CtorId(100),
+            "Just" => CtorId(101),
+            "Nil" => CtorId(102),
+            "Cons" => CtorId(103),
+            "MkPair" => CtorId(104),
+            other => panic!("ICE: unknown test constructor `{other}`"),
         }
     }
 

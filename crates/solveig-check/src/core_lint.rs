@@ -3,9 +3,8 @@ use std::ops::Range;
 
 use solveig_ast::ast::{
     CaseArmNode, ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Ev, EvVarId,
-    InstanceDefinition, InstanceId, Kind, ModuleId, Pattern, PatternNode, Predicate, Scheme,
-    TermExpr, TermExprNode, TyConTable, TyVarId, TypeExpr, VarRef, def_display_name,
-    symbol_display_name,
+    InstanceDefinition, InstanceId, Kind, ModuleId, Names, Pattern, PatternNode, Predicate, Scheme,
+    TermExpr, TermExprNode, TyConTable, TyVarId, TypeExpr, VarRef,
 };
 use solveig_base::utils::diagnostics::{Diagnostic, Label};
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -27,11 +26,15 @@ pub struct CoreLintEnv {
     ctor_table: CtorTable,
     tycon_table: TyConTable,
     class_table: ClassTable,
+    names: Names,
 }
 
 impl CoreLintEnv {
-    pub fn from_module(module: &CheckedModule) -> Self {
-        let mut env = Self::default();
+    pub fn from_module(module: &CheckedModule, names: &Names) -> Self {
+        let mut env = Self {
+            names: names.clone(),
+            ..Self::default()
+        };
         env.extend_from_checked_module(module);
         env
     }
@@ -43,6 +46,7 @@ impl CoreLintEnv {
             ctor_table: check_env.ctor_table.clone(),
             tycon_table: check_env.tycon_table.clone(),
             class_table: check_env.class_table.clone(),
+            names: check_env.names.clone(),
             ..Self::default()
         };
 
@@ -570,7 +574,7 @@ impl CoreLinter<'_> {
                 Some(span.clone()),
                 format!(
                     "ICE: global `{}` is missing from core tables",
-                    def_display_name(id)
+                    self.env.names.def_display_name(id)
                 ),
             );
         }
@@ -621,7 +625,7 @@ impl CoreLinter<'_> {
             .env
             .class_table
             .get(pred.class_id)
-            .map(|info| symbol_display_name(info.name))
+            .map(|info| self.env.names.symbol_display_name(info.name))
             .or_else(|| {
                 self.env
                     .class_defs
@@ -744,7 +748,7 @@ fn subst_from_class_head(
     params
         .iter()
         .zip(args.iter())
-        .map(|((param, _), arg)| (solveig_ast::ast::legacy_tyvar_id(param), arg.clone()))
+        .map(|((param, _), arg)| (solveig_ast::ast::source_tyvar_id(param), arg.clone()))
         .collect()
 }
 
@@ -830,8 +834,7 @@ fn type_fallback_name(ty: &TypeExpr) -> String {
 #[cfg(test)]
 mod tests {
     use solveig_ast::ast::{
-        ClassInfo, ClassMethodDef, PRIM_TYS, ResolvedModule, TermDefinition, VarRef, legacy_def_id,
-        legacy_symbol_id,
+        ClassInfo, ClassMethodDef, Names, PRIM_TYS, ResolvedModule, TermDefinition, VarRef,
     };
 
     use super::*;
@@ -859,7 +862,7 @@ mod tests {
         }
     }
 
-    fn class_def(id: ClassId, name: &str) -> ClassDefinition {
+    fn class_def(names: &mut Names, id: ClassId, name: &str) -> ClassDefinition {
         ClassDefinition {
             id,
             name: name.to_string(),
@@ -867,7 +870,7 @@ mod tests {
             params: vec![("a".to_string(), Kind::Star)],
             superclasses: Vec::new(),
             methods: vec![ClassMethodDef {
-                id: legacy_def_id(&format!("{name}.method")),
+                id: names.def_id(&format!("{name}.method")),
                 name: format!("{name}.method"),
                 short_name: "method".to_string(),
                 scheme: scheme(Vec::new()),
@@ -876,7 +879,10 @@ mod tests {
         }
     }
 
-    fn module_with_body(body: TermExprNode<TcMetadata, Range<usize>>) -> CheckedModule {
+    fn module_with_body(
+        names: &mut Names,
+        body: TermExprNode<TcMetadata, Range<usize>>,
+    ) -> CheckedModule {
         ResolvedModule {
             data_defs: Vec::new(),
             class_defs: Vec::new(),
@@ -889,7 +895,7 @@ mod tests {
             constructor_types: HashMap::new(),
             func_schemes: HashMap::new(),
             func_defs: vec![TermDefinition {
-                id: legacy_def_id("main.main"),
+                id: names.def_id("main.main"),
                 name: "main.main".to_string(),
                 short_name: "main".to_string(),
                 signature: Some(scheme(Vec::new())),
@@ -899,32 +905,34 @@ mod tests {
     }
 
     fn lint_env(
+        names: &mut Names,
         expected_def: DefId,
         expected: Predicate,
         instance_id: InstanceId,
         instance_head: Predicate,
     ) -> CoreLintEnv {
         let mut class_table = ClassTable::new();
-        let eq = class_def(expected.class_id, "Eq");
+        let eq = class_def(names, expected.class_id, "Eq");
         class_table.insert_with_id(
             expected.class_id,
             ClassInfo {
-                name: legacy_symbol_id("Eq"),
-                short_name: legacy_symbol_id("Eq"),
+                name: names.symbol("Eq"),
+                short_name: names.symbol("Eq"),
                 definition: eq.clone(),
             },
         );
-        let head_class = class_def(instance_head.class_id, "Other");
+        let head_class = class_def(names, instance_head.class_id, "Other");
         class_table.insert_with_id(
             instance_head.class_id,
             ClassInfo {
-                name: legacy_symbol_id("Other"),
-                short_name: legacy_symbol_id("Other"),
+                name: names.symbol("Other"),
+                short_name: names.symbol("Other"),
                 definition: head_class.clone(),
             },
         );
 
         let mut env = CoreLintEnv {
+            names: names.clone(),
             class_table,
             ..CoreLintEnv::default()
         }
@@ -958,36 +966,45 @@ mod tests {
 
     #[test]
     fn valid_global_evidence_application_lints_cleanly() {
-        let expected_def = legacy_def_id("test.needsEq");
+        let mut names = Names::new();
+        let expected_def = names.def_id("test.needsEq");
         let class_id = ClassId(1);
         let instance_id = InstanceId(1);
         let expected = pred(class_id, TypeExpr::TyCon(PRIM_TYS.int));
-        let env = lint_env(expected_def, expected.clone(), instance_id, expected);
-        let module = module_with_body(evidence_app_body(
+        let env = lint_env(
+            &mut names,
             expected_def,
-            Ev::Inst(instance_id, Vec::new(), Vec::new()),
-        ));
+            expected.clone(),
+            instance_id,
+            expected,
+        );
+        let module = module_with_body(
+            &mut names,
+            evidence_app_body(expected_def, Ev::Inst(instance_id, Vec::new(), Vec::new())),
+        );
 
         assert!(lint_checked_module(&module, &env).is_empty());
     }
 
     #[test]
     fn evidence_application_predicate_mismatch_is_reported() {
-        let expected_def = legacy_def_id("test.needsEq");
+        let mut names = Names::new();
+        let expected_def = names.def_id("test.needsEq");
         let eq = ClassId(1);
         let other = ClassId(2);
         let instance_id = InstanceId(1);
         let int = TypeExpr::TyCon(PRIM_TYS.int);
         let env = lint_env(
+            &mut names,
             expected_def,
             pred(eq, int.clone()),
             instance_id,
             pred(other, int),
         );
-        let module = module_with_body(evidence_app_body(
-            expected_def,
-            Ev::Inst(instance_id, Vec::new(), Vec::new()),
-        ));
+        let module = module_with_body(
+            &mut names,
+            evidence_app_body(expected_def, Ev::Inst(instance_id, Vec::new(), Vec::new())),
+        );
         let diagnostics = lint_checked_module(&module, &env);
 
         assert!(notes(&diagnostics).contains("predicate mismatch"));
@@ -995,15 +1012,22 @@ mod tests {
 
     #[test]
     fn surviving_evidence_placeholder_is_reported() {
-        let expected_def = legacy_def_id("test.needsEq");
+        let mut names = Names::new();
+        let expected_def = names.def_id("test.needsEq");
         let class_id = ClassId(1);
         let instance_id = InstanceId(1);
         let expected = pred(class_id, TypeExpr::TyCon(PRIM_TYS.int));
-        let env = lint_env(expected_def, expected.clone(), instance_id, expected);
-        let module = module_with_body(evidence_app_body(
+        let env = lint_env(
+            &mut names,
             expected_def,
-            Ev::Placeholder(EvVarId(99)),
-        ));
+            expected.clone(),
+            instance_id,
+            expected,
+        );
+        let module = module_with_body(
+            &mut names,
+            evidence_app_body(expected_def, Ev::Placeholder(EvVarId(99))),
+        );
         let diagnostics = lint_checked_module(&module, &env);
 
         assert!(notes(&diagnostics).contains("placeholder"));
@@ -1011,16 +1035,23 @@ mod tests {
 
     #[test]
     fn empty_source_span_on_user_var_is_reported() {
-        let expected_def = legacy_def_id("test.value");
+        let mut names = Names::new();
+        let expected_def = names.def_id("test.value");
         let class_id = ClassId(1);
         let instance_id = InstanceId(1);
         let expected = pred(class_id, TypeExpr::TyCon(PRIM_TYS.int));
-        let mut env = lint_env(expected_def, expected.clone(), instance_id, expected);
+        let mut env = lint_env(
+            &mut names,
+            expected_def,
+            expected.clone(),
+            instance_id,
+            expected,
+        );
         env.func_schemes.insert(expected_def, scheme(Vec::new()));
-        let module = module_with_body(TermExprNode::new(
-            TermExpr::Var(VarRef::Global(expected_def)),
-            meta(0..0),
-        ));
+        let module = module_with_body(
+            &mut names,
+            TermExprNode::new(TermExpr::Var(VarRef::Global(expected_def)), meta(0..0)),
+        );
         let diagnostics = lint_checked_module(&module, &env);
 
         assert!(notes(&diagnostics).contains("empty source span"));

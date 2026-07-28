@@ -100,7 +100,7 @@ impl TypeChecker {
             if !omega.has_unsolved_evar_id(result_evar) && !omega.has_solved_evar_id(result_evar) {
                 return Err(TypeError::MissingCaseResultExistential {
                     span: self.get_file_span(arm.node.expr.anno.clone()),
-                    evar: solveig_ast::ast::legacy_evar_name(result_evar),
+                    evar: solveig_ast::ast::evar_display_name(result_evar),
                     arm_index,
                 });
             }

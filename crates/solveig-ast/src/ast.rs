@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::{Mutex, OnceLock};
 
 use solveig_base::Symbol;
 
@@ -133,161 +132,30 @@ pub enum Ty {
 
 pub type TypeExpr = Ty;
 
-pub fn legacy_evar_name(id: EvarId) -> String {
+pub fn evar_display_name(id: EvarId) -> String {
     format!("a^{}", id.0)
 }
 
-const LEGACY_TYCON_TAG: u32 = 0x8000_0000;
-const LEGACY_CTOR_TAG: u32 = 0x8000_0000;
-const LEGACY_CLASS_TAG: u32 = 0x8000_0000;
-const LEGACY_SYMBOL_TAG: u32 = 0x8000_0000;
-const LEGACY_DEF_MODULE: ModuleId = ModuleId(0xffff_fffe);
+const NAMED_TYCON_START: u32 = 0x8000_0000;
+const NAMED_CTOR_START: u32 = 0x8000_0000;
+const NAMED_CLASS_START: u32 = 0x8000_0000;
+const NAMED_SYMBOL_START: u32 = 0x8000_0000;
+const NAMED_DEF_MODULE: ModuleId = ModuleId(0xffff_fffe);
 
-#[derive(Default)]
-struct LegacyTyConRegistry {
-    names: Vec<String>,
+#[derive(Clone, Debug, Default)]
+pub struct Names {
+    tycon_names: Vec<String>,
     ids: HashMap<String, TyConId>,
-}
-
-#[derive(Default)]
-struct LegacyCtorRegistry {
-    names: Vec<String>,
-    ids: HashMap<String, CtorId>,
-}
-
-#[derive(Default)]
-struct LegacyClassRegistry {
-    names: Vec<String>,
-    ids: HashMap<String, ClassId>,
-}
-
-#[derive(Default)]
-struct LegacyTermNameRegistry {
+    ctor_names: Vec<String>,
+    ctor_ids: HashMap<String, CtorId>,
+    class_names: Vec<String>,
+    class_ids: HashMap<String, ClassId>,
     symbols: Vec<String>,
     symbol_ids: HashMap<String, Symbol>,
     symbol_names: HashMap<Symbol, String>,
     def_names: HashMap<DefId, String>,
-}
-
-#[derive(Default)]
-struct StringLiteralRegistry {
-    values: Vec<String>,
-    ids: HashMap<String, StrLitId>,
-}
-
-fn legacy_tycon_registry() -> &'static Mutex<LegacyTyConRegistry> {
-    static REGISTRY: OnceLock<Mutex<LegacyTyConRegistry>> = OnceLock::new();
-    REGISTRY.get_or_init(|| Mutex::new(LegacyTyConRegistry::default()))
-}
-
-fn legacy_ctor_registry() -> &'static Mutex<LegacyCtorRegistry> {
-    static REGISTRY: OnceLock<Mutex<LegacyCtorRegistry>> = OnceLock::new();
-    REGISTRY.get_or_init(|| Mutex::new(LegacyCtorRegistry::default()))
-}
-
-fn legacy_class_registry() -> &'static Mutex<LegacyClassRegistry> {
-    static REGISTRY: OnceLock<Mutex<LegacyClassRegistry>> = OnceLock::new();
-    REGISTRY.get_or_init(|| Mutex::new(LegacyClassRegistry::default()))
-}
-
-fn legacy_term_name_registry() -> &'static Mutex<LegacyTermNameRegistry> {
-    static REGISTRY: OnceLock<Mutex<LegacyTermNameRegistry>> = OnceLock::new();
-    REGISTRY.get_or_init(|| Mutex::new(LegacyTermNameRegistry::default()))
-}
-
-fn string_literal_registry() -> &'static Mutex<StringLiteralRegistry> {
-    static REGISTRY: OnceLock<Mutex<StringLiteralRegistry>> = OnceLock::new();
-    REGISTRY.get_or_init(|| Mutex::new(StringLiteralRegistry::default()))
-}
-
-pub fn legacy_tycon_id(name: &str) -> TyConId {
-    let mut registry = legacy_tycon_registry()
-        .lock()
-        .expect("ICE: legacy type constructor registry lock poisoned");
-
-    if let Some(id) = registry.ids.get(name) {
-        return *id;
-    }
-
-    let id = TyConId(LEGACY_TYCON_TAG | registry.names.len() as u32);
-    registry.names.push(name.to_string());
-    registry.ids.insert(name.to_string(), id);
-    id
-}
-
-pub fn tycon_display_name(id: TyConId) -> String {
-    let registry = legacy_tycon_registry()
-        .lock()
-        .expect("ICE: legacy type constructor registry lock poisoned");
-    let index = (id.0 & !LEGACY_TYCON_TAG) as usize;
-
-    if id.0 & LEGACY_TYCON_TAG != 0
-        && let Some(name) = registry.names.get(index)
-    {
-        return name.clone();
-    }
-
-    tycon_fallback_name(id)
-}
-
-pub fn legacy_ctor_id(name: &str) -> CtorId {
-    let mut registry = legacy_ctor_registry()
-        .lock()
-        .expect("ICE: legacy constructor registry lock poisoned");
-
-    if let Some(id) = registry.ids.get(name) {
-        return *id;
-    }
-
-    let id = CtorId(LEGACY_CTOR_TAG | registry.names.len() as u32);
-    registry.names.push(name.to_string());
-    registry.ids.insert(name.to_string(), id);
-    id
-}
-
-pub fn ctor_display_name(id: CtorId) -> String {
-    let registry = legacy_ctor_registry()
-        .lock()
-        .expect("ICE: legacy constructor registry lock poisoned");
-    let index = (id.0 & !LEGACY_CTOR_TAG) as usize;
-
-    if id.0 & LEGACY_CTOR_TAG != 0
-        && let Some(name) = registry.names.get(index)
-    {
-        return name.clone();
-    }
-
-    ctor_fallback_name(id)
-}
-
-pub fn legacy_class_id(name: &str) -> ClassId {
-    let mut registry = legacy_class_registry()
-        .lock()
-        .expect("ICE: legacy class registry lock poisoned");
-
-    if let Some(id) = registry.ids.get(name) {
-        return *id;
-    }
-
-    let id = ClassId(LEGACY_CLASS_TAG | registry.names.len() as u32);
-    registry.names.push(name.to_string());
-    registry.ids.insert(name.to_string(), id);
-    id
-}
-
-pub fn class_display_name(id: ClassId) -> String {
-    let registry = legacy_class_registry()
-        .lock()
-        .expect("ICE: legacy class registry lock poisoned");
-    let index = (id.0 & !LEGACY_CLASS_TAG) as usize;
-
-    if id.0 & LEGACY_CLASS_TAG != 0
-        && let Some(name) = registry.names.get(index)
-    {
-        return name.clone();
-    }
-
-    class_fallback_name(id)
+    string_values: Vec<String>,
+    string_ids: HashMap<String, StrLitId>,
 }
 
 fn tycon_fallback_name(id: TyConId) -> String {
@@ -302,47 +170,151 @@ fn class_fallback_name(id: ClassId) -> String {
     format!("K{}", id.0)
 }
 
-pub fn legacy_symbol_id(name: &str) -> Symbol {
-    let mut registry = legacy_term_name_registry()
-        .lock()
-        .expect("ICE: legacy term-name registry lock poisoned");
-
-    if let Some(id) = registry.symbol_ids.get(name) {
-        return *id;
+impl Names {
+    pub fn new() -> Self {
+        Self::default()
     }
 
-    let id = Symbol(LEGACY_SYMBOL_TAG | registry.symbols.len() as u32);
-    registry.symbols.push(name.to_string());
-    registry.symbol_ids.insert(name.to_string(), id);
-    registry.symbol_names.insert(id, name.to_string());
-    id
-}
+    pub fn tycon_id(&mut self, name: &str) -> TyConId {
+        if let Some(id) = self.ids.get(name) {
+            return *id;
+        }
 
-pub fn intern_string_literal(value: &str) -> StrLitId {
-    let mut registry = string_literal_registry()
-        .lock()
-        .expect("ICE: string-literal registry lock poisoned");
-
-    if let Some(id) = registry.ids.get(value) {
-        return *id;
+        let id = TyConId(named_id(NAMED_TYCON_START, self.tycon_names.len()));
+        self.tycon_names.push(name.to_string());
+        self.ids.insert(name.to_string(), id);
+        id
     }
 
-    let id = StrLitId(registry.values.len() as u32);
-    registry.values.push(value.to_string());
-    registry.ids.insert(value.to_string(), id);
-    id
+    pub fn ctor_id(&mut self, name: &str) -> CtorId {
+        if let Some(id) = self.ctor_ids.get(name) {
+            return *id;
+        }
+
+        let id = CtorId(named_id(NAMED_CTOR_START, self.ctor_names.len()));
+        self.ctor_names.push(name.to_string());
+        self.ctor_ids.insert(name.to_string(), id);
+        id
+    }
+
+    pub fn class_id(&mut self, name: &str) -> ClassId {
+        if let Some(id) = self.class_ids.get(name) {
+            return *id;
+        }
+
+        let id = ClassId(named_id(NAMED_CLASS_START, self.class_names.len()));
+        self.class_names.push(name.to_string());
+        self.class_ids.insert(name.to_string(), id);
+        id
+    }
+
+    pub fn symbol(&mut self, name: &str) -> Symbol {
+        if let Some(id) = self.symbol_ids.get(name) {
+            return *id;
+        }
+
+        let id = Symbol(named_id(NAMED_SYMBOL_START, self.symbols.len()));
+        self.symbols.push(name.to_string());
+        self.symbol_ids.insert(name.to_string(), id);
+        self.symbol_names.insert(id, name.to_string());
+        id
+    }
+
+    pub fn register_symbol(&mut self, symbol: Symbol, name: &str) {
+        self.symbol_names.insert(symbol, name.to_string());
+    }
+
+    pub fn register_def(&mut self, def_id: DefId, name: &str) {
+        self.def_names.insert(def_id, name.to_string());
+    }
+
+    pub fn def_id(&mut self, name: &str) -> DefId {
+        let def_id = DefId {
+            module: NAMED_DEF_MODULE,
+            name: self.symbol(name),
+        };
+        self.register_def(def_id, name);
+        def_id
+    }
+
+    pub fn tycon_display_name(&self, id: TyConId) -> String {
+        named_display_name(id.0, NAMED_TYCON_START, &self.tycon_names)
+            .unwrap_or_else(|| tycon_fallback_name(id))
+    }
+
+    pub fn ctor_display_name(&self, id: CtorId) -> String {
+        named_display_name(id.0, NAMED_CTOR_START, &self.ctor_names)
+            .unwrap_or_else(|| ctor_fallback_name(id))
+    }
+
+    pub fn class_display_name(&self, id: ClassId) -> String {
+        named_display_name(id.0, NAMED_CLASS_START, &self.class_names)
+            .unwrap_or_else(|| class_fallback_name(id))
+    }
+
+    pub fn symbol_display_name(&self, symbol: Symbol) -> String {
+        self.symbol_names
+            .get(&symbol)
+            .cloned()
+            .or_else(|| named_display_name(symbol.0, NAMED_SYMBOL_START, &self.symbols))
+            .unwrap_or_else(|| format!("s{}", symbol.0))
+    }
+
+    pub fn def_display_name(&self, def_id: DefId) -> String {
+        if let Some(name) = self.def_names.get(&def_id) {
+            return name.clone();
+        }
+
+        if def_id.module == NAMED_DEF_MODULE {
+            self.symbol_display_name(def_id.name)
+        } else {
+            format!("D{}.{}", def_id.module.0, def_id.name.0)
+        }
+    }
+
+    pub fn var_display_name(&self, var: &VarRef) -> String {
+        match var {
+            VarRef::Local(symbol) => self.symbol_display_name(*symbol),
+            VarRef::Global(def_id) => self.def_display_name(*def_id),
+        }
+    }
+
+    pub fn intern_string_literal(&mut self, value: &str) -> StrLitId {
+        if let Some(id) = self.string_ids.get(value) {
+            return *id;
+        }
+
+        let id = StrLitId(
+            u32::try_from(self.string_values.len())
+                .expect("ICE: string literal table exceeded u32 capacity"),
+        );
+        self.string_values.push(value.to_string());
+        self.string_ids.insert(value.to_string(), id);
+        id
+    }
+
+    pub fn string_literal_value(&self, id: StrLitId) -> &str {
+        self.string_values
+            .get(id.0 as usize)
+            .map(String::as_str)
+            .unwrap_or_else(|| panic!("ICE: missing string literal payload for StrLitId {id:?}"))
+    }
+
+    pub fn string_literals(&self) -> &[String] {
+        &self.string_values
+    }
 }
 
-pub fn string_literal_value(id: StrLitId) -> String {
-    let registry = string_literal_registry()
-        .lock()
-        .expect("ICE: string-literal registry lock poisoned");
+fn named_id(start: u32, index: usize) -> u32 {
+    let index = u32::try_from(index).expect("ICE: name table exceeded u32 capacity");
+    start
+        .checked_add(index)
+        .expect("ICE: name table id range overflow")
+}
 
-    registry
-        .values
-        .get(id.0 as usize)
-        .cloned()
-        .unwrap_or_else(|| panic!("ICE: missing string literal payload for StrLitId {id:?}"))
+fn named_display_name(id: u32, start: u32, names: &[String]) -> Option<String> {
+    let offset = id.checked_sub(start)?;
+    names.get(offset as usize).cloned()
 }
 
 pub const COMPILER_PRELUDE_BUILTINS_MODULE: &str = "prelude.builtins";
@@ -443,13 +415,26 @@ impl PrimTys {
     }
 }
 
-pub fn compiler_primitive_tycon_infos() -> Vec<(TyConId, TyConInfo)> {
+pub fn compiler_primitive_tycon_infos(names: &mut Names) -> Vec<(TyConId, TyConInfo)> {
     vec![
-        compiler_primitive_tycon_info(PRIM_TYS.int, COMPILER_INT_NAME, "Int", Kind::Star),
-        compiler_primitive_tycon_info(PRIM_TYS.float, COMPILER_FLOAT_NAME, "Float", Kind::Star),
-        compiler_primitive_tycon_info(PRIM_TYS.char, COMPILER_CHAR_NAME, "Char", Kind::Star),
-        compiler_primitive_tycon_info(PRIM_TYS.string, COMPILER_STRING_NAME, "String", Kind::Star),
+        compiler_primitive_tycon_info(names, PRIM_TYS.int, COMPILER_INT_NAME, "Int", Kind::Star),
         compiler_primitive_tycon_info(
+            names,
+            PRIM_TYS.float,
+            COMPILER_FLOAT_NAME,
+            "Float",
+            Kind::Star,
+        ),
+        compiler_primitive_tycon_info(names, PRIM_TYS.char, COMPILER_CHAR_NAME, "Char", Kind::Star),
+        compiler_primitive_tycon_info(
+            names,
+            PRIM_TYS.string,
+            COMPILER_STRING_NAME,
+            "String",
+            Kind::Star,
+        ),
+        compiler_primitive_tycon_info(
+            names,
             PRIM_TYS.io,
             COMPILER_IO_NAME,
             "IO",
@@ -459,10 +444,13 @@ pub fn compiler_primitive_tycon_infos() -> Vec<(TyConId, TyConInfo)> {
 }
 
 pub fn compiler_primitive_tycon_kinds() -> HashMap<TyConId, Kind> {
-    compiler_primitive_tycon_infos()
-        .into_iter()
-        .map(|(id, info)| (id, info.kind))
-        .collect()
+    HashMap::from([
+        (PRIM_TYS.int, Kind::Star),
+        (PRIM_TYS.float, Kind::Star),
+        (PRIM_TYS.char, Kind::Star),
+        (PRIM_TYS.string, Kind::Star),
+        (PRIM_TYS.io, Kind::make_arrow(Kind::Star, Kind::Star)),
+    ])
 }
 
 pub fn compiler_bool_data_definition() -> DataDefinition {
@@ -500,63 +488,66 @@ pub fn compiler_bool_constructor_types() -> HashMap<CtorId, TypeExpr> {
         .collect()
 }
 
-pub fn prelude_maybe_tycon_id() -> TyConId {
-    legacy_tycon_id(PRELUDE_MAYBE_NAME)
+pub fn prelude_maybe_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_MAYBE_NAME)
 }
 
-pub fn prelude_maybe_just_ctor_id() -> CtorId {
-    legacy_ctor_id(PRELUDE_MAYBE_JUST_NAME)
+pub fn prelude_maybe_just_ctor_id(names: &mut Names) -> CtorId {
+    names.ctor_id(PRELUDE_MAYBE_JUST_NAME)
 }
 
-pub fn prelude_maybe_nothing_ctor_id() -> CtorId {
-    legacy_ctor_id(PRELUDE_MAYBE_NOTHING_NAME)
+pub fn prelude_maybe_nothing_ctor_id(names: &mut Names) -> CtorId {
+    names.ctor_id(PRELUDE_MAYBE_NOTHING_NAME)
 }
 
-pub fn prelude_list_tycon_id() -> TyConId {
-    legacy_tycon_id(PRELUDE_LIST_NAME)
+pub fn prelude_list_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_LIST_NAME)
 }
 
-pub fn prelude_list_nil_ctor_id() -> CtorId {
-    legacy_ctor_id(PRELUDE_LIST_NIL_NAME)
+pub fn prelude_list_nil_ctor_id(names: &mut Names) -> CtorId {
+    names.ctor_id(PRELUDE_LIST_NIL_NAME)
 }
 
-pub fn prelude_list_cons_ctor_id() -> CtorId {
-    legacy_ctor_id(PRELUDE_LIST_CONS_NAME)
+pub fn prelude_list_cons_ctor_id(names: &mut Names) -> CtorId {
+    names.ctor_id(PRELUDE_LIST_CONS_NAME)
 }
 
-pub fn prelude_pair_mkpair_ctor_id() -> CtorId {
-    legacy_ctor_id(PRELUDE_PAIR_MKPAIR_NAME)
+pub fn prelude_pair_mkpair_ctor_id(names: &mut Names) -> CtorId {
+    names.ctor_id(PRELUDE_PAIR_MKPAIR_NAME)
 }
 
-pub fn prelude_ordering_tycon_id() -> TyConId {
-    legacy_tycon_id(PRELUDE_ORDERING_NAME)
+pub fn prelude_ordering_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_ORDERING_NAME)
 }
 
-pub fn prelude_ordering_lt_ctor_id() -> CtorId {
-    legacy_ctor_id(PRELUDE_ORDERING_LT_NAME)
+pub fn prelude_ordering_lt_ctor_id(names: &mut Names) -> CtorId {
+    names.ctor_id(PRELUDE_ORDERING_LT_NAME)
 }
 
-pub fn prelude_ordering_eq_ctor_id() -> CtorId {
-    legacy_ctor_id(PRELUDE_ORDERING_EQ_NAME)
+pub fn prelude_ordering_eq_ctor_id(names: &mut Names) -> CtorId {
+    names.ctor_id(PRELUDE_ORDERING_EQ_NAME)
 }
 
-pub fn prelude_ordering_gt_ctor_id() -> CtorId {
-    legacy_ctor_id(PRELUDE_ORDERING_GT_NAME)
+pub fn prelude_ordering_gt_ctor_id(names: &mut Names) -> CtorId {
+    names.ctor_id(PRELUDE_ORDERING_GT_NAME)
 }
 
-pub fn runtime_ctor_role(ctor: CtorId) -> CtorRuntimeRole {
-    if ctor == prelude_list_nil_ctor_id() {
-        CtorRuntimeRole::PreludeListNil
-    } else if ctor == prelude_list_cons_ctor_id() {
-        CtorRuntimeRole::PreludeListCons
-    } else if ctor == prelude_pair_mkpair_ctor_id() {
-        CtorRuntimeRole::PreludePair
-    } else {
-        CtorRuntimeRole::Ordinary
+pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
+    match names.ctor_display_name(ctor).as_str() {
+        PRELUDE_MAYBE_JUST_NAME => CtorRuntimeRole::PreludeMaybeJust,
+        PRELUDE_MAYBE_NOTHING_NAME => CtorRuntimeRole::PreludeMaybeNothing,
+        PRELUDE_LIST_NIL_NAME => CtorRuntimeRole::PreludeListNil,
+        PRELUDE_LIST_CONS_NAME => CtorRuntimeRole::PreludeListCons,
+        PRELUDE_PAIR_MKPAIR_NAME => CtorRuntimeRole::PreludePair,
+        PRELUDE_ORDERING_LT_NAME => CtorRuntimeRole::PreludeOrderingLt,
+        PRELUDE_ORDERING_EQ_NAME => CtorRuntimeRole::PreludeOrderingEq,
+        PRELUDE_ORDERING_GT_NAME => CtorRuntimeRole::PreludeOrderingGt,
+        _ => CtorRuntimeRole::Ordinary,
     }
 }
 
 fn compiler_primitive_tycon_info(
+    names: &mut Names,
     id: TyConId,
     name: &str,
     short_name: &str,
@@ -565,112 +556,43 @@ fn compiler_primitive_tycon_info(
     (
         id,
         TyConInfo {
-            name: legacy_symbol_id(name),
-            short_name: legacy_symbol_id(short_name),
+            name: names.symbol(name),
+            short_name: names.symbol(short_name),
             kind,
             definition: TyConDefinition::Primitive,
         },
     )
 }
 
-fn tycon_id_for_data_definition(name: &str) -> TyConId {
+fn tycon_id_for_data_definition(names: &mut Names, name: &str) -> TyConId {
     if name == COMPILER_BOOL_NAME {
         PRIM_TYS.bool
     } else {
-        legacy_tycon_id(name)
-    }
-}
-
-pub fn register_symbol_display_name(symbol: Symbol, name: &str) {
-    let mut registry = legacy_term_name_registry()
-        .lock()
-        .expect("ICE: legacy term-name registry lock poisoned");
-    registry.symbol_names.insert(symbol, name.to_string());
-}
-
-pub fn symbol_display_name(symbol: Symbol) -> String {
-    let registry = legacy_term_name_registry()
-        .lock()
-        .expect("ICE: legacy term-name registry lock poisoned");
-
-    if let Some(name) = registry.symbol_names.get(&symbol) {
-        return name.clone();
-    }
-
-    if symbol.0 & LEGACY_SYMBOL_TAG == 0 {
-        return format!("s{}", symbol.0);
-    }
-
-    let index = (symbol.0 & !LEGACY_SYMBOL_TAG) as usize;
-    registry
-        .symbols
-        .get(index)
-        .cloned()
-        .unwrap_or_else(|| format!("s{}", symbol.0))
-}
-
-pub fn register_def_display_name(def_id: DefId, name: &str) {
-    let mut registry = legacy_term_name_registry()
-        .lock()
-        .expect("ICE: legacy term-name registry lock poisoned");
-    registry.def_names.insert(def_id, name.to_string());
-}
-
-pub fn legacy_def_id(name: &str) -> DefId {
-    let def_id = DefId {
-        module: LEGACY_DEF_MODULE,
-        name: legacy_symbol_id(name),
-    };
-    register_def_display_name(def_id, name);
-    def_id
-}
-
-pub fn def_display_name(def_id: DefId) -> String {
-    let registry = legacy_term_name_registry()
-        .lock()
-        .expect("ICE: legacy term-name registry lock poisoned");
-
-    if let Some(name) = registry.def_names.get(&def_id) {
-        return name.clone();
-    }
-
-    drop(registry);
-
-    if def_id.module == LEGACY_DEF_MODULE {
-        symbol_display_name(def_id.name)
-    } else {
-        format!("D{}.{}", def_id.module.0, def_id.name.0)
-    }
-}
-
-pub fn var_display_name(var: &VarRef) -> String {
-    match var {
-        VarRef::Local(symbol) => symbol_display_name(*symbol),
-        VarRef::Global(def_id) => def_display_name(*def_id),
+        names.tycon_id(name)
     }
 }
 
 impl VarRef {
-    pub fn legacy_local(name: &str) -> Self {
-        Self::Local(legacy_symbol_id(name))
+    pub fn named_local(names: &mut Names, name: &str) -> Self {
+        Self::Local(names.symbol(name))
     }
 
-    pub fn legacy_global(name: &str) -> Self {
-        Self::Global(legacy_def_id(name))
+    pub fn named_global(names: &mut Names, name: &str) -> Self {
+        Self::Global(names.def_id(name))
     }
 
-    pub fn display_name(&self) -> String {
-        var_display_name(self)
+    pub fn display_name(&self, names: &Names) -> String {
+        names.var_display_name(self)
     }
 }
 
-const LEGACY_SOURCE_TYVAR_TAG: u32 = 0x8000_0000;
-const LEGACY_SOURCE_TYVAR_LEN_SHIFT: u32 = 24;
-const LEGACY_SOURCE_TYVAR_CODE_MASK: u32 = 0x00ff_ffff;
-const LEGACY_SOURCE_TYVAR_BASE: u32 = 40;
-const LEGACY_SOURCE_TYVAR_MAX_CHARS: usize = 4;
+const SOURCE_TYVAR_TAG: u32 = 0x8000_0000;
+const SOURCE_TYVAR_LEN_SHIFT: u32 = 24;
+const SOURCE_TYVAR_CODE_MASK: u32 = 0x00ff_ffff;
+const SOURCE_TYVAR_BASE: u32 = 40;
+const SOURCE_TYVAR_MAX_CHARS: usize = 4;
 
-pub fn legacy_tyvar_name(base: &str, id: TyVarId) -> String {
+pub fn generated_tyvar_name(base: &str, id: TyVarId) -> String {
     format!("{}{}", base, id.0)
 }
 
@@ -696,15 +618,15 @@ fn decode_tyvar_char(code: u32) -> Option<char> {
     }
 }
 
-pub fn legacy_tyvar_id(name: &str) -> TyVarId {
+pub fn source_tyvar_id(name: &str) -> TyVarId {
     let chars = name.chars().collect::<Vec<_>>();
-    if !chars.is_empty() && chars.len() <= LEGACY_SOURCE_TYVAR_MAX_CHARS {
+    if !chars.is_empty() && chars.len() <= SOURCE_TYVAR_MAX_CHARS {
         let mut code = 0_u32;
         let mut encodable = true;
 
         for ch in &chars {
             if let Some(part) = encode_tyvar_char(*ch) {
-                code = code * LEGACY_SOURCE_TYVAR_BASE + part;
+                code = code * SOURCE_TYVAR_BASE + part;
             } else {
                 encodable = false;
                 break;
@@ -713,9 +635,7 @@ pub fn legacy_tyvar_id(name: &str) -> TyVarId {
 
         if encodable {
             return TyVarId(
-                LEGACY_SOURCE_TYVAR_TAG
-                    | ((chars.len() as u32) << LEGACY_SOURCE_TYVAR_LEN_SHIFT)
-                    | code,
+                SOURCE_TYVAR_TAG | ((chars.len() as u32) << SOURCE_TYVAR_LEN_SHIFT) | code,
             );
         }
     }
@@ -723,32 +643,28 @@ pub fn legacy_tyvar_id(name: &str) -> TyVarId {
     let hash = name.bytes().fold(2166136261_u32, |acc, byte| {
         (acc ^ byte as u32).wrapping_mul(16777619)
     });
-    TyVarId(
-        LEGACY_SOURCE_TYVAR_TAG
-            | (5 << LEGACY_SOURCE_TYVAR_LEN_SHIFT)
-            | (hash & LEGACY_SOURCE_TYVAR_CODE_MASK),
-    )
+    TyVarId(SOURCE_TYVAR_TAG | (5 << SOURCE_TYVAR_LEN_SHIFT) | (hash & SOURCE_TYVAR_CODE_MASK))
 }
 
 pub fn tyvar_display_name(id: TyVarId) -> String {
-    if id.0 & LEGACY_SOURCE_TYVAR_TAG == 0 {
-        return legacy_tyvar_name("t", id);
+    if id.0 & SOURCE_TYVAR_TAG == 0 {
+        return generated_tyvar_name("t", id);
     }
 
-    let len = ((id.0 >> LEGACY_SOURCE_TYVAR_LEN_SHIFT) & 0x7) as usize;
-    if !(1..=LEGACY_SOURCE_TYVAR_MAX_CHARS).contains(&len) {
-        return legacy_tyvar_name("t", id);
+    let len = ((id.0 >> SOURCE_TYVAR_LEN_SHIFT) & 0x7) as usize;
+    if !(1..=SOURCE_TYVAR_MAX_CHARS).contains(&len) {
+        return generated_tyvar_name("t", id);
     }
 
-    let mut code = id.0 & LEGACY_SOURCE_TYVAR_CODE_MASK;
+    let mut code = id.0 & SOURCE_TYVAR_CODE_MASK;
     let mut chars = Vec::with_capacity(len);
     for _ in 0..len {
-        let part = code % LEGACY_SOURCE_TYVAR_BASE;
+        let part = code % SOURCE_TYVAR_BASE;
         let Some(ch) = decode_tyvar_char(part) else {
-            return legacy_tyvar_name("t", id);
+            return generated_tyvar_name("t", id);
         };
         chars.push(ch);
-        code /= LEGACY_SOURCE_TYVAR_BASE;
+        code /= SOURCE_TYVAR_BASE;
     }
 
     chars.iter().rev().collect()
@@ -811,7 +727,7 @@ impl Ty {
     }
 
     pub fn make_var(var_name: String) -> TypeExpr {
-        Self::TyVar(legacy_tyvar_id(&var_name))
+        Self::TyVar(source_tyvar_id(&var_name))
     }
 
     pub fn make_var_id(base: &str, id: TyVarId) -> TypeExpr {
@@ -823,8 +739,8 @@ impl Ty {
         Self::TyExVar(id)
     }
 
-    pub fn make_con(name: String) -> TypeExpr {
-        Self::TyCon(legacy_tycon_id(&name))
+    pub fn make_named_con(names: &mut Names, name: String) -> TypeExpr {
+        Self::TyCon(names.tycon_id(&name))
     }
 
     pub fn make_con_id(id: TyConId) -> TypeExpr {
@@ -832,7 +748,7 @@ impl Ty {
     }
 
     pub fn make_forall(quant_name: String, kind: Kind, body: TypeExpr) -> TypeExpr {
-        Self::make_forall_id(legacy_tyvar_id(&quant_name), kind, body)
+        Self::make_forall_id(source_tyvar_id(&quant_name), kind, body)
     }
 
     pub fn make_forall_id(quant_id: TyVarId, kind: Kind, body: TypeExpr) -> TypeExpr {
@@ -973,7 +889,7 @@ impl Pretty<Ty> for Ty {
             let type_fmt = match t {
                 TypeExpr::TyUnit => "()".into(),
                 TypeExpr::TyVar(id) => tyvar_display_name(*id),
-                TypeExpr::TyExVar(id) => legacy_evar_name(*id),
+                TypeExpr::TyExVar(id) => evar_display_name(*id),
                 TypeExpr::TyCon(id) => tycon_fallback_name(*id),
 
                 TypeExpr::TyArr(lhs, rhs) => {
@@ -1061,9 +977,9 @@ impl Predicate {
         }
     }
 
-    pub fn legacy(class_name: String, args: Vec<TypeExpr>) -> Self {
+    pub fn named(names: &mut Names, class_name: String, args: Vec<TypeExpr>) -> Self {
         Self {
-            class_id: legacy_class_id(&class_name),
+            class_id: names.class_id(&class_name),
             args,
         }
     }
@@ -1335,9 +1251,9 @@ pub struct ResolvedModule<A, P = A> {
 }
 
 impl<A, P> ResolvedModule<A, P> {
-    pub fn rebuild_identity_tables(&mut self) {
+    pub fn rebuild_identity_tables(&mut self, names: &mut Names) {
         let (tycon_table, ctor_table, class_table) =
-            identity_tables_from_defs(&self.data_defs, &self.class_defs);
+            identity_tables_from_defs(names, &self.data_defs, &self.class_defs);
 
         self.tycon_table = tycon_table;
         self.ctor_table = ctor_table;
@@ -1378,6 +1294,7 @@ impl<A, P> ResolvedModule<A, P> {
 }
 
 pub fn identity_tables_from_defs(
+    names: &mut Names,
     data_defs: &[DataDefinition],
     class_defs: &[ClassDefinition],
 ) -> (TyConTable, CtorTable, ClassTable) {
@@ -1386,7 +1303,7 @@ pub fn identity_tables_from_defs(
     let mut class_table = ClassTable::new();
     let mut next_ctor_tag = 0_u16;
 
-    for (id, info) in compiler_primitive_tycon_infos() {
+    for (id, info) in compiler_primitive_tycon_infos(names) {
         tycon_table.insert_with_id(id, info);
     }
 
@@ -1395,6 +1312,7 @@ pub fn identity_tables_from_defs(
         .find(|data_def| data_def.name == COMPILER_BOOL_NAME)
     {
         insert_data_definition_identity(
+            names,
             bool_def,
             &mut tycon_table,
             &mut ctor_table,
@@ -1408,6 +1326,7 @@ pub fn identity_tables_from_defs(
         }
 
         insert_data_definition_identity(
+            names,
             data_def,
             &mut tycon_table,
             &mut ctor_table,
@@ -1419,8 +1338,8 @@ pub fn identity_tables_from_defs(
         class_table.insert_with_id(
             class_def.id,
             ClassInfo {
-                name: legacy_symbol_id(&class_def.name),
-                short_name: legacy_symbol_id(&class_def.short_name),
+                name: names.symbol(&class_def.name),
+                short_name: names.symbol(&class_def.short_name),
                 definition: class_def.clone(),
             },
         );
@@ -1430,18 +1349,19 @@ pub fn identity_tables_from_defs(
 }
 
 fn insert_data_definition_identity(
+    names: &mut Names,
     data_def: &DataDefinition,
     tycon_table: &mut TyConTable,
     ctor_table: &mut CtorTable,
     next_ctor_tag: &mut u16,
 ) {
-    let tycon_id = tycon_id_for_data_definition(&data_def.name);
+    let tycon_id = tycon_id_for_data_definition(names, &data_def.name);
 
     tycon_table.insert_with_id(
         tycon_id,
         TyConInfo {
-            name: legacy_symbol_id(&data_def.name),
-            short_name: legacy_symbol_id(&data_def.short_name),
+            name: names.symbol(&data_def.name),
+            short_name: names.symbol(&data_def.short_name),
             kind: data_def.tycon_kind.clone(),
             definition: TyConDefinition::Data(data_def.clone()),
         },
@@ -1451,8 +1371,8 @@ fn insert_data_definition_identity(
         ctor_table.insert_with_id(
             ctor_def.id,
             CtorInfo {
-                name: legacy_symbol_id(&ctor_def.name),
-                short_name: legacy_symbol_id(&ctor_def.short_name),
+                name: names.symbol(&ctor_def.name),
+                short_name: names.symbol(&ctor_def.short_name),
                 tycon: tycon_id,
                 fields: ctor_def.fields.clone(),
                 full_type: ctor_def.full_type.clone(),
@@ -1552,9 +1472,14 @@ pub struct CtorRuntimeInfo {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum CtorRuntimeRole {
     Ordinary,
+    PreludeMaybeJust,
+    PreludeMaybeNothing,
     PreludeListNil,
     PreludeListCons,
     PreludePair,
+    PreludeOrderingLt,
+    PreludeOrderingEq,
+    PreludeOrderingGt,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1693,6 +1618,7 @@ impl ClassTable {
 
 #[derive(Clone, Copy)]
 pub struct PrettyTables<'a> {
+    pub names: &'a Names,
     pub tycons: &'a TyConTable,
     pub classes: &'a ClassTable,
 }
@@ -1701,7 +1627,7 @@ fn tycon_pretty_name(id: TyConId, tables: PrettyTables<'_>) -> String {
     tables
         .tycons
         .get(id)
-        .map(|info| symbol_display_name(info.short_name))
+        .map(|info| tables.names.symbol_display_name(info.short_name))
         .unwrap_or_else(|| panic!("ICE: pretty tables missing TyConId {id:?}"))
 }
 
@@ -1709,7 +1635,7 @@ fn class_pretty_name(id: ClassId, tables: PrettyTables<'_>) -> String {
     tables
         .classes
         .get(id)
-        .map(|info| symbol_display_name(info.short_name))
+        .map(|info| tables.names.symbol_display_name(info.short_name))
         .unwrap_or_else(|| panic!("ICE: pretty tables missing ClassId {id:?}"))
 }
 
@@ -1721,7 +1647,7 @@ impl TypeExpr {
             let type_fmt = match t {
                 TypeExpr::TyUnit => "()".into(),
                 TypeExpr::TyVar(id) => tyvar_display_name(*id),
-                TypeExpr::TyExVar(id) => legacy_evar_name(*id),
+                TypeExpr::TyExVar(id) => evar_display_name(*id),
                 TypeExpr::TyCon(id) => tycon_pretty_name(*id, tables),
 
                 TypeExpr::TyArr(lhs, rhs) => {
@@ -2176,7 +2102,7 @@ mod tests {
             short_name: session.intern("False"),
             tycon: bool_id,
             fields: Vec::new(),
-            full_type: TypeExpr::make_con("Bool".to_string()),
+            full_type: TypeExpr::make_con_id(bool_id),
             tag: 0,
         });
         let true_id = ctors.insert(CtorInfo {
@@ -2184,7 +2110,7 @@ mod tests {
             short_name: session.intern("True"),
             tycon: bool_id,
             fields: Vec::new(),
-            full_type: TypeExpr::make_con("Bool".to_string()),
+            full_type: TypeExpr::make_con_id(bool_id),
             tag: 1,
         });
 
@@ -2228,10 +2154,10 @@ mod tests {
     }
 
     #[test]
-    fn legacy_evar_bridge_round_trips_ids() {
+    fn evar_display_round_trips_ids() {
         let id = EvarId(42);
 
-        assert_eq!(legacy_evar_name(id), "a^42");
+        assert_eq!(evar_display_name(id), "a^42");
         assert_eq!(TypeExpr::make_evar(id), TypeExpr::TyExVar(id));
     }
 
@@ -2241,65 +2167,75 @@ mod tests {
 
         assert!(TypeExpr::make_evar(needle).occurs_check(needle));
         assert!(!TypeExpr::make_evar(EvarId(3)).occurs_check(needle));
-        assert!(!TypeExpr::make_var(legacy_evar_name(needle)).occurs_check(needle));
+        assert!(!TypeExpr::make_var(evar_display_name(needle)).occurs_check(needle));
     }
 
     #[test]
-    fn legacy_tyvar_bridge_names_generated_ids() {
+    fn generated_tyvar_names_generated_ids() {
         let id = TyVarId(9);
 
-        assert_eq!(legacy_tyvar_name("t", id), "t9");
+        assert_eq!(generated_tyvar_name("t", id), "t9");
         assert_eq!(TypeExpr::make_var_id("t", id), TypeExpr::TyVar(id));
     }
 
     #[test]
-    fn legacy_tycon_bridge_preserves_registered_names() {
+    fn names_table_preserves_type_constructor_names() {
+        let mut names = Names::new();
         let name = "test.module.Widget";
-        let id = legacy_tycon_id(name);
+        let id = names.tycon_id(name);
 
-        assert_eq!(legacy_tycon_id(name), id);
-        assert_ne!(legacy_tycon_id("test.module.OtherWidget"), id);
-        assert_eq!(tycon_display_name(id), name);
-        assert_eq!(TypeExpr::make_con(name.to_string()), TypeExpr::TyCon(id));
+        assert_eq!(names.tycon_id(name), id);
+        assert_ne!(names.tycon_id("test.module.OtherWidget"), id);
+        assert_eq!(names.tycon_display_name(id), name);
         assert_eq!(
-            TypeExpr::make_con(name.to_string()).pretty(),
+            TypeExpr::make_named_con(&mut names, name.to_string()),
+            TypeExpr::TyCon(id)
+        );
+        assert_eq!(
+            TypeExpr::make_named_con(&mut names, name.to_string()).pretty(),
             format!("T{}", id.0)
         );
     }
 
     #[test]
-    fn legacy_ctor_bridge_preserves_registered_names() {
+    fn names_table_preserves_constructor_names() {
+        let mut names = Names::new();
         let name = "test.module.MkWidget";
-        let id = legacy_ctor_id(name);
+        let id = names.ctor_id(name);
 
-        assert_eq!(legacy_ctor_id(name), id);
-        assert_ne!(legacy_ctor_id("test.module.OtherCtor"), id);
-        assert_eq!(ctor_display_name(id), name);
+        assert_eq!(names.ctor_id(name), id);
+        assert_ne!(names.ctor_id("test.module.OtherCtor"), id);
+        assert_eq!(names.ctor_display_name(id), name);
     }
 
     #[test]
-    fn legacy_class_bridge_preserves_registered_names() {
+    fn names_table_preserves_class_names() {
+        let mut names = Names::new();
         let name = "test.module.EqWidget";
-        let id = legacy_class_id(name);
+        let id = names.class_id(name);
 
-        assert_eq!(legacy_class_id(name), id);
-        assert_ne!(legacy_class_id("test.module.OtherClass"), id);
-        assert_eq!(class_display_name(id), name);
-        assert_eq!(Predicate::legacy(name.to_string(), Vec::new()).class_id, id);
+        assert_eq!(names.class_id(name), id);
+        assert_ne!(names.class_id("test.module.OtherClass"), id);
+        assert_eq!(names.class_display_name(id), name);
         assert_eq!(
-            Predicate::legacy(name.to_string(), Vec::new()).pretty(),
+            Predicate::named(&mut names, name.to_string(), Vec::new()).class_id,
+            id
+        );
+        assert_eq!(
+            Predicate::named(&mut names, name.to_string(), Vec::new()).pretty(),
             format!("K{}", id.0)
         );
     }
 
     #[test]
-    fn resolved_module_rebuilds_identity_tables_for_legacy_ids() {
+    fn resolved_module_rebuilds_identity_tables_for_named_ids() {
+        let mut names = Names::new();
         let tycon_name = "test.module.Widget";
         let ctor_name = "test.module.MkWidget";
         let class_name = "test.module.WidgetLike";
-        let tycon_id = legacy_tycon_id(tycon_name);
-        let ctor_id = legacy_ctor_id(ctor_name);
-        let class_id = legacy_class_id(class_name);
+        let tycon_id = names.tycon_id(tycon_name);
+        let ctor_id = names.ctor_id(ctor_name);
+        let class_id = names.class_id(class_name);
 
         let data_def = DataDefinition {
             name: tycon_name.to_string(),
@@ -2313,7 +2249,7 @@ mod tests {
                 fields: vec![TypeExpr::TyUnit],
                 full_type: TypeExpr::make_arr(
                     TypeExpr::TyUnit,
-                    TypeExpr::make_con(tycon_name.to_string()),
+                    TypeExpr::make_named_con(&mut names, tycon_name.to_string()),
                 ),
             }],
         };
@@ -2341,20 +2277,20 @@ mod tests {
             func_defs: Vec::new(),
         };
 
-        module.rebuild_identity_tables();
+        module.rebuild_identity_tables(&mut names);
 
         let tycon_info = module
             .tycon_table
             .get(tycon_id)
             .expect("ICE: rebuilt type-constructor table must contain Widget");
-        assert_eq!(symbol_display_name(tycon_info.name), tycon_name);
+        assert_eq!(names.symbol_display_name(tycon_info.name), tycon_name);
         assert_eq!(tycon_info.kind, Kind::Star);
 
         let ctor_info = module
             .ctor_table
             .get(ctor_id)
             .expect("ICE: rebuilt constructor table must contain MkWidget");
-        assert_eq!(symbol_display_name(ctor_info.name), ctor_name);
+        assert_eq!(names.symbol_display_name(ctor_info.name), ctor_name);
         assert_eq!(ctor_info.tycon, tycon_id);
         assert_eq!(ctor_info.tag, 0);
 
@@ -2362,7 +2298,7 @@ mod tests {
             .class_table
             .get(class_id)
             .expect("ICE: rebuilt class table must contain WidgetLike");
-        assert_eq!(symbol_display_name(class_info.name), class_name);
+        assert_eq!(names.symbol_display_name(class_info.name), class_name);
         assert_eq!(class_info.definition.id, class_id);
     }
 
@@ -2370,14 +2306,15 @@ mod tests {
     fn table_backed_pretty_uses_identity_tables() {
         let tycon_id = TyConId(42);
         let class_id = ClassId(77);
+        let mut names = Names::new();
         let mut tycons = TyConTable::new();
         let mut classes = ClassTable::new();
 
         tycons.insert_with_id(
             tycon_id,
             TyConInfo {
-                name: legacy_symbol_id("test.module.TableTy"),
-                short_name: legacy_symbol_id("TableTy"),
+                name: names.symbol("test.module.TableTy"),
+                short_name: names.symbol("TableTy"),
                 kind: Kind::Star,
                 definition: TyConDefinition::Primitive,
             },
@@ -2385,8 +2322,8 @@ mod tests {
         classes.insert_with_id(
             class_id,
             ClassInfo {
-                name: legacy_symbol_id("test.module.TableClass"),
-                short_name: legacy_symbol_id("TableClass"),
+                name: names.symbol("test.module.TableClass"),
+                short_name: names.symbol("TableClass"),
                 definition: ClassDefinition {
                     id: class_id,
                     name: "test.module.TableClass".to_string(),
@@ -2399,6 +2336,7 @@ mod tests {
         );
 
         let tables = PrettyTables {
+            names: &names,
             tycons: &tycons,
             classes: &classes,
         };
@@ -2419,18 +2357,19 @@ mod tests {
     }
 
     #[test]
-    fn legacy_varref_bridge_preserves_local_and_global_names() {
-        let local = VarRef::legacy_local("value");
+    fn names_table_preserves_local_and_global_names() {
+        let mut names = Names::new();
+        let local = VarRef::named_local(&mut names, "value");
         let global_name = "test.module.value";
-        let global = VarRef::legacy_global(global_name);
+        let global = VarRef::named_global(&mut names, global_name);
 
-        assert_eq!(var_display_name(&local), "value");
-        assert_eq!(var_display_name(&global), global_name);
+        assert_eq!(names.var_display_name(&local), "value");
+        assert_eq!(names.var_display_name(&global), global_name);
 
         let source_symbol = Symbol(12);
-        register_symbol_display_name(source_symbol, "sourceValue");
+        names.register_symbol(source_symbol, "sourceValue");
         assert_eq!(
-            var_display_name(&VarRef::Local(source_symbol)),
+            names.var_display_name(&VarRef::Local(source_symbol)),
             "sourceValue"
         );
 
@@ -2438,10 +2377,10 @@ mod tests {
             module: ModuleId(7),
             name: Symbol(11),
         };
-        register_def_display_name(def_id, "other.module.value");
+        names.register_def(def_id, "other.module.value");
 
         assert_eq!(
-            var_display_name(&VarRef::Global(def_id)),
+            names.var_display_name(&VarRef::Global(def_id)),
             "other.module.value"
         );
     }
