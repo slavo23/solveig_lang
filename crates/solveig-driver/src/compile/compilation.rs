@@ -7,6 +7,7 @@ pub struct Compilation {
     pub(super) project_root: PathBuf,
     pub(super) session: Session,
     pub(super) names: Names,
+    pub(super) source_provider: SourceProvider,
     pub(super) artifacts: Option<CompilationArtifacts>,
     pub(super) checked_project: Option<CheckedProject>,
     pub(super) prelude_cache: Option<PreludeCache>,
@@ -142,6 +143,7 @@ impl Compilation {
             project_root: project_root.into(),
             session: Session::new(),
             names: Names::new(),
+            source_provider: SourceProvider::default(),
             artifacts: None,
             checked_project: None,
             prelude_cache: None,
@@ -170,6 +172,20 @@ impl Compilation {
         options: CompileOptions,
     ) -> Result<(), DriverError> {
         self.compile_and_run_project_with_options_and_args(entry_name, options, &[])
+    }
+
+    /// Sets editor-provided source text for a project path, shadowing disk on the next check.
+    pub fn set_overlay(&mut self, path: impl AsRef<Path>, text: impl Into<String>) {
+        let path = self.project_source_path(path.as_ref());
+        self.source_provider.set_overlay(path, text);
+        self.clear_retained_project();
+    }
+
+    /// Clears editor-provided source text for a project path, exposing disk again on the next check.
+    pub fn clear_overlay(&mut self, path: impl AsRef<Path>) {
+        let path = self.project_source_path(path.as_ref());
+        self.source_provider.clear_overlay(path);
+        self.clear_retained_project();
     }
 
     pub fn compile_and_run_project_with_options_and_args(
@@ -465,6 +481,20 @@ impl Compilation {
             success: false,
             failure_message: Some(phase.error_message()),
         };
+    }
+
+    fn project_source_path(&self, path: &Path) -> PathBuf {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.project_root.join(path)
+        }
+    }
+
+    fn clear_retained_project(&mut self) {
+        self.artifacts = None;
+        self.checked_project = None;
+        self.check_result = CheckResult::default();
     }
 }
 

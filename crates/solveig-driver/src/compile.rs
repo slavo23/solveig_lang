@@ -49,9 +49,9 @@ use solveig_vm::vm::Machine;
 
 use crate::DriverError;
 use crate::project::{
-    ProjectError, is_compiler_prelude_module, load_project, load_project_with_prelude_cache,
-    parse_project,
+    ProjectError, is_compiler_prelude_module, load_project_with_source_provider, parse_project,
 };
+use crate::source_provider::SourceProvider;
 
 mod builtins;
 mod compilation;

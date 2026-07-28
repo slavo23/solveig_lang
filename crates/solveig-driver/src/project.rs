@@ -2,7 +2,6 @@
 //! The compile facade calls this before parsing modules into the project graph.
 
 use solveig_base::FxHashMap;
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use solveig_base::{FileId, FileSpan, Session};
@@ -13,6 +12,7 @@ use solveig_syntax::ast::{ModuleName, ParsedModule};
 use solveig_syntax::parser;
 
 use crate::DriverError;
+use crate::source_provider::SourceProvider;
 
 const PRELUDE_BUILTINS_SRC: &str = include_str!("./prelude/builtins.sv");
 const PRELUDE_LIST_SRC: &str = include_str!("./prelude/list.sv");
@@ -117,11 +117,14 @@ fn scan_module_file(
     session: &Session,
     root: &Path,
     file: &Path,
+    sources: &SourceProvider,
 ) -> Result<ModuleFile, DriverError> {
-    let source = fs::read_to_string(file).map_err(|source| DriverError::ReadFile {
-        path: file.to_path_buf(),
-        source,
-    })?;
+    let source = sources
+        .read_to_string(file)
+        .map_err(|source| DriverError::ReadFile {
+            path: file.to_path_buf(),
+            source,
+        })?;
 
     let name = module_name_from_file(session, root, file)?;
     let file_id = session.add_file(file.to_path_buf(), source.clone());
@@ -196,16 +199,10 @@ struct PendingModule {
     import_span: Option<FileSpan>,
 }
 
-pub fn load_project(
+pub(crate) fn load_project_with_source_provider(
     session: &Session,
     entry_file: &Path,
-) -> Result<(PathBuf, Project), ProjectError> {
-    load_project_with_prelude_cache(session, entry_file, None)
-}
-
-pub(crate) fn load_project_with_prelude_cache(
-    session: &Session,
-    entry_file: &Path,
+    sources: &SourceProvider,
     cached_prelude_modules: Option<&FxHashMap<ModuleName, ModuleFile>>,
 ) -> Result<(PathBuf, Project), ProjectError> {
     let root = entry_file
@@ -223,10 +220,10 @@ pub(crate) fn load_project_with_prelude_cache(
     }];
 
     while let Some(pending) = stack.pop() {
-        let module_file = match scan_module_file(session, &root, &pending.file) {
+        let module_file = match scan_module_file(session, &root, &pending.file, sources) {
             Ok(module_file) => module_file,
             Err(error) => {
-                if !pending.file.is_file()
+                if !sources.has_source(&pending.file)
                     && let (Some(module), Some(span)) =
                         (pending.requested_module, pending.import_span)
                 {

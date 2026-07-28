@@ -22,19 +22,25 @@ impl Compilation {
         &mut self,
         verify_core: bool,
     ) -> Result<CheckProjectOutcome, DriverError> {
-        let entry_file = find_entry_file(&self.project_root)?;
+        let entry_file = find_entry_file(&self.project_root, &self.source_provider)?;
         let cached_prelude_modules = self
             .prelude_cache
             .as_ref()
             .map(|cache| &cache.project_modules);
         let loaded_project = if let Some(cached_prelude_modules) = cached_prelude_modules {
-            load_project_with_prelude_cache(
+            load_project_with_source_provider(
                 &self.session,
                 &entry_file,
+                &self.source_provider,
                 Some(cached_prelude_modules),
             )
         } else {
-            load_project(&self.session, &entry_file)
+            load_project_with_source_provider(
+                &self.session,
+                &entry_file,
+                &self.source_provider,
+                None,
+            )
         };
         let (_root, project) = match loaded_project {
             Ok(project) => project,
@@ -118,9 +124,9 @@ fn push_resolve_errors(
 
 include!("pipeline/frontend.rs");
 
-fn find_entry_file(project_root: &Path) -> Result<PathBuf, DriverError> {
+fn find_entry_file(project_root: &Path, sources: &SourceProvider) -> Result<PathBuf, DriverError> {
     let entry = project_root.join("src").join("main.sv");
-    if entry.is_file() {
+    if sources.has_source(&entry) {
         Ok(entry)
     } else {
         Err(DriverError::EntryFileMissing { path: entry })

@@ -4,6 +4,7 @@
 mod compile;
 mod error;
 mod project;
+mod source_provider;
 
 /// Re-exports project compilation, checking, and execution entry points.
 pub use compile::{
