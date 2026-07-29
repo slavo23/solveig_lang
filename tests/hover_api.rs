@@ -292,6 +292,46 @@ fn hover_info_covers_h13_semantic_targets() {
         Some("Converts a value into a friendly label.")
     );
 
+    let class_name = compilation
+        .hover_info(
+            &lib_file,
+            offset_in_line(&lib_source, "class Describe a where", "Describe"),
+        )
+        .expect("class declaration hover should exist");
+    assert_eq!(class_name.signature(), "class Describe a");
+    assert_eq!(class_name.documentation(), Some("Describes values."));
+
+    let class_predicate = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line_last(
+                &main_source,
+                "useDescriber : forall a. Describe a => a -> String",
+                "Describe",
+            ),
+        )
+        .expect("class predicate hover should exist");
+    assert_eq!(class_predicate.signature(), "class Describe a");
+    assert!(
+        class_predicate
+            .provenance()
+            .is_some_and(|provenance| provenance.contains("hoverLib")),
+        "class predicate hover should include provenance: {class_predicate:#?}"
+    );
+
+    let class_method_reference = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(
+                &main_source,
+                "useDescriber value = describe value",
+                "describe",
+            ),
+        )
+        .expect("class method reference hover should exist");
+    assert_contains(class_method_reference.signature(), "class Describe a");
+    assert_contains(class_method_reference.signature(), "describe :");
+
     let do_expression = compilation
         .hover_info(
             &main_file,
@@ -422,6 +462,146 @@ fn hover_info_covers_local_declaration_sites() {
 }
 
 #[test]
+fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
+    let quiz_root = fixture_root("examples/quiz_game");
+    let quiz_file = quiz_root.join("src/main.sv");
+    let quiz_source = fs::read_to_string(&quiz_file).expect("quiz source should load");
+    let mut quiz = Compilation::new(&quiz_root);
+    let result = quiz.check(true).expect("quiz fixture should check");
+
+    assert!(
+        result.success(),
+        "quiz diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let summary_line =
+        r#"    appendString "Score: " (appendString (show score) (appendString "/" (show total)))"#;
+    let slash_string = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(&quiz_source, summary_line, r#""/""#) + 1,
+        )
+        .expect("slash string literal hover should exist");
+    assert_eq!(slash_string.signature(), "String");
+
+    let show_score_open = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(&quiz_source, summary_line, "(show score)"),
+        )
+        .expect("opening paren around show score should hover");
+    assert_eq!(show_score_open.signature(), "String");
+
+    let show_score_close = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(&quiz_source, summary_line, "(show score)") + "(show score".len(),
+        )
+        .expect("closing paren around show score should hover");
+    assert_eq!(show_score_close.signature(), "String");
+
+    let prompt = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(&quiz_source, r#"                printStr "> ""#, r#""> ""#) + 1,
+        )
+        .expect("prompt string literal hover should exist");
+    assert_eq!(prompt.signature(), "String");
+
+    let expression_cons = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(
+                &quiz_source,
+                r#"    if line == "" then rest else line :: rest"#,
+                "::",
+            ),
+        )
+        .expect("expression cons hover should exist");
+    assert_contains(expression_cons.signature(), "Cons :");
+    assert_contains(expression_cons.signature(), "a -> List a -> List a");
+
+    let empty_list_open = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(
+                &quiz_source,
+                "splitLines text = splitLinesChars (stringToChars text) []",
+                "[",
+            ),
+        )
+        .expect("empty list opening bracket hover should exist");
+    assert_eq!(empty_list_open.signature(), "Nil : ∀ (a : *). List a");
+
+    let empty_list_close = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(
+                &quiz_source,
+                "splitLines text = splitLinesChars (stringToChars text) []",
+                "]",
+            ),
+        )
+        .expect("empty list closing bracket hover should exist");
+    assert_eq!(empty_list_close.signature(), "Nil : ∀ (a : *). List a");
+
+    let pattern_cons = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(&quiz_source, "        | c :: rest =>", "::"),
+        )
+        .expect("pattern cons hover should exist");
+    assert_contains(pattern_cons.signature(), "Cons :");
+    assert_contains(pattern_cons.signature(), "a -> List a -> List a");
+
+    let instance_class = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(&quiz_source, "instance Functor (State s) where", "Functor"),
+        )
+        .expect("instance class hover should exist");
+    assert_contains(instance_class.signature(), "class Functor f");
+
+    let fmap_method = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(&quiz_source, "    fmap f action =", "fmap"),
+        )
+        .expect("instance method name hover should exist");
+    assert_contains(fmap_method.signature(), "fmap :");
+    assert_contains(fmap_method.signature(), "State s");
+
+    let fmap_param = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(&quiz_source, "    fmap f action =", "f action"),
+        )
+        .expect("instance method parameter hover should exist");
+    assert_eq!(fmap_param.signature(), "f : a -> b");
+
+    let fmap_param_ref = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(
+                &quiz_source,
+                "                MkPair value nextState => MkPair (f value) nextState",
+                "f",
+            ),
+        )
+        .expect("instance method parameter reference hover should exist");
+    assert_eq!(fmap_param_ref.signature(), "f : a -> b");
+
+    let instance_lambda_param = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(&quiz_source, "        State (fun state =>", "state"),
+        )
+        .expect("nested lambda parameter inside instance method should hover");
+    assert_eq!(instance_lambda_param.signature(), "state : s");
+}
+
+#[test]
 fn hover_audits_quiz_game_sensitive_tokens() {
     let quiz_root = fixture_root("examples/quiz_game");
     let quiz_file = quiz_root.join("src/main.sv");
@@ -454,14 +634,14 @@ fn hover_audits_quiz_game_sensitive_tokens() {
         " 13:11  `value` => value : a\n",
         " 13:17  `=` => <none>\n",
         " 13:19  `State` => State : ∀ (s : *) (a : *). (s -> Pair a s) -> State s a\n",
-        " 13:25  `(` => <none>\n",
+        " 13:25  `(` => s -> Pair a s\n",
         " 13:26  `fun` => <none>\n",
         " 13:30  `state` => state : s\n",
         " 13:36  `=>` => <none>\n",
         " 13:39  `MkPair` => MkPair : ∀ (a : *) (b : *). a -> b -> Pair a b\n",
         " 13:46  `value` => value : a\n",
         " 13:52  `state` => state : s\n",
-        " 13:57  `)` => <none>\n",
+        " 13:57  `)` => s -> Pair a s\n",
         " 74:9   `MkPair` => MkPair : ∀ (a : *) (b : *). a -> b -> Pair a b\n",
         " 74:16  `question` => question : String\n",
         " 74:25  `answer` => answer : String\n",

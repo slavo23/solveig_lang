@@ -10,7 +10,8 @@ go-to-definition.
 - Diagnostics for parser, resolver, kind, type, hole, and core checks.
 - Hover for functions, constructors, types, classes, methods, modules, local
   variables, function parameters, lambda parameters, `let` binders, do-block
-  binders, and case-pattern variables.
+  binders, case-pattern variables, literals, parenthesized expressions, `::`,
+  and `[]`.
 - Go-to-definition and find-references for resolved project declarations.
 - Document outline and workspace symbol search.
 - Semantic highlighting with full and delta token responses.
@@ -77,15 +78,20 @@ The H23 robustness harness should grow in this order:
 
 ## Findings From The First Sweep
 
-The first `scry` and `smoke_suite` sweep found and fixed several concrete
-issues:
+The first `scry`, `smoke_suite`, and quiz-game sweeps found and fixed several
+concrete issues:
 
-- Hover on pure syntax tokens such as `case`, `of`, `=>`, `fun`, parentheses,
-  and `::` could show the type of a larger expression. These now stay quiet.
+- Hover on keywords and separators such as `case`, `of`, `=>`, and `fun`
+  could show the type of a nearby expression. These now stay quiet.
+- Hover inside a string such as `"/"` or `"> "` could be mistaken for an
+  operator hover. String, char, number, and float literals now report their own
+  literal type.
+- Hover on opening or closing parentheses now reports the type of the
+  expression inside those parentheses.
+- Hover on `::` now reports the list constructor, and hover on `[]` now reports
+  the empty-list constructor.
 - Hover on import punctuation could show `module ...` because module hover used
   the whole import line. Module hover now uses only the module path span.
-- Hover on `[]` brackets could show the Prelude `Nil` constructor. Brackets now
-  stay quiet.
 - Some repeated source-map entries caused editor lookup to choose a file id
   without retained semantic artifacts. File lookup now prefers artifact-backed
   file ids.
@@ -102,3 +108,6 @@ issues:
   highlighting from the language server provides the accurate coloring.
 - The robustness harness currently sweeps driver APIs and selected in-process
   LSP paths. The next expansion is a longer LSP lifecycle test with many edits.
+- Hover inside class declarations is still best for names and method
+  signatures. Ordinary functions and explicit instance method bodies currently
+  have more complete local-variable hover coverage.

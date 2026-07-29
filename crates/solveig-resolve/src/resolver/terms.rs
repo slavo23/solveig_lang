@@ -96,12 +96,18 @@ impl<'a> Resolver<'a> {
     fn lower_list_cons_application(
         &mut self,
         lhs: &SpannedWrapper<SurfaceExpr>,
+        op: SpannedWrapper<Symbol>,
         rhs: &SpannedWrapper<SurfaceExpr>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
         bound_terms: &FxHashSet<Symbol>,
-        span: Span,
     ) -> TermExpr<Span> {
+        if let Some(def_id) = self.prelude_list_cons_def_id() {
+            self.record_resolution(self.file_span(cx, op.1), def_id);
+            self.qualified_def_name(def_id);
+        }
+
+        let span = to_core_span(SourceSpan::new(lhs.1.start, rhs.1.end));
         let cons = TermExprNode::new(
             TermExpr::Con(prelude_list_cons_ctor_id(self.names)),
             span.clone(),
@@ -128,7 +134,7 @@ impl<'a> Resolver<'a> {
         let span = to_core_span(SourceSpan::new(lhs.1.start, rhs.1.end));
 
         if self.symbol_text(op.0) == "::" {
-            return self.lower_list_cons_application(lhs, rhs, cx, local, bound_terms, span);
+            return self.lower_list_cons_application(lhs, op, rhs, cx, local, bound_terms);
         }
 
         let name_ref = NameRef {
@@ -151,6 +157,17 @@ impl<'a> Resolver<'a> {
         );
 
         TermExpr::App(Box::new(app), Box::new(rhs))
+    }
+
+    fn prelude_list_cons_def_id(&self) -> Option<DefId> {
+        let module = ModuleName(vec![
+            self.session.intern("prelude"),
+            self.session.intern("list"),
+        ]);
+        let module = self.modules.id(&module)?;
+        let name = self.session.intern("Cons");
+
+        Some(DefId { module, name })
     }
 
     fn section_param_expr(

@@ -25,12 +25,14 @@ impl Parser<'_> {
                     span_end,
                 ))
             } else if this.at(&Token::Cons) {
-                this.advance();
+                let cons = this.advance();
                 let tail = this.parse_pattern()?;
                 Ok(cons_pattern(
                     this.session,
                     head,
                     tail,
+                    cons.start,
+                    cons.end,
                     this.current_cst_id(),
                 ))
             } else {

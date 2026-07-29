@@ -4,6 +4,15 @@ use super::*;
 
 type CheckedExpr = TermExprNode<TcMetadata, Range<usize>>;
 
+#[derive(Clone, Copy)]
+struct LocalHoverContext<'a> {
+    session: &'a Session,
+    source: &'a str,
+    file: FileId,
+    tables: PrettyTables<'a>,
+    ctor_table: &'a CtorTable,
+}
+
 pub(super) fn project_inlay_hints(
     session: &Session,
     project: &Project,
@@ -61,6 +70,7 @@ pub(super) fn project_local_hovers(
         tycons: &tycon_table,
         classes: &class_table,
     };
+    let source_map = session.source_map();
     let mut out = Vec::new();
 
     for module_name in order {
@@ -71,16 +81,16 @@ pub(super) fn project_local_hovers(
             continue;
         };
         let parsed = parsed.get(session, module_name);
+        let source = &source_map.lookup(parsed.file).src;
 
-        collect_module_local_hovers(
+        let hover_cx = LocalHoverContext {
             session,
-            parsed,
-            module_id,
-            checked,
+            source,
+            file: parsed.file,
             tables,
-            &ctor_table,
-            &mut out,
-        );
+            ctor_table: &ctor_table,
+        };
+        collect_module_local_hovers(hover_cx, parsed, module_id, checked, &mut out);
     }
 
     out.sort_by_key(local_hover_sort_key);
@@ -177,17 +187,62 @@ fn collect_module_inlay_hints(
         collect_expr_inlay_hints(session, parsed.file, body, checked_body, tables, out);
         collect_textual_let_hints(parsed.file, source, checked_body, tables, out);
     }
+
+    let mut checked_instances = checked.instance_defs.iter();
+    for defn in &parsed.defs {
+        let SurfaceDefinition::InstanceDef { methods, .. } = &defn.0 else {
+            continue;
+        };
+        let Some(checked_instance) = checked_instances.next() else {
+            continue;
+        };
+
+        for method in methods {
+            let method_name = session.str(method.name.0);
+            let Some(checked_method) = checked_instance
+                .methods
+                .iter()
+                .find(|checked_method| checked_method.name == *method_name)
+            else {
+                continue;
+            };
+            drop(method_name);
+
+            let checked_body = collect_function_param_hints(
+                session,
+                parsed.file,
+                &method.params,
+                &checked_method.body,
+                tables,
+                out,
+            )
+            .unwrap_or_else(|| {
+                checked_body_without_function_params(&checked_method.body, method.params.len())
+            });
+
+            collect_expr_inlay_hints(
+                session,
+                parsed.file,
+                &method.body,
+                checked_body,
+                tables,
+                out,
+            );
+            collect_textual_let_hints(parsed.file, source, checked_body, tables, out);
+        }
+    }
 }
 
 fn collect_module_local_hovers(
-    session: &Session,
+    cx: LocalHoverContext<'_>,
     parsed: &ParsedModule,
     module_id: ModuleId,
     checked: &CheckedModule,
-    tables: PrettyTables<'_>,
-    ctor_table: &CtorTable,
     out: &mut Vec<HoverInfo>,
 ) {
+    let session = cx.session;
+    let file = cx.file;
+    let tables = cx.tables;
     let checked_defs = checked
         .func_defs
         .iter()
@@ -211,7 +266,7 @@ fn collect_module_local_hovers(
         let mut param_facts = Vec::new();
         let checked_body = collect_function_param_hovers(
             session,
-            parsed.file,
+            file,
             params,
             &checked_def.body,
             tables,
@@ -221,18 +276,61 @@ fn collect_module_local_hovers(
         .unwrap_or_else(|| checked_body_without_function_params(&checked_def.body, params.len()));
 
         for (symbol, name, ty) in &param_facts {
-            push_expr_reference_hovers(parsed.file, body, *symbol, name, ty, tables, out);
+            push_expr_reference_hovers(file, body, *symbol, name, ty, tables, out);
         }
 
-        collect_expr_local_hovers(
-            session,
-            parsed.file,
-            body,
-            checked_body,
-            tables,
-            ctor_table,
-            out,
-        );
+        collect_expr_local_hovers(cx, body, checked_body, out);
+    }
+
+    let mut checked_instances = checked.instance_defs.iter();
+    for defn in &parsed.defs {
+        let SurfaceDefinition::InstanceDef { methods, .. } = &defn.0 else {
+            continue;
+        };
+        let Some(checked_instance) = checked_instances.next() else {
+            continue;
+        };
+
+        for method in methods {
+            let method_name = session.str(method.name.0);
+            let Some(checked_method) = checked_instance
+                .methods
+                .iter()
+                .find(|checked_method| checked_method.name == *method_name)
+            else {
+                continue;
+            };
+            drop(method_name);
+
+            push_local_hover(
+                file,
+                method.name.1,
+                &checked_method.name,
+                &checked_method.body.anno.inferred_type,
+                tables,
+                out,
+            );
+
+            let mut param_facts = Vec::new();
+            let checked_body = collect_function_param_hovers(
+                session,
+                file,
+                &method.params,
+                &checked_method.body,
+                tables,
+                &mut param_facts,
+                out,
+            )
+            .unwrap_or_else(|| {
+                checked_body_without_function_params(&checked_method.body, method.params.len())
+            });
+
+            for (symbol, name, ty) in &param_facts {
+                push_expr_reference_hovers(file, &method.body, *symbol, name, ty, tables, out);
+            }
+
+            collect_expr_local_hovers(cx, &method.body, checked_body, out);
+        }
     }
 }
 
@@ -400,15 +498,16 @@ fn collect_expr_inlay_hints(
 }
 
 fn collect_expr_local_hovers(
-    session: &Session,
-    file: FileId,
+    cx: LocalHoverContext<'_>,
     surface: &Spanned<SurfaceExpr>,
     checked: &TermExprNode<TcMetadata, Range<usize>>,
-    tables: PrettyTables<'_>,
-    ctor_table: &CtorTable,
     out: &mut Vec<HoverInfo>,
 ) {
+    let session = cx.session;
+    let file = cx.file;
+    let tables = cx.tables;
     let checked = strip_checked_wrappers(checked);
+    push_parenthesized_expr_hover(file, cx.source, surface, checked, tables, out);
 
     match (&surface.0, &checked.node) {
         (SurfaceExpr::Abs(params, body), _) => {
@@ -425,15 +524,7 @@ fn collect_expr_local_hovers(
                 for (symbol, name, ty) in &param_facts {
                     push_expr_reference_hovers(file, body, *symbol, name, ty, tables, out);
                 }
-                collect_expr_local_hovers(
-                    session,
-                    file,
-                    body,
-                    checked_body,
-                    tables,
-                    ctor_table,
-                    out,
-                );
+                collect_expr_local_hovers(cx, body, checked_body, out);
             }
         }
         (
@@ -457,88 +548,32 @@ fn collect_expr_local_hovers(
                 tables,
                 out,
             );
-            collect_expr_local_hovers(
-                session,
-                file,
-                binder,
-                checked_binder,
-                tables,
-                ctor_table,
-                out,
-            );
-            collect_expr_local_hovers(session, file, body, checked_body, tables, ctor_table, out);
+            collect_expr_local_hovers(cx, binder, checked_binder, out);
+            collect_expr_local_hovers(cx, body, checked_body, out);
         }
         (SurfaceExpr::App(surface_func, surface_arg), TermExpr::App(checked_func, checked_arg)) => {
-            collect_expr_local_hovers(
-                session,
-                file,
-                surface_func,
-                checked_func,
-                tables,
-                ctor_table,
-                out,
-            );
-            collect_expr_local_hovers(
-                session,
-                file,
-                surface_arg,
-                checked_arg,
-                tables,
-                ctor_table,
-                out,
-            );
+            collect_expr_local_hovers(cx, surface_func, checked_func, out);
+            collect_expr_local_hovers(cx, surface_arg, checked_arg, out);
         }
         (SurfaceExpr::Ann(value, _), TermExpr::Anno(checked_value, _)) => {
-            collect_expr_local_hovers(session, file, value, checked_value, tables, ctor_table, out);
+            collect_expr_local_hovers(cx, value, checked_value, out);
         }
         (SurfaceExpr::Ann(value, _), _) => {
-            collect_expr_local_hovers(session, file, value, checked, tables, ctor_table, out);
+            collect_expr_local_hovers(cx, value, checked, out);
         }
         (
             SurfaceExpr::IfThenElse(surface_cond, surface_then, surface_else),
             TermExpr::IfThenElse(checked_cond, checked_then, checked_else),
         ) => {
-            collect_expr_local_hovers(
-                session,
-                file,
-                surface_cond,
-                checked_cond,
-                tables,
-                ctor_table,
-                out,
-            );
-            collect_expr_local_hovers(
-                session,
-                file,
-                surface_then,
-                checked_then,
-                tables,
-                ctor_table,
-                out,
-            );
-            collect_expr_local_hovers(
-                session,
-                file,
-                surface_else,
-                checked_else,
-                tables,
-                ctor_table,
-                out,
-            );
+            collect_expr_local_hovers(cx, surface_cond, checked_cond, out);
+            collect_expr_local_hovers(cx, surface_then, checked_then, out);
+            collect_expr_local_hovers(cx, surface_else, checked_else, out);
         }
         (
             SurfaceExpr::Case(surface_scrutinee, surface_arms),
             TermExpr::Case(checked_scrutinee, checked_arms),
         ) => {
-            collect_expr_local_hovers(
-                session,
-                file,
-                surface_scrutinee,
-                checked_scrutinee,
-                tables,
-                ctor_table,
-                out,
-            );
+            collect_expr_local_hovers(cx, surface_scrutinee, checked_scrutinee, out);
             for (surface_arm, checked_arm) in surface_arms.iter().zip(checked_arms) {
                 let mut pattern_facts = Vec::new();
                 {
@@ -552,7 +587,7 @@ fn collect_expr_local_hovers(
                         &checked_arm.node.pattern,
                         &checked_scrutinee.anno.inferred_type,
                         tables,
-                        ctor_table,
+                        cx.ctor_table,
                         &mut sink,
                     );
                 }
@@ -567,58 +602,55 @@ fn collect_expr_local_hovers(
                         out,
                     );
                 }
-                collect_expr_local_hovers(
-                    session,
-                    file,
-                    &surface_arm.0.expr,
-                    &checked_arm.node.expr,
-                    tables,
-                    ctor_table,
-                    out,
-                );
+                collect_expr_local_hovers(cx, &surface_arm.0.expr, &checked_arm.node.expr, out);
             }
         }
         (SurfaceExpr::Do(statements), _) => {
-            collect_do_local_hovers(session, file, statements, checked, tables, ctor_table, out);
+            collect_do_local_hovers(cx, statements, checked, out);
         }
         (
             SurfaceExpr::OperatorApply(surface_lhs, _, surface_rhs),
             TermExpr::App(checked_func, checked_rhs),
         ) => {
             if let TermExpr::App(_, checked_lhs) = &strip_checked_wrappers(checked_func).node {
-                collect_expr_local_hovers(
-                    session,
-                    file,
-                    surface_lhs,
-                    checked_lhs,
-                    tables,
-                    ctor_table,
-                    out,
-                );
+                collect_expr_local_hovers(cx, surface_lhs, checked_lhs, out);
             }
-            collect_expr_local_hovers(
-                session,
-                file,
-                surface_rhs,
-                checked_rhs,
-                tables,
-                ctor_table,
-                out,
-            );
+            collect_expr_local_hovers(cx, surface_rhs, checked_rhs, out);
         }
         (SurfaceExpr::UnaryOperator(_, surface_rhs), TermExpr::App(_, checked_rhs)) => {
-            collect_expr_local_hovers(
-                session,
-                file,
-                surface_rhs,
-                checked_rhs,
-                tables,
-                ctor_table,
-                out,
-            );
+            collect_expr_local_hovers(cx, surface_rhs, checked_rhs, out);
         }
         _ => {}
     }
+}
+
+fn push_parenthesized_expr_hover(
+    file: FileId,
+    source: &str,
+    surface: &Spanned<SurfaceExpr>,
+    checked: &TermExprNode<TcMetadata, Range<usize>>,
+    tables: PrettyTables<'_>,
+    out: &mut Vec<HoverInfo>,
+) {
+    if !source_span_is_parenthesized(source, surface.1) {
+        return;
+    }
+
+    out.push(HoverInfo::new(
+        file,
+        surface.1.to_usize_range(),
+        checked.anno.inferred_type.pretty_with_tables(tables),
+        None,
+    ));
+}
+
+fn source_span_is_parenthesized(source: &str, span: Span) -> bool {
+    let Some(text) = source.get(span.to_usize_range()) else {
+        return false;
+    };
+    let text = text.trim();
+
+    text.starts_with('(') && text.ends_with(')')
 }
 
 fn collect_lambda_param_hints<'a>(
@@ -689,21 +721,21 @@ fn collect_lambda_param_hovers<'a>(
 }
 
 fn collect_do_local_hovers(
-    session: &Session,
-    file: FileId,
+    cx: LocalHoverContext<'_>,
     statements: &[Spanned<SurfaceDoStmt>],
     checked: &TermExprNode<TcMetadata, Range<usize>>,
-    tables: PrettyTables<'_>,
-    ctor_table: &CtorTable,
     out: &mut Vec<HoverInfo>,
 ) {
+    let session = cx.session;
+    let file = cx.file;
+    let tables = cx.tables;
     let Some((first, rest)) = statements.split_first() else {
         return;
     };
 
     if rest.is_empty() {
         if let SurfaceDoStmt::Expr(expr) = &first.0 {
-            collect_expr_local_hovers(session, file, expr, checked, tables, ctor_table, out);
+            collect_expr_local_hovers(cx, expr, checked, out);
         }
         return;
     }
@@ -712,31 +744,15 @@ fn collect_do_local_hovers(
     match &first.0 {
         SurfaceDoStmt::Expr(expr) => {
             if let Some((checked_expr, checked_rest)) = checked_binary_application_args(checked) {
-                collect_expr_local_hovers(
-                    session,
-                    file,
-                    expr,
-                    checked_expr,
-                    tables,
-                    ctor_table,
-                    out,
-                );
-                collect_do_local_hovers(session, file, rest, checked_rest, tables, ctor_table, out);
+                collect_expr_local_hovers(cx, expr, checked_expr, out);
+                collect_do_local_hovers(cx, rest, checked_rest, out);
             }
         }
         SurfaceDoStmt::Bind { binder, expr } => {
             if let Some((checked_expr, checked_continuation)) =
                 checked_binary_application_args(checked)
             {
-                collect_expr_local_hovers(
-                    session,
-                    file,
-                    expr,
-                    checked_expr,
-                    tables,
-                    ctor_table,
-                    out,
-                );
+                collect_expr_local_hovers(cx, expr, checked_expr, out);
 
                 let checked_continuation = strip_checked_wrappers(checked_continuation);
                 if let TermExpr::Abs(checked_name, checked_type, checked_body) =
@@ -756,15 +772,7 @@ fn collect_do_local_hovers(
                             out,
                         );
                     }
-                    collect_do_local_hovers(
-                        session,
-                        file,
-                        rest,
-                        checked_body,
-                        tables,
-                        ctor_table,
-                        out,
-                    );
+                    collect_do_local_hovers(cx, rest, checked_body, out);
                 }
             }
         }
@@ -789,16 +797,8 @@ fn collect_do_local_hovers(
                         out,
                     );
                 }
-                collect_expr_local_hovers(
-                    session,
-                    file,
-                    expr,
-                    checked_binder,
-                    tables,
-                    ctor_table,
-                    out,
-                );
-                collect_do_local_hovers(session, file, rest, checked_body, tables, ctor_table, out);
+                collect_expr_local_hovers(cx, expr, checked_binder, out);
+                collect_do_local_hovers(cx, rest, checked_body, out);
             }
         }
     }

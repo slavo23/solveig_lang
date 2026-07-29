@@ -113,12 +113,20 @@ pub(super) fn cons_pattern(
     session: &Session,
     head: S<SurfacePattern>,
     tail: S<SurfacePattern>,
+    cons_start: usize,
+    cons_end: usize,
     cst_id: CstId,
 ) -> S<SurfacePattern> {
     let (start, end) = merge_span(&head, &tail);
     sp(
         SurfacePattern::Con(
-            qref(session, &["prelude", "list", "Cons"], start, start, cst_id),
+            qref(
+                session,
+                &["prelude", "list", "Cons"],
+                cons_start,
+                cons_end,
+                cst_id,
+            ),
             vec![head, tail],
         ),
         start,
@@ -138,7 +146,8 @@ pub(super) fn list_pattern(
         .into_iter()
         .rev()
         .fold(list_nil_pattern(session, end, end, cst_id), |acc, elem| {
-            cons_pattern(session, elem, acc, cst_id)
+            let generated = span_start(&elem);
+            cons_pattern(session, elem, acc, generated, generated, cst_id)
         })
 }
 

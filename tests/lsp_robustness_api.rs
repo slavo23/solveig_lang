@@ -45,11 +45,11 @@ fn case_hover_snapshots_cover_scry_and_smoke_examples() {
                 " 42:36  `=>` => <none>\n",
                 " 42:39  `parseList` => parseList : List Tok -> List SExp -> ParseStep\n",
                 " 42:49  `rest` => rest : List Tok\n",
-                " 42:54  `(` => <none>\n",
+                " 42:54  `(` => List SExp\n",
                 " 42:55  `item` => item : SExp\n",
-                " 42:60  `::` => <none>\n",
+                " 42:60  `::` => Cons : ∀ (a : *). a -> List a -> List a\n",
                 " 42:63  `items` => items : List SExp\n",
-                " 42:68  `)` => <none>\n",
+                " 42:68  `)` => List SExp\n",
                 " 60:21  `case` => <none>\n",
                 " 60:26  `parseAllTokens` => parseAllTokens : List Tok -> Maybe (List SExp)\n",
                 " 60:41  `rest` => rest : List Tok\n",
@@ -59,11 +59,11 @@ fn case_hover_snapshots_cover_scry_and_smoke_examples() {
                 " 90:32  `terms` => terms : List Term\n",
                 " 90:38  `=>` => <none>\n",
                 " 90:41  `Just` => Just : ∀ (a : *). a -> Maybe a\n",
-                " 90:46  `(` => <none>\n",
+                " 90:46  `(` => List Term\n",
                 " 90:47  `term` => term : Term\n",
-                " 90:52  `::` => <none>\n",
+                " 90:52  `::` => Cons : ∀ (a : *). a -> List a -> List a\n",
                 " 90:55  `terms` => terms : List Term\n",
-                " 90:60  `)` => <none>\n",
+                " 90:60  `)` => List Term\n",
             ),
         ),
         (
@@ -130,25 +130,25 @@ fn case_hover_snapshots_cover_scry_and_smoke_examples() {
                 " 91:32  `of` => <none>\n",
                 " 94:23  `|` => <none>\n",
                 " 94:25  `x` => x : Int\n",
-                " 94:27  `::` => <none>\n",
+                " 94:27  `::` => Cons : ∀ (a : *). a -> List a -> List a\n",
                 " 94:30  `xs` => xs : List Int\n",
                 " 94:33  `=>` => <none>\n",
                 " 95:29  `Pair` => Pair : ∀ (a : *) (b : *). a -> b -> Pair a b\n",
-                " 95:34  `(` => <none>\n",
-                " 95:35  `)` => <none>\n",
-                " 95:37  `(` => <none>\n",
+                " 95:34  `(` => ()\n",
+                " 95:35  `)` => ()\n",
+                " 95:37  `(` => BFState\n",
                 " 95:38  `BFState` => BFState : List Int -> Int -> List Int -> List Int -> List Int -> BFState\n",
-                " 95:46  `(` => <none>\n",
+                " 95:46  `(` => List Int\n",
                 " 95:47  `cur` => cur : Int\n",
-                " 95:51  `::` => <none>\n",
+                " 95:51  `::` => Cons : ∀ (a : *). a -> List a -> List a\n",
                 " 95:54  `left` => left : List Int\n",
-                " 95:58  `)` => <none>\n",
+                " 95:58  `)` => List Int\n",
                 " 95:60  `x` => x : Int\n",
                 " 95:62  `xs` => xs : List Int\n",
                 " 95:65  `input` => input : List Int\n",
                 " 95:71  `output` => output : List Int\n",
-                " 95:77  `)` => <none>\n",
-                " 95:78  `)` => <none>\n",
+                " 95:77  `)` => BFState\n",
+                " 95:78  `)` => BFState -> Pair () BFState\n",
                 " 95:79  `;` => <none>\n",
             ),
         ),
@@ -434,7 +434,7 @@ fn audit_token_features(
                 info.signature()
             ));
         }
-        if contains_generated_helper(info.signature()) {
+        if contains_generated_hover_helper(text, info.signature()) {
             anomalies.push(format!(
                 "{}:{} hover leaks generated helper: `{}`",
                 token.line + 1,
@@ -452,7 +452,9 @@ fn audit_token_features(
             "definition",
             anomalies,
         );
-        if span_text(compilation.source_map(), definition).is_some_and(contains_generated_helper) {
+        if span_text(compilation.source_map(), definition)
+            .is_some_and(contains_generated_span_helper)
+        {
             anomalies.push(format!(
                 "{}:{} definition points at generated helper",
                 token.line + 1,
@@ -624,7 +626,11 @@ fn span_text(source_map: &SourceMap, span: FileSpan) -> Option<&str> {
     source.src.get(span.span.to_usize_range())
 }
 
-fn contains_generated_helper(text: &str) -> bool {
+fn contains_generated_hover_helper(token_text: &str, text: &str) -> bool {
+    text.contains("thenM") || (token_text != "bind" && text.contains("bind :"))
+}
+
+fn contains_generated_span_helper(text: &str) -> bool {
     text.contains("thenM") || text.contains("bind :")
 }
 
@@ -662,14 +668,9 @@ fn syntax_token_should_not_hover(kind: &Token) -> bool {
             | Token::Arrow
             | Token::BindArrow
             | Token::FatArrow
-            | Token::Cons
             | Token::Pipe
             | Token::Dot
             | Token::Comma
-            | Token::LParen
-            | Token::RParen
-            | Token::LBrack
-            | Token::RBrack
             | Token::Semicolon
             | Token::Backtick
             | Token::VOpen
