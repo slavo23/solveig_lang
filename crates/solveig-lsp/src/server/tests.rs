@@ -1,12 +1,14 @@
 use super::*;
 use lsp_types::{
-    DocumentSymbolParams, DocumentSymbolResponse, GeneralClientCapabilities, GotoDefinitionParams,
-    GotoDefinitionResponse, HoverContents, PartialResultParams, Position, ReferenceContext,
-    ReferenceParams, SemanticTokenType, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
-    SemanticTokensFullOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceFolder, WorkspaceSymbolParams,
+    CodeActionContext, CodeActionKind, CodeActionOrCommand, CodeActionParams,
+    CodeActionProviderCapability, DocumentSymbolParams, DocumentSymbolResponse,
+    GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, HoverContents,
+    PartialResultParams, Position, Range, ReferenceContext, ReferenceParams, SemanticTokenType,
+    SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensFullOptions,
+    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    WorkspaceFolder, WorkspaceSymbolParams,
 };
 use std::fs;
 use std::path::Path;
@@ -65,6 +67,16 @@ fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
         capabilities.workspace_symbol_provider,
         Some(OneOf::Left(true))
     );
+    let code_actions = capabilities
+        .code_action_provider
+        .expect("code-action provider should be advertised");
+    let CodeActionProviderCapability::Options(code_action_options) = code_actions else {
+        panic!("code actions should use direct server options");
+    };
+    assert_eq!(
+        code_action_options.code_action_kinds,
+        Some(vec![CodeActionKind::QUICKFIX])
+    );
     let semantic_tokens = capabilities
         .semantic_tokens_provider
         .expect("semantic-token provider should be advertised");
@@ -87,6 +99,84 @@ fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
         options.full,
         Some(SemanticTokensFullOptions::Delta { delta: Some(true) })
     ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn text_document_code_action_returns_workspace_edit_for_hole() {
+    let project_root = temp_root("server_code_action");
+    let source = project_root.join("scratch.sv");
+    let text = r#"main : Bool
+main = ??
+"#;
+    write_source(&source, text);
+    let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+    let root_uri =
+        Url::from_directory_path(&project_root).expect("test root should become a file URI");
+    let (service, _socket) = LspService::new(LspServer::new);
+    let server = service.inner();
+
+    server
+        .initialize(InitializeParams {
+            root_uri: Some(root_uri),
+            capabilities: ClientCapabilities::default(),
+            ..InitializeParams::default()
+        })
+        .await
+        .expect("initialize should succeed");
+
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "solveig".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let actions = server
+        .code_action(CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(1, 7), Position::new(1, 9)),
+            context: CodeActionContext::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("code-action request should succeed")
+        .expect("code-action response should exist");
+
+    let action = actions
+        .iter()
+        .find_map(|action| match action {
+            CodeActionOrCommand::CodeAction(action) if action.title == "Fill hole with `True`" => {
+                Some(action)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("missing hole fill action: {actions:#?}"));
+    let edit = action
+        .edit
+        .as_ref()
+        .expect("code action should carry a workspace edit");
+    let changes = edit
+        .changes
+        .as_ref()
+        .expect("workspace edit should use plain changes");
+    let text_edit = changes
+        .get(&uri)
+        .and_then(|edits| edits.first())
+        .expect("workspace edit should update the open document");
+
+    assert_eq!(
+        text_edit.range,
+        Range::new(Position::new(1, 7), Position::new(1, 9))
+    );
+    assert_eq!(text_edit.new_text, "True");
+
+    server.shutdown().await.expect("shutdown should succeed");
+    let _ = fs::remove_dir_all(project_root);
 }
 
 #[test]

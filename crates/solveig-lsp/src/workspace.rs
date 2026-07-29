@@ -5,13 +5,15 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
 use lsp_types::{
-    Diagnostic, DocumentSymbol, Hover, Location, Position, SemanticToken, SemanticTokens,
-    SemanticTokensDelta, SemanticTokensEdit, SemanticTokensFullDeltaResult, SymbolInformation, Url,
+    CodeActionResponse, Diagnostic, DocumentSymbol, Hover, Location, Position, Range,
+    SemanticToken, SemanticTokens, SemanticTokensDelta, SemanticTokensEdit,
+    SemanticTokensFullDeltaResult, SymbolInformation, Url,
 };
 use solveig_base::{PositionEncoding, SourcePosition};
 use solveig_driver::{Compilation, DriverError};
 use tokio::task::JoinHandle;
 
+use crate::code_actions::lsp_code_actions;
 use crate::diagnostics::{diagnostic_map, missing_entry_diagnostic};
 use crate::hover::lsp_hover;
 use crate::navigation::{lsp_document_symbols, lsp_location, lsp_symbol_information};
@@ -195,6 +197,14 @@ impl ServerState {
         })
     }
 
+    pub(crate) fn code_actions(&mut self, uri: &Url, range: Range) -> Option<CodeActionResponse> {
+        let path = uri.to_file_path().ok()?;
+        let encoding = self.encoding;
+
+        self.workspace_for_path(&path)
+            .code_actions(&path, range, encoding)
+    }
+
     #[cfg(test)]
     pub(crate) fn previous_diagnostic_count(&self) -> usize {
         self.previous_diagnostics.len()
@@ -359,6 +369,30 @@ impl Workspace {
             let tokens = self.compilation.semantic_tokens(path);
             Some(lsp_semantic_tokens(
                 &tokens,
+                self.compilation.source_map(),
+                encoding,
+            ))
+        }))
+        .ok()
+        .flatten()
+    }
+
+    fn code_actions(
+        &mut self,
+        path: &Path,
+        range: Range,
+        encoding: PositionEncoding,
+    ) -> Option<CodeActionResponse> {
+        catch_unwind(AssertUnwindSafe(|| {
+            let actions = self.compilation.code_actions_at_range(
+                path,
+                SourcePosition::new(range.start.line, range.start.character),
+                SourcePosition::new(range.end.line, range.end.character),
+                encoding,
+            );
+
+            Some(lsp_code_actions(
+                &actions,
                 self.compilation.source_map(),
                 encoding,
             ))

@@ -5,7 +5,7 @@ use solveig_base::FxHashMap;
 
 use solveig_ast::ast::{CtorId, CtorTable, Names, PrettyTables, Ty};
 use solveig_base::FileSpan;
-use solveig_base::{Diagnostic, Label};
+use solveig_base::{Diagnostic, Label, Severity};
 
 #[derive(Clone, Debug)]
 pub struct HoleInfo {
@@ -184,8 +184,9 @@ impl HoleInfo {
         ctor_table: &CtorTable,
         tables: PrettyTables<'_>,
     ) -> Diagnostic {
-        let mut diag = Diagnostic::error(
+        let mut diag = Diagnostic::new(
             "HOLE",
+            Severity::Note,
             format!("found hole of type `{}`", self.pretty_type(tables),),
         )
         .with_label(Label::primary(

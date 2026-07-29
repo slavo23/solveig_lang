@@ -6,6 +6,7 @@ use super::*;
 pub(super) struct CheckProjectOutcome {
     pub(super) checked_project: Option<CheckedProject>,
     pub(super) semantic_tokens: Vec<SourceSemanticToken>,
+    pub(super) code_actions: Vec<SourceCodeAction>,
     pub(super) phase: Option<FrontendPhase>,
     pub(super) freshly_checked_modules: Vec<String>,
     pub(super) reused_modules: Vec<String>,
@@ -49,7 +50,7 @@ impl Compilation {
                 None,
             )
         };
-        let (_root, project) = match loaded_project {
+        let (source_root, project) = match loaded_project {
             Ok(project) => project,
             Err(ProjectError::Driver(error)) => return Err(error),
             Err(ProjectError::Resolve(error)) => {
@@ -57,6 +58,7 @@ impl Compilation {
                 return Ok(CheckProjectOutcome {
                     checked_project: None,
                     semantic_tokens: Vec::new(),
+                    code_actions: Vec::new(),
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -69,6 +71,7 @@ impl Compilation {
             return Ok(CheckProjectOutcome {
                 checked_project: None,
                 semantic_tokens,
+                code_actions: Vec::new(),
                 phase: Some(FrontendPhase::Parse),
                 freshly_checked_modules: Vec::new(),
                 reused_modules: Vec::new(),
@@ -82,6 +85,7 @@ impl Compilation {
                 return Ok(CheckProjectOutcome {
                     checked_project: None,
                     semantic_tokens,
+                    code_actions: Vec::new(),
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -107,9 +111,8 @@ impl Compilation {
         let mut state = match FrontendState::new(
             &self.session,
             &mut self.names,
-            &project,
-            &parsed,
-            &order,
+            (&source_root, &self.source_provider),
+            (&project, &parsed, &order),
             verify_core,
             caches,
         ) {
@@ -119,6 +122,7 @@ impl Compilation {
                 return Ok(CheckProjectOutcome {
                     checked_project: None,
                     semantic_tokens,
+                    code_actions: Vec::new(),
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -132,6 +136,7 @@ impl Compilation {
             checked_project,
             prelude_cache,
             incremental_cache,
+            code_actions,
             freshly_checked_modules,
             reused_modules,
         ) = state.into_checked_project(source_files, &order);
@@ -145,6 +150,7 @@ impl Compilation {
         Ok(CheckProjectOutcome {
             checked_project: Some(checked_project),
             semantic_tokens,
+            code_actions,
             phase,
             freshly_checked_modules,
             reused_modules,

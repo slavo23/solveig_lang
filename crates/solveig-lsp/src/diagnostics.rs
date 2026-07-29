@@ -97,6 +97,19 @@ fn related_information(
         });
     }
 
+    if related.is_empty() && diagnostic.code == "HOLE" {
+        let uri = uri_for_file(source_map, anchor.file)?;
+        related.extend(
+            diagnostic
+                .notes
+                .iter()
+                .map(|note| DiagnosticRelatedInformation {
+                    location: Location::new(uri.clone(), lsp_range(source_map, anchor, encoding)),
+                    message: note.clone(),
+                }),
+        );
+    }
+
     if related.is_empty() {
         None
     } else {

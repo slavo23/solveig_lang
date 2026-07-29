@@ -26,13 +26,13 @@ use solveig_ast::ast::{
     prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
 };
 use solveig_base::Span;
-use solveig_base::{Diagnostic, Severity};
+use solveig_base::{Diagnostic, Severity, TypeError};
 use solveig_base::{
     FileId, FileSpan, IntoDiagnostic, PositionEncoding, Session, SourceFile, SourceMap,
     SourcePosition,
 };
 use solveig_check::core_lint::{CoreLintEnv, lint_checked_module};
-use solveig_check::inference::holes::hole_diagnostics;
+use solveig_check::inference::holes::{HoleInfo, hole_diagnostics};
 use solveig_check::inference::type_infer::{
     CheckedModule, TcMetadata, TypeCheckEnv, check_and_elab_expr_in_checked_module,
     check_and_elab_module,
@@ -41,16 +41,17 @@ use solveig_lower::closure_ir::CCProgram;
 use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
 use solveig_resolve::project::{
-    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleFile,
-    ModuleTable, ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi,
-    TypeAlias, TypedDisplayMaps, build_module_api, build_typed_module_api, compiler_builtin_api,
-    compiler_prelude_prim_module, effective_imports, module_order_checked,
-    seed_compiler_prelude_module_api,
+    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleApi, ModuleContext,
+    ModuleFile, ModuleTable, ParsedProject, Project, ResolveError, ResolveNameKind,
+    SharedModuleApi, SharedTypedModuleApi, TypeAlias, TypedDisplayMaps, build_module_api,
+    build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module, effective_imports,
+    module_order_checked, seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::{
-    ClassMethod, DocComment, ModuleName, Spanned, SurfaceConstructor, SurfaceDefinition,
-    SurfaceDoStmt, SurfaceExpr, SurfacePattern, SurfacePredicate, SurfaceTy,
+    ClassMethod, DocComment, ImportDecl, ImportSpec, ModuleName, ParsedModule, Spanned,
+    SurfaceConstructor, SurfaceDefinition, SurfaceDoStmt, SurfaceExpr, SurfacePattern,
+    SurfacePredicate, SurfaceTy,
 };
 use solveig_vm::vm::Machine;
 
@@ -61,6 +62,7 @@ use crate::project::{
 use crate::source_provider::SourceProvider;
 
 mod builtins;
+mod code_actions;
 mod compilation;
 mod editor_api;
 mod evidence_dump;
@@ -70,11 +72,13 @@ mod navigation;
 mod pipeline;
 mod semantic_tokens;
 mod show_entry;
+mod source_code_action;
 mod source_lookup;
 mod source_semantic_token;
 mod source_symbol;
 
 use builtins::driver_builtin_api;
+use code_actions::code_actions_in_compilation;
 pub use compilation::{
     CheckResult, Compilation, CompileOptions, HoverInfo, ProjectDocs, ProjectSchemes,
     checked_project_docs, checked_project_schemes, compile_and_run_project,
@@ -92,6 +96,7 @@ use navigation::{
 use pipeline::{FrontendPhase, merge_checked_modules, verify_lowering_core};
 use semantic_tokens::{semantic_tokens_in_compilation, syntax_semantic_tokens};
 use show_entry::{add_show_entry_wrapper, entry_returns_io};
+pub use source_code_action::{SourceCodeAction, SourceTextEdit};
 pub use source_semantic_token::{
     SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
     SourceSemanticTokenModifiers,

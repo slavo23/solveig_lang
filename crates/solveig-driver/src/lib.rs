@@ -9,11 +9,11 @@ mod source_provider;
 /// Re-exports project compilation, checking, and execution entry points.
 pub use compile::{
     CheckResult, Compilation, CompileOptions, HoverInfo, ProjectDocs, ProjectSchemes,
-    SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
-    SourceSemanticTokenModifiers, SourceSymbol, SourceSymbolKind, checked_project_docs,
-    checked_project_schemes, compile_and_run_project, compile_and_run_project_with_options,
-    compile_and_run_project_with_options_and_args, run_project_capture,
-    run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
+    SourceCodeAction, SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
+    SourceSemanticTokenModifiers, SourceSymbol, SourceSymbolKind, SourceTextEdit,
+    checked_project_docs, checked_project_schemes, compile_and_run_project,
+    compile_and_run_project_with_options, compile_and_run_project_with_options_and_args,
+    run_project_capture, run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
 };
 /// Re-exports the top-level driver error type.
 pub use error::DriverError;

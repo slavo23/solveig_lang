@@ -12,6 +12,7 @@ pub struct Compilation {
     pub(super) artifacts: Option<CompilationArtifacts>,
     pub(super) checked_project: Option<CheckedProject>,
     pub(super) semantic_tokens: Vec<SourceSemanticToken>,
+    pub(super) code_actions: Vec<SourceCodeAction>,
     pub(super) prelude_cache: Option<PreludeCache>,
     pub(super) incremental_cache: Option<IncrementalCache>,
     check_result: CheckResult,
@@ -232,6 +233,7 @@ impl Compilation {
             artifacts: None,
             checked_project: None,
             semantic_tokens: Vec::new(),
+            code_actions: Vec::new(),
             prelude_cache: None,
             incremental_cache: None,
             check_result: CheckResult::default(),
@@ -413,6 +415,7 @@ impl Compilation {
         self.artifacts = None;
         self.checked_project = None;
         self.semantic_tokens = Vec::new();
+        self.code_actions = Vec::new();
         self.session.diagnostics().drain();
         self.names = Names::new();
 
@@ -434,6 +437,7 @@ impl Compilation {
             self.checked_project = Some(checked_project);
         }
         self.semantic_tokens = outcome.semantic_tokens;
+        self.code_actions = outcome.code_actions;
 
         self.check_result = CheckResult {
             diagnostics,
@@ -593,6 +597,7 @@ impl Compilation {
         self.artifacts = None;
         self.checked_project = None;
         self.semantic_tokens = Vec::new();
+        self.code_actions = Vec::new();
         self.check_result = CheckResult::default();
     }
 }

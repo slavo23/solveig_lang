@@ -1,6 +1,8 @@
 struct FrontendState<'a> {
     session: &'a Session,
     names: &'a mut Names,
+    source_root: &'a Path,
+    source_provider: &'a SourceProvider,
     project: &'a Project,
     parsed: &'a ParsedProject,
     builtins: Arc<BuiltinApi>,
@@ -13,6 +15,7 @@ struct FrontendState<'a> {
     next_instance_id: u32,
     verify_core: bool,
     prelude_cache: Option<PreludeCache>,
+    code_actions: Vec<SourceCodeAction>,
     freshly_checked_modules: Vec<ModuleName>,
     reused_modules: Vec<ModuleName>,
 }
@@ -21,6 +24,16 @@ type FrontendCaches<'cache> = (
     Option<&'cache PreludeCache>,
     Option<&'cache IncrementalCache>,
     &'cache FxHashSet<ModuleName>,
+);
+type FrontendSources<'a> = (&'a Path, &'a SourceProvider);
+type FrontendProjectInput<'a> = (&'a Project, &'a ParsedProject, &'a [ModuleName]);
+type FrontendRetained = (
+    CheckedProject,
+    Option<PreludeCache>,
+    Option<IncrementalCache>,
+    Vec<SourceCodeAction>,
+    Vec<String>,
+    Vec<String>,
 );
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -50,12 +63,13 @@ impl<'a> FrontendState<'a> {
     fn new(
         session: &'a Session,
         names: &'a mut Names,
-        project: &'a Project,
-        parsed: &'a ParsedProject,
-        order: &[ModuleName],
+        sources: FrontendSources<'a>,
+        project_input: FrontendProjectInput<'a>,
         verify_core: bool,
         caches: FrontendCaches<'_>,
     ) -> Result<Self, Vec<ResolveError>> {
+        let (source_root, source_provider) = sources;
+        let (project, parsed, order) = project_input;
         let mut apis = FxHashMap::default();
         let mut errors = Vec::new();
         let (prelude_cache, incremental_cache, reusable_modules) = caches;
@@ -209,6 +223,8 @@ impl<'a> FrontendState<'a> {
         Ok(Self {
             session,
             names,
+            source_root,
+            source_provider,
             project,
             parsed,
             builtins,
@@ -221,6 +237,7 @@ impl<'a> FrontendState<'a> {
             next_instance_id,
             verify_core,
             prelude_cache: prelude_cache.cloned(),
+            code_actions: Vec::new(),
             freshly_checked_modules: Vec::new(),
             reused_modules: Vec::new(),
         })
@@ -230,13 +247,7 @@ impl<'a> FrontendState<'a> {
         self,
         source_files: Vec<SourceFile>,
         order: &[ModuleName],
-    ) -> (
-        CheckedProject,
-        Option<PreludeCache>,
-        Option<IncrementalCache>,
-        Vec<String>,
-        Vec<String>,
-    ) {
+    ) -> FrontendRetained {
         let artifacts =
             collect_retained_frontend_artifacts(self.session, self.project, &self.typed_apis);
         let modules = order
@@ -267,6 +278,7 @@ impl<'a> FrontendState<'a> {
             },
             self.prelude_cache,
             Some(incremental_cache),
+            self.code_actions,
             freshly_checked_modules,
             reused_modules,
         )
@@ -387,6 +399,15 @@ impl<'a> FrontendState<'a> {
             match resolver.resolve_module(module_name, parsed, &cx, &resolver_imports) {
                 Ok(resolved) => resolved,
                 Err(ResolverError::Resolve(errors)) => {
+                    self.code_actions.extend(code_actions::resolve_code_actions(
+                        self.session,
+                        self.source_root,
+                        self.source_provider,
+                        module_name,
+                        parsed,
+                        &self.apis,
+                        &errors,
+                    ));
                     push_resolve_errors(self.session, Some(&self.project.module_table), errors);
                     return Err(FrontendPhase::Resolve);
                 }
@@ -438,6 +459,14 @@ impl<'a> FrontendState<'a> {
         let checked_raw = match check_and_elab_module(&resolved, &check_env, file) {
             Ok(c) => c,
             Err(errors) => {
+                {
+                    let source_map = self.session.source_map();
+                    self.code_actions.extend(code_actions::type_error_code_actions(
+                        &source_map,
+                        &errors,
+                    ));
+                }
+
                 for error in errors {
                     self.session.diagnostics().push(error.into_diagnostic(()));
                 }
@@ -454,6 +483,12 @@ impl<'a> FrontendState<'a> {
         }
 
         if !checked_raw.holes.is_empty() {
+            self.code_actions.extend(code_actions::hole_code_actions(
+                &checked_raw.holes,
+                &check_env.constructor_types,
+                &check_env.ctor_table,
+                check_env.pretty_tables(),
+            ));
             let diagnostics = hole_diagnostics(
                 &checked_raw.holes,
                 &check_env.constructor_types,
@@ -480,6 +515,15 @@ impl<'a> FrontendState<'a> {
                 return Err(FrontendPhase::Core);
             }
         }
+
+        self.code_actions
+            .extend(code_actions::inferred_signature_code_actions(
+                self.session,
+                parsed,
+                module_id,
+                &checked_raw.module,
+                check_env.pretty_tables(),
+            ));
 
         Ok(checked_raw.module)
     }

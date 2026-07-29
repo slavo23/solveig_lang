@@ -123,4 +123,37 @@ impl Compilation {
             file.as_ref(),
         )
     }
+
+    /// Checks the current project and returns code actions visible for an editor range.
+    pub fn code_actions_at_range(
+        &mut self,
+        file: impl AsRef<Path>,
+        start: SourcePosition,
+        end: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Vec<SourceCodeAction> {
+        if self.source_map().is_empty() {
+            let _ = self.check(true);
+        }
+
+        let Some(file_id) =
+            source_lookup::source_file_id_in_source_map(self.source_map(), file.as_ref())
+        else {
+            return Vec::new();
+        };
+        let start = self.source_map().offset(file_id, start, encoding);
+        let end = self.source_map().offset(file_id, end, encoding);
+        let (start, end) = if start <= end {
+            (start, end)
+        } else {
+            (end, start)
+        };
+
+        code_actions_in_compilation(
+            self.source_map(),
+            &self.code_actions,
+            file.as_ref(),
+            Span::new(start, end),
+        )
+    }
 }

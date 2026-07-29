@@ -112,7 +112,11 @@ diagnostic codes as the CLI, and Markdown `textDocument/hover` responses for
 typed expressions, definitions, constructors, class methods, and module imports.
 It also supports `textDocument/definition`, project-wide
 `textDocument/references`, hierarchical `textDocument/documentSymbol`, and
-project-wide `workspace/symbol` queries for Solveig declarations.
+project-wide `workspace/symbol` queries for Solveig declarations. Semantic
+tokens are available through `textDocument/semanticTokens/full` with whole-file
+delta responses. Quick fixes are available through `textDocument/codeAction`
+for typed-hole fills, missing instance method stubs, missing imports, and
+adding inferred type signatures.
 
 Manual smoke test:
 
@@ -122,8 +126,8 @@ python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
 ```
 
 Expected output includes a negotiated `positionEncoding` and a `TC0005` type
-mismatch diagnostic with its LSP range. Completion, semantic tokens, code
-actions, and editor-extension wiring are planned Phase H follow-ups.
+mismatch diagnostic with its LSP range. Completion, inlay hints, and
+editor-extension wiring are planned Phase H follow-ups.
 
 ## Project Layout
 
@@ -192,7 +196,7 @@ Solveig currently supports:
 - program args through `getArgs`
 - project-relative UTF-8 text file IO
 - structured diagnostics with stable codes
-- typed holes, used by the checker and future LSP code actions
+- typed holes with LSP diagnostics and quick-fix fill suggestions
 
 ## Small Examples
 
@@ -333,7 +337,8 @@ scope.
 - The REPL is planned but not complete.
 - The LSP currently runs over stdio and has no packaged editor extension yet.
   It publishes diagnostics and supports hover, go-to-definition, references,
-  document symbols, and workspace symbols.
+  document symbols, workspace symbols, semantic tokens, and quick-fix code
+  actions.
 
 ## More Documentation
 

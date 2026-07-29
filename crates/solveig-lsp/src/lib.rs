@@ -1,6 +1,7 @@
 //! Language Server Protocol support for Solveig.
 //! This crate adapts the driver API to `tower-lsp` over stdio.
 
+mod code_actions;
 mod diagnostics;
 mod hover;
 mod navigation;
