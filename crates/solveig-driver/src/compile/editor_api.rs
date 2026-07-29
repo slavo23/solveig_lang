@@ -111,4 +111,16 @@ impl Compilation {
 
         workspace_symbols_in_artifacts(artifacts, query)
     }
+
+    /// Checks the current project and returns semantic tokens for one source file.
+    pub fn semantic_tokens(&mut self, file: impl AsRef<Path>) -> Vec<SourceSemanticToken> {
+        let _ = self.check(true);
+
+        semantic_tokens_in_compilation(
+            self.artifacts.as_ref(),
+            self.source_map(),
+            &self.semantic_tokens,
+            file.as_ref(),
+        )
+    }
 }

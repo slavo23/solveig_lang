@@ -25,6 +25,7 @@ use solveig_ast::ast::{
     Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId, TyConTable, TyVarId, VarRef,
     prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
 };
+use solveig_base::Span;
 use solveig_base::{Diagnostic, Severity};
 use solveig_base::{
     FileId, FileSpan, IntoDiagnostic, PositionEncoding, Session, SourceFile, SourceMap,
@@ -49,6 +50,7 @@ use solveig_resolve::project::{
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::{
     ClassMethod, DocComment, ModuleName, Spanned, SurfaceConstructor, SurfaceDefinition,
+    SurfaceDoStmt, SurfaceExpr, SurfacePattern, SurfacePredicate, SurfaceTy,
 };
 use solveig_vm::vm::Machine;
 
@@ -66,8 +68,10 @@ mod hover;
 mod incremental;
 mod navigation;
 mod pipeline;
+mod semantic_tokens;
 mod show_entry;
 mod source_lookup;
+mod source_semantic_token;
 mod source_symbol;
 
 use builtins::driver_builtin_api;
@@ -86,5 +90,10 @@ use navigation::{
     references_at_position_in_artifacts, references_in_artifacts, workspace_symbols_in_artifacts,
 };
 use pipeline::{FrontendPhase, merge_checked_modules, verify_lowering_core};
+use semantic_tokens::{semantic_tokens_in_compilation, syntax_semantic_tokens};
 use show_entry::{add_show_entry_wrapper, entry_returns_io};
+pub use source_semantic_token::{
+    SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
+    SourceSemanticTokenModifiers,
+};
 pub use source_symbol::{SourceSymbol, SourceSymbolKind};

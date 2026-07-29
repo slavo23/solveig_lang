@@ -5,6 +5,7 @@ use super::*;
 
 pub(super) struct CheckProjectOutcome {
     pub(super) checked_project: Option<CheckedProject>,
+    pub(super) semantic_tokens: Vec<SourceSemanticToken>,
     pub(super) phase: Option<FrontendPhase>,
     pub(super) freshly_checked_modules: Vec<String>,
     pub(super) reused_modules: Vec<String>,
@@ -55,16 +56,19 @@ impl Compilation {
                 push_resolve_errors(&self.session, None, vec![error]);
                 return Ok(CheckProjectOutcome {
                     checked_project: None,
+                    semantic_tokens: Vec::new(),
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
                 });
             }
         };
+        let semantic_tokens = syntax_semantic_tokens(&project);
 
         if self.session.diagnostics().has_errors() {
             return Ok(CheckProjectOutcome {
                 checked_project: None,
+                semantic_tokens,
                 phase: Some(FrontendPhase::Parse),
                 freshly_checked_modules: Vec::new(),
                 reused_modules: Vec::new(),
@@ -77,6 +81,7 @@ impl Compilation {
                 push_resolve_errors(&self.session, Some(&project.module_table), vec![error]);
                 return Ok(CheckProjectOutcome {
                     checked_project: None,
+                    semantic_tokens,
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -113,6 +118,7 @@ impl Compilation {
                 push_resolve_errors(&self.session, Some(&project.module_table), errors);
                 return Ok(CheckProjectOutcome {
                     checked_project: None,
+                    semantic_tokens,
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -138,6 +144,7 @@ impl Compilation {
 
         Ok(CheckProjectOutcome {
             checked_project: Some(checked_project),
+            semantic_tokens,
             phase,
             freshly_checked_modules,
             reused_modules,

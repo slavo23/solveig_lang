@@ -4,6 +4,7 @@
 mod diagnostics;
 mod hover;
 mod navigation;
+mod semantic_tokens;
 mod server;
 mod workspace;
 

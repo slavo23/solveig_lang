@@ -11,14 +11,17 @@ use lsp_types::{
     DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, GotoDefinitionParams,
     GotoDefinitionResponse, HoverParams, HoverProviderCapability, InitializeParams,
     InitializeResult, InitializedParams, Location, MessageType, OneOf, PositionEncodingKind,
-    ReferenceParams, ServerCapabilities, SymbolInformation, TextDocumentSyncCapability,
-    TextDocumentSyncKind, WorkspaceSymbolParams,
+    ReferenceParams, SemanticTokensFullDeltaResult, SemanticTokensFullOptions,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, SymbolInformation,
+    TextDocumentSyncCapability, TextDocumentSyncKind, WorkspaceSymbolParams,
 };
 use solveig_base::PositionEncoding;
 use tokio::io::{stdin, stdout};
 use tokio::sync::Mutex;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
+use crate::semantic_tokens::semantic_tokens_legend;
 use crate::workspace::ServerState;
 
 const CHECK_DEBOUNCE: Duration = Duration::from_millis(150);
@@ -233,6 +236,26 @@ impl LanguageServer for LspServer {
 
         Ok(Some(state.workspace_symbols(&params.query)))
     }
+
+    async fn semantic_tokens_full(
+        &self,
+        params: SemanticTokensParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<SemanticTokensResult>> {
+        let mut state = self.state.lock().await;
+
+        Ok(state
+            .semantic_tokens_full(&params.text_document.uri)
+            .map(SemanticTokensResult::Tokens))
+    }
+
+    async fn semantic_tokens_full_delta(
+        &self,
+        params: lsp_types::SemanticTokensDeltaParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<SemanticTokensFullDeltaResult>> {
+        let mut state = self.state.lock().await;
+
+        Ok(state.semantic_tokens_delta(&params.text_document.uri, &params.previous_result_id))
+    }
 }
 
 fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
@@ -244,6 +267,14 @@ fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
         references_provider: Some(OneOf::Left(true)),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
+        semantic_tokens_provider: Some(SemanticTokensServerCapabilities::SemanticTokensOptions(
+            SemanticTokensOptions {
+                work_done_progress_options: Default::default(),
+                legend: semantic_tokens_legend(),
+                range: None,
+                full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
+            },
+        )),
         ..ServerCapabilities::default()
     }
 }
@@ -287,385 +318,4 @@ fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use lsp_types::{
-        DocumentSymbolParams, DocumentSymbolResponse, GeneralClientCapabilities,
-        GotoDefinitionParams, GotoDefinitionResponse, HoverContents, PartialResultParams, Position,
-        ReferenceContext, ReferenceParams, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-        TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
-        WorkDoneProgressParams, WorkspaceFolder, WorkspaceSymbolParams,
-    };
-    use std::fs;
-    use std::path::Path;
-    use std::process;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn temp_root(name: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be after unix epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!("solveig_lsp_{name}_{}_{}", process::id(), nanos))
-    }
-
-    fn write_source(path: &Path, source: &str) {
-        fs::create_dir_all(
-            path.parent()
-                .expect("test source should have a parent directory"),
-        )
-        .expect("test source directory should be creatable");
-        fs::write(path, source).expect("test source should be writable");
-    }
-
-    #[test]
-    fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
-        let capabilities = ClientCapabilities {
-            general: Some(GeneralClientCapabilities {
-                position_encodings: Some(vec![PositionEncodingKind::UTF8]),
-                ..GeneralClientCapabilities::default()
-            }),
-            ..ClientCapabilities::default()
-        };
-        let (encoding, lsp_encoding) = negotiate_position_encoding(&capabilities);
-        let capabilities = server_capabilities(lsp_encoding);
-
-        assert_eq!(encoding, PositionEncoding::Utf8);
-        assert_eq!(
-            capabilities.text_document_sync,
-            Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL))
-        );
-        assert_eq!(
-            capabilities.position_encoding,
-            Some(PositionEncodingKind::UTF8)
-        );
-        assert_eq!(
-            capabilities.hover_provider,
-            Some(HoverProviderCapability::Simple(true))
-        );
-        assert_eq!(capabilities.definition_provider, Some(OneOf::Left(true)));
-        assert_eq!(capabilities.references_provider, Some(OneOf::Left(true)));
-        assert_eq!(
-            capabilities.document_symbol_provider,
-            Some(OneOf::Left(true))
-        );
-        assert_eq!(
-            capabilities.workspace_symbol_provider,
-            Some(OneOf::Left(true))
-        );
-    }
-
-    #[test]
-    fn initialize_roots_use_workspace_folders_before_root_uri() {
-        let first = Url::from_file_path("/tmp/solveig-first").expect("test URI should be valid");
-        let second = Url::from_file_path("/tmp/solveig-second").expect("test URI should be valid");
-        let params = InitializeParams {
-            root_uri: Some(first),
-            workspace_folders: Some(vec![WorkspaceFolder {
-                uri: second,
-                name: "second".to_string(),
-            }]),
-            ..InitializeParams::default()
-        };
-
-        assert_eq!(
-            workspace_roots(&params),
-            vec![PathBuf::from("/tmp/solveig-second")]
-        );
-    }
-
-    #[tokio::test(flavor = "current_thread", start_paused = true)]
-    async fn document_lifecycle_runs_debounced_diagnostics() {
-        let project_root = temp_root("server_lifecycle");
-        let source = project_root.join("scratch.sv");
-        write_source(
-            &source,
-            r#"main : Int
-main = True
-"#,
-        );
-        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
-        let root_uri =
-            Url::from_directory_path(&project_root).expect("test root should become a file URI");
-        let (service, _socket) = LspService::new(LspServer::new);
-        let server = service.inner();
-
-        server
-            .initialize(InitializeParams {
-                root_uri: Some(root_uri),
-                capabilities: ClientCapabilities::default(),
-                ..InitializeParams::default()
-            })
-            .await
-            .expect("initialize should succeed");
-
-        server
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "solveig".to_string(),
-                    version: 1,
-                    text: r#"main : Int
-main = True
-"#
-                    .to_string(),
-                },
-            })
-            .await;
-
-        {
-            let state = server.state.lock().await;
-            assert!(state.pending_check.is_some());
-        }
-
-        tokio::task::yield_now().await;
-        tokio::time::advance(CHECK_DEBOUNCE).await;
-        tokio::task::yield_now().await;
-
-        {
-            let state = server.state.lock().await;
-            assert!(state.pending_check.is_none());
-            assert_eq!(state.previous_diagnostic_count(), 1);
-        }
-
-        server
-            .did_change(DidChangeTextDocumentParams {
-                text_document: VersionedTextDocumentIdentifier {
-                    uri: uri.clone(),
-                    version: 2,
-                },
-                content_changes: vec![TextDocumentContentChangeEvent {
-                    range: None,
-                    range_length: None,
-                    text: r#"main : Int
-main = 1
-"#
-                    .to_string(),
-                }],
-            })
-            .await;
-
-        tokio::task::yield_now().await;
-        tokio::time::advance(CHECK_DEBOUNCE).await;
-        tokio::task::yield_now().await;
-
-        {
-            let state = server.state.lock().await;
-            assert!(state.pending_check.is_none());
-            assert_eq!(state.previous_diagnostic_count(), 0);
-        }
-
-        server.shutdown().await.expect("shutdown should succeed");
-        let _ = fs::remove_dir_all(project_root);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn text_document_hover_returns_markdown_signature_and_docs() {
-        let project_root = temp_root("server_hover");
-        let source = project_root.join("scratch.sv");
-        write_source(
-            &source,
-            r#"-- | The answer used by hover.
-answer : Int
-answer = 42
-
-main : Int
-main = answer
-"#,
-        );
-        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
-        let root_uri =
-            Url::from_directory_path(&project_root).expect("test root should become a file URI");
-        let (service, _socket) = LspService::new(LspServer::new);
-        let server = service.inner();
-
-        server
-            .initialize(InitializeParams {
-                root_uri: Some(root_uri),
-                capabilities: ClientCapabilities::default(),
-                ..InitializeParams::default()
-            })
-            .await
-            .expect("initialize should succeed");
-
-        server
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: uri.clone(),
-                    language_id: "solveig".to_string(),
-                    version: 1,
-                    text: r#"-- | The answer used by hover.
-answer : Int
-answer = 42
-
-main : Int
-main = answer
-"#
-                    .to_string(),
-                },
-            })
-            .await;
-
-        let hover = server
-            .hover(HoverParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier { uri: uri.clone() },
-                    position: Position::new(1, 0),
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-            })
-            .await
-            .expect("hover request should succeed")
-            .expect("hover response should exist");
-
-        let HoverContents::Markup(markup) = hover.contents else {
-            panic!("hover should use markdown markup content");
-        };
-
-        assert!(markup.value.contains("```solveig\nanswer : Int\n```"));
-        assert!(markup.value.contains("The answer used by hover."));
-        assert_eq!(
-            hover.range.expect("hover should carry a range").start.line,
-            1
-        );
-
-        server.shutdown().await.expect("shutdown should succeed");
-        let _ = fs::remove_dir_all(project_root);
-    }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn text_document_navigation_returns_locations_and_symbols() {
-        let project_root = temp_root("server_navigation");
-        let main = project_root.join("src/main.sv");
-        let lib = project_root.join("src/navLib.sv");
-        let main_text = r#"import navLib(Box, MkBox, unwrap)
-
-main : Int
-main = unwrap (MkBox 41)
-"#;
-        write_source(
-            &lib,
-            r#"data Box = MkBox Int
-
-unwrap : Box -> Int
-unwrap value =
-    case value of
-        MkBox n => n
-"#,
-        );
-        write_source(&main, main_text);
-        let main_uri = Url::from_file_path(&main).expect("test path should become a file URI");
-        let lib_uri = Url::from_file_path(&lib).expect("test path should become a file URI");
-        let root_uri =
-            Url::from_directory_path(&project_root).expect("test root should become a file URI");
-        let (service, _socket) = LspService::new(LspServer::new);
-        let server = service.inner();
-
-        server
-            .initialize(InitializeParams {
-                root_uri: Some(root_uri),
-                capabilities: ClientCapabilities::default(),
-                ..InitializeParams::default()
-            })
-            .await
-            .expect("initialize should succeed");
-
-        server
-            .did_open(DidOpenTextDocumentParams {
-                text_document: TextDocumentItem {
-                    uri: main_uri.clone(),
-                    language_id: "solveig".to_string(),
-                    version: 1,
-                    text: main_text.to_string(),
-                },
-            })
-            .await;
-
-        let definition = server
-            .goto_definition(GotoDefinitionParams {
-                text_document_position_params: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier {
-                        uri: main_uri.clone(),
-                    },
-                    position: Position::new(3, 7),
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
-            .await
-            .expect("definition request should succeed")
-            .expect("definition response should exist");
-        let GotoDefinitionResponse::Scalar(location) = definition else {
-            panic!("definition should return one location");
-        };
-
-        assert_eq!(location.uri, lib_uri);
-        assert_eq!(location.range.start.line, 2);
-        assert_eq!(location.range.start.character, 0);
-
-        let references = server
-            .references(ReferenceParams {
-                text_document_position: TextDocumentPositionParams {
-                    text_document: TextDocumentIdentifier {
-                        uri: main_uri.clone(),
-                    },
-                    position: Position::new(3, 7),
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-                context: ReferenceContext {
-                    include_declaration: true,
-                },
-            })
-            .await
-            .expect("references request should succeed")
-            .expect("references response should exist");
-
-        assert!(references.len() >= 3);
-        assert!(references.iter().any(|location| location.uri == main_uri));
-        assert!(references.iter().any(|location| location.uri == lib_uri));
-
-        let symbols = server
-            .document_symbol(DocumentSymbolParams {
-                text_document: TextDocumentIdentifier {
-                    uri: lib_uri.clone(),
-                },
-                work_done_progress_params: WorkDoneProgressParams::default(),
-                partial_result_params: PartialResultParams::default(),
-            })
-            .await
-            .expect("document symbol request should succeed")
-            .expect("document symbol response should exist");
-        let DocumentSymbolResponse::Nested(symbols) = symbols else {
-            panic!("document symbols should be hierarchical");
-        };
-
-        assert!(symbols.iter().any(|symbol| symbol.name == "unwrap"));
-        assert!(symbols.iter().any(|symbol| {
-            symbol.name == "Box"
-                && symbol
-                    .children
-                    .as_ref()
-                    .is_some_and(|children| children.iter().any(|child| child.name == "MkBox"))
-        }));
-
-        let workspace_symbols = server
-            .symbol(WorkspaceSymbolParams {
-                query: "box".to_string(),
-                ..WorkspaceSymbolParams::default()
-            })
-            .await
-            .expect("workspace symbol request should succeed")
-            .expect("workspace symbol response should exist");
-        let names = workspace_symbols
-            .iter()
-            .map(|symbol| symbol.name.as_str())
-            .collect::<Vec<_>>();
-
-        assert!(names.contains(&"Box"));
-        assert!(names.contains(&"MkBox"));
-
-        server.shutdown().await.expect("shutdown should succeed");
-        let _ = fs::remove_dir_all(project_root);
-    }
-}
+mod tests;

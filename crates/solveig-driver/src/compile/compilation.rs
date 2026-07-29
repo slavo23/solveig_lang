@@ -11,6 +11,7 @@ pub struct Compilation {
     pub(super) source_provider: SourceProvider,
     pub(super) artifacts: Option<CompilationArtifacts>,
     pub(super) checked_project: Option<CheckedProject>,
+    pub(super) semantic_tokens: Vec<SourceSemanticToken>,
     pub(super) prelude_cache: Option<PreludeCache>,
     pub(super) incremental_cache: Option<IncrementalCache>,
     check_result: CheckResult,
@@ -230,6 +231,7 @@ impl Compilation {
             source_provider: SourceProvider::default(),
             artifacts: None,
             checked_project: None,
+            semantic_tokens: Vec::new(),
             prelude_cache: None,
             incremental_cache: None,
             check_result: CheckResult::default(),
@@ -410,6 +412,7 @@ impl Compilation {
     pub fn check(&mut self, verify_core: bool) -> Result<&CheckResult, DriverError> {
         self.artifacts = None;
         self.checked_project = None;
+        self.semantic_tokens = Vec::new();
         self.session.diagnostics().drain();
         self.names = Names::new();
 
@@ -430,6 +433,7 @@ impl Compilation {
             self.artifacts = Some(CompilationArtifacts::from_checked_project(&checked_project));
             self.checked_project = Some(checked_project);
         }
+        self.semantic_tokens = outcome.semantic_tokens;
 
         self.check_result = CheckResult {
             diagnostics,
@@ -588,6 +592,7 @@ impl Compilation {
     fn clear_retained_project(&mut self) {
         self.artifacts = None;
         self.checked_project = None;
+        self.semantic_tokens = Vec::new();
         self.check_result = CheckResult::default();
     }
 }

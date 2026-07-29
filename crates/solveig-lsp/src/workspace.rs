@@ -4,7 +4,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
-use lsp_types::{Diagnostic, DocumentSymbol, Hover, Location, Position, SymbolInformation, Url};
+use lsp_types::{
+    Diagnostic, DocumentSymbol, Hover, Location, Position, SemanticToken, SemanticTokens,
+    SemanticTokensDelta, SemanticTokensEdit, SemanticTokensFullDeltaResult, SymbolInformation, Url,
+};
 use solveig_base::{PositionEncoding, SourcePosition};
 use solveig_driver::{Compilation, DriverError};
 use tokio::task::JoinHandle;
@@ -12,11 +15,14 @@ use tokio::task::JoinHandle;
 use crate::diagnostics::{diagnostic_map, missing_entry_diagnostic};
 use crate::hover::lsp_hover;
 use crate::navigation::{lsp_document_symbols, lsp_location, lsp_symbol_information};
+use crate::semantic_tokens::lsp_semantic_tokens;
 
 pub(crate) struct ServerState {
     workspaces: BTreeMap<PathBuf, Workspace>,
     roots: Vec<PathBuf>,
     previous_diagnostics: BTreeSet<Url>,
+    semantic_token_results: BTreeMap<String, Vec<SemanticToken>>,
+    next_semantic_token_result: u64,
     pub(crate) pending_check: Option<JoinHandle<()>>,
     encoding: PositionEncoding,
 }
@@ -32,6 +38,8 @@ impl ServerState {
             workspaces: BTreeMap::new(),
             roots: Vec::new(),
             previous_diagnostics: BTreeSet::new(),
+            semantic_token_results: BTreeMap::new(),
+            next_semantic_token_result: 0,
             pending_check: None,
             encoding,
         }
@@ -151,6 +159,42 @@ impl ServerState {
         out
     }
 
+    pub(crate) fn semantic_tokens_full(&mut self, uri: &Url) -> Option<SemanticTokens> {
+        let path = uri.to_file_path().ok()?;
+        let encoding = self.encoding;
+        let tokens = self
+            .workspace_for_path(&path)
+            .semantic_tokens(&path, encoding)?;
+
+        Some(self.remember_semantic_tokens(tokens))
+    }
+
+    pub(crate) fn semantic_tokens_delta(
+        &mut self,
+        uri: &Url,
+        previous_result_id: &str,
+    ) -> Option<SemanticTokensFullDeltaResult> {
+        let path = uri.to_file_path().ok()?;
+        let encoding = self.encoding;
+        let tokens = self
+            .workspace_for_path(&path)
+            .semantic_tokens(&path, encoding)?;
+        let previous = self.semantic_token_results.get(previous_result_id).cloned();
+        let result = self.remember_semantic_tokens(tokens.clone());
+
+        Some(match previous {
+            Some(previous) => SemanticTokensFullDeltaResult::TokensDelta(SemanticTokensDelta {
+                result_id: result.result_id,
+                edits: vec![SemanticTokensEdit {
+                    start: 0,
+                    delete_count: semantic_token_u32_len(&previous),
+                    data: Some(tokens),
+                }],
+            }),
+            None => SemanticTokensFullDeltaResult::Tokens(result),
+        })
+    }
+
     #[cfg(test)]
     pub(crate) fn previous_diagnostic_count(&self) -> usize {
         self.previous_diagnostics.len()
@@ -168,6 +212,18 @@ impl ServerState {
         self.workspaces
             .entry(root)
             .or_insert_with_key(|root| Workspace::new(root, path))
+    }
+
+    fn remember_semantic_tokens(&mut self, tokens: Vec<SemanticToken>) -> SemanticTokens {
+        self.next_semantic_token_result = self.next_semantic_token_result.saturating_add(1);
+        let result_id = format!("solveig-semantic-{}", self.next_semantic_token_result);
+        self.semantic_token_results
+            .insert(result_id.clone(), tokens.clone());
+
+        SemanticTokens {
+            result_id: Some(result_id),
+            data: tokens,
+        }
     }
 }
 
@@ -293,6 +349,31 @@ impl Workspace {
         }))
         .unwrap_or_default()
     }
+
+    fn semantic_tokens(
+        &mut self,
+        path: &Path,
+        encoding: PositionEncoding,
+    ) -> Option<Vec<SemanticToken>> {
+        catch_unwind(AssertUnwindSafe(|| {
+            let tokens = self.compilation.semantic_tokens(path);
+            Some(lsp_semantic_tokens(
+                &tokens,
+                self.compilation.source_map(),
+                encoding,
+            ))
+        }))
+        .ok()
+        .flatten()
+    }
+}
+
+fn semantic_token_u32_len(tokens: &[SemanticToken]) -> u32 {
+    tokens
+        .len()
+        .saturating_mul(5)
+        .try_into()
+        .unwrap_or(u32::MAX)
 }
 
 fn project_root_for_file(path: &Path) -> PathBuf {
