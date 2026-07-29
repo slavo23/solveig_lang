@@ -1,7 +1,9 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use solveig_base::Session;
 use solveig_driver::Compilation;
+use solveig_syntax::lexer::lex;
 
 fn fixture_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
@@ -18,11 +20,74 @@ fn offset_in_line(source: &str, line: &str, needle: &str) -> usize {
     line_start + needle_offset
 }
 
+fn offset_in_line_last(source: &str, line: &str, needle: &str) -> usize {
+    let line_start = source
+        .find(line)
+        .unwrap_or_else(|| panic!("hover fixture should contain line `{line}`"));
+    let needle_offset = line
+        .rfind(needle)
+        .unwrap_or_else(|| panic!("hover fixture line should contain `{needle}`"));
+
+    line_start + needle_offset
+}
+
 fn assert_contains(haystack: &str, needle: &str) {
     assert!(
         haystack.contains(needle),
         "expected `{haystack}` to contain `{needle}`"
     );
+}
+
+fn hover_audit_for_lines(
+    compilation: &mut Compilation,
+    file: &Path,
+    source: &str,
+    lines: &[&str],
+) -> String {
+    let lex_session = Session::new();
+    let lex_file = lex_session.add_file(file, source.to_string());
+    let tokens = lex(&lex_session, lex_file, source).expect("hover audit source should lex");
+    let line_ranges = lines
+        .iter()
+        .map(|line| {
+            let start = source
+                .find(line)
+                .unwrap_or_else(|| panic!("hover audit source should contain line `{line}`"));
+            (start, start + line.len())
+        })
+        .collect::<Vec<_>>();
+    let mut out = String::new();
+
+    for token in tokens {
+        if token.is_synthetic()
+            || token.kind.is_trivia()
+            || !line_ranges
+                .iter()
+                .any(|(start, end)| *start <= token.start && token.end <= *end)
+        {
+            continue;
+        }
+
+        let text = token.source_text(source);
+        if text.is_empty() {
+            continue;
+        }
+
+        let signature = compilation.hover_info(file, token.start).map_or_else(
+            || "<none>".to_string(),
+            |info| info.signature().replace('\n', "\\n"),
+        );
+
+        out.push_str(&format!(
+            "{:>3}:{:<3} `{}` => {}\n",
+            token.line + 1,
+            token.col + 1,
+            text,
+            signature
+        ));
+    }
+
+    out
 }
 
 #[test]
@@ -52,7 +117,7 @@ fn hover_returns_checked_expression_types_after_run() {
     assert_eq!(output, "42");
     assert_eq!(
         compilation.hover(&file, condition_offset),
-        Some("Bool".to_string())
+        Some("total : Int".to_string())
     );
     assert_eq!(
         compilation.hover(&file, then_offset),
@@ -95,7 +160,7 @@ fn hover_preserves_long_source_type_variable_names() {
     );
     assert_eq!(
         compilation.hover(&file, value_offset),
-        Some("element".to_string())
+        Some("value : element".to_string())
     );
 }
 
@@ -121,7 +186,7 @@ fn hover_info_covers_h13_semantic_targets() {
             offset_in_line(&main_source, "    inner + 1", "inner"),
         )
         .expect("local binder hover should exist");
-    assert_eq!(local.signature(), "Int");
+    assert_eq!(local.signature(), "inner : Int");
 
     let top_level = compilation
         .hover_info(
@@ -212,7 +277,7 @@ fn hover_info_covers_h13_semantic_targets() {
             offset_in_line(&main_source, "    case value of", "value"),
         )
         .expect("case scrutinee hover should exist");
-    assert_eq!(scrutinee.signature(), "Documented");
+    assert_eq!(scrutinee.signature(), "value : Documented");
 
     let method = compilation
         .hover_info(
@@ -346,4 +411,75 @@ fn hover_info_covers_local_declaration_sites() {
         )
         .expect("case pattern variable hover should exist");
     assert_eq!(answer.signature(), "answer : String");
+
+    let ask_cards = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line_last(&quiz_source, "askCards cards = mapM askCard cards", "cards"),
+        )
+        .expect("function parameter reference hover should exist");
+    assert_eq!(ask_cards.signature(), "cards : List QuizCard");
+}
+
+#[test]
+fn hover_audits_quiz_game_sensitive_tokens() {
+    let quiz_root = fixture_root("examples/quiz_game");
+    let quiz_file = quiz_root.join("src/main.sv");
+    let quiz_source = fs::read_to_string(&quiz_file).expect("quiz source should load");
+    let mut quiz = Compilation::new(&quiz_root);
+    let result = quiz.check(true).expect("quiz fixture should check");
+
+    assert!(
+        result.success(),
+        "quiz diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let actual = hover_audit_for_lines(
+        &mut quiz,
+        &quiz_file,
+        &quiz_source,
+        &[
+            "statePure value = State (fun state => MkPair value state)",
+            "askCards cards = mapM askCard cards",
+            "        MkPair question answer => QuizCard question answer",
+            "        responses <- askCards cards",
+        ],
+    );
+    assert!(!actual.contains("thenM"));
+    assert!(!actual.contains("bind :"));
+
+    let expected = concat!(
+        " 13:1   `statePure` => statePure : ∀ (s : *) (a : *). a -> State s a\n",
+        " 13:11  `value` => value : a\n",
+        " 13:17  `=` => <none>\n",
+        " 13:19  `State` => State : ∀ (s : *) (a : *). (s -> Pair a s) -> State s a\n",
+        " 13:25  `(` => a -> State s a\n",
+        " 13:26  `fun` => a -> State s a\n",
+        " 13:30  `state` => state : s\n",
+        " 13:36  `=>` => a -> State s a\n",
+        " 13:39  `MkPair` => MkPair : ∀ (a : *) (b : *). a -> b -> Pair a b\n",
+        " 13:46  `value` => value : a\n",
+        " 13:52  `state` => state : s\n",
+        " 13:57  `)` => a -> State s a\n",
+        " 74:9   `MkPair` => MkPair : ∀ (a : *) (b : *). a -> b -> Pair a b\n",
+        " 74:16  `question` => question : String\n",
+        " 74:25  `answer` => answer : String\n",
+        " 74:32  `=>` => QuizCard\n",
+        " 74:35  `QuizCard` => QuizCard : String -> String -> QuizCard\n",
+        " 74:44  `question` => question : String\n",
+        " 74:53  `answer` => answer : String\n",
+        " 90:1   `askCards` => askCards : List QuizCard -> IO (List (Pair QuizCard String))\n",
+        " 90:10  `cards` => cards : List QuizCard\n",
+        " 90:16  `=` => <none>\n",
+        " 90:18  `mapM` => mapM : ∀ (m : * -> *) (a : *) (b : *). Monad m => (a -> m b) -> List a -> m (List b)\n",
+        " 90:23  `askCard` => askCard : QuizCard -> IO (Pair QuizCard String)\n",
+        " 90:31  `cards` => cards : List QuizCard\n",
+        "136:9   `responses` => responses : List (Pair QuizCard String)\n",
+        "136:19  `<-` => <none>\n",
+        "136:22  `askCards` => askCards : List QuizCard -> IO (List (Pair QuizCard String))\n",
+        "136:31  `cards` => cards : List QuizCard\n",
+    );
+
+    assert_eq!(actual, expected);
 }

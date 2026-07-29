@@ -208,15 +208,21 @@ fn collect_module_local_hovers(
         let Some(checked_def) = checked_defs.get(&def_id).copied() else {
             continue;
         };
+        let mut param_facts = Vec::new();
         let checked_body = collect_function_param_hovers(
             session,
             parsed.file,
             params,
             &checked_def.body,
             tables,
+            &mut param_facts,
             out,
         )
         .unwrap_or_else(|| checked_body_without_function_params(&checked_def.body, params.len()));
+
+        for (symbol, name, ty) in &param_facts {
+            push_expr_reference_hovers(parsed.file, body, *symbol, name, ty, tables, out);
+        }
 
         collect_expr_local_hovers(
             session,
@@ -285,6 +291,7 @@ fn collect_function_param_hovers<'a>(
     params: &[Spanned<Symbol>],
     checked: &'a TermExprNode<TcMetadata, Range<usize>>,
     tables: PrettyTables<'_>,
+    binder_facts: &mut Vec<(Symbol, String, Ty)>,
     out: &mut Vec<HoverInfo>,
 ) -> Option<&'a TermExprNode<TcMetadata, Range<usize>>> {
     let mut current = checked;
@@ -300,6 +307,7 @@ fn collect_function_param_hovers<'a>(
 
         if let Some(ty) = checked_type {
             push_local_hover(file, param.1, checked_name, ty, tables, out);
+            binder_facts.push((param.0, checked_name.clone(), ty.clone()));
         }
 
         current = body;
@@ -404,9 +412,19 @@ fn collect_expr_local_hovers(
 
     match (&surface.0, &checked.node) {
         (SurfaceExpr::Abs(params, body), _) => {
-            if let Some(checked_body) =
-                collect_lambda_param_hovers(session, file, params, checked, tables, out)
-            {
+            let mut param_facts = Vec::new();
+            if let Some(checked_body) = collect_lambda_param_hovers(
+                session,
+                file,
+                params,
+                checked,
+                tables,
+                &mut param_facts,
+                out,
+            ) {
+                for (symbol, name, ty) in &param_facts {
+                    push_expr_reference_hovers(file, body, *symbol, name, ty, tables, out);
+                }
                 collect_expr_local_hovers(
                     session,
                     file,
@@ -425,6 +443,15 @@ fn collect_expr_local_hovers(
             push_local_hover(
                 file,
                 name.1,
+                checked_name,
+                &checked_binder.anno.inferred_type,
+                tables,
+                out,
+            );
+            push_expr_reference_hovers(
+                file,
+                body,
+                name.0,
                 checked_name,
                 &checked_binder.anno.inferred_type,
                 tables,
@@ -513,14 +540,33 @@ fn collect_expr_local_hovers(
                 out,
             );
             for (surface_arm, checked_arm) in surface_arms.iter().zip(checked_arms) {
-                collect_pattern_local_hovers(
-                    file,
-                    &checked_arm.node.pattern,
-                    &checked_scrutinee.anno.inferred_type,
-                    tables,
-                    ctor_table,
-                    out,
-                );
+                let mut pattern_facts = Vec::new();
+                {
+                    let mut sink = PatternLocalHoverSink {
+                        binder_facts: &mut pattern_facts,
+                        out,
+                    };
+                    collect_pattern_local_hovers(
+                        file,
+                        &surface_arm.0.pattern,
+                        &checked_arm.node.pattern,
+                        &checked_scrutinee.anno.inferred_type,
+                        tables,
+                        ctor_table,
+                        &mut sink,
+                    );
+                }
+                for (symbol, name, ty) in &pattern_facts {
+                    push_expr_reference_hovers(
+                        file,
+                        &surface_arm.0.expr,
+                        *symbol,
+                        name,
+                        ty,
+                        tables,
+                        out,
+                    );
+                }
                 collect_expr_local_hovers(
                     session,
                     file,
@@ -617,6 +663,7 @@ fn collect_lambda_param_hovers<'a>(
     params: &[(Spanned<Symbol>, Option<Spanned<SurfaceTy>>)],
     checked: &'a TermExprNode<TcMetadata, Range<usize>>,
     tables: PrettyTables<'_>,
+    binder_facts: &mut Vec<(Symbol, String, Ty)>,
     out: &mut Vec<HoverInfo>,
 ) -> Option<&'a TermExprNode<TcMetadata, Range<usize>>> {
     let mut current = checked;
@@ -632,6 +679,7 @@ fn collect_lambda_param_hovers<'a>(
 
         if let Some(ty) = checked_type {
             push_local_hover(file, param.1, checked_name, ty, tables, out);
+            binder_facts.push((param.0, checked_name.clone(), ty.clone()));
         }
 
         current = body;
@@ -865,24 +913,27 @@ fn pattern_binds_symbol(pattern: &Spanned<SurfacePattern>, symbol: Symbol) -> bo
     }
 }
 
+struct PatternLocalHoverSink<'a> {
+    binder_facts: &'a mut Vec<(Symbol, String, Ty)>,
+    out: &'a mut Vec<HoverInfo>,
+}
+
 fn collect_pattern_local_hovers(
     file: FileId,
+    surface: &Spanned<SurfacePattern>,
     pattern: &PatternNode<Range<usize>>,
     expected_type: &Ty,
     tables: PrettyTables<'_>,
     ctor_table: &CtorTable,
-    out: &mut Vec<HoverInfo>,
+    sink: &mut PatternLocalHoverSink<'_>,
 ) {
-    match &pattern.node {
-        Pattern::Var(name) => push_local_hover(
-            file,
-            Span::from_usize_range(pattern.anno.clone()),
-            name,
-            expected_type,
-            tables,
-            out,
-        ),
-        Pattern::Con(ctor_id, args) => {
+    match (&surface.0, &pattern.node) {
+        (SurfacePattern::Var(symbol), Pattern::Var(name)) => {
+            push_local_hover(file, surface.1, name, expected_type, tables, sink.out);
+            sink.binder_facts
+                .push((*symbol, name.clone(), expected_type.clone()));
+        }
+        (SurfacePattern::Con(_, surface_args), Pattern::Con(ctor_id, args)) => {
             let field_types = ctor_table
                 .get(*ctor_id)
                 .and_then(|info| {
@@ -890,11 +941,21 @@ fn collect_pattern_local_hovers(
                 })
                 .unwrap_or_default();
 
-            for (arg, field_type) in args.iter().zip(field_types.iter()) {
-                collect_pattern_local_hovers(file, arg, field_type, tables, ctor_table, out);
+            for ((surface_arg, arg), field_type) in
+                surface_args.iter().zip(args).zip(field_types.iter())
+            {
+                collect_pattern_local_hovers(
+                    file,
+                    surface_arg,
+                    arg,
+                    field_type,
+                    tables,
+                    ctor_table,
+                    sink,
+                );
             }
         }
-        Pattern::Lit(_) | Pattern::Wild => {}
+        _ => {}
     }
 }
 
