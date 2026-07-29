@@ -602,6 +602,33 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
 }
 
 #[test]
+fn hover_keeps_pattern_wildcards_quiet() {
+    let scry_root = fixture_root("examples/scry");
+    let parser_file = scry_root.join("src/scry/parser.sv");
+    let parser_source = fs::read_to_string(&parser_file).expect("scry parser source should load");
+    let mut scry = Compilation::new(&scry_root);
+    let result = scry.check(true).expect("scry fixture should check");
+
+    assert!(
+        result.success(),
+        "scry diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    for (line, needle) in [
+        ("        | _ =>", "_"),
+        ("        '?' :: _ => True", "_"),
+        ("        | SList _ => Nothing", "_"),
+    ] {
+        assert!(
+            scry.hover_info(&parser_file, offset_in_line(&parser_source, line, needle))
+                .is_none(),
+            "wildcard in `{line}` should not borrow a case-expression hover"
+        );
+    }
+}
+
+#[test]
 fn hover_audits_quiz_game_sensitive_tokens() {
     let quiz_root = fixture_root("examples/quiz_game");
     let quiz_file = quiz_root.join("src/main.sv");

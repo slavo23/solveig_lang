@@ -210,7 +210,6 @@ fn hover_token_kind(tokens: &[solveig_syntax::lexer::PosToken], index: usize) ->
         Token::Ident(_)
         | Token::UpperIdent(_)
         | Token::Hole
-        | Token::Underscore
         | Token::Operator(_)
         | Token::Plus
         | Token::Minus

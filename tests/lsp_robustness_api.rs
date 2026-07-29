@@ -30,11 +30,15 @@ fn case_hover_snapshots_cover_scry_and_smoke_examples() {
             "src/scry/parser.sv",
             &[
                 "    case tokens of",
+                "        | _ =>",
                 "        | Parsed item rest => parseList rest (item :: items)",
                 "                    case parseAllTokens rest of",
                 "                        | Just terms => Just (term :: terms)",
             ][..],
             concat!(
+                " 15:9   `|` => <none>\n",
+                " 15:11  `_` => <none>\n",
+                " 15:13  `=>` => <none>\n",
                 " 36:5   `case` => <none>\n",
                 " 36:10  `tokens` => tokens : List Tok\n",
                 " 36:17  `of` => <none>\n",
@@ -641,6 +645,7 @@ fn syntax_token_should_not_hover(kind: &Token) -> bool {
             | Token::Newline
             | Token::LineComment
             | Token::BlockComment
+            | Token::Underscore
             | Token::Let
             | Token::In
             | Token::Do
