@@ -108,6 +108,23 @@ Windows example:
 After changing the setting, run **Solveig: Restart Server** from the Command
 Palette.
 
+Optional editor settings:
+
+```json
+{
+  "solveig.inlayHints.enabled": false,
+  "solveig.diagnostics.inferredSignatures.enabled": true
+}
+```
+
+Inline type hints are off by default. You can turn them on with
+**Solveig: Inlay Hints: Enabled** if you want types shown directly in the
+editor.
+
+Signature hints for top-level definitions are on by default. When a function
+does not have a written type signature and Solveig can infer one, VS Code marks
+the function name and offers a quick fix to insert the signature.
+
 ## Use
 
 Open a folder containing Solveig source files, then open any `.sv` file. The
@@ -126,6 +143,7 @@ You should then get:
 - folding and selection expansion
 - signature help
 - module links for imports
+- quick fixes, including adding an inferred type signature when available
 
 Useful commands:
 

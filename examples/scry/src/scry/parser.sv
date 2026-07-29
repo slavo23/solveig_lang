@@ -1,6 +1,7 @@
 import prelude.prim(stringToChars, charsToString)
 import scry.ast
 
+
 isWhitespace : Char -> Bool
 isWhitespace c =
     if c == ' ' then True

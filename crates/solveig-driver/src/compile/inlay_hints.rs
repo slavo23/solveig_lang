@@ -507,7 +507,7 @@ fn collect_expr_local_hovers(
     let file = cx.file;
     let tables = cx.tables;
     let checked = strip_checked_wrappers(checked);
-    push_parenthesized_expr_hover(file, cx.source, surface, checked, tables, out);
+    push_grouped_expr_hover(file, cx.source, surface, checked, tables, out);
 
     match (&surface.0, &checked.node) {
         (SurfaceExpr::Abs(params, body), _) => {
@@ -624,7 +624,7 @@ fn collect_expr_local_hovers(
     }
 }
 
-fn push_parenthesized_expr_hover(
+fn push_grouped_expr_hover(
     file: FileId,
     source: &str,
     surface: &Spanned<SurfaceExpr>,
@@ -632,7 +632,7 @@ fn push_parenthesized_expr_hover(
     tables: PrettyTables<'_>,
     out: &mut Vec<HoverInfo>,
 ) {
-    if !source_span_is_parenthesized(source, surface.1) {
+    if !source_span_is_grouped_expr(source, surface.1) {
         return;
     }
 
@@ -644,13 +644,13 @@ fn push_parenthesized_expr_hover(
     ));
 }
 
-fn source_span_is_parenthesized(source: &str, span: Span) -> bool {
+fn source_span_is_grouped_expr(source: &str, span: Span) -> bool {
     let Some(text) = source.get(span.to_usize_range()) else {
         return false;
     };
     let text = text.trim();
 
-    text.starts_with('(') && text.ends_with(')')
+    (text.starts_with('(') && text.ends_with(')')) || (text.starts_with('[') && text.ends_with(']'))
 }
 
 fn collect_lambda_param_hints<'a>(
@@ -932,6 +932,9 @@ fn collect_pattern_local_hovers(
             push_local_hover(file, surface.1, name, expected_type, tables, sink.out);
             sink.binder_facts
                 .push((*symbol, name.clone(), expected_type.clone()));
+        }
+        (SurfacePattern::Wild, Pattern::Wild) => {
+            push_local_hover(file, surface.1, "_", expected_type, tables, sink.out);
         }
         (SurfacePattern::Con(_, surface_args), Pattern::Con(ctor_id, args)) => {
             let field_types = ctor_table

@@ -10,6 +10,9 @@ use lsp_types::{
 use solveig_base::{
     Diagnostic as SolveigDiagnostic, FileSpan, PositionEncoding, Severity, SourceMap,
 };
+use solveig_driver::{SourceCodeAction, SourceCodeActionCategory};
+
+pub(crate) const INFERRED_SIGNATURE_DIAGNOSTIC_CODE: &str = "SIG0001";
 
 pub(crate) fn diagnostic_map(
     diagnostics: &[SolveigDiagnostic],
@@ -50,6 +53,40 @@ pub(crate) fn missing_entry_diagnostic(path: &Path) -> Option<(Url, Vec<Diagnost
     };
 
     Some((uri, vec![diagnostic]))
+}
+
+pub(crate) fn inferred_signature_diagnostic_map(
+    actions: &[SourceCodeAction],
+    source_map: &SourceMap,
+    encoding: PositionEncoding,
+) -> BTreeMap<Url, Vec<Diagnostic>> {
+    let mut out = BTreeMap::<Url, Vec<Diagnostic>>::new();
+
+    for action in actions
+        .iter()
+        .filter(|action| action.category() == SourceCodeActionCategory::InferredSignature)
+    {
+        let trigger = action.trigger_span();
+        let Some(uri) = uri_for_file(source_map, trigger.file) else {
+            continue;
+        };
+
+        out.entry(uri).or_default().push(Diagnostic {
+            range: lsp_range(source_map, trigger, encoding),
+            severity: Some(DiagnosticSeverity::INFORMATION),
+            code: Some(NumberOrString::String(
+                INFERRED_SIGNATURE_DIAGNOSTIC_CODE.to_string(),
+            )),
+            code_description: None,
+            source: Some("solveig".to_string()),
+            message: "Top-level definition has no type signature. A quick fix can insert the inferred signature.".to_string(),
+            related_information: None,
+            tags: None,
+            data: None,
+        });
+    }
+
+    out
 }
 
 fn lsp_diagnostic(

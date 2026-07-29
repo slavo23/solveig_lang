@@ -247,11 +247,34 @@ fn hover_info_covers_h13_semantic_targets() {
         )
         .expect("imported type hover should exist");
     assert_eq!(imported_type.signature(), "type Documented : *");
+    assert_eq!(
+        imported_type.documentation(),
+        Some("Holds a documented integer.")
+    );
     assert!(
         imported_type
             .provenance()
             .is_some_and(|provenance| provenance.contains("hoverLib")),
         "imported type hover should include provenance: {imported_type:#?}"
+    );
+
+    let imported_constructor = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(
+                &main_source,
+                "        MkDocumented n => MkDocumented (documentedIncrement n)",
+                "MkDocumented",
+            ),
+        )
+        .expect("imported constructor hover should exist");
+    assert_eq!(
+        imported_constructor.signature(),
+        "MkDocumented : Int -> Documented"
+    );
+    assert_eq!(
+        imported_constructor.documentation(),
+        Some("Wraps a documented integer.")
     );
 
     let operator = compilation
@@ -602,7 +625,7 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
 }
 
 #[test]
-fn hover_keeps_pattern_wildcards_quiet() {
+fn hover_covers_pattern_wildcard_types() {
     let scry_root = fixture_root("examples/scry");
     let parser_file = scry_root.join("src/scry/parser.sv");
     let parser_source = fs::read_to_string(&parser_file).expect("scry parser source should load");
@@ -615,17 +638,48 @@ fn hover_keeps_pattern_wildcards_quiet() {
         result.diagnostics()
     );
 
-    for (line, needle) in [
-        ("        | _ =>", "_"),
-        ("        '?' :: _ => True", "_"),
-        ("        | SList _ => Nothing", "_"),
+    for (line, needle, expected) in [
+        ("        | _ =>", "_", "_ : List Char"),
+        ("        '?' :: _ => True", "_", "_ : List Char"),
+        ("        | SList _ => Nothing", "_", "_ : List SExp"),
     ] {
-        assert!(
-            scry.hover_info(&parser_file, offset_in_line(&parser_source, line, needle))
-                .is_none(),
-            "wildcard in `{line}` should not borrow a case-expression hover"
-        );
+        let hover = scry
+            .hover_info(&parser_file, offset_in_line(&parser_source, line, needle))
+            .unwrap_or_else(|| panic!("wildcard in `{line}` should hover"));
+        assert_eq!(hover.signature(), expected);
     }
+}
+
+#[test]
+fn hover_covers_non_empty_and_nested_list_literal_brackets() {
+    let smoke_root = fixture_root("examples/smoke_suite");
+    let cool_file = smoke_root.join("src/tcTests/coolStuff.sv");
+    let cool_source = fs::read_to_string(&cool_file).expect("coolStuff source should load");
+    let mut smoke = Compilation::new(&smoke_root);
+    let result = smoke.check(true).expect("smoke suite should check");
+
+    assert!(
+        result.success(),
+        "smoke diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let outer_line = "    eq allSubsets3 [";
+    let outer_open = smoke
+        .hover_info(&cool_file, offset_in_line(&cool_source, outer_line, "["))
+        .expect("outer list opening bracket should hover");
+    assert_eq!(outer_open.signature(), "List (List Int)");
+
+    let inner_line = "        [1, 2, 3],";
+    let inner_open = smoke
+        .hover_info(&cool_file, offset_in_line(&cool_source, inner_line, "["))
+        .expect("inner list opening bracket should hover");
+    assert_eq!(inner_open.signature(), "List Int");
+
+    let inner_close = smoke
+        .hover_info(&cool_file, offset_in_line(&cool_source, inner_line, "]"))
+        .expect("inner list closing bracket should hover");
+    assert_eq!(inner_close.signature(), "List Int");
 }
 
 #[test]

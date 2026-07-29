@@ -1,5 +1,5 @@
 use solveig_base::{PositionEncoding, Severity, SourcePosition};
-use solveig_driver::{Compilation, SourceCodeAction};
+use solveig_driver::{Compilation, SourceCodeAction, SourceCodeActionCategory};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
@@ -192,6 +192,10 @@ main = answer
         PositionEncoding::Utf16,
     );
     let action = action_named(&actions, "Add type signature for `answer`");
+    assert_eq!(
+        action.category(),
+        SourceCodeActionCategory::InferredSignature
+    );
     let fixed = apply_action(source, action);
 
     assert!(fixed.starts_with("answer : Int\nanswer = 42"));

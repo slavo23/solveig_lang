@@ -787,6 +787,7 @@ name = "solveig-lsp"
 version = "0.1.0"
 dependencies = [
  "lsp-types",
+ "serde_json",
  "solveig-base",
  "solveig-driver",
  "tokio",

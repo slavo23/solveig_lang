@@ -9,10 +9,10 @@ mod source_provider;
 /// Re-exports project compilation, checking, and execution entry points.
 pub use compile::{
     CheckResult, Compilation, CompileOptions, HoverInfo, ProjectDocs, ProjectSchemes,
-    SourceCodeAction, SourceCompletionItem, SourceCompletionItemKind, SourceDocumentHighlight,
-    SourceDocumentHighlightKind, SourceDocumentLink, SourceFoldingRange, SourceFoldingRangeKind,
-    SourceInlayHint, SourceInlayHintCategory, SourceInlayHintConfig, SourceInlayHintKind,
-    SourceSelectionRange, SourceSemanticToken, SourceSemanticTokenKind,
+    SourceCodeAction, SourceCodeActionCategory, SourceCompletionItem, SourceCompletionItemKind,
+    SourceDocumentHighlight, SourceDocumentHighlightKind, SourceDocumentLink, SourceFoldingRange,
+    SourceFoldingRangeKind, SourceInlayHint, SourceInlayHintCategory, SourceInlayHintConfig,
+    SourceInlayHintKind, SourceSelectionRange, SourceSemanticToken, SourceSemanticTokenKind,
     SourceSemanticTokenModifier, SourceSemanticTokenModifiers, SourceSignatureHelp,
     SourceSignatureInformation, SourceSymbol, SourceSymbolKind, SourceTextEdit,
     checked_project_docs, checked_project_schemes, compile_and_run_project,

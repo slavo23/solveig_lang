@@ -12,6 +12,14 @@ const LANGUAGE_ID = "solveig";
 const SERVER_ARGS = ["lsp"];
 const CONFIG_SECTION = "solveig";
 const SERVER_PATH_SETTING = "server.path";
+const INLAY_HINTS_SETTING = "inlayHints.enabled";
+const INFERRED_SIGNATURE_HINTS_SETTING =
+  "diagnostics.inferredSignatures.enabled";
+const RESTART_SETTINGS = [
+  SERVER_PATH_SETTING,
+  INLAY_HINTS_SETTING,
+  INFERRED_SIGNATURE_HINTS_SETTING,
+];
 
 let client;
 let outputChannel;
@@ -38,7 +46,11 @@ function activate(context) {
     ),
     vscode.commands.registerCommand("solveig.showTypeAtCursor", showTypeAtCursor),
     vscode.workspace.onDidChangeConfiguration((event) => {
-      if (event.affectsConfiguration(`${CONFIG_SECTION}.${SERVER_PATH_SETTING}`)) {
+      if (
+        RESTART_SETTINGS.some((setting) =>
+          event.affectsConfiguration(`${CONFIG_SECTION}.${setting}`)
+        )
+      ) {
         restartClient(context);
       }
     })
@@ -104,6 +116,7 @@ async function startClient(context) {
     outputChannel,
     traceOutputChannel: traceChannel,
     revealOutputChannelOn: RevealOutputChannelOn.Never,
+    initializationOptions: resolveInitializationOptions(),
     synchronize: {
       fileEvents: vscode.workspace.createFileSystemWatcher("**/*.sv"),
     },
@@ -130,6 +143,21 @@ async function startClient(context) {
   } finally {
     clientStarting = false;
   }
+}
+
+function resolveInitializationOptions() {
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+
+  return {
+    inlayHints: {
+      enabled: config.get(INLAY_HINTS_SETTING, false),
+    },
+    diagnostics: {
+      inferredSignatures: {
+        enabled: config.get(INFERRED_SIGNATURE_HINTS_SETTING, true),
+      },
+    },
+  };
 }
 
 function resolveServerExecutable() {

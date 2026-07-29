@@ -118,7 +118,7 @@ use rename::{prepare_rename_in_artifacts, rename_edits_in_artifacts};
 use semantic_tokens::{semantic_tokens_in_compilation, syntax_semantic_tokens};
 use show_entry::{add_show_entry_wrapper, entry_returns_io};
 use signature_help::signature_help_at_position_in_artifacts;
-pub use source_code_action::{SourceCodeAction, SourceTextEdit};
+pub use source_code_action::{SourceCodeAction, SourceCodeActionCategory, SourceTextEdit};
 use source_completion::SourceCompletionCandidate;
 pub use source_completion::{SourceCompletionItem, SourceCompletionItemKind};
 pub use source_document_highlight::{SourceDocumentHighlight, SourceDocumentHighlightKind};

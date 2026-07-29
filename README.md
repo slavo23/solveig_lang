@@ -176,9 +176,9 @@ rather than showing a prompt.
 
 Current editor features include errors and warnings, hover information,
 go-to-definition, find references, document outline, workspace symbol search,
-semantic highlighting, quick fixes, completion, inlay hints, highlights,
-folding, selection expansion, signature help, rename, and clickable module
-imports.
+semantic highlighting, quick fixes, completion, optional inline type hints,
+highlights, folding, selection expansion, signature help, rename, and clickable
+module imports.
 
 For capability details and the robustness testing plan, see
 [`docs/lsp.md`](docs/lsp.md).
@@ -249,6 +249,8 @@ On Windows, use the path to `solveig.exe`, for example:
 To use the extension, open a folder that contains Solveig source files and then
 open any `.sv` file. The Solveig status item appears in the VS Code status bar.
 If it shows an error, run **Solveig: Show Output** from the Command Palette.
+The extension also offers a quick fix to add an inferred type signature for a
+top-level definition when Solveig can infer one.
 
 Uninstall the extension:
 

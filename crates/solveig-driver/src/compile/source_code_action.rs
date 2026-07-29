@@ -40,12 +40,22 @@ impl SourceTextEdit {
     }
 }
 
+/// Identifies source-level quick fixes that editor integrations may group or filter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SourceCodeActionCategory {
+    /// General quick fixes tied to ordinary compiler diagnostics or source facts.
+    General,
+    /// Adds a top-level type signature inferred by the type checker.
+    InferredSignature,
+}
+
 /// Represents a source-level quick fix retained by the driver.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceCodeAction {
     title: String,
     trigger: FileSpan,
     edits: Vec<SourceTextEdit>,
+    category: SourceCodeActionCategory,
 }
 
 impl SourceCodeAction {
@@ -58,12 +68,23 @@ impl SourceCodeAction {
             title: title.into(),
             trigger,
             edits,
+            category: SourceCodeActionCategory::General,
         }
+    }
+
+    pub(super) fn with_category(mut self, category: SourceCodeActionCategory) -> Self {
+        self.category = category;
+        self
     }
 
     /// Returns the title displayed by editor quick-fix menus.
     pub fn title(&self) -> &str {
         &self.title
+    }
+
+    /// Returns the editor-facing category for this quick fix.
+    pub const fn category(&self) -> SourceCodeActionCategory {
+        self.category
     }
 
     /// Returns the diagnostic or declaration span that should reveal this action.

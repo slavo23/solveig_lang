@@ -2,13 +2,14 @@ use super::*;
 use lsp_types::{
     CodeActionContext, CodeActionKind, CodeActionOrCommand, CodeActionParams,
     CodeActionProviderCapability, CompletionItemKind, CompletionParams, CompletionResponse,
-    FoldingRangeProviderCapability, GeneralClientCapabilities, HoverContents, InlayHintKind,
-    InlayHintLabel, InlayHintParams, InlayHintServerCapabilities, PartialResultParams, Position,
-    Range, SelectionRangeProviderCapability, SemanticTokenType, SemanticTokensDeltaParams,
-    SemanticTokensFullDeltaResult, SemanticTokensFullOptions, SemanticTokensParams,
-    SemanticTokensResult, SemanticTokensServerCapabilities, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-    VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceFolder,
+    DidSaveTextDocumentParams, FoldingRangeProviderCapability, GeneralClientCapabilities,
+    HoverContents, InlayHintKind, InlayHintLabel, InlayHintParams, InlayHintServerCapabilities,
+    PartialResultParams, Position, Range, SelectionRangeProviderCapability, SemanticTokenType,
+    SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensFullOptions,
+    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    WorkspaceFolder,
 };
 use std::fs;
 use std::path::Path;
@@ -150,6 +151,30 @@ fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
     ));
 }
 
+#[test]
+fn initialize_options_configure_editor_hints() {
+    let default_config = server_config_from_initialize(&InitializeParams::default());
+    assert!(default_config.inlay_hints_enabled);
+    assert!(!default_config.inferred_signature_hints_enabled);
+
+    let configured = server_config_from_initialize(&InitializeParams {
+        initialization_options: Some(serde_json::json!({
+            "inlayHints": {
+                "enabled": false
+            },
+            "diagnostics": {
+                "inferredSignatures": {
+                    "enabled": true
+                }
+            }
+        })),
+        ..InitializeParams::default()
+    });
+
+    assert!(!configured.inlay_hints_enabled);
+    assert!(configured.inferred_signature_hints_enabled);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn text_document_completion_returns_qualified_items() {
     let project_root = temp_root("server_completion");
@@ -276,6 +301,62 @@ async fn text_document_inlay_hint_returns_type_hints() {
         .unwrap_or_else(|| panic!("missing local type hint: {hints:#?}"));
     assert_eq!(local_hint.padding_left, Some(false));
     assert_eq!(local_hint.padding_right, Some(true));
+
+    server.shutdown().await.expect("shutdown should succeed");
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn text_document_inlay_hint_respects_disabled_initialization_option() {
+    let project_root = temp_root("server_inlay_hint_disabled");
+    let source = project_root.join("scratch.sv");
+    let text = r#"main =
+    let local = 41 in
+    local
+"#;
+    write_source(&source, text);
+    let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+    let root_uri =
+        Url::from_directory_path(&project_root).expect("test root should become a file URI");
+    let (service, _socket) = LspService::new(LspServer::new);
+    let server = service.inner();
+
+    server
+        .initialize(InitializeParams {
+            root_uri: Some(root_uri),
+            capabilities: ClientCapabilities::default(),
+            initialization_options: Some(serde_json::json!({
+                "inlayHints": {
+                    "enabled": false
+                }
+            })),
+            ..InitializeParams::default()
+        })
+        .await
+        .expect("initialize should succeed");
+
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "solveig".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let hints = server
+        .inlay_hint(InlayHintParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 0), Position::new(3, 0)),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("inlay-hint request should succeed")
+        .expect("disabled inlay-hint response should still exist");
+
+    assert!(hints.is_empty(), "disabled inlay hints leaked: {hints:#?}");
 
     server.shutdown().await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);
@@ -463,6 +544,144 @@ main = 1
     let _ = fs::remove_dir_all(project_root);
 }
 
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn save_after_adding_unannotated_function_keeps_hover_results() {
+    let project_root = temp_root("server_save_hover");
+    let source = project_root.join("scratch.sv");
+    let initial = r#"main : Int
+main = 41
+"#;
+    let edited = r#"helper x = x + 1
+
+main : Int
+main = helper 41
+"#;
+    write_source(&source, initial);
+    let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+    let root_uri =
+        Url::from_directory_path(&project_root).expect("test root should become a file URI");
+    let (service, _socket) = LspService::new(LspServer::new);
+    let server = service.inner();
+
+    server
+        .initialize(InitializeParams {
+            root_uri: Some(root_uri),
+            capabilities: ClientCapabilities::default(),
+            initialization_options: Some(serde_json::json!({
+                "diagnostics": {
+                    "inferredSignatures": {
+                        "enabled": true
+                    }
+                }
+            })),
+            ..InitializeParams::default()
+        })
+        .await
+        .expect("initialize should succeed");
+
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "solveig".to_string(),
+                version: 1,
+                text: initial.to_string(),
+            },
+        })
+        .await;
+
+    let initial_main = server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(0, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("initial hover request should succeed")
+        .expect("initial hover should exist");
+    assert!(
+        hover_markup_value(initial_main).contains("main : Int"),
+        "initial main hover should work"
+    );
+
+    server
+        .did_change(DidChangeTextDocumentParams {
+            text_document: VersionedTextDocumentIdentifier {
+                uri: uri.clone(),
+                version: 2,
+            },
+            content_changes: vec![TextDocumentContentChangeEvent {
+                range: None,
+                range_length: None,
+                text: edited.to_string(),
+            }],
+        })
+        .await;
+    server
+        .did_save(DidSaveTextDocumentParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            text: None,
+        })
+        .await;
+
+    tokio::task::yield_now().await;
+    tokio::time::advance(CHECK_DEBOUNCE).await;
+    tokio::task::yield_now().await;
+
+    let helper_definition = server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(0, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("helper definition hover request should succeed")
+        .expect("helper definition hover should exist");
+    assert!(
+        hover_markup_value(helper_definition).contains("helper : Int -> Int"),
+        "helper definition hover should use edited text"
+    );
+
+    let helper_reference = server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(3, 7),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("helper reference hover request should succeed")
+        .expect("helper reference hover should exist");
+    assert!(
+        hover_markup_value(helper_reference).contains("helper : Int -> Int"),
+        "helper reference hover should use edited text"
+    );
+
+    let retained_main = server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(2, 0),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("main hover request should succeed after save")
+        .expect("main hover should still exist after save");
+    assert!(
+        hover_markup_value(retained_main).contains("main : Int"),
+        "existing hovers should survive an edit/save"
+    );
+
+    server.shutdown().await.expect("shutdown should succeed");
+    let _ = fs::remove_dir_all(project_root);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn text_document_semantic_tokens_return_full_and_delta() {
     let project_root = temp_root("server_semantic_tokens");
@@ -586,6 +805,14 @@ fn assert_relative_tokens_well_formed(tokens: &[lsp_types::SemanticToken]) {
     }
 
     let _ = (line, character);
+}
+
+fn hover_markup_value(hover: lsp_types::Hover) -> String {
+    let HoverContents::Markup(markup) = hover.contents else {
+        panic!("hover should use markdown markup content");
+    };
+
+    markup.value
 }
 
 #[tokio::test(flavor = "current_thread")]

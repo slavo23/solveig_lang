@@ -221,7 +221,7 @@ fn hover_token_kind(tokens: &[solveig_syntax::lexer::PosToken], index: usize) ->
         | Token::Greater
         | Token::LessEq
         | Token::GreaterEq => HoverTokenKind::Semantic,
-        Token::Cons => HoverTokenKind::ReferenceOnly,
+        Token::Underscore | Token::Cons => HoverTokenKind::ReferenceOnly,
         Token::LParen | Token::RParen | Token::LBrack | Token::RBrack => HoverTokenKind::Delimiter,
         _ => HoverTokenKind::Quiet,
     }

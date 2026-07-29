@@ -10,12 +10,14 @@ use lsp_types::{
     SemanticTokensFullDeltaResult, SymbolInformation, Url,
 };
 use solveig_base::{PositionEncoding, SourcePosition};
-use solveig_driver::{Compilation, DriverError, SourceInlayHintConfig};
+use solveig_driver::{Compilation, DriverError, SourceCodeActionCategory, SourceInlayHintConfig};
 use tokio::task::JoinHandle;
 
 use crate::code_actions::lsp_code_actions;
 use crate::completion::lsp_completion_items;
-use crate::diagnostics::{diagnostic_map, missing_entry_diagnostic};
+use crate::diagnostics::{
+    diagnostic_map, inferred_signature_diagnostic_map, missing_entry_diagnostic,
+};
 use crate::hover::lsp_hover;
 use crate::inlay_hints::lsp_inlay_hints;
 use crate::navigation::{lsp_document_symbols, lsp_location, lsp_symbol_information};
@@ -31,6 +33,7 @@ pub(crate) struct ServerState {
     next_semantic_token_result: u64,
     pub(crate) pending_check: Option<JoinHandle<()>>,
     encoding: PositionEncoding,
+    config: ServerConfig,
 }
 
 pub(crate) struct Workspace {
@@ -38,8 +41,27 @@ pub(crate) struct Workspace {
     open_files: BTreeSet<PathBuf>,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ServerConfig {
+    pub(crate) inlay_hints_enabled: bool,
+    pub(crate) inferred_signature_hints_enabled: bool,
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            inlay_hints_enabled: true,
+            inferred_signature_hints_enabled: false,
+        }
+    }
+}
+
 impl ServerState {
     pub(crate) fn new(encoding: PositionEncoding) -> Self {
+        Self::new_with_config(encoding, ServerConfig::default())
+    }
+
+    pub(crate) fn new_with_config(encoding: PositionEncoding, config: ServerConfig) -> Self {
         Self {
             workspaces: BTreeMap::new(),
             roots: Vec::new(),
@@ -48,6 +70,7 @@ impl ServerState {
             next_semantic_token_result: 0,
             pending_check: None,
             encoding,
+            config,
         }
     }
 
@@ -99,7 +122,7 @@ impl ServerState {
         let mut current = BTreeMap::<Url, Vec<Diagnostic>>::new();
 
         for workspace in self.workspaces.values_mut() {
-            current.extend(workspace.check(self.encoding));
+            current.extend(workspace.check(self.encoding, self.config));
         }
 
         let mut publications = Vec::new();
@@ -159,6 +182,10 @@ impl ServerState {
     }
 
     pub(crate) fn inlay_hints(&mut self, uri: &Url, range: Range) -> Option<Vec<InlayHint>> {
+        if !self.config.inlay_hints_enabled {
+            return Some(Vec::new());
+        }
+
         let path = uri.to_file_path().ok()?;
         let encoding = self.encoding;
 
@@ -224,9 +251,14 @@ impl ServerState {
     pub(crate) fn code_actions(&mut self, uri: &Url, range: Range) -> Option<CodeActionResponse> {
         let path = uri.to_file_path().ok()?;
         let encoding = self.encoding;
+        let include_inferred_signatures = self.config.inferred_signature_hints_enabled;
 
-        self.workspace_for_path(&path)
-            .code_actions(&path, range, encoding)
+        self.workspace_for_path(&path).code_actions(
+            &path,
+            range,
+            encoding,
+            include_inferred_signatures,
+        )
     }
 
     #[cfg(test)]
@@ -282,11 +314,29 @@ impl Workspace {
         }
     }
 
-    fn check(&mut self, encoding: PositionEncoding) -> BTreeMap<Url, Vec<Diagnostic>> {
+    fn check(
+        &mut self,
+        encoding: PositionEncoding,
+        config: ServerConfig,
+    ) -> BTreeMap<Url, Vec<Diagnostic>> {
         let checked = catch_unwind(AssertUnwindSafe(|| {
-            self.compilation
-                .check(true)
-                .map(|result| diagnostic_map(result.diagnostics(), result.source_map(), encoding))
+            let mut diagnostics = {
+                let result = self.compilation.check(true)?;
+                diagnostic_map(result.diagnostics(), result.source_map(), encoding)
+            };
+
+            if config.inferred_signature_hints_enabled {
+                extend_diagnostic_map(
+                    &mut diagnostics,
+                    inferred_signature_diagnostic_map(
+                        self.compilation.source_code_actions(),
+                        self.compilation.source_map(),
+                        encoding,
+                    ),
+                );
+            }
+
+            Ok(diagnostics)
         }));
 
         match checked {
@@ -457,14 +507,20 @@ impl Workspace {
         path: &Path,
         range: Range,
         encoding: PositionEncoding,
+        include_inferred_signatures: bool,
     ) -> Option<CodeActionResponse> {
         catch_unwind(AssertUnwindSafe(|| {
-            let actions = self.compilation.code_actions_at_range(
+            let mut actions = self.compilation.code_actions_at_range(
                 path,
                 SourcePosition::new(range.start.line, range.start.character),
                 SourcePosition::new(range.end.line, range.end.character),
                 encoding,
             );
+            if !include_inferred_signatures {
+                actions.retain(|action| {
+                    action.category() != SourceCodeActionCategory::InferredSignature
+                });
+            }
 
             Some(lsp_code_actions(
                 &actions,
@@ -483,6 +539,15 @@ fn semantic_token_u32_len(tokens: &[SemanticToken]) -> u32 {
         .saturating_mul(5)
         .try_into()
         .unwrap_or(u32::MAX)
+}
+
+fn extend_diagnostic_map(
+    left: &mut BTreeMap<Url, Vec<Diagnostic>>,
+    right: BTreeMap<Url, Vec<Diagnostic>>,
+) {
+    for (uri, mut diagnostics) in right {
+        left.entry(uri).or_default().append(&mut diagnostics);
+    }
 }
 
 fn project_root_for_file(path: &Path) -> PathBuf {
@@ -504,7 +569,8 @@ fn is_solveig_project_root(path: &Path) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use lsp_types::{HoverContents, NumberOrString};
+    use crate::diagnostics::INFERRED_SIGNATURE_DIAGNOSTIC_CODE;
+    use lsp_types::{CodeActionOrCommand, DiagnosticSeverity, HoverContents, NumberOrString};
     use solveig_driver::Compilation;
     use std::fs;
     use std::process;
@@ -634,6 +700,81 @@ main = 1
     }
 
     #[test]
+    fn inferred_signature_hints_are_configurable_editor_diagnostics() {
+        let project_root = temp_root("signature_hints");
+        let source = project_root.join("scratch.sv");
+        let text = r#"answer = 42
+
+main : Int
+main = answer
+"#;
+        write_source(&source, text);
+        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+        let enabled_config = ServerConfig {
+            inferred_signature_hints_enabled: true,
+            ..ServerConfig::default()
+        };
+        let disabled_config = ServerConfig {
+            inferred_signature_hints_enabled: false,
+            ..ServerConfig::default()
+        };
+
+        let mut enabled = ServerState::new_with_config(PositionEncoding::Utf16, enabled_config);
+        enabled.open_document(&uri, text.to_string());
+        let enabled_publications = enabled.check_all();
+        let enabled_diagnostics = diagnostics_for_uri(&enabled_publications, &uri);
+        assert!(
+            enabled_diagnostics.iter().any(|diagnostic| {
+                diagnostic.severity == Some(DiagnosticSeverity::INFORMATION)
+                    && diagnostic.code.as_ref()
+                        == Some(&NumberOrString::String(
+                            INFERRED_SIGNATURE_DIAGNOSTIC_CODE.to_string(),
+                        ))
+                    && diagnostic.range == Range::new(Position::new(0, 0), Position::new(0, 6))
+            }),
+            "missing inferred-signature hint: {enabled_diagnostics:#?}"
+        );
+        let enabled_actions = enabled
+            .code_actions(&uri, Range::new(Position::new(0, 0), Position::new(0, 6)))
+            .expect("code actions should be available");
+        assert!(
+            enabled_actions.iter().any(|action| matches!(
+                action,
+                CodeActionOrCommand::CodeAction(action)
+                    if action.title == "Add type signature for `answer`"
+            )),
+            "missing inferred-signature quick fix: {enabled_actions:#?}"
+        );
+
+        let mut disabled = ServerState::new_with_config(PositionEncoding::Utf16, disabled_config);
+        disabled.open_document(&uri, text.to_string());
+        let disabled_publications = disabled.check_all();
+        let disabled_diagnostics = diagnostics_for_uri(&disabled_publications, &uri);
+        assert!(
+            disabled_diagnostics.iter().all(|diagnostic| {
+                diagnostic.code.as_ref()
+                    != Some(&NumberOrString::String(
+                        INFERRED_SIGNATURE_DIAGNOSTIC_CODE.to_string(),
+                    ))
+            }),
+            "disabled inferred-signature hints leaked: {disabled_diagnostics:#?}"
+        );
+        let disabled_actions = disabled
+            .code_actions(&uri, Range::new(Position::new(0, 0), Position::new(0, 6)))
+            .expect("code actions should be available");
+        assert!(
+            disabled_actions.iter().all(|action| !matches!(
+                action,
+                CodeActionOrCommand::CodeAction(action)
+                    if action.title == "Add type signature for `answer`"
+            )),
+            "disabled inferred-signature quick fix leaked: {disabled_actions:#?}"
+        );
+
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
     fn non_project_workspace_root_uses_nested_solveig_project_roots() {
         let container = temp_root("nested_roots");
         let first_root = container.join("first");
@@ -713,6 +854,15 @@ secondAnswer = 2
             "expected hover `{}` to contain `{needle}`",
             markup.value
         );
+    }
+
+    fn diagnostics_for_uri(publications: &[(Url, Vec<Diagnostic>)], uri: &Url) -> Vec<Diagnostic> {
+        publications
+            .iter()
+            .find_map(|(published_uri, diagnostics)| {
+                (published_uri == uri).then(|| diagnostics.clone())
+            })
+            .unwrap_or_default()
     }
 
     fn diagnostic_keys(

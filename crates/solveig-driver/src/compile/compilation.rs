@@ -501,6 +501,10 @@ impl Compilation {
         self.check_result.diagnostics()
     }
 
+    pub fn source_code_actions(&self) -> &[SourceCodeAction] {
+        &self.code_actions
+    }
+
     pub fn source_map(&self) -> &SourceMap {
         self.check_result.source_map()
     }

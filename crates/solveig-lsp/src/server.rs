@@ -29,7 +29,7 @@ use tokio::sync::Mutex;
 use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use crate::semantic_tokens::semantic_tokens_legend;
-use crate::workspace::ServerState;
+use crate::workspace::{ServerConfig, ServerState};
 
 const CHECK_DEBOUNCE: Duration = Duration::from_millis(150);
 
@@ -113,9 +113,10 @@ impl LanguageServer for LspServer {
     ) -> tower_lsp::jsonrpc::Result<InitializeResult> {
         let (encoding, lsp_encoding) = negotiate_position_encoding(&params.capabilities);
         let roots = workspace_roots(&params);
+        let config = server_config_from_initialize(&params);
         {
             let mut state = self.state.lock().await;
-            *state = ServerState::new(encoding);
+            *state = ServerState::new_with_config(encoding, config);
             state.set_roots(roots);
         }
 
@@ -358,6 +359,33 @@ impl LanguageServer for LspServer {
 
         Ok(state.code_actions(&params.text_document.uri, params.range))
     }
+}
+
+fn server_config_from_initialize(params: &InitializeParams) -> ServerConfig {
+    let mut config = ServerConfig::default();
+
+    if let Some(value) = params
+        .initialization_options
+        .as_ref()
+        .and_then(|options| options.get("inlayHints"))
+        .and_then(|options| options.get("enabled"))
+        .and_then(|enabled| enabled.as_bool())
+    {
+        config.inlay_hints_enabled = value;
+    }
+
+    if let Some(value) = params
+        .initialization_options
+        .as_ref()
+        .and_then(|options| options.get("diagnostics"))
+        .and_then(|options| options.get("inferredSignatures"))
+        .and_then(|options| options.get("enabled"))
+        .and_then(|enabled| enabled.as_bool())
+    {
+        config.inferred_signature_hints_enabled = value;
+    }
+
+    config
 }
 
 fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {

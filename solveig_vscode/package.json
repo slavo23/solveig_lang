@@ -51,6 +51,16 @@
           "type": "string",
           "default": "",
           "markdownDescription": "Path to the `solveig` executable. Leave empty to use `solveig` from your PATH."
+        },
+        "solveig.inlayHints.enabled": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show inline type hints in Solveig files. Hover, diagnostics, and quick fixes still work when this is off."
+        },
+        "solveig.diagnostics.inferredSignatures.enabled": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Show an editor hint on top-level definitions that do not have a written type signature, with a quick fix to insert the inferred signature when available."
         }
       }
     },

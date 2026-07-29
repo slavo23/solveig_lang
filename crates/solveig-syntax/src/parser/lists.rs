@@ -188,16 +188,19 @@ pub(super) fn cons_expr(
 pub(super) fn list_expr(
     session: &Session,
     elems: Vec<S<SurfaceExpr>>,
-    _start: usize,
+    start: usize,
     end: usize,
     cst_id: CstId,
 ) -> S<SurfaceExpr> {
-    elems
-        .into_iter()
-        .rev()
-        .fold(list_nil_expr(session, end, end, cst_id), |acc, elem| {
-            let start = span_start(&elem);
-            let end = span_end(&acc);
-            cons_expr(session, elem, acc, start, end, cst_id)
-        })
+    let expr =
+        elems
+            .into_iter()
+            .rev()
+            .fold(list_nil_expr(session, end, end, cst_id), |acc, elem| {
+                let start = span_start(&elem);
+                let end = span_end(&acc);
+                cons_expr(session, elem, acc, start, end, cst_id)
+            });
+
+    sp(expr.0, start, end, cst_id)
 }
