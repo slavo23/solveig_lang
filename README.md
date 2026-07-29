@@ -8,6 +8,72 @@ conversion, bytecode generation, and execution on a custom VM.
 The language is still experimental, but it is now practical enough to run
 nontrivial examples, interactive terminal programs, and simple text-file IO.
 
+## Install
+
+Solveig has two pieces:
+
+- the `solveig` command, which builds, checks, and runs Solveig projects
+- the VS Code extension, which adds editor features for `.sv` files
+
+Install the `solveig` command first. The VS Code extension starts that command
+automatically when you open Solveig files.
+
+### Prerequisites
+
+You need a Rust toolchain with Cargo. If `cargo --version` works in your
+terminal, you are ready to install Solveig.
+
+For the VS Code extension, you also need Visual Studio Code. The terminal
+commands below use VS Code's `code` command; if `code --version` does not work,
+you can install extensions through the VS Code Extensions view instead.
+
+### Install the Solveig Command
+
+Install directly from the repository:
+
+```bash
+cargo install --git https://github.com/slavo23/lang_experiments.git
+```
+
+Or install from a local checkout:
+
+```bash
+git clone https://github.com/slavo23/lang_experiments.git
+cd lang_experiments
+cargo install --path .
+```
+
+Cargo installs the command as `solveig`, usually into `~/.cargo/bin` on macOS
+and Linux or `%USERPROFILE%\.cargo\bin` on Windows.
+
+Check the installation:
+
+```bash
+solveig --help
+```
+
+If your shell cannot find `solveig`, make sure Cargo's bin directory is on your
+PATH. On macOS or Linux, this is usually:
+
+```bash
+export PATH="$HOME/.cargo/bin:$PATH"
+```
+
+Add that line to your shell profile if you want it to apply to future terminal
+sessions.
+
+### Uninstall the Solveig Command
+
+If you installed Solveig with Cargo, uninstall it with:
+
+```bash
+cargo uninstall solveig
+```
+
+If you only built the repository with `cargo build`, nothing was installed
+system-wide. If you manually copied a `solveig` binary somewhere, remove that
+copied file from the directory where you put it.
+
 ## Quick Start
 
 Build the compiler:
@@ -126,26 +192,75 @@ range.
 
 ## VS Code Extension
 
-The VS Code extension lives in `solveig_vscode/`. It starts Solveig
-automatically for `.sv` files and provides errors, hover, completion, rename,
-go to definition, find references, document outline, folding, signature help,
-and module links.
+The VS Code extension lives in `solveig_vscode/`. It starts the `solveig`
+command automatically for `.sv` files and provides errors, hover, completion,
+rename, go to definition, find references, document outline, folding, signature
+help, and module links.
 
-Install from a packaged extension:
+Install the `solveig` command first and check that VS Code will be able to find
+it:
 
 ```bash
-code --install-extension solveig-0.1.0.vsix
+solveig --help
 ```
 
-Uninstall:
+After the extension is published, install it by extension id:
+
+```bash
+code --install-extension solveig-lang.solveig
+```
+
+Until then, install from a packaged `.vsix` file:
+
+```bash
+code --install-extension /path/to/solveig-0.1.0.vsix
+```
+
+To build and install that package from this repository:
+
+```bash
+cd solveig_vscode
+npm install
+npm run package -- --out /tmp/solveig.vsix
+code --install-extension /tmp/solveig.vsix --force
+```
+
+If the `solveig` command is not on your PATH, set **Solveig: Server Path** in
+VS Code settings to the executable path. A Cargo install usually puts the
+binary here on macOS and Linux:
+
+```json
+{
+  "solveig.server.path": "/Users/you/.cargo/bin/solveig"
+}
+```
+
+On Windows, use the path to `solveig.exe`, for example:
+
+```json
+{
+  "solveig.server.path": "C:\\Users\\you\\.cargo\\bin\\solveig.exe"
+}
+```
+
+To use the extension, open a folder that contains Solveig source files and then
+open any `.sv` file. The Solveig status item appears in the VS Code status bar.
+If it shows an error, run **Solveig: Show Output** from the Command Palette.
+
+Uninstall the extension:
 
 ```bash
 code --uninstall-extension solveig-lang.solveig
 ```
 
-If the `solveig` command is not on your PATH, set **Solveig: Server Path** in
-VS Code settings to the executable path. See `solveig_vscode/README.md` for
-the full user guide and contributor workflow.
+Uninstall the `solveig` command separately if you no longer want it:
+
+```bash
+cargo uninstall solveig
+```
+
+See `solveig_vscode/README.md` for the full extension guide and contributor
+workflow.
 
 ## Project Layout
 
