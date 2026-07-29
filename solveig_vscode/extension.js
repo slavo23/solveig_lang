@@ -1,406 +1,315 @@
+const cp = require("child_process");
+const os = require("os");
+const path = require("path");
 const vscode = require("vscode");
+const {
+  LanguageClient,
+  RevealOutputChannelOn,
+  State,
+} = require("vscode-languageclient/node");
 
 const LANGUAGE_ID = "solveig";
-const DOCUMENT_SELECTOR = [
-  { language: LANGUAGE_ID, scheme: "file" },
-  { language: LANGUAGE_ID, scheme: "untitled" },
-];
+const SERVER_ARGS = ["lsp"];
+const CONFIG_SECTION = "solveig";
+const SERVER_PATH_SETTING = "server.path";
 
-const KEYWORDS = [
-  "case",
-  "of",
-  "if",
-  "then",
-  "else",
-  "let",
-  "in",
-  "where",
-  "fun",
-  "forall",
-  "data",
-  "sig",
-  "class",
-  "instance",
-  "import",
-  "as",
-  "qualified",
-  "hiding",
-];
+let client;
+let outputChannel;
+let traceChannel;
+let statusBar;
+let clientStarting = false;
 
-const SNIPPETS = [
-  {
-    label: "case",
-    detail: "Case expression",
-    insertText: new vscode.SnippetString(
-      "case ${1:expr} of\n\t${2:Pattern} => ${3:expr}"
-    ),
-  },
-  {
-    label: "if",
-    detail: "If expression",
-    insertText: new vscode.SnippetString(
-      "if ${1:cond} then\n\t${2:thenExpr}\nelse\n\t${3:elseExpr}"
-    ),
-  },
-  {
-    label: "fun",
-    detail: "Lambda",
-    insertText: new vscode.SnippetString("fun ${1:x} => ${2:expr}"),
-  },
-  {
-    label: "let",
-    detail: "Let expression",
-    insertText: new vscode.SnippetString(
-      "let ${1:name} = ${2:expr} in\n\t${3:body}"
-    ),
-  },
-  {
-    label: "signature",
-    detail: "Type signature",
-    insertText: new vscode.SnippetString("${1:name} : ${2:Type}"),
-  },
-  {
-    label: "data",
-    detail: "Data declaration",
-    insertText: new vscode.SnippetString(
-      "data ${1:Type} ${2:a} = ${3:Ctor} ${2:a}"
-    ),
-  },
-  {
-    label: "class",
-    detail: "Typeclass declaration",
-    insertText: new vscode.SnippetString(
-      "class ${1:Class} ${2:a} where\n\t${3:method} : ${2:a} -> ${4:Result}"
-    ),
-  },
-  {
-    label: "instance",
-    detail: "Typeclass instance",
-    insertText: new vscode.SnippetString(
-      "instance ${1:Class} ${2:Type} where\n\t${3:method} ${4:x} = ${5:expr}"
-    ),
-  },
-  {
-    label: "import",
-    detail: "Import declaration",
-    insertText: new vscode.SnippetString("import ${1:module}${2:(${3:name})}"),
-  },
-];
+function activate(context) {
+  outputChannel = vscode.window.createOutputChannel("Solveig");
+  traceChannel = vscode.window.createOutputChannel("Solveig Trace");
+  statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
+  statusBar.command = "solveig.showOutput";
 
-function makeKeywordItem(label) {
-  const item = new vscode.CompletionItem(
-    label,
-    vscode.CompletionItemKind.Keyword
+  context.subscriptions.push(outputChannel, traceChannel, statusBar);
+  context.subscriptions.push(
+    vscode.commands.registerCommand("solveig.restartServer", () =>
+      restartClient(context)
+    ),
+    vscode.commands.registerCommand("solveig.showOutput", () =>
+      outputChannel.show(true)
+    ),
+    vscode.commands.registerCommand("solveig.showTrace", () =>
+      traceChannel.show(true)
+    ),
+    vscode.commands.registerCommand("solveig.showTypeAtCursor", showTypeAtCursor),
+    vscode.workspace.onDidChangeConfiguration((event) => {
+      if (event.affectsConfiguration(`${CONFIG_SECTION}.${SERVER_PATH_SETTING}`)) {
+        restartClient(context);
+      }
+    })
   );
-  item.insertText = label;
-  item.detail = "Solveig keyword";
-  item.sortText = `1_${label}`;
-  return item;
+
+  updateStatus("starting");
+  startClient(context);
 }
 
-function makeSnippetItem(spec) {
-  const item = new vscode.CompletionItem(
-    spec.label,
-    vscode.CompletionItemKind.Snippet
-  );
-  item.detail = spec.detail;
-  item.insertText = spec.insertText;
-  item.insertTextFormat = vscode.InsertTextFormat.Snippet;
-  item.sortText = `0_${spec.label}`;
-  return item;
-}
-
-function stripLineComment(line) {
-  // This is intentionally lightweight. TextMate handles real lexical comments;
-  // this only keeps symbol extraction from treating obvious line comments as code.
-  const ix = line.indexOf("--");
-  return ix === -1 ? line : line.slice(0, ix);
-}
-
-const FUNCTION_EQUATION_RE =
-  /^\s*(?!let\b)([a-z_][A-Za-z0-9_']*)\b(?=[^\n]*(?<![=!<>])=(?![=>]))/;
-
-function extractDeclaredClassName(line) {
-  const match = stripLineComment(line).match(/^\s*class\b(.+?)(?:\bwhere\b|$)/);
-  if (!match) {
+async function deactivate() {
+  if (!client) {
     return undefined;
   }
 
-  // In `class Eq a => Ord a where`, the declared class is after the last `=>`.
-  const head = match[1].split("=>").pop();
-  const classMatch = head.match(/\b([A-Z][A-Za-z0-9_']*)\b/);
-  return classMatch?.[1];
+  const stopping = client.stop();
+  client = undefined;
+  return stopping;
 }
 
-function extractInstanceName(line) {
-  const match = stripLineComment(line).match(
-    /^\s*instance\b\s+(.+?)\s+where\b/
+async function restartClient(context) {
+  updateStatus("starting");
+
+  if (client) {
+    const oldClient = client;
+    client = undefined;
+    await oldClient.stop();
+  }
+
+  return startClient(context);
+}
+
+async function startClient(context) {
+  if (clientStarting) {
+    return;
+  }
+
+  clientStarting = true;
+  const server = resolveServerExecutable();
+
+  try {
+    await ensureServerStarts(server);
+  } catch (error) {
+    clientStarting = false;
+    updateStatus("error");
+    showServerStartError(server, error);
+    return;
+  }
+
+  outputChannel.appendLine(`Starting Solveig server: ${server.command} ${SERVER_ARGS.join(" ")}`);
+
+  const serverOptions = {
+    command: server.command,
+    args: SERVER_ARGS,
+    options: {
+      cwd: server.cwd,
+    },
+  };
+  const clientOptions = {
+    documentSelector: [
+      { language: LANGUAGE_ID, scheme: "file" },
+      { language: LANGUAGE_ID, scheme: "untitled" },
+    ],
+    outputChannel,
+    traceOutputChannel: traceChannel,
+    revealOutputChannelOn: RevealOutputChannelOn.Never,
+    synchronize: {
+      fileEvents: vscode.workspace.createFileSystemWatcher("**/*.sv"),
+    },
+  };
+
+  client = new LanguageClient(
+    "solveig",
+    "Solveig",
+    serverOptions,
+    clientOptions
   );
-  return match ? `instance ${match[1].trim()}` : undefined;
+  context.subscriptions.push(client);
+  client.onDidChangeState((event) => updateStatusForClientState(event.newState));
+
+  try {
+    await client.start();
+    updateStatusForClientState(client.state);
+  } catch (error) {
+    updateStatus("error");
+    outputChannel.appendLine(`Failed to start Solveig server: ${errorMessage(error)}`);
+    vscode.window.showErrorMessage(
+      "Could not start the Solveig language server. Check the Solveig output for details."
+    );
+  } finally {
+    clientStarting = false;
+  }
 }
 
-function collectSymbolsFromText(text) {
-  const symbols = {
-    types: new Set(),
-    classes: new Set(),
-    constructors: new Set(),
-    functions: new Set(),
+function resolveServerExecutable() {
+  const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+  const configuredPath = config.get(SERVER_PATH_SETTING, "").trim();
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const cwd = workspaceFolder ?? process.cwd();
+
+  if (!configuredPath) {
+    return { command: "solveig", cwd, configured: false };
+  }
+
+  return {
+    command: expandConfiguredPath(configuredPath, workspaceFolder),
+    cwd,
+    configured: true,
   };
+}
 
-  for (const rawLine of text.split(/\r?\n/)) {
-    const line = stripLineComment(rawLine);
+function expandConfiguredPath(configuredPath, workspaceFolder) {
+  let expanded = configuredPath;
 
-    const dataMatch = line.match(/^\s*data\s+([A-Z][A-Za-z0-9_']*)\b(.*)$/);
-    if (dataMatch) {
-      symbols.types.add(dataMatch[1]);
-
-      const rhsIndex = line.indexOf("=");
-      if (rhsIndex !== -1) {
-        const rhs = line.slice(rhsIndex + 1);
-        for (const ctorMatch of rhs.matchAll(
-          /(?:^|\|)\s*([A-Z][A-Za-z0-9_']*)\b/g
-        )) {
-          symbols.constructors.add(ctorMatch[1]);
-        }
-      }
-    }
-
-    const className = extractDeclaredClassName(line);
-    if (className) {
-      symbols.classes.add(className);
-    }
-
-    const signatureMatch = line.match(/^\s*([a-z_][A-Za-z0-9_']*)\s*:/);
-    if (signatureMatch) {
-      symbols.functions.add(signatureMatch[1]);
-    }
-
-    const functionMatch = line.match(FUNCTION_EQUATION_RE);
-    if (functionMatch) {
-      symbols.functions.add(functionMatch[1]);
-    }
+  if (workspaceFolder) {
+    expanded = expanded
+      .replaceAll("${workspaceFolder}", workspaceFolder)
+      .replaceAll("${workspaceRoot}", workspaceFolder);
   }
 
-  return symbols;
-}
-
-function mergeSymbolSets(target, source) {
-  for (const key of Object.keys(target)) {
-    for (const value of source[key]) {
-      target[key].add(value);
-    }
-  }
-}
-
-function collectWorkspaceSymbols(currentDocument) {
-  const all = {
-    types: new Set(),
-    classes: new Set(),
-    constructors: new Set(),
-    functions: new Set(),
-  };
-
-  mergeSymbolSets(all, collectSymbolsFromText(currentDocument.getText()));
-
-  for (const doc of vscode.workspace.textDocuments) {
-    if (doc === currentDocument || doc.languageId !== LANGUAGE_ID) {
-      continue;
-    }
-
-    mergeSymbolSets(all, collectSymbolsFromText(doc.getText()));
+  if (expanded === "~") {
+    return os.homedir();
   }
 
-  return all;
+  if (expanded.startsWith(`~${path.sep}`) || expanded.startsWith("~/")) {
+    return path.join(os.homedir(), expanded.slice(2));
+  }
+
+  return expanded;
 }
 
-function makeDynamicItem(label, kind, detail, sortGroup) {
-  const item = new vscode.CompletionItem(label, kind);
-  item.insertText = label;
-  item.detail = detail;
-  item.sortText = `${sortGroup}_${label}`;
-  return item;
-}
-
-function buildCompletionItems(document) {
-  const symbols = collectWorkspaceSymbols(document);
-
-  return [
-    ...SNIPPETS.map(makeSnippetItem),
-
-    ...Array.from(symbols.functions)
-      .sort()
-      .map((name) =>
-        makeDynamicItem(
-          name,
-          vscode.CompletionItemKind.Function,
-          "Function",
-          "1"
-        )
-      ),
-
-    ...Array.from(symbols.constructors)
-      .sort()
-      .map((name) =>
-        makeDynamicItem(
-          name,
-          vscode.CompletionItemKind.Constructor,
-          "Constructor",
-          "1"
-        )
-      ),
-
-    ...Array.from(symbols.classes)
-      .sort()
-      .map((name) =>
-        makeDynamicItem(
-          name,
-          vscode.CompletionItemKind.Interface,
-          "Typeclass",
-          "1"
-        )
-      ),
-
-    ...Array.from(symbols.types)
-      .sort()
-      .map((name) =>
-        makeDynamicItem(name, vscode.CompletionItemKind.Class, "Type", "1")
-      ),
-
-    ...KEYWORDS.map(makeKeywordItem),
-  ];
-}
-
-class SolveigCompletionProvider {
-  provideCompletionItems(document, position) {
-    const linePrefix = document
-      .lineAt(position)
-      .text.slice(0, position.character);
-
-    const wordRange =
-      document.getWordRangeAtPosition(
-        position,
-        /[A-Za-z_][A-Za-z0-9_']*/
-      ) ?? undefined;
-
-    return buildCompletionItems(document).map((item) => {
-      if (wordRange) {
-        item.range = wordRange;
-      }
-
-      if (/^\s*$/.test(linePrefix)) {
-        item.preselect = item.kind === vscode.CompletionItemKind.Snippet;
-      }
-
-      return item;
+function ensureServerStarts(server) {
+  return new Promise((resolve, reject) => {
+    const child = cp.spawn(server.command, ["--help"], {
+      cwd: server.cwd,
+      windowsHide: true,
     });
-  }
+
+    child.once("error", reject);
+    child.once("exit", (code) => {
+      if (code === 0) {
+        resolve();
+      } else {
+        reject(new Error(`'${server.command} --help' exited with code ${code}`));
+      }
+    });
+  });
 }
 
-class SolveigDocumentSymbolProvider {
-  provideDocumentSymbols(document) {
-    const symbols = [];
-    const lines = document.getText().split(/\r?\n/);
+function showServerStartError(server, error) {
+  const source = server.configured
+    ? `the configured path '${server.command}'`
+    : "'solveig' on your PATH";
+  const message =
+    `Could not start the Solveig language server using ${source}. ` +
+    "Install Solveig or set 'Solveig: Server Path' to the Solveig executable.";
 
-    for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
-      const rawLine = lines[lineIndex];
-      const line = stripLineComment(rawLine);
-
-      let match = line.match(/^\s*data\s+([A-Z][A-Za-z0-9_']*)\b/);
-      if (match) {
-        symbols.push(
-          makeLineSymbol(document, lineIndex, match[1], vscode.SymbolKind.Struct)
-        );
-        continue;
-      }
-
-      const className = extractDeclaredClassName(line);
-      if (className) {
-        symbols.push(
-          makeLineSymbol(
-            document,
-            lineIndex,
-            className,
-            vscode.SymbolKind.Interface
-          )
-        );
-        continue;
-      }
-
-      const instanceName = extractInstanceName(line);
-      if (instanceName) {
-        symbols.push(
-          makeLineSymbol(
-            document,
-            lineIndex,
-            instanceName,
-            vscode.SymbolKind.Object
-          )
-        );
-        continue;
-      }
-
-      match = line.match(/^\s*([a-z_][A-Za-z0-9_']*)\s*:/);
-      if (match) {
-        symbols.push(
-          makeLineSymbol(
-            document,
-            lineIndex,
-            match[1],
-            vscode.SymbolKind.Interface
-          )
-        );
-        continue;
-      }
-
-      match = line.match(FUNCTION_EQUATION_RE);
-      if (match) {
-        symbols.push(
-          makeLineSymbol(
-            document,
-            lineIndex,
-            match[1],
-            vscode.SymbolKind.Function
-          )
-        );
-      }
+  outputChannel.appendLine(message);
+  outputChannel.appendLine(errorMessage(error));
+  vscode.window.showErrorMessage(message, "Open Settings", "Show Output").then((choice) => {
+    if (choice === "Open Settings") {
+      vscode.commands.executeCommand(
+        "workbench.action.openSettings",
+        `${CONFIG_SECTION}.${SERVER_PATH_SETTING}`
+      );
+    } else if (choice === "Show Output") {
+      outputChannel.show(true);
     }
+  });
+}
 
-    return symbols;
+function updateStatusForClientState(state) {
+  switch (state) {
+    case State.Running:
+      updateStatus("running");
+      break;
+    case State.Starting:
+      updateStatus("starting");
+      break;
+    case State.Stopped:
+      updateStatus("stopped");
+      break;
+    default:
+      updateStatus("stopped");
+      break;
   }
 }
 
-function makeLineSymbol(document, lineIndex, name, kind) {
-  const line = document.lineAt(lineIndex);
-  const rawText = line.text;
-  const selectableName = name.replace(/^instance\s+/, "");
-  const nameStart = Math.max(0, rawText.indexOf(selectableName));
-  const start = line.range.start.translate(0, nameStart);
-  const end = line.range.end;
-  const range = new vscode.Range(line.range.start, end);
-  const selectionRange = new vscode.Range(
-    start,
-    start.translate(0, Math.max(1, selectableName.length))
-  );
+function updateStatus(status) {
+  if (!statusBar) {
+    return;
+  }
 
-  return new vscode.DocumentSymbol(name, "", kind, range, selectionRange);
+  switch (status) {
+    case "running":
+      statusBar.text = "$(check) Solveig";
+      statusBar.tooltip = "Solveig language server is running";
+      break;
+    case "starting":
+      statusBar.text = "$(sync~spin) Solveig";
+      statusBar.tooltip = "Solveig language server is starting";
+      break;
+    case "error":
+      statusBar.text = "$(error) Solveig";
+      statusBar.tooltip = "Solveig language server could not start";
+      break;
+    case "stopped":
+    default:
+      statusBar.text = "$(circle-slash) Solveig";
+      statusBar.tooltip = "Solveig language server is stopped";
+      break;
+  }
+
+  statusBar.show();
 }
 
-function activate(context) {
-  const completionProvider = vscode.languages.registerCompletionItemProvider(
-    DOCUMENT_SELECTOR,
-    new SolveigCompletionProvider(),
-    "."
-  );
+async function showTypeAtCursor() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== LANGUAGE_ID) {
+    vscode.window.showInformationMessage("Open a Solveig file first.");
+    return;
+  }
 
-  const documentSymbolProvider = vscode.languages.registerDocumentSymbolProvider(
-    DOCUMENT_SELECTOR,
-    new SolveigDocumentSymbolProvider()
+  const hovers = await vscode.commands.executeCommand(
+    "vscode.executeHoverProvider",
+    editor.document.uri,
+    editor.selection.active
   );
+  const text = formatHoverContents(hovers);
 
-  context.subscriptions.push(completionProvider, documentSymbolProvider);
+  if (!text) {
+    vscode.window.showInformationMessage("No Solveig type information at the cursor.");
+    return;
+  }
+
+  outputChannel.appendLine("");
+  outputChannel.appendLine(`Type at ${editor.document.fileName}:${editor.selection.active.line + 1}`);
+  outputChannel.appendLine(text);
+  outputChannel.show(true);
 }
 
-function deactivate() { }
+function formatHoverContents(hovers) {
+  if (!Array.isArray(hovers)) {
+    return "";
+  }
+
+  return hovers
+    .flatMap((hover) => hover.contents ?? [])
+    .map(markedContentToString)
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function markedContentToString(content) {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (content?.language && content?.value) {
+    return `\`\`\`${content.language}\n${content.value}\n\`\`\``;
+  }
+
+  if (content?.value) {
+    return content.value;
+  }
+
+  return "";
+}
+
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
 
 module.exports = {
   activate,

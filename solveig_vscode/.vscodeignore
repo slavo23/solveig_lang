@@ -1,0 +1,8 @@
+.DS_Store
+*.vsix
+.git/**
+.github/**
+.vscode/**
+.vscode-test/**
+npm-debug.log
+README_PLAN.md

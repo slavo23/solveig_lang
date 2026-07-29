@@ -1,17 +1,30 @@
 {
   "name": "solveig",
   "displayName": "Solveig",
+  "publisher": "solveig-lang",
   "version": "0.1.0",
+  "description": "Language support for Solveig",
   "engines": {
     "vscode": "^1.75.0"
   },
   "categories": [
     "Programming Languages"
   ],
+  "activationEvents": [
+    "onLanguage:solveig",
+    "onCommand:solveig.restartServer",
+    "onCommand:solveig.showOutput",
+    "onCommand:solveig.showTrace",
+    "onCommand:solveig.showTypeAtCursor"
+  ],
   "contributes": {
     "languages": [
       {
         "id": "solveig",
+        "aliases": [
+          "Solveig",
+          "solveig"
+        ],
         "extensions": [
           ".sv"
         ],
@@ -24,17 +37,82 @@
         "scopeName": "source.solveig",
         "path": "./syntaxes/solveig.tmLanguage.json"
       }
+    ],
+    "snippets": [
+      {
+        "language": "solveig",
+        "path": "./snippets/solveig.code-snippets"
+      }
+    ],
+    "configuration": {
+      "title": "Solveig",
+      "properties": {
+        "solveig.server.path": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Path to the `solveig` executable. Leave empty to use `solveig` from your PATH."
+        }
+      }
+    },
+    "commands": [
+      {
+        "command": "solveig.restartServer",
+        "title": "Solveig: Restart Server"
+      },
+      {
+        "command": "solveig.showOutput",
+        "title": "Solveig: Show Output"
+      },
+      {
+        "command": "solveig.showTrace",
+        "title": "Solveig: Show Trace"
+      },
+      {
+        "command": "solveig.showTypeAtCursor",
+        "title": "Solveig: Show Type at Cursor"
+      }
+    ],
+    "problemMatchers": [
+      {
+        "name": "solveig",
+        "label": "Solveig",
+        "owner": "solveig",
+        "fileLocation": [
+          "relative",
+          "${workspaceFolder}"
+        ],
+        "pattern": [
+          {
+            "regexp": "^\\[(.+)\\]\\s+(Error|Warning|Note):\\s+(.*)$",
+            "code": 1,
+            "severity": 2,
+            "message": 3
+          },
+          {
+            "regexp": "^\\s*╭─\\[\\s*(.+):(\\d+):(\\d+)\\s*\\]$",
+            "file": 1,
+            "line": 2,
+            "column": 3
+          }
+        ]
+      }
     ]
   },
   "main": "extension.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "check": "node --check extension.js",
+    "package": "vsce package"
   },
-  "keywords": [],
+  "keywords": [
+    "solveig",
+    "language"
+  ],
   "author": "",
   "license": "ISC",
-  "description": "",
   "dependencies": {
+    "vscode-languageclient": "^8.1.0"
+  },
+  "devDependencies": {
     "@vscode/vsce": "^3.9.1"
   }
 }

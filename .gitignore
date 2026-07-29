@@ -6,3 +6,4 @@
 profile.json.gz
 bytecode.txt
 plan_v*
+*.vsix

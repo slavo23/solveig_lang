@@ -99,33 +99,20 @@ Or, after building:
 target/debug/solveig lsp
 ```
 
-The language server speaks LSP over stdio. It is meant to be launched by an
-editor or test client, so running it directly in a terminal waits for protocol
-messages rather than showing a prompt.
+This command is meant to be launched by an editor or test client, so running it
+directly in a terminal waits for editor messages rather than showing a prompt.
 
 ## Language Server
 
-Solveig ships a stdio LSP server through `solveig lsp`. The current server
-implements the lifecycle, full document sync, UTF-8/UTF-16 position negotiation,
-debounced project checks, `textDocument/publishDiagnostics` using the same
-diagnostic codes as the CLI, and Markdown `textDocument/hover` responses for
-typed expressions, definitions, constructors, class methods, and module imports.
-It also supports `textDocument/definition`, project-wide
-`textDocument/references`, hierarchical `textDocument/documentSymbol`, and
-project-wide `workspace/symbol` queries for Solveig declarations. Semantic
-tokens are available through `textDocument/semanticTokens/full` with whole-file
-delta responses. Quick fixes are available through `textDocument/codeAction`
-for typed-hole fills, missing instance method stubs, missing imports, and
-adding inferred type signatures. Completion is available through
-`textDocument/completion` for locals, current-module declarations, imported
-exports, constructors, class methods, keywords, and qualified module paths after
-`.`. Inlay hints are available through `textDocument/inlayHint` for inferred
-types on unannotated `let` bindings, unannotated lambda parameters, and
-definitions without explicit signatures. The server also supports
-`textDocument/documentHighlight`, `textDocument/foldingRange`,
-`textDocument/selectionRange`, `textDocument/signatureHelp`,
-`textDocument/prepareRename`, `textDocument/rename`, and
-`textDocument/documentLink` for module imports.
+Solveig ships editor support through `solveig lsp`. Editors normally start this
+command for you, so running it directly in a terminal waits for editor messages
+rather than showing a prompt.
+
+Current editor features include errors and warnings, hover information,
+go-to-definition, find references, document outline, workspace symbol search,
+semantic highlighting, quick fixes, completion, inlay hints, highlights,
+folding, selection expansion, signature help, rename, and clickable module
+imports.
 
 Manual smoke test:
 
@@ -134,9 +121,31 @@ cargo build
 python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
 ```
 
-Expected output includes a negotiated `positionEncoding` and a `TC0005` type
-mismatch diagnostic with its LSP range. Editor-extension wiring is a planned
-Phase H follow-up.
+Expected output includes a `TC0005` type mismatch diagnostic with its editor
+range.
+
+## VS Code Extension
+
+The VS Code extension lives in `solveig_vscode/`. It starts Solveig
+automatically for `.sv` files and provides errors, hover, completion, rename,
+go to definition, find references, document outline, folding, signature help,
+and module links.
+
+Install from a packaged extension:
+
+```bash
+code --install-extension solveig-0.1.0.vsix
+```
+
+Uninstall:
+
+```bash
+code --uninstall-extension solveig-lang.solveig
+```
+
+If the `solveig` command is not on your PATH, set **Solveig: Server Path** in
+VS Code settings to the executable path. See `solveig_vscode/README.md` for
+the full user guide and contributor workflow.
 
 ## Project Layout
 

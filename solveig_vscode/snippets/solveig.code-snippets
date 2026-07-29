@@ -1,0 +1,64 @@
+{
+  "case expression": {
+    "prefix": "case",
+    "body": [
+      "case ${1:expr} of",
+      "\t${2:Pattern} => ${3:expr}"
+    ],
+    "description": "Case expression"
+  },
+  "if expression": {
+    "prefix": "if",
+    "body": [
+      "if ${1:cond} then",
+      "\t${2:thenExpr}",
+      "else",
+      "\t${3:elseExpr}"
+    ],
+    "description": "If expression"
+  },
+  "lambda": {
+    "prefix": "fun",
+    "body": "fun ${1:x} => ${2:expr}",
+    "description": "Lambda"
+  },
+  "let expression": {
+    "prefix": "let",
+    "body": [
+      "let ${1:name} = ${2:expr} in",
+      "\t${3:body}"
+    ],
+    "description": "Let expression"
+  },
+  "type signature": {
+    "prefix": "signature",
+    "body": "${1:name} : ${2:Type}",
+    "description": "Type signature"
+  },
+  "data declaration": {
+    "prefix": "data",
+    "body": "data ${1:Type} ${2:a} = ${3:Ctor} ${2:a}",
+    "description": "Data declaration"
+  },
+  "typeclass declaration": {
+    "prefix": "class",
+    "body": [
+      "class ${1:Class} ${2:a} where",
+      "\t${3:method} : ${2:a} -> ${4:Result}"
+    ],
+    "description": "Typeclass declaration"
+  },
+  "typeclass instance": {
+    "prefix": "instance",
+    "body": [
+      "instance ${1:Class} ${2:Type} where",
+      "\t${3:method} ${4:x} = ${5:expr}"
+    ],
+    "description": "Typeclass instance"
+  },
+  "import declaration": {
+    "prefix": "import",
+    "body": "import ${1:module}${2:(${3:name})}",
+    "description": "Import declaration"
+  }
+}
