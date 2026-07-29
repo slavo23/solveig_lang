@@ -4,6 +4,7 @@
 mod code_actions;
 mod completion;
 mod diagnostics;
+mod editor_features;
 mod hover;
 mod inlay_hints;
 mod navigation;

@@ -121,7 +121,11 @@ adding inferred type signatures. Completion is available through
 exports, constructors, class methods, keywords, and qualified module paths after
 `.`. Inlay hints are available through `textDocument/inlayHint` for inferred
 types on unannotated `let` bindings, unannotated lambda parameters, and
-definitions without explicit signatures.
+definitions without explicit signatures. The server also supports
+`textDocument/documentHighlight`, `textDocument/foldingRange`,
+`textDocument/selectionRange`, `textDocument/signatureHelp`,
+`textDocument/prepareRename`, `textDocument/rename`, and
+`textDocument/documentLink` for module imports.
 
 Manual smoke test:
 
@@ -342,8 +346,9 @@ scope.
 - The REPL is planned but not complete.
 - The LSP currently runs over stdio and has no packaged editor extension yet.
   It publishes diagnostics and supports hover, go-to-definition, references,
-  document symbols, workspace symbols, semantic tokens, and quick-fix code
-  actions.
+  document symbols, workspace symbols, semantic tokens, quick-fix code actions,
+  completion, inlay hints, highlights, folding, selection ranges, signature
+  help, rename, and module document links.
 
 ## More Documentation
 

@@ -10,14 +10,18 @@ use lsp_types::{
     CodeActionProviderCapability, CodeActionResponse, CompletionOptions, CompletionParams,
     CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, GotoDefinitionParams,
+    DocumentHighlight, DocumentHighlightParams, DocumentLink, DocumentLinkOptions,
+    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FoldingRange,
+    FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
     GotoDefinitionResponse, HoverParams, HoverProviderCapability, InitializeParams,
     InitializeResult, InitializedParams, InlayHintOptions, InlayHintParams,
     InlayHintServerCapabilities, Location, MessageType, OneOf, PositionEncodingKind,
-    ReferenceParams, SemanticTokensFullDeltaResult, SemanticTokensFullOptions,
-    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, ServerCapabilities, SymbolInformation,
-    TextDocumentSyncCapability, TextDocumentSyncKind, WorkspaceSymbolParams,
+    PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, SelectionRange,
+    SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokensFullDeltaResult,
+    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind,
+    WorkspaceEdit, WorkspaceSymbolParams,
 };
 use solveig_base::PositionEncoding;
 use tokio::io::{stdin, stdout};
@@ -220,6 +224,25 @@ impl LanguageServer for LspServer {
         Ok(state.references(&uri, position, params.context.include_declaration))
     }
 
+    async fn document_highlight(
+        &self,
+        params: DocumentHighlightParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<Vec<DocumentHighlight>>> {
+        let mut state = self.state.lock().await;
+        let params = params.text_document_position_params;
+
+        Ok(state.document_highlights(&params.text_document.uri, params.position))
+    }
+
+    async fn document_link(
+        &self,
+        params: DocumentLinkParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<Vec<DocumentLink>>> {
+        let mut state = self.state.lock().await;
+
+        Ok(state.document_links(&params.text_document.uri))
+    }
+
     async fn completion(
         &self,
         params: CompletionParams,
@@ -237,6 +260,54 @@ impl LanguageServer for LspServer {
         let mut state = self.state.lock().await;
 
         Ok(state.inlay_hints(&params.text_document.uri, params.range))
+    }
+
+    async fn folding_range(
+        &self,
+        params: FoldingRangeParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<Vec<FoldingRange>>> {
+        let mut state = self.state.lock().await;
+
+        Ok(state.folding_ranges(&params.text_document.uri))
+    }
+
+    async fn selection_range(
+        &self,
+        params: SelectionRangeParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<Vec<SelectionRange>>> {
+        let mut state = self.state.lock().await;
+
+        Ok(state.selection_ranges(&params.text_document.uri, params.positions))
+    }
+
+    async fn signature_help(
+        &self,
+        params: SignatureHelpParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<SignatureHelp>> {
+        let mut state = self.state.lock().await;
+        let params = params.text_document_position_params;
+
+        Ok(state.signature_help(&params.text_document.uri, params.position))
+    }
+
+    async fn prepare_rename(
+        &self,
+        params: lsp_types::TextDocumentPositionParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<PrepareRenameResponse>> {
+        let mut state = self.state.lock().await;
+
+        Ok(state.prepare_rename(&params.text_document.uri, params.position))
+    }
+
+    async fn rename(
+        &self,
+        params: RenameParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<WorkspaceEdit>> {
+        let mut state = self.state.lock().await;
+        let position = params.text_document_position.position;
+        let uri = params.text_document_position.text_document.uri;
+
+        Ok(state.rename(&uri, position, &params.new_name))
     }
 
     async fn document_symbol(
@@ -293,13 +364,20 @@ fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
     ServerCapabilities {
         position_encoding: Some(encoding),
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+        selection_range_provider: Some(SelectionRangeProviderCapability::Simple(true)),
         hover_provider: Some(HoverProviderCapability::Simple(true)),
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
+        document_highlight_provider: Some(OneOf::Left(true)),
         completion_provider: Some(CompletionOptions {
             resolve_provider: Some(false),
             trigger_characters: Some(vec![".".to_string()]),
             ..CompletionOptions::default()
+        }),
+        signature_help_provider: Some(SignatureHelpOptions {
+            trigger_characters: Some(vec![" ".to_string(), "(".to_string()]),
+            retrigger_characters: Some(vec![" ".to_string()]),
+            work_done_progress_options: Default::default(),
         }),
         inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
             InlayHintOptions {
@@ -309,6 +387,15 @@ fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
         ))),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
+        rename_provider: Some(OneOf::Right(RenameOptions {
+            prepare_provider: Some(true),
+            work_done_progress_options: Default::default(),
+        })),
+        document_link_provider: Some(DocumentLinkOptions {
+            resolve_provider: Some(false),
+            work_done_progress_options: Default::default(),
+        }),
+        folding_range_provider: Some(FoldingRangeProviderCapability::Simple(true)),
         code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
             code_action_kinds: Some(vec![CodeActionKind::QUICKFIX]),
             resolve_provider: Some(false),

@@ -21,6 +21,8 @@ use crate::inlay_hints::lsp_inlay_hints;
 use crate::navigation::{lsp_document_symbols, lsp_location, lsp_symbol_information};
 use crate::semantic_tokens::lsp_semantic_tokens;
 
+mod editor_features;
+
 pub(crate) struct ServerState {
     workspaces: BTreeMap<PathBuf, Workspace>,
     roots: Vec<PathBuf>,

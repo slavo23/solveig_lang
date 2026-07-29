@@ -5,9 +5,9 @@ use super::source_lookup::{source_file_id, span_contains_offset, span_len};
 use super::*;
 
 #[derive(Clone, Copy, Debug)]
-struct DefCandidate {
-    span: FileSpan,
-    def_id: DefId,
+pub(super) struct DefCandidate {
+    pub(super) span: FileSpan,
+    pub(super) def_id: DefId,
     priority: u8,
 }
 
@@ -103,7 +103,7 @@ fn definition_in_artifacts_by_file_id(
     declaration_span(artifacts, def_id)
 }
 
-fn def_id_at_offset(
+pub(super) fn def_id_at_offset(
     artifacts: &CompilationArtifacts,
     file_id: FileId,
     offset: usize,
@@ -127,7 +127,10 @@ fn def_id_at_offset(
     best
 }
 
-fn declaration_span(artifacts: &CompilationArtifacts, def_id: DefId) -> Option<FileSpan> {
+pub(super) fn declaration_span(
+    artifacts: &CompilationArtifacts,
+    def_id: DefId,
+) -> Option<FileSpan> {
     artifacts
         .declaration_spans
         .iter()
@@ -136,7 +139,7 @@ fn declaration_span(artifacts: &CompilationArtifacts, def_id: DefId) -> Option<F
         .min_by_key(span_sort_key)
 }
 
-fn references_to_def(
+pub(super) fn references_to_def(
     artifacts: &CompilationArtifacts,
     def_id: DefId,
     include_declaration: bool,
@@ -172,7 +175,11 @@ fn references_to_def(
     out
 }
 
-fn is_declaration_span(artifacts: &CompilationArtifacts, span: FileSpan, def_id: DefId) -> bool {
+pub(super) fn is_declaration_span(
+    artifacts: &CompilationArtifacts,
+    span: FileSpan,
+    def_id: DefId,
+) -> bool {
     artifacts
         .declaration_spans
         .iter()

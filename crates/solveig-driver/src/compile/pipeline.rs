@@ -9,6 +9,7 @@ pub(super) struct CheckProjectOutcome {
     pub(super) code_actions: Vec<SourceCodeAction>,
     pub(super) completion_candidates: Vec<SourceCompletionCandidate>,
     pub(super) inlay_hints: Vec<SourceInlayHint>,
+    pub(super) syntax_trees: Vec<SourceSyntaxTree>,
     pub(super) phase: Option<FrontendPhase>,
     pub(super) freshly_checked_modules: Vec<String>,
     pub(super) reused_modules: Vec<String>,
@@ -63,12 +64,14 @@ impl Compilation {
                     code_actions: Vec::new(),
                     completion_candidates: Vec::new(),
                     inlay_hints: Vec::new(),
+                    syntax_trees: Vec::new(),
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
                 });
             }
         };
+        let syntax_trees = project_syntax_trees(&project);
         let semantic_tokens = syntax_semantic_tokens(&project);
         let mut completion_candidates =
             completion::syntax_completion_candidates(&self.session, &project);
@@ -80,6 +83,7 @@ impl Compilation {
                 code_actions: Vec::new(),
                 completion_candidates,
                 inlay_hints: Vec::new(),
+                syntax_trees,
                 phase: Some(FrontendPhase::Parse),
                 freshly_checked_modules: Vec::new(),
                 reused_modules: Vec::new(),
@@ -96,6 +100,7 @@ impl Compilation {
                     code_actions: Vec::new(),
                     completion_candidates,
                     inlay_hints: Vec::new(),
+                    syntax_trees,
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -135,6 +140,7 @@ impl Compilation {
                     code_actions: Vec::new(),
                     completion_candidates,
                     inlay_hints: Vec::new(),
+                    syntax_trees,
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -169,6 +175,7 @@ impl Compilation {
             completion_candidates,
             inlay_hints,
             phase,
+            syntax_trees,
             freshly_checked_modules,
             reused_modules,
         })

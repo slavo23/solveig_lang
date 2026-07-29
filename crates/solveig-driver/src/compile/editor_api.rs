@@ -177,6 +177,134 @@ impl Compilation {
         )
     }
 
+    /// Checks the current project and returns document highlights for the symbol at a position.
+    pub fn document_highlights_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Vec<SourceDocumentHighlight> {
+        if !self.check(true).is_ok_and(CheckResult::success) {
+            return Vec::new();
+        }
+
+        let Some(artifacts) = self.artifacts.as_ref() else {
+            return Vec::new();
+        };
+
+        document_highlights_at_position_in_artifacts(
+            artifacts,
+            self.source_map(),
+            file.as_ref(),
+            position,
+            encoding,
+        )
+    }
+
+    /// Checks the current project and returns foldable ranges for one source file.
+    pub fn folding_ranges(&mut self, file: impl AsRef<Path>) -> Vec<SourceFoldingRange> {
+        let _ = self.check(true);
+
+        folding_ranges_in_syntax_trees(self.source_map(), &self.syntax_trees, file.as_ref())
+    }
+
+    /// Checks the current project and returns CST-backed selection ranges.
+    pub fn selection_ranges(
+        &mut self,
+        file: impl AsRef<Path>,
+        positions: &[SourcePosition],
+        encoding: PositionEncoding,
+    ) -> Vec<SourceSelectionRange> {
+        let _ = self.check(true);
+
+        selection_ranges_in_syntax_trees(
+            self.source_map(),
+            &self.syntax_trees,
+            file.as_ref(),
+            positions,
+            encoding,
+        )
+    }
+
+    /// Checks the current project and returns signature help at an editor position.
+    pub fn signature_help_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Option<SourceSignatureHelp> {
+        if !self.check(true).is_ok_and(CheckResult::success) {
+            return None;
+        }
+
+        signature_help_at_position_in_artifacts(
+            self.artifacts.as_ref()?,
+            self.source_map(),
+            file.as_ref(),
+            position,
+            encoding,
+        )
+    }
+
+    /// Checks whether the symbol at an editor position can be renamed.
+    pub fn prepare_rename_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Option<FileSpan> {
+        if !self.check(true).is_ok_and(CheckResult::success) {
+            return None;
+        }
+
+        prepare_rename_in_artifacts(
+            self.artifacts.as_ref()?,
+            self.source_map(),
+            file.as_ref(),
+            position,
+            encoding,
+        )
+    }
+
+    /// Checks the current project and returns edits that rename a semantic symbol.
+    pub fn rename_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+        new_name: &str,
+    ) -> Vec<SourceTextEdit> {
+        if !self.check(true).is_ok_and(CheckResult::success) {
+            return Vec::new();
+        }
+
+        let Some(artifacts) = self.artifacts.as_ref() else {
+            return Vec::new();
+        };
+
+        rename_edits_in_artifacts(
+            artifacts,
+            self.source_map(),
+            file.as_ref(),
+            position,
+            encoding,
+            new_name,
+        )
+    }
+
+    /// Checks the current project and returns module document links for one source file.
+    pub fn document_links(&mut self, file: impl AsRef<Path>) -> Vec<SourceDocumentLink> {
+        if !self.check(true).is_ok_and(CheckResult::success) {
+            return Vec::new();
+        }
+
+        let Some(artifacts) = self.artifacts.as_ref() else {
+            return Vec::new();
+        };
+
+        document_links_in_artifacts(artifacts, self.source_map(), file.as_ref())
+    }
+
     /// Checks the current project and returns inlay hints visible for an editor range.
     pub fn inlay_hints_at_range(
         &mut self,

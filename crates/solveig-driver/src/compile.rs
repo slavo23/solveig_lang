@@ -22,8 +22,8 @@ use solveig_ast::ast::{
     BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinDefinition,
     BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassInfo, ClassTable,
     CtorId, CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, Names, PRIM_TYS, Pattern,
-    PatternNode, Pretty, PrettyTables, Scheme, TermDefinition, TermExpr, TermExprNode, Ty,
-    TyConDefinition, TyConId, TyConInfo, TyConTable, TyVarId, VarRef,
+    PatternNode, Predicate, Pretty, PrettyTables, Scheme, TermDefinition, TermExpr, TermExprNode,
+    Ty, TyConDefinition, TyConId, TyConInfo, TyConTable, TyVarId, VarRef,
     compiler_bool_data_definition, prelude_list_tycon_id, prelude_maybe_tycon_id,
     prelude_ordering_tycon_id,
 };
@@ -67,6 +67,8 @@ mod builtins;
 mod code_actions;
 mod compilation;
 mod completion;
+mod document_highlights;
+mod document_links;
 mod editor_api;
 mod evidence_dump;
 mod hover;
@@ -74,14 +76,22 @@ mod incremental;
 mod inlay_hints;
 mod navigation;
 mod pipeline;
+mod rename;
 mod semantic_tokens;
 mod show_entry;
+mod signature_help;
 mod source_code_action;
 mod source_completion;
+mod source_document_highlight;
+mod source_document_link;
+mod source_folding_range;
 mod source_inlay_hint;
 mod source_lookup;
+mod source_selection_range;
 mod source_semantic_token;
+mod source_signature_help;
 mod source_symbol;
+mod syntax_features;
 
 use builtins::driver_builtin_api;
 use code_actions::code_actions_in_compilation;
@@ -93,6 +103,8 @@ pub use compilation::{
 };
 use compilation::{CheckedProject, CompilationArtifacts, PreludeCache};
 use completion::completion_items_in_compilation;
+use document_highlights::document_highlights_at_position_in_artifacts;
+use document_links::document_links_in_artifacts;
 use evidence_dump::dump_solved_evidence;
 use hover::{hover_at_position_in_artifacts, hover_in_artifacts};
 use incremental::IncrementalCache;
@@ -102,16 +114,27 @@ use navigation::{
     references_at_position_in_artifacts, references_in_artifacts, workspace_symbols_in_artifacts,
 };
 use pipeline::{FrontendPhase, merge_checked_modules, verify_lowering_core};
+use rename::{prepare_rename_in_artifacts, rename_edits_in_artifacts};
 use semantic_tokens::{semantic_tokens_in_compilation, syntax_semantic_tokens};
 use show_entry::{add_show_entry_wrapper, entry_returns_io};
+use signature_help::signature_help_at_position_in_artifacts;
 pub use source_code_action::{SourceCodeAction, SourceTextEdit};
 use source_completion::SourceCompletionCandidate;
 pub use source_completion::{SourceCompletionItem, SourceCompletionItemKind};
+pub use source_document_highlight::{SourceDocumentHighlight, SourceDocumentHighlightKind};
+pub use source_document_link::SourceDocumentLink;
+pub use source_folding_range::{SourceFoldingRange, SourceFoldingRangeKind};
 pub use source_inlay_hint::{
     SourceInlayHint, SourceInlayHintCategory, SourceInlayHintConfig, SourceInlayHintKind,
 };
+pub use source_selection_range::SourceSelectionRange;
 pub use source_semantic_token::{
     SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
     SourceSemanticTokenModifiers,
 };
+pub use source_signature_help::{SourceSignatureHelp, SourceSignatureInformation};
 pub use source_symbol::{SourceSymbol, SourceSymbolKind};
+use syntax_features::{
+    SourceSyntaxTree, folding_ranges_in_syntax_trees, project_syntax_trees,
+    selection_ranges_in_syntax_trees,
+};
