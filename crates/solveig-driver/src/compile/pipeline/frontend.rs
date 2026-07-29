@@ -62,6 +62,11 @@ impl FrontendPhase {
     }
 }
 
+struct ModuleCheck {
+    module: CheckedModule,
+    failure: Option<FrontendPhase>,
+}
+
 impl<'a> FrontendState<'a> {
     fn new(
         session: &'a Session,
@@ -356,14 +361,15 @@ impl<'a> FrontendState<'a> {
             }
 
             self.freshly_checked_modules.push(module_name.clone());
-            let checked = match self.check_module(module_name) {
-                Ok(checked) => checked,
+            let module_check = match self.check_module(module_name) {
+                Ok(module_check) => module_check,
                 Err(phase) => {
                     failed_modules.insert(module_name.clone());
                     first_failure = Some(first_failure.map_or(phase, |current| current.min(phase)));
                     continue;
                 }
             };
+            let checked = module_check.module;
 
             let typed_api = Arc::new(build_typed_module_api(
                 self.session,
@@ -396,6 +402,9 @@ impl<'a> FrontendState<'a> {
             if is_compiler_prelude_module(self.session, module_name) {
                 self.capture_prelude_cache(order);
             }
+            if let Some(phase) = module_check.failure {
+                first_failure = Some(first_failure.map_or(phase, |current| current.min(phase)));
+            }
         }
 
         first_failure
@@ -425,7 +434,7 @@ impl<'a> FrontendState<'a> {
         out
     }
 
-    fn check_module(&mut self, module_name: &ModuleName) -> Result<CheckedModule, FrontendPhase> {
+    fn check_module(&mut self, module_name: &ModuleName) -> Result<ModuleCheck, FrontendPhase> {
         let parsed = self.parsed.get(self.session, module_name);
         let file = parsed.file;
         let module_id = self
@@ -539,6 +548,7 @@ impl<'a> FrontendState<'a> {
                 .push(diagnostic.into_diagnostic(()));
         }
 
+        let mut failure = None;
         if !checked_raw.holes.is_empty() {
             self.code_actions.extend(code_actions::hole_code_actions(
                 &checked_raw.holes,
@@ -557,10 +567,10 @@ impl<'a> FrontendState<'a> {
                 self.session.diagnostics().push(diagnostic);
             }
 
-            return Err(FrontendPhase::Hole);
+            failure = Some(FrontendPhase::Hole);
         }
 
-        if self.verify_core {
+        if self.verify_core && failure.is_none() {
             let lint_env = CoreLintEnv::from_typecheck_env(&checked_raw.module, &check_env)
                 .with_file(module_id, file);
             let diagnostics = lint_checked_module(&checked_raw.module, &lint_env);
@@ -588,7 +598,10 @@ impl<'a> FrontendState<'a> {
                 check_env.pretty_tables(),
             ));
 
-        Ok(checked_raw.module)
+        Ok(ModuleCheck {
+            module: checked_raw.module,
+            failure,
+        })
     }
 
     fn stamp_instance_ids(&mut self, module: &mut solveig_ast::ast::ResolvedModule<Range<usize>>) {

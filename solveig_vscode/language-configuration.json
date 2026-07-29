@@ -67,14 +67,20 @@
       "end": "^\\s*--\\s*#?endregion\\b"
     }
   },
-  "wordPattern": "(?:\\?[A-Za-z_][A-Za-z0-9_']*|\\?\\?|[A-Za-z_][A-Za-z0-9_']*(?:\\.[A-Za-z_][A-Za-z0-9_']*)*|\\d+)",
+  "wordPattern": "(?:\\?[A-Za-z_][A-Za-z0-9_']*|\\?\\?|[A-Za-z_][A-Za-z0-9_']*(?:\\.[A-Za-z_][A-Za-z0-9_']*)*|[!#$%&*+./<=>?@\\\\^|\\-~:]+|\\d+(?:\\.\\d+)?(?:[eE][+-]?\\d+)?)",
   "indentationRules": {
     "decreaseIndentPattern": "^\\s*(?:\\}|\\||in\\b|else\\b)",
-    "indentNextLinePattern": "^\\s*(?:.*\\bcase\\b.*\\bof\\s*$|.*\\bthen\\s*$|.*\\belse\\s*$|.*\\bwhere\\s*$|.*(?:=|=>)\\s*$)"
+    "indentNextLinePattern": "^\\s*(?:.*\\bcase\\b.*\\bof\\s*$|.*\\bdo\\s*$|.*\\bthen\\s*$|.*\\belse\\s*$|.*\\bwhere\\s*$|.*(?:=|=>)\\s*$)"
   },
   "onEnterRules": [
     {
       "beforeText": "^\\s*.*\\bcase\\b.*\\bof\\s*$",
+      "action": {
+        "indent": "indent"
+      }
+    },
+    {
+      "beforeText": "^\\s*.*\\bdo\\s*$",
       "action": {
         "indent": "indent"
       }

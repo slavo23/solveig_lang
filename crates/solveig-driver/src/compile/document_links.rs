@@ -23,7 +23,8 @@ pub(super) fn document_links_in_artifacts(
         let Some(display) = artifacts.module_display_names.get(module_id) else {
             continue;
         };
-        let link_span = import_module_name_span(source, span.span, display).unwrap_or(span.span);
+        let link_span =
+            source_lookup::import_module_name_span(source, span.span, display).unwrap_or(span.span);
 
         out.push(
             SourceDocumentLink::new(FileSpan::new(file_id, link_span), target.clone())
@@ -32,17 +33,4 @@ pub(super) fn document_links_in_artifacts(
     }
 
     out
-}
-
-fn import_module_name_span(source: &str, import_span: Span, module_name: &str) -> Option<Span> {
-    let text = source.get(import_span.to_usize_range())?;
-    let import_start = text.find("import")?;
-    let search_start = import_start + "import".len();
-    let name_start = text[search_start..].find(module_name)? + search_start;
-    let name_end = name_start + module_name.len();
-
-    Some(Span::new(
-        u32::try_from(import_span.start as usize + name_start).ok()?,
-        u32::try_from(import_span.start as usize + name_end).ok()?,
-    ))
 }

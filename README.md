@@ -180,6 +180,9 @@ semantic highlighting, quick fixes, completion, inlay hints, highlights,
 folding, selection expansion, signature help, rename, and clickable module
 imports.
 
+For capability details and the robustness testing plan, see
+[`docs/lsp.md`](docs/lsp.md).
+
 Manual smoke test:
 
 ```bash

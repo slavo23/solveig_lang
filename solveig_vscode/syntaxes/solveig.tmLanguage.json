@@ -10,6 +10,9 @@
       "include": "#strings"
     },
     {
+      "include": "#chars"
+    },
+    {
       "include": "#numeric_literals"
     },
     {
@@ -17,6 +20,9 @@
     },
     {
       "include": "#imports"
+    },
+    {
+      "include": "#fixity_declaration"
     },
     {
       "include": "#data_declaration"
@@ -98,7 +104,28 @@
       "name": "string.quoted.double.solveig",
       "patterns": [
         {
-          "match": "\\\\.",
+          "match": "\\\\(?:[nt\\\\'\"]|u\\{[0-9A-Fa-f]{1,6}\\})",
+          "name": "constant.character.escape.solveig"
+        }
+      ]
+    },
+    "chars": {
+      "begin": "'",
+      "beginCaptures": {
+        "0": {
+          "name": "punctuation.definition.character.begin.solveig"
+        }
+      },
+      "end": "'",
+      "endCaptures": {
+        "0": {
+          "name": "punctuation.definition.character.end.solveig"
+        }
+      },
+      "name": "constant.character.solveig",
+      "patterns": [
+        {
+          "match": "\\\\(?:[nt\\\\'\"]|u\\{[0-9A-Fa-f]{1,6}\\})",
           "name": "constant.character.escape.solveig"
         }
       ]
@@ -106,7 +133,11 @@
     "numeric_literals": {
       "patterns": [
         {
-          "match": "\\b(?:0[xX][0-9A-Fa-f_]+|0[oO][0-7_]+|0[bB][01_]+|[0-9][0-9_]*)\\b",
+          "match": "\\b[0-9]+(?:(?:\\.[0-9]+)(?:[eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)\\b",
+          "name": "constant.numeric.float.solveig"
+        },
+        {
+          "match": "\\b[0-9]+\\b",
           "name": "constant.numeric.integer.solveig"
         }
       ]
@@ -158,6 +189,36 @@
         },
         {
           "include": "#qualified_constructor"
+        },
+        {
+          "include": "#qualified_identifier"
+        },
+        {
+          "include": "#punctuation"
+        }
+      ]
+    },
+    "fixity_declaration": {
+      "begin": "^(\\s*)(infixl|infixr|infix)\\b",
+      "beginCaptures": {
+        "2": {
+          "name": "keyword.declaration.fixity.solveig"
+        }
+      },
+      "end": "(?:;\\s*)?$",
+      "name": "meta.declaration.fixity.solveig",
+      "patterns": [
+        {
+          "include": "#comments"
+        },
+        {
+          "include": "#numeric_literals"
+        },
+        {
+          "include": "#backticked_identifier"
+        },
+        {
+          "include": "#operators"
         },
         {
           "include": "#qualified_identifier"
@@ -364,6 +425,9 @@
           "include": "#strings"
         },
         {
+          "include": "#chars"
+        },
+        {
           "include": "#numeric_literals"
         },
         {
@@ -371,6 +435,9 @@
         },
         {
           "include": "#holes"
+        },
+        {
+          "include": "#backticked_identifier"
         },
         {
           "include": "#operators"
@@ -395,6 +462,9 @@
           "include": "#strings"
         },
         {
+          "include": "#chars"
+        },
+        {
           "include": "#numeric_literals"
         },
         {
@@ -405,6 +475,9 @@
         },
         {
           "include": "#holes"
+        },
+        {
+          "include": "#backticked_identifier"
         },
         {
           "include": "#operators"
@@ -435,7 +508,7 @@
           "name": "keyword.control.lambda.solveig"
         },
         {
-          "match": "\\b(data|sig|class|instance)\\b",
+          "match": "\\b(data|type|sig|class|instance|infixl|infixr|infix|default)\\b",
           "name": "keyword.declaration.solveig"
         },
         {
@@ -451,6 +524,20 @@
     "holes": {
       "match": "\\?\\?|\\?[a-z_][A-Za-z0-9_']*|\\?\\b",
       "name": "markup.underline.hole.solveig"
+    },
+    "backticked_identifier": {
+      "match": "(`)((?:[a-z_][A-Za-z0-9_']*\\.)*[a-z_][A-Za-z0-9_']*)(`)",
+      "captures": {
+        "1": {
+          "name": "punctuation.definition.operator.begin.solveig"
+        },
+        "2": {
+          "name": "variable.function.infix.solveig"
+        },
+        "3": {
+          "name": "punctuation.definition.operator.end.solveig"
+        }
+      }
     },
     "operators": {
       "patterns": [
@@ -493,6 +580,10 @@
         {
           "match": "\\.",
           "name": "keyword.operator.period.solveig"
+        },
+        {
+          "match": "[!#$%&*+./<=>?@\\\\^|\\-~:]+",
+          "name": "keyword.operator.symbolic.solveig"
         }
       ]
     },

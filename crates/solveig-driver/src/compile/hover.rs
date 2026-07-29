@@ -3,6 +3,7 @@
 
 use super::source_lookup::{is_atomic_source_span, source_file_id, span_contains_offset, span_len};
 use super::*;
+use solveig_syntax::lexer::{Token, lex};
 
 #[derive(Clone, Debug)]
 struct HoverCandidate {
@@ -43,6 +44,9 @@ fn hover_in_file_id(
         classes: &artifacts.class_table,
     };
     let mut best = None;
+    let source_file = artifacts.source_files.get(file_id.0 as usize);
+    let token_allows_hover =
+        source_file.is_none_or(|source_file| token_allows_expression_hover(source_file, offset));
 
     for info in &artifacts.local_hovers {
         if info.file_span().file != file_id || !span_contains_offset(&info.span(), offset) {
@@ -53,11 +57,22 @@ fn hover_in_file_id(
     }
 
     for (span, module_id) in &artifacts.module_imports {
-        if span.file != file_id || !span_contains_offset(&span.span.to_usize_range(), offset) {
+        if span.file != file_id || !token_allows_hover {
+            continue;
+        }
+        let hover_span = source_file
+            .and_then(|source_file| {
+                let module_name = artifacts.module_display_names.get(module_id)?;
+                source_lookup::import_module_name_span(&source_file.src, span.span, module_name)
+            })
+            .unwrap_or(span.span);
+        if !span_contains_offset(&hover_span.to_usize_range(), offset) {
             continue;
         }
 
-        if let Some(info) = module_hover_info(artifacts, *span, *module_id) {
+        if let Some(info) =
+            module_hover_info(artifacts, FileSpan::new(span.file, hover_span), *module_id)
+        {
             consider_hover_candidate(&mut best, 2, info);
         }
     }
@@ -72,10 +87,10 @@ fn hover_in_file_id(
         }
     }
 
-    let source_file = artifacts.source_files.get(file_id.0 as usize);
     for resolutions in artifacts.resolutions.values() {
         for (span, def_id) in resolutions {
             if span.file != file_id
+                || !token_allows_hover
                 || !source_file
                     .is_some_and(|source_file| is_atomic_source_span(source_file, span.span))
                 || !span_contains_offset(&span.span.to_usize_range(), offset)
@@ -89,23 +104,63 @@ fn hover_in_file_id(
         }
     }
 
-    for (module_id, checked) in &artifacts.checked {
-        if artifacts.module_files.get(module_id) != Some(&file_id) {
-            continue;
-        }
+    if token_allows_hover {
+        for (module_id, checked) in &artifacts.checked {
+            if artifacts.module_files.get(module_id) != Some(&file_id) {
+                continue;
+            }
 
-        for func_def in &checked.func_defs {
-            hover_expr(file_id, &func_def.body, pretty_tables, offset, &mut best);
-        }
+            for func_def in &checked.func_defs {
+                hover_expr(file_id, &func_def.body, pretty_tables, offset, &mut best);
+            }
 
-        for instance in &checked.instance_defs {
-            for method in &instance.methods {
-                hover_expr(file_id, &method.body, pretty_tables, offset, &mut best);
+            for instance in &checked.instance_defs {
+                for method in &instance.methods {
+                    hover_expr(file_id, &method.body, pretty_tables, offset, &mut best);
+                }
             }
         }
     }
 
     best.map(|candidate| candidate.info)
+}
+
+fn token_allows_expression_hover(source_file: &SourceFile, offset: usize) -> bool {
+    let session = Session::new();
+    let file = session.add_file(source_file.path.clone(), source_file.src.clone());
+    let Ok(tokens) = lex(&session, file, &source_file.src) else {
+        return true;
+    };
+
+    tokens
+        .iter()
+        .find(|token| {
+            !token.is_synthetic() && span_contains_offset(&(token.start..token.end), offset)
+        })
+        .is_none_or(|token| {
+            matches!(
+                token.kind,
+                Token::Int(_)
+                    | Token::Float(_)
+                    | Token::Char(_)
+                    | Token::Str(_)
+                    | Token::Ident(_)
+                    | Token::UpperIdent(_)
+                    | Token::Hole
+                    | Token::Underscore
+                    | Token::Operator(_)
+                    | Token::Plus
+                    | Token::Minus
+                    | Token::Star
+                    | Token::Slash
+                    | Token::Percent
+                    | Token::EqEq
+                    | Token::Less
+                    | Token::Greater
+                    | Token::LessEq
+                    | Token::GreaterEq
+            )
+        })
 }
 
 fn module_hover_info(
@@ -302,16 +357,18 @@ fn hover_expr(
         return;
     }
 
-    consider_hover_candidate(
-        best,
-        1,
-        HoverInfo::new(
-            file_id,
-            expr.anno.span.clone(),
-            expr.anno.inferred_type.pretty_with_tables(pretty_tables),
-            None,
-        ),
-    );
+    if !expr.anno.span.is_empty() {
+        consider_hover_candidate(
+            best,
+            1,
+            HoverInfo::new(
+                file_id,
+                expr.anno.span.clone(),
+                expr.anno.inferred_type.pretty_with_tables(pretty_tables),
+                None,
+            ),
+        );
+    }
 
     match &expr.node {
         TermExpr::Unit
