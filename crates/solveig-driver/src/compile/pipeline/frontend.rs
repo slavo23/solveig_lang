@@ -137,6 +137,9 @@ impl<'a> FrontendState<'a> {
         let mut module_files = prelude_cache
             .map(|cache| cache.module_files.clone())
             .unwrap_or_default();
+        let mut resolutions = prelude_cache
+            .map(|cache| cache.resolutions.clone())
+            .unwrap_or_default();
         let mut next_instance_id = prelude_cache.map_or(0, |cache| cache.next_instance_id);
 
         if let Some(cache) = incremental_cache {
@@ -173,14 +176,32 @@ impl<'a> FrontendState<'a> {
                         })
                         .clone(),
                 );
-                module_files.insert(
-                    module_id,
-                    *cache.module_files.get(&module_id).unwrap_or_else(|| {
+                let current_file = project
+                    .modules
+                    .get(module_name)
+                    .unwrap_or_else(|| {
                         panic!(
-                            "ICE: reusable cache missing file for {}",
+                            "ICE: reusable module missing project file {}",
                             module_name.as_string(session)
                         )
-                    }),
+                    })
+                    .parsed
+                    .file;
+                module_files.insert(
+                    module_id,
+                    current_file,
+                );
+                resolutions.insert(
+                    module_id,
+                    rebase_resolutions_file(
+                        cache.resolutions.get(&module_id).unwrap_or_else(|| {
+                            panic!(
+                                "ICE: reusable cache missing resolutions for {}",
+                                module_name.as_string(session)
+                            )
+                        }),
+                        current_file,
+                    ),
                 );
             }
         }
@@ -193,7 +214,7 @@ impl<'a> FrontendState<'a> {
             builtins,
             apis,
             typed_apis,
-            resolutions: FxHashMap::default(),
+            resolutions,
             resolved_type_aliases: FxHashMap::default(),
             checked,
             module_files,
@@ -216,15 +237,8 @@ impl<'a> FrontendState<'a> {
         Vec<String>,
         Vec<String>,
     ) {
-        let docs = self
-            .typed_apis
-            .values()
-            .flat_map(|api| api.docs.iter().map(|(id, doc)| (*id, doc.clone())))
-            .collect();
-        let declaration_spans = collect_hover_declaration_spans(self.project);
-        let module_display_names = collect_hover_module_display_names(self.session, self.project);
-        let module_paths = collect_hover_module_paths(self.project);
-        let module_imports = collect_hover_module_imports(self.project);
+        let artifacts =
+            collect_retained_frontend_artifacts(self.session, self.project, &self.typed_apis);
         let modules = order
             .iter()
             .filter_map(|module_name| {
@@ -243,54 +257,19 @@ impl<'a> FrontendState<'a> {
                 checked: self.checked,
                 module_files: self.module_files,
                 source_files,
-                docs,
+                docs: artifacts.docs,
                 resolutions: self.resolutions,
-                declaration_spans,
-                module_display_names,
-                module_paths,
-                module_imports,
+                declaration_spans: artifacts.declaration_spans,
+                module_display_names: artifacts.module_display_names,
+                module_paths: artifacts.module_paths,
+                module_imports: artifacts.module_imports,
+                source_symbols: artifacts.source_symbols,
             },
             self.prelude_cache,
             Some(incremental_cache),
             freshly_checked_modules,
             reused_modules,
         )
-    }
-
-    fn capture_incremental_cache(&self) -> IncrementalCache {
-        let mut module_ids = FxHashMap::default();
-        let mut source_hashes = FxHashMap::default();
-
-        for (module_name, module_file) in &self.project.modules {
-            if is_compiler_prelude_module(self.session, module_name) {
-                continue;
-            }
-
-            let module_id = self
-                .project
-                .module_table
-                .id(module_name)
-                .expect("ICE: cache capture referenced unknown module");
-
-            if !self.checked.contains_key(&module_id) {
-                continue;
-            }
-
-            module_ids.insert(module_name.clone(), module_id);
-            source_hashes.insert(module_name.clone(), module_file.source_hash);
-        }
-
-        IncrementalCache {
-            module_ids,
-            source_hashes,
-            names: self.names.clone(),
-            apis: self.apis.clone(),
-            typed_apis: self.typed_apis.clone(),
-            checked: self.checked.clone(),
-            module_files: self.module_files.clone(),
-            next_instance_id: self.next_instance_id,
-            verified_core: self.verify_core,
-        }
     }
 
     fn check_all(&mut self, order: &[ModuleName]) -> Option<FrontendPhase> {
@@ -351,113 +330,6 @@ impl<'a> FrontendState<'a> {
         }
 
         first_failure
-    }
-
-    fn capture_prelude_cache(&mut self, order: &[ModuleName]) {
-        let mut prelude_names = Vec::new();
-        for module_name in order {
-            if is_compiler_prelude_module(self.session, module_name) {
-                prelude_names.push(module_name.clone());
-            }
-        }
-
-        if prelude_names.iter().any(|module_name| {
-            let module_id = self
-                .project
-                .module_table
-                .id(module_name)
-                .expect("ICE: checked module order referenced unknown module");
-            !self.checked.contains_key(&module_id) || !self.typed_apis.contains_key(module_name)
-        }) {
-            return;
-        }
-
-        let mut project_modules = FxHashMap::default();
-        let mut module_ids = FxHashMap::default();
-        let mut apis = FxHashMap::default();
-        let mut typed_apis = FxHashMap::default();
-        let mut checked = FxHashMap::default();
-        let mut module_files = FxHashMap::default();
-
-        for module_name in &prelude_names {
-            let module_id = self
-                .project
-                .module_table
-                .id(module_name)
-                .expect("ICE: checked module order referenced unknown module");
-            project_modules.insert(
-                module_name.clone(),
-                self.project
-                    .modules
-                    .get(module_name)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: prelude cache missing project module {}",
-                            module_name.as_string(self.session)
-                        )
-                    })
-                    .clone(),
-            );
-            module_ids.insert(module_name.clone(), module_id);
-            apis.insert(
-                module_name.clone(),
-                self.apis
-                    .get(module_name)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: prelude cache missing module API {}",
-                            module_name.as_string(self.session)
-                        )
-                    })
-                    .clone(),
-            );
-            typed_apis.insert(
-                module_name.clone(),
-                self.typed_apis
-                    .get(module_name)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: prelude cache missing typed API {}",
-                            module_name.as_string(self.session)
-                        )
-                    })
-                    .clone(),
-            );
-            checked.insert(
-                module_id,
-                self.checked
-                    .get(&module_id)
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: prelude cache missing checked module {}",
-                            module_name.as_string(self.session)
-                        )
-                    })
-                    .clone(),
-            );
-            module_files.insert(
-                module_id,
-                *self.module_files.get(&module_id).unwrap_or_else(|| {
-                    panic!(
-                        "ICE: prelude cache missing file for {}",
-                        module_name.as_string(self.session)
-                    )
-                }),
-            );
-        }
-
-        self.prelude_cache = Some(PreludeCache {
-            project_modules,
-            module_ids,
-            names: self.names.clone(),
-            builtins: self.builtins.clone(),
-            apis,
-            typed_apis,
-            checked,
-            module_files,
-            next_instance_id: self.next_instance_id,
-            verified_core: self.verify_core,
-        });
     }
 
     fn collect_imported_class_param_kind_ids(

@@ -1,7 +1,7 @@
 //! Driver compile facade.
 //! Child modules own compilation state, frontend orchestration, builtins, hover, Show wrappers, and evidence dumps.
 
-use solveig_base::{FxHashMap, FxHashSet};
+use solveig_base::{FxHashMap, FxHashSet, Symbol};
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::ops::Range;
@@ -47,7 +47,9 @@ use solveig_resolve::project::{
     seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
-use solveig_syntax::ast::{DocComment, ModuleName, SurfaceDefinition};
+use solveig_syntax::ast::{
+    ClassMethod, DocComment, ModuleName, Spanned, SurfaceConstructor, SurfaceDefinition,
+};
 use solveig_vm::vm::Machine;
 
 use crate::DriverError;
@@ -58,11 +60,15 @@ use crate::source_provider::SourceProvider;
 
 mod builtins;
 mod compilation;
+mod editor_api;
 mod evidence_dump;
 mod hover;
 mod incremental;
+mod navigation;
 mod pipeline;
 mod show_entry;
+mod source_lookup;
+mod source_symbol;
 
 use builtins::driver_builtin_api;
 pub use compilation::{
@@ -75,5 +81,10 @@ use compilation::{CheckedProject, CompilationArtifacts, PreludeCache};
 use evidence_dump::dump_solved_evidence;
 use hover::{hover_at_position_in_artifacts, hover_in_artifacts};
 use incremental::IncrementalCache;
+use navigation::{
+    definition_at_position_in_artifacts, definition_in_artifacts, document_symbols_in_artifacts,
+    references_at_position_in_artifacts, references_in_artifacts, workspace_symbols_in_artifacts,
+};
 use pipeline::{FrontendPhase, merge_checked_modules, verify_lowering_core};
 use show_entry::{add_show_entry_wrapper, entry_returns_io};
+pub use source_symbol::{SourceSymbol, SourceSymbolKind};

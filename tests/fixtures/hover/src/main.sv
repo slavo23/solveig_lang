@@ -10,6 +10,14 @@ topLevel n = documentedIncrement n
 
 data LocalBox = MkLocalBox Int
 
+useImported : Documented -> Documented
+useImported value =
+    case value of
+        MkDocumented n => MkDocumented (documentedIncrement n)
+
+useDescriber : forall a. Describe a => a -> String
+useDescriber value = describe value
+
 maybeResult : Maybe Int
 maybeResult = do
     x <- Just 2

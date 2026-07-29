@@ -1,6 +1,7 @@
 //! Hover lookup over retained checked artifacts.
 //! The driver keeps enough table state here to render types after checking.
 
+use super::source_lookup::{source_file_id, span_contains_offset, span_len};
 use super::*;
 
 #[derive(Clone, Debug)]
@@ -255,22 +256,6 @@ fn short_def_name(names: &Names, def_id: DefId) -> String {
         .map_or(display.clone(), |name| name.to_string())
 }
 
-fn source_file_id(artifacts: &CompilationArtifacts, file: &Path) -> Option<FileId> {
-    artifacts
-        .source_files
-        .iter()
-        .enumerate()
-        .find(|(_, source)| source.path == file)
-        .or_else(|| {
-            artifacts
-                .source_files
-                .iter()
-                .enumerate()
-                .find(|(_, source)| file.is_relative() && source.path.ends_with(file))
-        })
-        .map(|(index, _)| FileId(index as u32))
-}
-
 fn hover_expr(
     file_id: FileId,
     expr: &TermExprNode<TcMetadata, Range<usize>>,
@@ -327,14 +312,6 @@ fn hover_expr(
     }
 }
 
-fn span_contains_offset(span: &Range<usize>, offset: usize) -> bool {
-    if span.start == span.end {
-        offset == span.start
-    } else {
-        span.start <= offset && offset < span.end
-    }
-}
-
 fn consider_hover_candidate(best: &mut Option<HoverCandidate>, priority: u8, info: HoverInfo) {
     let replace = best.as_ref().is_none_or(|current| {
         let current_len = span_len(&current.info.span());
@@ -347,8 +324,4 @@ fn consider_hover_candidate(best: &mut Option<HoverCandidate>, priority: u8, inf
     if replace {
         *best = Some(HoverCandidate { priority, info });
     }
-}
-
-fn span_len(span: &Range<usize>) -> usize {
-    span.end.saturating_sub(span.start)
 }

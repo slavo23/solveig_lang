@@ -1,3 +1,32 @@
+struct RetainedFrontendArtifacts {
+    docs: FxHashMap<DefId, DocComment>,
+    declaration_spans: Vec<(FileSpan, DefId)>,
+    module_display_names: FxHashMap<ModuleId, String>,
+    module_paths: FxHashMap<ModuleId, PathBuf>,
+    module_imports: Vec<(FileSpan, ModuleId)>,
+    source_symbols: Vec<SourceSymbol>,
+}
+
+fn collect_retained_frontend_artifacts(
+    session: &Session,
+    project: &Project,
+    typed_apis: &FxHashMap<ModuleName, SharedTypedModuleApi>,
+) -> RetainedFrontendArtifacts {
+    let docs = typed_apis
+        .values()
+        .flat_map(|api| api.docs.iter().map(|(id, doc)| (*id, doc.clone())))
+        .collect();
+
+    RetainedFrontendArtifacts {
+        docs,
+        declaration_spans: collect_hover_declaration_spans(project),
+        module_display_names: collect_hover_module_display_names(session, project),
+        module_paths: collect_hover_module_paths(project),
+        module_imports: collect_hover_module_imports(project),
+        source_symbols: collect_source_symbols(session, project),
+    }
+}
+
 fn collect_hover_declaration_spans(project: &Project) -> Vec<(FileSpan, DefId)> {
     let mut out = Vec::new();
 

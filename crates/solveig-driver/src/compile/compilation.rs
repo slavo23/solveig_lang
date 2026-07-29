@@ -137,6 +137,7 @@ pub(super) struct CompilationArtifacts {
     pub(super) module_display_names: FxHashMap<ModuleId, String>,
     pub(super) module_paths: FxHashMap<ModuleId, PathBuf>,
     pub(super) module_imports: Vec<(FileSpan, ModuleId)>,
+    pub(super) source_symbols: Vec<SourceSymbol>,
     pub(super) tycon_table: TyConTable,
     pub(super) ctor_table: CtorTable,
     pub(super) class_table: ClassTable,
@@ -155,6 +156,7 @@ pub(super) struct CheckedProject {
     pub(super) module_display_names: FxHashMap<ModuleId, String>,
     pub(super) module_paths: FxHashMap<ModuleId, PathBuf>,
     pub(super) module_imports: Vec<(FileSpan, ModuleId)>,
+    pub(super) source_symbols: Vec<SourceSymbol>,
 }
 
 #[derive(Clone, Debug)]
@@ -167,6 +169,7 @@ pub(super) struct PreludeCache {
     pub(super) typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
     pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
     pub(super) module_files: FxHashMap<ModuleId, FileId>,
+    pub(super) resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
     pub(super) next_instance_id: u32,
     pub(super) verified_core: bool,
 }
@@ -197,6 +200,7 @@ impl CompilationArtifacts {
             module_display_names: project.module_display_names.clone(),
             module_paths: project.module_paths.clone(),
             module_imports: project.module_imports.clone(),
+            source_symbols: project.source_symbols.clone(),
             tycon_table,
             ctor_table,
             class_table,
@@ -401,33 +405,6 @@ impl Compilation {
         }
 
         Ok(docs)
-    }
-
-    pub fn hover(&self, file: impl AsRef<Path>, offset: usize) -> Option<String> {
-        self.hover_info(file, offset)
-            .map(|info| info.signature().to_string())
-    }
-
-    /// Looks up semantic hover information at a byte offset after a prior successful check/run.
-    pub fn hover_info(&self, file: impl AsRef<Path>, offset: usize) -> Option<HoverInfo> {
-        hover_in_artifacts(self.artifacts.as_ref()?, file.as_ref(), offset)
-    }
-
-    /// Checks the current project and looks up semantic hover information at an editor position.
-    pub fn hover_at_position(
-        &mut self,
-        file: impl AsRef<Path>,
-        position: SourcePosition,
-        encoding: PositionEncoding,
-    ) -> Option<HoverInfo> {
-        self.check(true).ok()?;
-        hover_at_position_in_artifacts(
-            self.artifacts.as_ref()?,
-            self.source_map(),
-            file.as_ref(),
-            position,
-            encoding,
-        )
     }
 
     pub fn check(&mut self, verify_core: bool) -> Result<&CheckResult, DriverError> {

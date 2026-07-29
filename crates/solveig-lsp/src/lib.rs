@@ -3,6 +3,7 @@
 
 mod diagnostics;
 mod hover;
+mod navigation;
 mod server;
 mod workspace;
 

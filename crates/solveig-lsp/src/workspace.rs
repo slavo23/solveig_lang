@@ -4,13 +4,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
-use lsp_types::{Diagnostic, Hover, Position, Url};
+use lsp_types::{Diagnostic, DocumentSymbol, Hover, Location, Position, SymbolInformation, Url};
 use solveig_base::{PositionEncoding, SourcePosition};
 use solveig_driver::{Compilation, DriverError};
 use tokio::task::JoinHandle;
 
 use crate::diagnostics::{diagnostic_map, missing_entry_diagnostic};
 use crate::hover::lsp_hover;
+use crate::navigation::{lsp_document_symbols, lsp_location, lsp_symbol_information};
 
 pub(crate) struct ServerState {
     workspaces: BTreeMap<PathBuf, Workspace>,
@@ -110,6 +111,46 @@ impl ServerState {
             .hover(&path, position, encoding)
     }
 
+    pub(crate) fn definition(&mut self, uri: &Url, position: Position) -> Option<Location> {
+        let path = uri.to_file_path().ok()?;
+        let encoding = self.encoding;
+
+        self.workspace_for_path(&path)
+            .definition(&path, position, encoding)
+    }
+
+    pub(crate) fn references(
+        &mut self,
+        uri: &Url,
+        position: Position,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
+        let path = uri.to_file_path().ok()?;
+        let encoding = self.encoding;
+
+        self.workspace_for_path(&path)
+            .references(&path, position, encoding, include_declaration)
+    }
+
+    pub(crate) fn document_symbols(&mut self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
+        let path = uri.to_file_path().ok()?;
+        let encoding = self.encoding;
+
+        self.workspace_for_path(&path)
+            .document_symbols(&path, encoding)
+    }
+
+    pub(crate) fn workspace_symbols(&mut self, query: &str) -> Vec<SymbolInformation> {
+        let encoding = self.encoding;
+        let mut out = Vec::new();
+
+        for workspace in self.workspaces.values_mut() {
+            out.extend(workspace.workspace_symbols(query, encoding));
+        }
+
+        out
+    }
+
     #[cfg(test)]
     pub(crate) fn previous_diagnostic_count(&self) -> usize {
         self.previous_diagnostics.len()
@@ -177,6 +218,80 @@ impl Workspace {
         }))
         .ok()
         .flatten()
+    }
+
+    fn definition(
+        &mut self,
+        path: &Path,
+        position: Position,
+        encoding: PositionEncoding,
+    ) -> Option<Location> {
+        catch_unwind(AssertUnwindSafe(|| {
+            let span = self.compilation.definition_at_position(
+                path,
+                SourcePosition::new(position.line, position.character),
+                encoding,
+            )?;
+
+            lsp_location(span, self.compilation.source_map(), encoding)
+        }))
+        .ok()
+        .flatten()
+    }
+
+    fn references(
+        &mut self,
+        path: &Path,
+        position: Position,
+        encoding: PositionEncoding,
+        include_declaration: bool,
+    ) -> Option<Vec<Location>> {
+        catch_unwind(AssertUnwindSafe(|| {
+            let spans = self.compilation.references_at_position(
+                path,
+                SourcePosition::new(position.line, position.character),
+                encoding,
+                include_declaration,
+            )?;
+
+            Some(
+                spans
+                    .into_iter()
+                    .filter_map(|span| lsp_location(span, self.compilation.source_map(), encoding))
+                    .collect(),
+            )
+        }))
+        .ok()
+        .flatten()
+    }
+
+    fn document_symbols(
+        &mut self,
+        path: &Path,
+        encoding: PositionEncoding,
+    ) -> Option<Vec<DocumentSymbol>> {
+        catch_unwind(AssertUnwindSafe(|| {
+            let symbols = self.compilation.document_symbols(path);
+            Some(lsp_document_symbols(
+                &symbols,
+                self.compilation.source_map(),
+                encoding,
+            ))
+        }))
+        .ok()
+        .flatten()
+    }
+
+    fn workspace_symbols(
+        &mut self,
+        query: &str,
+        encoding: PositionEncoding,
+    ) -> Vec<SymbolInformation> {
+        catch_unwind(AssertUnwindSafe(|| {
+            let symbols = self.compilation.workspace_symbols(query);
+            lsp_symbol_information(&symbols, self.compilation.source_map(), encoding)
+        }))
+        .unwrap_or_default()
     }
 }
 

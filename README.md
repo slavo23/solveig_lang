@@ -110,6 +110,9 @@ implements the lifecycle, full document sync, UTF-8/UTF-16 position negotiation,
 debounced project checks, `textDocument/publishDiagnostics` using the same
 diagnostic codes as the CLI, and Markdown `textDocument/hover` responses for
 typed expressions, definitions, constructors, class methods, and module imports.
+It also supports `textDocument/definition`, project-wide
+`textDocument/references`, hierarchical `textDocument/documentSymbol`, and
+project-wide `workspace/symbol` queries for Solveig declarations.
 
 Manual smoke test:
 
@@ -119,8 +122,8 @@ python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
 ```
 
 Expected output includes a negotiated `positionEncoding` and a `TC0005` type
-mismatch diagnostic with its LSP range. Go-to-definition, completion, semantic
-tokens, code actions, and editor-extension wiring are planned Phase H follow-ups.
+mismatch diagnostic with its LSP range. Completion, semantic tokens, code
+actions, and editor-extension wiring are planned Phase H follow-ups.
 
 ## Project Layout
 
@@ -328,8 +331,9 @@ scope.
 - Float literal patterns are rejected.
 - Constructor operators are reserved for later work.
 - The REPL is planned but not complete.
-- The LSP currently publishes diagnostics and hover only; richer editor
-  features are planned in the rest of Phase H.
+- The LSP currently runs over stdio and has no packaged editor extension yet.
+  It publishes diagnostics and supports hover, go-to-definition, references,
+  document symbols, and workspace symbols.
 
 ## More Documentation
 

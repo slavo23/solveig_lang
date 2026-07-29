@@ -13,6 +13,7 @@ pub(super) struct IncrementalCache {
     pub(super) typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
     pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
     pub(super) module_files: FxHashMap<ModuleId, FileId>,
+    pub(super) resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
     pub(super) next_instance_id: u32,
     pub(super) verified_core: bool,
 }
@@ -107,6 +108,7 @@ impl IncrementalCache {
 
         self.checked.contains_key(&module_id)
             && self.module_files.contains_key(&module_id)
+            && self.resolutions.contains_key(&module_id)
             && self.apis.contains_key(module_name)
             && self.typed_apis.contains_key(module_name)
     }

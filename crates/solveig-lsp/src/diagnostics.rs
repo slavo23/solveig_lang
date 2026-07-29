@@ -144,7 +144,7 @@ fn lsp_severity(severity: Severity) -> DiagnosticSeverity {
     }
 }
 
-fn uri_for_file(source_map: &SourceMap, file: solveig_base::FileId) -> Option<Url> {
+pub(crate) fn uri_for_file(source_map: &SourceMap, file: solveig_base::FileId) -> Option<Url> {
     let source_file = source_map.files().get(file.0 as usize)?;
     Url::from_file_path(&source_file.path).ok()
 }

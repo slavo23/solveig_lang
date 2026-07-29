@@ -158,6 +158,8 @@ fn push_resolve_errors(
 }
 
 include!("pipeline/frontend.rs");
+include!("pipeline/frontend/cache_artifacts.rs");
+include!("pipeline/frontend/symbol_artifacts.rs");
 include!("pipeline/frontend/hover_artifacts.rs");
 
 fn find_entry_file(
