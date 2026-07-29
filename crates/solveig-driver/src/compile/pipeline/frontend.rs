@@ -3,7 +3,7 @@ struct FrontendState<'a> {
     names: &'a mut Names,
     project: &'a Project,
     parsed: &'a ParsedProject,
-    builtins: Rc<BuiltinApi>,
+    builtins: Arc<BuiltinApi>,
     apis: FxHashMap<ModuleName, SharedModuleApi>,
     typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
     resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
@@ -66,7 +66,7 @@ impl<'a> FrontendState<'a> {
             *names = cache.names.clone();
         }
         let builtins = prelude_cache.map_or_else(
-            || Rc::new(driver_builtin_api(session, names, &project.module_table)),
+            || Arc::new(driver_builtin_api(session, names, &project.module_table)),
             |cache| cache.builtins.clone(),
         );
 
@@ -118,7 +118,7 @@ impl<'a> FrontendState<'a> {
                         &builtins,
                         &mut api,
                     );
-                    apis.insert(module_name.clone(), Rc::new(api));
+                    apis.insert(module_name.clone(), Arc::new(api));
                 }
                 Err(error) => errors.push(error),
             }
@@ -321,7 +321,7 @@ impl<'a> FrontendState<'a> {
                 }
             };
 
-            let typed_api = Rc::new(build_typed_module_api(
+            let typed_api = Arc::new(build_typed_module_api(
                 self.session,
                 self.names,
                 module_id,
@@ -620,7 +620,7 @@ impl<'a> FrontendState<'a> {
             .map(|imp| ImportedApi {
                 alias: imp.alias,
                 module: imp.module.clone(),
-                api: Rc::new(self.apis[&imp.module].filtered(&imp.spec)),
+                api: Arc::new(self.apis[&imp.module].filtered(&imp.spec)),
                 spec: imp.spec.clone(),
             })
             .collect()

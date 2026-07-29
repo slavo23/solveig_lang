@@ -101,7 +101,7 @@ pub(super) struct PreludeCache {
     pub(super) project_modules: FxHashMap<ModuleName, ModuleFile>,
     pub(super) module_ids: FxHashMap<ModuleName, ModuleId>,
     pub(super) names: Names,
-    pub(super) builtins: Rc<BuiltinApi>,
+    pub(super) builtins: Arc<BuiltinApi>,
     pub(super) apis: FxHashMap<ModuleName, SharedModuleApi>,
     pub(super) typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
     pub(super) checked: FxHashMap<ModuleId, CheckedModule>,

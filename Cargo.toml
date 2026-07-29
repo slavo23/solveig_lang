@@ -7,6 +7,7 @@ edition = "2024"
 
 [dependencies]
 solveig-driver = { path = "crates/solveig-driver", version = "0.1.0" }
+solveig-lsp = { path = "crates/solveig-lsp", version = "0.1.0" }
 solveig-report = { path = "crates/solveig-report", version = "0.1.0" }
 clap = { version = "4.6.0", features = ["derive"] }
 
@@ -23,6 +24,7 @@ members = [
     "crates/solveig-base",
     "crates/solveig-check",
     "crates/solveig-driver",
+    "crates/solveig-lsp",
     "crates/solveig-lower",
     "crates/solveig-report",
     "crates/solveig-resolve",

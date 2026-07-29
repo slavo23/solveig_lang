@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use solveig_ast::ast::{
     BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ,

@@ -10,7 +10,7 @@ pub struct ModuleContext {
     pub file: FileId,
     pub local_api: SharedModuleApi,
     pub imported_apis: Vec<ImportedApi>,
-    pub builtins: Rc<BuiltinApi>,
+    pub builtins: Arc<BuiltinApi>,
 }
 
 #[derive(Debug, Clone)]

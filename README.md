@@ -40,6 +40,13 @@ Run all tests:
 cargo test --workspace
 ```
 
+Smoke-test the language server diagnostics path:
+
+```bash
+cargo build
+python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
+```
+
 Run clippy:
 
 ```bash
@@ -79,6 +86,41 @@ Inside Solveig, program args are available through:
 ```solveig
 getArgs : IO [String]
 ```
+
+Start the language server:
+
+```bash
+cargo run -- lsp
+```
+
+Or, after building:
+
+```bash
+target/debug/solveig lsp
+```
+
+The language server speaks LSP over stdio. It is meant to be launched by an
+editor or test client, so running it directly in a terminal waits for protocol
+messages rather than showing a prompt.
+
+## Language Server
+
+Solveig ships a stdio LSP server through `solveig lsp`. The current server
+implements the lifecycle, full document sync, UTF-8/UTF-16 position negotiation,
+debounced project checks, and `textDocument/publishDiagnostics` using the same
+diagnostic codes as the CLI.
+
+Manual smoke test:
+
+```bash
+cargo build
+python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
+```
+
+Expected output includes a negotiated `positionEncoding` and a `TC0005` type
+mismatch diagnostic with its LSP range. Hover, go-to-definition, completion,
+semantic tokens, code actions, and editor-extension wiring are planned Phase H
+follow-ups.
 
 ## Project Layout
 
@@ -147,7 +189,7 @@ Solveig currently supports:
 - program args through `getArgs`
 - project-relative UTF-8 text file IO
 - structured diagnostics with stable codes
-- typed holes, used by the checker and future LSP work
+- typed holes, used by the checker and future LSP code actions
 
 ## Small Examples
 
@@ -270,7 +312,8 @@ The current VM pipeline is:
 10. Lower to bytecode.
 11. Execute on the custom VM.
 
-The VM remains the reference runtime. A Cranelift backend is planned later.
+The VM remains the reference runtime. Native backends are currently out of
+scope.
 
 ## Current Limitations
 
@@ -284,7 +327,9 @@ The VM remains the reference runtime. A Cranelift backend is planned later.
 - `String` concatenation is `appendString`; `+` is numeric.
 - Float literal patterns are rejected.
 - Constructor operators are reserved for later work.
-- The Cranelift backend, REPL, and LSP server are planned but not complete.
+- The REPL is planned but not complete.
+- The LSP currently publishes diagnostics only; richer editor features are
+  planned in the rest of Phase H.
 
 ## More Documentation
 

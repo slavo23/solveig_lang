@@ -374,14 +374,14 @@ pub struct TypedDisplayMaps<'a> {
     >,
 }
 
-pub type SharedModuleApi = Rc<ModuleApi>;
-pub type SharedTypedModuleApi = Rc<TypedModuleApi>;
+pub type SharedModuleApi = Arc<ModuleApi>;
+pub type SharedTypedModuleApi = Arc<TypedModuleApi>;
 
 #[derive(Debug, Clone)]
 pub struct Imported<T> {
     pub alias: Symbol,
     pub module: ModuleName,
-    pub api: Rc<T>,
+    pub api: Arc<T>,
     pub spec: ImportSpec,
 }
 
