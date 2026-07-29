@@ -3,7 +3,8 @@ use lsp_types::{
     CodeActionContext, CodeActionKind, CodeActionOrCommand, CodeActionParams,
     CodeActionProviderCapability, CompletionItemKind, CompletionParams, CompletionResponse,
     DocumentSymbolParams, DocumentSymbolResponse, GeneralClientCapabilities, GotoDefinitionParams,
-    GotoDefinitionResponse, HoverContents, PartialResultParams, Position, Range, ReferenceContext,
+    GotoDefinitionResponse, HoverContents, InlayHintKind, InlayHintLabel, InlayHintParams,
+    InlayHintServerCapabilities, PartialResultParams, Position, Range, ReferenceContext,
     ReferenceParams, SemanticTokenType, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
     SemanticTokensFullOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
@@ -64,6 +65,13 @@ fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
         .expect("completion provider should be advertised");
     assert_eq!(completion.resolve_provider, Some(false));
     assert_eq!(completion.trigger_characters, Some(vec![".".to_string()]));
+    let inlay_hints = capabilities
+        .inlay_hint_provider
+        .expect("inlay-hint provider should be advertised");
+    let OneOf::Right(InlayHintServerCapabilities::Options(inlay_hint_options)) = inlay_hints else {
+        panic!("inlay hints should use direct server options");
+    };
+    assert_eq!(inlay_hint_options.resolve_provider, Some(false));
     assert_eq!(
         capabilities.document_symbol_provider,
         Some(OneOf::Left(true))
@@ -173,6 +181,60 @@ main = prelude.builtins.True
             .iter()
             .any(|item| item.label == "builtins" && item.kind == Some(CompletionItemKind::MODULE))
     );
+
+    server.shutdown().await.expect("shutdown should succeed");
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn text_document_inlay_hint_returns_type_hints() {
+    let project_root = temp_root("server_inlay_hint");
+    let source = project_root.join("scratch.sv");
+    let text = r#"main =
+    let local = 41 in
+    local
+"#;
+    write_source(&source, text);
+    let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+    let root_uri =
+        Url::from_directory_path(&project_root).expect("test root should become a file URI");
+    let (service, _socket) = LspService::new(LspServer::new);
+    let server = service.inner();
+
+    server
+        .initialize(InitializeParams {
+            root_uri: Some(root_uri),
+            capabilities: ClientCapabilities::default(),
+            ..InitializeParams::default()
+        })
+        .await
+        .expect("initialize should succeed");
+
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "solveig".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let hints = server
+        .inlay_hint(InlayHintParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 0), Position::new(3, 0)),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("inlay-hint request should succeed")
+        .expect("inlay-hint response should exist");
+
+    assert!(hints.iter().any(|hint| {
+        matches!(&hint.label, InlayHintLabel::String(label) if label == ": Int")
+            && hint.kind == Some(InlayHintKind::TYPE)
+    }));
 
     server.shutdown().await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);

@@ -71,12 +71,14 @@ mod editor_api;
 mod evidence_dump;
 mod hover;
 mod incremental;
+mod inlay_hints;
 mod navigation;
 mod pipeline;
 mod semantic_tokens;
 mod show_entry;
 mod source_code_action;
 mod source_completion;
+mod source_inlay_hint;
 mod source_lookup;
 mod source_semantic_token;
 mod source_symbol;
@@ -94,6 +96,7 @@ use completion::completion_items_in_compilation;
 use evidence_dump::dump_solved_evidence;
 use hover::{hover_at_position_in_artifacts, hover_in_artifacts};
 use incremental::IncrementalCache;
+use inlay_hints::inlay_hints_in_compilation;
 use navigation::{
     definition_at_position_in_artifacts, definition_in_artifacts, document_symbols_in_artifacts,
     references_at_position_in_artifacts, references_in_artifacts, workspace_symbols_in_artifacts,
@@ -104,6 +107,9 @@ use show_entry::{add_show_entry_wrapper, entry_returns_io};
 pub use source_code_action::{SourceCodeAction, SourceTextEdit};
 use source_completion::SourceCompletionCandidate;
 pub use source_completion::{SourceCompletionItem, SourceCompletionItemKind};
+pub use source_inlay_hint::{
+    SourceInlayHint, SourceInlayHintCategory, SourceInlayHintConfig, SourceInlayHintKind,
+};
 pub use source_semantic_token::{
     SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
     SourceSemanticTokenModifiers,

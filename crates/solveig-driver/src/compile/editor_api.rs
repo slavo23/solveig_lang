@@ -176,4 +176,26 @@ impl Compilation {
             encoding,
         )
     }
+
+    /// Checks the current project and returns inlay hints visible for an editor range.
+    pub fn inlay_hints_at_range(
+        &mut self,
+        file: impl AsRef<Path>,
+        start: SourcePosition,
+        end: SourcePosition,
+        encoding: PositionEncoding,
+        config: SourceInlayHintConfig,
+    ) -> Vec<SourceInlayHint> {
+        let _ = self.check(true);
+
+        inlay_hints_in_compilation(
+            self.source_map(),
+            &self.inlay_hints,
+            file.as_ref(),
+            start,
+            end,
+            encoding,
+            config,
+        )
+    }
 }

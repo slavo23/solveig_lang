@@ -5,18 +5,19 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
 use lsp_types::{
-    CodeActionResponse, CompletionResponse, Diagnostic, DocumentSymbol, Hover, Location, Position,
-    Range, SemanticToken, SemanticTokens, SemanticTokensDelta, SemanticTokensEdit,
+    CodeActionResponse, CompletionResponse, Diagnostic, DocumentSymbol, Hover, InlayHint, Location,
+    Position, Range, SemanticToken, SemanticTokens, SemanticTokensDelta, SemanticTokensEdit,
     SemanticTokensFullDeltaResult, SymbolInformation, Url,
 };
 use solveig_base::{PositionEncoding, SourcePosition};
-use solveig_driver::{Compilation, DriverError};
+use solveig_driver::{Compilation, DriverError, SourceInlayHintConfig};
 use tokio::task::JoinHandle;
 
 use crate::code_actions::lsp_code_actions;
 use crate::completion::lsp_completion_items;
 use crate::diagnostics::{diagnostic_map, missing_entry_diagnostic};
 use crate::hover::lsp_hover;
+use crate::inlay_hints::lsp_inlay_hints;
 use crate::navigation::{lsp_document_symbols, lsp_location, lsp_symbol_information};
 use crate::semantic_tokens::lsp_semantic_tokens;
 
@@ -153,6 +154,14 @@ impl ServerState {
 
         self.workspace_for_path(&path)
             .completion(&path, position, encoding)
+    }
+
+    pub(crate) fn inlay_hints(&mut self, uri: &Url, range: Range) -> Option<Vec<InlayHint>> {
+        let path = uri.to_file_path().ok()?;
+        let encoding = self.encoding;
+
+        self.workspace_for_path(&path)
+            .inlay_hints(&path, range, encoding)
     }
 
     pub(crate) fn document_symbols(&mut self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
@@ -358,6 +367,31 @@ impl Workspace {
             );
 
             Some(CompletionResponse::Array(lsp_completion_items(&items)))
+        }))
+        .ok()
+        .flatten()
+    }
+
+    fn inlay_hints(
+        &mut self,
+        path: &Path,
+        range: Range,
+        encoding: PositionEncoding,
+    ) -> Option<Vec<InlayHint>> {
+        catch_unwind(AssertUnwindSafe(|| {
+            let hints = self.compilation.inlay_hints_at_range(
+                path,
+                SourcePosition::new(range.start.line, range.start.character),
+                SourcePosition::new(range.end.line, range.end.character),
+                encoding,
+                SourceInlayHintConfig::default(),
+            );
+
+            Some(lsp_inlay_hints(
+                &hints,
+                self.compilation.source_map(),
+                encoding,
+            ))
         }))
         .ok()
         .flatten()

@@ -34,6 +34,7 @@ type FrontendRetained = (
     Option<IncrementalCache>,
     Vec<SourceCodeAction>,
     Vec<SourceCompletionCandidate>,
+    Vec<SourceInlayHint>,
     Vec<String>,
     Vec<String>,
 );
@@ -253,13 +254,22 @@ impl<'a> FrontendState<'a> {
     ) -> FrontendRetained {
         let artifacts =
             collect_retained_frontend_artifacts(self.session, self.project, &self.typed_apis);
-        let modules = order
+        let modules: Vec<CheckedModule> = order
             .iter()
             .filter_map(|module_name| {
                 let module_id = self.project.module_table.id(module_name)?;
                 self.checked.get(&module_id).cloned()
             })
             .collect();
+        let inlay_hints = inlay_hints::project_inlay_hints(
+            self.session,
+            self.project,
+            self.parsed,
+            order,
+            &self.checked,
+            self.names,
+            &modules,
+        );
         let incremental_cache = self.capture_incremental_cache();
         let freshly_checked_modules = module_names_as_strings(self.session, &self.freshly_checked_modules);
         let reused_modules = module_names_as_strings(self.session, &self.reused_modules);
@@ -283,6 +293,7 @@ impl<'a> FrontendState<'a> {
             Some(incremental_cache),
             self.code_actions,
             self.completion_candidates,
+            inlay_hints,
             freshly_checked_modules,
             reused_modules,
         )

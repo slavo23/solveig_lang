@@ -14,6 +14,7 @@ pub struct Compilation {
     pub(super) semantic_tokens: Vec<SourceSemanticToken>,
     pub(super) code_actions: Vec<SourceCodeAction>,
     pub(super) completion_candidates: Vec<SourceCompletionCandidate>,
+    pub(super) inlay_hints: Vec<SourceInlayHint>,
     pub(super) prelude_cache: Option<PreludeCache>,
     pub(super) incremental_cache: Option<IncrementalCache>,
     check_result: CheckResult,
@@ -236,6 +237,7 @@ impl Compilation {
             semantic_tokens: Vec::new(),
             code_actions: Vec::new(),
             completion_candidates: Vec::new(),
+            inlay_hints: Vec::new(),
             prelude_cache: None,
             incremental_cache: None,
             check_result: CheckResult::default(),
@@ -419,6 +421,7 @@ impl Compilation {
         self.semantic_tokens = Vec::new();
         self.code_actions = Vec::new();
         self.completion_candidates = Vec::new();
+        self.inlay_hints = Vec::new();
         self.session.diagnostics().drain();
         self.names = Names::new();
 
@@ -442,6 +445,7 @@ impl Compilation {
         self.semantic_tokens = outcome.semantic_tokens;
         self.code_actions = outcome.code_actions;
         self.completion_candidates = outcome.completion_candidates;
+        self.inlay_hints = outcome.inlay_hints;
 
         self.check_result = CheckResult {
             diagnostics,

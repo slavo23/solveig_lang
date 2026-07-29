@@ -12,7 +12,8 @@ use lsp_types::{
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
     DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, GotoDefinitionParams,
     GotoDefinitionResponse, HoverParams, HoverProviderCapability, InitializeParams,
-    InitializeResult, InitializedParams, Location, MessageType, OneOf, PositionEncodingKind,
+    InitializeResult, InitializedParams, InlayHintOptions, InlayHintParams,
+    InlayHintServerCapabilities, Location, MessageType, OneOf, PositionEncodingKind,
     ReferenceParams, SemanticTokensFullDeltaResult, SemanticTokensFullOptions,
     SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
     SemanticTokensServerCapabilities, ServerCapabilities, SymbolInformation,
@@ -229,6 +230,15 @@ impl LanguageServer for LspServer {
         Ok(state.completion(&params.text_document.uri, params.position))
     }
 
+    async fn inlay_hint(
+        &self,
+        params: InlayHintParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<Vec<lsp_types::InlayHint>>> {
+        let mut state = self.state.lock().await;
+
+        Ok(state.inlay_hints(&params.text_document.uri, params.range))
+    }
+
     async fn document_symbol(
         &self,
         params: DocumentSymbolParams,
@@ -291,6 +301,12 @@ fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
             trigger_characters: Some(vec![".".to_string()]),
             ..CompletionOptions::default()
         }),
+        inlay_hint_provider: Some(OneOf::Right(InlayHintServerCapabilities::Options(
+            InlayHintOptions {
+                resolve_provider: Some(false),
+                work_done_progress_options: Default::default(),
+            },
+        ))),
         document_symbol_provider: Some(OneOf::Left(true)),
         workspace_symbol_provider: Some(OneOf::Left(true)),
         code_action_provider: Some(CodeActionProviderCapability::Options(CodeActionOptions {
