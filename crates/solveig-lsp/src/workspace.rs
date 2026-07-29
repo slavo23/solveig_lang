@@ -4,12 +4,13 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
-use lsp_types::{Diagnostic, Url};
-use solveig_base::PositionEncoding;
+use lsp_types::{Diagnostic, Hover, Position, Url};
+use solveig_base::{PositionEncoding, SourcePosition};
 use solveig_driver::{Compilation, DriverError};
 use tokio::task::JoinHandle;
 
 use crate::diagnostics::{diagnostic_map, missing_entry_diagnostic};
+use crate::hover::lsp_hover;
 
 pub(crate) struct ServerState {
     workspaces: BTreeMap<PathBuf, Workspace>,
@@ -101,6 +102,14 @@ impl ServerState {
         publications
     }
 
+    pub(crate) fn hover(&mut self, uri: &Url, position: Position) -> Option<Hover> {
+        let path = uri.to_file_path().ok()?;
+        let encoding = self.encoding;
+
+        self.workspace_for_path(&path)
+            .hover(&path, position, encoding)
+    }
+
     #[cfg(test)]
     pub(crate) fn previous_diagnostic_count(&self) -> usize {
         self.previous_diagnostics.len()
@@ -149,6 +158,25 @@ impl Workspace {
             }
             Ok(Err(_)) | Err(_) => BTreeMap::new(),
         }
+    }
+
+    fn hover(
+        &mut self,
+        path: &Path,
+        position: Position,
+        encoding: PositionEncoding,
+    ) -> Option<Hover> {
+        catch_unwind(AssertUnwindSafe(|| {
+            let info = self.compilation.hover_at_position(
+                path,
+                SourcePosition::new(position.line, position.character),
+                encoding,
+            )?;
+
+            Some(lsp_hover(&info, self.compilation.source_map(), encoding))
+        }))
+        .ok()
+        .flatten()
     }
 }
 

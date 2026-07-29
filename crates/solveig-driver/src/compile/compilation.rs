@@ -30,6 +30,55 @@ pub struct CheckResult {
 pub type ProjectSchemes = BTreeMap<String, String>;
 pub type ProjectDocs = BTreeMap<String, String>;
 
+/// Semantic hover payload retained by the driver after a successful check.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HoverInfo {
+    file: FileId,
+    span: Range<usize>,
+    signature: String,
+    documentation: Option<String>,
+}
+
+impl HoverInfo {
+    /// Creates a semantic hover for a byte span in one source file.
+    pub fn new(
+        file: FileId,
+        span: Range<usize>,
+        signature: impl Into<String>,
+        documentation: Option<String>,
+    ) -> Self {
+        Self {
+            file,
+            span,
+            signature: signature.into(),
+            documentation,
+        }
+    }
+
+    /// Returns this hover's span with its source file id attached.
+    pub fn file_span(&self) -> FileSpan {
+        FileSpan::new(
+            self.file,
+            solveig_base::Span::from_usize_range(self.span.clone()),
+        )
+    }
+
+    /// Returns this hover's byte span inside its source file.
+    pub fn span(&self) -> Range<usize> {
+        self.span.clone()
+    }
+
+    /// Returns the Solveig signature, type, or module path heading to display.
+    pub fn signature(&self) -> &str {
+        &self.signature
+    }
+
+    /// Returns documentation text attached to the hovered semantic item, when available.
+    pub fn documentation(&self) -> Option<&str> {
+        self.documentation.as_deref()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 pub struct CompileOptions {
     pub dump_bytecode: bool,
@@ -82,7 +131,14 @@ pub(super) struct CompilationArtifacts {
     pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
     pub(super) module_files: FxHashMap<ModuleId, FileId>,
     pub(super) source_files: Vec<SourceFile>,
+    pub(super) docs: FxHashMap<DefId, DocComment>,
+    pub(super) resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
+    pub(super) declaration_spans: Vec<(FileSpan, DefId)>,
+    pub(super) module_display_names: FxHashMap<ModuleId, String>,
+    pub(super) module_paths: FxHashMap<ModuleId, PathBuf>,
+    pub(super) module_imports: Vec<(FileSpan, ModuleId)>,
     pub(super) tycon_table: TyConTable,
+    pub(super) ctor_table: CtorTable,
     pub(super) class_table: ClassTable,
 }
 
@@ -94,6 +150,11 @@ pub(super) struct CheckedProject {
     pub(super) module_files: FxHashMap<ModuleId, FileId>,
     pub(super) source_files: Vec<SourceFile>,
     pub(super) docs: FxHashMap<DefId, DocComment>,
+    pub(super) resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
+    pub(super) declaration_spans: Vec<(FileSpan, DefId)>,
+    pub(super) module_display_names: FxHashMap<ModuleId, String>,
+    pub(super) module_paths: FxHashMap<ModuleId, PathBuf>,
+    pub(super) module_imports: Vec<(FileSpan, ModuleId)>,
 }
 
 #[derive(Clone, Debug)]
@@ -123,14 +184,21 @@ struct PreparedRun {
 
 impl CompilationArtifacts {
     fn from_checked_project(project: &CheckedProject) -> Self {
-        let (tycon_table, class_table) = checked_project_tables(&project.modules);
+        let (tycon_table, ctor_table, class_table) = checked_project_tables(&project.modules);
 
         Self {
             names: project.names.clone(),
             checked: project.checked.clone(),
             module_files: project.module_files.clone(),
             source_files: project.source_files.clone(),
+            docs: project.docs.clone(),
+            resolutions: project.resolutions.clone(),
+            declaration_spans: project.declaration_spans.clone(),
+            module_display_names: project.module_display_names.clone(),
+            module_paths: project.module_paths.clone(),
+            module_imports: project.module_imports.clone(),
             tycon_table,
+            ctor_table,
             class_table,
         }
     }
@@ -292,7 +360,8 @@ impl Compilation {
             .checked_project
             .as_ref()
             .expect("ICE: successful check did not retain checked project");
-        let (tycon_table, class_table) = checked_project_tables(&checked_project.modules);
+        let (tycon_table, _ctor_table, class_table) =
+            checked_project_tables(&checked_project.modules);
         let pretty_tables = PrettyTables {
             names: &checked_project.names,
             tycons: &tycon_table,
@@ -335,7 +404,30 @@ impl Compilation {
     }
 
     pub fn hover(&self, file: impl AsRef<Path>, offset: usize) -> Option<String> {
+        self.hover_info(file, offset)
+            .map(|info| info.signature().to_string())
+    }
+
+    /// Looks up semantic hover information at a byte offset after a prior successful check/run.
+    pub fn hover_info(&self, file: impl AsRef<Path>, offset: usize) -> Option<HoverInfo> {
         hover_in_artifacts(self.artifacts.as_ref()?, file.as_ref(), offset)
+    }
+
+    /// Checks the current project and looks up semantic hover information at an editor position.
+    pub fn hover_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Option<HoverInfo> {
+        self.check(true).ok()?;
+        hover_at_position_in_artifacts(
+            self.artifacts.as_ref()?,
+            self.source_map(),
+            file.as_ref(),
+            position,
+            encoding,
+        )
     }
 
     pub fn check(&mut self, verify_core: bool) -> Result<&CheckResult, DriverError> {
@@ -535,8 +627,9 @@ fn discover_project_for_source_file(source_file: &Path) -> (PathBuf, Option<Path
     (source_dir.to_path_buf(), Some(source_file.to_path_buf()))
 }
 
-fn checked_project_tables(modules: &[CheckedModule]) -> (TyConTable, ClassTable) {
+fn checked_project_tables(modules: &[CheckedModule]) -> (TyConTable, CtorTable, ClassTable) {
     let mut tycon_table = TyConTable::new();
+    let mut ctor_table = CtorTable::new();
     let mut class_table = ClassTable::new();
 
     for module in modules {
@@ -544,12 +637,16 @@ fn checked_project_tables(modules: &[CheckedModule]) -> (TyConTable, ClassTable)
             tycon_table.insert_with_id(id, info.clone());
         }
 
+        for (id, info) in module.ctor_table.iter() {
+            ctor_table.insert_with_id(id, info.clone());
+        }
+
         for (id, info) in module.class_table.iter() {
             class_table.insert_with_id(id, info.clone());
         }
     }
 
-    (tycon_table, class_table)
+    (tycon_table, ctor_table, class_table)
 }
 
 pub fn compile_and_run_project(

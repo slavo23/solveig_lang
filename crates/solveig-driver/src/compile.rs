@@ -21,12 +21,15 @@ use solveig_ast::ast::{
     BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
     BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinDefinition,
     BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassTable, CtorId,
-    CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, Names, PRIM_TYS, PrettyTables, Scheme,
-    TermDefinition, TermExpr, TermExprNode, Ty, TyConId, TyConTable, TyVarId, VarRef,
+    CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, Names, PRIM_TYS, Pretty, PrettyTables,
+    Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId, TyConTable, TyVarId, VarRef,
     prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
 };
 use solveig_base::{Diagnostic, Severity};
-use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap};
+use solveig_base::{
+    FileId, FileSpan, IntoDiagnostic, PositionEncoding, Session, SourceFile, SourceMap,
+    SourcePosition,
+};
 use solveig_check::core_lint::{CoreLintEnv, lint_checked_module};
 use solveig_check::inference::holes::hole_diagnostics;
 use solveig_check::inference::type_infer::{
@@ -44,7 +47,7 @@ use solveig_resolve::project::{
     seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
-use solveig_syntax::ast::{DocComment, ModuleName};
+use solveig_syntax::ast::{DocComment, ModuleName, SurfaceDefinition};
 use solveig_vm::vm::Machine;
 
 use crate::DriverError;
@@ -63,14 +66,14 @@ mod show_entry;
 
 use builtins::driver_builtin_api;
 pub use compilation::{
-    CheckResult, Compilation, CompileOptions, ProjectDocs, ProjectSchemes, checked_project_docs,
-    checked_project_schemes, compile_and_run_project, compile_and_run_project_with_options,
-    compile_and_run_project_with_options_and_args, run_project_capture,
-    run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
+    CheckResult, Compilation, CompileOptions, HoverInfo, ProjectDocs, ProjectSchemes,
+    checked_project_docs, checked_project_schemes, compile_and_run_project,
+    compile_and_run_project_with_options, compile_and_run_project_with_options_and_args,
+    run_project_capture, run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
 };
 use compilation::{CheckedProject, CompilationArtifacts, PreludeCache};
 use evidence_dump::dump_solved_evidence;
-use hover::hover_in_artifacts;
+use hover::{hover_at_position_in_artifacts, hover_in_artifacts};
 use incremental::IncrementalCache;
 use pipeline::{FrontendPhase, merge_checked_modules, verify_lowering_core};
 use show_entry::{add_show_entry_wrapper, entry_returns_io};

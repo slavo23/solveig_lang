@@ -107,8 +107,9 @@ messages rather than showing a prompt.
 
 Solveig ships a stdio LSP server through `solveig lsp`. The current server
 implements the lifecycle, full document sync, UTF-8/UTF-16 position negotiation,
-debounced project checks, and `textDocument/publishDiagnostics` using the same
-diagnostic codes as the CLI.
+debounced project checks, `textDocument/publishDiagnostics` using the same
+diagnostic codes as the CLI, and Markdown `textDocument/hover` responses for
+typed expressions, definitions, constructors, class methods, and module imports.
 
 Manual smoke test:
 
@@ -118,9 +119,8 @@ python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
 ```
 
 Expected output includes a negotiated `positionEncoding` and a `TC0005` type
-mismatch diagnostic with its LSP range. Hover, go-to-definition, completion,
-semantic tokens, code actions, and editor-extension wiring are planned Phase H
-follow-ups.
+mismatch diagnostic with its LSP range. Go-to-definition, completion, semantic
+tokens, code actions, and editor-extension wiring are planned Phase H follow-ups.
 
 ## Project Layout
 
@@ -328,8 +328,8 @@ scope.
 - Float literal patterns are rejected.
 - Constructor operators are reserved for later work.
 - The REPL is planned but not complete.
-- The LSP currently publishes diagnostics only; richer editor features are
-  planned in the rest of Phase H.
+- The LSP currently publishes diagnostics and hover only; richer editor
+  features are planned in the rest of Phase H.
 
 ## More Documentation
 

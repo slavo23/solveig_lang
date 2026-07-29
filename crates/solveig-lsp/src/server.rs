@@ -8,8 +8,9 @@ use std::time::Duration;
 use lsp_types::{
     ClientCapabilities, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    FileChangeType, InitializeParams, InitializeResult, InitializedParams, MessageType,
-    PositionEncodingKind, ServerCapabilities, TextDocumentSyncCapability, TextDocumentSyncKind,
+    FileChangeType, HoverParams, HoverProviderCapability, InitializeParams, InitializeResult,
+    InitializedParams, MessageType, PositionEncodingKind, ServerCapabilities,
+    TextDocumentSyncCapability, TextDocumentSyncKind,
 };
 use solveig_base::PositionEncoding;
 use tokio::io::{stdin, stdout};
@@ -177,12 +178,23 @@ impl LanguageServer for LspServer {
         }
         self.check_after_change().await;
     }
+
+    async fn hover(
+        &self,
+        params: HoverParams,
+    ) -> tower_lsp::jsonrpc::Result<Option<lsp_types::Hover>> {
+        let mut state = self.state.lock().await;
+        let params = params.text_document_position_params;
+
+        Ok(state.hover(&params.text_document.uri, params.position))
+    }
 }
 
 fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
     ServerCapabilities {
         position_encoding: Some(encoding),
         text_document_sync: Some(TextDocumentSyncCapability::Kind(TextDocumentSyncKind::FULL)),
+        hover_provider: Some(HoverProviderCapability::Simple(true)),
         ..ServerCapabilities::default()
     }
 }
@@ -229,8 +241,9 @@ fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
 mod tests {
     use super::*;
     use lsp_types::{
-        GeneralClientCapabilities, TextDocumentContentChangeEvent, TextDocumentItem, Url,
-        VersionedTextDocumentIdentifier, WorkspaceFolder,
+        GeneralClientCapabilities, HoverContents, Position, TextDocumentContentChangeEvent,
+        TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+        VersionedTextDocumentIdentifier, WorkDoneProgressParams, WorkspaceFolder,
     };
     use std::fs;
     use std::path::Path;
@@ -274,6 +287,10 @@ mod tests {
         assert_eq!(
             capabilities.position_encoding,
             Some(PositionEncodingKind::UTF8)
+        );
+        assert_eq!(
+            capabilities.hover_provider,
+            Some(HoverProviderCapability::Simple(true))
         );
     }
 
@@ -376,6 +393,80 @@ main = 1
             assert!(state.pending_check.is_none());
             assert_eq!(state.previous_diagnostic_count(), 0);
         }
+
+        server.shutdown().await.expect("shutdown should succeed");
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn text_document_hover_returns_markdown_signature_and_docs() {
+        let project_root = temp_root("server_hover");
+        let source = project_root.join("scratch.sv");
+        write_source(
+            &source,
+            r#"-- | The answer used by hover.
+answer : Int
+answer = 42
+
+main : Int
+main = answer
+"#,
+        );
+        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+        let root_uri =
+            Url::from_directory_path(&project_root).expect("test root should become a file URI");
+        let (service, _socket) = LspService::new(LspServer::new);
+        let server = service.inner();
+
+        server
+            .initialize(InitializeParams {
+                root_uri: Some(root_uri),
+                capabilities: ClientCapabilities::default(),
+                ..InitializeParams::default()
+            })
+            .await
+            .expect("initialize should succeed");
+
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: r#"-- | The answer used by hover.
+answer : Int
+answer = 42
+
+main : Int
+main = answer
+"#
+                    .to_string(),
+                },
+            })
+            .await;
+
+        let hover = server
+            .hover(HoverParams {
+                text_document_position_params: TextDocumentPositionParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                    position: Position::new(1, 0),
+                },
+                work_done_progress_params: WorkDoneProgressParams::default(),
+            })
+            .await
+            .expect("hover request should succeed")
+            .expect("hover response should exist");
+
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("hover should use markdown markup content");
+        };
+
+        assert!(markup.value.contains("```solveig\nanswer : Int\n```"));
+        assert!(markup.value.contains("The answer used by hover."));
+        assert_eq!(
+            hover.range.expect("hover should carry a range").start.line,
+            1
+        );
 
         server.shutdown().await.expect("shutdown should succeed");
         let _ = fs::remove_dir_all(project_root);

@@ -8,10 +8,10 @@ mod source_provider;
 
 /// Re-exports project compilation, checking, and execution entry points.
 pub use compile::{
-    CheckResult, Compilation, CompileOptions, ProjectDocs, ProjectSchemes, checked_project_docs,
-    checked_project_schemes, compile_and_run_project, compile_and_run_project_with_options,
-    compile_and_run_project_with_options_and_args, run_project_capture,
-    run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
+    CheckResult, Compilation, CompileOptions, HoverInfo, ProjectDocs, ProjectSchemes,
+    checked_project_docs, checked_project_schemes, compile_and_run_project,
+    compile_and_run_project_with_options, compile_and_run_project_with_options_and_args,
+    run_project_capture, run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
 };
 /// Re-exports the top-level driver error type.
 pub use error::DriverError;

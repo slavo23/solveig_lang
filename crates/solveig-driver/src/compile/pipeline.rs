@@ -158,6 +158,7 @@ fn push_resolve_errors(
 }
 
 include!("pipeline/frontend.rs");
+include!("pipeline/frontend/hover_artifacts.rs");
 
 fn find_entry_file(
     project_root: &Path,

@@ -221,6 +221,10 @@ impl<'a> FrontendState<'a> {
             .values()
             .flat_map(|api| api.docs.iter().map(|(id, doc)| (*id, doc.clone())))
             .collect();
+        let declaration_spans = collect_hover_declaration_spans(self.project);
+        let module_display_names = collect_hover_module_display_names(self.session, self.project);
+        let module_paths = collect_hover_module_paths(self.project);
+        let module_imports = collect_hover_module_imports(self.project);
         let modules = order
             .iter()
             .filter_map(|module_name| {
@@ -240,6 +244,11 @@ impl<'a> FrontendState<'a> {
                 module_files: self.module_files,
                 source_files,
                 docs,
+                resolutions: self.resolutions,
+                declaration_spans,
+                module_display_names,
+                module_paths,
+                module_imports,
             },
             self.prelude_cache,
             Some(incremental_cache),

@@ -1,7 +1,29 @@
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use solveig_driver::Compilation;
+
+fn fixture_root(name: &str) -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
+}
+
+fn offset_in_line(source: &str, line: &str, needle: &str) -> usize {
+    let line_start = source
+        .find(line)
+        .unwrap_or_else(|| panic!("hover fixture should contain line `{line}`"));
+    let needle_offset = line
+        .find(needle)
+        .unwrap_or_else(|| panic!("hover fixture line should contain `{needle}`"));
+
+    line_start + needle_offset
+}
+
+fn assert_contains(haystack: &str, needle: &str) {
+    assert!(
+        haystack.contains(needle),
+        "expected `{haystack}` to contain `{needle}`"
+    );
+}
 
 #[test]
 fn hover_returns_checked_expression_types_after_run() {
@@ -66,5 +88,108 @@ fn hover_preserves_long_source_type_variable_names() {
     assert_eq!(
         compilation.hover(&file, value_offset),
         Some("element".to_string())
+    );
+}
+
+#[test]
+fn hover_info_covers_h13_semantic_targets() {
+    let project_root = fixture_root("tests/fixtures/hover");
+    let main_file = project_root.join("src/main.sv");
+    let lib_file = project_root.join("src/hoverLib.sv");
+    let main_source = fs::read_to_string(&main_file).expect("hover fixture source should load");
+    let lib_source = fs::read_to_string(&lib_file).expect("hover lib fixture should load");
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation.check(true).expect("hover fixture should check");
+
+    assert!(
+        result.success(),
+        "hover fixture diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let local = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "    inner + 1", "inner"),
+        )
+        .expect("local binder hover should exist");
+    assert_eq!(local.signature(), "Int");
+
+    let top_level = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "topLevel : Int -> Int", "topLevel"),
+        )
+        .expect("top-level hover should exist");
+    assert_eq!(top_level.signature(), "topLevel : Int -> Int");
+
+    let imported = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(
+                &main_source,
+                "topLevel n = documentedIncrement n",
+                "documentedIncrement",
+            ),
+        )
+        .expect("imported function hover should exist");
+    assert_eq!(imported.signature(), "documentedIncrement : Int -> Int");
+    assert_eq!(imported.documentation(), Some("Adds one to an integer."));
+
+    let operator = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "    inner + 1", "+"),
+        )
+        .expect("operator hover should exist");
+    assert_contains(operator.signature(), "class Num a");
+    assert_contains(operator.signature(), "+ :");
+
+    let constructor = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "    case MkLocalBox 41 of", "MkLocalBox"),
+        )
+        .expect("constructor hover should exist");
+    assert_eq!(constructor.signature(), "MkLocalBox : Int -> LocalBox");
+
+    let method = compilation
+        .hover_info(
+            &lib_file,
+            offset_in_line(&lib_source, "    describe : a -> String", "describe"),
+        )
+        .expect("class method hover should exist");
+    assert_contains(method.signature(), "class Describe a");
+    assert_contains(method.signature(), "describe :");
+    assert_eq!(
+        method.documentation(),
+        Some("Converts a value into a friendly label.")
+    );
+
+    let do_expression = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "    pure (x + y)", "pure"),
+        )
+        .expect("do-block expression hover should exist");
+    assert_contains(do_expression.signature(), "Applicative f");
+    assert_contains(do_expression.signature(), "pure :");
+
+    let module = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(
+                &main_source,
+                "import hoverLib(documentedIncrement, Documented, MkDocumented, Describe)",
+                "hoverLib",
+            ),
+        )
+        .expect("module hover should exist");
+    assert_eq!(module.signature(), "module hoverLib");
+    assert!(
+        module
+            .documentation()
+            .is_some_and(|path| path.ends_with("tests/fixtures/hover/src/hoverLib.sv")),
+        "module hover should include the imported path"
     );
 }
