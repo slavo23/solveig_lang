@@ -29,8 +29,8 @@ fn lsp_inlay_hint(
         kind: Some(lsp_inlay_hint_kind(hint.kind())),
         text_edits: None,
         tooltip: None,
-        padding_left: None,
-        padding_right: None,
+        padding_left: Some(false),
+        padding_right: Some(true),
         data: None,
     }
 }

@@ -106,12 +106,17 @@ fn module_hover_info(
         .get(&module_id)
         .map(|path| path.display().to_string());
 
-    Some(HoverInfo::new(
-        span.file,
-        span.span.to_usize_range(),
-        format!("module {name}"),
-        documentation,
-    ))
+    let provenance = module_provenance(artifacts, module_id);
+
+    Some(
+        HoverInfo::new(
+            span.file,
+            span.span.to_usize_range(),
+            format!("module {name}"),
+            documentation,
+        )
+        .with_optional_provenance(provenance),
+    )
 }
 
 fn def_hover_info(
@@ -123,12 +128,15 @@ fn def_hover_info(
     let signature = def_signature(artifacts, pretty_tables, def_id)?;
     let documentation = artifacts.docs.get(&def_id).map(|doc| doc.text.clone());
 
-    Some(HoverInfo::new(
-        span.file,
-        span.span.to_usize_range(),
-        signature,
-        documentation,
-    ))
+    Some(
+        HoverInfo::new(
+            span.file,
+            span.span.to_usize_range(),
+            signature,
+            documentation,
+        )
+        .with_optional_provenance(def_provenance(artifacts, def_id)),
+    )
 }
 
 fn def_signature(
@@ -225,6 +233,19 @@ fn class_method_signature(
     }
 
     None
+}
+
+fn def_provenance(artifacts: &CompilationArtifacts, def_id: DefId) -> Option<String> {
+    module_provenance(artifacts, def_id.module)
+}
+
+fn module_provenance(artifacts: &CompilationArtifacts, module_id: ModuleId) -> Option<String> {
+    let module = artifacts.module_display_names.get(&module_id)?;
+    let Some(path) = artifacts.module_paths.get(&module_id) else {
+        return Some(format!("Defined in `{module}`."));
+    };
+
+    Some(format!("Defined in `{module}` at `{}`.", path.display()))
 }
 
 fn class_header(class_def: &ClassDefinition, pretty_tables: PrettyTables<'_>) -> String {

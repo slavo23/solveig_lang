@@ -11,13 +11,25 @@ pub(crate) fn lsp_hover(
     source_map: &SourceMap,
     encoding: PositionEncoding,
 ) -> Hover {
-    let mut value = format!("```solveig\n{}\n```", info.signature());
+    let signature = trim_hover_text(info.signature());
+    let mut value = format!("```solveig\n{signature}\n```");
 
-    if let Some(documentation) = info.documentation()
-        && !documentation.trim().is_empty()
+    if let Some(documentation) = info
+        .documentation()
+        .map(trim_hover_text)
+        .filter(|documentation| !documentation.is_empty())
     {
         value.push_str("\n\n");
-        value.push_str(documentation);
+        value.push_str(&documentation);
+    }
+
+    if let Some(provenance) = info
+        .provenance()
+        .map(trim_hover_text)
+        .filter(|provenance| !provenance.is_empty())
+    {
+        value.push_str("\n\n");
+        value.push_str(&provenance);
     }
 
     Hover {
@@ -27,4 +39,13 @@ pub(crate) fn lsp_hover(
         }),
         range: Some(lsp_range(source_map, info.file_span(), encoding)),
     }
+}
+
+fn trim_hover_text(text: &str) -> String {
+    text.lines()
+        .map(str::trim)
+        .collect::<Vec<_>>()
+        .join("\n")
+        .trim()
+        .to_string()
 }

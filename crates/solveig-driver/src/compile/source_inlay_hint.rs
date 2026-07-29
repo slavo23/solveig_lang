@@ -14,26 +14,30 @@ pub enum SourceInlayHintKind {
 pub enum SourceInlayHintCategory {
     /// Inferred type for an unannotated `let` binding.
     LetBindingType,
+    /// Inferred type for a top-level function parameter.
+    FunctionParameterType,
     /// Inferred type for an unannotated lambda parameter.
     LambdaParameterType,
-    /// Inferred return type for a definition without a signature.
-    InferredReturnType,
+    /// Inferred full signature for a definition without a signature.
+    InferredSignature,
 }
 
 /// Enables or disables groups of source-level inlay hints.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SourceInlayHintConfig {
     pub let_binding_types: bool,
+    pub function_parameter_types: bool,
     pub lambda_parameter_types: bool,
-    pub inferred_return_types: bool,
+    pub inferred_signatures: bool,
 }
 
 impl Default for SourceInlayHintConfig {
     fn default() -> Self {
         Self {
             let_binding_types: true,
+            function_parameter_types: true,
             lambda_parameter_types: true,
-            inferred_return_types: true,
+            inferred_signatures: true,
         }
     }
 }
@@ -43,8 +47,9 @@ impl SourceInlayHintConfig {
     pub const fn enables(self, category: SourceInlayHintCategory) -> bool {
         match category {
             SourceInlayHintCategory::LetBindingType => self.let_binding_types,
+            SourceInlayHintCategory::FunctionParameterType => self.function_parameter_types,
             SourceInlayHintCategory::LambdaParameterType => self.lambda_parameter_types,
-            SourceInlayHintCategory::InferredReturnType => self.inferred_return_types,
+            SourceInlayHintCategory::InferredSignature => self.inferred_signatures,
         }
     }
 }

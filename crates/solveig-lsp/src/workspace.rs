@@ -235,17 +235,24 @@ impl ServerState {
     }
 
     fn workspace_for_path(&mut self, path: &Path) -> &mut Workspace {
-        let root = self
-            .roots
-            .iter()
-            .filter(|root| path.starts_with(root))
-            .max_by_key(|root| root.components().count())
-            .cloned()
-            .unwrap_or_else(|| project_root_for_file(path));
+        let root = self.workspace_root_for_path(path);
 
         self.workspaces
             .entry(root)
             .or_insert_with_key(|root| Workspace::new(root, path))
+    }
+
+    fn workspace_root_for_path(&self, path: &Path) -> PathBuf {
+        let configured_root = self
+            .roots
+            .iter()
+            .filter(|root| path.starts_with(root))
+            .max_by_key(|root| root.components().count());
+
+        match configured_root {
+            Some(root) if is_solveig_project_root(root) => root.clone(),
+            Some(_) | None => project_root_for_file(path),
+        }
     }
 
     fn remember_semantic_tokens(&mut self, tokens: Vec<SemanticToken>) -> SemanticTokens {
@@ -490,10 +497,14 @@ fn project_root_for_file(path: &Path) -> PathBuf {
     source_dir.to_path_buf()
 }
 
+fn is_solveig_project_root(path: &Path) -> bool {
+    path.join("src").join("main.sv").is_file()
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use lsp_types::NumberOrString;
+    use lsp_types::{HoverContents, NumberOrString};
     use solveig_driver::Compilation;
     use std::fs;
     use std::process;
@@ -620,6 +631,88 @@ main = 1
         assert_eq!(second, vec![(uri, Vec::new())]);
 
         let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn non_project_workspace_root_uses_nested_solveig_project_roots() {
+        let container = temp_root("nested_roots");
+        let first_root = container.join("first");
+        let second_root = container.join("second");
+        let first_main = first_root.join("src/main.sv");
+        let first_helper = first_root.join("src/helper.sv");
+        let second_main = second_root.join("src/main.sv");
+        let second_helper = second_root.join("src/helper.sv");
+
+        write_source(
+            &first_main,
+            r#"import helper(firstAnswer)
+
+main : Int
+main = firstAnswer
+"#,
+        );
+        write_source(
+            &first_helper,
+            r#"firstAnswer : Int
+firstAnswer = 1
+"#,
+        );
+        write_source(
+            &second_main,
+            r#"import helper(secondAnswer)
+
+main : Int
+main = secondAnswer
+"#,
+        );
+        write_source(
+            &second_helper,
+            r#"secondAnswer : Int
+secondAnswer = 2
+"#,
+        );
+
+        let first_uri = Url::from_file_path(&first_main).expect("first URI should be valid");
+        let second_uri = Url::from_file_path(&second_main).expect("second URI should be valid");
+        let mut state = ServerState::new(PositionEncoding::Utf16);
+        state.set_roots(vec![container.clone()]);
+
+        state.open_document(
+            &first_uri,
+            fs::read_to_string(&first_main).expect("first main should be readable"),
+        );
+        state.open_document(
+            &second_uri,
+            fs::read_to_string(&second_main).expect("second main should be readable"),
+        );
+
+        assert!(state.workspaces.contains_key(&first_root));
+        assert!(state.workspaces.contains_key(&second_root));
+        assert!(!state.workspaces.contains_key(&container));
+
+        let first_hover = state
+            .hover(&first_uri, Position::new(3, 7))
+            .expect("first project hover should work");
+        let second_hover = state
+            .hover(&second_uri, Position::new(3, 7))
+            .expect("second project hover should work");
+
+        assert_hover_contains(first_hover, "firstAnswer : Int");
+        assert_hover_contains(second_hover, "secondAnswer : Int");
+
+        let _ = fs::remove_dir_all(container);
+    }
+
+    fn assert_hover_contains(hover: Hover, needle: &str) {
+        let HoverContents::Markup(markup) = hover.contents else {
+            panic!("hover should use markup content");
+        };
+
+        assert!(
+            markup.value.contains(needle),
+            "expected hover `{}` to contain `{needle}`",
+            markup.value
+        );
     }
 
     fn diagnostic_keys(

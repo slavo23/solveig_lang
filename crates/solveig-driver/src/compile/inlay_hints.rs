@@ -110,12 +110,20 @@ fn collect_module_inlay_hints(
         let Some(checked_def) = checked_defs.get(&def_id).copied() else {
             continue;
         };
-        let checked_body = checked_body_without_function_params(&checked_def.body, params.len());
+        let checked_body = collect_function_param_hints(
+            session,
+            parsed.file,
+            params,
+            &checked_def.body,
+            tables,
+            out,
+        )
+        .unwrap_or_else(|| checked_body_without_function_params(&checked_def.body, params.len()));
 
         if !signatures.contains(&name.0)
             && let Some(scheme) = checked.func_schemes.get(&def_id)
         {
-            push_return_type_hint(parsed.file, name, params, scheme, tables, out);
+            push_inferred_signature_hint(parsed.file, name, scheme, tables, out);
         }
 
         collect_expr_inlay_hints(session, parsed.file, body, checked_body, tables, out);
@@ -123,22 +131,53 @@ fn collect_module_inlay_hints(
     }
 }
 
-fn push_return_type_hint(
+fn push_inferred_signature_hint(
     file: FileId,
     name: &Spanned<Symbol>,
-    params: &[Spanned<Symbol>],
     scheme: &Scheme,
     tables: PrettyTables<'_>,
     out: &mut Vec<SourceInlayHint>,
 ) {
-    let position = params.last().map_or(name.1.end, |param| param.1.end);
-    let return_type = return_type_after_params(scheme, params.len());
     out.push(SourceInlayHint::new(
-        FileSpan::new(file, Span::new(position, position)),
-        format!(": {}", return_type.pretty_with_tables(tables)),
+        FileSpan::new(file, Span::new(name.1.end, name.1.end)),
+        format!(": {}", scheme.pretty_with_tables(tables)),
         SourceInlayHintKind::Type,
-        SourceInlayHintCategory::InferredReturnType,
+        SourceInlayHintCategory::InferredSignature,
     ));
+}
+
+fn collect_function_param_hints<'a>(
+    session: &Session,
+    file: FileId,
+    params: &[Spanned<Symbol>],
+    checked: &'a TermExprNode<TcMetadata, Range<usize>>,
+    tables: PrettyTables<'_>,
+    out: &mut Vec<SourceInlayHint>,
+) -> Option<&'a TermExprNode<TcMetadata, Range<usize>>> {
+    let mut current = checked;
+
+    for param in params {
+        current = strip_checked_wrappers(current);
+        let TermExpr::Abs(checked_name, checked_type, body) = &current.node else {
+            return None;
+        };
+        if checked_name != &*session.str(param.0) {
+            return None;
+        }
+
+        if let Some(ty) = checked_type {
+            out.push(SourceInlayHint::new(
+                FileSpan::new(file, Span::new(param.1.end, param.1.end)),
+                format!(": {}", ty.pretty_with_tables(tables)),
+                SourceInlayHintKind::Type,
+                SourceInlayHintCategory::FunctionParameterType,
+            ));
+        }
+
+        current = body;
+    }
+
+    Some(strip_checked_wrappers(current))
 }
 
 fn collect_expr_inlay_hints(
@@ -351,19 +390,6 @@ fn strip_checked_wrappers(
             _ => return current,
         };
     }
-}
-
-fn return_type_after_params(scheme: &Scheme, param_count: usize) -> Ty {
-    let (_, _, mut ty) = scheme.to_ty().peel_scheme_like();
-
-    for _ in 0..param_count {
-        let Ty::TyArr(_, rhs) = ty else {
-            break;
-        };
-        ty = *rhs;
-    }
-
-    ty
 }
 
 fn let_binding_hint_offset(source: &str, span: &Range<usize>, name: &str) -> Option<u32> {

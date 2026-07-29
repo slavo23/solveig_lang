@@ -267,10 +267,15 @@ async fn text_document_inlay_hint_returns_type_hints() {
         .expect("inlay-hint request should succeed")
         .expect("inlay-hint response should exist");
 
-    assert!(hints.iter().any(|hint| {
-        matches!(&hint.label, InlayHintLabel::String(label) if label == ": Int")
-            && hint.kind == Some(InlayHintKind::TYPE)
-    }));
+    let local_hint = hints
+        .iter()
+        .find(|hint| {
+            matches!(&hint.label, InlayHintLabel::String(label) if label == ": Int")
+                && hint.kind == Some(InlayHintKind::TYPE)
+        })
+        .unwrap_or_else(|| panic!("missing local type hint: {hints:#?}"));
+    assert_eq!(local_hint.padding_left, Some(false));
+    assert_eq!(local_hint.padding_right, Some(true));
 
     server.shutdown().await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);
@@ -647,7 +652,9 @@ main = answer
     };
 
     assert!(markup.value.contains("```solveig\nanswer : Int\n```"));
+    assert!(!markup.value.contains("```solveig\n answer : Int"));
     assert!(markup.value.contains("The answer used by hover."));
+    assert!(markup.value.contains("Defined in `scratch`"));
     assert_eq!(
         hover.range.expect("hover should carry a range").start.line,
         1

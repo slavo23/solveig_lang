@@ -39,6 +39,10 @@ fn hover_returns_checked_expression_types_after_run() {
         .find(line)
         .map(|start| start + "if total == 10 then ".len())
         .expect("hover fixture should contain the then literal");
+    let else_offset = source
+        .find(line)
+        .map(|start| start + "if total == 10 then 42 else ".len())
+        .expect("hover fixture should contain the else literal");
 
     let mut compilation = Compilation::new(&project_root);
     let output = compilation
@@ -52,6 +56,10 @@ fn hover_returns_checked_expression_types_after_run() {
     );
     assert_eq!(
         compilation.hover(&file, then_offset),
+        Some("Int".to_string())
+    );
+    assert_eq!(
+        compilation.hover(&file, else_offset),
         Some("Int".to_string())
     );
 }
@@ -135,6 +143,30 @@ fn hover_info_covers_h13_semantic_targets() {
         .expect("imported function hover should exist");
     assert_eq!(imported.signature(), "documentedIncrement : Int -> Int");
     assert_eq!(imported.documentation(), Some("Adds one to an integer."));
+    assert!(
+        imported
+            .provenance()
+            .is_some_and(|provenance| provenance.contains("hoverLib")),
+        "imported function hover should include provenance: {imported:#?}"
+    );
+
+    let imported_type = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(
+                &main_source,
+                "useImported : Documented -> Documented",
+                "Documented",
+            ),
+        )
+        .expect("imported type hover should exist");
+    assert_eq!(imported_type.signature(), "type Documented : *");
+    assert!(
+        imported_type
+            .provenance()
+            .is_some_and(|provenance| provenance.contains("hoverLib")),
+        "imported type hover should include provenance: {imported_type:#?}"
+    );
 
     let operator = compilation
         .hover_info(
@@ -152,6 +184,14 @@ fn hover_info_covers_h13_semantic_targets() {
         )
         .expect("constructor hover should exist");
     assert_eq!(constructor.signature(), "MkLocalBox : Int -> LocalBox");
+
+    let scrutinee = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "    case value of", "value"),
+        )
+        .expect("case scrutinee hover should exist");
+    assert_eq!(scrutinee.signature(), "Documented");
 
     let method = compilation
         .hover_info(

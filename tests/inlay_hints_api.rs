@@ -60,9 +60,12 @@ fn assert_hint(hints: &[SourceInlayHint], category: SourceInlayHintCategory, lab
 }
 
 #[test]
-fn inlay_hints_include_let_lambda_and_inferred_return_types() {
+fn inlay_hints_include_let_lambda_function_params_and_inferred_signatures() {
     let hints = inlay_hints(
-        r#"useLet =
+        r#"useArg value =
+    if value then 1 else 0
+
+useLet =
     let local = 41 in
     local
 
@@ -75,15 +78,30 @@ useLambda =
     assert_hint(&hints, SourceInlayHintCategory::LetBindingType, ": Int");
     assert_hint(
         &hints,
+        SourceInlayHintCategory::FunctionParameterType,
+        ": Bool",
+    );
+    assert_hint(
+        &hints,
         SourceInlayHintCategory::LambdaParameterType,
         ": Int",
     );
-    let return_hints = hints
+    assert_hint(
+        &hints,
+        SourceInlayHintCategory::InferredSignature,
+        ": Bool -> Int",
+    );
+    let signature_hints = hints
         .iter()
-        .filter(|hint| hint.category() == SourceInlayHintCategory::InferredReturnType)
+        .filter(|hint| hint.category() == SourceInlayHintCategory::InferredSignature)
         .collect::<Vec<_>>();
-    assert_eq!(return_hints.len(), 2, "{hints:#?}");
-    assert!(return_hints.iter().all(|hint| hint.label() == ": Int"));
+    assert_eq!(signature_hints.len(), 3, "{hints:#?}");
+    assert!(
+        signature_hints
+            .iter()
+            .all(|hint| !hint.label().contains("->") || hint.label() == ": Bool -> Int"),
+        "{hints:#?}"
+    );
 }
 
 #[test]
@@ -95,8 +113,9 @@ fn inlay_hint_config_disables_categories() {
 "#,
         SourceInlayHintConfig {
             let_binding_types: true,
+            function_parameter_types: false,
             lambda_parameter_types: false,
-            inferred_return_types: false,
+            inferred_signatures: false,
         },
     );
 

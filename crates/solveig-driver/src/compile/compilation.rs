@@ -42,6 +42,7 @@ pub struct HoverInfo {
     span: Range<usize>,
     signature: String,
     documentation: Option<String>,
+    provenance: Option<String>,
 }
 
 impl HoverInfo {
@@ -57,7 +58,13 @@ impl HoverInfo {
             span,
             signature: signature.into(),
             documentation,
+            provenance: None,
         }
+    }
+
+    pub(super) fn with_optional_provenance(mut self, provenance: Option<String>) -> Self {
+        self.provenance = provenance;
+        self
     }
 
     /// Returns this hover's span with its source file id attached.
@@ -81,6 +88,11 @@ impl HoverInfo {
     /// Returns documentation text attached to the hovered semantic item, when available.
     pub fn documentation(&self) -> Option<&str> {
         self.documentation.as_deref()
+    }
+
+    /// Returns where the hovered semantic item was defined, when available.
+    pub fn provenance(&self) -> Option<&str> {
+        self.provenance.as_deref()
     }
 }
 
