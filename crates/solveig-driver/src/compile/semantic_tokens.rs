@@ -1,7 +1,7 @@
 //! Semantic-token extraction for editor integrations.
 //! The driver owns Solveig-aware token classification; protocol crates only encode it.
 
-use super::source_lookup::source_file_id_in_source_map;
+use super::source_lookup::{is_atomic_source_span, source_file_id_in_source_map};
 use super::*;
 use solveig_syntax::lexer::{PosToken, Token};
 
@@ -573,15 +573,6 @@ fn is_default_library_def(artifacts: &CompilationArtifacts, def_id: &DefId) -> b
         .module_paths
         .get(&def_id.module)
         .is_some_and(|path| path.starts_with("<compiler-prelude>"))
-}
-
-fn is_atomic_source_span(source_file: &SourceFile, span: Span) -> bool {
-    let range = span.to_usize_range();
-    let Some(text) = source_file.src.get(range) else {
-        return false;
-    };
-
-    !text.chars().any(char::is_whitespace)
 }
 
 fn is_operator_source_span(source_file: &SourceFile, span: Span) -> bool {

@@ -409,6 +409,20 @@ impl<'a> Parser<'a> {
         }
     }
 
+    fn expect_import_name_segment(&mut self) -> Result<NameSpan, ParseError> {
+        match self.current_kind() {
+            Token::Ident(name) | Token::UpperIdent(name) => {
+                let name = *name;
+                let token = self.advance();
+                Ok((name, token.start, token.end))
+            }
+            _ => Err(self.error(format!(
+                "expected import name, got {}",
+                self.describe_current()
+            ))),
+        }
+    }
+
     fn fixed_operator_text(token: &Token) -> Option<&'static str> {
         match token {
             Token::Plus => Some("+"),
@@ -495,12 +509,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_import_name(&mut self) -> Result<Symbol, ParseError> {
-        if self.starts_parenthesized_operator_name() {
-            Ok(self.parse_parenthesized_operator_name()?.0)
+    fn parse_import_name(&mut self) -> Result<S<Symbol>, ParseError> {
+        let (symbol, start, end) = if self.starts_parenthesized_operator_name() {
+            self.parse_parenthesized_operator_name()?
         } else {
-            self.expect_module_name_segment()
-        }
+            self.expect_import_name_segment()?
+        };
+
+        Ok(self.sp(symbol, start, end))
     }
 
     fn expect_binder(&mut self) -> Result<NameSpan, ParseError> {

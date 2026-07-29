@@ -291,6 +291,33 @@ fn table_backed_pretty_uses_identity_tables() {
 }
 
 #[test]
+fn table_backed_pretty_falls_back_for_missing_table_entries() {
+    let mut names = Names::new();
+    let tycon_id = names.tycon_id("FallbackTy");
+    let class_id = names.class_id("FallbackClass");
+    let tycons = TyConTable::new();
+    let classes = ClassTable::new();
+    let tables = PrettyTables {
+        names: &names,
+        tycons: &tycons,
+        classes: &classes,
+    };
+    let scheme = Scheme {
+        quantifiers: Vec::new(),
+        predicates: vec![Predicate {
+            class_id,
+            args: vec![Ty::TyCon(tycon_id)],
+        }],
+        ty: Ty::TyCon(tycon_id),
+    };
+
+    assert_eq!(
+        scheme.pretty_with_tables(tables),
+        "FallbackClass FallbackTy => FallbackTy"
+    );
+}
+
+#[test]
 fn names_table_preserves_local_and_global_names() {
     let mut names = Names::new();
     let local = VarRef::named_local(&mut names, "value");

@@ -18,6 +18,7 @@ pub struct Compilation {
     pub(super) syntax_trees: Vec<SourceSyntaxTree>,
     pub(super) prelude_cache: Option<PreludeCache>,
     pub(super) incremental_cache: Option<IncrementalCache>,
+    pub(super) retained_verify_core: Option<bool>,
     check_result: CheckResult,
 }
 
@@ -154,6 +155,7 @@ pub(super) struct CompilationArtifacts {
     pub(super) module_display_names: FxHashMap<ModuleId, String>,
     pub(super) module_paths: FxHashMap<ModuleId, PathBuf>,
     pub(super) module_imports: Vec<(FileSpan, ModuleId)>,
+    pub(super) local_hovers: Vec<HoverInfo>,
     pub(super) source_symbols: Vec<SourceSymbol>,
     pub(super) tycon_table: TyConTable,
     pub(super) ctor_table: CtorTable,
@@ -173,6 +175,7 @@ pub(super) struct CheckedProject {
     pub(super) module_display_names: FxHashMap<ModuleId, String>,
     pub(super) module_paths: FxHashMap<ModuleId, PathBuf>,
     pub(super) module_imports: Vec<(FileSpan, ModuleId)>,
+    pub(super) local_hovers: Vec<HoverInfo>,
     pub(super) source_symbols: Vec<SourceSymbol>,
 }
 
@@ -217,6 +220,7 @@ impl CompilationArtifacts {
             module_display_names: project.module_display_names.clone(),
             module_paths: project.module_paths.clone(),
             module_imports: project.module_imports.clone(),
+            local_hovers: project.local_hovers.clone(),
             source_symbols: project.source_symbols.clone(),
             tycon_table,
             ctor_table,
@@ -254,6 +258,7 @@ impl Compilation {
             syntax_trees: Vec::new(),
             prelude_cache: None,
             incremental_cache: None,
+            retained_verify_core: None,
             check_result: CheckResult::default(),
         }
     }
@@ -437,6 +442,7 @@ impl Compilation {
         self.completion_candidates = Vec::new();
         self.inlay_hints = Vec::new();
         self.syntax_trees = Vec::new();
+        self.retained_verify_core = None;
         self.session.diagnostics().drain();
         self.names = Names::new();
 
@@ -472,8 +478,23 @@ impl Compilation {
             success,
             failure_message: outcome.phase.map(FrontendPhase::error_message),
         };
+        self.retained_verify_core = Some(verify_core);
 
         Ok(&self.check_result)
+    }
+
+    pub(super) fn ensure_checked(
+        &mut self,
+        verify_core: bool,
+    ) -> Result<&CheckResult, DriverError> {
+        let reusable_verify_core = self
+            .retained_verify_core
+            .is_some_and(|retained| retained || !verify_core);
+        if reusable_verify_core && !self.check_result.source_map().is_empty() {
+            return Ok(&self.check_result);
+        }
+
+        self.check(verify_core)
     }
 
     pub fn diagnostics(&self) -> &[Diagnostic] {
@@ -623,6 +644,9 @@ impl Compilation {
         self.semantic_tokens = Vec::new();
         self.code_actions = Vec::new();
         self.completion_candidates = Vec::new();
+        self.inlay_hints = Vec::new();
+        self.syntax_trees = Vec::new();
+        self.retained_verify_core = None;
         self.check_result = CheckResult::default();
     }
 }

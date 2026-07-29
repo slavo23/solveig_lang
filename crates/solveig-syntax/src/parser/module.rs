@@ -57,20 +57,23 @@ impl Parser<'_> {
                 module.default_alias()
             };
 
-            let spec = if this.at(&Token::LParen) {
+            let (spec, selected_names) = if this.at(&Token::LParen) {
                 this.advance();
                 let mut names = Vec::new();
+                let mut selected_names = Vec::new();
                 while !this.at(&Token::RParen) {
-                    names.push(this.parse_import_name()?);
+                    let selected_name = this.parse_import_name()?;
+                    names.push(selected_name.0);
+                    selected_names.push(selected_name);
                     if !this.at(&Token::Comma) {
                         break;
                     }
                     this.advance();
                 }
                 this.expect(&Token::RParen)?;
-                ImportSpec::Only(names)
+                (ImportSpec::Only(names), selected_names)
             } else {
-                ImportSpec::All
+                (ImportSpec::All, Vec::new())
             };
             let end = this.current_start();
 
@@ -78,6 +81,7 @@ impl Parser<'_> {
                 module,
                 alias,
                 spec,
+                selected_names,
                 span: mk_span(start, end),
                 cst_id: this.current_cst_id(),
             })

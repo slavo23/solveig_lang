@@ -1,7 +1,7 @@
 //! Definition, reference, and symbol lookup over retained compiler artifacts.
 //! These queries keep semantic indexing in the driver while LSP stays a DTO boundary.
 
-use super::source_lookup::{source_file_id, span_contains_offset, span_len};
+use super::source_lookup::{is_atomic_source_span, source_file_id, span_contains_offset, span_len};
 use super::*;
 
 #[derive(Clone, Copy, Debug)]
@@ -116,9 +116,14 @@ pub(super) fn def_id_at_offset(
         }
     }
 
+    let source_file = artifacts.source_files.get(file_id.0 as usize);
     for resolutions in artifacts.resolutions.values() {
         for (span, def_id) in resolutions {
-            if span.file == file_id && span_contains_offset(&span.span.to_usize_range(), offset) {
+            if span.file == file_id
+                && source_file
+                    .is_some_and(|source_file| is_atomic_source_span(source_file, span.span))
+                && span_contains_offset(&span.span.to_usize_range(), offset)
+            {
                 consider_def_candidate(&mut best, *span, *def_id, 1);
             }
         }
@@ -166,6 +171,10 @@ pub(super) fn references_to_def(
                 continue;
             }
 
+            if !is_user_reference_span(artifacts, *span) {
+                continue;
+            }
+
             out.push(*span);
         }
     }
@@ -184,6 +193,13 @@ pub(super) fn is_declaration_span(
         .declaration_spans
         .iter()
         .any(|(decl_span, candidate)| *candidate == def_id && *decl_span == span)
+}
+
+fn is_user_reference_span(artifacts: &CompilationArtifacts, span: FileSpan) -> bool {
+    artifacts
+        .source_files
+        .get(span.file.0 as usize)
+        .is_some_and(|source_file| is_atomic_source_span(source_file, span.span))
 }
 
 fn push_matching_symbols(symbol: &SourceSymbol, query: &str, out: &mut Vec<SourceSymbol>) {

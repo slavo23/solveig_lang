@@ -20,7 +20,7 @@ impl Compilation {
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Option<HoverInfo> {
-        self.check(true).ok()?;
+        self.ensure_checked(true).ok()?;
         hover_at_position_in_artifacts(
             self.artifacts.as_ref()?,
             self.source_map(),
@@ -42,7 +42,7 @@ impl Compilation {
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Option<FileSpan> {
-        self.check(true).ok()?;
+        self.ensure_checked(true).ok()?;
         definition_at_position_in_artifacts(
             self.artifacts.as_ref()?,
             self.source_map(),
@@ -75,7 +75,7 @@ impl Compilation {
         encoding: PositionEncoding,
         include_declaration: bool,
     ) -> Option<Vec<FileSpan>> {
-        self.check(true).ok()?;
+        self.ensure_checked(true).ok()?;
         references_at_position_in_artifacts(
             self.artifacts.as_ref()?,
             self.source_map(),
@@ -88,7 +88,7 @@ impl Compilation {
 
     /// Checks the current project and returns hierarchical symbols for one source file.
     pub fn document_symbols(&mut self, file: impl AsRef<Path>) -> Vec<SourceSymbol> {
-        if !self.check(true).is_ok_and(CheckResult::success) {
+        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
             return Vec::new();
         }
 
@@ -101,7 +101,7 @@ impl Compilation {
 
     /// Checks the current project and returns project-wide symbols matching `query`.
     pub fn workspace_symbols(&mut self, query: &str) -> Vec<SourceSymbol> {
-        if !self.check(true).is_ok_and(CheckResult::success) {
+        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
             return Vec::new();
         }
 
@@ -114,7 +114,7 @@ impl Compilation {
 
     /// Checks the current project and returns semantic tokens for one source file.
     pub fn semantic_tokens(&mut self, file: impl AsRef<Path>) -> Vec<SourceSemanticToken> {
-        let _ = self.check(true);
+        let _ = self.ensure_checked(true);
 
         semantic_tokens_in_compilation(
             self.artifacts.as_ref(),
@@ -133,7 +133,7 @@ impl Compilation {
         encoding: PositionEncoding,
     ) -> Vec<SourceCodeAction> {
         if self.source_map().is_empty() {
-            let _ = self.check(true);
+            let _ = self.ensure_checked(true);
         }
 
         let Some(file_id) =
@@ -165,7 +165,7 @@ impl Compilation {
         encoding: PositionEncoding,
     ) -> Vec<SourceCompletionItem> {
         if self.source_map().is_empty() {
-            let _ = self.check(true);
+            let _ = self.ensure_checked(true);
         }
 
         completion_items_in_compilation(
@@ -184,7 +184,7 @@ impl Compilation {
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Vec<SourceDocumentHighlight> {
-        if !self.check(true).is_ok_and(CheckResult::success) {
+        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
             return Vec::new();
         }
 
@@ -203,7 +203,7 @@ impl Compilation {
 
     /// Checks the current project and returns foldable ranges for one source file.
     pub fn folding_ranges(&mut self, file: impl AsRef<Path>) -> Vec<SourceFoldingRange> {
-        let _ = self.check(true);
+        let _ = self.ensure_checked(true);
 
         folding_ranges_in_syntax_trees(self.source_map(), &self.syntax_trees, file.as_ref())
     }
@@ -215,7 +215,7 @@ impl Compilation {
         positions: &[SourcePosition],
         encoding: PositionEncoding,
     ) -> Vec<SourceSelectionRange> {
-        let _ = self.check(true);
+        let _ = self.ensure_checked(true);
 
         selection_ranges_in_syntax_trees(
             self.source_map(),
@@ -233,7 +233,7 @@ impl Compilation {
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Option<SourceSignatureHelp> {
-        if !self.check(true).is_ok_and(CheckResult::success) {
+        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
             return None;
         }
 
@@ -253,7 +253,7 @@ impl Compilation {
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Option<FileSpan> {
-        if !self.check(true).is_ok_and(CheckResult::success) {
+        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
             return None;
         }
 
@@ -274,7 +274,7 @@ impl Compilation {
         encoding: PositionEncoding,
         new_name: &str,
     ) -> Vec<SourceTextEdit> {
-        if !self.check(true).is_ok_and(CheckResult::success) {
+        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
             return Vec::new();
         }
 
@@ -294,7 +294,7 @@ impl Compilation {
 
     /// Checks the current project and returns module document links for one source file.
     pub fn document_links(&mut self, file: impl AsRef<Path>) -> Vec<SourceDocumentLink> {
-        if !self.check(true).is_ok_and(CheckResult::success) {
+        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
             return Vec::new();
         }
 
@@ -314,7 +314,7 @@ impl Compilation {
         encoding: PositionEncoding,
         config: SourceInlayHintConfig,
     ) -> Vec<SourceInlayHint> {
-        let _ = self.check(true);
+        let _ = self.ensure_checked(true);
 
         inlay_hints_in_compilation(
             self.source_map(),

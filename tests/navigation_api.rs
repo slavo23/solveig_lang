@@ -106,6 +106,24 @@ fn definition_covers_imported_semantic_targets() {
         &compilation,
         &main_file,
         &main_source,
+        "import hoverLib(documentedIncrement, Documented, MkDocumented, Describe)",
+        "documentedIncrement",
+        &main_source,
+        &lib_source,
+    );
+    assert_definition_text(
+        &compilation,
+        &main_file,
+        &main_source,
+        "import hoverLib(documentedIncrement, Documented, MkDocumented, Describe)",
+        "Describe",
+        &main_source,
+        &lib_source,
+    );
+    assert_definition_text(
+        &compilation,
+        &main_file,
+        &main_source,
         "topLevel n = documentedIncrement n",
         "documentedIncrement",
         &main_source,
@@ -184,8 +202,13 @@ fn references_are_project_wide_and_respect_declaration_toggle() {
         .references(&main_file, offset, true)
         .expect("references with declarations should exist");
 
-    assert_eq!(without_declaration.len(), 2);
+    assert_eq!(without_declaration.len(), 3);
     assert!(with_declaration.len() > without_declaration.len());
+    assert!(without_declaration.iter().any(|span| {
+        source_for_span(compilation.source_map(), *span, &main_source, &lib_source)
+            == "documentedIncrement"
+            && span.file == source_lookup_main_file_id(compilation.source_map(), &main_file)
+    }));
     assert!(without_declaration.iter().all(|span| source_for_span(
         compilation.source_map(),
         *span,
@@ -201,6 +224,17 @@ fn references_are_project_wide_and_respect_declaration_toggle() {
                     .expect("reference list should not be empty")
                     .file
     }));
+}
+
+fn source_lookup_main_file_id(source_map: &SourceMap, file: &Path) -> solveig_base::FileId {
+    source_map
+        .files()
+        .iter()
+        .enumerate()
+        .find_map(|(index, source)| {
+            (source.path == file).then_some(solveig_base::FileId(index as u32))
+        })
+        .expect("source map should contain main file")
 }
 
 #[test]

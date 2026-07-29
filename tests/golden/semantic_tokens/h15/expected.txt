@@ -1,10 +1,10 @@
 1:1-1:7 Keyword [-] `import`
 1:8-1:19 Namespace [-] `semanticLib`
-1:20-1:30 Type [-] `Documented`
-1:32-1:44 Type [-] `MkDocumented`
-1:46-1:54 Type [-] `Describe`
-1:56-1:64 Variable [-] `describe`
-1:66-1:85 Variable [-] `documentedIncrement`
+1:20-1:30 Type [Readonly] `Documented`
+1:32-1:44 EnumMember [Readonly] `MkDocumented`
+1:46-1:54 Class [Readonly] `Describe`
+1:56-1:64 Method [Readonly] `describe`
+1:66-1:85 Function [Readonly] `documentedIncrement`
 3:1-3:29 Comment [-] `-- semantic coverage comment`
 4:1-4:5 Keyword [-] `data`
 4:6-4:14 Type [Declaration|Definition] `LocalBox`

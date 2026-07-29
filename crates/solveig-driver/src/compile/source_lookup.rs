@@ -49,3 +49,12 @@ pub(super) fn span_contains_offset(span: &Range<usize>, offset: usize) -> bool {
 pub(super) fn span_len(span: &Range<usize>) -> usize {
     span.end.saturating_sub(span.start)
 }
+
+pub(super) fn is_atomic_source_span(source_file: &SourceFile, span: Span) -> bool {
+    let range = span.to_usize_range();
+    let Some(text) = source_file.src.get(range) else {
+        return false;
+    };
+
+    !text.is_empty() && !text.chars().any(char::is_whitespace)
+}

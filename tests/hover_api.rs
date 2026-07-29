@@ -150,6 +150,27 @@ fn hover_info_covers_h13_semantic_targets() {
         "imported function hover should include provenance: {imported:#?}"
     );
 
+    let import_list_function = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(
+                &main_source,
+                "import hoverLib(documentedIncrement, Documented, MkDocumented, Describe)",
+                "documentedIncrement",
+            ),
+        )
+        .expect("selected import function hover should exist");
+    assert_eq!(
+        import_list_function.signature(),
+        "documentedIncrement : Int -> Int"
+    );
+    assert!(
+        import_list_function
+            .provenance()
+            .is_some_and(|provenance| provenance.contains("hoverLib")),
+        "selected import hover should include provenance: {import_list_function:#?}"
+    );
+
     let imported_type = compilation
         .hover_info(
             &main_file,
@@ -214,6 +235,24 @@ fn hover_info_covers_h13_semantic_targets() {
         .expect("do-block expression hover should exist");
     assert_contains(do_expression.signature(), "Applicative f");
     assert_contains(do_expression.signature(), "pure :");
+    assert!(!do_expression.signature().contains("thenM"));
+    assert!(!do_expression.signature().contains("bind :"));
+
+    let do_local = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "    x <- Just 2", "x"),
+        )
+        .expect("do-block binder hover should exist");
+    assert_eq!(do_local.signature(), "x : Int");
+
+    let do_local_ref = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "    pure (x + y)", "x"),
+        )
+        .expect("do-block local reference hover should exist");
+    assert_eq!(do_local_ref.signature(), "x : Int");
 
     let module = compilation
         .hover_info(
@@ -232,4 +271,79 @@ fn hover_info_covers_h13_semantic_targets() {
             .is_some_and(|path| path.ends_with("tests/fixtures/hover/src/hoverLib.sv")),
         "module hover should include the imported path"
     );
+}
+
+#[test]
+fn hover_info_covers_local_declaration_sites() {
+    let project_root = fixture_root("tests/fixtures/hover");
+    let main_file = project_root.join("src/main.sv");
+    let main_source = fs::read_to_string(&main_file).expect("hover fixture source should load");
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation.check(true).expect("hover fixture should check");
+
+    assert!(
+        result.success(),
+        "hover fixture diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let function_param = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "topLevel n = documentedIncrement n", "n"),
+        )
+        .expect("function parameter declaration hover should exist");
+    assert_eq!(function_param.signature(), "n : Int");
+
+    let quiz_root = fixture_root("examples/quiz_game");
+    let quiz_file = quiz_root.join("src/main.sv");
+    let quiz_source = fs::read_to_string(&quiz_file).expect("quiz source should load");
+    let mut quiz = Compilation::new(&quiz_root);
+    let result = quiz.check(true).expect("quiz fixture should check");
+
+    assert!(
+        result.success(),
+        "quiz diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let lambda_line = "statePure value = State (fun state => MkPair value state)";
+    let lambda_offset = {
+        let line_start = quiz_source
+            .find(lambda_line)
+            .expect("quiz source should contain statePure lambda");
+        let param_start = lambda_line
+            .find("fun state")
+            .expect("lambda line should contain `fun state`")
+            + "fun ".len();
+        line_start + param_start
+    };
+    let lambda_param = quiz
+        .hover_info(&quiz_file, lambda_offset)
+        .expect("nested lambda parameter hover should exist");
+    assert_eq!(lambda_param.signature(), "state : s");
+
+    let question = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(
+                &quiz_source,
+                "        MkPair question answer => QuizCard question answer",
+                "question",
+            ),
+        )
+        .expect("case pattern variable hover should exist");
+    assert_eq!(question.signature(), "question : String");
+
+    let answer = quiz
+        .hover_info(
+            &quiz_file,
+            offset_in_line(
+                &quiz_source,
+                "        MkPair question answer => QuizCard question answer",
+                "answer",
+            ),
+        )
+        .expect("case pattern variable hover should exist");
+    assert_eq!(answer.signature(), "answer : String");
 }

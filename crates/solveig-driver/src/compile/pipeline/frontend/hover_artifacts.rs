@@ -4,6 +4,7 @@ struct RetainedFrontendArtifacts {
     module_display_names: FxHashMap<ModuleId, String>,
     module_paths: FxHashMap<ModuleId, PathBuf>,
     module_imports: Vec<(FileSpan, ModuleId)>,
+    import_name_resolutions: Vec<(ModuleId, FileSpan, DefId)>,
     source_symbols: Vec<SourceSymbol>,
 }
 
@@ -23,6 +24,7 @@ fn collect_retained_frontend_artifacts(
         module_display_names: collect_hover_module_display_names(session, project),
         module_paths: collect_hover_module_paths(project),
         module_imports: collect_hover_module_imports(project),
+        import_name_resolutions: collect_hover_import_name_resolutions(project, typed_apis),
         source_symbols: collect_source_symbols(session, project),
     }
 }
@@ -127,5 +129,73 @@ fn collect_hover_module_imports(project: &Project) -> Vec<(FileSpan, ModuleId)> 
     }
 
     out.sort_by_key(|(span, module)| (span.file, span.span.start, span.span.end, *module));
+    out
+}
+
+fn collect_hover_import_name_resolutions(
+    project: &Project,
+    typed_apis: &FxHashMap<ModuleName, SharedTypedModuleApi>,
+) -> Vec<(ModuleId, FileSpan, DefId)> {
+    let mut out = Vec::new();
+
+    for (module_name, module_file) in &project.modules {
+        let Some(module_id) = project.module_table.id(module_name) else {
+            continue;
+        };
+
+        for import in &module_file.imports {
+            let Some(imported_api) = typed_apis.get(&import.module) else {
+                continue;
+            };
+
+            for selected_name in &import.selected_names {
+                for def_id in typed_import_def_ids_for_name(imported_api, selected_name.0) {
+                    out.push((
+                        module_id,
+                        FileSpan::new(module_file.parsed.file, selected_name.1),
+                        def_id,
+                    ));
+                }
+            }
+        }
+    }
+
+    out.sort_by_key(|(module, span, def)| {
+        (
+            *module,
+            span.file,
+            span.span.start,
+            span.span.end,
+            def.module,
+            def.name,
+        )
+    });
+    out.dedup();
+    out
+}
+
+fn typed_import_def_ids_for_name(api: &TypedModuleApi, name: Symbol) -> Vec<DefId> {
+    let mut out = Vec::new();
+
+    out.extend(api.term_schemes.keys().copied().filter(|def| def.name == name));
+    out.extend(api.type_kinds.keys().copied().filter(|def| def.name == name));
+    out.extend(api.type_aliases.keys().copied().filter(|def| def.name == name));
+    out.extend(
+        api.constructor_types
+            .keys()
+            .copied()
+            .filter(|def| def.name == name),
+    );
+    out.extend(api.class_defs.keys().copied().filter(|def| def.name == name));
+    out.extend(api.class_defs.values().flat_map(|class_def| {
+        class_def
+            .methods
+            .iter()
+            .map(|method| method.id)
+            .filter(move |def| def.name == name)
+    }));
+
+    out.sort();
+    out.dedup();
     out
 }

@@ -92,6 +92,7 @@ pub struct ImportDecl {
     pub module: ModuleName,
     pub alias: Symbol,
     pub spec: ImportSpec,
+    pub selected_names: Vec<Spanned<Symbol>>,
     pub span: Span,
     pub cst_id: CstId,
 }

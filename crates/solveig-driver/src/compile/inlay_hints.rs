@@ -2,6 +2,8 @@
 
 use super::*;
 
+type CheckedExpr = TermExprNode<TcMetadata, Range<usize>>;
+
 pub(super) fn project_inlay_hints(
     session: &Session,
     project: &Project,
@@ -11,7 +13,7 @@ pub(super) fn project_inlay_hints(
     names: &Names,
     modules: &[CheckedModule],
 ) -> Vec<SourceInlayHint> {
-    let (tycon_table, class_table) = inlay_display_tables(modules);
+    let (tycon_table, _, class_table) = inlay_display_tables(modules);
     let tables = PrettyTables {
         names,
         tycons: &tycon_table,
@@ -40,6 +42,52 @@ pub(super) fn project_inlay_hints(
         left.file_span() == right.file_span()
             && left.category() == right.category()
             && left.label() == right.label()
+    });
+    out
+}
+
+pub(super) fn project_local_hovers(
+    session: &Session,
+    project: &Project,
+    parsed: &ParsedProject,
+    order: &[ModuleName],
+    checked: &FxHashMap<ModuleId, CheckedModule>,
+    names: &Names,
+    modules: &[CheckedModule],
+) -> Vec<HoverInfo> {
+    let (tycon_table, ctor_table, class_table) = inlay_display_tables(modules);
+    let tables = PrettyTables {
+        names,
+        tycons: &tycon_table,
+        classes: &class_table,
+    };
+    let mut out = Vec::new();
+
+    for module_name in order {
+        let Some(module_id) = project.module_table.id(module_name) else {
+            continue;
+        };
+        let Some(checked) = checked.get(&module_id) else {
+            continue;
+        };
+        let parsed = parsed.get(session, module_name);
+
+        collect_module_local_hovers(
+            session,
+            parsed,
+            module_id,
+            checked,
+            tables,
+            &ctor_table,
+            &mut out,
+        );
+    }
+
+    out.sort_by_key(local_hover_sort_key);
+    out.dedup_by(|left, right| {
+        left.file_span() == right.file_span()
+            && left.signature() == right.signature()
+            && left.documentation() == right.documentation()
     });
     out
 }
@@ -131,6 +179,57 @@ fn collect_module_inlay_hints(
     }
 }
 
+fn collect_module_local_hovers(
+    session: &Session,
+    parsed: &ParsedModule,
+    module_id: ModuleId,
+    checked: &CheckedModule,
+    tables: PrettyTables<'_>,
+    ctor_table: &CtorTable,
+    out: &mut Vec<HoverInfo>,
+) {
+    let checked_defs = checked
+        .func_defs
+        .iter()
+        .map(|def| (def.id, def))
+        .collect::<FxHashMap<_, _>>();
+
+    for defn in &parsed.defs {
+        let SurfaceDefinition::FunDef {
+            name, body, params, ..
+        } = &defn.0
+        else {
+            continue;
+        };
+        let def_id = DefId {
+            module: module_id,
+            name: name.0,
+        };
+        let Some(checked_def) = checked_defs.get(&def_id).copied() else {
+            continue;
+        };
+        let checked_body = collect_function_param_hovers(
+            session,
+            parsed.file,
+            params,
+            &checked_def.body,
+            tables,
+            out,
+        )
+        .unwrap_or_else(|| checked_body_without_function_params(&checked_def.body, params.len()));
+
+        collect_expr_local_hovers(
+            session,
+            parsed.file,
+            body,
+            checked_body,
+            tables,
+            ctor_table,
+            out,
+        );
+    }
+}
+
 fn push_inferred_signature_hint(
     file: FileId,
     name: &Spanned<Symbol>,
@@ -172,6 +271,35 @@ fn collect_function_param_hints<'a>(
                 SourceInlayHintKind::Type,
                 SourceInlayHintCategory::FunctionParameterType,
             ));
+        }
+
+        current = body;
+    }
+
+    Some(strip_checked_wrappers(current))
+}
+
+fn collect_function_param_hovers<'a>(
+    session: &Session,
+    file: FileId,
+    params: &[Spanned<Symbol>],
+    checked: &'a TermExprNode<TcMetadata, Range<usize>>,
+    tables: PrettyTables<'_>,
+    out: &mut Vec<HoverInfo>,
+) -> Option<&'a TermExprNode<TcMetadata, Range<usize>>> {
+    let mut current = checked;
+
+    for param in params {
+        current = strip_checked_wrappers(current);
+        let TermExpr::Abs(checked_name, checked_type, body) = &current.node else {
+            return None;
+        };
+        if checked_name != &*session.str(param.0) {
+            return None;
+        }
+
+        if let Some(ty) = checked_type {
+            push_local_hover(file, param.1, checked_name, ty, tables, out);
         }
 
         current = body;
@@ -263,6 +391,190 @@ fn collect_expr_inlay_hints(
     }
 }
 
+fn collect_expr_local_hovers(
+    session: &Session,
+    file: FileId,
+    surface: &Spanned<SurfaceExpr>,
+    checked: &TermExprNode<TcMetadata, Range<usize>>,
+    tables: PrettyTables<'_>,
+    ctor_table: &CtorTable,
+    out: &mut Vec<HoverInfo>,
+) {
+    let checked = strip_checked_wrappers(checked);
+
+    match (&surface.0, &checked.node) {
+        (SurfaceExpr::Abs(params, body), _) => {
+            if let Some(checked_body) =
+                collect_lambda_param_hovers(session, file, params, checked, tables, out)
+            {
+                collect_expr_local_hovers(
+                    session,
+                    file,
+                    body,
+                    checked_body,
+                    tables,
+                    ctor_table,
+                    out,
+                );
+            }
+        }
+        (
+            SurfaceExpr::Let(name, binder, body),
+            TermExpr::Let(checked_name, checked_binder, checked_body),
+        ) if checked_name == &*session.str(name.0) => {
+            push_local_hover(
+                file,
+                name.1,
+                checked_name,
+                &checked_binder.anno.inferred_type,
+                tables,
+                out,
+            );
+            collect_expr_local_hovers(
+                session,
+                file,
+                binder,
+                checked_binder,
+                tables,
+                ctor_table,
+                out,
+            );
+            collect_expr_local_hovers(session, file, body, checked_body, tables, ctor_table, out);
+        }
+        (SurfaceExpr::App(surface_func, surface_arg), TermExpr::App(checked_func, checked_arg)) => {
+            collect_expr_local_hovers(
+                session,
+                file,
+                surface_func,
+                checked_func,
+                tables,
+                ctor_table,
+                out,
+            );
+            collect_expr_local_hovers(
+                session,
+                file,
+                surface_arg,
+                checked_arg,
+                tables,
+                ctor_table,
+                out,
+            );
+        }
+        (SurfaceExpr::Ann(value, _), TermExpr::Anno(checked_value, _)) => {
+            collect_expr_local_hovers(session, file, value, checked_value, tables, ctor_table, out);
+        }
+        (SurfaceExpr::Ann(value, _), _) => {
+            collect_expr_local_hovers(session, file, value, checked, tables, ctor_table, out);
+        }
+        (
+            SurfaceExpr::IfThenElse(surface_cond, surface_then, surface_else),
+            TermExpr::IfThenElse(checked_cond, checked_then, checked_else),
+        ) => {
+            collect_expr_local_hovers(
+                session,
+                file,
+                surface_cond,
+                checked_cond,
+                tables,
+                ctor_table,
+                out,
+            );
+            collect_expr_local_hovers(
+                session,
+                file,
+                surface_then,
+                checked_then,
+                tables,
+                ctor_table,
+                out,
+            );
+            collect_expr_local_hovers(
+                session,
+                file,
+                surface_else,
+                checked_else,
+                tables,
+                ctor_table,
+                out,
+            );
+        }
+        (
+            SurfaceExpr::Case(surface_scrutinee, surface_arms),
+            TermExpr::Case(checked_scrutinee, checked_arms),
+        ) => {
+            collect_expr_local_hovers(
+                session,
+                file,
+                surface_scrutinee,
+                checked_scrutinee,
+                tables,
+                ctor_table,
+                out,
+            );
+            for (surface_arm, checked_arm) in surface_arms.iter().zip(checked_arms) {
+                collect_pattern_local_hovers(
+                    file,
+                    &checked_arm.node.pattern,
+                    &checked_scrutinee.anno.inferred_type,
+                    tables,
+                    ctor_table,
+                    out,
+                );
+                collect_expr_local_hovers(
+                    session,
+                    file,
+                    &surface_arm.0.expr,
+                    &checked_arm.node.expr,
+                    tables,
+                    ctor_table,
+                    out,
+                );
+            }
+        }
+        (SurfaceExpr::Do(statements), _) => {
+            collect_do_local_hovers(session, file, statements, checked, tables, ctor_table, out);
+        }
+        (
+            SurfaceExpr::OperatorApply(surface_lhs, _, surface_rhs),
+            TermExpr::App(checked_func, checked_rhs),
+        ) => {
+            if let TermExpr::App(_, checked_lhs) = &strip_checked_wrappers(checked_func).node {
+                collect_expr_local_hovers(
+                    session,
+                    file,
+                    surface_lhs,
+                    checked_lhs,
+                    tables,
+                    ctor_table,
+                    out,
+                );
+            }
+            collect_expr_local_hovers(
+                session,
+                file,
+                surface_rhs,
+                checked_rhs,
+                tables,
+                ctor_table,
+                out,
+            );
+        }
+        (SurfaceExpr::UnaryOperator(_, surface_rhs), TermExpr::App(_, checked_rhs)) => {
+            collect_expr_local_hovers(
+                session,
+                file,
+                surface_rhs,
+                checked_rhs,
+                tables,
+                ctor_table,
+                out,
+            );
+        }
+        _ => {}
+    }
+}
+
 fn collect_lambda_param_hints<'a>(
     session: &Session,
     file: FileId,
@@ -297,6 +609,353 @@ fn collect_lambda_param_hints<'a>(
     }
 
     Some(strip_checked_wrappers(current))
+}
+
+fn collect_lambda_param_hovers<'a>(
+    session: &Session,
+    file: FileId,
+    params: &[(Spanned<Symbol>, Option<Spanned<SurfaceTy>>)],
+    checked: &'a TermExprNode<TcMetadata, Range<usize>>,
+    tables: PrettyTables<'_>,
+    out: &mut Vec<HoverInfo>,
+) -> Option<&'a TermExprNode<TcMetadata, Range<usize>>> {
+    let mut current = checked;
+
+    for (param, _) in params {
+        current = strip_checked_wrappers(current);
+        let TermExpr::Abs(checked_name, checked_type, body) = &current.node else {
+            return None;
+        };
+        if checked_name != &*session.str(param.0) {
+            return None;
+        }
+
+        if let Some(ty) = checked_type {
+            push_local_hover(file, param.1, checked_name, ty, tables, out);
+        }
+
+        current = body;
+    }
+
+    Some(strip_checked_wrappers(current))
+}
+
+fn collect_do_local_hovers(
+    session: &Session,
+    file: FileId,
+    statements: &[Spanned<SurfaceDoStmt>],
+    checked: &TermExprNode<TcMetadata, Range<usize>>,
+    tables: PrettyTables<'_>,
+    ctor_table: &CtorTable,
+    out: &mut Vec<HoverInfo>,
+) {
+    let Some((first, rest)) = statements.split_first() else {
+        return;
+    };
+
+    if rest.is_empty() {
+        if let SurfaceDoStmt::Expr(expr) = &first.0 {
+            collect_expr_local_hovers(session, file, expr, checked, tables, ctor_table, out);
+        }
+        return;
+    }
+
+    let checked = strip_checked_wrappers(checked);
+    match &first.0 {
+        SurfaceDoStmt::Expr(expr) => {
+            if let Some((checked_expr, checked_rest)) = checked_binary_application_args(checked) {
+                collect_expr_local_hovers(
+                    session,
+                    file,
+                    expr,
+                    checked_expr,
+                    tables,
+                    ctor_table,
+                    out,
+                );
+                collect_do_local_hovers(session, file, rest, checked_rest, tables, ctor_table, out);
+            }
+        }
+        SurfaceDoStmt::Bind { binder, expr } => {
+            if let Some((checked_expr, checked_continuation)) =
+                checked_binary_application_args(checked)
+            {
+                collect_expr_local_hovers(
+                    session,
+                    file,
+                    expr,
+                    checked_expr,
+                    tables,
+                    ctor_table,
+                    out,
+                );
+
+                let checked_continuation = strip_checked_wrappers(checked_continuation);
+                if let TermExpr::Abs(checked_name, checked_type, checked_body) =
+                    &checked_continuation.node
+                {
+                    if checked_name == &*session.str(binder.0)
+                        && let Some(ty) = checked_type
+                    {
+                        push_local_hover(file, binder.1, checked_name, ty, tables, out);
+                        push_do_binder_reference_hovers(
+                            file,
+                            rest,
+                            binder.0,
+                            checked_name,
+                            ty,
+                            tables,
+                            out,
+                        );
+                    }
+                    collect_do_local_hovers(
+                        session,
+                        file,
+                        rest,
+                        checked_body,
+                        tables,
+                        ctor_table,
+                        out,
+                    );
+                }
+            }
+        }
+        SurfaceDoStmt::Let { binder, expr } => {
+            if let TermExpr::Let(checked_name, checked_binder, checked_body) = &checked.node {
+                if checked_name == &*session.str(binder.0) {
+                    push_local_hover(
+                        file,
+                        binder.1,
+                        checked_name,
+                        &checked_binder.anno.inferred_type,
+                        tables,
+                        out,
+                    );
+                    push_do_binder_reference_hovers(
+                        file,
+                        rest,
+                        binder.0,
+                        checked_name,
+                        &checked_binder.anno.inferred_type,
+                        tables,
+                        out,
+                    );
+                }
+                collect_expr_local_hovers(
+                    session,
+                    file,
+                    expr,
+                    checked_binder,
+                    tables,
+                    ctor_table,
+                    out,
+                );
+                collect_do_local_hovers(session, file, rest, checked_body, tables, ctor_table, out);
+            }
+        }
+    }
+}
+
+fn checked_binary_application_args(checked: &CheckedExpr) -> Option<(&CheckedExpr, &CheckedExpr)> {
+    let checked = strip_checked_wrappers(checked);
+    let TermExpr::App(func, second) = &checked.node else {
+        return None;
+    };
+    let func = strip_checked_wrappers(func);
+    let TermExpr::App(_, first) = &func.node else {
+        return None;
+    };
+
+    Some((first, second))
+}
+
+fn push_do_binder_reference_hovers(
+    file: FileId,
+    statements: &[Spanned<SurfaceDoStmt>],
+    symbol: Symbol,
+    name: &str,
+    ty: &Ty,
+    tables: PrettyTables<'_>,
+    out: &mut Vec<HoverInfo>,
+) {
+    for statement in statements {
+        match &statement.0 {
+            SurfaceDoStmt::Expr(expr) => {
+                push_expr_reference_hovers(file, expr, symbol, name, ty, tables, out);
+            }
+            SurfaceDoStmt::Bind { binder, expr } | SurfaceDoStmt::Let { binder, expr } => {
+                push_expr_reference_hovers(file, expr, symbol, name, ty, tables, out);
+                if binder.0 == symbol {
+                    break;
+                }
+            }
+        }
+    }
+}
+
+fn push_expr_reference_hovers(
+    file: FileId,
+    expr: &Spanned<SurfaceExpr>,
+    symbol: Symbol,
+    name: &str,
+    ty: &Ty,
+    tables: PrettyTables<'_>,
+    out: &mut Vec<HoverInfo>,
+) {
+    match &expr.0 {
+        SurfaceExpr::Var(name_ref) if name_ref.0.segments.as_slice() == [symbol] => {
+            push_local_hover(file, name_ref.1, name, ty, tables, out);
+        }
+        SurfaceExpr::App(lhs, rhs) | SurfaceExpr::OperatorApply(lhs, _, rhs) => {
+            push_expr_reference_hovers(file, lhs, symbol, name, ty, tables, out);
+            push_expr_reference_hovers(file, rhs, symbol, name, ty, tables, out);
+        }
+        SurfaceExpr::Abs(params, body) => {
+            if !params.iter().any(|(param, _)| param.0 == symbol) {
+                push_expr_reference_hovers(file, body, symbol, name, ty, tables, out);
+            }
+        }
+        SurfaceExpr::Ann(value, _)
+        | SurfaceExpr::UnaryOperator(_, value)
+        | SurfaceExpr::OperatorLeftSection(value, _)
+        | SurfaceExpr::OperatorRightSection(_, value) => {
+            push_expr_reference_hovers(file, value, symbol, name, ty, tables, out);
+        }
+        SurfaceExpr::Let(binder, value, body) => {
+            push_expr_reference_hovers(file, value, symbol, name, ty, tables, out);
+            if binder.0 != symbol {
+                push_expr_reference_hovers(file, body, symbol, name, ty, tables, out);
+            }
+        }
+        SurfaceExpr::Case(scrutinee, arms) => {
+            push_expr_reference_hovers(file, scrutinee, symbol, name, ty, tables, out);
+            for arm in arms {
+                if !pattern_binds_symbol(&arm.0.pattern, symbol) {
+                    push_expr_reference_hovers(file, &arm.0.expr, symbol, name, ty, tables, out);
+                }
+            }
+        }
+        SurfaceExpr::Do(statements) => {
+            push_do_binder_reference_hovers(file, statements, symbol, name, ty, tables, out);
+        }
+        SurfaceExpr::IfThenElse(cond, then_expr, else_expr) => {
+            push_expr_reference_hovers(file, cond, symbol, name, ty, tables, out);
+            push_expr_reference_hovers(file, then_expr, symbol, name, ty, tables, out);
+            push_expr_reference_hovers(file, else_expr, symbol, name, ty, tables, out);
+        }
+        SurfaceExpr::OpSeq(first, rest) => {
+            push_expr_reference_hovers(file, &first.expr, symbol, name, ty, tables, out);
+            for segment in rest {
+                push_expr_reference_hovers(file, &segment.rhs.expr, symbol, name, ty, tables, out);
+            }
+        }
+        SurfaceExpr::Unit
+        | SurfaceExpr::Literal(_)
+        | SurfaceExpr::Hole
+        | SurfaceExpr::Con(_)
+        | SurfaceExpr::Var(_) => {}
+    }
+}
+
+fn pattern_binds_symbol(pattern: &Spanned<SurfacePattern>, symbol: Symbol) -> bool {
+    match &pattern.0 {
+        SurfacePattern::Var(candidate) => *candidate == symbol,
+        SurfacePattern::Con(_, args) => args.iter().any(|arg| pattern_binds_symbol(arg, symbol)),
+        SurfacePattern::Lit(_) | SurfacePattern::Wild => false,
+    }
+}
+
+fn collect_pattern_local_hovers(
+    file: FileId,
+    pattern: &PatternNode<Range<usize>>,
+    expected_type: &Ty,
+    tables: PrettyTables<'_>,
+    ctor_table: &CtorTable,
+    out: &mut Vec<HoverInfo>,
+) {
+    match &pattern.node {
+        Pattern::Var(name) => push_local_hover(
+            file,
+            Span::from_usize_range(pattern.anno.clone()),
+            name,
+            expected_type,
+            tables,
+            out,
+        ),
+        Pattern::Con(ctor_id, args) => {
+            let field_types = ctor_table
+                .get(*ctor_id)
+                .and_then(|info| {
+                    specialized_constructor_field_types(&info.full_type, expected_type, args.len())
+                })
+                .unwrap_or_default();
+
+            for (arg, field_type) in args.iter().zip(field_types.iter()) {
+                collect_pattern_local_hovers(file, arg, field_type, tables, ctor_table, out);
+            }
+        }
+        Pattern::Lit(_) | Pattern::Wild => {}
+    }
+}
+
+fn specialized_constructor_field_types(
+    constructor_type: &Ty,
+    expected_result_type: &Ty,
+    arity: usize,
+) -> Option<Vec<Ty>> {
+    let (_, _, mut current) = constructor_type.peel_scheme_like();
+    let mut fields = Vec::with_capacity(arity);
+
+    for _ in 0..arity {
+        let Ty::TyArr(field_type, rest) = current else {
+            return None;
+        };
+        fields.push(*field_type);
+        current = *rest;
+    }
+
+    let mut subst = FxHashMap::<TyVarId, Ty>::default();
+    if !match_type_shape(&current, expected_result_type, &mut subst) {
+        return None;
+    }
+
+    Some(
+        fields
+            .into_iter()
+            .map(|field| apply_type_subst(field, &subst))
+            .collect(),
+    )
+}
+
+fn match_type_shape(expected: &Ty, actual: &Ty, subst: &mut FxHashMap<TyVarId, Ty>) -> bool {
+    match (expected, actual) {
+        (Ty::TyVar(id), _) => match subst.get(id) {
+            Some(existing) => existing == actual,
+            None => {
+                subst.insert(*id, actual.clone());
+                true
+            }
+        },
+        (Ty::TyUnit, Ty::TyUnit) => true,
+        (Ty::TyCon(expected), Ty::TyCon(actual)) => expected == actual,
+        (Ty::TyExVar(expected), Ty::TyExVar(actual)) => expected == actual,
+        (Ty::TyArr(expected_lhs, expected_rhs), Ty::TyArr(actual_lhs, actual_rhs))
+        | (Ty::TyApp(expected_lhs, expected_rhs), Ty::TyApp(actual_lhs, actual_rhs)) => {
+            match_type_shape(expected_lhs, actual_lhs, subst)
+                && match_type_shape(expected_rhs, actual_rhs, subst)
+        }
+        (Ty::TyForAll(_, _, _), _) => {
+            let (_, _, body) = expected.peel_scheme_like();
+            match_type_shape(&body, actual, subst)
+        }
+        _ => false,
+    }
+}
+
+fn apply_type_subst(ty: Ty, subst: &FxHashMap<TyVarId, Ty>) -> Ty {
+    subst.iter().fold(ty, |acc, (var, replacement)| {
+        acc.substitute(*var, replacement)
+    })
 }
 
 fn collect_textual_let_hints(
@@ -357,6 +1016,26 @@ fn push_let_binding_hint(
         format!(": {}", binder.anno.inferred_type.pretty_with_tables(tables)),
         SourceInlayHintKind::Type,
         SourceInlayHintCategory::LetBindingType,
+    ));
+}
+
+fn push_local_hover(
+    file: FileId,
+    span: Span,
+    name: &str,
+    ty: &Ty,
+    tables: PrettyTables<'_>,
+    out: &mut Vec<HoverInfo>,
+) {
+    if span.is_empty() {
+        return;
+    }
+
+    out.push(HoverInfo::new(
+        file,
+        span.to_usize_range(),
+        format!("{name} : {}", ty.pretty_with_tables(tables)),
+        None,
     ));
 }
 
@@ -444,8 +1123,9 @@ fn span_contains_position(span: Span, position: u32) -> bool {
     }
 }
 
-fn inlay_display_tables(modules: &[CheckedModule]) -> (TyConTable, ClassTable) {
+fn inlay_display_tables(modules: &[CheckedModule]) -> (TyConTable, CtorTable, ClassTable) {
     let mut tycon_table = TyConTable::new();
+    let mut ctor_table = CtorTable::new();
     let mut class_table = ClassTable::new();
 
     for module in modules {
@@ -453,12 +1133,16 @@ fn inlay_display_tables(modules: &[CheckedModule]) -> (TyConTable, ClassTable) {
             tycon_table.insert_with_id(id, info.clone());
         }
 
+        for (id, info) in module.ctor_table.iter() {
+            ctor_table.insert_with_id(id, info.clone());
+        }
+
         for (id, info) in module.class_table.iter() {
             class_table.insert_with_id(id, info.clone());
         }
     }
 
-    (tycon_table, class_table)
+    (tycon_table, ctor_table, class_table)
 }
 
 fn inlay_hint_sort_key(
@@ -472,5 +1156,16 @@ fn inlay_hint_sort_key(
         span.span.end,
         hint.category(),
         hint.label().to_string(),
+    )
+}
+
+fn local_hover_sort_key(hover: &HoverInfo) -> (FileId, usize, usize, String) {
+    let span = hover.file_span();
+
+    (
+        span.file,
+        hover.span().start,
+        hover.span().end,
+        hover.signature().to_string(),
     )
 }

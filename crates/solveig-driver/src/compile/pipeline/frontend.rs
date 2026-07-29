@@ -270,9 +270,37 @@ impl<'a> FrontendState<'a> {
             self.names,
             &modules,
         );
+        let local_hovers = inlay_hints::project_local_hovers(
+            self.session,
+            self.project,
+            self.parsed,
+            order,
+            &self.checked,
+            self.names,
+            &modules,
+        );
         let incremental_cache = self.capture_incremental_cache();
         let freshly_checked_modules = module_names_as_strings(self.session, &self.freshly_checked_modules);
         let reused_modules = module_names_as_strings(self.session, &self.reused_modules);
+        let mut resolutions = self.resolutions;
+        for (module_id, span, def_id) in artifacts.import_name_resolutions {
+            resolutions
+                .entry(module_id)
+                .or_default()
+                .push((span, def_id));
+        }
+        for entries in resolutions.values_mut() {
+            entries.sort_by_key(|(span, def)| {
+                (
+                    span.file,
+                    span.span.start,
+                    span.span.end,
+                    def.module,
+                    def.name,
+                )
+            });
+            entries.dedup();
+        }
 
         (
             CheckedProject {
@@ -282,11 +310,12 @@ impl<'a> FrontendState<'a> {
                 module_files: self.module_files,
                 source_files,
                 docs: artifacts.docs,
-                resolutions: self.resolutions,
+                resolutions,
                 declaration_spans: artifacts.declaration_spans,
                 module_display_names: artifacts.module_display_names,
                 module_paths: artifacts.module_paths,
                 module_imports: artifacts.module_imports,
+                local_hovers,
                 source_symbols: artifacts.source_symbols,
             },
             self.prelude_cache,

@@ -1,7 +1,7 @@
 //! Hover lookup over retained checked artifacts.
 //! The driver keeps enough table state here to render types after checking.
 
-use super::source_lookup::{source_file_id, span_contains_offset, span_len};
+use super::source_lookup::{is_atomic_source_span, source_file_id, span_contains_offset, span_len};
 use super::*;
 
 #[derive(Clone, Debug)]
@@ -44,6 +44,14 @@ fn hover_in_file_id(
     };
     let mut best = None;
 
+    for info in &artifacts.local_hovers {
+        if info.file_span().file != file_id || !span_contains_offset(&info.span(), offset) {
+            continue;
+        }
+
+        consider_hover_candidate(&mut best, 4, info.clone());
+    }
+
     for (span, module_id) in &artifacts.module_imports {
         if span.file != file_id || !span_contains_offset(&span.span.to_usize_range(), offset) {
             continue;
@@ -64,9 +72,14 @@ fn hover_in_file_id(
         }
     }
 
+    let source_file = artifacts.source_files.get(file_id.0 as usize);
     for resolutions in artifacts.resolutions.values() {
         for (span, def_id) in resolutions {
-            if span.file != file_id || !span_contains_offset(&span.span.to_usize_range(), offset) {
+            if span.file != file_id
+                || !source_file
+                    .is_some_and(|source_file| is_atomic_source_span(source_file, span.span))
+                || !span_contains_offset(&span.span.to_usize_range(), offset)
+            {
                 continue;
             }
 
@@ -284,6 +297,7 @@ fn hover_expr(
     offset: usize,
     best: &mut Option<HoverCandidate>,
 ) {
+    let expr = strip_hover_wrappers(expr);
     if !span_contains_offset(&expr.anno.span, offset) {
         return;
     }
@@ -330,6 +344,22 @@ fn hover_expr(
             hover_expr(file_id, binder, pretty_tables, offset, best);
             hover_expr(file_id, in_expr, pretty_tables, offset, best);
         }
+    }
+}
+
+fn strip_hover_wrappers(
+    expr: &TermExprNode<TcMetadata, Range<usize>>,
+) -> &TermExprNode<TcMetadata, Range<usize>> {
+    let mut current = expr;
+
+    loop {
+        current = match &current.node {
+            TermExpr::TyAbs(_, _, body)
+            | TermExpr::TyApp(body, _)
+            | TermExpr::EvAbs(_, _, body)
+            | TermExpr::EvApp(body, _) => body,
+            _ => return current,
+        };
     }
 }
 
