@@ -5,8 +5,8 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
 
 use lsp_types::{
-    CodeActionResponse, Diagnostic, DocumentSymbol, Hover, Location, Position, Range,
-    SemanticToken, SemanticTokens, SemanticTokensDelta, SemanticTokensEdit,
+    CodeActionResponse, CompletionResponse, Diagnostic, DocumentSymbol, Hover, Location, Position,
+    Range, SemanticToken, SemanticTokens, SemanticTokensDelta, SemanticTokensEdit,
     SemanticTokensFullDeltaResult, SymbolInformation, Url,
 };
 use solveig_base::{PositionEncoding, SourcePosition};
@@ -14,6 +14,7 @@ use solveig_driver::{Compilation, DriverError};
 use tokio::task::JoinHandle;
 
 use crate::code_actions::lsp_code_actions;
+use crate::completion::lsp_completion_items;
 use crate::diagnostics::{diagnostic_map, missing_entry_diagnostic};
 use crate::hover::lsp_hover;
 use crate::navigation::{lsp_document_symbols, lsp_location, lsp_symbol_information};
@@ -140,6 +141,18 @@ impl ServerState {
 
         self.workspace_for_path(&path)
             .references(&path, position, encoding, include_declaration)
+    }
+
+    pub(crate) fn completion(
+        &mut self,
+        uri: &Url,
+        position: Position,
+    ) -> Option<CompletionResponse> {
+        let path = uri.to_file_path().ok()?;
+        let encoding = self.encoding;
+
+        self.workspace_for_path(&path)
+            .completion(&path, position, encoding)
     }
 
     pub(crate) fn document_symbols(&mut self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
@@ -326,6 +339,25 @@ impl Workspace {
                     .filter_map(|span| lsp_location(span, self.compilation.source_map(), encoding))
                     .collect(),
             )
+        }))
+        .ok()
+        .flatten()
+    }
+
+    fn completion(
+        &mut self,
+        path: &Path,
+        position: Position,
+        encoding: PositionEncoding,
+    ) -> Option<CompletionResponse> {
+        catch_unwind(AssertUnwindSafe(|| {
+            let items = self.compilation.completion_items_at_position(
+                path,
+                SourcePosition::new(position.line, position.character),
+                encoding,
+            );
+
+            Some(CompletionResponse::Array(lsp_completion_items(&items)))
         }))
         .ok()
         .flatten()

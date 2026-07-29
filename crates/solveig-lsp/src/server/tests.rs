@@ -1,14 +1,14 @@
 use super::*;
 use lsp_types::{
     CodeActionContext, CodeActionKind, CodeActionOrCommand, CodeActionParams,
-    CodeActionProviderCapability, DocumentSymbolParams, DocumentSymbolResponse,
-    GeneralClientCapabilities, GotoDefinitionParams, GotoDefinitionResponse, HoverContents,
-    PartialResultParams, Position, Range, ReferenceContext, ReferenceParams, SemanticTokenType,
-    SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensFullOptions,
-    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-    WorkspaceFolder, WorkspaceSymbolParams,
+    CodeActionProviderCapability, CompletionItemKind, CompletionParams, CompletionResponse,
+    DocumentSymbolParams, DocumentSymbolResponse, GeneralClientCapabilities, GotoDefinitionParams,
+    GotoDefinitionResponse, HoverContents, PartialResultParams, Position, Range, ReferenceContext,
+    ReferenceParams, SemanticTokenType, SemanticTokensDeltaParams, SemanticTokensFullDeltaResult,
+    SemanticTokensFullOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams, WorkspaceFolder, WorkspaceSymbolParams,
 };
 use std::fs;
 use std::path::Path;
@@ -59,6 +59,11 @@ fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
     );
     assert_eq!(capabilities.definition_provider, Some(OneOf::Left(true)));
     assert_eq!(capabilities.references_provider, Some(OneOf::Left(true)));
+    let completion = capabilities
+        .completion_provider
+        .expect("completion provider should be advertised");
+    assert_eq!(completion.resolve_provider, Some(false));
+    assert_eq!(completion.trigger_characters, Some(vec![".".to_string()]));
     assert_eq!(
         capabilities.document_symbol_provider,
         Some(OneOf::Left(true))
@@ -99,6 +104,78 @@ fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
         options.full,
         Some(SemanticTokensFullOptions::Delta { delta: Some(true) })
     ));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn text_document_completion_returns_qualified_items() {
+    let project_root = temp_root("server_completion");
+    let source = project_root.join("scratch.sv");
+    let text = r#"main : Bool
+main = prelude.builtins.True
+"#;
+    write_source(&source, text);
+    let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+    let root_uri =
+        Url::from_directory_path(&project_root).expect("test root should become a file URI");
+    let (service, _socket) = LspService::new(LspServer::new);
+    let server = service.inner();
+
+    server
+        .initialize(InitializeParams {
+            root_uri: Some(root_uri),
+            capabilities: ClientCapabilities::default(),
+            ..InitializeParams::default()
+        })
+        .await
+        .expect("initialize should succeed");
+
+    server
+        .did_open(DidOpenTextDocumentParams {
+            text_document: TextDocumentItem {
+                uri: uri.clone(),
+                language_id: "solveig".to_string(),
+                version: 1,
+                text: text.to_string(),
+            },
+        })
+        .await;
+
+    let completion = server
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(1, 15),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .expect("completion request should succeed")
+        .expect("completion response should exist");
+    let CompletionResponse::Array(items) = completion else {
+        panic!("completion should return an item array");
+    };
+
+    let true_item = items
+        .iter()
+        .find(|item| item.label == "True")
+        .unwrap_or_else(|| panic!("missing True completion: {items:#?}"));
+    assert_eq!(true_item.kind, Some(CompletionItemKind::CONSTRUCTOR));
+    assert!(
+        true_item
+            .detail
+            .as_ref()
+            .is_some_and(|detail| detail.contains("Bool"))
+    );
+    assert!(
+        items
+            .iter()
+            .any(|item| item.label == "builtins" && item.kind == Some(CompletionItemKind::MODULE))
+    );
+
+    server.shutdown().await.expect("shutdown should succeed");
+    let _ = fs::remove_dir_all(project_root);
 }
 
 #[tokio::test(flavor = "current_thread")]

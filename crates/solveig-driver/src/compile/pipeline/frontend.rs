@@ -16,6 +16,7 @@ struct FrontendState<'a> {
     verify_core: bool,
     prelude_cache: Option<PreludeCache>,
     code_actions: Vec<SourceCodeAction>,
+    completion_candidates: Vec<SourceCompletionCandidate>,
     freshly_checked_modules: Vec<ModuleName>,
     reused_modules: Vec<ModuleName>,
 }
@@ -32,6 +33,7 @@ type FrontendRetained = (
     Option<PreludeCache>,
     Option<IncrementalCache>,
     Vec<SourceCodeAction>,
+    Vec<SourceCompletionCandidate>,
     Vec<String>,
     Vec<String>,
 );
@@ -238,6 +240,7 @@ impl<'a> FrontendState<'a> {
             verify_core,
             prelude_cache: prelude_cache.cloned(),
             code_actions: Vec::new(),
+            completion_candidates: Vec::new(),
             freshly_checked_modules: Vec::new(),
             reused_modules: Vec::new(),
         })
@@ -279,6 +282,7 @@ impl<'a> FrontendState<'a> {
             self.prelude_cache,
             Some(incremental_cache),
             self.code_actions,
+            self.completion_candidates,
             freshly_checked_modules,
             reused_modules,
         )
@@ -333,6 +337,19 @@ impl<'a> FrontendState<'a> {
                 self.apis[module_name].docs.clone(),
             ));
 
+            self.completion_candidates
+                .extend(completion::typed_module_completion_candidates(
+                    completion::TypedModuleCompletionInput {
+                        session: self.session,
+                        names: self.names,
+                        module_name,
+                        parsed,
+                        imports: &imports,
+                        local_api: &self.apis[module_name],
+                        local_typed_api: &typed_api,
+                        typed_apis: &self.typed_apis,
+                    },
+                ));
             self.typed_apis.insert(module_name.clone(), typed_api);
             self.module_files.insert(module_id, parsed.file);
             self.checked.insert(module_id, checked.clone());
@@ -522,6 +539,12 @@ impl<'a> FrontendState<'a> {
                 parsed,
                 module_id,
                 &checked_raw.module,
+                check_env.pretty_tables(),
+            ));
+        self.completion_candidates
+            .extend(completion::typed_local_completion_candidates(
+                &checked_raw.module,
+                file,
                 check_env.pretty_tables(),
             ));
 

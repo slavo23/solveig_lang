@@ -7,6 +7,7 @@ pub(super) struct CheckProjectOutcome {
     pub(super) checked_project: Option<CheckedProject>,
     pub(super) semantic_tokens: Vec<SourceSemanticToken>,
     pub(super) code_actions: Vec<SourceCodeAction>,
+    pub(super) completion_candidates: Vec<SourceCompletionCandidate>,
     pub(super) phase: Option<FrontendPhase>,
     pub(super) freshly_checked_modules: Vec<String>,
     pub(super) reused_modules: Vec<String>,
@@ -59,6 +60,7 @@ impl Compilation {
                     checked_project: None,
                     semantic_tokens: Vec::new(),
                     code_actions: Vec::new(),
+                    completion_candidates: Vec::new(),
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -66,12 +68,15 @@ impl Compilation {
             }
         };
         let semantic_tokens = syntax_semantic_tokens(&project);
+        let mut completion_candidates =
+            completion::syntax_completion_candidates(&self.session, &project);
 
         if self.session.diagnostics().has_errors() {
             return Ok(CheckProjectOutcome {
                 checked_project: None,
                 semantic_tokens,
                 code_actions: Vec::new(),
+                completion_candidates,
                 phase: Some(FrontendPhase::Parse),
                 freshly_checked_modules: Vec::new(),
                 reused_modules: Vec::new(),
@@ -86,6 +91,7 @@ impl Compilation {
                     checked_project: None,
                     semantic_tokens,
                     code_actions: Vec::new(),
+                    completion_candidates,
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -123,6 +129,7 @@ impl Compilation {
                     checked_project: None,
                     semantic_tokens,
                     code_actions: Vec::new(),
+                    completion_candidates,
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -137,9 +144,11 @@ impl Compilation {
             prelude_cache,
             incremental_cache,
             code_actions,
+            typed_completion_candidates,
             freshly_checked_modules,
             reused_modules,
         ) = state.into_checked_project(source_files, &order);
+        completion_candidates.extend(typed_completion_candidates);
         if let Some(prelude_cache) = prelude_cache {
             self.prelude_cache = Some(prelude_cache);
         }
@@ -151,6 +160,7 @@ impl Compilation {
             checked_project: Some(checked_project),
             semantic_tokens,
             code_actions,
+            completion_candidates,
             phase,
             freshly_checked_modules,
             reused_modules,

@@ -156,4 +156,24 @@ impl Compilation {
             Span::new(start, end),
         )
     }
+
+    /// Checks the current project and returns completion items visible at an editor position.
+    pub fn completion_items_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Vec<SourceCompletionItem> {
+        if self.source_map().is_empty() {
+            let _ = self.check(true);
+        }
+
+        completion_items_in_compilation(
+            self.source_map(),
+            &self.completion_candidates,
+            file.as_ref(),
+            position,
+            encoding,
+        )
+    }
 }

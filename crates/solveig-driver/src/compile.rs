@@ -20,10 +20,12 @@ use solveig_ast::ast::{
     BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_STRING_APPEND,
     BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
     BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinDefinition,
-    BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassTable, CtorId,
-    CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, Names, PRIM_TYS, Pretty, PrettyTables,
-    Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId, TyConTable, TyVarId, VarRef,
-    prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
+    BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassInfo, ClassTable,
+    CtorId, CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, Names, PRIM_TYS, Pattern,
+    PatternNode, Pretty, PrettyTables, Scheme, TermDefinition, TermExpr, TermExprNode, Ty,
+    TyConDefinition, TyConId, TyConInfo, TyConTable, TyVarId, VarRef,
+    compiler_bool_data_definition, prelude_list_tycon_id, prelude_maybe_tycon_id,
+    prelude_ordering_tycon_id,
 };
 use solveig_base::Span;
 use solveig_base::{Diagnostic, Severity, TypeError};
@@ -43,9 +45,9 @@ use solveig_lower::lowering::lower_module;
 use solveig_resolve::project::{
     BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleApi, ModuleContext,
     ModuleFile, ModuleTable, ParsedProject, Project, ResolveError, ResolveNameKind,
-    SharedModuleApi, SharedTypedModuleApi, TypeAlias, TypedDisplayMaps, build_module_api,
-    build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module, effective_imports,
-    module_order_checked, seed_compiler_prelude_module_api,
+    SharedModuleApi, SharedTypedModuleApi, TypeAlias, TypedDisplayMaps, TypedModuleApi,
+    build_module_api, build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module,
+    effective_imports, module_order_checked, seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::{
@@ -64,6 +66,7 @@ use crate::source_provider::SourceProvider;
 mod builtins;
 mod code_actions;
 mod compilation;
+mod completion;
 mod editor_api;
 mod evidence_dump;
 mod hover;
@@ -73,6 +76,7 @@ mod pipeline;
 mod semantic_tokens;
 mod show_entry;
 mod source_code_action;
+mod source_completion;
 mod source_lookup;
 mod source_semantic_token;
 mod source_symbol;
@@ -86,6 +90,7 @@ pub use compilation::{
     run_project_capture, run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
 };
 use compilation::{CheckedProject, CompilationArtifacts, PreludeCache};
+use completion::completion_items_in_compilation;
 use evidence_dump::dump_solved_evidence;
 use hover::{hover_at_position_in_artifacts, hover_in_artifacts};
 use incremental::IncrementalCache;
@@ -97,6 +102,8 @@ use pipeline::{FrontendPhase, merge_checked_modules, verify_lowering_core};
 use semantic_tokens::{semantic_tokens_in_compilation, syntax_semantic_tokens};
 use show_entry::{add_show_entry_wrapper, entry_returns_io};
 pub use source_code_action::{SourceCodeAction, SourceTextEdit};
+use source_completion::SourceCompletionCandidate;
+pub use source_completion::{SourceCompletionItem, SourceCompletionItemKind};
 pub use source_semantic_token::{
     SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
     SourceSemanticTokenModifiers,

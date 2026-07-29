@@ -116,7 +116,10 @@ project-wide `workspace/symbol` queries for Solveig declarations. Semantic
 tokens are available through `textDocument/semanticTokens/full` with whole-file
 delta responses. Quick fixes are available through `textDocument/codeAction`
 for typed-hole fills, missing instance method stubs, missing imports, and
-adding inferred type signatures.
+adding inferred type signatures. Completion is available through
+`textDocument/completion` for locals, current-module declarations, imported
+exports, constructors, class methods, keywords, and qualified module paths after
+`.`.
 
 Manual smoke test:
 
@@ -126,8 +129,8 @@ python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
 ```
 
 Expected output includes a negotiated `positionEncoding` and a `TC0005` type
-mismatch diagnostic with its LSP range. Completion, inlay hints, and
-editor-extension wiring are planned Phase H follow-ups.
+mismatch diagnostic with its LSP range. Inlay hints and editor-extension wiring
+are planned Phase H follow-ups.
 
 ## Project Layout
 
