@@ -2,12 +2,13 @@
 //! The parser consumes the significant tokens; later CST phases keep trivia.
 
 use logos::Logos;
+use text_size::{TextRange, TextSize};
 
 use solveig_base::{FileId, FileSpan, Span};
 
 use crate::ast::{Assoc, Fixity};
 
-#[derive(Logos, Debug, Clone, PartialEq)]
+#[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
 enum RawToken {
     // Keywords (must appear before identifiers).
     #[token("let")]
@@ -73,17 +74,17 @@ enum RawToken {
     #[token("`")]
     Backtick,
 
-    #[regex(r"[0-9]+((\.[0-9]+)([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)", |lex| lex.slice().parse::<f64>().ok())]
-    Float(f64),
+    #[regex(r"[0-9]+((\.[0-9]+)([eE][+-]?[0-9]+)?|[eE][+-]?[0-9]+)")]
+    Float,
 
-    #[regex(r#"'([^'\\\n]|\\(n|t|\\|'|"|u\{[0-9a-fA-F]{1,6}\}))'"#, |lex| parse_char_literal(lex.slice()))]
-    Char(char),
+    #[regex(r#"'([^'\\\n]|\\(n|t|\\|'|"|u\{[0-9a-fA-F]{1,6}\}))'"#)]
+    Char,
 
-    #[regex(r#""([^"\\\n]|\\(n|t|\\|'|"|u\{[0-9a-fA-F]{1,6}\}))*""#, |lex| parse_string_literal(lex.slice()))]
-    Str(String),
+    #[regex(r#""([^"\\\n]|\\(n|t|\\|'|"|u\{[0-9a-fA-F]{1,6}\}))*""#)]
+    Str,
 
-    #[regex(r"[0-9]+", |lex| lex.slice().parse::<i64>().ok())]
-    Int(i64),
+    #[regex(r"[0-9]+")]
+    Int,
 
     #[regex(r"[A-Z][a-zA-Z0-9_']*")]
     UpperIdent,
@@ -97,11 +98,10 @@ enum RawToken {
 
 // -- Positioned tokens ------------------------------------------------------
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PosToken {
     pub kind: Token,
-    pub start: usize,
-    pub end: usize,
+    pub range: TextRange,
     pub line: u32,
     pub col: u32,
     synthetic: bool,
@@ -111,8 +111,7 @@ impl PosToken {
     fn new(kind: Token, start: usize, end: usize, line: u32, col: u32) -> Self {
         Self {
             kind,
-            start,
-            end,
+            range: text_range(start, end),
             line,
             col,
             synthetic: false,
@@ -120,10 +119,10 @@ impl PosToken {
     }
 
     fn virtual_at(kind: Token, anchor: &Self) -> Self {
+        let anchor_start = anchor.range.start();
         Self {
             kind,
-            start: anchor.start,
-            end: anchor.start,
+            range: TextRange::new(anchor_start, anchor_start),
             line: anchor.line,
             col: anchor.col,
             synthetic: true,
@@ -134,21 +133,42 @@ impl PosToken {
         self.synthetic
     }
 
+    pub fn start(&self) -> usize {
+        text_size_to_usize(self.range.start())
+    }
+
+    pub fn end(&self) -> usize {
+        text_size_to_usize(self.range.end())
+    }
+
     pub fn source_text<'a>(&self, source: &'a str) -> &'a str {
         if self.synthetic {
             ""
         } else {
-            &source[self.start..self.end]
+            &source[self.start()..self.end()]
         }
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+fn text_range(start: usize, end: usize) -> TextRange {
+    TextRange::new(text_size(start), text_size(end))
+}
+
+fn text_size(offset: usize) -> TextSize {
+    let offset = u32::try_from(offset).expect("ICE: token offset exceeded u32 capacity");
+    TextSize::from(offset)
+}
+
+fn text_size_to_usize(offset: TextSize) -> usize {
+    u32::from(offset) as usize
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Token {
-    Int(i64),
-    Float(f64),
-    Char(char),
-    Str(String),
+    Int,
+    Float,
+    Char,
+    Str,
     Ident,
     UpperIdent,
 
@@ -232,79 +252,6 @@ pub struct LexError {
     pub line: u32,
     pub col: u32,
     pub message: String,
-}
-
-fn parse_string_literal(slice: &str) -> Option<String> {
-    let body = slice.strip_prefix('"')?.strip_suffix('"')?;
-    decode_escaped_body(body)
-}
-
-fn parse_char_literal(slice: &str) -> Option<char> {
-    let body = slice.strip_prefix('\'')?.strip_suffix('\'')?;
-    let decoded = decode_escaped_body(body)?;
-    let mut chars = decoded.chars();
-    let ch = chars.next()?;
-
-    if chars.next().is_none() {
-        Some(ch)
-    } else {
-        None
-    }
-}
-
-fn decode_escaped_body(body: &str) -> Option<String> {
-    let mut out = String::new();
-    let mut chars = body.chars();
-
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            out.push(decode_escape(&mut chars)?);
-        } else {
-            out.push(ch);
-        }
-    }
-
-    Some(out)
-}
-
-fn decode_escape(chars: &mut std::str::Chars<'_>) -> Option<char> {
-    match chars.next()? {
-        'n' => Some('\n'),
-        't' => Some('\t'),
-        '\\' => Some('\\'),
-        '\'' => Some('\''),
-        '"' => Some('"'),
-        'u' => decode_unicode_escape(chars),
-        _ => None,
-    }
-}
-
-fn decode_unicode_escape(chars: &mut std::str::Chars<'_>) -> Option<char> {
-    if chars.next()? != '{' {
-        return None;
-    }
-
-    let mut value = String::new();
-
-    loop {
-        let ch = chars.next()?;
-        if ch == '}' {
-            break;
-        }
-
-        if !ch.is_ascii_hexdigit() || value.len() == 6 {
-            return None;
-        }
-
-        value.push(ch);
-    }
-
-    if value.is_empty() {
-        return None;
-    }
-
-    let scalar = u32::from_str_radix(&value, 16).ok()?;
-    char::from_u32(scalar)
 }
 
 fn compute_line_starts(source: &str) -> Vec<usize> {
@@ -398,10 +345,10 @@ fn block_comment_end(source: &str, start: usize) -> usize {
 
 fn map_raw_token(raw: RawToken, slice: &str) -> Token {
     match raw {
-        RawToken::Int(n) => Token::Int(n),
-        RawToken::Float(n) => Token::Float(n),
-        RawToken::Char(ch) => Token::Char(ch),
-        RawToken::Str(value) => Token::Str(value),
+        RawToken::Int => Token::Int,
+        RawToken::Float => Token::Float,
+        RawToken::Char => Token::Char,
+        RawToken::Str => Token::Str,
         RawToken::Ident => Token::Ident,
         RawToken::UpperIdent => Token::UpperIdent,
 
@@ -572,7 +519,7 @@ pub fn insert_layout(tokens: &[PosToken]) -> Vec<PosToken> {
 
     for (index, token) in tokens.iter().enumerate() {
         if token.kind.is_trivia() {
-            out.push(token.clone());
+            out.push(*token);
             continue;
         }
 
@@ -637,7 +584,7 @@ pub fn insert_layout(tokens: &[PosToken]) -> Vec<PosToken> {
             }
         }
 
-        out.push(token.clone());
+        out.push(*token);
         prev_line = Some(token.line);
     }
 

@@ -85,7 +85,7 @@ fn hover_audit_for_lines(
             || token.kind.is_trivia()
             || !line_ranges
                 .iter()
-                .any(|(start, end)| *start <= token.start && token.end <= *end)
+                .any(|(start, end)| *start <= token.start() && token.end() <= *end)
         {
             continue;
         }
@@ -95,7 +95,7 @@ fn hover_audit_for_lines(
             continue;
         }
 
-        let signature = compilation.hover_info(file, token.start).map_or_else(
+        let signature = compilation.hover_info(file, token.start()).map_or_else(
             || "<none>".to_string(),
             |info| info.signature().replace('\n', "\\n"),
         );

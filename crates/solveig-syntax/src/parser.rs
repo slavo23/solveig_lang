@@ -1,44 +1,24 @@
-//! Recursive-descent parser for Solveig modules.
-//! Child parser modules split declarations, expressions, patterns, and types.
+//! Standalone recursive-descent parser for Solveig modules.
+//!
+//! This module consumes lexer tokens and emits a lossless CST event stream.
+//! AST construction happens later, during lowering.
 
-use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
+use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Span};
 
-use crate::ast::*;
-use crate::cst::{CstId, SyntaxTree};
+use crate::cst::SyntaxTree;
 use crate::lexer::{self, LexError, PosToken, Token};
 use crate::syntax::{Event, SyntaxKind};
 
-use lists::{
-    cons_pattern, int_pattern, list_expr, list_nil_expr, list_nil_pattern, list_pattern, list_ty,
-    literal_pattern,
-};
-
-type S<T> = Spanned<T>;
-
-type NameSpan = (Symbol, usize, usize);
-
-type LambdaParam = (S<Symbol>, Option<S<SurfaceTy>>);
-
-const DUMMY_SYMBOL: Symbol = Symbol(u32::MAX);
+mod decl;
+mod expr;
+mod module;
+mod name_path;
+mod operators;
+mod pattern;
+mod ty;
 
 fn mk_span(start: usize, end: usize) -> Span {
     Span::from_usize_range(start..end)
-}
-
-fn sp<T>(value: T, start: usize, end: usize, cst_id: CstId) -> S<T> {
-    (value, mk_span(start, end), cst_id)
-}
-
-fn span_start<T>(spanned: &S<T>) -> usize {
-    spanned.1.start as usize
-}
-
-fn span_end<T>(spanned: &S<T>) -> usize {
-    spanned.1.end as usize
-}
-
-fn merge_span<T, U>(start: &S<T>, end: &S<U>) -> (usize, usize) {
-    (span_start(start), span_end(end))
 }
 
 fn is_ctor_like(name: &str) -> bool {
@@ -79,76 +59,66 @@ impl IntoDiagnostic for &ParseError {
     }
 }
 
-pub struct Parser<'a> {
-    /// `None` during session-free CST parsing; `Some` only while reusing the
-    /// parser routines to lower an already-built CST into the symbolized AST.
-    lowering_session: Option<&'a Session>,
+#[derive(Clone)]
+struct NamePathFacts {
+    text: String,
+    last_segment: String,
+    segment_count: usize,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DoStatementKind {
+    Bind,
+    Let,
+    Expr,
+}
+
+#[derive(Clone, Copy)]
+struct DoStatementFacts {
+    kind: DoStatementKind,
+    start: usize,
+    end: usize,
+}
+
+#[cfg(test)]
+pub(crate) struct ParsedEvents {
+    pub(crate) tokens: Vec<PosToken>,
+    pub(crate) events: Vec<Event>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ParsedCst {
+    pub file: FileId,
+    pub cst: SyntaxTree,
+    pub tokens: Vec<PosToken>,
+    pub diagnostics: Vec<Diagnostic>,
+}
+
+struct Parser<'source> {
     file: FileId,
-    source: &'a str,
+    source: &'source str,
     tokens: Vec<PosToken>,
-    cst: Option<&'a SyntaxTree>,
     events: Vec<Event>,
     diagnostics: Vec<Diagnostic>,
     pos: usize,
-    emit_events: bool,
-    report_diagnostics: bool,
-    cst_nodes: Vec<(CstId, SyntaxKind)>,
-    next_node: usize,
-    node_stack: Vec<CstId>,
-    last_finished_node: Option<CstId>,
 }
 
 #[derive(Clone, Copy)]
 struct ParserCheckpoint {
     pos: usize,
     events_len: usize,
-    next_node: usize,
-    node_stack_len: usize,
-    last_finished_node: Option<CstId>,
+    diagnostics_len: usize,
 }
 
-pub(crate) struct ParsedEvents {
-    pub(crate) tokens: Vec<PosToken>,
-    pub(crate) events: Vec<Event>,
-    pub(crate) diagnostics: Vec<Diagnostic>,
-}
-
-impl<'a> Parser<'a> {
-    pub fn new(file: FileId, source: &'a str, tokens: Vec<PosToken>) -> Self {
+impl<'source> Parser<'source> {
+    fn new(file: FileId, source: &'source str, tokens: Vec<PosToken>) -> Self {
         Self {
-            lowering_session: None,
             file,
             source,
             tokens,
-            cst: None,
             events: Vec::new(),
             diagnostics: Vec::new(),
             pos: 0,
-            emit_events: true,
-            report_diagnostics: true,
-            cst_nodes: Vec::new(),
-            next_node: 0,
-            node_stack: Vec::new(),
-            last_finished_node: None,
-        }
-    }
-
-    fn from_cst(session: &'a Session, file: FileId, source: &'a str, cst: &'a SyntaxTree) -> Self {
-        Self {
-            lowering_session: Some(session),
-            file,
-            source,
-            tokens: cst.tokens().to_vec(),
-            cst: Some(cst),
-            events: Vec::new(),
-            diagnostics: Vec::new(),
-            pos: 0,
-            emit_events: false,
-            report_diagnostics: false,
-            cst_nodes: cst.nodes().map(|(id, node)| (id, node.kind())).collect(),
-            next_node: 0,
-            node_stack: Vec::new(),
-            last_finished_node: None,
         }
     }
 
@@ -156,76 +126,22 @@ impl<'a> Parser<'a> {
         ParserCheckpoint {
             pos: self.pos,
             events_len: self.events.len(),
-            next_node: self.next_node,
-            node_stack_len: self.node_stack.len(),
-            last_finished_node: self.last_finished_node,
+            diagnostics_len: self.diagnostics.len(),
         }
     }
 
     fn restore(&mut self, checkpoint: ParserCheckpoint) {
         self.pos = checkpoint.pos;
         self.events.truncate(checkpoint.events_len);
-        self.next_node = checkpoint.next_node;
-        self.node_stack.truncate(checkpoint.node_stack_len);
-        self.last_finished_node = checkpoint.last_finished_node;
+        self.diagnostics.truncate(checkpoint.diagnostics_len);
     }
 
-    fn start_node(&mut self, kind: SyntaxKind) -> CstId {
-        let cst_id = if self.cst_nodes.is_empty() {
-            CstId::new(self.next_node)
-        } else {
-            match self.cst_nodes.get(self.next_node).copied() {
-                Some((cst_id, cst_kind)) if cst_kind == kind => {
-                    self.next_node += 1;
-                    cst_id
-                }
-                Some((cst_id, _)) => self.node_stack.last().copied().unwrap_or(cst_id),
-                None => *self
-                    .node_stack
-                    .last()
-                    .expect("ICE: AST lowering visited past CST root scope"),
-            }
-        };
-
-        if self.cst_nodes.is_empty() {
-            self.next_node += 1;
-        }
-        self.node_stack.push(cst_id);
-        self.last_finished_node = None;
-
-        if self.emit_events {
-            self.events.push(Event::StartNode(kind));
-        }
-
-        cst_id
+    fn start_node(&mut self, kind: SyntaxKind) {
+        self.events.push(Event::StartNode(kind));
     }
 
     fn finish_node(&mut self) {
-        let cst_id = self
-            .node_stack
-            .pop()
-            .expect("ICE: parser finished a syntax node without starting one");
-        self.last_finished_node = Some(cst_id);
-
-        if self.emit_events {
-            self.events.push(Event::FinishNode);
-        }
-    }
-
-    fn current_cst_id(&self) -> CstId {
-        *self
-            .node_stack
-            .last()
-            .expect("ICE: parser built AST outside a syntax node")
-    }
-
-    fn completed_cst_id(&self) -> CstId {
-        self.last_finished_node
-            .expect("ICE: parser expected a completed syntax node")
-    }
-
-    fn sp<T>(&self, value: T, start: usize, end: usize) -> S<T> {
-        sp(value, start, end, self.current_cst_id())
+        self.events.push(Event::FinishNode);
     }
 
     fn node<T>(
@@ -277,6 +193,11 @@ impl<'a> Parser<'a> {
             .map(|(index, _)| index)
     }
 
+    fn previous_consumed_significant_token(&self) -> Option<&PosToken> {
+        self.previous_significant_index(self.pos)
+            .map(|index| &self.tokens[index])
+    }
+
     fn peek_kind(&self, offset: usize) -> Option<&Token> {
         self.significant_index_from(self.pos, offset)
             .map(|index| &self.tokens[index].kind)
@@ -284,9 +205,7 @@ impl<'a> Parser<'a> {
 
     fn emit_remaining_tokens(&mut self) {
         while self.pos < self.tokens.len() {
-            if self.emit_events {
-                self.events.push(Event::Token(self.pos));
-            }
+            self.events.push(Event::Token(self.pos));
             self.pos += 1;
         }
     }
@@ -300,7 +219,7 @@ impl<'a> Parser<'a> {
     }
 
     fn current_start(&self) -> usize {
-        self.current().start
+        self.current().start()
     }
 
     fn at(&self, token: &Token) -> bool {
@@ -313,27 +232,24 @@ impl<'a> Parser<'a> {
 
     fn advance(&mut self) -> PosToken {
         if self.pos >= self.tokens.len() {
-            return self
+            return *self
                 .tokens
                 .last()
-                .expect("ICE: parser token stream must contain EOF")
-                .clone();
+                .expect("ICE: parser token stream must contain EOF");
         }
 
         let index = self.current_index();
         for token_index in self.pos..=index {
-            if self.emit_events {
-                self.events.push(Event::Token(token_index));
-            }
+            self.events.push(Event::Token(token_index));
         }
         self.pos = index + 1;
 
-        self.tokens[index].clone()
+        self.tokens[index]
     }
 
     fn current_span(&self) -> FileSpan {
         let token = self.current();
-        FileSpan::new(self.file, mk_span(token.start, token.end))
+        FileSpan::new(self.file, mk_span(token.start(), token.end()))
     }
 
     fn error(&self, message: impl Into<String>) -> ParseError {
@@ -345,15 +261,8 @@ impl<'a> Parser<'a> {
 
     fn push_error_diagnostic(&mut self, error: &ParseError) -> Diagnostic {
         let diagnostic = error.to_diagnostic();
-        if self.report_diagnostics {
-            self.diagnostics.push(diagnostic.clone());
-        }
+        self.diagnostics.push(diagnostic.clone());
         diagnostic
-    }
-
-    pub(super) fn intern(&self, text: &str) -> Symbol {
-        self.lowering_session
-            .map_or(DUMMY_SYMBOL, |session| session.intern(text))
     }
 
     fn token_source_text(&self, token: &PosToken) -> &str {
@@ -364,21 +273,6 @@ impl<'a> Parser<'a> {
         self.token_source_text(self.current())
     }
 
-    fn spanned_source_text<T>(&self, spanned: &S<T>) -> &str {
-        self.source.get(spanned.1.to_usize_range()).unwrap_or("")
-    }
-
-    fn name_ref_source_text(&self, name_ref: &S<NameRef>) -> &str {
-        self.spanned_source_text(name_ref)
-    }
-
-    fn name_ref_last_source_text(&self, name_ref: &S<NameRef>) -> &str {
-        self.name_ref_source_text(name_ref)
-            .rsplit('.')
-            .next()
-            .unwrap_or("")
-    }
-
     fn describe_current(&self) -> String {
         match self.current_kind() {
             Token::Ident => format!("identifier `{}`", self.current_source_text()),
@@ -386,10 +280,10 @@ impl<'a> Parser<'a> {
             Token::Operator => format!("operator `{}`", self.current_source_text()),
             Token::ReservedOp => format!("reserved operator `{}`", self.current_source_text()),
             Token::Backtick => "`".to_string(),
-            Token::Int(value) => format!("integer literal `{value}`"),
-            Token::Float(value) => format!("float literal `{value}`"),
-            Token::Char(value) => format!("char literal `{value}`"),
-            Token::Str(_) => "string literal".to_string(),
+            Token::Int => format!("integer literal `{}`", self.current_source_text()),
+            Token::Float => format!("float literal `{}`", self.current_source_text()),
+            Token::Char => format!("char literal `{}`", self.current_source_text()),
+            Token::Str => "string literal".to_string(),
             other => format!("{other:?}"),
         }
     }
@@ -406,12 +300,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_ident(&mut self) -> Result<NameSpan, ParseError> {
+    fn expect_ident_span(&mut self) -> Result<(), ParseError> {
         match self.current_kind() {
             Token::Ident => {
-                let token = self.advance();
-                let name = self.intern(self.token_source_text(&token));
-                Ok((name, token.start, token.end))
+                self.advance();
+                Ok(())
             }
             _ => Err(self.error(format!(
                 "expected identifier, got {}",
@@ -420,12 +313,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_upper(&mut self) -> Result<NameSpan, ParseError> {
+    fn expect_upper_span(&mut self) -> Result<(), ParseError> {
         match self.current_kind() {
             Token::UpperIdent => {
-                let token = self.advance();
-                let name = self.intern(self.token_source_text(&token));
-                Ok((name, token.start, token.end))
+                self.advance();
+                Ok(())
             }
             _ => Err(self.error(format!(
                 "expected constructor, got {}",
@@ -434,12 +326,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_module_name_segment(&mut self) -> Result<Symbol, ParseError> {
+    fn expect_module_name_segment(&mut self) -> Result<(), ParseError> {
         match self.current_kind() {
             Token::Ident | Token::UpperIdent => {
-                let token = self.advance();
-                let name = self.intern(self.token_source_text(&token));
-                Ok(name)
+                self.advance();
+                Ok(())
             }
             _ => Err(self.error(format!(
                 "expected module name, got {}",
@@ -448,12 +339,11 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn expect_import_name_segment(&mut self) -> Result<NameSpan, ParseError> {
+    fn expect_import_name_segment(&mut self) -> Result<(), ParseError> {
         match self.current_kind() {
             Token::Ident | Token::UpperIdent => {
-                let token = self.advance();
-                let name = self.intern(self.token_source_text(&token));
-                Ok((name, token.start, token.end))
+                self.advance();
+                Ok(())
             }
             _ => Err(self.error(format!(
                 "expected import name, got {}",
@@ -489,17 +379,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn current_operator_symbol(&self) -> Option<(Symbol, bool)> {
-        self.current_operator_text()
-            .map(|(text, is_cons_syntax)| (self.intern(text), is_cons_syntax))
-    }
-
     fn is_infix_operator(&self) -> bool {
-        self.current_operator_symbol().is_some() || self.starts_backticked_operator_name()
+        self.current_operator_text().is_some() || self.starts_backticked_operator_name()
     }
 
-    fn expect_operator_symbol(&mut self, allow_cons_syntax: bool) -> Result<NameSpan, ParseError> {
-        let Some((symbol, is_cons_syntax)) = self.current_operator_symbol() else {
+    fn expect_operator_span(&mut self, allow_cons_syntax: bool) -> Result<(), ParseError> {
+        let Some((operator_text, is_cons_syntax)) = self.current_operator_text() else {
             return Err(self.error(format!(
                 "expected operator, got {}",
                 self.describe_current()
@@ -510,27 +395,21 @@ impl<'a> Parser<'a> {
             return Err(self.error("list cons `::` is reserved syntax, not an operator name"));
         }
 
-        let text = self
-            .current_operator_text()
-            .map(|(text, _)| text)
-            .expect("ICE: current operator text disappeared after symbol lookup");
-        let is_reserved_constructor_operator = text.starts_with(':') && !is_cons_syntax;
-
-        if is_reserved_constructor_operator {
+        if operator_text.starts_with(':') && !is_cons_syntax {
             return Err(self.error(
                 "operators starting with `:` are reserved for future constructor operators",
             ));
         }
 
-        let token = self.advance();
-        Ok((symbol, token.start, token.end))
+        self.advance();
+        Ok(())
     }
 
-    fn parse_parenthesized_operator_name(&mut self) -> Result<NameSpan, ParseError> {
-        let start = self.expect(&Token::LParen)?.start;
-        let (symbol, _, _) = self.expect_operator_symbol(false)?;
-        let end = self.expect(&Token::RParen)?.end;
-        Ok((symbol, start, end))
+    fn parse_parenthesized_operator_name(&mut self) -> Result<(), ParseError> {
+        self.expect(&Token::LParen)?;
+        self.expect_operator_span(false)?;
+        self.expect(&Token::RParen)?;
+        Ok(())
     }
 
     fn starts_parenthesized_operator_name(&self) -> bool {
@@ -547,35 +426,27 @@ impl<'a> Parser<'a> {
             .is_some_and(|kind| matches!(kind, Token::RParen))
     }
 
-    fn expect_value_name(&mut self) -> Result<NameSpan, ParseError> {
+    fn expect_value_name(&mut self) -> Result<(), ParseError> {
         if self.starts_parenthesized_operator_name() {
             self.parse_parenthesized_operator_name()
         } else {
-            self.expect_ident()
+            self.expect_ident_span()
         }
     }
 
-    fn parse_import_name(&mut self) -> Result<S<Symbol>, ParseError> {
-        let (symbol, start, end) = if self.starts_parenthesized_operator_name() {
-            self.parse_parenthesized_operator_name()?
+    fn parse_import_name(&mut self) -> Result<(), ParseError> {
+        if self.starts_parenthesized_operator_name() {
+            self.parse_parenthesized_operator_name()
         } else {
-            self.expect_import_name_segment()?
-        };
-
-        Ok(self.sp(symbol, start, end))
+            self.expect_import_name_segment()
+        }
     }
 
-    fn expect_binder(&mut self) -> Result<NameSpan, ParseError> {
+    fn expect_binder_span(&mut self) -> Result<(), ParseError> {
         match self.current_kind() {
-            Token::Ident => {
-                let token = self.advance();
-                let name = self.intern(self.token_source_text(&token));
-                Ok((name, token.start, token.end))
-            }
-            Token::Underscore => {
-                let underscore = self.intern("_");
-                let token = self.advance();
-                Ok((underscore, token.start, token.end))
+            Token::Ident | Token::Underscore => {
+                self.advance();
+                Ok(())
             }
             _ => Err(self.error(format!("expected binder, got {}", self.describe_current()))),
         }
@@ -673,84 +544,40 @@ impl<'a> Parser<'a> {
     fn recover_top_level_as_error_node(&mut self, error: &ParseError) {
         let diagnostic = self.push_error_diagnostic(error);
         self.start_node(SyntaxKind::Error);
-        if self.emit_events {
-            self.events.push(Event::Error(diagnostic));
-        }
+        self.events.push(Event::Error(diagnostic));
         self.recover_top_level();
         self.finish_node();
     }
 }
 
-mod decl;
-mod docs;
-mod expr;
-mod lists;
-mod module;
-mod name_path;
-mod operators;
-mod pattern;
 #[cfg(test)]
-mod tests;
-mod ty;
-
-fn parse_source_events(file: FileId, source: &str) -> Result<ParsedEvents, ParseError> {
+pub(crate) fn parse_source_events(file: FileId, source: &str) -> Result<ParsedEvents, ParseError> {
     let tokens = lexer::lex(file, source)?;
     let mut parser = Parser::new(file, source, tokens);
-    let _ = parser.parse_module_surface();
+    parser.parse_module_surface();
     Ok(ParsedEvents {
         tokens: parser.tokens,
         events: parser.events,
-        diagnostics: parser.diagnostics,
     })
 }
 
-pub fn parse_cst(file: FileId, source: &str) -> Result<(SyntaxTree, Vec<Diagnostic>), ParseError> {
-    let parsed = parse_source_events(file, source)?;
-    Ok((
-        SyntaxTree::from_events(file, parsed.tokens, &parsed.events),
-        parsed.diagnostics,
-    ))
-}
-
-pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
-    let (cst, diagnostics) = match parse_cst(file, source) {
-        Ok((cst, diagnostics)) => (cst, diagnostics),
-        Err(error) => {
-            let diagnostic = error.to_diagnostic();
-            session.diagnostics().push(diagnostic.clone());
-            let events = vec![
-                Event::StartNode(SyntaxKind::Module),
-                Event::Error(diagnostic),
-                Event::FinishNode,
-            ];
-            let cst = SyntaxTree::from_events(file, Vec::new(), &events);
-
-            return ParsedModule {
-                file,
-                cst,
-                imports: Vec::new(),
-                defs: Vec::new(),
-            };
-        }
-    };
-    for diagnostic in diagnostics {
-        session.diagnostics().push(diagnostic);
-    }
-
-    let mut parser = Parser::from_cst(session, file, source, &cst);
-    let (imports, defs) = parser.parse_module_surface();
-    if !parser.cst_nodes.is_empty() {
-        assert_eq!(
-            parser.next_node,
-            parser.cst_nodes.len(),
-            "ICE: AST lowering did not visit every CST node"
-        );
-    }
-
-    ParsedModule {
+pub fn parse(file: FileId, source: &str, tokens: &[PosToken]) -> ParsedCst {
+    let mut parser = Parser::new(file, source, tokens.to_vec());
+    parser.parse_module_surface();
+    let cst = SyntaxTree::from_events(file, parser.tokens.clone(), &parser.events);
+    ParsedCst {
         file,
         cst,
-        imports,
-        defs,
+        tokens: parser.tokens,
+        diagnostics: parser.diagnostics,
     }
 }
+
+pub fn parse_cst(file: FileId, source: &str) -> Result<(SyntaxTree, Vec<Diagnostic>), ParseError> {
+    let tokens = lexer::lex(file, source)?;
+    let parsed = parse(file, source, &tokens);
+    Ok((parsed.cst, parsed.diagnostics))
+}
+
+#[cfg(test)]
+mod tests;

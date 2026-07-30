@@ -1,0 +1,237 @@
+//! Pattern parser for function equations, case arms, and bindings.
+//! Later checker passes lower these patterns into coverage matrices.
+
+use super::*;
+
+impl AstLowerer<'_> {
+    pub(super) fn parse_pattern(&mut self) -> Result<Spanned<SurfacePattern>, ParseError> {
+        self.node(SyntaxKind::Pattern, |this| {
+            let head = this.parse_pattern_head()?;
+            if this.starts_backticked_constructor_name() {
+                let (ctor, start, end) = this.parse_backticked_constructor_name()?;
+                let rhs = this.parse_pattern()?;
+                let ctor = this.sp(
+                    NameRef {
+                        segments: vec![ctor],
+                    },
+                    start,
+                    end,
+                );
+                let span_start = span_start(&head);
+                let span_end = span_end(&rhs);
+                Ok(this.sp(
+                    SurfacePattern::Con(ctor, vec![head, rhs]),
+                    span_start,
+                    span_end,
+                ))
+            } else if this.at(&Token::Cons) {
+                let cons = this.advance();
+                let tail = this.parse_pattern()?;
+                Ok(cons_pattern(
+                    this,
+                    head,
+                    tail,
+                    cons.start(),
+                    cons.end(),
+                    this.current_cst_id(),
+                ))
+            } else {
+                Ok(head)
+            }
+        })
+    }
+
+    fn starts_backticked_constructor_name(&self) -> bool {
+        self.at(&Token::Backtick)
+            && matches!(self.peek_kind(1), Some(Token::UpperIdent))
+            && matches!(self.peek_kind(2), Some(Token::Backtick))
+    }
+
+    fn parse_backticked_constructor_name(&mut self) -> Result<NameSpan, ParseError> {
+        self.node(SyntaxKind::BacktickOperator, |this| {
+            let start = this.expect(&Token::Backtick)?.start();
+            let (symbol, _, _) = this.expect_upper()?;
+            let end = this.expect(&Token::Backtick)?.end();
+            Ok((symbol, start, end))
+        })
+    }
+
+    pub(super) fn parse_pattern_head(&mut self) -> Result<Spanned<SurfacePattern>, ParseError> {
+        self.node(SyntaxKind::PatternHead, |this| {
+            if matches!(this.current_kind(), Token::UpperIdent) {
+                let start = this.current_start();
+                let name_ref = this.parse_name_path()?;
+                let mut args = Vec::new();
+                while this.is_pattern_arg_start() {
+                    args.push(this.parse_pattern_arg()?);
+                }
+                let end = args.last().map_or_else(|| span_end(&name_ref), span_end);
+                Ok(this.sp(SurfacePattern::Con(name_ref, args), start, end))
+            } else {
+                this.parse_pattern_arg()
+            }
+        })
+    }
+
+    pub(super) fn parse_pattern_arg(&mut self) -> Result<Spanned<SurfacePattern>, ParseError> {
+        self.node(SyntaxKind::PatternArg, |this| {
+            let start = this.current_start();
+
+            match this.current_kind() {
+                Token::Int => {
+                    let token = this.advance();
+                    let value = this.parse_int_literal(&token)?;
+                    Ok(int_pattern(
+                        value,
+                        token.start(),
+                        token.end(),
+                        this.current_cst_id(),
+                    ))
+                }
+
+                Token::Float => {
+                    let token = this.advance();
+                    let value = this.parse_float_literal(&token)?;
+                    Ok(literal_pattern(
+                        SurfaceLiteral::Float(value),
+                        token.start(),
+                        token.end(),
+                        this.current_cst_id(),
+                    ))
+                }
+
+                Token::Char => {
+                    let token = this.advance();
+                    let value = this.parse_char_literal(&token)?;
+                    Ok(literal_pattern(
+                        SurfaceLiteral::Char(value),
+                        token.start(),
+                        token.end(),
+                        this.current_cst_id(),
+                    ))
+                }
+
+                Token::Str => {
+                    let token = this.advance();
+                    let value = this.parse_string_literal(&token)?;
+                    Ok(literal_pattern(
+                        SurfaceLiteral::Str(value),
+                        token.start(),
+                        token.end(),
+                        this.current_cst_id(),
+                    ))
+                }
+
+                Token::Minus => {
+                    let minus = this.advance();
+                    match this.current_kind() {
+                        Token::Int => {
+                            let int_token = this.advance();
+                            let value = this.parse_int_literal(&int_token)?;
+                            let value = value.checked_neg().ok_or_else(|| {
+                                this.error("integer literal pattern is too small")
+                            })?;
+
+                            Ok(int_pattern(
+                                value,
+                                minus.start(),
+                                int_token.end(),
+                                this.current_cst_id(),
+                            ))
+                        }
+
+                        Token::Float => {
+                            let float_token = this.advance();
+                            let value = -this.parse_float_literal(&float_token)?;
+                            Ok(literal_pattern(
+                                SurfaceLiteral::Float(value),
+                                minus.start(),
+                                float_token.end(),
+                                this.current_cst_id(),
+                            ))
+                        }
+
+                        _ => Err(this.error(format!(
+                            "expected numeric literal after `-` in pattern, got {}",
+                            this.describe_current()
+                        ))),
+                    }
+                }
+
+                Token::Underscore => {
+                    let token = this.advance();
+                    Ok(this.sp(SurfacePattern::Wild, token.start(), token.end()))
+                }
+
+                Token::Ident => {
+                    let name_ref = this.parse_name_path()?;
+                    let end = span_end(&name_ref);
+
+                    if name_ref.0.segments.len() == 1 {
+                        Ok(this.sp(SurfacePattern::Var(name_ref.0.last()), start, end))
+                    } else {
+                        Err(this.error(format!(
+                            "qualified variable patterns are not supported: {}",
+                            this.name_ref_source_text(&name_ref)
+                        )))
+                    }
+                }
+
+                Token::UpperIdent => {
+                    let name_ref = this.parse_name_path()?;
+                    let end = span_end(&name_ref);
+                    Ok(this.sp(SurfacePattern::Con(name_ref, vec![]), start, end))
+                }
+
+                Token::LParen => {
+                    this.advance();
+
+                    if this.at(&Token::RParen) {
+                        return Err(this.error("unit pattern `()` is not supported yet"));
+                    }
+
+                    let inner = this.parse_pattern()?;
+                    let end = this.expect(&Token::RParen)?.end();
+                    Ok(this.sp(inner.0, start, end))
+                }
+
+                Token::LBrack => {
+                    this.advance();
+
+                    if this.at(&Token::RBrack) {
+                        let end = this.advance().end();
+                        return Ok(list_nil_pattern(this, start, end, this.current_cst_id()));
+                    }
+
+                    let mut elems = vec![this.parse_pattern()?];
+
+                    while this.at(&Token::Comma) {
+                        this.advance();
+                        elems.push(this.parse_pattern()?);
+                    }
+
+                    let end = this.expect(&Token::RBrack)?.end();
+                    Ok(list_pattern(this, elems, start, end, this.current_cst_id()))
+                }
+
+                _ => Err(this.error(format!("expected pattern, got {}", this.describe_current()))),
+            }
+        })
+    }
+
+    pub(super) fn is_pattern_arg_start(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            Token::Int
+                | Token::Float
+                | Token::Char
+                | Token::Str
+                | Token::Minus
+                | Token::Ident
+                | Token::UpperIdent
+                | Token::LParen
+                | Token::LBrack
+                | Token::Underscore
+        )
+    }
+}

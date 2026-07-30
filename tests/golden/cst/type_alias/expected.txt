@@ -44,10 +44,10 @@ Module @0..67
           UpperIdent @54..60 line=3 col=7 text="MkPair"
         Whitespace @60..61 line=3 col=13 text=" "
         AtomExpr @61..65
-          Str("ok") @61..65 line=3 col=14 text="\"ok\""
+          Str @61..65 line=3 col=14 text="\"ok\""
         Whitespace @65..66 line=3 col=18 text=" "
         AtomExpr @66..67
-          Int(1) @66..67 line=3 col=19 text="1"
+          Int @66..67 line=3 col=19 text="1"
   Newline @67..68 line=3 col=20 text="\n"
   VClose @68..68 line=4 col=0 synthetic text=""
   Eof @68..68 line=4 col=0 text=""

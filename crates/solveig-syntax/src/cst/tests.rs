@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 use solveig_base::{FileId, Session};
 
 use crate::ast::ParsedModule;
-use crate::lexer::Token;
-use crate::parser::{parse_cst, parse_source};
+use crate::lexer::{Token, lex};
+use crate::lowering::parse_source;
+use crate::parser::parse_cst;
 
 fn parse_test_source(source: &str) -> ParsedModule {
     let session = Session::new();
@@ -39,6 +40,20 @@ fn session_free_cst_parse_keeps_structural_expr_nodes_and_drops_empty_imports() 
             .any(|(_, node)| node.kind() == SyntaxKind::ParenExpr),
         "parenthesized expressions should have a structural ParenExpr node"
     );
+}
+
+#[test]
+fn lexing_many_identifiers_does_not_touch_session_interner() {
+    let source = (0..10_000)
+        .map(|index| format!("name{index} = {index}\n"))
+        .collect::<String>();
+    let session = Session::new();
+    let before = session.interned_symbol_count();
+
+    let tokens = lex(FileId(0), &source).expect("generated identifiers should lex");
+
+    assert!(!tokens.is_empty());
+    assert_eq!(session.interned_symbol_count(), before);
 }
 
 #[test]

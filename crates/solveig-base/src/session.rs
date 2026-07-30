@@ -25,6 +25,10 @@ impl Session {
         Ref::map(self.interner.borrow(), |interner| interner.str(symbol))
     }
 
+    pub fn interned_symbol_count(&self) -> usize {
+        self.interner.borrow().len()
+    }
+
     pub fn add_file(&self, path: impl Into<PathBuf>, src: impl Into<String>) -> FileId {
         self.source_map.borrow_mut().add_file(path, src)
     }

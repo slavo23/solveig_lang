@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use solveig_base::{Diagnostic, Session, Span};
 use solveig_syntax::cst::{CstId, NodeOrToken, SyntaxTree, TokenId};
 use solveig_syntax::lexer::{PosToken, Token};
-use solveig_syntax::parser::parse_source;
+use solveig_syntax::lowering::parse_source;
 
 #[test]
 fn golden_cst_cases() {
@@ -135,7 +135,7 @@ fn dump_token(tree: &SyntaxTree, id: TokenId, source: &str, depth: usize, out: &
         out,
         "{} {} line={} col={}",
         token_label(&token.kind),
-        span_label(Span::from_usize_range(token.start..token.end)),
+        span_label(Span::from_usize_range(token.start()..token.end())),
         token.line,
         token.col
     )
@@ -181,7 +181,7 @@ fn dump_attached_comment(
         out,
         "{} {} text={}",
         label,
-        span_label(Span::from_usize_range(token.start..token.end)),
+        span_label(Span::from_usize_range(token.start()..token.end())),
         quoted(token.source_text(source))
     )
     .expect("writing to String should not fail");

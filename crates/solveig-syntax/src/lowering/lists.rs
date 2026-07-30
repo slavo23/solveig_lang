@@ -3,12 +3,12 @@
 use super::*;
 
 fn qref(
-    parser: &Parser<'_>,
+    parser: &AstLowerer<'_>,
     segments: &[&str],
     start: usize,
     end: usize,
     cst_id: CstId,
-) -> S<NameRef> {
+) -> Spanned<NameRef> {
     sp(
         NameRef {
             segments: segments
@@ -23,11 +23,11 @@ fn qref(
 }
 
 pub(super) fn list_nil_pattern(
-    parser: &Parser<'_>,
+    parser: &AstLowerer<'_>,
     start: usize,
     end: usize,
     cst_id: CstId,
-) -> S<SurfacePattern> {
+) -> Spanned<SurfacePattern> {
     sp(
         SurfacePattern::Con(
             qref(parser, &["prelude", "list", "Nil"], start, end, cst_id),
@@ -40,11 +40,11 @@ pub(super) fn list_nil_pattern(
 }
 
 pub(super) fn list_nil_expr(
-    parser: &Parser<'_>,
+    parser: &AstLowerer<'_>,
     start: usize,
     end: usize,
     cst_id: CstId,
-) -> S<SurfaceExpr> {
+) -> Spanned<SurfaceExpr> {
     sp(
         SurfaceExpr::Con(qref(
             parser,
@@ -60,12 +60,12 @@ pub(super) fn list_nil_expr(
 }
 
 pub(super) fn list_ty(
-    parser: &Parser<'_>,
-    elem_ty: S<SurfaceTy>,
+    parser: &AstLowerer<'_>,
+    elem_ty: Spanned<SurfaceTy>,
     start: usize,
     end: usize,
     cst_id: CstId,
-) -> S<SurfaceTy> {
+) -> Spanned<SurfaceTy> {
     let list_con = sp(
         SurfaceTy::Con(qref(
             parser,
@@ -91,7 +91,7 @@ pub(super) fn int_pattern(
     start: usize,
     end: usize,
     cst_id: CstId,
-) -> S<SurfacePattern> {
+) -> Spanned<SurfacePattern> {
     sp(
         SurfacePattern::Lit(SurfaceLiteral::Int(value)),
         start,
@@ -105,18 +105,18 @@ pub(super) fn literal_pattern(
     start: usize,
     end: usize,
     cst_id: CstId,
-) -> S<SurfacePattern> {
+) -> Spanned<SurfacePattern> {
     sp(SurfacePattern::Lit(literal), start, end, cst_id)
 }
 
 pub(super) fn cons_pattern(
-    parser: &Parser<'_>,
-    head: S<SurfacePattern>,
-    tail: S<SurfacePattern>,
+    parser: &AstLowerer<'_>,
+    head: Spanned<SurfacePattern>,
+    tail: Spanned<SurfacePattern>,
     cons_start: usize,
     cons_end: usize,
     cst_id: CstId,
-) -> S<SurfacePattern> {
+) -> Spanned<SurfacePattern> {
     let (start, end) = merge_span(&head, &tail);
     sp(
         SurfacePattern::Con(
@@ -136,12 +136,12 @@ pub(super) fn cons_pattern(
 }
 
 pub(super) fn list_pattern(
-    parser: &Parser<'_>,
-    elems: Vec<S<SurfacePattern>>,
+    parser: &AstLowerer<'_>,
+    elems: Vec<Spanned<SurfacePattern>>,
     _start: usize,
     end: usize,
     cst_id: CstId,
-) -> S<SurfacePattern> {
+) -> Spanned<SurfacePattern> {
     elems
         .into_iter()
         .rev()
@@ -152,13 +152,13 @@ pub(super) fn list_pattern(
 }
 
 pub(super) fn cons_expr(
-    parser: &Parser<'_>,
-    head: S<SurfaceExpr>,
-    tail: S<SurfaceExpr>,
+    parser: &AstLowerer<'_>,
+    head: Spanned<SurfaceExpr>,
+    tail: Spanned<SurfaceExpr>,
     start: usize,
     end: usize,
     cst_id: CstId,
-) -> S<SurfaceExpr> {
+) -> Spanned<SurfaceExpr> {
     let cons = sp(
         SurfaceExpr::Con(qref(
             parser,
@@ -186,12 +186,12 @@ pub(super) fn cons_expr(
 }
 
 pub(super) fn list_expr(
-    parser: &Parser<'_>,
-    elems: Vec<S<SurfaceExpr>>,
+    parser: &AstLowerer<'_>,
+    elems: Vec<Spanned<SurfaceExpr>>,
     start: usize,
     end: usize,
     cst_id: CstId,
-) -> S<SurfaceExpr> {
+) -> Spanned<SurfaceExpr> {
     let expr =
         elems
             .into_iter()

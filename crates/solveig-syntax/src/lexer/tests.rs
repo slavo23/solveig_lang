@@ -3,14 +3,10 @@ use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use solveig_base::{FileId, Session};
+use solveig_base::FileId;
 
-fn lex_test_source(source: &str) -> (Session, FileId, Vec<PosToken>) {
-    let session = Session::new();
-    let file = session.add_file("test.sv", source);
-    let tokens = lex(file, source).expect("test source should lex");
-
-    (session, file, tokens)
+fn lex_test_source(source: &str) -> Vec<PosToken> {
+    lex(FileId(0), source).expect("test source should lex")
 }
 
 fn reconstruct(tokens: &[PosToken], source: &str) -> String {
@@ -23,7 +19,7 @@ fn reconstruct(tokens: &[PosToken], source: &str) -> String {
 #[test]
 fn trivia_tokens_reconstruct_source_and_parser_view_skips_them() {
     let source = "main : IO ()\nmain = do\n    -- keep me\n\n    printLine \"x\"\n";
-    let (_session, _file, tokens) = lex_test_source(source);
+    let tokens = lex_test_source(source);
 
     assert_eq!(reconstruct(&tokens, source), source);
     assert!(tokens.iter().any(|token| token.kind == Token::Whitespace));
@@ -52,7 +48,7 @@ fn trivia_tokens_reconstruct_source_and_parser_view_skips_them() {
 #[test]
 fn nested_block_comment_is_one_lossless_trivia_token() {
     let source = "main = {- outer {- inner -}\n still outer -} ()\n";
-    let (_session, _file, tokens) = lex_test_source(source);
+    let tokens = lex_test_source(source);
     let block = tokens
         .iter()
         .find(|token| token.kind == Token::BlockComment)
@@ -77,12 +73,11 @@ fn all_repository_solveig_sources_round_trip_through_tokens() {
 
     assert!(!files.is_empty(), "expected repository .sv files");
 
-    let session = Session::new();
     for path in files {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
-        let file = session.add_file(&path, source.clone());
-        let tokens = lex(file, &source).unwrap_or_else(|err| panic!("{}: {err:?}", path.display()));
+        let tokens =
+            lex(FileId(0), &source).unwrap_or_else(|err| panic!("{}: {err:?}", path.display()));
 
         assert_eq!(
             reconstruct(&tokens, &source),
@@ -91,6 +86,14 @@ fn all_repository_solveig_sources_round_trip_through_tokens() {
             path.display()
         );
     }
+}
+
+#[test]
+fn token_and_positioned_token_are_copy() {
+    fn assert_copy<T: Copy>() {}
+
+    assert_copy::<Token>();
+    assert_copy::<PosToken>();
 }
 
 fn collect_solveig_sources(root: &Path, files: &mut Vec<PathBuf>) {

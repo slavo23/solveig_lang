@@ -11,7 +11,7 @@ use solveig_resolve::project::{
     ModuleFile, ModuleTable, ParsedProject, Project, ResolveError, effective_imports,
 };
 use solveig_syntax::ast::{ModuleName, ParsedModule};
-use solveig_syntax::parser;
+use solveig_syntax::lowering;
 
 use crate::DriverError;
 use crate::source_provider::SourceProvider;
@@ -55,7 +55,7 @@ pub(crate) fn is_compiler_prelude_module(session: &Session, module: &ModuleName)
 }
 
 fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
-    parser::parse_source(session, file, source)
+    lowering::parse_source(session, file, source)
 }
 
 fn source_hash(source: &str) -> u64 {

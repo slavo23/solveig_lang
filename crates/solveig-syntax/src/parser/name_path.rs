@@ -1,40 +1,43 @@
+//! Qualified name path parsing.
+
 use super::*;
 
 impl Parser<'_> {
-    pub(super) fn parse_name_path(&mut self) -> Result<S<NameRef>, ParseError> {
-        self.node(SyntaxKind::NamePath, |this| {
-            let start = this.current_start();
-
-            let first = match this.current_kind() {
-                Token::Ident | Token::UpperIdent => {
-                    let token = this.advance();
-                    this.intern(this.token_source_text(&token))
-                }
+    pub(super) fn parse_name_path(&mut self) -> Result<NamePathFacts, ParseError> {
+        self.node(SyntaxKind::NamePath, |parser| {
+            let start = parser.current_start();
+            let first = match parser.current_kind() {
+                Token::Ident | Token::UpperIdent => parser.advance(),
                 _ => {
                     return Err(
-                        this.error(format!("expected name, got {}", this.describe_current()))
+                        parser.error(format!("expected name, got {}", parser.describe_current()))
                     );
                 }
             };
 
-            let mut segments = vec![first];
-            while this.current_dot_is_qualified_separator() {
-                match this.peek_kind(1) {
+            let mut end = first.end();
+            let mut last_segment = parser.token_source_text(&first).to_string();
+            let mut segment_count = 1usize;
+
+            while parser.current_dot_is_qualified_separator() {
+                match parser.peek_kind(1) {
                     Some(Token::Ident | Token::UpperIdent) => {
-                        this.advance();
-                        let token = this.advance();
-                        let name = this.intern(this.token_source_text(&token));
-                        segments.push(name);
+                        parser.advance();
+                        let segment = parser.advance();
+                        end = segment.end();
+                        last_segment = parser.token_source_text(&segment).to_string();
+                        segment_count += 1;
                     }
                     _ => break,
                 }
             }
 
-            Ok(this.sp(
-                NameRef { segments },
-                start,
-                this.tokens[this.pos.saturating_sub(1)].end,
-            ))
+            let text = parser.source.get(start..end).unwrap_or("").to_string();
+            Ok(NamePathFacts {
+                text,
+                last_segment,
+                segment_count,
+            })
         })
     }
 
@@ -54,25 +57,8 @@ impl Parser<'_> {
         let dot = &self.tokens[dot_index];
         let next = &self.tokens[next_index];
 
-        previous.end == dot.start
-            && dot.end == next.start
+        previous.end() == dot.start()
+            && dot.end() == next.start()
             && matches!(next.kind, Token::Ident | Token::UpperIdent)
-    }
-
-    pub(super) fn is_case_block_follower(&self) -> bool {
-        matches!(
-            self.current_kind(),
-            Token::RParen
-                | Token::RBrack
-                | Token::Comma
-                | Token::Then
-                | Token::Else
-                | Token::In
-                | Token::BindArrow
-                | Token::Semicolon
-                | Token::VSemi
-                | Token::VClose
-                | Token::Eof
-        )
     }
 }

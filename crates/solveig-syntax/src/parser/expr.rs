@@ -1,138 +1,78 @@
-//! Expression parser for Solveig terms and do-notation blocks.
-//! The syntax tree produced here is still unresolved and fixity-sensitive.
+//! Expression syntax parsing.
 
 use super::*;
 
 impl Parser<'_> {
-    pub(super) fn parse_expr(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
+    pub(super) fn parse_expr(&mut self) -> Result<(), ParseError> {
         self.parse_expr_with_left_section(false)
     }
 
-    fn parse_expr_with_left_section(
+    pub(super) fn parse_expr_with_left_section(
         &mut self,
         allow_left_section: bool,
-    ) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::Expr, |this| {
-            let start = this.current_start();
-
-            let expr = match this.current_kind() {
-                Token::Fun => this.parse_lambda()?,
-                Token::Let => this.parse_let()?,
-                Token::Do => this.parse_do()?,
-                Token::If => this.parse_if()?,
-                Token::Case => this.parse_case()?,
-                _ => this.parse_op_chain(allow_left_section)?,
-            };
-
-            if this.at(&Token::Colon) {
-                this.advance();
-                let ty = this.parse_type()?;
-                let end = span_end(&ty);
-                return Ok(this.sp(SurfaceExpr::Ann(Box::new(expr), ty), start, end));
+    ) -> Result<(), ParseError> {
+        self.node(SyntaxKind::Expr, |parser| {
+            match parser.current_kind() {
+                Token::Fun => parser.parse_lambda()?,
+                Token::Let => parser.parse_let()?,
+                Token::Do => parser.parse_do()?,
+                Token::If => parser.parse_if()?,
+                Token::Case => parser.parse_case()?,
+                _ => parser.parse_op_chain(allow_left_section)?,
             }
 
-            Ok(expr)
+            if parser.at(&Token::Colon) {
+                parser.advance();
+                parser.parse_type()?;
+            }
+
+            Ok(())
         })
     }
 
-    fn op_chain_start(first: &SurfaceOpOperand) -> usize {
-        first
-            .prefix_minuses
-            .first()
-            .map_or_else(|| span_start(&first.expr), |span| span.start as usize)
-    }
+    pub(super) fn parse_op_chain(&mut self, allow_left_section: bool) -> Result<(), ParseError> {
+        self.node(SyntaxKind::OpChain, |parser| {
+            parser.parse_op_operand()?;
 
-    fn op_chain_end(first: &SurfaceOpOperand, segments: &[SurfaceOpSegment]) -> usize {
-        segments.last().map_or_else(
-            || span_end(&first.expr),
-            |segment| span_end(&segment.rhs.expr),
-        )
-    }
-
-    fn op_chain_expr(
-        &self,
-        first: SurfaceOpOperand,
-        segments: Vec<SurfaceOpSegment>,
-    ) -> S<SurfaceExpr> {
-        if segments.is_empty() && first.prefix_minuses.is_empty() {
-            first.expr
-        } else {
-            let start = Self::op_chain_start(&first);
-            let end = Self::op_chain_end(&first, &segments);
-            self.sp(SurfaceExpr::OpSeq(Box::new(first), segments), start, end)
-        }
-    }
-
-    pub(super) fn parse_op_chain(
-        &mut self,
-        allow_left_section: bool,
-    ) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::OpChain, |this| {
-            let first = this.parse_op_operand()?;
-            let mut segments = Vec::new();
-
-            while this.is_infix_operator() {
-                let (op, start, end) = this.parse_infix_operator_symbol(true)?;
-                if allow_left_section && this.at(&Token::RParen) {
-                    let lhs = this.op_chain_expr(first, segments);
-                    let op = this.sp(op, start, end);
-                    let section_start = span_start(&lhs);
-                    return Ok(this.sp(
-                        SurfaceExpr::OperatorLeftSection(Box::new(lhs), op),
-                        section_start,
-                        end,
-                    ));
+            while parser.is_infix_operator() {
+                parser.parse_infix_operator_span(true)?;
+                if allow_left_section && parser.at(&Token::RParen) {
+                    return Ok(());
                 }
-
-                let rhs = this.parse_op_operand()?;
-                let cst_id = this.current_cst_id();
-                segments.push(SurfaceOpSegment {
-                    op: this.sp(op, start, end),
-                    rhs,
-                    cst_id,
-                });
+                parser.parse_op_operand()?;
             }
 
-            Ok(this.op_chain_expr(first, segments))
+            Ok(())
         })
     }
 
-    pub(super) fn parse_op_operand(&mut self) -> Result<SurfaceOpOperand, ParseError> {
-        self.node(SyntaxKind::OpOperand, |this| {
-            let mut prefix_minuses = Vec::new();
-            while this.at(&Token::Minus) {
-                let token = this.advance();
-                prefix_minuses.push(mk_span(token.start, token.end));
+    pub(super) fn parse_op_operand(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::OpOperand, |parser| {
+            while parser.at(&Token::Minus) {
+                parser.advance();
             }
 
-            let expr = this.parse_app()?;
-            Ok(SurfaceOpOperand {
-                prefix_minuses,
-                expr,
-                cst_id: this.current_cst_id(),
-            })
+            parser.parse_app()
         })
     }
 
-    pub(super) fn parse_app(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::AppExpr, |this| {
-            let mut func = this.parse_atom()?;
-            while this.is_atom_start() {
-                let arg = this.parse_atom()?;
-                let (start, end) = merge_span(&func, &arg);
-                func = this.sp(SurfaceExpr::App(Box::new(func), Box::new(arg)), start, end);
+    pub(super) fn parse_app(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::AppExpr, |parser| {
+            parser.parse_atom()?;
+            while parser.is_atom_start() {
+                parser.parse_atom()?;
             }
-            Ok(func)
+            Ok(())
         })
     }
 
     pub(super) fn is_atom_start(&self) -> bool {
         matches!(
             self.current_kind(),
-            Token::Int(_)
-                | Token::Float(_)
-                | Token::Char(_)
-                | Token::Str(_)
+            Token::Int
+                | Token::Float
+                | Token::Char
+                | Token::Str
                 | Token::Ident
                 | Token::UpperIdent
                 | Token::LParen
@@ -142,145 +82,87 @@ impl Parser<'_> {
         )
     }
 
-    pub(super) fn parse_atom(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::AtomExpr, |this| {
-            let start = this.current_start();
-            match this.current_kind() {
-                Token::Int(value) => {
-                    let value = *value;
-                    let token = this.advance();
-                    Ok(this.sp(
-                        SurfaceExpr::Literal(SurfaceLiteral::Int(value)),
-                        token.start,
-                        token.end,
-                    ))
-                }
-                Token::Float(value) => {
-                    let value = *value;
-                    let token = this.advance();
-                    Ok(this.sp(
-                        SurfaceExpr::Literal(SurfaceLiteral::Float(value)),
-                        token.start,
-                        token.end,
-                    ))
-                }
-                Token::Char(value) => {
-                    let value = *value;
-                    let token = this.advance();
-                    Ok(this.sp(
-                        SurfaceExpr::Literal(SurfaceLiteral::Char(value)),
-                        token.start,
-                        token.end,
-                    ))
-                }
-                Token::Str(value) => {
-                    let value = value.clone();
-                    let token = this.advance();
-                    Ok(this.sp(
-                        SurfaceExpr::Literal(SurfaceLiteral::Str(value)),
-                        token.start,
-                        token.end,
-                    ))
-                }
-                Token::Hole | Token::Underscore => {
-                    let token = this.advance();
-                    Ok(this.sp(SurfaceExpr::Hole, token.start, token.end))
-                }
-                Token::Ident | Token::UpperIdent => {
-                    let name_ref = this.parse_name_path()?;
-                    let end = span_end(&name_ref);
-                    let expr = if is_ctor_like(this.name_ref_last_source_text(&name_ref)) {
-                        SurfaceExpr::Con(name_ref)
-                    } else {
-                        SurfaceExpr::Var(name_ref)
-                    };
-                    Ok(this.sp(expr, start, end))
-                }
-                Token::LParen => {
-                    if this.starts_parenthesized_operator_name() {
-                        let (symbol, start, end) = this.parse_parenthesized_operator_name()?;
-                        let name_ref = this.sp(
-                            NameRef {
-                                segments: vec![symbol],
-                            },
-                            start,
-                            end,
-                        );
-                        return Ok(this.sp(SurfaceExpr::Var(name_ref), start, end));
-                    }
-
-                    if this.starts_operator_right_section() {
-                        return this.parse_operator_right_section();
-                    }
-
-                    if this.starts_operator_left_section() {
-                        return this.parse_operator_left_section();
-                    }
-
-                    this.node(SyntaxKind::ParenExpr, |this| {
-                        this.advance();
-                        if this.at(&Token::RParen) {
-                            let end = this.advance().end;
-                            return Ok(this.sp(SurfaceExpr::Unit, start, end));
-                        }
-                        let inner = this.parse_expr()?;
-                        let end = this.expect(&Token::RParen)?.end;
-                        Ok(this.sp(inner.0, start, end))
-                    })
-                }
-                Token::LBrack => this.node(SyntaxKind::ListExpr, |this| {
-                    this.advance();
-                    if this.at(&Token::RBrack) {
-                        let end = this.advance().end;
-                        return Ok(list_nil_expr(this, start, end, this.current_cst_id()));
-                    }
-                    let mut elems = vec![this.parse_expr()?];
-                    while this.at(&Token::Comma) {
-                        this.advance();
-                        elems.push(this.parse_expr()?);
-                    }
-                    let end = this.expect(&Token::RBrack)?.end;
-                    Ok(list_expr(this, elems, start, end, this.current_cst_id()))
-                }),
-                _ => Err(this.error(format!(
-                    "expected expression, got {}",
-                    this.describe_current()
-                ))),
+    pub(super) fn parse_atom(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::AtomExpr, |parser| match parser.current_kind() {
+            Token::Int
+            | Token::Float
+            | Token::Char
+            | Token::Str
+            | Token::Hole
+            | Token::Underscore => {
+                parser.advance();
+                Ok(())
             }
-        })
-    }
-
-    fn parse_operator_right_section(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::OperatorSection, |this| {
-            let start = this.expect(&Token::LParen)?.start;
-            let (op, op_start, op_end) = this.parse_infix_operator_symbol(true)?;
-            let rhs = this.parse_expr()?;
-            let end = this.expect(&Token::RParen)?.end;
-            let op = this.sp(op, op_start, op_end);
-            Ok(this.sp(
-                SurfaceExpr::OperatorRightSection(op, Box::new(rhs)),
-                start,
-                end,
-            ))
-        })
-    }
-
-    fn parse_operator_left_section(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::OperatorSection, |this| {
-            let start = this.expect(&Token::LParen)?.start;
-            let section = this.parse_expr_with_left_section(true)?;
-            let end = this.expect(&Token::RParen)?.end;
-
-            match section.0 {
-                section @ SurfaceExpr::OperatorLeftSection(_, _) => {
-                    Ok(this.sp(section, start, end))
-                }
-                _ => Err(this.error("expected operator section")),
+            Token::Ident | Token::UpperIdent => {
+                parser.parse_name_path()?;
+                Ok(())
             }
+            Token::LParen => {
+                if parser.starts_parenthesized_operator_name() {
+                    parser.parse_parenthesized_operator_name()?;
+                    return Ok(());
+                }
+
+                if parser.starts_operator_right_section() {
+                    return parser.parse_operator_right_section();
+                }
+
+                if parser.starts_operator_left_section() {
+                    return parser.parse_operator_left_section();
+                }
+
+                parser.node(SyntaxKind::ParenExpr, |parser| {
+                    parser.advance();
+                    if parser.at(&Token::RParen) {
+                        parser.advance();
+                        return Ok(());
+                    }
+                    parser.parse_expr()?;
+                    parser.expect(&Token::RParen)?;
+                    Ok(())
+                })
+            }
+            Token::LBrack => parser.node(SyntaxKind::ListExpr, |parser| {
+                parser.advance();
+                if parser.at(&Token::RBrack) {
+                    parser.advance();
+                    return Ok(());
+                }
+                parser.parse_expr()?;
+                while parser.at(&Token::Comma) {
+                    parser.advance();
+                    parser.parse_expr()?;
+                }
+                parser.expect(&Token::RBrack)?;
+                Ok(())
+            }),
+            _ => Err(parser.error(format!(
+                "expected expression, got {}",
+                parser.describe_current()
+            ))),
         })
     }
 
-    fn token_is_section_operator(token: &Token) -> bool {
+    pub(super) fn parse_operator_right_section(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::OperatorSection, |parser| {
+            parser.expect(&Token::LParen)?;
+            parser.parse_infix_operator_span(true)?;
+            parser.parse_expr()?;
+            parser.expect(&Token::RParen)?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn parse_operator_left_section(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::OperatorSection, |parser| {
+            parser.expect(&Token::LParen)?;
+            parser.parse_expr_with_left_section(true)?;
+            parser.expect(&Token::RParen)?;
+            Ok(())
+        })
+    }
+
+    pub(super) fn token_is_section_operator(token: &Token) -> bool {
         matches!(
             token,
             Token::Operator
@@ -299,7 +181,7 @@ impl Parser<'_> {
         )
     }
 
-    fn starts_operator_right_section(&self) -> bool {
+    pub(super) fn starts_operator_right_section(&self) -> bool {
         if !self.at(&Token::LParen) {
             return false;
         }
@@ -318,7 +200,7 @@ impl Parser<'_> {
         }
     }
 
-    fn significant_after_index(&self, index: usize) -> Option<usize> {
+    pub(super) fn significant_after_index(&self, index: usize) -> Option<usize> {
         self.tokens
             .iter()
             .enumerate()
@@ -327,7 +209,7 @@ impl Parser<'_> {
             .map(|(index, _)| index)
     }
 
-    fn significant_before_index(&self, index: usize) -> Option<usize> {
+    pub(super) fn significant_before_index(&self, index: usize) -> Option<usize> {
         self.tokens[..index.min(self.tokens.len())]
             .iter()
             .enumerate()
@@ -336,7 +218,7 @@ impl Parser<'_> {
             .map(|(index, _)| index)
     }
 
-    fn matching_rparen_index(&self, lparen_index: usize) -> Option<usize> {
+    pub(super) fn matching_rparen_index(&self, lparen_index: usize) -> Option<usize> {
         let mut depth = 0usize;
 
         for (index, token) in self.tokens.iter().enumerate().skip(lparen_index) {
@@ -359,7 +241,7 @@ impl Parser<'_> {
         None
     }
 
-    fn trailing_backticked_operator_start(&self, close_index: usize) -> Option<usize> {
+    pub(super) fn trailing_backticked_operator_start(&self, close_index: usize) -> Option<usize> {
         let close_backtick = self.significant_before_index(close_index)?;
         if !matches!(self.tokens[close_backtick].kind, Token::Backtick) {
             return None;
@@ -378,7 +260,7 @@ impl Parser<'_> {
         }
     }
 
-    fn trailing_operator_start(&self, close_index: usize) -> Option<usize> {
+    pub(super) fn trailing_operator_start(&self, close_index: usize) -> Option<usize> {
         let previous = self.significant_before_index(close_index)?;
         if Self::token_is_section_operator(&self.tokens[previous].kind) {
             Some(previous)
@@ -387,227 +269,232 @@ impl Parser<'_> {
         }
     }
 
-    fn starts_operator_left_section(&self) -> bool {
+    pub(super) fn starts_operator_left_section(&self) -> bool {
         if !self.at(&Token::LParen) {
             return false;
         }
 
-        let lparen = self.current_index();
-        let close = match self.matching_rparen_index(lparen) {
-            Some(close) => close,
+        let lparen_index = self.current_index();
+        let close_index = match self.matching_rparen_index(lparen_index) {
+            Some(close_index) => close_index,
             None => return false,
         };
-        let first = match self.significant_after_index(lparen) {
-            Some(first) => first,
+        let first_inside_index = match self.significant_after_index(lparen_index) {
+            Some(first_inside_index) => first_inside_index,
             None => return false,
         };
-        let op_start = match self.trailing_operator_start(close) {
-            Some(op_start) => op_start,
+        let operator_start_index = match self.trailing_operator_start(close_index) {
+            Some(operator_start_index) => operator_start_index,
             None => return false,
         };
 
-        first < op_start
+        first_inside_index < operator_start_index
     }
 
-    pub(super) fn parse_lambda(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::LambdaExpr, |this| {
-            let start = this.expect(&Token::Fun)?.start;
-            let mut params: Vec<LambdaParam> = Vec::new();
+    pub(super) fn parse_lambda(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::LambdaExpr, |parser| {
+            parser.expect(&Token::Fun)?;
 
-            while !this.at(&Token::FatArrow) {
-                if this.at(&Token::LParen) {
-                    this.advance();
-                    let (name, start, end) = this.expect_binder()?;
-                    this.expect(&Token::Colon)?;
-                    let ty = this.parse_type()?;
-                    this.expect(&Token::RParen)?;
-                    params.push((this.sp(name, start, end), Some(ty)));
+            while !parser.at(&Token::FatArrow) {
+                if parser.at(&Token::LParen) {
+                    parser.advance();
+                    parser.expect_binder_span()?;
+                    parser.expect(&Token::Colon)?;
+                    parser.parse_type()?;
+                    parser.expect(&Token::RParen)?;
                 } else {
-                    let (name, start, end) = this.expect_binder()?;
-                    params.push((this.sp(name, start, end), None));
+                    parser.expect_binder_span()?;
                 }
             }
 
-            this.expect(&Token::FatArrow)?;
-            let body = this.parse_expr()?;
-            let end = span_end(&body);
-            Ok(this.sp(SurfaceExpr::Abs(params, Box::new(body)), start, end))
+            parser.expect(&Token::FatArrow)?;
+            parser.parse_expr()
         })
     }
 
-    pub(super) fn parse_let(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::LetExpr, |this| {
-            let start = this.expect(&Token::Let)?.start;
-            let (name, name_start, name_end) = this.expect_ident()?;
-            this.expect(&Token::Eq)?;
-            let binding = this.parse_expr()?;
-            this.expect(&Token::In)?;
-            let body = this.parse_expr()?;
-            let end = span_end(&body);
-            Ok(this.sp(
-                SurfaceExpr::Let(
-                    this.sp(name, name_start, name_end),
-                    Box::new(binding),
-                    Box::new(body),
-                ),
-                start,
-                end,
-            ))
+    pub(super) fn parse_let(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::LetExpr, |parser| {
+            parser.expect(&Token::Let)?;
+            parser.expect_ident_span()?;
+            parser.expect(&Token::Eq)?;
+            parser.parse_expr()?;
+            parser.expect(&Token::In)?;
+            parser.parse_expr()
         })
     }
 
-    pub(super) fn parse_if(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::IfExpr, |this| {
-            let start = this.expect(&Token::If)?.start;
-            let cond = this.parse_expr()?;
-            this.expect(&Token::Then)?;
-            let then_branch = this.parse_expr()?;
-            this.expect(&Token::Else)?;
-            let else_branch = this.parse_expr()?;
-            let end = span_end(&else_branch);
-            Ok(this.sp(
-                SurfaceExpr::IfThenElse(
-                    Box::new(cond),
-                    Box::new(then_branch),
-                    Box::new(else_branch),
-                ),
-                start,
-                end,
-            ))
+    pub(super) fn parse_if(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::IfExpr, |parser| {
+            parser.expect(&Token::If)?;
+            parser.parse_expr()?;
+            parser.expect(&Token::Then)?;
+            parser.parse_expr()?;
+            parser.expect(&Token::Else)?;
+            parser.parse_expr()
         })
     }
 
-    pub(super) fn parse_do(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::DoExpr, |this| {
-            let start = this.expect(&Token::Do)?.start;
+    pub(super) fn parse_do(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::DoExpr, |parser| {
+            parser.expect(&Token::Do)?;
 
-            let implicit_layout = if this.at(&Token::VOpen) {
-                this.advance();
+            let implicit_layout = if parser.at(&Token::VOpen) {
+                parser.advance();
                 true
             } else {
                 false
             };
 
-            let mut statements = Vec::new();
+            let mut statement_count = 0usize;
+            let mut final_statement = None;
             loop {
-                this.skip_separators();
+                parser.skip_separators();
 
-                if this.at(&Token::VClose) {
+                if parser.at(&Token::VClose) {
                     if implicit_layout {
-                        this.advance();
+                        parser.advance();
                     }
                     break;
                 }
 
-                if this.at_eof() || (implicit_layout && this.is_case_block_follower()) {
+                if parser.at_eof() || (implicit_layout && parser.is_case_block_follower()) {
                     break;
                 }
 
-                let stmt_start = this.current_start();
-                let stmt = this.parse_do_statement()?;
-                let stmt_end = match &stmt {
-                    SurfaceDoStmt::Bind { expr, .. }
-                    | SurfaceDoStmt::Let { expr, .. }
-                    | SurfaceDoStmt::Expr(expr) => span_end(expr),
-                };
-                statements.push(sp(stmt, stmt_start, stmt_end, this.completed_cst_id()));
+                final_statement = Some(parser.parse_do_statement()?);
+                statement_count += 1;
             }
 
-            if statements.is_empty() {
-                return Err(this.error("do block must contain at least one statement"));
+            if statement_count == 0 {
+                return Err(parser.error("do block must contain at least one statement"));
             }
 
-            let last = statements
-                .last()
-                .expect("ICE: checked non-empty do block before reading final statement");
-            if !matches!(last.0, SurfaceDoStmt::Expr(_)) {
+            if !final_statement.is_some_and(|statement| statement.kind == DoStatementKind::Expr) {
+                let span = final_statement.map_or_else(
+                    || parser.current_span(),
+                    |statement| {
+                        FileSpan::new(
+                            parser.file,
+                            mk_span(statement.start, statement.end.max(statement.start)),
+                        )
+                    },
+                );
                 return Err(ParseError {
-                    span: FileSpan::new(this.file, last.1),
+                    span,
                     message: "final do statement must be an expression".to_string(),
                 });
             }
 
-            let end = span_end(last);
-            Ok(this.sp(SurfaceExpr::Do(statements), start, end))
+            Ok(())
         })
     }
 
-    pub(super) fn parse_do_statement(&mut self) -> Result<SurfaceDoStmt, ParseError> {
-        self.node(SyntaxKind::DoStmt, |this| {
-            if this.at(&Token::Let) {
-                this.advance();
-                let (name, start, end) = this.expect_ident()?;
-                this.expect(&Token::Eq)?;
-                let expr = this.parse_expr()?;
-                return Ok(SurfaceDoStmt::Let {
-                    binder: this.sp(name, start, end),
-                    expr,
+    pub(super) fn parse_do_statement(&mut self) -> Result<DoStatementFacts, ParseError> {
+        self.node(SyntaxKind::DoStmt, |parser| {
+            let statement_start = parser.current_start();
+
+            if parser.at(&Token::Let) {
+                parser.advance();
+                parser.expect_ident_span()?;
+                parser.expect(&Token::Eq)?;
+                parser.parse_expr()?;
+                return Ok(DoStatementFacts {
+                    kind: DoStatementKind::Let,
+                    start: statement_start,
+                    end: parser
+                        .previous_consumed_significant_token()
+                        .map_or(statement_start, PosToken::end),
                 });
             }
 
-            if matches!(this.current_kind(), Token::Ident | Token::Underscore)
-                && this
+            if matches!(parser.current_kind(), Token::Ident | Token::Underscore)
+                && parser
                     .peek_kind(1)
                     .is_some_and(|kind| matches!(kind, Token::BindArrow))
             {
-                let (name, start, end) = this.expect_binder()?;
-                this.expect(&Token::BindArrow)?;
-                let expr = this.parse_expr()?;
-                return Ok(SurfaceDoStmt::Bind {
-                    binder: this.sp(name, start, end),
-                    expr,
+                parser.expect_binder_span()?;
+                parser.expect(&Token::BindArrow)?;
+                parser.parse_expr()?;
+                return Ok(DoStatementFacts {
+                    kind: DoStatementKind::Bind,
+                    start: statement_start,
+                    end: parser
+                        .previous_consumed_significant_token()
+                        .map_or(statement_start, PosToken::end),
                 });
             }
 
-            Ok(SurfaceDoStmt::Expr(this.parse_expr()?))
+            parser.parse_expr()?;
+            Ok(DoStatementFacts {
+                kind: DoStatementKind::Expr,
+                start: statement_start,
+                end: parser
+                    .previous_consumed_significant_token()
+                    .map_or(statement_start, PosToken::end),
+            })
         })
     }
 
-    pub(super) fn parse_case(&mut self) -> Result<S<SurfaceExpr>, ParseError> {
-        self.node(SyntaxKind::CaseExpr, |this| {
-            let start = this.expect(&Token::Case)?.start;
-            let scrutinee = this.parse_expr()?;
-            this.expect(&Token::Of)?;
+    pub(super) fn parse_case(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::CaseExpr, |parser| {
+            parser.expect(&Token::Case)?;
+            parser.parse_expr()?;
+            parser.expect(&Token::Of)?;
 
-            let implicit_layout = if this.at(&Token::VOpen) {
-                this.advance();
+            let implicit_layout = if parser.at(&Token::VOpen) {
+                parser.advance();
                 true
             } else {
                 false
             };
 
-            let mut arms = Vec::new();
             loop {
-                this.skip_separators();
+                parser.skip_separators();
 
-                if this.at(&Token::VClose) {
+                if parser.at(&Token::VClose) {
                     if implicit_layout {
-                        this.advance();
+                        parser.advance();
                     }
                     break;
                 }
 
-                if this.at_eof() || (implicit_layout && this.is_case_block_follower()) {
+                if parser.at_eof() || (implicit_layout && parser.is_case_block_follower()) {
                     break;
                 }
 
-                let arm = this.node(SyntaxKind::CaseArm, |this| {
-                    if this.at(&Token::Pipe) {
-                        this.advance();
-                    }
-
-                    let start = this.current_start();
-                    let pattern = this.parse_pattern()?;
-                    this.expect(&Token::FatArrow)?;
-                    let expr = this.parse_expr()?;
-                    let end = span_end(&expr);
-                    Ok(this.sp(SurfaceMatchArm { pattern, expr }, start, end))
-                })?;
-                arms.push(arm);
+                parser.parse_case_arm()?;
             }
 
-            let end = arms.last().map_or_else(|| span_end(&scrutinee), span_end);
-            Ok(this.sp(SurfaceExpr::Case(Box::new(scrutinee), arms), start, end))
+            Ok(())
         })
+    }
+
+    pub(super) fn parse_case_arm(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::CaseArm, |parser| {
+            if parser.at(&Token::Pipe) {
+                parser.advance();
+            }
+
+            parser.parse_pattern()?;
+            parser.expect(&Token::FatArrow)?;
+            parser.parse_expr()
+        })
+    }
+
+    pub(super) fn is_case_block_follower(&self) -> bool {
+        matches!(
+            self.current_kind(),
+            Token::RParen
+                | Token::RBrack
+                | Token::Comma
+                | Token::Then
+                | Token::Else
+                | Token::In
+                | Token::BindArrow
+                | Token::Semicolon
+                | Token::VSemi
+                | Token::VClose
+                | Token::Eof
+        )
     }
 }

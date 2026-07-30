@@ -1,3 +1,5 @@
+//! Operator-name parsing helpers.
+
 use super::*;
 
 impl Parser<'_> {
@@ -7,23 +9,23 @@ impl Parser<'_> {
             && matches!(self.peek_kind(2), Some(Token::Backtick))
     }
 
-    pub(super) fn parse_backticked_operator_name(&mut self) -> Result<NameSpan, ParseError> {
-        self.node(SyntaxKind::BacktickOperator, |this| {
-            let start = this.expect(&Token::Backtick)?.start;
-            let (symbol, _, _) = this.expect_ident()?;
-            let end = this.expect(&Token::Backtick)?.end;
-            Ok((symbol, start, end))
+    pub(super) fn parse_backticked_operator_name(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::BacktickOperator, |parser| {
+            parser.expect(&Token::Backtick)?;
+            parser.expect_ident_span()?;
+            parser.expect(&Token::Backtick)?;
+            Ok(())
         })
     }
 
-    pub(super) fn parse_infix_operator_symbol(
+    pub(super) fn parse_infix_operator_span(
         &mut self,
         allow_cons_syntax: bool,
-    ) -> Result<NameSpan, ParseError> {
+    ) -> Result<(), ParseError> {
         if self.starts_backticked_operator_name() {
             self.parse_backticked_operator_name()
         } else {
-            self.expect_operator_symbol(allow_cons_syntax)
+            self.expect_operator_span(allow_cons_syntax)
         }
     }
 }

@@ -7,7 +7,7 @@ use solveig_ast::ast::{
     ConstructorDef, CtorInfo, DataDefinition, Names, ResolvedModule, TyConDefinition, TyConId,
     TyConInfo,
 };
-use solveig_syntax::parser::parse_source;
+use solveig_syntax::lowering::parse_source;
 
 use super::*;
 

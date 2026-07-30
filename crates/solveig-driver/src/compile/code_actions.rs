@@ -308,7 +308,7 @@ fn scanned_module_exports_name(
     let session = Session::new();
     let module_name = crate::project::module_name_from_file(&session, source_root, file).ok()?;
     let file_id = session.add_file(file.to_path_buf(), source.clone());
-    let parsed = solveig_syntax::parser::parse_source(&session, file_id, &source);
+    let parsed = solveig_syntax::lowering::parse_source(&session, file_id, &source);
     if session.diagnostics().has_errors() {
         return None;
     }

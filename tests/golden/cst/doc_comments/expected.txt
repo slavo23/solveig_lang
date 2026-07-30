@@ -10,7 +10,7 @@ Module @21..221
       Eq @26..27 line=1 col=5 text="="
       Whitespace @27..28 line=1 col=6 text=" "
       AtomExpr @28..29
-        Int(1) @28..29 line=1 col=7 text="1"
+        Int @28..29 line=1 col=7 text="1"
           trailing-comment @30..48 text="-- ^ trailing docs"
     Whitespace @29..30 line=1 col=8 text=" "
     LineComment @30..48 line=1 col=9 text="-- ^ trailing docs"

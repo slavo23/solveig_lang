@@ -4,7 +4,7 @@ Module @0..98
     FixityDef @0..11
       Infixr @0..6 line=0 col=0 text="infixr"
       Whitespace @6..7 line=0 col=6 text=" "
-      Int(8) @7..8 line=0 col=7 text="8"
+      Int @7..8 line=0 col=7 text="8"
       Whitespace @8..9 line=0 col=8 text=" "
       Operator @9..11 line=0 col=9 text="^^"
     Newline @11..12 line=0 col=11 text="\n"
@@ -12,7 +12,7 @@ Module @0..98
     FixityDef @12..24
       Infixl @12..18 line=1 col=0 text="infixl"
       Whitespace @18..19 line=1 col=6 text=" "
-      Int(6) @19..20 line=1 col=7 text="6"
+      Int @19..20 line=1 col=7 text="6"
       Whitespace @20..21 line=1 col=8 text=" "
       Operator @21..24 line=1 col=9 text="<+>"
     Newline @24..26 line=1 col=12 text="\n\n"
@@ -68,27 +68,27 @@ Module @0..98
       Whitespace @77..78 line=6 col=6 text=" "
       OpChain @78..98
         AtomExpr @78..79
-          Int(1) @78..79 line=6 col=7 text="1"
+          Int @78..79 line=6 col=7 text="1"
         Whitespace @79..80 line=6 col=8 text=" "
         Plus @80..81 line=6 col=9 text="+"
         Whitespace @81..82 line=6 col=10 text=" "
         AtomExpr @82..83
-          Int(2) @82..83 line=6 col=11 text="2"
+          Int @82..83 line=6 col=11 text="2"
         Whitespace @83..84 line=6 col=12 text=" "
         Star @84..85 line=6 col=13 text="*"
         Whitespace @85..86 line=6 col=14 text=" "
         AtomExpr @86..87
-          Int(3) @86..87 line=6 col=15 text="3"
+          Int @86..87 line=6 col=15 text="3"
         Whitespace @87..88 line=6 col=16 text=" "
         Operator @88..90 line=6 col=17 text="^^"
         Whitespace @90..91 line=6 col=19 text=" "
         AtomExpr @91..92
-          Int(4) @91..92 line=6 col=20 text="4"
+          Int @91..92 line=6 col=20 text="4"
         Whitespace @92..93 line=6 col=21 text=" "
         Operator @93..96 line=6 col=22 text="<+>"
         Whitespace @96..97 line=6 col=25 text=" "
         AtomExpr @97..98
-          Int(5) @97..98 line=6 col=26 text="5"
+          Int @97..98 line=6 col=26 text="5"
   Newline @98..99 line=6 col=27 text="\n"
   VClose @99..99 line=7 col=0 synthetic text=""
   Eof @99..99 line=7 col=0 text=""

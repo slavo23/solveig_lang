@@ -4,7 +4,7 @@ Module @0..165
     FixityDef @0..14
       Infixl @0..6 line=0 col=0 text="infixl"
       Whitespace @6..7 line=0 col=6 text=" "
-      Int(5) @7..8 line=0 col=7 text="5"
+      Int @7..8 line=0 col=7 text="5"
       Whitespace @8..9 line=0 col=8 text=" "
       BacktickOperator @9..14
         Backtick @9..10 line=0 col=9 text="`"
@@ -40,7 +40,7 @@ Module @0..165
         LParen @39..40 line=3 col=7 text="("
         OpChain @40..43
           AtomExpr @40..41
-            Int(1) @40..41 line=3 col=8 text="1"
+            Int @40..41 line=3 col=8 text="1"
           Whitespace @41..42 line=3 col=9 text=" "
           Plus @42..43 line=3 col=10 text="+"
         RParen @43..44 line=3 col=11 text=")"
@@ -56,7 +56,7 @@ Module @0..165
         Plus @54..55 line=4 col=9 text="+"
         Whitespace @55..56 line=4 col=10 text=" "
         AtomExpr @56..57
-          Int(1) @56..57 line=4 col=11 text="1"
+          Int @56..57 line=4 col=11 text="1"
         RParen @57..58 line=4 col=12 text=")"
     Newline @58..59 line=4 col=13 text="\n"
     VSemi @59..59 line=5 col=0 synthetic text=""
@@ -67,7 +67,7 @@ Module @0..165
       Whitespace @66..67 line=5 col=7 text=" "
       OpChain @67..76
         AtomExpr @67..68
-          Int(1) @67..68 line=5 col=8 text="1"
+          Int @67..68 line=5 col=8 text="1"
         Whitespace @68..69 line=5 col=9 text=" "
         BacktickOperator @69..74
           Backtick @69..70 line=5 col=10 text="`"
@@ -75,7 +75,7 @@ Module @0..165
           Backtick @73..74 line=5 col=14 text="`"
         Whitespace @74..75 line=5 col=15 text=" "
         AtomExpr @75..76
-          Int(2) @75..76 line=5 col=16 text="2"
+          Int @75..76 line=5 col=16 text="2"
     Newline @76..77 line=5 col=17 text="\n"
     VSemi @77..77 line=6 col=0 synthetic text=""
     FunctionDef @77..88
@@ -89,7 +89,7 @@ Module @0..165
           Minus @84..85 line=6 col=7 text="-"
           Whitespace @85..86 line=6 col=8 text=" "
           AtomExpr @86..87
-            Int(1) @86..87 line=6 col=9 text="1"
+            Int @86..87 line=6 col=9 text="1"
         RParen @87..88 line=6 col=10 text=")"
     Newline @88..89 line=6 col=11 text="\n"
     VSemi @89..89 line=7 col=0 synthetic text=""
@@ -107,10 +107,10 @@ Module @0..165
             UpperIdent @108..114 line=8 col=9 text="MkPair"
           Whitespace @114..115 line=8 col=15 text=" "
           AtomExpr @115..116
-            Int(1) @115..116 line=8 col=16 text="1"
+            Int @115..116 line=8 col=16 text="1"
           Whitespace @116..117 line=8 col=17 text=" "
           AtomExpr @117..118
-            Int(2) @117..118 line=8 col=18 text="2"
+            Int @117..118 line=8 col=18 text="2"
         Whitespace @118..119 line=8 col=19 text=" "
         Of @119..121 line=8 col=20 text="of"
         Newline @121..122 line=8 col=22 text="\n"

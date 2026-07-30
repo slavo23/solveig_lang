@@ -254,7 +254,7 @@ fn hover_audit_for_lines(
     {
         if !line_ranges
             .iter()
-            .any(|(start, end)| *start <= token.start && token.end <= *end)
+            .any(|(start, end)| *start <= token.start() && token.end() <= *end)
         {
             continue;
         }
@@ -264,7 +264,7 @@ fn hover_audit_for_lines(
             continue;
         }
 
-        let signature = compilation.hover_info(file, token.start).map_or_else(
+        let signature = compilation.hover_info(file, token.start()).map_or_else(
             || "<none>".to_string(),
             |info| info.signature().replace('\n', "\\n"),
         );
@@ -315,10 +315,11 @@ fn audit_file(compilation: &mut Compilation, file: &Path, anomalies: &mut Vec<St
             continue;
         }
 
-        let position =
-            compilation
-                .source_map()
-                .position(file_id, token.start as u32, PositionEncoding::Utf8);
+        let position = compilation.source_map().position(
+            file_id,
+            token.start() as u32,
+            PositionEncoding::Utf8,
+        );
         audit_token_features(compilation, file, position, token, text, anomalies);
     }
 
@@ -418,7 +419,7 @@ fn audit_token_features(
     text: &str,
     anomalies: &mut Vec<String>,
 ) {
-    if let Some(info) = compilation.hover_info(file, token.start) {
+    if let Some(info) = compilation.hover_info(file, token.start()) {
         validate_span(
             compilation.source_map(),
             info.file_span(),
@@ -444,7 +445,7 @@ fn audit_token_features(
         }
     }
 
-    if let Some(definition) = compilation.definition(file, token.start) {
+    if let Some(definition) = compilation.definition(file, token.start()) {
         validate_span(
             compilation.source_map(),
             definition,
@@ -463,7 +464,7 @@ fn audit_token_features(
         }
     }
 
-    if let Some(references) = compilation.references(file, token.start, false) {
+    if let Some(references) = compilation.references(file, token.start(), false) {
         for reference in references {
             validate_span(
                 compilation.source_map(),

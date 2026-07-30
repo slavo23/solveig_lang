@@ -216,7 +216,7 @@ fn syntax_tree_for_file(
 }
 
 fn token_span(token: &solveig_syntax::lexer::PosToken) -> Span {
-    Span::from_usize_range(token.start..token.end)
+    Span::from_usize_range(token.start()..token.end())
 }
 
 fn folding_range_sort_key(

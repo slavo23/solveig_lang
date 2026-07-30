@@ -112,10 +112,10 @@ Module @0..189
           Ident @179..185 line=8 col=7 text="tinyEq"
         Whitespace @185..186 line=8 col=13 text=" "
         AtomExpr @186..187
-          Int(1) @186..187 line=8 col=14 text="1"
+          Int @186..187 line=8 col=14 text="1"
         Whitespace @187..188 line=8 col=15 text=" "
         AtomExpr @188..189
-          Int(1) @188..189 line=8 col=16 text="1"
+          Int @188..189 line=8 col=16 text="1"
   Newline @189..190 line=8 col=17 text="\n"
   VClose @190..190 line=9 col=0 synthetic text=""
   Eof @190..190 line=9 col=0 text=""

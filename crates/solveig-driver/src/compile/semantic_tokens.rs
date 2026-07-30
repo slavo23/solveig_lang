@@ -68,13 +68,13 @@ pub(super) fn semantic_tokens_in_compilation(
 }
 
 fn syntax_semantic_token(file: FileId, token: &PosToken) -> Option<SourceSemanticToken> {
-    if token.is_synthetic() || token.start == token.end {
+    if token.is_synthetic() || token.start() == token.end() {
         return None;
     }
 
     let kind = syntax_token_kind(&token.kind)?;
     Some(SourceSemanticToken::new(
-        FileSpan::new(file, Span::from_usize_range(token.start..token.end)),
+        FileSpan::new(file, Span::from_usize_range(token.start()..token.end())),
         kind,
         SourceSemanticTokenModifiers::empty(),
     ))
@@ -105,8 +105,8 @@ fn import_namespace_tokens(file: FileId, tokens: &[PosToken]) -> Vec<SourceSeman
         match &token.kind {
             Token::Whitespace | Token::BlockComment | Token::LineComment => {}
             Token::Ident | Token::UpperIdent | Token::Dot => {
-                namespace_start.get_or_insert(token.start);
-                namespace_end = token.end;
+                namespace_start.get_or_insert(token.start());
+                namespace_end = token.end();
             }
             _ => {
                 finish_import_namespace(file, namespace_start.take(), namespace_end, &mut out);
@@ -142,8 +142,8 @@ fn finish_import_namespace(
 fn syntax_token_kind(kind: &Token) -> Option<SourceSemanticTokenKind> {
     match kind {
         Token::LineComment | Token::BlockComment => Some(SourceSemanticTokenKind::Comment),
-        Token::Str(_) | Token::Char(_) => Some(SourceSemanticTokenKind::String),
-        Token::Int(_) | Token::Float(_) => Some(SourceSemanticTokenKind::Number),
+        Token::Str | Token::Char => Some(SourceSemanticTokenKind::String),
+        Token::Int | Token::Float => Some(SourceSemanticTokenKind::Number),
         Token::Let
         | Token::In
         | Token::Do

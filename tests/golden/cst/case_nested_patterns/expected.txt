@@ -46,7 +46,7 @@ Module @0..249
                 UpperIdent @65..69 line=3 col=17 text="Leaf"
               Whitespace @69..70 line=3 col=21 text=" "
               AtomExpr @70..71
-                Int(1) @70..71 line=3 col=22 text="1"
+                Int @70..71 line=3 col=22 text="1"
             RParen @71..72 line=3 col=23 text=")"
           Whitespace @72..73 line=3 col=24 text=" "
           ParenExpr @73..81
@@ -56,7 +56,7 @@ Module @0..249
                 UpperIdent @74..78 line=3 col=26 text="Leaf"
               Whitespace @78..79 line=3 col=30 text=" "
               AtomExpr @79..80
-                Int(2) @79..80 line=3 col=31 text="2"
+                Int @79..80 line=3 col=31 text="2"
             RParen @80..81 line=3 col=32 text=")"
         Whitespace @81..82 line=3 col=33 text=" "
         Of @82..84 line=3 col=34 text="of"
@@ -148,7 +148,7 @@ Module @0..249
               FatArrow @245..247 line=8 col=27 text="=>"
               Whitespace @247..248 line=8 col=29 text=" "
               AtomExpr @248..249
-                Int(0) @248..249 line=8 col=30 text="0"
+                Int @248..249 line=8 col=30 text="0"
             Newline @249..250 line=8 col=31 text="\n"
             VClose @250..250 line=9 col=0 synthetic text=""
         VClose @250..250 line=9 col=0 synthetic text=""

@@ -186,7 +186,7 @@ fn hover_token_at(source_file: &SourceFile, offset: usize) -> Option<HoverToken>
         .find(|(_, token)| {
             !token.is_synthetic()
                 && !token.kind.is_trivia()
-                && span_contains_offset(&(token.start..token.end), offset)
+                && span_contains_offset(&(token.start()..token.end()), offset)
         })
         .map(|(index, _)| HoverToken {
             kind: hover_token_kind(&tokens, index),
@@ -198,10 +198,10 @@ fn hover_token_kind(tokens: &[solveig_syntax::lexer::PosToken], index: usize) ->
     let token = &tokens[index];
 
     match token.kind {
-        Token::Int(_) => HoverTokenKind::IntLiteral,
-        Token::Float(_) => HoverTokenKind::FloatLiteral,
-        Token::Char(_) => HoverTokenKind::CharLiteral,
-        Token::Str(_) => HoverTokenKind::StringLiteral,
+        Token::Int => HoverTokenKind::IntLiteral,
+        Token::Float => HoverTokenKind::FloatLiteral,
+        Token::Char => HoverTokenKind::CharLiteral,
+        Token::Str => HoverTokenKind::StringLiteral,
         Token::LBrack | Token::RBrack if empty_list_token_span(tokens, index).is_some() => {
             HoverTokenKind::EmptyList
         }
@@ -226,7 +226,8 @@ fn hover_token_kind(tokens: &[solveig_syntax::lexer::PosToken], index: usize) ->
 }
 
 fn hover_token_span(tokens: &[solveig_syntax::lexer::PosToken], index: usize) -> Range<usize> {
-    empty_list_token_span(tokens, index).unwrap_or_else(|| tokens[index].start..tokens[index].end)
+    empty_list_token_span(tokens, index)
+        .unwrap_or_else(|| tokens[index].start()..tokens[index].end())
 }
 
 fn empty_list_token_span(
@@ -237,12 +238,12 @@ fn empty_list_token_span(
         Token::LBrack => {
             let close = next_significant_token(tokens, index)?;
             matches!(tokens[close].kind, Token::RBrack)
-                .then_some(tokens[index].start..tokens[close].end)
+                .then_some(tokens[index].start()..tokens[close].end())
         }
         Token::RBrack => {
             let open = previous_significant_token(tokens, index)?;
             matches!(tokens[open].kind, Token::LBrack)
-                .then_some(tokens[open].start..tokens[index].end)
+                .then_some(tokens[open].start()..tokens[index].end())
         }
         _ => None,
     }

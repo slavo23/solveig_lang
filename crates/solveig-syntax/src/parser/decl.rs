@@ -1,44 +1,29 @@
-//! Declaration parsing for modules, data types, classes, instances, and fixities.
-//! Parsed declarations feed fixity resolution and project API construction.
+//! Top-level declaration parsing.
 
 use super::*;
 
 impl Parser<'_> {
-    pub(super) fn parse_func_or_sig(&mut self) -> Result<SurfaceDefinition, ParseError> {
+    pub(super) fn parse_func_or_sig(&mut self) -> Result<(), ParseError> {
         let kind = self.current_value_definition_kind();
-        self.node(kind, |this| {
-            let (name, start, end) = this.expect_value_name()?;
-            let name = this.sp(name, start, end);
+        self.node(kind, |parser| {
+            parser.expect_value_name()?;
 
-            if this.at(&Token::Colon) {
-                this.advance();
-                let ty = this.parse_type()?;
-                return Ok(SurfaceDefinition::SigDef {
-                    name,
-                    ty,
-                    docs: None,
-                });
+            if parser.at(&Token::Colon) {
+                parser.advance();
+                parser.parse_type()?;
+                return Ok(());
             }
 
-            let mut params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident | Token::Underscore) {
-                let (param, start, end) = this.expect_binder()?;
-                params.push(this.sp(param, start, end));
+            while matches!(parser.current_kind(), Token::Ident | Token::Underscore) {
+                parser.expect_binder_span()?;
             }
 
-            this.expect(&Token::Eq)?;
-            let body = this.parse_expr()?;
-
-            Ok(SurfaceDefinition::FunDef {
-                name,
-                body,
-                params,
-                docs: None,
-            })
+            parser.expect(&Token::Eq)?;
+            parser.parse_expr()
         })
     }
 
-    fn current_value_definition_kind(&self) -> SyntaxKind {
+    pub(super) fn current_value_definition_kind(&self) -> SyntaxKind {
         let token_after_name = if self.starts_parenthesized_operator_name() {
             3
         } else if self.at(&Token::Ident) {
@@ -54,349 +39,202 @@ impl Parser<'_> {
         }
     }
 
-    pub(super) fn parse_fixity_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::FixityDef, |this| {
-            let assoc = match this.current_kind() {
-                Token::Infixl => Assoc::Left,
-                Token::Infixr => Assoc::Right,
-                Token::Infix => Assoc::None,
+    pub(super) fn parse_fixity_def(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::FixityDef, |parser| {
+            match parser.current_kind() {
+                Token::Infixl | Token::Infixr | Token::Infix => {
+                    parser.advance();
+                }
                 _ => {
-                    return Err(this.error(format!(
+                    return Err(parser.error(format!(
                         "expected fixity declaration, got {}",
-                        this.describe_current()
+                        parser.describe_current()
                     )));
                 }
-            };
-            this.advance();
-
-            let prec = match this.current_kind() {
-                Token::Int(value) => {
-                    let value = *value;
-                    this.advance();
-                    u8::try_from(value)
-                        .ok()
-                        .filter(|value| *value <= 9)
-                        .ok_or_else(|| this.error("fixity precedence must be in the range 0..9"))?
-                }
-                _ => Fixity::DEFAULT.prec,
-            };
-
-            let mut ops = Vec::new();
-            loop {
-                let (op, start, end) = if this.starts_backticked_operator_name() {
-                    this.parse_backticked_operator_name()?
-                } else if this.starts_parenthesized_operator_name() {
-                    this.parse_parenthesized_operator_name()?
-                } else {
-                    this.expect_operator_symbol(false)?
-                };
-                ops.push(this.sp(op, start, end));
-
-                if !this.at(&Token::Comma) {
-                    break;
-                }
-                this.advance();
             }
 
-            Ok(SurfaceDefinition::FixityDef {
-                fixity: Fixity { prec, assoc },
-                ops,
-                docs: None,
-            })
+            if matches!(parser.current_kind(), Token::Int) {
+                parser.advance();
+            }
+
+            loop {
+                parser.parse_fixity_operator_name()?;
+                if !parser.at(&Token::Comma) {
+                    break;
+                }
+                parser.advance();
+            }
+
+            Ok(())
         })
     }
 
-    pub(super) fn parse_data_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::DataDef, |this| {
-            this.expect(&Token::Data)?;
-            let (name, start, end) = this.expect_upper()?;
-            let name = this.sp(name, start, end);
+    pub(super) fn parse_fixity_operator_name(&mut self) -> Result<(), ParseError> {
+        if self.starts_backticked_operator_name() {
+            self.parse_backticked_operator_name()
+        } else if self.starts_parenthesized_operator_name() {
+            self.parse_parenthesized_operator_name()
+        } else {
+            self.expect_operator_span(false)
+        }
+    }
 
-            let mut ty_params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident) {
-                let (param, start, end) = this.expect_ident()?;
-                ty_params.push(this.sp(param, start, end));
+    pub(super) fn parse_data_def(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::DataDef, |parser| {
+            parser.expect(&Token::Data)?;
+            parser.expect_upper_span()?;
+
+            while matches!(parser.current_kind(), Token::Ident) {
+                parser.expect_ident_span()?;
             }
 
-            this.expect(&Token::Eq)?;
+            parser.expect(&Token::Eq)?;
 
-            let mut constructors = Vec::new();
             loop {
-                if this.at(&Token::Pipe) {
-                    this.advance();
+                if parser.at(&Token::Pipe) {
+                    parser.advance();
                 }
 
-                let start = this.current_start();
-                let ctor = this.parse_constructor()?;
-                let end = this.current_start();
-                constructors.push(sp(ctor, start, end, this.completed_cst_id()));
+                parser.parse_constructor()?;
 
-                if !this.at(&Token::Pipe) {
+                if !parser.at(&Token::Pipe) {
                     break;
                 }
             }
 
-            Ok(SurfaceDefinition::DataDef {
-                name,
-                ty_params,
-                constructors,
-                docs: None,
-            })
+            Ok(())
         })
     }
 
-    pub(super) fn parse_type_alias_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::TypeAliasDef, |this| {
-            this.expect(&Token::Type)?;
-            let (name, start, end) = this.expect_upper()?;
-            let name = this.sp(name, start, end);
+    pub(super) fn parse_type_alias_def(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::TypeAliasDef, |parser| {
+            parser.expect(&Token::Type)?;
+            parser.expect_upper_span()?;
 
-            let mut ty_params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident) {
-                let (param, start, end) = this.expect_ident()?;
-                ty_params.push(this.sp(param, start, end));
+            while matches!(parser.current_kind(), Token::Ident) {
+                parser.expect_ident_span()?;
             }
 
-            this.expect(&Token::Eq)?;
-            let ty = this.parse_type()?;
-
-            Ok(SurfaceDefinition::TypeAliasDef {
-                name,
-                ty_params,
-                ty,
-                docs: None,
-            })
+            parser.expect(&Token::Eq)?;
+            parser.parse_type()
         })
     }
 
-    pub(super) fn parse_constructor(&mut self) -> Result<SurfaceConstructor, ParseError> {
-        self.node(SyntaxKind::Constructor, |this| {
-            let leading_docs = this.doc_comment_before_current();
-            let (name, start, end) = this.expect_upper()?;
-            let mut params = Vec::new();
-            while this.is_type_atom_start() {
-                params.push(this.parse_type_atom()?);
+    pub(super) fn parse_constructor(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::Constructor, |parser| {
+            parser.expect_upper_span()?;
+            while parser.is_type_atom_start() {
+                parser.parse_type_atom()?;
             }
-            let trailing_docs = this.doc_comment_after_previous_significant();
-            Ok(SurfaceConstructor {
-                name: this.sp(name, start, end),
-                params,
-                docs: this.attached_doc_comment(leading_docs, trailing_docs),
-            })
+            Ok(())
         })
     }
 
-    pub(super) fn parse_predicate(&mut self) -> Result<S<SurfacePredicate>, ParseError> {
-        self.node(SyntaxKind::Predicate, |this| {
-            let start = this.current_start();
+    pub(super) fn parse_optional_context(&mut self) {
+        let checkpoint = self.checkpoint();
+        if self.parse_predicate_list().is_ok() && self.at(&Token::FatArrow) {
+            self.advance();
+        } else {
+            self.restore(checkpoint);
+        }
+    }
 
-            let class_name = this.parse_name_path()?;
-            if !is_ctor_like(this.name_ref_last_source_text(&class_name)) {
-                return Err(this.error(format!(
-                    "expected class name, got {}",
-                    this.name_ref_source_text(&class_name)
-                )));
+    pub(super) fn parse_class_def(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::ClassDef, |parser| {
+            parser.expect(&Token::Class)?;
+            parser.parse_optional_context();
+
+            parser.expect_upper_span()?;
+
+            let mut type_parameter_count = 0usize;
+            while matches!(parser.current_kind(), Token::Ident) {
+                parser.expect_ident_span()?;
+                type_parameter_count += 1;
             }
 
-            let mut args = Vec::new();
-            while this.is_type_atom_start() {
-                args.push(this.parse_type_atom()?);
-            }
-
-            if args.is_empty() {
+            if type_parameter_count == 0 {
                 return Err(
-                    this.error("expected at least one type argument in predicate".to_string())
+                    parser.error("class declaration needs at least one type parameter".to_string())
                 );
             }
 
-            let end = args.last().map_or_else(|| span_end(&class_name), span_end);
+            parser.expect(&Token::Where)?;
 
-            Ok(this.sp(SurfacePredicate { class_name, args }, start, end))
-        })
-    }
-
-    pub(super) fn parse_predicate_list(&mut self) -> Result<Vec<S<SurfacePredicate>>, ParseError> {
-        self.node(SyntaxKind::PredicateList, |this| {
-            if this.at(&Token::LParen) {
-                this.advance();
-
-                let mut preds = vec![this.parse_predicate()?];
-                while this.at(&Token::Comma) {
-                    this.advance();
-                    preds.push(this.parse_predicate()?);
-                }
-
-                this.expect(&Token::RParen)?;
-                Ok(preds)
-            } else {
-                Ok(vec![this.parse_predicate()?])
-            }
-        })
-    }
-
-    pub(super) fn parse_class_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::ClassDef, |this| {
-            this.expect(&Token::Class)?;
-
-            let checkpoint = this.checkpoint();
-            let superclasses = if let Ok(preds) = this.parse_predicate_list() {
-                if this.at(&Token::FatArrow) {
-                    this.advance();
-                    preds
-                } else {
-                    this.restore(checkpoint);
-                    Vec::new()
-                }
-            } else {
-                this.restore(checkpoint);
-                Vec::new()
-            };
-
-            let (name, ns, ne) = this.expect_upper()?;
-
-            let mut ty_params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident) {
-                let (p, ps, pe) = this.expect_ident()?;
-                ty_params.push(this.sp(p, ps, pe));
+            if parser.at(&Token::VOpen) {
+                parser.advance();
             }
 
-            if ty_params.is_empty() {
-                return Err(
-                    this.error("class declaration needs at least one type parameter".to_string())
-                );
-            }
-
-            this.expect(&Token::Where)?;
-
-            if this.at(&Token::VOpen) {
-                this.advance();
-            }
-
-            let mut methods = Vec::new();
-            let mut defaults = Vec::new();
             loop {
-                this.skip_separators();
-                if this.at(&Token::VClose) || this.at_eof() {
+                parser.skip_separators();
+                if parser.at(&Token::VClose) || parser.at_eof() {
                     break;
                 }
 
-                if this.at(&Token::Default) {
-                    this.advance();
-                    let (mname, ms, me) = this.expect_value_name()?;
-                    let mut mparams = Vec::new();
-                    while matches!(this.current_kind(), Token::Ident | Token::Underscore) {
-                        let (p, ps, pe) = this.expect_binder()?;
-                        mparams.push(this.sp(p, ps, pe));
+                if parser.at(&Token::Default) {
+                    parser.advance();
+                    parser.expect_value_name()?;
+                    while matches!(parser.current_kind(), Token::Ident | Token::Underscore) {
+                        parser.expect_binder_span()?;
                     }
-                    this.expect(&Token::Eq)?;
-                    let mbody = this.parse_expr()?;
-                    defaults.push(InstanceMethod {
-                        name: this.sp(mname, ms, me),
-                        params: mparams,
-                        body: mbody,
-                        cst_id: this.current_cst_id(),
-                    });
+                    parser.expect(&Token::Eq)?;
+                    parser.parse_expr()?;
                     continue;
                 }
 
-                let leading_docs = this.doc_comment_before_current();
-                let (mname, ms, me) = this.expect_value_name()?;
-                this.expect(&Token::Colon)?;
-                let mty = this.parse_type()?;
-                let trailing_docs = this.doc_comment_after_previous_significant();
-                methods.push(ClassMethod {
-                    name: this.sp(mname, ms, me),
-                    ty: mty,
-                    docs: this.attached_doc_comment(leading_docs, trailing_docs),
-                    cst_id: this.current_cst_id(),
-                });
+                parser.expect_value_name()?;
+                parser.expect(&Token::Colon)?;
+                parser.parse_type()?;
             }
 
-            if this.at(&Token::VClose) {
-                this.advance();
+            if parser.at(&Token::VClose) {
+                parser.advance();
             }
 
-            Ok(SurfaceDefinition::ClassDef {
-                name: this.sp(name, ns, ne),
-                ty_params,
-                superclasses,
-                methods,
-                defaults,
-                docs: None,
-            })
+            Ok(())
         })
     }
 
-    pub(super) fn parse_instance_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::InstanceDef, |this| {
-            this.expect(&Token::Instance)?;
+    pub(super) fn parse_instance_def(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::InstanceDef, |parser| {
+            parser.expect(&Token::Instance)?;
+            parser.parse_optional_context();
 
-            let checkpoint = this.checkpoint();
-            let context = if let Ok(preds) = this.parse_predicate_list() {
-                if this.at(&Token::FatArrow) {
-                    this.advance();
-                    preds
-                } else {
-                    this.restore(checkpoint);
-                    Vec::new()
-                }
-            } else {
-                this.restore(checkpoint);
-                Vec::new()
-            };
+            parser.expect_upper_span()?;
 
-            let (cname, cs, ce) = this.expect_upper()?;
-
-            let mut args = Vec::new();
-            while this.is_type_atom_start() {
-                args.push(this.parse_type_atom()?);
+            let mut argument_count = 0usize;
+            while parser.is_type_atom_start() {
+                parser.parse_type_atom()?;
+                argument_count += 1;
             }
 
-            if args.is_empty() {
-                return Err(
-                    this.error("instance head needs at least one type argument".to_string())
-                );
+            if argument_count == 0 {
+                return Err(parser.error("instance head needs at least one type argument"));
             }
 
-            this.expect(&Token::Where)?;
+            parser.expect(&Token::Where)?;
 
-            if this.at(&Token::VOpen) {
-                this.advance();
+            if parser.at(&Token::VOpen) {
+                parser.advance();
             }
 
-            let mut methods = Vec::new();
             loop {
-                this.skip_separators();
-                if this.at(&Token::VClose) || this.at_eof() {
+                parser.skip_separators();
+                if parser.at(&Token::VClose) || parser.at_eof() {
                     break;
                 }
-                let (mname, ms, me) = this.expect_value_name()?;
-                let mut mparams = Vec::new();
-                while matches!(this.current_kind(), Token::Ident | Token::Underscore) {
-                    let (p, ps, pe) = this.expect_binder()?;
-                    mparams.push(this.sp(p, ps, pe));
+                parser.expect_value_name()?;
+                while matches!(parser.current_kind(), Token::Ident | Token::Underscore) {
+                    parser.expect_binder_span()?;
                 }
-                this.expect(&Token::Eq)?;
-                let mbody = this.parse_expr()?;
-                methods.push(InstanceMethod {
-                    name: this.sp(mname, ms, me),
-                    params: mparams,
-                    body: mbody,
-                    cst_id: this.current_cst_id(),
-                });
+                parser.expect(&Token::Eq)?;
+                parser.parse_expr()?;
             }
 
-            if this.at(&Token::VClose) {
-                this.advance();
+            if parser.at(&Token::VClose) {
+                parser.advance();
             }
 
-            Ok(SurfaceDefinition::InstanceDef {
-                context,
-                class_name: this.sp(cname, cs, ce),
-                args,
-                methods,
-                docs: None,
-            })
+            Ok(())
         })
     }
 }

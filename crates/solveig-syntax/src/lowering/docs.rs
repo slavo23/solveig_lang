@@ -5,7 +5,7 @@
 use super::*;
 use crate::cst::TokenId;
 
-impl Parser<'_> {
+impl AstLowerer<'_> {
     fn doc_line_text(&self, token: &PosToken, marker: &str) -> Option<String> {
         let text = self.token_source_text(token);
         let rest = text.trim_start().strip_prefix(marker)?;

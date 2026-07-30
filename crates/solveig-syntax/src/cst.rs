@@ -489,7 +489,7 @@ fn merge_span(current: Option<Span>, next: Span) -> Span {
 }
 
 fn token_span(token: &PosToken) -> Span {
-    Span::from_usize_range(token.start..token.end)
+    Span::from_usize_range(token.start()..token.end())
 }
 
 fn meaningful_token_span(token: &PosToken) -> Option<Span> {
@@ -513,7 +513,7 @@ fn token_is_comment(token: &PosToken) -> bool {
 }
 
 fn newline_has_blank_line(token: &PosToken) -> bool {
-    token.end.saturating_sub(token.start) > 1
+    token.end().saturating_sub(token.start()) > 1
 }
 
 fn mark_meaningful_tokens(stack: &[CstId], node_has_meaningful_token: &mut [bool]) {
@@ -608,10 +608,10 @@ fn token_contains_offset(token: &PosToken, offset: usize) -> bool {
         return false;
     }
 
-    if token.start == token.end {
-        matches!(token.kind, Token::Eof) && offset == token.start
+    if token.start() == token.end() {
+        matches!(token.kind, Token::Eof) && offset == token.start()
     } else {
-        token.start <= offset && offset < token.end
+        token.start() <= offset && offset < token.end()
     }
 }
 

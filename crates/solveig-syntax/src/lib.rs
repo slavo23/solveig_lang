@@ -9,7 +9,9 @@ pub mod cst;
 pub mod fixity;
 /// Tokenizes Solveig source text into spanned tokens.
 pub mod lexer;
-/// Parses tokens into surface syntax modules.
+/// Lowers parsed CSTs into surface syntax modules.
+pub mod lowering;
+/// Parses tokens into lossless CSTs.
 pub mod parser;
 /// Defines parser events and concrete syntax node kinds.
 pub mod syntax;

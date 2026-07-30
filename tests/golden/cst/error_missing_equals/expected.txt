@@ -18,7 +18,7 @@ Module @0..16
       Eq @13..14 line=1 col=5 text="="
       Whitespace @14..15 line=1 col=6 text=" "
       AtomExpr @15..16
-        Int(0) @15..16 line=1 col=7 text="0"
+        Int @15..16 line=1 col=7 text="0"
   Newline @16..17 line=1 col=8 text="\n"
   VClose @17..17 line=2 col=0 synthetic text=""
   Eof @17..17 line=2 col=0 text=""
