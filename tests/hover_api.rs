@@ -181,12 +181,67 @@ fn hover_preserves_long_source_type_variable_names() {
 
     assert_eq!(
         schemes.get("main.longElementId"),
-        Some(&"∀ (element : *). element -> element".to_string())
+        Some(&"forall element. element -> element".to_string())
     );
     assert_eq!(
         compilation.hover(&file, value_offset),
         Some("value : element".to_string())
     );
+}
+
+#[test]
+fn hover_covers_forall_signature_binder_kinds() {
+    let project_root = temp_root("forall_binder_kinds");
+    let file = project_root.join("src/main.sv");
+    let source = r#"data Box a = Box a
+
+higher : forall f a. f a -> f a
+higher x = x
+
+main = 0
+"#;
+    write_source(&file, source);
+
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation
+        .check(true)
+        .expect("forall binder hover fixture should check");
+
+    assert!(
+        result.success(),
+        "forall binder diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let line = "higher : forall f a. f a -> f a";
+    let higher = compilation
+        .hover_info(&file, offset_in_line(source, line, "higher"))
+        .expect("function name should retain exact source signature");
+    assert_eq!(higher.signature(), "higher : forall f a. f a -> f a");
+
+    let f_binder = compilation
+        .hover_info(&file, offset_in_line(source, line, "f a."))
+        .expect("higher-kinded forall binder should hover");
+    assert_eq!(f_binder.signature(), "f : * -> *");
+
+    let a_binder = compilation
+        .hover_info(&file, offset_in_line(source, line, "a. f"))
+        .expect("star-kinded forall binder should hover");
+    assert_eq!(a_binder.signature(), "a : *");
+
+    let f_use = compilation
+        .hover_info(&file, offset_in_line_last(source, line, "f a"))
+        .expect("higher-kinded forall variable use should hover");
+    assert_eq!(f_use.signature(), "f : * -> *");
+
+    let a_use_offset = source
+        .find(line)
+        .and_then(|start| line.rfind("f a").map(|offset| start + offset + "f ".len()))
+        .expect("forall fixture should contain a body type variable use");
+    let a_use = compilation
+        .hover_info(&file, a_use_offset)
+        .expect("star-kinded forall variable use should hover");
+    assert_eq!(a_use.signature(), "a : *");
 }
 
 #[test]
@@ -579,7 +634,7 @@ fn hover_info_covers_local_declaration_sites() {
             offset_in_line_last(&quiz_source, "askCards cards = mapM askCard cards", "cards"),
         )
         .expect("function parameter reference hover should exist");
-    assert_eq!(ask_cards.signature(), "cards : List QuizCard");
+    assert_eq!(ask_cards.signature(), "cards : [QuizCard]");
 }
 
 #[test]
@@ -641,7 +696,7 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
         )
         .expect("expression cons hover should exist");
     assert_contains(expression_cons.signature(), "Cons :");
-    assert_contains(expression_cons.signature(), "a -> List a -> List a");
+    assert_contains(expression_cons.signature(), "a -> [a] -> [a]");
 
     let empty_list_open = quiz
         .hover_info(
@@ -653,7 +708,7 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
             ),
         )
         .expect("empty list opening bracket hover should exist");
-    assert_eq!(empty_list_open.signature(), "Nil : forall a. List a");
+    assert_eq!(empty_list_open.signature(), "Nil : forall a. [a]");
 
     let empty_list_close = quiz
         .hover_info(
@@ -665,7 +720,7 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
             ),
         )
         .expect("empty list closing bracket hover should exist");
-    assert_eq!(empty_list_close.signature(), "Nil : forall a. List a");
+    assert_eq!(empty_list_close.signature(), "Nil : forall a. [a]");
 
     let pattern_cons = quiz
         .hover_info(
@@ -674,7 +729,7 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
         )
         .expect("pattern cons hover should exist");
     assert_contains(pattern_cons.signature(), "Cons :");
-    assert_contains(pattern_cons.signature(), "a -> List a -> List a");
+    assert_contains(pattern_cons.signature(), "a -> [a] -> [a]");
 
     let instance_class = quiz
         .hover_info(
@@ -737,9 +792,9 @@ fn hover_covers_pattern_wildcard_types() {
     );
 
     for (line, needle, expected) in [
-        ("        | _ =>", "_", "_ : List Char"),
-        ("        '?' :: _ => True", "_", "_ : List Char"),
-        ("        | SList _ => Nothing", "_", "_ : List SExp"),
+        ("        | _ =>", "_", "_ : [Char]"),
+        ("        '?' :: _ => True", "_", "_ : [Char]"),
+        ("        | SList _ => Nothing", "_", "_ : [SExp]"),
     ] {
         let hover = scry
             .hover_info(&parser_file, offset_in_line(&parser_source, line, needle))
@@ -766,18 +821,18 @@ fn hover_covers_non_empty_and_nested_list_literal_brackets() {
     let outer_open = smoke
         .hover_info(&cool_file, offset_in_line(&cool_source, outer_line, "["))
         .expect("outer list opening bracket should hover");
-    assert_eq!(outer_open.signature(), "List (List Int)");
+    assert_eq!(outer_open.signature(), "[[Int]]");
 
     let inner_line = "        [1, 2, 3],";
     let inner_open = smoke
         .hover_info(&cool_file, offset_in_line(&cool_source, inner_line, "["))
         .expect("inner list opening bracket should hover");
-    assert_eq!(inner_open.signature(), "List Int");
+    assert_eq!(inner_open.signature(), "[Int]");
 
     let inner_close = smoke
         .hover_info(&cool_file, offset_in_line(&cool_source, inner_line, "]"))
         .expect("inner list closing bracket should hover");
-    assert_eq!(inner_close.signature(), "List Int");
+    assert_eq!(inner_close.signature(), "[Int]");
 }
 
 #[test]
@@ -798,6 +853,32 @@ fn hover_covers_direct_prelude_imported_references() {
     );
 
     for (line, needle, expected) in [
+        ("class Eq a where", "a where", "a : *"),
+        ("    (==) : a -> a -> Bool", "a", "a : *"),
+        ("instance Eq a => Eq (List a) where", "a =>", "a : *"),
+        ("instance Eq a => Eq (List a) where", "a)", "a : *"),
+        ("class Functor f where", "f", "f : * -> *"),
+        (
+            "    fmap : forall a b. (a -> b) -> f a -> f b",
+            "f a",
+            "f : * -> *",
+        ),
+        (
+            "    fmap : forall a b. (a -> b) -> f a -> f b",
+            "a ->",
+            "a : *",
+        ),
+        (
+            "class Functor f => Applicative f where",
+            "f =>",
+            "f : * -> *",
+        ),
+        (
+            "class Functor f => Applicative f where",
+            "f where",
+            "f : * -> *",
+        ),
+        ("instance Functor (Pair e) where", "e)", "e : *"),
         (
             "    compare x y = intCompare x y",
             "intCompare",
@@ -816,7 +897,7 @@ fn hover_covers_direct_prelude_imported_references() {
         (
             "getArgs = prelude.prim.getArgs",
             "prelude.prim.getArgs",
-            "getArgs : IO (List String)",
+            "getArgs : IO [String]",
         ),
         (
             "    apply fs xs = concat (map (fun f => map f xs) fs)",
@@ -888,15 +969,15 @@ fn hover_audits_quiz_game_sensitive_tokens() {
         " 74:44  `question` => question : String\n",
         " 74:53  `answer` => answer : String\n",
         " 90:1   `askCards` => askCards : [QuizCard] -> IO [Pair QuizCard String]\n",
-        " 90:10  `cards` => cards : List QuizCard\n",
+        " 90:10  `cards` => cards : [QuizCard]\n",
         " 90:16  `=` => <none>\n",
         " 90:18  `mapM` => mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]\n",
         " 90:23  `askCard` => askCard : QuizCard -> IO (Pair QuizCard String)\n",
-        " 90:31  `cards` => cards : List QuizCard\n",
-        "136:9   `responses` => responses : List (Pair QuizCard String)\n",
+        " 90:31  `cards` => cards : [QuizCard]\n",
+        "136:9   `responses` => responses : [Pair QuizCard String]\n",
         "136:19  `<-` => <none>\n",
         "136:22  `askCards` => askCards : [QuizCard] -> IO [Pair QuizCard String]\n",
-        "136:31  `cards` => cards : List QuizCard\n",
+        "136:31  `cards` => cards : [QuizCard]\n",
     );
 
     assert_eq!(actual, expected);

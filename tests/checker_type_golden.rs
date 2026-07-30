@@ -10,61 +10,52 @@ fn checker_api_golden_types() {
         .expect("checker API golden fixture should resolve and check");
 
     let expected = [
-        (
-            "prelude.list.map",
-            "∀ (a : *) (b : *). (a -> b) -> List a -> List b",
-        ),
+        ("prelude.list.map", "forall a b. (a -> b) -> [a] -> [b]"),
         (
             "prelude.list.foldr",
-            "∀ (a : *) (b : *). (a -> b -> b) -> b -> List a -> b",
+            "forall a b. (a -> b -> b) -> b -> [a] -> b",
         ),
         (
             "prelude.typeclasses.notEq",
-            "∀ (a : *). Eq a => a -> a -> Bool",
+            "forall a. Eq a => a -> a -> Bool",
         ),
         (
             "prelude.typeclasses.less",
-            "∀ (a : *). Ord a => a -> a -> Bool",
+            "forall a. Ord a => a -> a -> Bool",
         ),
         (
             "main.compose",
-            "∀ (a : *) (b : *) (c : *). (b -> c) -> (a -> b) -> a -> c",
+            "forall a b c. (b -> c) -> (a -> b) -> a -> c",
         ),
-        ("main.constLocal", "∀ (a : *) (b : *). a -> b -> a"),
-        ("main.applyTwice", "∀ (a : *). (a -> a) -> a -> a"),
-        ("main.useMap", "List Int -> List Int"),
+        ("main.constLocal", "forall a b. a -> b -> a"),
+        ("main.applyTwice", "forall a. (a -> a) -> a -> a"),
+        ("main.useMap", "[Int] -> [Int]"),
         ("main.floatId", "Float -> Float"),
         ("main.charId", "Char -> Char"),
         ("main.stringId", "String -> String"),
         ("main.ioIntId", "IO Int -> IO Int"),
-        ("main.sumViaFoldr", "List Int -> Int"),
-        (
-            "main.mapBox",
-            "∀ (a : *) (b : *). (a -> b) -> Box a -> Box b",
-        ),
+        ("main.sumViaFoldr", "[Int] -> Int"),
+        ("main.mapBox", "forall a b. (a -> b) -> Box a -> Box b"),
         ("main.mapBoxInt", "Box Int -> Box Int"),
         (
             "main.sameWrap",
-            "∀ (a : *). Eq a => Wrap a -> Wrap a -> Bool",
+            "forall a. Eq a => Wrap a -> Wrap a -> Bool",
         ),
-        ("main.notEqThrough", "∀ (a : *). Eq a => a -> a -> Bool"),
-        ("main.lessViaOrd", "∀ (a : *). Ord a => a -> a -> Bool"),
-        ("main.sameViaOrd", "∀ (a : *). Ord a => a -> a -> Bool"),
-        ("main.letUnderQualified", "∀ (a : *). Eq a => a -> Bool"),
+        ("main.notEqThrough", "forall a. Eq a => a -> a -> Bool"),
+        ("main.lessViaOrd", "forall a. Ord a => a -> a -> Bool"),
+        ("main.sameViaOrd", "forall a. Ord a => a -> a -> Bool"),
+        ("main.letUnderQualified", "forall a. Eq a => a -> Bool"),
         ("main.lessInt", "Bool"),
         ("main.wrapNotEqInt", "Bool"),
-        ("main.useRank2", "(∀ (a : *). a -> a) -> Int"),
+        ("main.useRank2", "(forall a. a -> a) -> Int"),
         (
             "main.useRank2Eq",
-            "(∀ (a : *). Eq a => a -> a -> Bool) -> Bool",
+            "(forall a. Eq a => a -> a -> Bool) -> Bool",
         ),
-        ("main.polyId", "∀ (a : *). a -> a"),
-        ("main.longElementId", "∀ (element : *). element -> element"),
+        ("main.polyId", "forall a. a -> a"),
+        ("main.longElementId", "forall element. element -> element"),
         ("main.longElementResult", "Int"),
-        (
-            "main.shadowRank2",
-            "∀ (a : *). (∀ (a : *). a -> a) -> a -> a",
-        ),
+        ("main.shadowRank2", "forall a. (forall b. b -> b) -> a -> a"),
         ("main.shadowRank2Result", "Int"),
         ("main.rank2Result", "Int"),
         ("main.rank2EqResult", "Bool"),
@@ -86,19 +77,10 @@ fn inferred_constraint_golden_types() {
         .expect("inferred constrained fixture should resolve and check");
 
     let expected = [
-        ("main.double", "∀ (t99 : *). Num t99 => t99 -> t99"),
-        (
-            "main.lessAndSame",
-            "∀ (t100 : *). Ord t100 => t100 -> t100 -> Bool",
-        ),
-        (
-            "main.containsLeft",
-            "∀ (t101 : *). Eq t101 => t101 -> List t101 -> Bool",
-        ),
-        (
-            "main.containsRight",
-            "∀ (t102 : *). Eq t102 => t102 -> List t102 -> Bool",
-        ),
+        ("main.double", "forall a. Num a => a -> a"),
+        ("main.lessAndSame", "forall a. Ord a => a -> a -> Bool"),
+        ("main.containsLeft", "forall a. Eq a => a -> [a] -> Bool"),
+        ("main.containsRight", "forall a. Eq a => a -> [a] -> Bool"),
         ("main.main", "Int"),
     ];
 

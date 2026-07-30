@@ -114,7 +114,10 @@ fn signature_help_for_application(
     }
 
     let active_parameter = active_parameter(&args, offset);
-    let label = format!("{name} : {}", pretty_signature_ty(&signature_type, tables));
+    let label = format!(
+        "{name} : {}",
+        source_signature::pretty_source_ty(&signature_type, tables)
+    );
     let signature = SourceSignatureInformation::new(label, parameters)
         .with_optional_documentation(callable_documentation(artifacts, head));
 
@@ -205,128 +208,11 @@ fn arrow_parameter_types(ty: &Ty, tables: PrettyTables<'_>) -> Vec<String> {
     let mut params = Vec::new();
 
     while let Ty::TyArr(param, rest) = current {
-        params.push(pretty_signature_ty(&param, tables));
+        params.push(source_signature::pretty_source_ty(&param, tables));
         current = *rest;
     }
 
     params
-}
-
-fn pretty_signature_ty(ty: &Ty, tables: PrettyTables<'_>) -> String {
-    const PRECEDENCE_LOOSE: u8 = 0;
-    const PRECEDENCE_ARR: u8 = 1;
-    const PRECEDENCE_APP: u8 = 2;
-    const PRECEDENCE_ATOM: u8 = 3;
-
-    fn precedence(ty: &Ty) -> u8 {
-        match ty {
-            Ty::TyForAll(_, _, _) => PRECEDENCE_LOOSE,
-            Ty::TyArr(_, _) => PRECEDENCE_ARR,
-            Ty::TyApp(_, _) => PRECEDENCE_APP,
-            Ty::TyUnit | Ty::TyVar(_) | Ty::TyExVar(_) | Ty::TyCon(_) => PRECEDENCE_ATOM,
-        }
-    }
-
-    fn go(ty: &Ty, parent_precedence: u8, tables: PrettyTables<'_>) -> String {
-        let current_precedence = precedence(ty);
-        let text = match ty {
-            Ty::TyUnit => "()".to_string(),
-            Ty::TyVar(id) => tables.names.tyvar_display_name(*id),
-            Ty::TyExVar(_) => ty.pretty(),
-            Ty::TyCon(id) => signature_tycon_name(*id, tables),
-            Ty::TyArr(lhs, rhs) => {
-                let lhs = go(lhs, PRECEDENCE_APP, tables);
-                let rhs = go(rhs, PRECEDENCE_ARR, tables);
-
-                format!("{lhs} -> {rhs}")
-            }
-            Ty::TyForAll(_, _, _) => {
-                let (kinded_quants, preds, rest) = ty.peel_scheme_like();
-                let quantifiers = kinded_quants
-                    .iter()
-                    .map(|(id, kind)| {
-                        format!(
-                            "({} : {})",
-                            tables.names.tyvar_display_name(*id),
-                            kind.pretty()
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let prefix = if quantifiers.is_empty() {
-                    String::new()
-                } else {
-                    format!("forall {}. ", quantifiers.join(" "))
-                };
-
-                if preds.is_empty() {
-                    format!("{prefix}{}", go(&rest, PRECEDENCE_LOOSE, tables))
-                } else {
-                    let predicates = if preds.len() == 1 {
-                        pretty_signature_predicate(&preds[0], tables)
-                    } else {
-                        format!(
-                            "({})",
-                            preds
-                                .iter()
-                                .map(|pred| pretty_signature_predicate(pred, tables))
-                                .collect::<Vec<_>>()
-                                .join(", ")
-                        )
-                    };
-
-                    format!(
-                        "{prefix}{predicates} => {}",
-                        go(&rest, PRECEDENCE_LOOSE, tables)
-                    )
-                }
-            }
-            Ty::TyApp(func, arg) => {
-                let func = go(func, PRECEDENCE_APP, tables);
-                let arg = go(arg, PRECEDENCE_ATOM, tables);
-
-                format!("{func} {arg}")
-            }
-        };
-
-        if current_precedence < parent_precedence {
-            format!("({text})")
-        } else {
-            text
-        }
-    }
-
-    go(ty, PRECEDENCE_LOOSE, tables)
-}
-
-fn pretty_signature_predicate(pred: &Predicate, tables: PrettyTables<'_>) -> String {
-    let class = tables.classes.get(pred.class_id).map_or_else(
-        || tables.names.class_display_name(pred.class_id),
-        |info| tables.names.symbol_display_name(info.short_name),
-    );
-    let args = pred
-        .args
-        .iter()
-        .map(|arg| {
-            let text = pretty_signature_ty(arg, tables);
-            match arg {
-                Ty::TyArr(_, _) | Ty::TyForAll(_, _, _) => format!("({text})"),
-                _ => text,
-            }
-        })
-        .collect::<Vec<_>>();
-
-    if args.is_empty() {
-        class
-    } else {
-        format!("{class} {}", args.join(" "))
-    }
-}
-
-fn signature_tycon_name(id: TyConId, tables: PrettyTables<'_>) -> String {
-    tables.tycons.get(id).map_or_else(
-        || tables.names.tycon_display_name(id),
-        |info| tables.names.symbol_display_name(info.short_name),
-    )
 }
 
 fn active_parameter(args: &[&CheckedExpr], offset: usize) -> u32 {

@@ -125,10 +125,7 @@ fn missing_signature_action_handles_scry_mutual_recursion() {
             offset_in_line(&edited, "goalsFromSExps sexps =", "goalsFromSExps"),
         )
         .expect("recursive function hover should exist without a written signature");
-    assert_eq!(
-        hover.signature(),
-        "goalsFromSExps : List SExp -> Maybe (List Goal)"
-    );
+    assert_eq!(hover.signature(), "goalsFromSExps : [SExp] -> Maybe [Goal]");
 }
 
 #[test]
@@ -169,7 +166,7 @@ main = count [1, 2, 3]
     let hover = compilation
         .hover_info(&source_path, offset_in_line(source, "count xs =", "count"))
         .expect("direct recursive function hover should exist without a written signature");
-    assert_eq!(hover.signature(), "count : forall a. List a -> Int");
+    assert_eq!(hover.signature(), "count : forall a. [a] -> Int");
 
     let _ = fs::remove_dir_all(project_root);
 }
@@ -258,7 +255,7 @@ main = hasZero [1, 2, 3]
             offset_in_line(source, "hasZero xs =", "hasZero"),
         )
         .expect("concrete typeclass recursive function hover should exist");
-    assert_eq!(hover.signature(), "hasZero : List Int -> Bool");
+    assert_eq!(hover.signature(), "hasZero : [Int] -> Bool");
 
     let _ = fs::remove_dir_all(project_root);
 }
@@ -306,10 +303,9 @@ fn signatureless_recursive_function_infers_typeclass_constraint() {
         "containsPoly should infer an Eq-qualified signature: {}",
         hover.signature()
     );
-    assert!(
-        hover.signature().contains(" -> List ") && hover.signature().ends_with(" -> Bool"),
-        "containsPoly should infer a membership-like type: {}",
-        hover.signature()
+    assert_eq!(
+        hover.signature(),
+        "containsPoly : forall a. Eq a => a -> [a] -> Bool"
     );
 
     let _ = fs::remove_dir_all(project_root);

@@ -844,7 +844,7 @@ main = count [1, 2, 3]
         let hover = state
             .hover(&uri, Position::new(0, 0))
             .expect("hover should survive saving a signature-less recursive function");
-        assert_hover_contains(hover, "count : forall a. List a -> Int");
+        assert_hover_contains(hover, "count : forall a. [a] -> Int");
 
         let _ = fs::remove_dir_all(project_root);
     }
@@ -893,7 +893,7 @@ main = count [1, 2, 3]
             (
                 "getArgs = prelude.prim.getArgs",
                 "prelude.prim.getArgs",
-                "getArgs : IO (List String)",
+                "getArgs : IO [String]",
             ),
             (
                 "apply fs xs = concat (map (fun f => map f xs) fs)",

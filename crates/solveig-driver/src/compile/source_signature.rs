@@ -158,26 +158,34 @@ impl<'a> SourceSignaturePrinter<'a> {
     }
 
     fn ty(&mut self, ty: &Ty, parent_precedence: u8) -> String {
-        let current_precedence = type_precedence(ty);
-        let text = match ty {
-            Ty::TyUnit => "()".to_string(),
-            Ty::TyVar(id) => self.tyvar_name(*id),
-            Ty::TyExVar(_) => "_".to_string(),
-            Ty::TyCon(id) => source_tycon_name(*id, self.tables),
-            Ty::TyArr(lhs, rhs) => {
-                let lhs = self.ty(lhs, PRECEDENCE_APP);
-                let rhs = self.ty(rhs, PRECEDENCE_ARR);
-                format!("{lhs} -> {rhs}")
-            }
-            Ty::TyForAll(_, _, _) => {
-                let (quantifiers, predicates, body) = ty.peel_scheme_like();
-                self.bind_quantifiers(&quantifiers, &predicates);
-                self.scheme_parts(&quantifiers, &predicates, &body)
-            }
-            Ty::TyApp(func, arg) => {
-                let func = self.ty(func, PRECEDENCE_APP);
-                let arg = self.ty(arg, PRECEDENCE_ATOM);
-                format!("{func} {arg}")
+        let current_precedence = if self.list_arg(ty).is_some() {
+            PRECEDENCE_ATOM
+        } else {
+            type_precedence(ty)
+        };
+        let text = if let Some(list_arg) = self.list_arg(ty) {
+            format!("[{}]", self.ty(list_arg, PRECEDENCE_LOOSE))
+        } else {
+            match ty {
+                Ty::TyUnit => "()".to_string(),
+                Ty::TyVar(id) => self.tyvar_name(*id),
+                Ty::TyExVar(_) => "_".to_string(),
+                Ty::TyCon(id) => source_tycon_name(*id, self.tables),
+                Ty::TyArr(lhs, rhs) => {
+                    let lhs = self.ty(lhs, PRECEDENCE_APP);
+                    let rhs = self.ty(rhs, PRECEDENCE_ARR);
+                    format!("{lhs} -> {rhs}")
+                }
+                Ty::TyForAll(_, _, _) => {
+                    let (quantifiers, predicates, body) = ty.peel_scheme_like();
+                    self.bind_quantifiers(&quantifiers, &predicates);
+                    self.scheme_parts(&quantifiers, &predicates, &body)
+                }
+                Ty::TyApp(func, arg) => {
+                    let func = self.ty(func, PRECEDENCE_APP);
+                    let arg = self.ty(arg, PRECEDENCE_ATOM);
+                    format!("{func} {arg}")
+                }
             }
         };
 
@@ -214,6 +222,24 @@ impl<'a> SourceSignaturePrinter<'a> {
             .get(&id)
             .cloned()
             .unwrap_or_else(|| self.tables.names.tyvar_display_name(id))
+    }
+
+    fn list_arg<'b>(&self, ty: &'b Ty) -> Option<&'b Ty> {
+        let Ty::TyApp(func, arg) = ty else {
+            return None;
+        };
+
+        self.is_prelude_list_tycon(func).then_some(arg)
+    }
+
+    fn is_prelude_list_tycon(&self, ty: &Ty) -> bool {
+        let Ty::TyCon(id) = ty else {
+            return false;
+        };
+
+        self.tables.tycons.get(*id).is_some_and(|info| {
+            self.tables.names.symbol_display_name(info.name) == PRELUDE_LIST_NAME
+        }) || self.tables.names.tycon_display_name(*id) == PRELUDE_LIST_NAME
     }
 }
 

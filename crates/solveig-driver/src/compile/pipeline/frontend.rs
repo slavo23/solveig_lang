@@ -265,8 +265,12 @@ impl<'a> FrontendState<'a> {
         source_files: Vec<SourceFile>,
         order: &[ModuleName],
     ) -> FrontendRetained {
-        let artifacts =
-            collect_retained_frontend_artifacts(self.session, self.project, &self.typed_apis);
+        let artifacts = collect_retained_frontend_artifacts(
+            self.session,
+            self.names,
+            self.project,
+            &self.typed_apis,
+        );
         let modules: Vec<CheckedModule> = order
             .iter()
             .filter_map(|module_name| {
@@ -283,7 +287,7 @@ impl<'a> FrontendState<'a> {
             self.names,
             &modules,
         );
-        let local_hovers = inlay_hints::project_local_hovers(
+        let mut local_hovers = inlay_hints::project_local_hovers(
             self.session,
             self.project,
             self.parsed,
@@ -292,6 +296,11 @@ impl<'a> FrontendState<'a> {
             self.names,
             &modules,
         );
+        local_hovers.extend(artifacts.source_type_var_hovers);
+        local_hovers.sort_by_key(|info| {
+            let span = info.file_span();
+            (span.file, span.span.start, span.span.end)
+        });
         let incremental_cache = self.capture_incremental_cache();
         let (tycon_table, _ctor_table, class_table) =
             super::compilation::checked_project_tables(&modules);

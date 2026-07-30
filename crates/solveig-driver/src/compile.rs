@@ -21,11 +21,11 @@ use solveig_ast::ast::{
     BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
     BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinDefinition,
     BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassInfo, ClassTable,
-    CtorId, CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, Names, PRIM_TYS, Pattern,
-    PatternNode, Predicate, Pretty, PrettyTables, Scheme, TermDefinition, TermExpr, TermExprNode,
-    Ty, TyConDefinition, TyConId, TyConInfo, TyConTable, TyVarId, VarRef,
-    compiler_bool_data_definition, prelude_list_tycon_id, prelude_maybe_tycon_id,
-    prelude_ordering_tycon_id,
+    CtorId, CtorTable, DataDefinition, DefId, Ev, InstanceDefinition, InstanceId, Kind, ModuleId,
+    Names, PRELUDE_LIST_NAME, PRIM_TYS, Pattern, PatternNode, Predicate, Pretty, PrettyTables,
+    Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConDefinition, TyConId, TyConInfo,
+    TyConTable, TyVarId, VarRef, compiler_bool_data_definition, prelude_list_tycon_id,
+    prelude_maybe_tycon_id, prelude_ordering_tycon_id,
 };
 use solveig_base::Span;
 use solveig_base::{Diagnostic, Severity, TypeError};
