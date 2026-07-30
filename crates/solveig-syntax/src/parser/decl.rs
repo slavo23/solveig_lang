@@ -5,7 +5,8 @@ use super::*;
 
 impl Parser<'_> {
     pub(super) fn parse_func_or_sig(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::FunctionOrSignature, |this| {
+        let kind = self.current_value_definition_kind();
+        self.node(kind, |this| {
             let (name, start, end) = this.expect_value_name()?;
             let name = this.sp(name, start, end);
 
@@ -20,7 +21,7 @@ impl Parser<'_> {
             }
 
             let mut params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident(_) | Token::Underscore) {
+            while matches!(this.current_kind(), Token::Ident | Token::Underscore) {
                 let (param, start, end) = this.expect_binder()?;
                 params.push(this.sp(param, start, end));
             }
@@ -35,6 +36,22 @@ impl Parser<'_> {
                 docs: None,
             })
         })
+    }
+
+    fn current_value_definition_kind(&self) -> SyntaxKind {
+        let token_after_name = if self.starts_parenthesized_operator_name() {
+            3
+        } else if self.at(&Token::Ident) {
+            1
+        } else {
+            return SyntaxKind::FunctionDef;
+        };
+
+        if matches!(self.peek_kind(token_after_name), Some(Token::Colon)) {
+            SyntaxKind::Signature
+        } else {
+            SyntaxKind::FunctionDef
+        }
     }
 
     pub(super) fn parse_fixity_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
@@ -96,7 +113,7 @@ impl Parser<'_> {
             let name = this.sp(name, start, end);
 
             let mut ty_params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident(_)) {
+            while matches!(this.current_kind(), Token::Ident) {
                 let (param, start, end) = this.expect_ident()?;
                 ty_params.push(this.sp(param, start, end));
             }
@@ -135,7 +152,7 @@ impl Parser<'_> {
             let name = this.sp(name, start, end);
 
             let mut ty_params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident(_)) {
+            while matches!(this.current_kind(), Token::Ident) {
                 let (param, start, end) = this.expect_ident()?;
                 ty_params.push(this.sp(param, start, end));
             }
@@ -174,10 +191,10 @@ impl Parser<'_> {
             let start = this.current_start();
 
             let class_name = this.parse_name_path()?;
-            if !is_ctor_like(&class_name.0.last_text(this.session)) {
+            if !is_ctor_like(this.name_ref_last_source_text(&class_name)) {
                 return Err(this.error(format!(
                     "expected class name, got {}",
-                    class_name.0.display(this.session)
+                    this.name_ref_source_text(&class_name)
                 )));
             }
 
@@ -238,7 +255,7 @@ impl Parser<'_> {
             let (name, ns, ne) = this.expect_upper()?;
 
             let mut ty_params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident(_)) {
+            while matches!(this.current_kind(), Token::Ident) {
                 let (p, ps, pe) = this.expect_ident()?;
                 ty_params.push(this.sp(p, ps, pe));
             }
@@ -267,7 +284,7 @@ impl Parser<'_> {
                     this.advance();
                     let (mname, ms, me) = this.expect_value_name()?;
                     let mut mparams = Vec::new();
-                    while matches!(this.current_kind(), Token::Ident(_) | Token::Underscore) {
+                    while matches!(this.current_kind(), Token::Ident | Token::Underscore) {
                         let (p, ps, pe) = this.expect_binder()?;
                         mparams.push(this.sp(p, ps, pe));
                     }
@@ -355,7 +372,7 @@ impl Parser<'_> {
                 }
                 let (mname, ms, me) = this.expect_value_name()?;
                 let mut mparams = Vec::new();
-                while matches!(this.current_kind(), Token::Ident(_) | Token::Underscore) {
+                while matches!(this.current_kind(), Token::Ident | Token::Underscore) {
                     let (p, ps, pe) = this.expect_binder()?;
                     mparams.push(this.sp(p, ps, pe));
                 }

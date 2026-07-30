@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 solveig-base = { path = "../solveig-base", version = "0.1.0" }
+la-arena = { workspace = true }
 logos = { version = "0.16.1" }
 
 [lints]

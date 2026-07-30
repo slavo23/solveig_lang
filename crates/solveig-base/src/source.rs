@@ -4,6 +4,8 @@
 use std::ops::Range;
 use std::path::PathBuf;
 
+use text_size::{TextRange, TextSize};
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct FileId(pub u32);
 
@@ -36,6 +38,17 @@ impl Span {
 
     pub fn to_usize_range(self) -> Range<usize> {
         self.start as usize..self.end as usize
+    }
+
+    pub fn from_text_range(range: TextRange) -> Self {
+        Self {
+            start: range.start().into(),
+            end: range.end().into(),
+        }
+    }
+
+    pub fn to_text_range(self) -> TextRange {
+        TextRange::new(TextSize::from(self.start), TextSize::from(self.end))
     }
 }
 

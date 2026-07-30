@@ -1,7 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use solveig_base::{FileSpan, PositionEncoding, Session, SourceMap, SourcePosition};
+use solveig_base::{FileId, FileSpan, PositionEncoding, SourceMap, SourcePosition};
 use solveig_driver::{Compilation, SourceInlayHintConfig, SourceSelectionRange, SourceSymbol};
 use solveig_syntax::lexer::{Token, lex};
 
@@ -236,9 +236,7 @@ fn hover_audit_for_lines(
     source: &str,
     lines: &[&str],
 ) -> String {
-    let lex_session = Session::new();
-    let lex_file = lex_session.add_file(file, source.to_string());
-    let tokens = lex(&lex_session, lex_file, source).expect("hover audit source should lex");
+    let tokens = lex(FileId(0), source).expect("hover audit source should lex");
     let line_ranges = lines
         .iter()
         .map(|line| {
@@ -305,9 +303,7 @@ fn audit_file(compilation: &mut Compilation, file: &Path, anomalies: &mut Vec<St
 
     audit_file_level_features(compilation, file, file_id, source.len(), anomalies);
 
-    let lex_session = Session::new();
-    let lex_file = lex_session.add_file(file, source.clone());
-    let tokens = lex(&lex_session, lex_file, &source)
+    let tokens = lex(FileId(0), &source)
         .unwrap_or_else(|err| panic!("{} should lex: {err:?}", file.display()));
 
     for token in tokens

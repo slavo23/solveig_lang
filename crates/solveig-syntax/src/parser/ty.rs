@@ -30,7 +30,7 @@ impl Parser<'_> {
             if this.at(&Token::Forall) {
                 this.advance();
                 let mut vars = Vec::new();
-                while matches!(this.current_kind(), Token::Ident(_)) {
+                while matches!(this.current_kind(), Token::Ident) {
                     let (v, vs, ve) = this.expect_ident()?;
                     vars.push(this.sp(v, vs, ve));
                 }
@@ -73,7 +73,7 @@ impl Parser<'_> {
     pub(super) fn is_type_atom_start(&self) -> bool {
         matches!(
             self.current_kind(),
-            Token::Ident(_) | Token::UpperIdent(_) | Token::LParen | Token::LBrack
+            Token::Ident | Token::UpperIdent | Token::LParen | Token::LBrack
         )
     }
 
@@ -81,17 +81,17 @@ impl Parser<'_> {
         self.node(SyntaxKind::TypeAtom, |this| {
             let start = this.current_start();
             match this.current_kind() {
-                Token::Ident(_) | Token::UpperIdent(_) => {
+                Token::Ident | Token::UpperIdent => {
                     let name_ref = this.parse_name_path()?;
                     let end = span_end(&name_ref);
-                    if is_ctor_like(&name_ref.0.last_text(this.session)) {
+                    if is_ctor_like(this.name_ref_last_source_text(&name_ref)) {
                         Ok(this.sp(SurfaceTy::Con(name_ref), start, end))
                     } else if name_ref.0.segments.len() == 1 {
                         Ok(this.sp(SurfaceTy::Var(name_ref.0.last()), start, end))
                     } else {
                         Err(this.error(format!(
                             "qualified type variable is not allowed: {}",
-                            name_ref.0.display(this.session)
+                            this.name_ref_source_text(&name_ref)
                         )))
                     }
                 }
@@ -109,13 +109,7 @@ impl Parser<'_> {
                     this.advance();
                     let elem = this.parse_type()?;
                     let end = this.expect(&Token::RBrack)?.end;
-                    Ok(list_ty(
-                        this.session,
-                        elem,
-                        start,
-                        end,
-                        this.current_cst_id(),
-                    ))
+                    Ok(list_ty(this, elem, start, end, this.current_cst_id()))
                 }
                 _ => Err(this.error(format!("expected type, got {}", this.describe_current()))),
             }

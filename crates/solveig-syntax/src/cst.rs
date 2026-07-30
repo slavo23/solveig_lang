@@ -2,6 +2,7 @@
 //! The parser emits flat events; this module builds the arena used by H4
 //! lowering and later editor features.
 
+use la_arena::{Arena, Idx, RawIdx};
 use solveig_base::{Diagnostic, FileId, Span};
 
 use crate::lexer::{PosToken, Token};
@@ -9,15 +10,16 @@ use crate::syntax::{Event, SyntaxKind};
 
 /// Identifies a syntax node in a `SyntaxTree` arena.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct CstId(u32);
+pub struct CstId(Idx<SyntaxNode>);
 
 impl CstId {
     pub(crate) fn new(index: usize) -> Self {
-        Self(u32::try_from(index).expect("ICE: CST node arena exceeded u32 capacity"))
+        let index = u32::try_from(index).expect("ICE: CST node arena exceeded u32 capacity");
+        Self(Idx::from_raw(RawIdx::from_u32(index)))
     }
 
     pub fn index(self) -> usize {
-        self.0 as usize
+        self.0.into_raw().into_u32() as usize
     }
 }
 
@@ -84,7 +86,7 @@ impl SyntaxNode {
 pub struct SyntaxTree {
     file: FileId,
     root: CstId,
-    nodes: Vec<SyntaxNode>,
+    nodes: Arena<SyntaxNode>,
     tokens: Vec<PosToken>,
     token_parents: Vec<Option<CstId>>,
     leading_comments: Vec<Vec<TokenId>>,
@@ -98,8 +100,8 @@ impl SyntaxTree {
         // StartNode/Token/FinishNode stream; Solveig keeps the arena hand-rolled.
         let mut tree = Self {
             file,
-            root: CstId(0),
-            nodes: Vec::new(),
+            root: CstId::new(0),
+            nodes: Arena::new(),
             token_parents: vec![None; tokens.len()],
             leading_comments: vec![Vec::new(); tokens.len()],
             trailing_comments: vec![Vec::new(); tokens.len()],
@@ -184,6 +186,7 @@ impl SyntaxTree {
         }
 
         tree.root = root;
+        tree.collapse_trivial_wrappers();
         tree.attach_comment_trivia();
         tree
     }
@@ -205,17 +208,12 @@ impl SyntaxTree {
 
     /// Returns all arena nodes with their ids.
     pub fn nodes(&self) -> impl Iterator<Item = (CstId, &SyntaxNode)> + '_ {
-        self.nodes
-            .iter()
-            .enumerate()
-            .map(|(index, node)| (CstId::new(index), node))
+        self.nodes.iter().map(|(id, node)| (CstId(id), node))
     }
 
     /// Returns one syntax node by id.
     pub fn node(&self, id: CstId) -> &SyntaxNode {
-        self.nodes
-            .get(id.index())
-            .expect("ICE: CstId not present in SyntaxTree")
+        &self.nodes[id.0]
     }
 
     /// Returns one token by id.
@@ -283,21 +281,45 @@ impl SyntaxTree {
     }
 
     fn push_node(&mut self, kind: SyntaxKind, parent: Option<CstId>) -> CstId {
-        let id = CstId::new(self.nodes.len());
-        self.nodes.push(SyntaxNode {
+        let id = self.nodes.alloc(SyntaxNode {
             kind,
             span: Span::new(0, 0),
             parent,
             children: Vec::new(),
             diagnostics: Vec::new(),
         });
-        id
+        CstId(id)
     }
 
     fn node_mut(&mut self, id: CstId) -> &mut SyntaxNode {
-        self.nodes
-            .get_mut(id.index())
-            .expect("ICE: CstId not present in SyntaxTree")
+        &mut self.nodes[id.0]
+    }
+
+    fn collapse_trivial_wrappers(&mut self) {
+        let old_nodes = std::mem::replace(&mut self.nodes, Arena::new());
+        let old_root = self.root;
+        let mut rebuilder = CstRebuilder {
+            old_nodes,
+            tokens: &self.tokens,
+            nodes: Arena::new(),
+            token_parents: vec![None; self.tokens.len()],
+        };
+
+        let rebuilt = rebuilder.rebuild_node(old_root, true);
+        let [NodeOrToken::Node(root)] = rebuilt.as_slice() else {
+            panic!("ICE: CST root rebuild must produce exactly one root node");
+        };
+
+        self.root = *root;
+        self.nodes = rebuilder.nodes;
+        self.token_parents = rebuilder.token_parents;
+
+        for (index, parent) in self.token_parents.iter().enumerate() {
+            assert!(
+                parent.is_some(),
+                "ICE: CST collapse lost parent for token {index}"
+            );
+        }
     }
 
     fn insert_token_child(&mut self, parent: CstId, token: TokenId, before_child: Option<CstId>) {
@@ -373,6 +395,89 @@ impl SyntaxTree {
                 NodeOrToken::Token(id) => out.push_str(self.token(*id).source_text(source)),
             }
         }
+    }
+}
+
+struct CstRebuilder<'a> {
+    old_nodes: Arena<SyntaxNode>,
+    tokens: &'a [PosToken],
+    nodes: Arena<SyntaxNode>,
+    token_parents: Vec<Option<CstId>>,
+}
+
+impl CstRebuilder<'_> {
+    fn rebuild_node(&mut self, old_id: CstId, force_keep: bool) -> Vec<NodeOrToken> {
+        if !force_keep && self.should_collapse(old_id) {
+            return self.rebuild_children(old_id, None);
+        }
+
+        let old = &self.old_nodes[old_id.0];
+        let new_id = CstId(self.nodes.alloc(SyntaxNode {
+            kind: old.kind,
+            span: old.span,
+            parent: None,
+            children: Vec::new(),
+            diagnostics: old.diagnostics.clone(),
+        }));
+        let children = self.rebuild_children(old_id, Some(new_id));
+        self.nodes[new_id.0].children = children;
+
+        vec![NodeOrToken::Node(new_id)]
+    }
+
+    fn rebuild_children(&mut self, old_id: CstId, parent: Option<CstId>) -> Vec<NodeOrToken> {
+        let old_children = self.old_nodes[old_id.0].children.clone();
+        let mut children = Vec::new();
+
+        for child in old_children {
+            match child {
+                NodeOrToken::Node(old_child) => {
+                    let rebuilt = self.rebuild_node(old_child, false);
+                    for entry in rebuilt {
+                        self.attach_rebuilt_child(parent, entry);
+                        children.push(entry);
+                    }
+                }
+                NodeOrToken::Token(token) => {
+                    self.attach_rebuilt_child(parent, NodeOrToken::Token(token));
+                    children.push(NodeOrToken::Token(token));
+                }
+            }
+        }
+
+        children
+    }
+
+    fn attach_rebuilt_child(&mut self, parent: Option<CstId>, child: NodeOrToken) {
+        let Some(parent) = parent else {
+            return;
+        };
+
+        match child {
+            NodeOrToken::Node(id) => self.nodes[id.0].parent = Some(parent),
+            NodeOrToken::Token(id) => self.token_parents[id.index()] = Some(parent),
+        }
+    }
+
+    fn should_collapse(&self, old_id: CstId) -> bool {
+        let old = &self.old_nodes[old_id.0];
+
+        if !old.diagnostics.is_empty() {
+            return false;
+        }
+
+        let mut child_nodes = 0usize;
+        for child in &old.children {
+            match child {
+                NodeOrToken::Node(_) => child_nodes += 1,
+                NodeOrToken::Token(id) if token_is_meaningful(&self.tokens[id.index()]) => {
+                    return false;
+                }
+                NodeOrToken::Token(_) => {}
+            }
+        }
+
+        child_nodes == 1
     }
 }
 

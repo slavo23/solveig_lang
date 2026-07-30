@@ -11,10 +11,8 @@ fn parse_test_source(source: &str) -> ParsedModule {
 }
 
 fn parse_test_events(source: &str) -> (Vec<PosToken>, Vec<Event>) {
-    let session = Session::new();
-    let file = session.add_file("test.sv", source);
-
-    parse_source_events(&session, file, source).expect("test source should lex")
+    let parsed = parse_source_events(FileId(0), source).expect("test source should lex");
+    (parsed.tokens, parsed.events)
 }
 
 fn event_balance(events: &[Event]) -> isize {
@@ -55,7 +53,8 @@ fn parser_emits_balanced_events_over_full_token_stream() {
         Some(Event::StartNode(SyntaxKind::Module))
     ));
     assert!(matches!(events.last(), Some(Event::FinishNode)));
-    assert!(events.contains(&Event::StartNode(SyntaxKind::FunctionOrSignature)));
+    assert!(events.contains(&Event::StartNode(SyntaxKind::Signature)));
+    assert!(events.contains(&Event::StartNode(SyntaxKind::FunctionDef)));
     assert!(events.contains(&Event::StartNode(SyntaxKind::DoExpr)));
 
     let token_events = events
@@ -91,22 +90,13 @@ fn lowered_ast_nodes_point_into_cst_arena() {
     let sig = &parsed.defs[0];
     let main = &parsed.defs[1];
 
-    assert_eq!(
-        parsed.cst.node(sig.2).kind(),
-        SyntaxKind::FunctionOrSignature
-    );
-    assert_eq!(
-        parsed.cst.node(main.2).kind(),
-        SyntaxKind::FunctionOrSignature
-    );
+    assert_eq!(parsed.cst.node(sig.2).kind(), SyntaxKind::Signature);
+    assert_eq!(parsed.cst.node(main.2).kind(), SyntaxKind::FunctionDef);
 
     let SurfaceDefinition::FunDef { name, body, .. } = &main.0 else {
         panic!("expected main function definition");
     };
-    assert_eq!(
-        parsed.cst.node(name.2).kind(),
-        SyntaxKind::FunctionOrSignature
-    );
+    assert_eq!(parsed.cst.node(name.2).kind(), SyntaxKind::FunctionDef);
     assert_eq!(parsed.cst.node(body.2).kind(), SyntaxKind::DoExpr);
 }
 
@@ -148,21 +138,20 @@ fn parser_events_cover_every_token_for_repository_sources() {
     collect_solveig_sources(repo, &mut files);
     files.sort();
 
-    let session = Session::new();
     for path in files {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
-        let file = session.add_file(&path, source.clone());
-        let (tokens, events) = parse_source_events(&session, file, &source)
+        let parsed = parse_source_events(FileId(0), &source)
             .unwrap_or_else(|err| panic!("failed to parse events for {}: {err:?}", path.display()));
-        let token_events = events
+        let token_events = parsed
+            .events
             .iter()
             .filter_map(|event| match event {
                 Event::Token(index) => Some(*index),
                 Event::StartNode(_) | Event::FinishNode | Event::Error(_) => None,
             })
             .collect::<Vec<_>>();
-        let all_token_indices = (0..tokens.len()).collect::<Vec<_>>();
+        let all_token_indices = (0..parsed.tokens.len()).collect::<Vec<_>>();
 
         assert_eq!(
             token_events,

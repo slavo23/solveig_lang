@@ -178,9 +178,7 @@ fn hover_in_file_id(
 }
 
 fn hover_token_at(source_file: &SourceFile, offset: usize) -> Option<HoverToken> {
-    let session = Session::new();
-    let file = session.add_file(source_file.path.clone(), source_file.src.clone());
-    let tokens = lex(&session, file, &source_file.src).ok()?;
+    let tokens = lex(FileId(0), &source_file.src).ok()?;
 
     tokens
         .iter()
@@ -207,10 +205,10 @@ fn hover_token_kind(tokens: &[solveig_syntax::lexer::PosToken], index: usize) ->
         Token::LBrack | Token::RBrack if empty_list_token_span(tokens, index).is_some() => {
             HoverTokenKind::EmptyList
         }
-        Token::Ident(_)
-        | Token::UpperIdent(_)
+        Token::Ident
+        | Token::UpperIdent
         | Token::Hole
-        | Token::Operator(_)
+        | Token::Operator
         | Token::Plus
         | Token::Minus
         | Token::Star

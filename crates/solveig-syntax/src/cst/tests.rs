@@ -3,17 +3,42 @@ use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use solveig_base::Session;
+use solveig_base::{FileId, Session};
 
 use crate::ast::ParsedModule;
 use crate::lexer::Token;
-use crate::parser::parse_source;
+use crate::parser::{parse_cst, parse_source};
 
 fn parse_test_source(source: &str) -> ParsedModule {
     let session = Session::new();
     let file = session.add_file("test.sv", source);
 
     parse_source(&session, file, source)
+}
+
+#[test]
+fn session_free_cst_parse_keeps_structural_expr_nodes_and_drops_empty_imports() {
+    let source = "main = [1, (2)]\n";
+    let (tree, diagnostics) =
+        parse_cst(FileId(0), source).expect("session-free CST parse should lex");
+
+    assert!(diagnostics.is_empty(), "unexpected parse diagnostics");
+    assert_eq!(tree.reconstruct_text(source), source);
+    assert!(
+        tree.nodes()
+            .all(|(_, node)| node.kind() != SyntaxKind::ImportList),
+        "modules without imports should not emit an empty ImportList"
+    );
+    assert!(
+        tree.nodes()
+            .any(|(_, node)| node.kind() == SyntaxKind::ListExpr),
+        "list literals should have a structural ListExpr node"
+    );
+    assert!(
+        tree.nodes()
+            .any(|(_, node)| node.kind() == SyntaxKind::ParenExpr),
+        "parenthesized expressions should have a structural ParenExpr node"
+    );
 }
 
 #[test]
@@ -42,7 +67,7 @@ fn cst_reconstructs_text_and_supports_navigation() {
     let print_token = tree
         .token_at_offset(print_offset)
         .expect("function name should have a token");
-    assert!(matches!(tree.token(print_token).kind, Token::Ident(_)));
+    assert!(matches!(tree.token(print_token).kind, Token::Ident));
 
     let token_parent = tree
         .token_parent(print_token)
@@ -55,7 +80,7 @@ fn cst_reconstructs_text_and_supports_navigation() {
     assert_eq!(tree.node(node).kind(), SyntaxKind::NamePath);
 
     let parent = tree.parent(node).expect("name path should be nested");
-    assert_eq!(tree.node(parent).kind(), SyntaxKind::AtomExpr);
+    assert_eq!(tree.node(parent).kind(), SyntaxKind::AppExpr);
 }
 
 #[test]
@@ -133,10 +158,7 @@ fn cst_places_leading_trivia_at_surrounding_parent_level() {
         .expect("trivia tokens should stay placed in the CST");
 
     assert_eq!(tree.token(whitespace).kind, Token::Whitespace);
-    assert_eq!(
-        tree.node(whitespace_parent).kind(),
-        SyntaxKind::FunctionOrSignature
-    );
+    assert_eq!(tree.node(whitespace_parent).kind(), SyntaxKind::Signature);
 
     let io_token = tree
         .token_at_offset(io_offset)

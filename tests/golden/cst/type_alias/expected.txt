@@ -1,6 +1,5 @@
 Module @0..67
   VOpen @0..0 line=0 col=0 synthetic text=""
-  ImportList @0..0
   DefinitionList @0..67
     TypeAliasDef @0..28
       Type @0..4 line=0 col=0 text="type"
@@ -11,59 +10,44 @@ Module @0..67
       Whitespace @12..13 line=0 col=12 text=" "
       Eq @13..14 line=0 col=13 text="="
       Whitespace @14..15 line=0 col=14 text=" "
-      Type @15..28
-        QualifiedType @15..28
-          TypeArrow @15..28
-            TypeApp @15..28
-              TypeAtom @15..19
-                NamePath @15..19
-                  UpperIdent @15..19 line=0 col=15 text="Pair"
-              Whitespace @19..20 line=0 col=19 text=" "
-              TypeAtom @20..26
-                NamePath @20..26
-                  UpperIdent @20..26 line=0 col=20 text="String"
-              Whitespace @26..27 line=0 col=26 text=" "
-              TypeAtom @27..28
-                NamePath @27..28
-                  Ident @27..28 line=0 col=27 text="a"
+      TypeApp @15..28
+        NamePath @15..19
+          UpperIdent @15..19 line=0 col=15 text="Pair"
+        Whitespace @19..20 line=0 col=19 text=" "
+        NamePath @20..26
+          UpperIdent @20..26 line=0 col=20 text="String"
+        Whitespace @26..27 line=0 col=26 text=" "
+        NamePath @27..28
+          Ident @27..28 line=0 col=27 text="a"
     Newline @28..30 line=0 col=28 text="\n\n"
     VSemi @30..30 line=2 col=0 synthetic text=""
-    FunctionOrSignature @30..46
+    Signature @30..46
       Ident @30..34 line=2 col=0 text="main"
       Whitespace @34..35 line=2 col=4 text=" "
       Colon @35..36 line=2 col=5 text=":"
       Whitespace @36..37 line=2 col=6 text=" "
-      Type @37..46
-        QualifiedType @37..46
-          TypeArrow @37..46
-            TypeApp @37..46
-              TypeAtom @37..42
-                NamePath @37..42
-                  UpperIdent @37..42 line=2 col=7 text="Score"
-              Whitespace @42..43 line=2 col=12 text=" "
-              TypeAtom @43..46
-                NamePath @43..46
-                  UpperIdent @43..46 line=2 col=13 text="Int"
+      TypeApp @37..46
+        NamePath @37..42
+          UpperIdent @37..42 line=2 col=7 text="Score"
+        Whitespace @42..43 line=2 col=12 text=" "
+        NamePath @43..46
+          UpperIdent @43..46 line=2 col=13 text="Int"
     Newline @46..47 line=2 col=16 text="\n"
     VSemi @47..47 line=3 col=0 synthetic text=""
-    FunctionOrSignature @47..67
+    FunctionDef @47..67
       Ident @47..51 line=3 col=0 text="main"
       Whitespace @51..52 line=3 col=4 text=" "
       Eq @52..53 line=3 col=5 text="="
       Whitespace @53..54 line=3 col=6 text=" "
-      Expr @54..67
-        OpChain @54..67
-          OpOperand @54..67
-            AppExpr @54..67
-              AtomExpr @54..60
-                NamePath @54..60
-                  UpperIdent @54..60 line=3 col=7 text="MkPair"
-              Whitespace @60..61 line=3 col=13 text=" "
-              AtomExpr @61..65
-                Str("ok") @61..65 line=3 col=14 text="\"ok\""
-              Whitespace @65..66 line=3 col=18 text=" "
-              AtomExpr @66..67
-                Int(1) @66..67 line=3 col=19 text="1"
+      AppExpr @54..67
+        NamePath @54..60
+          UpperIdent @54..60 line=3 col=7 text="MkPair"
+        Whitespace @60..61 line=3 col=13 text=" "
+        AtomExpr @61..65
+          Str("ok") @61..65 line=3 col=14 text="\"ok\""
+        Whitespace @65..66 line=3 col=18 text=" "
+        AtomExpr @66..67
+          Int(1) @66..67 line=3 col=19 text="1"
   Newline @67..68 line=3 col=20 text="\n"
   VClose @68..68 line=4 col=0 synthetic text=""
   Eof @68..68 line=4 col=0 text=""

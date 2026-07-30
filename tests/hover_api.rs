@@ -3,7 +3,6 @@ use std::path::{Path, PathBuf};
 use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use solveig_base::Session;
 use solveig_driver::Compilation;
 use solveig_syntax::lexer::lex;
 
@@ -69,9 +68,7 @@ fn hover_audit_for_lines(
     source: &str,
     lines: &[&str],
 ) -> String {
-    let lex_session = Session::new();
-    let lex_file = lex_session.add_file(file, source.to_string());
-    let tokens = lex(&lex_session, lex_file, source).expect("hover audit source should lex");
+    let tokens = lex(solveig_base::FileId(0), source).expect("hover audit source should lex");
     let line_ranges = lines
         .iter()
         .map(|line| {

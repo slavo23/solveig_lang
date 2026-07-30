@@ -1,31 +1,20 @@
 Module @0..41
   VOpen @0..0 line=0 col=0 synthetic text=""
-  ImportList @0..0
   DefinitionList @0..41
-    FunctionOrSignature @0..23
+    FunctionDef @0..23
       Ident @0..4 line=0 col=0 text="main"
       Whitespace @4..5 line=0 col=4 text=" "
       Eq @5..6 line=0 col=5 text="="
       Newline @6..7 line=0 col=6 text="\n"
       Whitespace @7..11 line=1 col=0 text="    "
-      Expr @11..23
-        IfExpr @11..23
-          If @11..13 line=1 col=4 text="if"
-          Whitespace @13..14 line=1 col=6 text=" "
-          Expr @14..18
-            OpChain @14..18
-              OpOperand @14..18
-                AppExpr @14..18
-                  AtomExpr @14..18
-                    NamePath @14..18
-                      UpperIdent @14..18 line=1 col=7 text="True"
-          Whitespace @18..19 line=1 col=11 text=" "
-          Then @19..23 line=1 col=12 text="then"
-          Expr @0..0
-            OpChain @0..0
-              OpOperand @0..0
-                AppExpr @0..0
-                  AtomExpr @0..0
+      IfExpr @11..23
+        If @11..13 line=1 col=4 text="if"
+        Whitespace @13..14 line=1 col=6 text=" "
+        NamePath @14..18
+          UpperIdent @14..18 line=1 col=7 text="True"
+        Whitespace @18..19 line=1 col=11 text=" "
+        Then @19..23 line=1 col=12 text="then"
+        AtomExpr @0..0
     Whitespace @23..24 line=1 col=16 text=" "
     Error @24..32
       diagnostic PAR0001 Error "parse error"
@@ -37,17 +26,13 @@ Module @0..41
       Int(0) @31..32 line=1 col=24 text="0"
       Newline @32..33 line=1 col=25 text="\n"
       VSemi @33..33 line=2 col=0 synthetic text=""
-    FunctionOrSignature @33..41
+    FunctionDef @33..41
       Ident @33..37 line=2 col=0 text="next"
       Whitespace @37..38 line=2 col=4 text=" "
       Eq @38..39 line=2 col=5 text="="
       Whitespace @39..40 line=2 col=6 text=" "
-      Expr @40..41
-        OpChain @40..41
-          OpOperand @40..41
-            AppExpr @40..41
-              AtomExpr @40..41
-                Int(3) @40..41 line=2 col=7 text="3"
+      AtomExpr @40..41
+        Int(3) @40..41 line=2 col=7 text="3"
   Newline @41..42 line=2 col=8 text="\n"
   VClose @42..42 line=3 col=0 synthetic text=""
   Eof @42..42 line=3 col=0 text=""

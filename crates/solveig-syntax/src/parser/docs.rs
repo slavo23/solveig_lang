@@ -6,16 +6,6 @@ use super::*;
 use crate::cst::TokenId;
 
 impl Parser<'_> {
-    fn token_source_text(&self, token: &PosToken) -> String {
-        self.session
-            .source_map()
-            .lookup(self.file)
-            .src
-            .get(token.start..token.end)
-            .unwrap_or("")
-            .to_string()
-    }
-
     fn doc_line_text(&self, token: &PosToken, marker: &str) -> Option<String> {
         let text = self.token_source_text(token);
         let rest = text.trim_start().strip_prefix(marker)?;

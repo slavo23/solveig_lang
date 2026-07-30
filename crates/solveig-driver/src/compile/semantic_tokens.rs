@@ -104,7 +104,7 @@ fn import_namespace_tokens(file: FileId, tokens: &[PosToken]) -> Vec<SourceSeman
 
         match &token.kind {
             Token::Whitespace | Token::BlockComment | Token::LineComment => {}
-            Token::Ident(_) | Token::UpperIdent(_) | Token::Dot => {
+            Token::Ident | Token::UpperIdent | Token::Dot => {
                 namespace_start.get_or_insert(token.start);
                 namespace_end = token.end;
             }
@@ -185,10 +185,10 @@ fn syntax_token_kind(kind: &Token) -> Option<SourceSemanticTokenKind> {
         | Token::LessEq
         | Token::GreaterEq
         | Token::Backtick
-        | Token::Operator(_)
-        | Token::ReservedOp(_) => Some(SourceSemanticTokenKind::Operator),
-        Token::Ident(_) => Some(SourceSemanticTokenKind::Variable),
-        Token::UpperIdent(_) => Some(SourceSemanticTokenKind::Type),
+        | Token::Operator
+        | Token::ReservedOp => Some(SourceSemanticTokenKind::Operator),
+        Token::Ident => Some(SourceSemanticTokenKind::Variable),
+        Token::UpperIdent => Some(SourceSemanticTokenKind::Type),
         Token::Whitespace
         | Token::Newline
         | Token::Hole

@@ -189,10 +189,10 @@ fn dump_attached_comment(
 
 fn token_label(token: &Token) -> String {
     match token {
-        Token::Ident(_) => "Ident".to_string(),
-        Token::UpperIdent(_) => "UpperIdent".to_string(),
-        Token::Operator(_) => "Operator".to_string(),
-        Token::ReservedOp(_) => "ReservedOp".to_string(),
+        Token::Ident => "Ident".to_string(),
+        Token::UpperIdent => "UpperIdent".to_string(),
+        Token::Operator => "Operator".to_string(),
+        Token::ReservedOp => "ReservedOp".to_string(),
         other => format!("{other:?}"),
     }
 }

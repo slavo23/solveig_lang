@@ -23,6 +23,10 @@ impl Parser<'_> {
     }
 
     pub(super) fn parse_imports(&mut self) -> Vec<ImportDecl> {
+        if !self.at(&Token::Import) {
+            return Vec::new();
+        }
+
         self.node_value(SyntaxKind::ImportList, |this| {
             let mut imports = Vec::new();
             while this.at(&Token::Import) {

@@ -3,7 +3,7 @@
 
 use logos::Logos;
 
-use solveig_base::{FileId, FileSpan, Session, Span, Symbol};
+use solveig_base::{FileId, FileSpan, Span};
 
 use crate::ast::{Assoc, Fixity};
 
@@ -149,8 +149,8 @@ pub enum Token {
     Float(f64),
     Char(char),
     Str(String),
-    Ident(Symbol),
-    UpperIdent(Symbol),
+    Ident,
+    UpperIdent,
 
     Whitespace,
     Newline,
@@ -207,8 +207,8 @@ pub enum Token {
     Underscore,
     Semicolon,
     Backtick,
-    Operator(Symbol),
-    ReservedOp(Symbol),
+    Operator,
+    ReservedOp,
 
     VOpen,
     VClose,
@@ -396,14 +396,14 @@ fn block_comment_end(source: &str, start: usize) -> usize {
     bytes.len()
 }
 
-fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Token {
+fn map_raw_token(raw: RawToken, slice: &str) -> Token {
     match raw {
         RawToken::Int(n) => Token::Int(n),
         RawToken::Float(n) => Token::Float(n),
         RawToken::Char(ch) => Token::Char(ch),
         RawToken::Str(value) => Token::Str(value),
-        RawToken::Ident => Token::Ident(session.intern(slice)),
-        RawToken::UpperIdent => Token::UpperIdent(session.intern(slice)),
+        RawToken::Ident => Token::Ident,
+        RawToken::UpperIdent => Token::UpperIdent,
 
         RawToken::KwLet => Token::Let,
         RawToken::KwIn => Token::In,
@@ -457,11 +457,10 @@ fn map_raw_token(raw: RawToken, slice: &str, session: &Session) -> Token {
             ">" => Token::Greater,
             "<" => Token::Less,
             _ => {
-                let symbol = session.intern(slice);
                 if is_reserved_operator(slice) {
-                    Token::ReservedOp(symbol)
+                    Token::ReservedOp
                 } else {
-                    Token::Operator(symbol)
+                    Token::Operator
                 }
             }
         },
@@ -475,7 +474,7 @@ fn is_reserved_operator(slice: &str) -> bool {
     )
 }
 
-fn raw_lex(session: &Session, file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
+fn raw_lex(file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
     let line_starts = compute_line_starts(source);
     let mut out = Vec::new();
     let mut offset = 0usize;
@@ -504,7 +503,7 @@ fn raw_lex(session: &Session, file: FileId, source: &str) -> Result<Vec<PosToken
         };
 
         let slice = &source[start..end];
-        let kind = map_raw_token(raw, slice, session);
+        let kind = map_raw_token(raw, slice);
         out.push(PosToken::new(kind, start, end, line, col));
         offset = end;
     }
@@ -645,8 +644,8 @@ pub fn insert_layout(tokens: &[PosToken]) -> Vec<PosToken> {
     out
 }
 
-pub fn lex(session: &Session, file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
-    raw_lex(session, file, source).map(|tokens| insert_layout(&tokens))
+pub fn lex(file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
+    raw_lex(file, source).map(|tokens| insert_layout(&tokens))
 }
 
 pub fn parser_tokens(tokens: Vec<PosToken>) -> Vec<PosToken> {

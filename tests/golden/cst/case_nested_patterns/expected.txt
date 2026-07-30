@@ -1,6 +1,5 @@
 Module @0..249
   VOpen @0..0 line=0 col=0 synthetic text=""
-  ImportList @0..0
   DefinitionList @0..249
     DataDef @0..39
       Data @0..4 line=0 col=0 text="data"
@@ -12,193 +11,146 @@ Module @0..249
       Constructor @12..20
         UpperIdent @12..16 line=0 col=12 text="Leaf"
         Whitespace @16..17 line=0 col=16 text=" "
-        TypeAtom @17..20
-          NamePath @17..20
-            UpperIdent @17..20 line=0 col=17 text="Int"
+        NamePath @17..20
+          UpperIdent @17..20 line=0 col=17 text="Int"
       Whitespace @20..21 line=0 col=20 text=" "
       Pipe @21..22 line=0 col=21 text="|"
       Whitespace @22..23 line=0 col=22 text=" "
       Constructor @23..39
         UpperIdent @23..29 line=0 col=23 text="Branch"
         Whitespace @29..30 line=0 col=29 text=" "
-        TypeAtom @30..34
-          NamePath @30..34
-            UpperIdent @30..34 line=0 col=30 text="Tree"
+        NamePath @30..34
+          UpperIdent @30..34 line=0 col=30 text="Tree"
         Whitespace @34..35 line=0 col=34 text=" "
-        TypeAtom @35..39
-          NamePath @35..39
-            UpperIdent @35..39 line=0 col=35 text="Tree"
+        NamePath @35..39
+          UpperIdent @35..39 line=0 col=35 text="Tree"
     Newline @39..41 line=0 col=39 text="\n\n"
     VSemi @41..41 line=2 col=0 synthetic text=""
-    FunctionOrSignature @41..249
+    FunctionDef @41..249
       Ident @41..45 line=2 col=0 text="main"
       Whitespace @45..46 line=2 col=4 text=" "
       Eq @46..47 line=2 col=5 text="="
       Newline @47..48 line=2 col=6 text="\n"
       Whitespace @48..52 line=3 col=0 text="    "
-      Expr @52..249
-        CaseExpr @52..249
-          Case @52..56 line=3 col=4 text="case"
-          Whitespace @56..57 line=3 col=8 text=" "
-          Expr @57..81
-            OpChain @57..81
-              OpOperand @57..81
-                AppExpr @57..81
-                  AtomExpr @57..63
-                    NamePath @57..63
-                      UpperIdent @57..63 line=3 col=9 text="Branch"
-                  Whitespace @63..64 line=3 col=15 text=" "
-                  AtomExpr @64..72
-                    LParen @64..65 line=3 col=16 text="("
-                    Expr @65..71
-                      OpChain @65..71
-                        OpOperand @65..71
-                          AppExpr @65..71
-                            AtomExpr @65..69
-                              NamePath @65..69
-                                UpperIdent @65..69 line=3 col=17 text="Leaf"
-                            Whitespace @69..70 line=3 col=21 text=" "
-                            AtomExpr @70..71
-                              Int(1) @70..71 line=3 col=22 text="1"
-                    RParen @71..72 line=3 col=23 text=")"
-                  Whitespace @72..73 line=3 col=24 text=" "
-                  AtomExpr @73..81
-                    LParen @73..74 line=3 col=25 text="("
-                    Expr @74..80
-                      OpChain @74..80
-                        OpOperand @74..80
-                          AppExpr @74..80
-                            AtomExpr @74..78
-                              NamePath @74..78
-                                UpperIdent @74..78 line=3 col=26 text="Leaf"
-                            Whitespace @78..79 line=3 col=30 text=" "
-                            AtomExpr @79..80
-                              Int(2) @79..80 line=3 col=31 text="2"
-                    RParen @80..81 line=3 col=32 text=")"
-          Whitespace @81..82 line=3 col=33 text=" "
-          Of @82..84 line=3 col=34 text="of"
-          Newline @84..85 line=3 col=36 text="\n"
-          Whitespace @85..93 line=4 col=0 text="        "
-          VOpen @93..93 line=4 col=8 synthetic text=""
-          VSemi @93..93 line=4 col=8 synthetic text=""
-          CaseArm @93..112
-            Pattern @93..103
-              PatternHead @93..103
-                NamePath @93..97
-                  UpperIdent @93..97 line=4 col=8 text="Leaf"
-                Whitespace @97..98 line=4 col=12 text=" "
-                PatternArg @98..103
-                  NamePath @98..103
-                    Ident @98..103 line=4 col=13 text="value"
-            Whitespace @103..104 line=4 col=18 text=" "
-            FatArrow @104..106 line=4 col=19 text="=>"
-            Whitespace @106..107 line=4 col=21 text=" "
-            Expr @107..112
-              OpChain @107..112
-                OpOperand @107..112
-                  AppExpr @107..112
-                    AtomExpr @107..112
-                      NamePath @107..112
-                        Ident @107..112 line=4 col=22 text="value"
-          Newline @112..113 line=4 col=27 text="\n"
-          Whitespace @113..119 line=5 col=0 text="      "
-          CaseArm @119..249
-            Pipe @119..120 line=5 col=6 text="|"
-            Whitespace @120..121 line=5 col=7 text=" "
-            Pattern @121..145
-              PatternHead @121..145
-                NamePath @121..127
-                  UpperIdent @121..127 line=5 col=8 text="Branch"
-                Whitespace @127..128 line=5 col=14 text=" "
-                PatternArg @128..139
-                  LParen @128..129 line=5 col=15 text="("
-                  Pattern @129..138
-                    PatternHead @129..138
-                      NamePath @129..133
-                        UpperIdent @129..133 line=5 col=16 text="Leaf"
-                      Whitespace @133..134 line=5 col=20 text=" "
-                      PatternArg @134..138
-                        NamePath @134..138
-                          Ident @134..138 line=5 col=21 text="left"
-                  RParen @138..139 line=5 col=25 text=")"
-                Whitespace @139..140 line=5 col=26 text=" "
-                PatternArg @140..145
-                  NamePath @140..145
-                    Ident @140..145 line=5 col=27 text="right"
-            Whitespace @145..146 line=5 col=32 text=" "
-            FatArrow @146..148 line=5 col=33 text="=>"
-            Newline @148..149 line=5 col=35 text="\n"
-            Whitespace @149..161 line=6 col=0 text="            "
-            Expr @161..249
-              CaseExpr @161..249
-                Case @161..165 line=6 col=12 text="case"
-                Whitespace @165..166 line=6 col=16 text=" "
-                Expr @166..171
-                  OpChain @166..171
-                    OpOperand @166..171
-                      AppExpr @166..171
-                        AtomExpr @166..171
-                          NamePath @166..171
-                            Ident @166..171 line=6 col=17 text="right"
-                Whitespace @171..172 line=6 col=22 text=" "
-                Of @172..174 line=6 col=23 text="of"
-                Newline @174..175 line=6 col=25 text="\n"
-                Whitespace @175..191 line=7 col=0 text="                "
-                VOpen @191..191 line=7 col=16 synthetic text=""
-                VSemi @191..191 line=7 col=16 synthetic text=""
-                CaseArm @191..217
-                  Pattern @191..201
-                    PatternHead @191..201
-                      NamePath @191..195
-                        UpperIdent @191..195 line=7 col=16 text="Leaf"
-                      Whitespace @195..196 line=7 col=20 text=" "
-                      PatternArg @196..201
-                        NamePath @196..201
-                          Ident @196..201 line=7 col=21 text="value"
-                  Whitespace @201..202 line=7 col=26 text=" "
-                  FatArrow @202..204 line=7 col=27 text="=>"
-                  Whitespace @204..205 line=7 col=29 text=" "
-                  Expr @205..217
-                    OpChain @205..217
-                      OpOperand @205..209
-                        AppExpr @205..209
-                          AtomExpr @205..209
-                            NamePath @205..209
-                              Ident @205..209 line=7 col=30 text="left"
-                      Whitespace @209..210 line=7 col=34 text=" "
-                      Plus @210..211 line=7 col=35 text="+"
-                      Whitespace @211..212 line=7 col=36 text=" "
-                      OpOperand @212..217
-                        AppExpr @212..217
-                          AtomExpr @212..217
-                            NamePath @212..217
-                              Ident @212..217 line=7 col=37 text="value"
-                Newline @217..218 line=7 col=42 text="\n"
-                Whitespace @218..232 line=8 col=0 text="              "
-                CaseArm @232..249
-                  Pipe @232..233 line=8 col=14 text="|"
-                  Whitespace @233..234 line=8 col=15 text=" "
-                  Pattern @234..244
-                    PatternHead @234..244
-                      NamePath @234..240
-                        UpperIdent @234..240 line=8 col=16 text="Branch"
-                      Whitespace @240..241 line=8 col=22 text=" "
-                      PatternArg @241..242
-                        Underscore @241..242 line=8 col=23 text="_"
-                      Whitespace @242..243 line=8 col=24 text=" "
-                      PatternArg @243..244
-                        Underscore @243..244 line=8 col=25 text="_"
-                  Whitespace @244..245 line=8 col=26 text=" "
-                  FatArrow @245..247 line=8 col=27 text="=>"
-                  Whitespace @247..248 line=8 col=29 text=" "
-                  Expr @248..249
-                    OpChain @248..249
-                      OpOperand @248..249
-                        AppExpr @248..249
-                          AtomExpr @248..249
-                            Int(0) @248..249 line=8 col=30 text="0"
-                Newline @249..250 line=8 col=31 text="\n"
-                VClose @250..250 line=9 col=0 synthetic text=""
-          VClose @250..250 line=9 col=0 synthetic text=""
+      CaseExpr @52..249
+        Case @52..56 line=3 col=4 text="case"
+        Whitespace @56..57 line=3 col=8 text=" "
+        AppExpr @57..81
+          NamePath @57..63
+            UpperIdent @57..63 line=3 col=9 text="Branch"
+          Whitespace @63..64 line=3 col=15 text=" "
+          ParenExpr @64..72
+            LParen @64..65 line=3 col=16 text="("
+            AppExpr @65..71
+              NamePath @65..69
+                UpperIdent @65..69 line=3 col=17 text="Leaf"
+              Whitespace @69..70 line=3 col=21 text=" "
+              AtomExpr @70..71
+                Int(1) @70..71 line=3 col=22 text="1"
+            RParen @71..72 line=3 col=23 text=")"
+          Whitespace @72..73 line=3 col=24 text=" "
+          ParenExpr @73..81
+            LParen @73..74 line=3 col=25 text="("
+            AppExpr @74..80
+              NamePath @74..78
+                UpperIdent @74..78 line=3 col=26 text="Leaf"
+              Whitespace @78..79 line=3 col=30 text=" "
+              AtomExpr @79..80
+                Int(2) @79..80 line=3 col=31 text="2"
+            RParen @80..81 line=3 col=32 text=")"
+        Whitespace @81..82 line=3 col=33 text=" "
+        Of @82..84 line=3 col=34 text="of"
+        Newline @84..85 line=3 col=36 text="\n"
+        Whitespace @85..93 line=4 col=0 text="        "
+        VOpen @93..93 line=4 col=8 synthetic text=""
+        VSemi @93..93 line=4 col=8 synthetic text=""
+        CaseArm @93..112
+          PatternHead @93..103
+            NamePath @93..97
+              UpperIdent @93..97 line=4 col=8 text="Leaf"
+            Whitespace @97..98 line=4 col=12 text=" "
+            NamePath @98..103
+              Ident @98..103 line=4 col=13 text="value"
+          Whitespace @103..104 line=4 col=18 text=" "
+          FatArrow @104..106 line=4 col=19 text="=>"
+          Whitespace @106..107 line=4 col=21 text=" "
+          NamePath @107..112
+            Ident @107..112 line=4 col=22 text="value"
+        Newline @112..113 line=4 col=27 text="\n"
+        Whitespace @113..119 line=5 col=0 text="      "
+        CaseArm @119..249
+          Pipe @119..120 line=5 col=6 text="|"
+          Whitespace @120..121 line=5 col=7 text=" "
+          PatternHead @121..145
+            NamePath @121..127
+              UpperIdent @121..127 line=5 col=8 text="Branch"
+            Whitespace @127..128 line=5 col=14 text=" "
+            PatternArg @128..139
+              LParen @128..129 line=5 col=15 text="("
+              PatternHead @129..138
+                NamePath @129..133
+                  UpperIdent @129..133 line=5 col=16 text="Leaf"
+                Whitespace @133..134 line=5 col=20 text=" "
+                NamePath @134..138
+                  Ident @134..138 line=5 col=21 text="left"
+              RParen @138..139 line=5 col=25 text=")"
+            Whitespace @139..140 line=5 col=26 text=" "
+            NamePath @140..145
+              Ident @140..145 line=5 col=27 text="right"
+          Whitespace @145..146 line=5 col=32 text=" "
+          FatArrow @146..148 line=5 col=33 text="=>"
+          Newline @148..149 line=5 col=35 text="\n"
+          Whitespace @149..161 line=6 col=0 text="            "
+          CaseExpr @161..249
+            Case @161..165 line=6 col=12 text="case"
+            Whitespace @165..166 line=6 col=16 text=" "
+            NamePath @166..171
+              Ident @166..171 line=6 col=17 text="right"
+            Whitespace @171..172 line=6 col=22 text=" "
+            Of @172..174 line=6 col=23 text="of"
+            Newline @174..175 line=6 col=25 text="\n"
+            Whitespace @175..191 line=7 col=0 text="                "
+            VOpen @191..191 line=7 col=16 synthetic text=""
+            VSemi @191..191 line=7 col=16 synthetic text=""
+            CaseArm @191..217
+              PatternHead @191..201
+                NamePath @191..195
+                  UpperIdent @191..195 line=7 col=16 text="Leaf"
+                Whitespace @195..196 line=7 col=20 text=" "
+                NamePath @196..201
+                  Ident @196..201 line=7 col=21 text="value"
+              Whitespace @201..202 line=7 col=26 text=" "
+              FatArrow @202..204 line=7 col=27 text="=>"
+              Whitespace @204..205 line=7 col=29 text=" "
+              OpChain @205..217
+                NamePath @205..209
+                  Ident @205..209 line=7 col=30 text="left"
+                Whitespace @209..210 line=7 col=34 text=" "
+                Plus @210..211 line=7 col=35 text="+"
+                Whitespace @211..212 line=7 col=36 text=" "
+                NamePath @212..217
+                  Ident @212..217 line=7 col=37 text="value"
+            Newline @217..218 line=7 col=42 text="\n"
+            Whitespace @218..232 line=8 col=0 text="              "
+            CaseArm @232..249
+              Pipe @232..233 line=8 col=14 text="|"
+              Whitespace @233..234 line=8 col=15 text=" "
+              PatternHead @234..244
+                NamePath @234..240
+                  UpperIdent @234..240 line=8 col=16 text="Branch"
+                Whitespace @240..241 line=8 col=22 text=" "
+                PatternArg @241..242
+                  Underscore @241..242 line=8 col=23 text="_"
+                Whitespace @242..243 line=8 col=24 text=" "
+                PatternArg @243..244
+                  Underscore @243..244 line=8 col=25 text="_"
+              Whitespace @244..245 line=8 col=26 text=" "
+              FatArrow @245..247 line=8 col=27 text="=>"
+              Whitespace @247..248 line=8 col=29 text=" "
+              AtomExpr @248..249
+                Int(0) @248..249 line=8 col=30 text="0"
+            Newline @249..250 line=8 col=31 text="\n"
+            VClose @250..250 line=9 col=0 synthetic text=""
+        VClose @250..250 line=9 col=0 synthetic text=""
   VClose @250..250 line=9 col=0 synthetic text=""
   Eof @250..250 line=9 col=0 text=""

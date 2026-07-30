@@ -6,10 +6,9 @@ impl Parser<'_> {
             let start = this.current_start();
 
             let first = match this.current_kind() {
-                Token::Ident(name) | Token::UpperIdent(name) => {
-                    let name = *name;
-                    this.advance();
-                    name
+                Token::Ident | Token::UpperIdent => {
+                    let token = this.advance();
+                    this.intern(this.token_source_text(&token))
                 }
                 _ => {
                     return Err(
@@ -21,10 +20,10 @@ impl Parser<'_> {
             let mut segments = vec![first];
             while this.current_dot_is_qualified_separator() {
                 match this.peek_kind(1) {
-                    Some(Token::Ident(name)) | Some(Token::UpperIdent(name)) => {
-                        let name = *name;
+                    Some(Token::Ident | Token::UpperIdent) => {
                         this.advance();
-                        this.advance();
+                        let token = this.advance();
+                        let name = this.intern(this.token_source_text(&token));
                         segments.push(name);
                     }
                     _ => break,
@@ -57,7 +56,7 @@ impl Parser<'_> {
 
         previous.end == dot.start
             && dot.end == next.start
-            && matches!(next.kind, Token::Ident(_) | Token::UpperIdent(_))
+            && matches!(next.kind, Token::Ident | Token::UpperIdent)
     }
 
     pub(super) fn is_case_block_follower(&self) -> bool {

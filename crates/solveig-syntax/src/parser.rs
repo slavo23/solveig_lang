@@ -1,8 +1,6 @@
 //! Recursive-descent parser for Solveig modules.
 //! Child parser modules split declarations, expressions, patterns, and types.
 
-use std::cell::Ref;
-
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 
 use crate::ast::*;
@@ -20,6 +18,8 @@ type S<T> = Spanned<T>;
 type NameSpan = (Symbol, usize, usize);
 
 type LambdaParam = (S<Symbol>, Option<S<SurfaceTy>>);
+
+const DUMMY_SYMBOL: Symbol = Symbol(u32::MAX);
 
 fn mk_span(start: usize, end: usize) -> Span {
     Span::from_usize_range(start..end)
@@ -80,11 +80,15 @@ impl IntoDiagnostic for &ParseError {
 }
 
 pub struct Parser<'a> {
-    session: &'a Session,
+    /// `None` during session-free CST parsing; `Some` only while reusing the
+    /// parser routines to lower an already-built CST into the symbolized AST.
+    lowering_session: Option<&'a Session>,
     file: FileId,
+    source: &'a str,
     tokens: Vec<PosToken>,
     cst: Option<&'a SyntaxTree>,
     events: Vec<Event>,
+    diagnostics: Vec<Diagnostic>,
     pos: usize,
     emit_events: bool,
     report_diagnostics: bool,
@@ -103,14 +107,22 @@ struct ParserCheckpoint {
     last_finished_node: Option<CstId>,
 }
 
+pub(crate) struct ParsedEvents {
+    pub(crate) tokens: Vec<PosToken>,
+    pub(crate) events: Vec<Event>,
+    pub(crate) diagnostics: Vec<Diagnostic>,
+}
+
 impl<'a> Parser<'a> {
-    pub fn new(session: &'a Session, file: FileId, tokens: Vec<PosToken>) -> Self {
+    pub fn new(file: FileId, source: &'a str, tokens: Vec<PosToken>) -> Self {
         Self {
-            session,
+            lowering_session: None,
             file,
+            source,
             tokens,
             cst: None,
             events: Vec::new(),
+            diagnostics: Vec::new(),
             pos: 0,
             emit_events: true,
             report_diagnostics: true,
@@ -121,13 +133,15 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn from_cst(session: &'a Session, file: FileId, cst: &'a SyntaxTree) -> Self {
+    fn from_cst(session: &'a Session, file: FileId, source: &'a str, cst: &'a SyntaxTree) -> Self {
         Self {
-            session,
+            lowering_session: Some(session),
             file,
+            source,
             tokens: cst.tokens().to_vec(),
             cst: Some(cst),
             events: Vec::new(),
+            diagnostics: Vec::new(),
             pos: 0,
             emit_events: false,
             report_diagnostics: false,
@@ -332,23 +346,45 @@ impl<'a> Parser<'a> {
     fn push_error_diagnostic(&mut self, error: &ParseError) -> Diagnostic {
         let diagnostic = error.to_diagnostic();
         if self.report_diagnostics {
-            self.session.diagnostics().push(diagnostic.clone());
+            self.diagnostics.push(diagnostic.clone());
         }
         diagnostic
     }
 
-    fn token_text(&self, symbol: Symbol) -> Ref<'_, str> {
-        self.session.str(symbol)
+    pub(super) fn intern(&self, text: &str) -> Symbol {
+        self.lowering_session
+            .map_or(DUMMY_SYMBOL, |session| session.intern(text))
+    }
+
+    fn token_source_text(&self, token: &PosToken) -> &str {
+        token.source_text(self.source)
+    }
+
+    fn current_source_text(&self) -> &str {
+        self.token_source_text(self.current())
+    }
+
+    fn spanned_source_text<T>(&self, spanned: &S<T>) -> &str {
+        self.source.get(spanned.1.to_usize_range()).unwrap_or("")
+    }
+
+    fn name_ref_source_text(&self, name_ref: &S<NameRef>) -> &str {
+        self.spanned_source_text(name_ref)
+    }
+
+    fn name_ref_last_source_text(&self, name_ref: &S<NameRef>) -> &str {
+        self.name_ref_source_text(name_ref)
+            .rsplit('.')
+            .next()
+            .unwrap_or("")
     }
 
     fn describe_current(&self) -> String {
         match self.current_kind() {
-            Token::Ident(symbol) => format!("identifier `{}`", self.token_text(*symbol)),
-            Token::UpperIdent(symbol) => format!("constructor `{}`", self.token_text(*symbol)),
-            Token::Operator(symbol) => format!("operator `{}`", self.token_text(*symbol)),
-            Token::ReservedOp(symbol) => {
-                format!("reserved operator `{}`", self.token_text(*symbol))
-            }
+            Token::Ident => format!("identifier `{}`", self.current_source_text()),
+            Token::UpperIdent => format!("constructor `{}`", self.current_source_text()),
+            Token::Operator => format!("operator `{}`", self.current_source_text()),
+            Token::ReservedOp => format!("reserved operator `{}`", self.current_source_text()),
             Token::Backtick => "`".to_string(),
             Token::Int(value) => format!("integer literal `{value}`"),
             Token::Float(value) => format!("float literal `{value}`"),
@@ -372,9 +408,9 @@ impl<'a> Parser<'a> {
 
     fn expect_ident(&mut self) -> Result<NameSpan, ParseError> {
         match self.current_kind() {
-            Token::Ident(name) => {
-                let name = *name;
+            Token::Ident => {
                 let token = self.advance();
+                let name = self.intern(self.token_source_text(&token));
                 Ok((name, token.start, token.end))
             }
             _ => Err(self.error(format!(
@@ -386,9 +422,9 @@ impl<'a> Parser<'a> {
 
     fn expect_upper(&mut self) -> Result<NameSpan, ParseError> {
         match self.current_kind() {
-            Token::UpperIdent(name) => {
-                let name = *name;
+            Token::UpperIdent => {
                 let token = self.advance();
+                let name = self.intern(self.token_source_text(&token));
                 Ok((name, token.start, token.end))
             }
             _ => Err(self.error(format!(
@@ -400,9 +436,9 @@ impl<'a> Parser<'a> {
 
     fn expect_module_name_segment(&mut self) -> Result<Symbol, ParseError> {
         match self.current_kind() {
-            Token::Ident(name) | Token::UpperIdent(name) => {
-                let name = *name;
-                self.advance();
+            Token::Ident | Token::UpperIdent => {
+                let token = self.advance();
+                let name = self.intern(self.token_source_text(&token));
                 Ok(name)
             }
             _ => Err(self.error(format!(
@@ -414,9 +450,9 @@ impl<'a> Parser<'a> {
 
     fn expect_import_name_segment(&mut self) -> Result<NameSpan, ParseError> {
         match self.current_kind() {
-            Token::Ident(name) | Token::UpperIdent(name) => {
-                let name = *name;
+            Token::Ident | Token::UpperIdent => {
                 let token = self.advance();
+                let name = self.intern(self.token_source_text(&token));
                 Ok((name, token.start, token.end))
             }
             _ => Err(self.error(format!(
@@ -444,12 +480,18 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn current_operator_symbol(&self) -> Option<(Symbol, bool)> {
+    fn current_operator_text(&self) -> Option<(&str, bool)> {
         match self.current_kind() {
-            Token::Operator(symbol) => Some((*symbol, false)),
-            token => Self::fixed_operator_text(token)
-                .map(|text| (self.session.intern(text), matches!(token, Token::Cons))),
+            Token::Operator => Some((self.current_source_text(), false)),
+            token => {
+                Self::fixed_operator_text(token).map(|text| (text, matches!(token, Token::Cons)))
+            }
         }
+    }
+
+    fn current_operator_symbol(&self) -> Option<(Symbol, bool)> {
+        self.current_operator_text()
+            .map(|(text, is_cons_syntax)| (self.intern(text), is_cons_syntax))
     }
 
     fn is_infix_operator(&self) -> bool {
@@ -468,10 +510,11 @@ impl<'a> Parser<'a> {
             return Err(self.error("list cons `::` is reserved syntax, not an operator name"));
         }
 
-        let is_reserved_constructor_operator = {
-            let text = self.token_text(symbol);
-            text.starts_with(':') && !is_cons_syntax
-        };
+        let text = self
+            .current_operator_text()
+            .map(|(text, _)| text)
+            .expect("ICE: current operator text disappeared after symbol lookup");
+        let is_reserved_constructor_operator = text.starts_with(':') && !is_cons_syntax;
 
         if is_reserved_constructor_operator {
             return Err(self.error(
@@ -496,7 +539,7 @@ impl<'a> Parser<'a> {
         }
 
         self.peek_kind(1).is_some_and(|kind| match kind {
-            Token::Operator(_) => true,
+            Token::Operator => true,
             other => Self::fixed_operator_text(other)
                 .is_some_and(|text| text != "::" && !text.starts_with(':')),
         }) && self
@@ -524,13 +567,13 @@ impl<'a> Parser<'a> {
 
     fn expect_binder(&mut self) -> Result<NameSpan, ParseError> {
         match self.current_kind() {
-            Token::Ident(name) => {
-                let name = *name;
+            Token::Ident => {
                 let token = self.advance();
+                let name = self.intern(self.token_source_text(&token));
                 Ok((name, token.start, token.end))
             }
             Token::Underscore => {
-                let underscore = self.session.intern("_");
+                let underscore = self.intern("_");
                 let token = self.advance();
                 Ok((underscore, token.start, token.end))
             }
@@ -650,20 +693,28 @@ mod pattern;
 mod tests;
 mod ty;
 
-fn parse_source_events(
-    session: &Session,
-    file: FileId,
-    source: &str,
-) -> Result<(Vec<PosToken>, Vec<Event>), ParseError> {
-    let tokens = lexer::lex(session, file, source)?;
-    let mut parser = Parser::new(session, file, tokens);
+fn parse_source_events(file: FileId, source: &str) -> Result<ParsedEvents, ParseError> {
+    let tokens = lexer::lex(file, source)?;
+    let mut parser = Parser::new(file, source, tokens);
     let _ = parser.parse_module_surface();
-    Ok((parser.tokens, parser.events))
+    Ok(ParsedEvents {
+        tokens: parser.tokens,
+        events: parser.events,
+        diagnostics: parser.diagnostics,
+    })
+}
+
+pub fn parse_cst(file: FileId, source: &str) -> Result<(SyntaxTree, Vec<Diagnostic>), ParseError> {
+    let parsed = parse_source_events(file, source)?;
+    Ok((
+        SyntaxTree::from_events(file, parsed.tokens, &parsed.events),
+        parsed.diagnostics,
+    ))
 }
 
 pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
-    let (tokens, events) = match parse_source_events(session, file, source) {
-        Ok((tokens, events)) => (tokens, events),
+    let (cst, diagnostics) = match parse_cst(file, source) {
+        Ok((cst, diagnostics)) => (cst, diagnostics),
         Err(error) => {
             let diagnostic = error.to_diagnostic();
             session.diagnostics().push(diagnostic.clone());
@@ -682,9 +733,11 @@ pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModu
             };
         }
     };
+    for diagnostic in diagnostics {
+        session.diagnostics().push(diagnostic);
+    }
 
-    let cst = SyntaxTree::from_events(file, tokens, &events);
-    let mut parser = Parser::from_cst(session, file, &cst);
+    let mut parser = Parser::from_cst(session, file, source, &cst);
     let (imports, defs) = parser.parse_module_surface();
     if !parser.cst_nodes.is_empty() {
         assert_eq!(

@@ -189,7 +189,8 @@ fn empty_selection_range(file: FileId, offset: u32) -> SourceSelectionRange {
 fn foldable_syntax_kind(kind: SyntaxKind) -> bool {
     matches!(
         kind,
-        SyntaxKind::FunctionOrSignature
+        SyntaxKind::Signature
+            | SyntaxKind::FunctionDef
             | SyntaxKind::FixityDef
             | SyntaxKind::DataDef
             | SyntaxKind::TypeAliasDef

@@ -28,7 +28,7 @@ impl Parser<'_> {
                 let cons = this.advance();
                 let tail = this.parse_pattern()?;
                 Ok(cons_pattern(
-                    this.session,
+                    this,
                     head,
                     tail,
                     cons.start,
@@ -43,7 +43,7 @@ impl Parser<'_> {
 
     fn starts_backticked_constructor_name(&self) -> bool {
         self.at(&Token::Backtick)
-            && matches!(self.peek_kind(1), Some(Token::UpperIdent(_)))
+            && matches!(self.peek_kind(1), Some(Token::UpperIdent))
             && matches!(self.peek_kind(2), Some(Token::Backtick))
     }
 
@@ -58,7 +58,7 @@ impl Parser<'_> {
 
     pub(super) fn parse_pattern_head(&mut self) -> Result<S<SurfacePattern>, ParseError> {
         self.node(SyntaxKind::PatternHead, |this| {
-            if matches!(this.current_kind(), Token::UpperIdent(_)) {
+            if matches!(this.current_kind(), Token::UpperIdent) {
                 let start = this.current_start();
                 let name_ref = this.parse_name_path()?;
                 let mut args = Vec::new();
@@ -162,7 +162,7 @@ impl Parser<'_> {
                     Ok(this.sp(SurfacePattern::Wild, token.start, token.end))
                 }
 
-                Token::Ident(_) => {
+                Token::Ident => {
                     let name_ref = this.parse_name_path()?;
                     let end = span_end(&name_ref);
 
@@ -171,12 +171,12 @@ impl Parser<'_> {
                     } else {
                         Err(this.error(format!(
                             "qualified variable patterns are not supported: {}",
-                            name_ref.0.display(this.session)
+                            this.name_ref_source_text(&name_ref)
                         )))
                     }
                 }
 
-                Token::UpperIdent(_) => {
+                Token::UpperIdent => {
                     let name_ref = this.parse_name_path()?;
                     let end = span_end(&name_ref);
                     Ok(this.sp(SurfacePattern::Con(name_ref, vec![]), start, end))
@@ -199,12 +199,7 @@ impl Parser<'_> {
 
                     if this.at(&Token::RBrack) {
                         let end = this.advance().end;
-                        return Ok(list_nil_pattern(
-                            this.session,
-                            start,
-                            end,
-                            this.current_cst_id(),
-                        ));
+                        return Ok(list_nil_pattern(this, start, end, this.current_cst_id()));
                     }
 
                     let mut elems = vec![this.parse_pattern()?];
@@ -215,13 +210,7 @@ impl Parser<'_> {
                     }
 
                     let end = this.expect(&Token::RBrack)?.end;
-                    Ok(list_pattern(
-                        this.session,
-                        elems,
-                        start,
-                        end,
-                        this.current_cst_id(),
-                    ))
+                    Ok(list_pattern(this, elems, start, end, this.current_cst_id()))
                 }
 
                 _ => Err(this.error(format!("expected pattern, got {}", this.describe_current()))),
@@ -237,8 +226,8 @@ impl Parser<'_> {
                 | Token::Char(_)
                 | Token::Str(_)
                 | Token::Minus
-                | Token::Ident(_)
-                | Token::UpperIdent(_)
+                | Token::Ident
+                | Token::UpperIdent
                 | Token::LParen
                 | Token::LBrack
                 | Token::Underscore

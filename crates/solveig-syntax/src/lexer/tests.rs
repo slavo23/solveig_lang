@@ -3,10 +3,12 @@ use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use solveig_base::{FileId, Session};
+
 fn lex_test_source(source: &str) -> (Session, FileId, Vec<PosToken>) {
     let session = Session::new();
     let file = session.add_file("test.sv", source);
-    let tokens = lex(&session, file, source).expect("test source should lex");
+    let tokens = lex(file, source).expect("test source should lex");
 
     (session, file, tokens)
 }
@@ -80,8 +82,7 @@ fn all_repository_solveig_sources_round_trip_through_tokens() {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|err| panic!("failed to read {}: {err}", path.display()));
         let file = session.add_file(&path, source.clone());
-        let tokens = lex(&session, file, &source)
-            .unwrap_or_else(|err| panic!("{}: {err:?}", path.display()));
+        let tokens = lex(file, &source).unwrap_or_else(|err| panic!("{}: {err:?}", path.display()));
 
         assert_eq!(
             reconstruct(&tokens, &source),

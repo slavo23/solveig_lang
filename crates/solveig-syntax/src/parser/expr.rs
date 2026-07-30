@@ -133,8 +133,8 @@ impl Parser<'_> {
                 | Token::Float(_)
                 | Token::Char(_)
                 | Token::Str(_)
-                | Token::Ident(_)
-                | Token::UpperIdent(_)
+                | Token::Ident
+                | Token::UpperIdent
                 | Token::LParen
                 | Token::LBrack
                 | Token::Hole
@@ -186,10 +186,10 @@ impl Parser<'_> {
                     let token = this.advance();
                     Ok(this.sp(SurfaceExpr::Hole, token.start, token.end))
                 }
-                Token::Ident(_) | Token::UpperIdent(_) => {
+                Token::Ident | Token::UpperIdent => {
                     let name_ref = this.parse_name_path()?;
                     let end = span_end(&name_ref);
-                    let expr = if is_ctor_like(&name_ref.0.last_text(this.session)) {
+                    let expr = if is_ctor_like(this.name_ref_last_source_text(&name_ref)) {
                         SurfaceExpr::Con(name_ref)
                     } else {
                         SurfaceExpr::Var(name_ref)
@@ -217,25 +217,22 @@ impl Parser<'_> {
                         return this.parse_operator_left_section();
                     }
 
-                    this.advance();
-                    if this.at(&Token::RParen) {
-                        let end = this.advance().end;
-                        return Ok(this.sp(SurfaceExpr::Unit, start, end));
-                    }
-                    let inner = this.parse_expr()?;
-                    let end = this.expect(&Token::RParen)?.end;
-                    Ok(this.sp(inner.0, start, end))
+                    this.node(SyntaxKind::ParenExpr, |this| {
+                        this.advance();
+                        if this.at(&Token::RParen) {
+                            let end = this.advance().end;
+                            return Ok(this.sp(SurfaceExpr::Unit, start, end));
+                        }
+                        let inner = this.parse_expr()?;
+                        let end = this.expect(&Token::RParen)?.end;
+                        Ok(this.sp(inner.0, start, end))
+                    })
                 }
-                Token::LBrack => {
+                Token::LBrack => this.node(SyntaxKind::ListExpr, |this| {
                     this.advance();
                     if this.at(&Token::RBrack) {
                         let end = this.advance().end;
-                        return Ok(list_nil_expr(
-                            this.session,
-                            start,
-                            end,
-                            this.current_cst_id(),
-                        ));
+                        return Ok(list_nil_expr(this, start, end, this.current_cst_id()));
                     }
                     let mut elems = vec![this.parse_expr()?];
                     while this.at(&Token::Comma) {
@@ -243,14 +240,8 @@ impl Parser<'_> {
                         elems.push(this.parse_expr()?);
                     }
                     let end = this.expect(&Token::RBrack)?.end;
-                    Ok(list_expr(
-                        this.session,
-                        elems,
-                        start,
-                        end,
-                        this.current_cst_id(),
-                    ))
-                }
+                    Ok(list_expr(this, elems, start, end, this.current_cst_id()))
+                }),
                 _ => Err(this.error(format!(
                     "expected expression, got {}",
                     this.describe_current()
@@ -292,7 +283,7 @@ impl Parser<'_> {
     fn token_is_section_operator(token: &Token) -> bool {
         matches!(
             token,
-            Token::Operator(_)
+            Token::Operator
                 | Token::Plus
                 | Token::Minus
                 | Token::Star
@@ -316,7 +307,7 @@ impl Parser<'_> {
         match self.peek_kind(1) {
             Some(Token::Minus) => false,
             Some(Token::Backtick) => {
-                matches!(self.peek_kind(2), Some(Token::Ident(_)))
+                matches!(self.peek_kind(2), Some(Token::Ident))
                     && matches!(self.peek_kind(3), Some(Token::Backtick))
                     && !matches!(self.peek_kind(4), Some(Token::RParen))
             }
@@ -375,7 +366,7 @@ impl Parser<'_> {
         }
 
         let name = self.significant_before_index(close_backtick)?;
-        if !matches!(self.tokens[name].kind, Token::Ident(_)) {
+        if !matches!(self.tokens[name].kind, Token::Ident) {
             return None;
         }
 
@@ -554,7 +545,7 @@ impl Parser<'_> {
                 });
             }
 
-            if matches!(this.current_kind(), Token::Ident(_) | Token::Underscore)
+            if matches!(this.current_kind(), Token::Ident | Token::Underscore)
                 && this
                     .peek_kind(1)
                     .is_some_and(|kind| matches!(kind, Token::BindArrow))

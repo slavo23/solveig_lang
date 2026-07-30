@@ -3,7 +3,7 @@ use super::*;
 impl Parser<'_> {
     pub(super) fn starts_backticked_operator_name(&self) -> bool {
         self.at(&Token::Backtick)
-            && matches!(self.peek_kind(1), Some(Token::Ident(_)))
+            && matches!(self.peek_kind(1), Some(Token::Ident))
             && matches!(self.peek_kind(2), Some(Token::Backtick))
     }
 
