@@ -212,6 +212,10 @@ pub enum TypeError {
         span: FileSpan,
         predicates: Vec<String>,
     },
+    AmbiguousConstraints {
+        span: FileSpan,
+        predicates: Vec<String>,
+    },
     OverlappingInstances {
         span: FileSpan,
         class_name: String,
@@ -492,6 +496,23 @@ impl TypeError {
                     "no matching instance found for:\n  {}",
                     predicates.join("\n  ")
                 ))
+            }
+
+            TypeError::AmbiguousConstraints { span, predicates } => {
+                let preds = predicates.join(", ");
+
+                DiagnosticParts::new(
+                    "TC0021",
+                    format!("ambiguous type class constraints: {preds}"),
+                )
+                .with_label(Label::primary(
+                    *span,
+                    "ambiguous constraints arise from this expression",
+                ))
+                .with_note(
+                    "the constrained type variable does not appear in the inferred result type",
+                )
+                .with_note("add a type annotation to choose which instance should be used")
             }
 
             TypeError::OverlappingInstances {

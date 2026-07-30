@@ -12,9 +12,11 @@ fn temp_root(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after unix epoch")
         .as_nanos();
+    let thread_id = format!("{:?}", std::thread::current().id());
     std::env::temp_dir().join(format!(
-        "solveig_completion_{name}_{}_{}",
+        "solveig_completion_{name}_{}_{}_{}",
         process::id(),
+        thread_id,
         nanos
     ))
 }

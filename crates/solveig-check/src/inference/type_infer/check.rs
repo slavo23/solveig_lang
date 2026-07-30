@@ -333,10 +333,15 @@ fn substitute_generalized_expr(
 
 fn wrap_inferred_quantifiers(
     names: &Names,
-    mut body: TermExprNode<TcMetadata, Span>,
+    body: TermExprNode<TcMetadata, Span>,
     scheme: &Scheme,
+    retained: Vec<GivenEvidence>,
     span: Span,
 ) -> TermExprNode<TcMetadata, Span> {
+    let qualified_type =
+        Ty::make_forall_group(Vec::new(), scheme.predicates.clone(), scheme.ty.clone());
+    let mut body = wrap_ev_abs(body, retained, span.clone(), &qualified_type);
+
     for index in (0..scheme.quantifiers.len()).rev() {
         let (param, kind) = &scheme.quantifiers[index];
         let result_type = Ty::make_forall_group(
@@ -728,13 +733,18 @@ pub fn check_and_elab_module(
         }
 
         checker.func_schemes = group_func_schemes.clone();
-        let mut group_results =
-            Vec::<(usize, TermExprNode<TcMetadata, Span>, FunctionSignatureSource)>::new();
+        let mut group_results = Vec::<(
+            usize,
+            TermExprNode<TcMetadata, Span>,
+            FunctionSignatureSource,
+            Range<usize>,
+        )>::new();
         let mut group_errors = Vec::new();
 
         for &index in &group_indices {
             let func_def = &module.func_defs[index];
             checker.func_schemes = group_func_schemes.clone();
+            let wanted_start = checker.wanted_count();
 
             match &func_def.signature {
                 Some(sig) => {
@@ -743,7 +753,7 @@ pub fn check_and_elab_module(
                     match checker.solve_checking(group_ctx.clone(), &func_def.body, &expected_type)
                     {
                         Ok((final_ctx, elaborated)) => {
-                            let unresolved = checker.unresolved_wanteds();
+                            let unresolved = checker.solve_wanteds_from(wanted_start);
 
                             if !unresolved.is_empty() {
                                 group_errors.push(checker.wanteds_error(unresolved));
@@ -755,6 +765,7 @@ pub fn check_and_elab_module(
                                 index,
                                 elaborated,
                                 FunctionSignatureSource::Explicit(sig.clone()),
+                                checker.current_wanted_range_from(wanted_start),
                             ));
                         }
 
@@ -778,18 +789,12 @@ pub fn check_and_elab_module(
 
                     match inferred {
                         Ok((final_ctx, elaborated, inferred_type)) => {
-                            let unresolved = checker.unresolved_wanteds();
-
-                            if !unresolved.is_empty() {
-                                group_errors.push(checker.wanteds_error(unresolved));
-                                break;
-                            }
-
                             group_ctx = final_ctx;
                             group_results.push((
                                 index,
                                 elaborated,
                                 FunctionSignatureSource::Inferred(inferred_type),
+                                checker.current_wanted_range_from(wanted_start),
                             ));
                         }
 
@@ -811,7 +816,10 @@ pub fn check_and_elab_module(
             continue;
         }
 
-        for (index, elaborated, signature_source) in group_results {
+        let mut finalized_defs =
+            Vec::<(usize, TermDefinition<TcMetadata, Span>, Scheme)>::new();
+
+        for (index, elaborated, signature_source, wanted_range) in group_results {
             let func_def = &module.func_defs[index];
             let (final_scheme, final_body) = match signature_source {
                 FunctionSignatureSource::Explicit(sig) => {
@@ -819,15 +827,26 @@ pub fn check_and_elab_module(
                     (final_scheme, checker.zonk_expr(&elaborated))
                 }
                 FunctionSignatureSource::Inferred(inferred_type) => {
-                    let (final_sig, generalized_subst) =
-                        checker.generalize_top_level_type_with_subst(&group_ctx, &inferred_type);
-                    let final_scheme = TypeChecker::type_to_scheme(&final_sig);
+                    let generalized = match checker
+                        .generalize_top_level_type_with_subst(
+                            &group_ctx,
+                            &inferred_type,
+                            wanted_range.clone(),
+                        ) {
+                        Ok(generalized) => generalized,
+                        Err(err) => {
+                            group_errors.push(err);
+                            break;
+                        }
+                    };
+                    let final_scheme = TypeChecker::type_to_scheme(&generalized.ty);
                     let zonked = checker.zonk_expr(&elaborated);
-                    let substituted = substitute_generalized_expr(zonked, &generalized_subst);
+                    let substituted = substitute_generalized_expr(zonked, &generalized.subst);
                     let wrapped = wrap_inferred_quantifiers(
                         &checker.names,
                         substituted,
                         &final_scheme,
+                        generalized.retained,
                         func_def.body.anno.clone(),
                     );
 
@@ -835,16 +854,30 @@ pub fn check_and_elab_module(
                 }
             };
 
-            checked_defs_by_index[index] = Some(TermDefinition {
+            let checked_def = TermDefinition {
                 id: func_def.id,
                 name: func_def.name.clone(),
                 short_name: func_def.short_name.clone(),
                 signature: Some(final_scheme.clone()),
                 body: final_body,
-            });
+            };
 
-            available_func_schemes.insert(func_def.id, final_scheme.clone());
-            checked_func_schemes.insert(func_def.id, final_scheme);
+            finalized_defs.push((index, checked_def, final_scheme));
+        }
+
+        if !group_errors.is_empty() {
+            errors.extend(group_errors);
+            checker.finalize_holes();
+            names = checker.names.clone();
+            all_holes.extend(checker.holes);
+            all_warnings.extend(checker.warnings);
+            continue;
+        }
+
+        for (index, checked_def, final_scheme) in finalized_defs {
+            available_func_schemes.insert(checked_def.id, final_scheme.clone());
+            checked_func_schemes.insert(checked_def.id, final_scheme);
+            checked_defs_by_index[index] = Some(checked_def);
         }
 
         checker.finalize_holes();

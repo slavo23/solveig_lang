@@ -1,0 +1,12 @@
+[TC0021] Error: ambiguous type class constraints: Show a, FromText a
+   ╭─[ $WORKSPACE/tests/golden/diag/ambiguous_constraint/src/main.sv:4:19 ]
+   │
+ 4 │ renderText text = show (fromText text)
+   │                   ──┬─
+   │                     ╰─── ambiguous constraints arise from this expression
+   │
+   │ Note 1: the constrained type variable does not appear in the inferred result type
+   │
+   │ Note 2: add a type annotation to choose which instance should be used
+───╯
+type error

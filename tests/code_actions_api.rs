@@ -273,7 +273,7 @@ main = hasZero [1, 2, 3]
 }
 
 #[test]
-fn signatureless_recursive_function_does_not_infer_new_typeclass_constraint() {
+fn signatureless_recursive_function_infers_typeclass_constraint() {
     let project_root = temp_root("polymorphic_typeclass_recursion");
     let source_path = project_root.join("scratch.sv");
     let source = r#"containsPoly target xs =
@@ -286,28 +286,39 @@ fn signatureless_recursive_function_does_not_infer_new_typeclass_constraint() {
 
     let result = compilation
         .check(true)
-        .expect("polymorphic typeclass recursion should report diagnostics, not driver failure");
+        .expect("polymorphic typeclass recursion should check");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let action = compilation
+        .source_code_actions()
+        .iter()
+        .find(|action| action.title() == "Add type signature for `containsPoly`")
+        .unwrap_or_else(|| {
+            panic!(
+                "missing inferred signature action for qualified recursion: {:#?}",
+                compilation.source_code_actions()
+            )
+        });
+    assert_eq!(
+        action.category(),
+        SourceCodeActionCategory::InferredSignature
+    );
+
+    let hover = compilation
+        .hover_info(
+            &source_path,
+            offset_in_line(source, "containsPoly target xs =", "containsPoly"),
+        )
+        .expect("qualified recursive function hover should exist");
     assert!(
-        !result.success(),
-        "signature-less polymorphic typeclass recursion should not be accepted without qualified signature"
+        hover.signature().contains("Eq ") && hover.signature().contains("=>"),
+        "containsPoly should infer an Eq-qualified signature: {}",
+        hover.signature()
     );
     assert!(
-        result.diagnostics().iter().any(|diagnostic| {
-            diagnostic
-                .message
-                .contains("unsatisfied type class constraints")
-                || diagnostic.message.contains("no matching instance found")
-        }),
-        "expected a typeclass diagnostic, got: {:#?}",
-        result.diagnostics()
-    );
-    assert!(
-        compilation.source_code_actions().iter().all(|action| {
-            action.title() != "Add type signature for `containsPoly`"
-                || action.category() != SourceCodeActionCategory::InferredSignature
-        }),
-        "failed qualified inference should not produce an inferred-signature action: {:#?}",
-        compilation.source_code_actions()
+        hover.signature().contains(" -> List ") && hover.signature().ends_with(" -> Bool"),
+        "containsPoly should infer a membership-like type: {}",
+        hover.signature()
     );
 
     let _ = fs::remove_dir_all(project_root);

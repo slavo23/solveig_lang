@@ -1,3 +1,10 @@
+#[derive(Debug)]
+struct GeneralizedInferred {
+    ty: Ty,
+    subst: FxHashMap<EvarId, Ty>,
+    retained: Vec<GivenEvidence>,
+}
+
 impl TypeChecker {
     fn free_type_vars_in_type(ty: &Ty, out: &mut BTreeSet<TyVarId>) {
         match ty {
@@ -481,9 +488,13 @@ impl TypeChecker {
         None
     }
     fn unresolved_wanteds(&mut self) -> Vec<Wanted> {
+        self.unresolved_wanteds_in_range(0..self.wanteds.len())
+    }
+    fn unresolved_wanteds_in_range(&mut self, range: Range<usize>) -> Vec<Wanted> {
         let mut unresolved = Vec::new();
 
-        for wanted in self.wanteds.clone() {
+        let wanteds = self.wanteds[range].to_vec();
+        for wanted in wanteds {
             match self.entail(&wanted.givens, &wanted.pred) {
                 Ok(evidence) => {
                     self.evidence_solutions.insert(wanted.ev, evidence);
@@ -528,21 +539,158 @@ impl TypeChecker {
             Ty::TyUnit | Ty::TyVar(_) | Ty::TyCon(_) => {}
         }
     }
+    fn collect_exvars_in_predicate(pred: &Predicate, acc: &mut Vec<EvarId>) {
+        for arg in &pred.args {
+            Self::collect_exvars_in_type(arg, acc);
+        }
+    }
+    fn collect_fixed_exvars(ctx: &Context) -> Vec<EvarId> {
+        let mut fixed = Vec::new();
+
+        for entry in ctx.get_entries() {
+            if let ContextEntry::TypedVar { ty, .. } = entry {
+                Self::collect_exvars_in_type(&ctx.apply(&ty), &mut fixed);
+            }
+        }
+
+        fixed
+    }
+    fn substitute_evars_in_predicate(
+        pred: &Predicate,
+        subst: &FxHashMap<EvarId, Ty>,
+    ) -> Predicate {
+        Predicate {
+            class_id: pred.class_id,
+            args: pred
+                .args
+                .iter()
+                .map(|arg| {
+                    subst
+                        .iter()
+                        .fold(arg.clone(), |acc, (evar, ty)| acc.substitute_evar(*evar, ty))
+                })
+                .collect(),
+        }
+    }
+    fn ambiguous_tyvar_name(index: usize) -> String {
+        const LETTERS: &[u8; 26] = b"abcdefghijklmnopqrstuvwxyz";
+        LETTERS.get(index).map_or_else(
+            || format!("t{}", index - LETTERS.len()),
+            |letter| char::from(*letter).to_string(),
+        )
+    }
+    fn pretty_ambiguous_predicates(&mut self, wanteds: &[Wanted]) -> Vec<String> {
+        let mut evars = Vec::new();
+        for wanted in wanteds {
+            Self::collect_exvars_in_predicate(&wanted.pred, &mut evars);
+        }
+
+        let mut names = self.names.clone();
+        let mut subst = FxHashMap::default();
+        for (index, evar) in evars.into_iter().enumerate() {
+            let universal_id = names.fresh_tyvar(&Self::ambiguous_tyvar_name(index));
+            let replacement = Ty::TyVar(universal_id);
+            subst.insert(evar, replacement);
+        }
+        let tables = PrettyTables {
+            names: &names,
+            tycons: &self.tycon_table,
+            classes: &self.class_table,
+        };
+
+        wanteds
+            .iter()
+            .map(|wanted| {
+                let pred = Self::substitute_evars_in_predicate(&wanted.pred, &subst);
+                pred.pretty_with_tables(tables)
+            })
+            .collect()
+    }
+    fn split_generalized_wanteds(
+        &mut self,
+        ctx: &Context,
+        ty_evars: &[EvarId],
+        wanted_range: Range<usize>,
+    ) -> Result<Vec<GivenEvidence>, TypeError> {
+        let fixed_evars = Self::collect_fixed_exvars(ctx);
+        let mut retained = Vec::<GivenEvidence>::new();
+        let mut concrete_errors = Vec::<Wanted>::new();
+        let mut ambiguous = Vec::<Wanted>::new();
+
+        // THIH §7.4-7.5 `split`: unsolved predicates that mention variables
+        // generalized by the binding become retained constraints; concrete
+        // unsolved predicates remain errors, and retained predicates whose
+        // variables do not appear in the inferred type are ambiguous.
+        let wanteds = self.wanteds[wanted_range].to_vec();
+        for wanted in wanteds {
+            let pred = self.zonk_predicate(&wanted.pred);
+            let wanted = Wanted { pred, ..wanted };
+
+            let mut givens = wanted.givens.clone();
+            givens.extend(retained.clone());
+
+            if let Ok(evidence) = self.entail(&givens, &wanted.pred) {
+                self.evidence_solutions.insert(wanted.ev, evidence);
+                continue;
+            }
+
+            let mut pred_evars = Vec::new();
+            Self::collect_exvars_in_predicate(&wanted.pred, &mut pred_evars);
+
+            if pred_evars.is_empty()
+                || pred_evars.iter().all(|evar| fixed_evars.contains(evar))
+            {
+                concrete_errors.push(wanted);
+                continue;
+            }
+
+            if !pred_evars.iter().all(|evar| ty_evars.contains(evar)) {
+                ambiguous.push(wanted);
+                continue;
+            }
+
+            let given = GivenEvidence {
+                ev: wanted.ev,
+                pred: wanted.pred.clone(),
+            };
+            self.evidence_solutions.insert(wanted.ev, Ev::Var(wanted.ev));
+            retained.push(given);
+        }
+
+        if !concrete_errors.is_empty() {
+            return Err(self.wanteds_error(concrete_errors));
+        }
+
+        if !ambiguous.is_empty() {
+            let span = ambiguous.first().map_or_else(
+                || self.get_file_span(0..0),
+                |wanted| self.get_file_span(wanted.span.clone()),
+            );
+            let predicates = self.pretty_ambiguous_predicates(&ambiguous);
+            return Err(TypeError::AmbiguousConstraints {
+                span,
+                predicates,
+            });
+        }
+
+        Ok(retained)
+    }
     fn generalize_top_level_type_with_subst(
         &mut self,
         ctx: &Context,
         ty: &Ty,
-    ) -> (Ty, FxHashMap<EvarId, Ty>) {
+        wanted_range: Range<usize>,
+    ) -> Result<GeneralizedInferred, TypeError> {
         let zonked = self.zonk_type(&ctx.apply(ty));
 
         let mut evars = Vec::new();
         Self::collect_exvars_in_type(&zonked, &mut evars);
-
-        if evars.is_empty() {
-            return (zonked, FxHashMap::default());
+        let retained = self.split_generalized_wanteds(ctx, &evars, wanted_range)?;
+        for given in &retained {
+            Self::collect_exvars_in_predicate(&given.pred, &mut evars);
         }
 
-        let mut result = zonked;
+        let mut result = zonked.clone();
         let mut binders = Vec::new();
         let mut subst = FxHashMap::default();
 
@@ -556,11 +704,34 @@ impl TypeChecker {
             binders.push((universal_id, kind));
         }
 
-        for (name, kind) in binders.into_iter().rev() {
-            result = Ty::make_forall_id(name, kind, result);
-        }
+        let predicates = retained
+            .iter()
+            .map(|given| Self::substitute_evars_in_predicate(&given.pred, &subst))
+            .collect::<Vec<_>>();
+        result = Ty::make_forall_group(binders, predicates, result);
 
-        (result, subst)
+        let retained = retained
+            .into_iter()
+            .map(|given| GivenEvidence {
+                ev: given.ev,
+                pred: Self::substitute_evars_in_predicate(&given.pred, &subst),
+            })
+            .collect();
+
+        Ok(GeneralizedInferred {
+            ty: result,
+            subst,
+            retained,
+        })
+    }
+    fn current_wanted_range_from(&self, start: usize) -> Range<usize> {
+        start..self.wanteds.len()
+    }
+    fn wanted_count(&self) -> usize {
+        self.wanteds.len()
+    }
+    fn solve_wanteds_from(&mut self, start: usize) -> Vec<Wanted> {
+        self.unresolved_wanteds_in_range(start..self.wanteds.len())
     }
 }
 

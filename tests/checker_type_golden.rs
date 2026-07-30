@@ -50,6 +50,7 @@ fn checker_api_golden_types() {
         ("main.notEqThrough", "∀ (a : *). Eq a => a -> a -> Bool"),
         ("main.lessViaOrd", "∀ (a : *). Ord a => a -> a -> Bool"),
         ("main.sameViaOrd", "∀ (a : *). Ord a => a -> a -> Bool"),
+        ("main.letUnderQualified", "∀ (a : *). Eq a => a -> Bool"),
         ("main.lessInt", "Bool"),
         ("main.wrapNotEqInt", "Bool"),
         ("main.useRank2", "(∀ (a : *). a -> a) -> Int"),
@@ -67,6 +68,38 @@ fn checker_api_golden_types() {
         ("main.shadowRank2Result", "Int"),
         ("main.rank2Result", "Int"),
         ("main.rank2EqResult", "Bool"),
+    ];
+
+    for (name, expected_scheme) in expected {
+        let actual = schemes
+            .get(name)
+            .unwrap_or_else(|| panic!("missing checked scheme for `{name}`"));
+
+        assert_eq!(actual, expected_scheme, "scheme changed for `{name}`");
+    }
+}
+
+#[test]
+fn inferred_constraint_golden_types() {
+    let project_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/types/inferred");
+    let schemes = checked_project_schemes(&project_root)
+        .expect("inferred constrained fixture should resolve and check");
+
+    let expected = [
+        ("main.double", "∀ (t99 : *). Num t99 => t99 -> t99"),
+        (
+            "main.lessAndSame",
+            "∀ (t100 : *). Ord t100 => t100 -> t100 -> Bool",
+        ),
+        (
+            "main.containsLeft",
+            "∀ (t101 : *). Eq t101 => t101 -> List t101 -> Bool",
+        ),
+        (
+            "main.containsRight",
+            "∀ (t102 : *). Eq t102 => t102 -> List t102 -> Bool",
+        ),
+        ("main.main", "Int"),
     ];
 
     for (name, expected_scheme) in expected {

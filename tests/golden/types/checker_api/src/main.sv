@@ -58,6 +58,11 @@ lessViaOrd x y = less x y
 sameViaOrd : forall a. Ord a => a -> a -> Bool
 sameViaOrd x y = eq x y
 
+letUnderQualified : forall a. Eq a => a -> Bool
+letUnderQualified x =
+    let same = fun y => y == x in
+    same x
+
 lessInt : Bool
 lessInt = less 1 2
 

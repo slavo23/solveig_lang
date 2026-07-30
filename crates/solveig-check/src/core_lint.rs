@@ -163,6 +163,7 @@ impl CoreLinter<'_> {
             self.with_owner(func_def.name.clone(), func_def.id.module, |this| {
                 if let Some(signature) = &func_def.signature {
                     this.lint_scheme(signature);
+                    this.check_definition_predicate_binders(signature, &func_def.body);
                 }
                 this.lint_expr(&func_def.body);
             });
@@ -321,6 +322,52 @@ impl CoreLinter<'_> {
     fn lint_case_arm(&mut self, arm: &CaseArmNode<TcMetadata, Range<usize>>) {
         self.lint_pattern(&arm.node.pattern);
         self.lint_expr(&arm.node.expr);
+    }
+
+    fn check_definition_predicate_binders(
+        &mut self,
+        scheme: &Scheme,
+        body: &TermExprNode<TcMetadata, Range<usize>>,
+    ) {
+        let mut current = body;
+
+        for _ in &scheme.quantifiers {
+            let TermExpr::TyAbs(_, _, inner) = &current.node else {
+                break;
+            };
+            current = inner;
+        }
+
+        let mut actual = Vec::new();
+        while let TermExpr::EvAbs(_, pred, inner) = &current.node {
+            actual.push(pred.clone());
+            current = inner;
+        }
+
+        if actual.len() != scheme.predicates.len() {
+            self.report(
+                Some(body.anno.span.clone()),
+                format!(
+                    "ICE: scheme/evidence binder arity mismatch: {} predicates, {} evidence binders",
+                    scheme.predicates.len(),
+                    actual.len()
+                ),
+            );
+            return;
+        }
+
+        for (index, (expected, actual)) in scheme.predicates.iter().zip(actual.iter()).enumerate() {
+            if expected != actual {
+                self.report(
+                    Some(body.anno.span.clone()),
+                    format!(
+                        "ICE: scheme/evidence binder {index} predicate mismatch: expected `{}`, got `{}`",
+                        self.pretty_predicate_fallback(expected),
+                        self.pretty_predicate_fallback(actual)
+                    ),
+                );
+            }
+        }
     }
 
     fn lint_pattern(&mut self, pattern: &PatternNode<Range<usize>>) {
@@ -873,6 +920,14 @@ mod tests {
         names: &mut Names,
         body: TermExprNode<TcMetadata, Range<usize>>,
     ) -> CheckedModule {
+        module_with_signature_body(names, scheme(Vec::new()), body)
+    }
+
+    fn module_with_signature_body(
+        names: &mut Names,
+        signature: Scheme,
+        body: TermExprNode<TcMetadata, Range<usize>>,
+    ) -> CheckedModule {
         ResolvedModule {
             data_defs: Vec::new(),
             class_defs: Vec::new(),
@@ -888,7 +943,7 @@ mod tests {
                 id: names.def_id("main.main"),
                 name: "main.main".to_string(),
                 short_name: "main".to_string(),
-                signature: Some(scheme(Vec::new())),
+                signature: Some(signature),
                 body,
             }],
         }
@@ -1021,6 +1076,27 @@ mod tests {
         let diagnostics = lint_checked_module(&module, &env);
 
         assert!(notes(&diagnostics).contains("placeholder"));
+    }
+
+    #[test]
+    fn scheme_predicates_without_evidence_binders_are_reported() {
+        let mut names = Names::new();
+        let expected_def = names.def_id("test.needsEq");
+        let class_id = ClassId(1);
+        let instance_id = InstanceId(1);
+        let expected = pred(class_id, Ty::TyCon(PRIM_TYS.int));
+        let env = lint_env(
+            &mut names,
+            expected_def,
+            expected.clone(),
+            instance_id,
+            expected.clone(),
+        );
+        let module =
+            module_with_signature_body(&mut names, scheme(vec![expected]), node(TermExpr::Unit));
+        let diagnostics = lint_checked_module(&module, &env);
+
+        assert!(notes(&diagnostics).contains("scheme/evidence binder arity mismatch"));
     }
 
     #[test]
