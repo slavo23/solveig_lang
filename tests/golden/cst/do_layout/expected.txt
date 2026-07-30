@@ -1,32 +1,32 @@
-Module @0..136
+Module @0..135
   VOpen @0..0 line=0 col=0 synthetic text=""
   ImportList @0..0
-  DefinitionList @0..136
+  DefinitionList @0..135
     FunctionOrSignature @0..12
       Ident @0..4 line=0 col=0 text="main"
       Whitespace @4..5 line=0 col=4 text=" "
       Colon @5..6 line=0 col=5 text=":"
-      Type @6..12
-        QualifiedType @6..12
-          TypeArrow @6..12
-            TypeApp @6..12
-              TypeAtom @6..9
-                NamePath @6..9
-                  Whitespace @6..7 line=0 col=6 text=" "
+      Whitespace @6..7 line=0 col=6 text=" "
+      Type @7..12
+        QualifiedType @7..12
+          TypeArrow @7..12
+            TypeApp @7..12
+              TypeAtom @7..9
+                NamePath @7..9
                   UpperIdent @7..9 line=0 col=7 text="IO"
-              TypeAtom @9..12
-                Whitespace @9..10 line=0 col=9 text=" "
+              Whitespace @9..10 line=0 col=9 text=" "
+              TypeAtom @10..12
                 LParen @10..11 line=0 col=10 text="("
                 RParen @11..12 line=0 col=11 text=")"
     Newline @12..13 line=0 col=12 text="\n"
     VSemi @13..13 line=1 col=0 synthetic text=""
-    FunctionOrSignature @13..136
+    FunctionOrSignature @13..135
       Ident @13..17 line=1 col=0 text="main"
       Whitespace @17..18 line=1 col=4 text=" "
       Eq @18..19 line=1 col=5 text="="
-      Expr @19..136
-        DoExpr @19..136
-          Whitespace @19..20 line=1 col=6 text=" "
+      Whitespace @19..20 line=1 col=6 text=" "
+      Expr @20..135
+        DoExpr @20..135
           Do @20..22 line=1 col=7 text="do"
           Newline @22..23 line=1 col=9 text="\n"
           Whitespace @23..27 line=2 col=0 text="    "
@@ -40,8 +40,8 @@ Module @0..136
                     AtomExpr @27..36
                       NamePath @27..36
                         Ident @27..36 line=2 col=4 text="printLine"
-                    AtomExpr @36..44
-                      Whitespace @36..37 line=2 col=13 text=" "
+                    Whitespace @36..37 line=2 col=13 text=" "
+                    AtomExpr @37..44
                       Str("first") @37..44 line=2 col=14 text="\"first\""
           Newline @44..45 line=2 col=21 text="\n"
           Whitespace @45..49 line=3 col=0 text="    "
@@ -50,13 +50,13 @@ Module @0..136
             Ident @49..53 line=3 col=4 text="name"
             Whitespace @53..54 line=3 col=8 text=" "
             BindArrow @54..56 line=3 col=9 text="<-"
-            Expr @56..65
-              OpChain @56..65
-                OpOperand @56..65
-                  AppExpr @56..65
-                    AtomExpr @56..65
-                      NamePath @56..65
-                        Whitespace @56..57 line=3 col=11 text=" "
+            Whitespace @56..57 line=3 col=11 text=" "
+            Expr @57..65
+              OpChain @57..65
+                OpOperand @57..65
+                  AppExpr @57..65
+                    AtomExpr @57..65
+                      NamePath @57..65
                         Ident @57..65 line=3 col=12 text="readLine"
           Newline @65..66 line=3 col=20 text="\n"
           Whitespace @66..70 line=4 col=0 text="    "
@@ -67,20 +67,20 @@ Module @0..136
             Ident @74..82 line=4 col=8 text="greeting"
             Whitespace @82..83 line=4 col=16 text=" "
             Eq @83..84 line=4 col=17 text="="
-            Expr @84..112
-              OpChain @84..112
-                OpOperand @84..112
-                  AppExpr @84..112
-                    AtomExpr @84..97
-                      NamePath @84..97
-                        Whitespace @84..85 line=4 col=18 text=" "
+            Whitespace @84..85 line=4 col=18 text=" "
+            Expr @85..112
+              OpChain @85..112
+                OpOperand @85..112
+                  AppExpr @85..112
+                    AtomExpr @85..97
+                      NamePath @85..97
                         Ident @85..97 line=4 col=19 text="appendString"
-                    AtomExpr @97..107
-                      Whitespace @97..98 line=4 col=31 text=" "
+                    Whitespace @97..98 line=4 col=31 text=" "
+                    AtomExpr @98..107
                       Str("hello, ") @98..107 line=4 col=32 text="\"hello, \""
-                    AtomExpr @107..112
-                      NamePath @107..112
-                        Whitespace @107..108 line=4 col=41 text=" "
+                    Whitespace @107..108 line=4 col=41 text=" "
+                    AtomExpr @108..112
+                      NamePath @108..112
                         Ident @108..112 line=4 col=42 text="name"
           Newline @112..113 line=4 col=46 text="\n"
           Whitespace @113..117 line=5 col=0 text="    "
@@ -93,9 +93,9 @@ Module @0..136
                     AtomExpr @117..126
                       NamePath @117..126
                         Ident @117..126 line=5 col=4 text="printLine"
-                    AtomExpr @126..135
-                      NamePath @126..135
-                        Whitespace @126..127 line=5 col=13 text=" "
+                    Whitespace @126..127 line=5 col=13 text=" "
+                    AtomExpr @127..135
+                      NamePath @127..135
                         Ident @127..135 line=5 col=14 text="greeting"
           Newline @135..136 line=5 col=22 text="\n"
           VClose @136..136 line=6 col=0 synthetic text=""

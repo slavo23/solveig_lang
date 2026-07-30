@@ -102,6 +102,7 @@ impl SyntaxTree {
             tokens,
         };
         let mut stack = Vec::new();
+        let mut node_has_meaningful_token = Vec::new();
         let mut root = None;
 
         for event in events {
@@ -109,6 +110,12 @@ impl SyntaxTree {
                 Event::StartNode(kind) => {
                     let parent = stack.last().copied();
                     let id = tree.push_node(*kind, parent);
+                    assert_eq!(
+                        node_has_meaningful_token.len(),
+                        id.index(),
+                        "ICE: CST builder node state must match arena order"
+                    );
+                    node_has_meaningful_token.push(false);
 
                     if let Some(parent) = parent {
                         tree.node_mut(parent).children.push(NodeOrToken::Node(id));
@@ -124,16 +131,28 @@ impl SyntaxTree {
                         .last()
                         .expect("ICE: CST token event must be inside a syntax node");
                     let token_id = TokenId::new(*index);
+                    let is_trivia = token_is_trivia(tree.token(token_id));
+                    let is_meaningful = token_is_meaningful(tree.token(token_id));
                     let slot = tree
                         .token_parents
                         .get_mut(*index)
                         .expect("ICE: CST token event index is outside the token stream");
 
                     assert!(slot.is_none(), "ICE: CST token event emitted a token twice");
-                    *slot = Some(parent);
-                    tree.node_mut(parent)
-                        .children
-                        .push(NodeOrToken::Token(token_id));
+                    if is_trivia {
+                        let (parent, before_child) =
+                            trivia_placement(&stack, &node_has_meaningful_token);
+                        *slot = Some(parent);
+                        tree.insert_token_child(parent, token_id, before_child);
+                    } else {
+                        if is_meaningful {
+                            mark_meaningful_tokens(&stack, &mut node_has_meaningful_token);
+                        }
+                        *slot = Some(parent);
+                        tree.node_mut(parent)
+                            .children
+                            .push(NodeOrToken::Token(token_id));
+                    }
                 }
                 Event::FinishNode => {
                     let id = stack
@@ -262,16 +281,34 @@ impl SyntaxTree {
             .expect("ICE: CstId not present in SyntaxTree")
     }
 
+    fn insert_token_child(&mut self, parent: CstId, token: TokenId, before_child: Option<CstId>) {
+        let children = &mut self.node_mut(parent).children;
+        let child = NodeOrToken::Token(token);
+
+        let Some(before_child) = before_child else {
+            children.push(child);
+            return;
+        };
+
+        let index = children
+            .iter()
+            .position(|existing| *existing == NodeOrToken::Node(before_child))
+            .expect("ICE: CST trivia anchor must be a child of its placement parent");
+        children.insert(index, child);
+    }
+
     fn span_for_node(&self, id: CstId) -> Span {
         let node = self.node(id);
         let mut span = None;
 
         for child in &node.children {
             let child_span = match child {
-                NodeOrToken::Node(id) => self.node(*id).span,
-                NodeOrToken::Token(id) => token_span(self.token(*id)),
+                NodeOrToken::Node(id) => node_meaningful_span(self.node(*id)),
+                NodeOrToken::Token(id) => meaningful_token_span(self.token(*id)),
             };
-            span = Some(merge_span(span, child_span));
+            if let Some(child_span) = child_span {
+                span = Some(merge_span(span, child_span));
+            }
         }
 
         for diagnostic in &node.diagnostics {
@@ -320,6 +357,56 @@ fn token_span(token: &PosToken) -> Span {
     Span::from_usize_range(token.start..token.end)
 }
 
+fn meaningful_token_span(token: &PosToken) -> Option<Span> {
+    token_is_meaningful(token).then(|| token_span(token))
+}
+
+fn node_meaningful_span(node: &SyntaxNode) -> Option<Span> {
+    (!node.span.is_empty()).then_some(node.span)
+}
+
+fn token_is_trivia(token: &PosToken) -> bool {
+    token.kind.is_trivia()
+}
+
+fn token_is_meaningful(token: &PosToken) -> bool {
+    !token.kind.is_trivia() && !token.is_synthetic() && !matches!(token.kind, Token::Eof)
+}
+
+fn mark_meaningful_tokens(stack: &[CstId], node_has_meaningful_token: &mut [bool]) {
+    for id in stack {
+        node_has_meaningful_token[id.index()] = true;
+    }
+}
+
+fn trivia_placement(stack: &[CstId], node_has_meaningful_token: &[bool]) -> (CstId, Option<CstId>) {
+    let top = *stack
+        .last()
+        .expect("ICE: CST trivia token event must be inside a syntax node");
+
+    if node_has_meaningful_token[top.index()] {
+        return (top, None);
+    }
+
+    // Leading trivia belongs before the current empty subtree, not inside its
+    // deepest wrapper, so leaf spans start at their meaningful token.
+    let mut empty_subtree_root = stack.len() - 1;
+    while empty_subtree_root > 0
+        && !node_has_meaningful_token[stack[empty_subtree_root - 1].index()]
+    {
+        empty_subtree_root -= 1;
+    }
+
+    if empty_subtree_root == 0 {
+        (stack[0], None)
+    } else {
+        (
+            stack[empty_subtree_root - 1],
+            Some(stack[empty_subtree_root]),
+        )
+    }
+}
+
 fn span_contains_offset(span: Span, offset: usize) -> bool {
     let start = span.start as usize;
     let end = span.end as usize;
@@ -327,7 +414,7 @@ fn span_contains_offset(span: Span, offset: usize) -> bool {
     if start == end {
         offset == start
     } else {
-        start <= offset && offset <= end
+        start <= offset && offset < end
     }
 }
 

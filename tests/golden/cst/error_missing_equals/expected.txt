@@ -1,4 +1,4 @@
-Module @0..17
+Module @0..16
   VOpen @0..0 line=0 col=0 synthetic text=""
   ImportList @0..0
   DefinitionList @0..16
@@ -8,21 +8,21 @@ Module @0..17
       Ident @4..5 line=0 col=4 text="x"
       Whitespace @5..6 line=0 col=5 text=" "
       Ident @6..7 line=0 col=6 text="x"
-    Error @7..8
+    Newline @7..8 line=0 col=7 text="\n"
+    Error @8..8
       diagnostic PAR0001 Error "parse error"
         label primary @8..8 "expected Eq, got VSemi"
-      Newline @7..8 line=0 col=7 text="\n"
       VSemi @8..8 line=1 col=0 synthetic text=""
     FunctionOrSignature @8..16
       Ident @8..12 line=1 col=0 text="main"
       Whitespace @12..13 line=1 col=4 text=" "
       Eq @13..14 line=1 col=5 text="="
-      Expr @14..16
-        OpChain @14..16
-          OpOperand @14..16
-            AppExpr @14..16
-              AtomExpr @14..16
-                Whitespace @14..15 line=1 col=6 text=" "
+      Whitespace @14..15 line=1 col=6 text=" "
+      Expr @15..16
+        OpChain @15..16
+          OpOperand @15..16
+            AppExpr @15..16
+              AtomExpr @15..16
                 Int(0) @15..16 line=1 col=7 text="0"
   Newline @16..17 line=1 col=8 text="\n"
   VClose @17..17 line=2 col=0 synthetic text=""

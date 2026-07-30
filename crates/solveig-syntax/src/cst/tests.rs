@@ -103,6 +103,53 @@ fn cst_parent_links_match_child_edges() {
 }
 
 #[test]
+fn cst_node_spans_exclude_leading_trivia() {
+    let source = "type Score a = Pair String a\n\nmain : Score Int\nmain = MkPair \"ok\" 1\n";
+    let parsed = parse_test_source(source);
+    let tree = &parsed.cst;
+
+    assert_eq!(tree.reconstruct_text(source), source);
+
+    assert_node_span_text(tree, source, SyntaxKind::NamePath, "Pair", "Pair");
+    assert_node_span_text(tree, source, SyntaxKind::NamePath, "String", "String");
+    assert_node_span_text(tree, source, SyntaxKind::NamePath, "Int", "Int");
+    assert_node_span_text(tree, source, SyntaxKind::AtomExpr, "\"ok\"", "\"ok\"");
+    assert_node_span_text(tree, source, SyntaxKind::AtomExpr, "1", "1");
+}
+
+#[test]
+fn cst_places_leading_trivia_at_surrounding_parent_level() {
+    let source = "main : IO ()\nmain = pure ()\n";
+    let parsed = parse_test_source(source);
+    let tree = &parsed.cst;
+
+    let io_offset = source.find("IO").expect("fixture has IO");
+    let whitespace_offset = io_offset - 1;
+    let whitespace = tree
+        .token_at_offset(whitespace_offset)
+        .expect("space before IO should be a trivia token");
+    let whitespace_parent = tree
+        .token_parent(whitespace)
+        .expect("trivia tokens should stay placed in the CST");
+
+    assert_eq!(tree.token(whitespace).kind, Token::Whitespace);
+    assert_eq!(
+        tree.node(whitespace_parent).kind(),
+        SyntaxKind::FunctionOrSignature
+    );
+
+    let io_token = tree
+        .token_at_offset(io_offset)
+        .expect("IO should have a token");
+    let io_parent = tree
+        .token_parent(io_token)
+        .expect("meaningful tokens should have parents");
+
+    assert_eq!(tree.node(io_parent).kind(), SyntaxKind::NamePath);
+    assert_ne!(whitespace_parent, io_parent);
+}
+
+#[test]
 fn cst_round_trips_repository_solveig_sources() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -146,4 +193,21 @@ fn collect_solveig_sources(root: &Path, files: &mut Vec<PathBuf>) {
             files.push(path);
         }
     }
+}
+
+fn assert_node_span_text(
+    tree: &SyntaxTree,
+    source: &str,
+    kind: SyntaxKind,
+    needle: &str,
+    expected: &str,
+) {
+    let offset = source
+        .find(needle)
+        .expect("fixture should contain node text");
+    let node = tree
+        .node_at_offset(offset)
+        .expect("offset should resolve to a CST node");
+    assert_eq!(tree.node(node).kind(), kind);
+    assert_eq!(&source[tree.node(node).span().to_usize_range()], expected);
 }

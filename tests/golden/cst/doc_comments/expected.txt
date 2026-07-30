@@ -1,19 +1,19 @@
-Module @0..222
+Module @21..221
   LineComment @0..20 line=0 col=0 text="-- | Top-level docs."
   Newline @20..21 line=0 col=20 text="\n"
   VOpen @21..21 line=1 col=0 synthetic text=""
   ImportList @0..0
-  DefinitionList @21..222
+  DefinitionList @21..221
     FunctionOrSignature @21..29
       Ident @21..25 line=1 col=0 text="main"
       Whitespace @25..26 line=1 col=4 text=" "
       Eq @26..27 line=1 col=5 text="="
-      Expr @27..29
-        OpChain @27..29
-          OpOperand @27..29
-            AppExpr @27..29
-              AtomExpr @27..29
-                Whitespace @27..28 line=1 col=6 text=" "
+      Whitespace @27..28 line=1 col=6 text=" "
+      Expr @28..29
+        OpChain @28..29
+          OpOperand @28..29
+            AppExpr @28..29
+              AtomExpr @28..29
                 Int(1) @28..29 line=1 col=7 text="1"
     Whitespace @29..30 line=1 col=8 text=" "
     LineComment @30..48 line=1 col=9 text="-- ^ trailing docs"
@@ -27,22 +27,22 @@ Module @0..222
       UpperIdent @71..81 line=4 col=5 text="Documented"
       Whitespace @81..82 line=4 col=15 text=" "
       Eq @82..83 line=4 col=16 text="="
-      Constructor @83..131
-        Newline @83..84 line=4 col=17 text="\n"
-        Whitespace @84..88 line=5 col=0 text="    "
-        LineComment @88..110 line=5 col=4 text="-- | Constructor docs."
-        Newline @110..111 line=5 col=26 text="\n"
-        Whitespace @111..115 line=6 col=0 text="    "
+      Newline @83..84 line=4 col=17 text="\n"
+      Whitespace @84..88 line=5 col=0 text="    "
+      LineComment @88..110 line=5 col=4 text="-- | Constructor docs."
+      Newline @110..111 line=5 col=26 text="\n"
+      Whitespace @111..115 line=6 col=0 text="    "
+      Constructor @115..131
         UpperIdent @115..127 line=6 col=4 text="MkDocumented"
-        TypeAtom @127..131
-          NamePath @127..131
-            Whitespace @127..128 line=6 col=16 text=" "
+        Whitespace @127..128 line=6 col=16 text=" "
+        TypeAtom @128..131
+          NamePath @128..131
             UpperIdent @128..131 line=6 col=17 text="Int"
     Newline @131..133 line=6 col=20 text="\n\n"
     LineComment @133..149 line=8 col=0 text="-- | Class docs."
     Newline @149..150 line=8 col=16 text="\n"
     VSemi @150..150 line=9 col=0 synthetic text=""
-    ClassDef @150..222
+    ClassDef @150..221
       Class @150..155 line=9 col=0 text="class"
       Whitespace @155..156 line=9 col=5 text=" "
       UpperIdent @156..164 line=9 col=6 text="Describe"
@@ -60,23 +60,23 @@ Module @0..222
       Ident @199..207 line=11 col=4 text="describe"
       Whitespace @207..208 line=11 col=12 text=" "
       Colon @208..209 line=11 col=13 text=":"
-      Type @209..221
-        QualifiedType @209..221
-          TypeArrow @209..221
-            TypeApp @209..211
-              TypeAtom @209..211
-                NamePath @209..211
-                  Whitespace @209..210 line=11 col=14 text=" "
+      Whitespace @209..210 line=11 col=14 text=" "
+      Type @210..221
+        QualifiedType @210..221
+          TypeArrow @210..221
+            TypeApp @210..211
+              TypeAtom @210..211
+                NamePath @210..211
                   Ident @210..211 line=11 col=15 text="a"
             Whitespace @211..212 line=11 col=16 text=" "
             Arrow @212..214 line=11 col=17 text="->"
-            Type @214..221
-              QualifiedType @214..221
-                TypeArrow @214..221
-                  TypeApp @214..221
-                    TypeAtom @214..221
-                      NamePath @214..221
-                        Whitespace @214..215 line=11 col=19 text=" "
+            Whitespace @214..215 line=11 col=19 text=" "
+            Type @215..221
+              QualifiedType @215..221
+                TypeArrow @215..221
+                  TypeApp @215..221
+                    TypeAtom @215..221
+                      NamePath @215..221
                         UpperIdent @215..221 line=11 col=20 text="String"
       Newline @221..222 line=11 col=26 text="\n"
       VClose @222..222 line=12 col=0 synthetic text=""
