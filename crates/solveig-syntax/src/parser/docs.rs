@@ -1,8 +1,9 @@
-//! Doc-comment attachment during CST-to-AST lowering.
-//! Comments remain ordinary CST trivia; these routines read nearby trivia and
-//! produce the owned surface `DocComment` payload.
+//! Doc-comment lowering from explicit CST comment attachments.
+//! Comments remain ordinary CST trivia; the CST records which comments belong
+//! to nearby source tokens, and these routines produce owned `DocComment`s.
 
 use super::*;
+use crate::cst::TokenId;
 
 impl Parser<'_> {
     fn token_source_text(&self, token: &PosToken) -> String {
@@ -26,37 +27,14 @@ impl Parser<'_> {
         )
     }
 
-    fn newline_has_blank_line(&self, token: &PosToken) -> bool {
-        self.token_source_text(token)
-            .bytes()
-            .filter(|byte| *byte == b'\n')
-            .count()
-            > 1
-    }
-
-    pub(super) fn doc_comment_before_index(&self, anchor_index: usize) -> Option<DocComment> {
+    fn leading_doc_comment_from_tokens(&self, comments: &[TokenId]) -> Option<DocComment> {
         let mut lines = Vec::new();
-        let mut index = anchor_index;
 
-        while index > 0 {
-            index -= 1;
-            let token = &self.tokens[index];
-
-            match &token.kind {
-                Token::Whitespace | Token::VOpen | Token::VClose | Token::VSemi => {}
-                Token::Newline => {
-                    if self.newline_has_blank_line(token) {
-                        break;
-                    }
-                }
-                Token::LineComment => {
-                    let Some(line) = self.doc_line_text(token, "-- |") else {
-                        break;
-                    };
-                    lines.push(line);
-                }
-                _ => break,
-            }
+        for comment in comments.iter().rev() {
+            let Some(line) = self.doc_line_text(self.cst?.token(*comment), "-- |") else {
+                break;
+            };
+            lines.push(line);
         }
 
         if lines.is_empty() {
@@ -67,25 +45,20 @@ impl Parser<'_> {
         Some(DocComment::new(lines.join("\n")))
     }
 
+    fn trailing_doc_comment_from_tokens(&self, comments: &[TokenId]) -> Option<DocComment> {
+        let comment = comments.first()?;
+        self.doc_line_text(self.cst?.token(*comment), "-- ^")
+            .map(DocComment::new)
+    }
+
     pub(super) fn doc_comment_before_current(&self) -> Option<DocComment> {
-        self.doc_comment_before_index(self.current_index())
+        let token = TokenId::new(self.current_index());
+        self.leading_doc_comment_from_tokens(self.cst?.leading_comments(token))
     }
 
     pub(super) fn doc_comment_after_previous_significant(&self) -> Option<DocComment> {
-        let last_index = self.previous_significant_index(self.pos)?;
-        let last_line = self.tokens[last_index].line;
-
-        for token in &self.tokens[last_index + 1..] {
-            match &token.kind {
-                Token::Whitespace if token.line == last_line => {}
-                Token::LineComment if token.line == last_line => {
-                    return self.doc_line_text(token, "-- ^").map(DocComment::new);
-                }
-                _ => break,
-            }
-        }
-
-        None
+        let token = TokenId::new(self.previous_significant_index(self.pos)?);
+        self.trailing_doc_comment_from_tokens(self.cst?.trailing_comments(token))
     }
 
     pub(super) fn attached_doc_comment(

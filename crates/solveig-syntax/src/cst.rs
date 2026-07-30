@@ -26,7 +26,7 @@ impl CstId {
 pub struct TokenId(u32);
 
 impl TokenId {
-    fn new(index: usize) -> Self {
+    pub(crate) fn new(index: usize) -> Self {
         Self(u32::try_from(index).expect("ICE: CST token table exceeded u32 capacity"))
     }
 
@@ -87,6 +87,8 @@ pub struct SyntaxTree {
     nodes: Vec<SyntaxNode>,
     tokens: Vec<PosToken>,
     token_parents: Vec<Option<CstId>>,
+    leading_comments: Vec<Vec<TokenId>>,
+    trailing_comments: Vec<Vec<TokenId>>,
 }
 
 impl SyntaxTree {
@@ -99,6 +101,8 @@ impl SyntaxTree {
             root: CstId(0),
             nodes: Vec::new(),
             token_parents: vec![None; tokens.len()],
+            leading_comments: vec![Vec::new(); tokens.len()],
+            trailing_comments: vec![Vec::new(); tokens.len()],
             tokens,
         };
         let mut stack = Vec::new();
@@ -180,6 +184,7 @@ impl SyntaxTree {
         }
 
         tree.root = root;
+        tree.attach_comment_trivia();
         tree
     }
 
@@ -230,6 +235,20 @@ impl SyntaxTree {
         self.token_parents
             .get(id.index())
             .copied()
+            .expect("ICE: TokenId not present in SyntaxTree")
+    }
+
+    /// Returns comments explicitly attached before this token.
+    pub fn leading_comments(&self, id: TokenId) -> &[TokenId] {
+        self.leading_comments
+            .get(id.index())
+            .expect("ICE: TokenId not present in SyntaxTree")
+    }
+
+    /// Returns comments explicitly attached after this token.
+    pub fn trailing_comments(&self, id: TokenId) -> &[TokenId] {
+        self.trailing_comments
+            .get(id.index())
             .expect("ICE: TokenId not present in SyntaxTree")
     }
 
@@ -295,6 +314,17 @@ impl SyntaxTree {
             .position(|existing| *existing == NodeOrToken::Node(before_child))
             .expect("ICE: CST trivia anchor must be a child of its placement parent");
         children.insert(index, child);
+    }
+
+    fn attach_comment_trivia(&mut self) {
+        for index in 0..self.tokens.len() {
+            if !token_is_meaningful(&self.tokens[index]) {
+                continue;
+            }
+
+            self.leading_comments[index] = leading_comments_before(&self.tokens, index);
+            self.trailing_comments[index] = trailing_comments_after(&self.tokens, index);
+        }
     }
 
     fn span_for_node(&self, id: CstId) -> Span {
@@ -373,6 +403,14 @@ fn token_is_meaningful(token: &PosToken) -> bool {
     !token.kind.is_trivia() && !token.is_synthetic() && !matches!(token.kind, Token::Eof)
 }
 
+fn token_is_comment(token: &PosToken) -> bool {
+    matches!(token.kind, Token::LineComment | Token::BlockComment)
+}
+
+fn newline_has_blank_line(token: &PosToken) -> bool {
+    token.end.saturating_sub(token.start) > 1
+}
+
 fn mark_meaningful_tokens(stack: &[CstId], node_has_meaningful_token: &mut [bool]) {
     for id in stack {
         node_has_meaningful_token[id.index()] = true;
@@ -405,6 +443,48 @@ fn trivia_placement(stack: &[CstId], node_has_meaningful_token: &[bool]) -> (Cst
             Some(stack[empty_subtree_root]),
         )
     }
+}
+
+fn leading_comments_before(tokens: &[PosToken], anchor_index: usize) -> Vec<TokenId> {
+    let mut comments = Vec::new();
+    let mut index = anchor_index;
+
+    while index > 0 {
+        index -= 1;
+        let token = &tokens[index];
+
+        match token.kind {
+            Token::Whitespace | Token::VOpen | Token::VClose | Token::VSemi => {}
+            Token::Newline => {
+                if newline_has_blank_line(token) {
+                    break;
+                }
+            }
+            _ if token_is_comment(token) => comments.push(TokenId::new(index)),
+            _ => break,
+        }
+    }
+
+    comments.reverse();
+    comments
+}
+
+fn trailing_comments_after(tokens: &[PosToken], anchor_index: usize) -> Vec<TokenId> {
+    let anchor_line = tokens[anchor_index].line;
+    let mut comments = Vec::new();
+
+    for (index, token) in tokens.iter().enumerate().skip(anchor_index + 1) {
+        match token.kind {
+            Token::Whitespace if token.line == anchor_line => {}
+            _ if token_is_comment(token) && token.line == anchor_line => {
+                comments.push(TokenId::new(index));
+                break;
+            }
+            _ => break,
+        }
+    }
+
+    comments
 }
 
 fn span_contains_offset(span: Span, offset: usize) -> bool {

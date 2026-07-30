@@ -83,6 +83,7 @@ pub struct Parser<'a> {
     session: &'a Session,
     file: FileId,
     tokens: Vec<PosToken>,
+    cst: Option<&'a SyntaxTree>,
     events: Vec<Event>,
     pos: usize,
     emit_events: bool,
@@ -108,6 +109,7 @@ impl<'a> Parser<'a> {
             session,
             file,
             tokens,
+            cst: None,
             events: Vec::new(),
             pos: 0,
             emit_events: true,
@@ -119,11 +121,12 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn from_cst(session: &'a Session, file: FileId, cst: &SyntaxTree) -> Self {
+    fn from_cst(session: &'a Session, file: FileId, cst: &'a SyntaxTree) -> Self {
         Self {
             session,
             file,
             tokens: cst.tokens().to_vec(),
+            cst: Some(cst),
             events: Vec::new(),
             pos: 0,
             emit_events: false,

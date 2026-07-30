@@ -150,6 +150,63 @@ fn cst_places_leading_trivia_at_surrounding_parent_level() {
 }
 
 #[test]
+fn cst_attaches_doc_comments_to_neighboring_tokens() {
+    let source = "\
+-- | Top-level docs.
+main = 1 -- ^ trailing docs
+
+-- | Type docs.
+data Documented =
+    -- | Constructor docs.
+    MkDocumented Int
+";
+    let parsed = parse_test_source(source);
+    let tree = &parsed.cst;
+
+    let main = token_at_text(tree, source, "main");
+    assert_attached_comment_texts(
+        tree,
+        source,
+        tree.leading_comments(main),
+        &["-- | Top-level docs."],
+    );
+
+    let one = token_at_text(tree, source, "1");
+    assert_attached_comment_texts(
+        tree,
+        source,
+        tree.trailing_comments(one),
+        &["-- ^ trailing docs"],
+    );
+
+    let data = token_at_text(tree, source, "data");
+    assert_attached_comment_texts(
+        tree,
+        source,
+        tree.leading_comments(data),
+        &["-- | Type docs."],
+    );
+
+    let constructor = token_at_text(tree, source, "MkDocumented");
+    assert_attached_comment_texts(
+        tree,
+        source,
+        tree.leading_comments(constructor),
+        &["-- | Constructor docs."],
+    );
+}
+
+#[test]
+fn cst_does_not_attach_leading_comment_across_blank_line() {
+    let source = "-- | Detached docs.\n\nmain = 1\n";
+    let parsed = parse_test_source(source);
+    let tree = &parsed.cst;
+    let main = token_at_text(tree, source, "main");
+
+    assert!(tree.leading_comments(main).is_empty());
+}
+
+#[test]
 fn cst_round_trips_repository_solveig_sources() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
@@ -210,4 +267,25 @@ fn assert_node_span_text(
         .expect("offset should resolve to a CST node");
     assert_eq!(tree.node(node).kind(), kind);
     assert_eq!(&source[tree.node(node).span().to_usize_range()], expected);
+}
+
+fn token_at_text(tree: &SyntaxTree, source: &str, needle: &str) -> TokenId {
+    let offset = source
+        .find(needle)
+        .expect("fixture should contain token text");
+    tree.token_at_offset(offset)
+        .expect("fixture token should resolve in the CST")
+}
+
+fn assert_attached_comment_texts(
+    tree: &SyntaxTree,
+    source: &str,
+    comments: &[TokenId],
+    expected: &[&str],
+) {
+    let actual = comments
+        .iter()
+        .map(|comment| tree.token(*comment).source_text(source))
+        .collect::<Vec<_>>();
+    assert_eq!(actual, expected);
 }

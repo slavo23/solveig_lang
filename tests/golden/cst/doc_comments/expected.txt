@@ -6,6 +6,7 @@ Module @21..221
   DefinitionList @21..221
     FunctionOrSignature @21..29
       Ident @21..25 line=1 col=0 text="main"
+        leading-comment @0..20 text="-- | Top-level docs."
       Whitespace @25..26 line=1 col=4 text=" "
       Eq @26..27 line=1 col=5 text="="
       Whitespace @27..28 line=1 col=6 text=" "
@@ -15,6 +16,7 @@ Module @21..221
             AppExpr @28..29
               AtomExpr @28..29
                 Int(1) @28..29 line=1 col=7 text="1"
+                  trailing-comment @30..48 text="-- ^ trailing docs"
     Whitespace @29..30 line=1 col=8 text=" "
     LineComment @30..48 line=1 col=9 text="-- ^ trailing docs"
     Newline @48..50 line=1 col=27 text="\n\n"
@@ -23,6 +25,7 @@ Module @21..221
     VSemi @66..66 line=4 col=0 synthetic text=""
     DataDef @66..131
       Data @66..70 line=4 col=0 text="data"
+        leading-comment @50..65 text="-- | Type docs."
       Whitespace @70..71 line=4 col=4 text=" "
       UpperIdent @71..81 line=4 col=5 text="Documented"
       Whitespace @81..82 line=4 col=15 text=" "
@@ -34,6 +37,7 @@ Module @21..221
       Whitespace @111..115 line=6 col=0 text="    "
       Constructor @115..131
         UpperIdent @115..127 line=6 col=4 text="MkDocumented"
+          leading-comment @88..110 text="-- | Constructor docs."
         Whitespace @127..128 line=6 col=16 text=" "
         TypeAtom @128..131
           NamePath @128..131
@@ -44,6 +48,7 @@ Module @21..221
     VSemi @150..150 line=9 col=0 synthetic text=""
     ClassDef @150..221
       Class @150..155 line=9 col=0 text="class"
+        leading-comment @133..149 text="-- | Class docs."
       Whitespace @155..156 line=9 col=5 text=" "
       UpperIdent @156..164 line=9 col=6 text="Describe"
       Whitespace @164..165 line=9 col=14 text=" "
@@ -58,6 +63,7 @@ Module @21..221
       VOpen @199..199 line=11 col=4 synthetic text=""
       VSemi @199..199 line=11 col=4 synthetic text=""
       Ident @199..207 line=11 col=4 text="describe"
+        leading-comment @177..194 text="-- | Method docs."
       Whitespace @207..208 line=11 col=12 text=" "
       Colon @208..209 line=11 col=13 text=":"
       Whitespace @209..210 line=11 col=14 text=" "

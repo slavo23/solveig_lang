@@ -4,7 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use solveig_base::{Diagnostic, Session, Span};
-use solveig_syntax::cst::{CstId, NodeOrToken, SyntaxTree};
+use solveig_syntax::cst::{CstId, NodeOrToken, SyntaxTree, TokenId};
 use solveig_syntax::lexer::{PosToken, Token};
 use solveig_syntax::parser::parse_source;
 
@@ -90,7 +90,7 @@ fn dump_node(tree: &SyntaxTree, source: &str, id: CstId, depth: usize, out: &mut
     for child in node.children() {
         match child {
             NodeOrToken::Node(id) => dump_node(tree, source, *id, depth + 1, out),
-            NodeOrToken::Token(id) => dump_token(tree.token(*id), source, depth + 1, out),
+            NodeOrToken::Token(id) => dump_token(tree, *id, source, depth + 1, out),
         }
     }
 }
@@ -128,7 +128,8 @@ fn dump_diagnostic(diagnostic: &Diagnostic, depth: usize, out: &mut String) {
     }
 }
 
-fn dump_token(token: &PosToken, source: &str, depth: usize, out: &mut String) {
+fn dump_token(tree: &SyntaxTree, id: TokenId, source: &str, depth: usize, out: &mut String) {
+    let token = tree.token(id);
     write_indent(out, depth);
     write!(
         out,
@@ -146,6 +147,44 @@ fn dump_token(token: &PosToken, source: &str, depth: usize, out: &mut String) {
 
     writeln!(out, " text={}", quoted(token.source_text(source)))
         .expect("writing to String should not fail");
+
+    for comment in tree.leading_comments(id) {
+        dump_attached_comment(
+            "leading-comment",
+            tree.token(*comment),
+            source,
+            depth + 1,
+            out,
+        );
+    }
+
+    for comment in tree.trailing_comments(id) {
+        dump_attached_comment(
+            "trailing-comment",
+            tree.token(*comment),
+            source,
+            depth + 1,
+            out,
+        );
+    }
+}
+
+fn dump_attached_comment(
+    label: &str,
+    token: &PosToken,
+    source: &str,
+    depth: usize,
+    out: &mut String,
+) {
+    write_indent(out, depth);
+    writeln!(
+        out,
+        "{} {} text={}",
+        label,
+        span_label(Span::from_usize_range(token.start..token.end)),
+        quoted(token.source_text(source))
+    )
+    .expect("writing to String should not fail");
 }
 
 fn token_label(token: &Token) -> String {

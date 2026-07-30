@@ -111,6 +111,34 @@ fn lowered_ast_nodes_point_into_cst_arena() {
 }
 
 #[test]
+fn doc_comment_lowering_uses_explicit_cst_attachments() {
+    let parsed = parse_test_source(
+        "\
+-- ordinary note
+-- | Attached docs.
+main = 1 -- ordinary trailing
+trailing = 2 -- ^ Attached trailing docs.
+",
+    );
+
+    let SurfaceDefinition::FunDef { docs, .. } = &parsed.defs[0].0 else {
+        panic!("expected first definition to be a function");
+    };
+    assert_eq!(
+        docs.as_ref().map(|doc| doc.text.as_str()),
+        Some("Attached docs.")
+    );
+
+    let SurfaceDefinition::FunDef { docs, .. } = &parsed.defs[1].0 else {
+        panic!("expected second definition to be a function");
+    };
+    assert_eq!(
+        docs.as_ref().map(|doc| doc.text.as_str()),
+        Some("Attached trailing docs.")
+    );
+}
+
+#[test]
 fn parser_events_cover_every_token_for_repository_sources() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
