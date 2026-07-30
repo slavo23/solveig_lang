@@ -60,6 +60,19 @@ pub struct TypeChecker {
     warnings: Vec<TypeError>,
 }
 
+#[derive(Clone)]
+struct TypeCheckerCheckpoint {
+    names: Names,
+    counter: u32,
+    func_schemes: FxHashMap<DefId, Scheme>,
+    givens: Vec<GivenEvidence>,
+    wanteds: Vec<Wanted>,
+    evar_solutions: FxHashMap<EvarId, Ty>,
+    evidence_solutions: FxHashMap<EvVarId, Ev>,
+    holes: Vec<HoleInfo>,
+    warnings: Vec<TypeError>,
+}
+
 impl Default for TypeChecker {
     fn default() -> Self {
         Self::new()
@@ -200,6 +213,30 @@ impl TypeChecker {
     }
     pub fn evidence_solution(&self, ev: EvVarId) -> Option<&Ev> {
         self.evidence_solutions.get(&ev)
+    }
+    fn checkpoint(&self) -> TypeCheckerCheckpoint {
+        TypeCheckerCheckpoint {
+            names: self.names.clone(),
+            counter: self.counter,
+            func_schemes: self.func_schemes.clone(),
+            givens: self.givens.clone(),
+            wanteds: self.wanteds.clone(),
+            evar_solutions: self.evar_solutions.clone(),
+            evidence_solutions: self.evidence_solutions.clone(),
+            holes: self.holes.clone(),
+            warnings: self.warnings.clone(),
+        }
+    }
+    fn restore(&mut self, checkpoint: TypeCheckerCheckpoint) {
+        self.names = checkpoint.names;
+        self.counter = checkpoint.counter;
+        self.func_schemes = checkpoint.func_schemes;
+        self.givens = checkpoint.givens;
+        self.wanteds = checkpoint.wanteds;
+        self.evar_solutions = checkpoint.evar_solutions;
+        self.evidence_solutions = checkpoint.evidence_solutions;
+        self.holes = checkpoint.holes;
+        self.warnings = checkpoint.warnings;
     }
 }
 

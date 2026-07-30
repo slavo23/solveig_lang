@@ -373,6 +373,7 @@ impl<'a> FrontendState<'a> {
                 module_files: self.module_files,
                 source_files,
                 docs: artifacts.docs,
+                source_signatures: artifacts.source_signatures,
                 resolutions,
                 declaration_spans: artifacts.declaration_spans,
                 module_display_names: artifacts.module_display_names,

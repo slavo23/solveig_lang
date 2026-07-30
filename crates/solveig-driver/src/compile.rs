@@ -89,6 +89,7 @@ mod source_inlay_hint;
 mod source_lookup;
 mod source_selection_range;
 mod source_semantic_token;
+mod source_signature;
 mod source_signature_help;
 mod source_symbol;
 mod syntax_features;

@@ -745,6 +745,7 @@ pub fn check_and_elab_module(
             let func_def = &module.func_defs[index];
             checker.func_schemes = group_func_schemes.clone();
             let wanted_start = checker.wanted_count();
+            let checkpoint = checker.checkpoint();
 
             match &func_def.signature {
                 Some(sig) => {
@@ -756,8 +757,10 @@ pub fn check_and_elab_module(
                             let unresolved = checker.solve_wanteds_from(wanted_start);
 
                             if !unresolved.is_empty() {
-                                group_errors.push(checker.wanteds_error(unresolved));
-                                break;
+                                let err = checker.wanteds_error(unresolved);
+                                checker.restore(checkpoint);
+                                group_errors.push(err);
+                                continue;
                             }
 
                             group_ctx = final_ctx;
@@ -770,8 +773,9 @@ pub fn check_and_elab_module(
                         }
 
                         Err(err) => {
+                            checker.restore(checkpoint);
                             group_errors.push(err);
-                            break;
+                            continue;
                         }
                     }
                 }
@@ -784,7 +788,7 @@ pub fn check_and_elab_module(
                                 (final_ctx, elaborated, expected_type.clone())
                             })
                     } else {
-                        checker.solve_inference(Context::new(), &func_def.body)
+                        checker.solve_inference(group_ctx.clone(), &func_def.body)
                     };
 
                     match inferred {
@@ -799,8 +803,9 @@ pub fn check_and_elab_module(
                         }
 
                         Err(err) => {
+                            checker.restore(checkpoint);
                             group_errors.push(err);
-                            break;
+                            continue;
                         }
                     }
                 }
@@ -821,6 +826,7 @@ pub fn check_and_elab_module(
 
         for (index, elaborated, signature_source, wanted_range) in group_results {
             let func_def = &module.func_defs[index];
+            let checkpoint = checker.checkpoint();
             let (final_scheme, final_body) = match signature_source {
                 FunctionSignatureSource::Explicit(sig) => {
                     let final_scheme = checker.zonk_scheme(&sig);
@@ -835,8 +841,9 @@ pub fn check_and_elab_module(
                         ) {
                         Ok(generalized) => generalized,
                         Err(err) => {
+                            checker.restore(checkpoint);
                             group_errors.push(err);
-                            break;
+                            continue;
                         }
                     };
                     let final_scheme = TypeChecker::type_to_scheme(&generalized.ty);

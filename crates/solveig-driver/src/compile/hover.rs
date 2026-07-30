@@ -316,7 +316,7 @@ fn constructor_hover_info_by_full_name(
     let signature = format!(
         "{} : {}",
         artifacts.names.symbol_display_name(info.short_name),
-        info.full_type.pretty_with_tables(pretty_tables)
+        source_signature::pretty_source_ty(&info.full_type, pretty_tables)
     );
     let provenance = module_provenance_for_qualified_name(artifacts, full_name);
 
@@ -397,6 +397,10 @@ fn term_signature(
     pretty_tables: PrettyTables<'_>,
     def_id: DefId,
 ) -> Option<String> {
+    if let Some(signature) = artifacts.source_signatures.get(&def_id) {
+        return Some(signature.clone());
+    }
+
     let scheme = artifacts
         .checked
         .values()
@@ -405,7 +409,7 @@ fn term_signature(
     Some(format!(
         "{} : {}",
         short_def_name(&artifacts.names, def_id),
-        scheme.pretty_with_tables(pretty_tables)
+        source_signature::pretty_source_scheme(scheme, pretty_tables)
     ))
 }
 
@@ -422,7 +426,7 @@ fn constructor_signature(
     Some(format!(
         "{} : {}",
         artifacts.names.symbol_display_name(info.short_name),
-        info.full_type.pretty_with_tables(pretty_tables)
+        source_signature::pretty_source_ty(&info.full_type, pretty_tables)
     ))
 }
 
@@ -463,11 +467,21 @@ fn class_method_signature(
     for checked in artifacts.checked.values() {
         for class_def in &checked.class_defs {
             if let Some(method) = class_def.methods.iter().find(|method| method.id == def_id) {
+                let method_signature = artifacts
+                    .source_signatures
+                    .get(&def_id)
+                    .cloned()
+                    .unwrap_or_else(|| {
+                        format!(
+                            "{} : {}",
+                            method.short_name,
+                            source_signature::pretty_source_scheme(&method.scheme, pretty_tables)
+                        )
+                    });
                 return Some(format!(
-                    "class {}\n{} : {}",
+                    "class {}\n{}",
                     class_header(class_def, pretty_tables),
-                    method.short_name,
-                    method.scheme.pretty_with_tables(pretty_tables)
+                    method_signature
                 ));
             }
         }

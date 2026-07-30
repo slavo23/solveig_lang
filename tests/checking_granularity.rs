@@ -193,6 +193,42 @@ valueB = True
 }
 
 #[test]
+fn mutually_recursive_sibling_errors_are_all_reported() {
+    let project_root = temp_project_root("recursive_sibling_errors");
+    write_source(
+        &project_root.join("src/main.sv"),
+        r#"left : Int
+left = right + True
+
+right : Int
+right = left + False
+
+main : Int
+main = 0
+"#,
+    );
+
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation
+        .check(true)
+        .expect("broken recursive group should check");
+    assert!(!result.success(), "broken recursive group should fail");
+
+    let errors = result
+        .diagnostics()
+        .iter()
+        .filter(|diagnostic| diagnostic.severity == Severity::Error)
+        .collect::<Vec<_>>();
+    assert!(
+        errors.len() >= 2,
+        "expected both sibling errors, got diagnostics: {:#?}",
+        result.diagnostics()
+    );
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
 fn source_file_entry_walks_up_to_project_marker() {
     let project_root = temp_project_root("marker");
     write_source(

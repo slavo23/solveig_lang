@@ -1,5 +1,6 @@
 struct RetainedFrontendArtifacts {
     docs: FxHashMap<DefId, DocComment>,
+    source_signatures: FxHashMap<DefId, String>,
     declaration_spans: Vec<(FileSpan, DefId)>,
     module_display_names: FxHashMap<ModuleId, String>,
     module_paths: FxHashMap<ModuleId, PathBuf>,
@@ -20,6 +21,7 @@ fn collect_retained_frontend_artifacts(
 
     RetainedFrontendArtifacts {
         docs,
+        source_signatures: collect_hover_source_signatures(session, project),
         declaration_spans: collect_hover_declaration_spans(project),
         module_display_names: collect_hover_module_display_names(session, project),
         module_paths: collect_hover_module_paths(project),
@@ -90,6 +92,63 @@ fn collect_hover_declaration_spans(project: &Project) -> Vec<(FileSpan, DefId)> 
 
     out.sort_by_key(|(span, def)| (span.file, span.span.start, span.span.end, def.module, def.name));
     out
+}
+
+fn collect_hover_source_signatures(
+    session: &Session,
+    project: &Project,
+) -> FxHashMap<DefId, String> {
+    let source_map = session.source_map();
+    let mut out = FxHashMap::default();
+
+    for (module_name, module_file) in &project.modules {
+        let Some(module_id) = project.module_table.id(module_name) else {
+            continue;
+        };
+        let source = &source_map.lookup(module_file.parsed.file).src;
+
+        for defn in &module_file.parsed.defs {
+            match &defn.0 {
+                SurfaceDefinition::SigDef { name, .. } => {
+                    if let Some(signature) = source_signature_text(source, defn.1) {
+                        out.insert(
+                            DefId {
+                                module: module_id,
+                                name: name.0,
+                            },
+                            signature,
+                        );
+                    }
+                }
+                SurfaceDefinition::ClassDef { methods, .. } => {
+                    for method in methods {
+                        let span = Span::new(method.name.1.start, method.ty.1.end);
+                        if let Some(signature) = source_signature_text(source, span) {
+                            out.insert(
+                                DefId {
+                                    module: module_id,
+                                    name: method.name.0,
+                                },
+                                signature,
+                            );
+                        }
+                    }
+                }
+                SurfaceDefinition::FunDef { .. }
+                | SurfaceDefinition::DataDef { .. }
+                | SurfaceDefinition::TypeAliasDef { .. }
+                | SurfaceDefinition::FixityDef { .. }
+                | SurfaceDefinition::InstanceDef { .. } => {}
+            }
+        }
+    }
+
+    out
+}
+
+fn source_signature_text(source: &str, span: Span) -> Option<String> {
+    let text = source.get(span.to_usize_range())?.trim();
+    (!text.is_empty()).then(|| text.to_string())
 }
 
 fn collect_hover_module_display_names(

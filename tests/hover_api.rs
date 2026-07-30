@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use solveig_base::Session;
 use solveig_driver::Compilation;
@@ -7,6 +9,29 @@ use solveig_syntax::lexer::lex;
 
 fn fixture_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
+}
+
+fn temp_root(name: &str) -> PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system clock should be after unix epoch")
+        .as_nanos();
+    let thread_id = format!("{:?}", std::thread::current().id());
+    std::env::temp_dir().join(format!(
+        "solveig_hover_{name}_{}_{}_{}",
+        process::id(),
+        thread_id,
+        nanos
+    ))
+}
+
+fn write_source(path: &Path, source: &str) {
+    fs::create_dir_all(
+        path.parent()
+            .expect("test source should have a parent directory"),
+    )
+    .expect("test source directory should be creatable");
+    fs::write(path, source).expect("test source should be writable");
 }
 
 fn offset_in_line(source: &str, line: &str, needle: &str) -> usize {
@@ -284,7 +309,7 @@ fn hover_info_covers_h13_semantic_targets() {
         )
         .expect("operator hover should exist");
     assert_contains(operator.signature(), "class Num a");
-    assert_contains(operator.signature(), "+ :");
+    assert_contains(operator.signature(), "(+) :");
 
     let constructor = compilation
         .hover_info(
@@ -353,7 +378,10 @@ fn hover_info_covers_h13_semantic_targets() {
         )
         .expect("class method reference hover should exist");
     assert_contains(class_method_reference.signature(), "class Describe a");
-    assert_contains(class_method_reference.signature(), "describe :");
+    assert_eq!(
+        class_method_reference.signature(),
+        "class Describe a\ndescribe : a -> String"
+    );
 
     let prelude_primitive_type = compilation
         .hover_info(
@@ -436,6 +464,39 @@ fn hover_info_covers_h13_semantic_targets() {
             .is_some_and(|path| path.ends_with("tests/fixtures/hover/src/hoverLib.sv")),
         "module hover should include the imported path"
     );
+}
+
+#[test]
+fn hover_formats_inferred_signatures_as_source_text() {
+    let project_root = temp_root("inferred_signature");
+    let source_path = project_root.join("src/main.sv");
+    let source = r#"triple x y z = x + y + z
+
+main : Int
+main = triple 1 2 3
+"#;
+    write_source(&source_path, source);
+
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation.check(true).expect("hover fixture should check");
+    assert!(
+        result.success(),
+        "hover fixture diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let hover = compilation
+        .hover_info(
+            &source_path,
+            offset_in_line(source, "main = triple 1 2 3", "triple"),
+        )
+        .expect("inferred function hover should exist");
+    assert_eq!(
+        hover.signature(),
+        "triple : forall a. Num a => a -> a -> a -> a"
+    );
+
+    let _ = fs::remove_dir_all(project_root);
 }
 
 #[test]
@@ -592,7 +653,7 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
             ),
         )
         .expect("empty list opening bracket hover should exist");
-    assert_eq!(empty_list_open.signature(), "Nil : ∀ (a : *). List a");
+    assert_eq!(empty_list_open.signature(), "Nil : forall a. List a");
 
     let empty_list_close = quiz
         .hover_info(
@@ -604,7 +665,7 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
             ),
         )
         .expect("empty list closing bracket hover should exist");
-    assert_eq!(empty_list_close.signature(), "Nil : ∀ (a : *). List a");
+    assert_eq!(empty_list_close.signature(), "Nil : forall a. List a");
 
     let pattern_cons = quiz
         .hover_info(
@@ -760,12 +821,12 @@ fn hover_covers_direct_prelude_imported_references() {
         (
             "    apply fs xs = concat (map (fun f => map f xs) fs)",
             "map",
-            "map : \u{2200} (a : *) (b : *). (a -> b) -> List a -> List b",
+            "map : forall a b. (a -> b) -> [a] -> [b]",
         ),
         (
             "mconcat xs = foldr appendS empty xs",
             "foldr",
-            "foldr : \u{2200} (a : *) (b : *). (a -> b -> b) -> b -> List a -> b",
+            "foldr : forall a b. (a -> b -> b) -> b -> [a] -> b",
         ),
     ] {
         let hover = compilation
@@ -807,34 +868,34 @@ fn hover_audits_quiz_game_sensitive_tokens() {
     assert!(!actual.contains("bind :"));
 
     let expected = concat!(
-        " 13:1   `statePure` => statePure : ∀ (s : *) (a : *). a -> State s a\n",
+        " 13:1   `statePure` => statePure : forall s a. a -> State s a\n",
         " 13:11  `value` => value : a\n",
         " 13:17  `=` => <none>\n",
-        " 13:19  `State` => State : ∀ (s : *) (a : *). (s -> Pair a s) -> State s a\n",
+        " 13:19  `State` => State : forall s a. (s -> Pair a s) -> State s a\n",
         " 13:25  `(` => s -> Pair a s\n",
         " 13:26  `fun` => <none>\n",
         " 13:30  `state` => state : s\n",
         " 13:36  `=>` => <none>\n",
-        " 13:39  `MkPair` => MkPair : ∀ (a : *) (b : *). a -> b -> Pair a b\n",
+        " 13:39  `MkPair` => MkPair : forall a b. a -> b -> Pair a b\n",
         " 13:46  `value` => value : a\n",
         " 13:52  `state` => state : s\n",
         " 13:57  `)` => s -> Pair a s\n",
-        " 74:9   `MkPair` => MkPair : ∀ (a : *) (b : *). a -> b -> Pair a b\n",
+        " 74:9   `MkPair` => MkPair : forall a b. a -> b -> Pair a b\n",
         " 74:16  `question` => question : String\n",
         " 74:25  `answer` => answer : String\n",
         " 74:32  `=>` => <none>\n",
         " 74:35  `QuizCard` => QuizCard : String -> String -> QuizCard\n",
         " 74:44  `question` => question : String\n",
         " 74:53  `answer` => answer : String\n",
-        " 90:1   `askCards` => askCards : List QuizCard -> IO (List (Pair QuizCard String))\n",
+        " 90:1   `askCards` => askCards : [QuizCard] -> IO [Pair QuizCard String]\n",
         " 90:10  `cards` => cards : List QuizCard\n",
         " 90:16  `=` => <none>\n",
-        " 90:18  `mapM` => mapM : ∀ (m : * -> *) (a : *) (b : *). Monad m => (a -> m b) -> List a -> m (List b)\n",
+        " 90:18  `mapM` => mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]\n",
         " 90:23  `askCard` => askCard : QuizCard -> IO (Pair QuizCard String)\n",
         " 90:31  `cards` => cards : List QuizCard\n",
         "136:9   `responses` => responses : List (Pair QuizCard String)\n",
         "136:19  `<-` => <none>\n",
-        "136:22  `askCards` => askCards : List QuizCard -> IO (List (Pair QuizCard String))\n",
+        "136:22  `askCards` => askCards : [QuizCard] -> IO [Pair QuizCard String]\n",
         "136:31  `cards` => cards : List QuizCard\n",
     );
 

@@ -2,6 +2,7 @@
 //! The driver relies on this ordering before resolving and checking modules.
 
 use super::*;
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone)]
 pub struct ModuleContext {
@@ -55,7 +56,10 @@ pub fn build_module_graph(
     let mut indices = FxHashMap::default();
     let mut import_spans = FxHashMap::default();
 
-    for module_name in project.modules.keys() {
+    let mut module_names = project.modules.keys().collect::<Vec<_>>();
+    module_names.sort_by_key(|module| module.as_string(session));
+
+    for module_name in module_names {
         let ix = graph.add_node(module_name.clone());
         indices.insert(module_name.clone(), ix);
     }
@@ -144,33 +148,129 @@ fn cycle_span(graph: &ModuleGraph, modules: &[ModuleName]) -> Option<FileSpan> {
 }
 
 pub fn module_order(
-    _session: &Session,
+    session: &Session,
     graph: &ModuleGraph,
 ) -> Result<Vec<ModuleName>, ResolveError> {
-    let mut order = toposort(&graph.graph, None)
-        .map_err(|cycle| {
-            let module = graph.graph[cycle.node_id()].clone();
-            let span = graph
-                .import_spans
-                .iter()
-                .find_map(|((from, to), span)| {
-                    if from == &module || to == &module {
-                        Some(*span)
-                    } else {
-                        None
-                    }
-                })
-                .expect("ICE: toposort cycle diagnostic requires an import edge span");
+    let node_count = graph.graph.node_count();
+    let mut dependents = vec![Vec::<NodeIndex>::new(); node_count];
+    let mut indegree = vec![0usize; node_count];
 
-            ResolveError::CyclicImports {
-                span,
-                modules: vec![module],
+    for item in graph.graph.node_indices() {
+        for dependency in graph.graph.neighbors(item) {
+            dependents[dependency.index()].push(item);
+            indegree[item.index()] += 1;
+        }
+    }
+
+    for entries in &mut dependents {
+        entries.sort_by_key(|node| graph.graph[*node].as_string(session));
+    }
+
+    let mut ready = graph
+        .graph
+        .node_indices()
+        .filter(|node| indegree[node.index()] == 0)
+        .map(|node| (graph.graph[node].as_string(session), node.index()))
+        .collect::<BTreeSet<_>>();
+    let mut order = Vec::with_capacity(node_count);
+
+    while let Some((_, node_index)) = ready.pop_first() {
+        let node = NodeIndex::new(node_index);
+        order.push(graph.graph[node].clone());
+
+        for dependent in &dependents[node_index] {
+            indegree[dependent.index()] -= 1;
+            if indegree[dependent.index()] == 0 {
+                ready.insert((
+                    graph.graph[*dependent].as_string(session),
+                    dependent.index(),
+                ));
             }
-        })?
-        .into_iter()
-        .map(|ix| graph.graph[ix].clone())
-        .collect::<Vec<_>>();
+        }
+    }
 
-    order.reverse();
+    if order.len() != node_count {
+        let cycle_node = graph
+            .graph
+            .node_indices()
+            .find(|node| indegree[node.index()] > 0)
+            .expect("ICE: cyclic module graph must contain an unsorted node");
+        let module = graph.graph[cycle_node].clone();
+        let span = graph
+            .import_spans
+            .iter()
+            .find_map(|((from, to), span)| {
+                if from == &module || to == &module {
+                    Some(*span)
+                } else {
+                    None
+                }
+            })
+            .expect("ICE: module-order cycle diagnostic requires an import edge span");
+
+        return Err(ResolveError::CyclicImports {
+            span,
+            modules: vec![module],
+        });
+    }
+
     Ok(order)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn module(session: &Session, name: &str) -> ModuleName {
+        ModuleName(name.split('.').map(|part| session.intern(part)).collect())
+    }
+
+    fn graph_with_edges(
+        session: &Session,
+        modules: &[&str],
+        edges: &[(&str, &str)],
+    ) -> ModuleGraph {
+        let mut graph = DiGraph::<ModuleName, ()>::new();
+        let mut indices = FxHashMap::default();
+
+        for name in modules {
+            let module_name = module(session, name);
+            let index = graph.add_node(module_name.clone());
+            indices.insert(module_name, index);
+        }
+
+        for (from, to) in edges {
+            let from = *indices
+                .get(&module(session, from))
+                .expect("test graph must contain source module");
+            let to = *indices
+                .get(&module(session, to))
+                .expect("test graph must contain dependency module");
+            graph.add_edge(from, to, ());
+        }
+
+        ModuleGraph {
+            graph,
+            indices,
+            import_spans: FxHashMap::default(),
+        }
+    }
+
+    #[test]
+    fn module_order_is_dependency_first_with_name_tie_breaking() {
+        let session = Session::new();
+        let graph = graph_with_edges(
+            &session,
+            &["main", "d", "b", "a", "c"],
+            &[("main", "a"), ("main", "b"), ("a", "c"), ("b", "c")],
+        );
+
+        let rendered = module_order(&session, &graph)
+            .expect("test graph is acyclic")
+            .into_iter()
+            .map(|module| module.as_string(&session))
+            .collect::<Vec<_>>();
+
+        assert_eq!(rendered, vec!["c", "a", "b", "d", "main"]);
+    }
 }

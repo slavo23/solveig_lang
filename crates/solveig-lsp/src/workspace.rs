@@ -844,7 +844,7 @@ main = count [1, 2, 3]
         let hover = state
             .hover(&uri, Position::new(0, 0))
             .expect("hover should survive saving a signature-less recursive function");
-        assert_hover_contains(hover, "count : \u{2200}");
+        assert_hover_contains(hover, "count : forall a. List a -> Int");
 
         let _ = fs::remove_dir_all(project_root);
     }
@@ -898,12 +898,12 @@ main = count [1, 2, 3]
             (
                 "apply fs xs = concat (map (fun f => map f xs) fs)",
                 "map",
-                "map : \u{2200} (a : *) (b : *). (a -> b) -> List a -> List b",
+                "map : forall a b. (a -> b) -> [a] -> [b]",
             ),
             (
                 "mconcat xs = foldr appendS empty xs",
                 "foldr",
-                "foldr : \u{2200} (a : *) (b : *). (a -> b -> b) -> b -> List a -> b",
+                "foldr : forall a b. (a -> b -> b) -> b -> [a] -> b",
             ),
         ] {
             let line = text

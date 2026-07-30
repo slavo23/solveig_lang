@@ -170,7 +170,7 @@ pub(super) fn inferred_signature_code_actions(
             continue;
         };
         let function_name = session.str(name.0).to_string();
-        let signature = scheme.pretty_with_tables(tables);
+        let signature = source_signature::pretty_source_scheme(scheme, tables);
         let insertion = Span::new(defn.1.start, defn.1.start);
 
         out.push(

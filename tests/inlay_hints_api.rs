@@ -12,9 +12,11 @@ fn temp_root(name: &str) -> PathBuf {
         .duration_since(UNIX_EPOCH)
         .expect("system clock should be after unix epoch")
         .as_nanos();
+    let thread_id = format!("{:?}", std::thread::current().id());
     std::env::temp_dir().join(format!(
-        "solveig_inlay_hints_{name}_{}_{}",
+        "solveig_inlay_hints_{name}_{}_{}_{}",
         process::id(),
+        thread_id,
         nanos
     ))
 }
@@ -101,6 +103,21 @@ useLambda =
             .iter()
             .all(|hint| !hint.label().contains("->") || hint.label() == ": Bool -> Int"),
         "{hints:#?}"
+    );
+}
+
+#[test]
+fn inferred_signature_inlay_uses_source_friendly_scheme_text() {
+    let hints = inlay_hints(
+        r#"double x = x + x
+"#,
+        SourceInlayHintConfig::default(),
+    );
+
+    assert_hint(
+        &hints,
+        SourceInlayHintCategory::InferredSignature,
+        ": forall a. Num a => a -> a",
     );
 }
 

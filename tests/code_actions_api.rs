@@ -169,16 +169,7 @@ main = count [1, 2, 3]
     let hover = compilation
         .hover_info(&source_path, offset_in_line(source, "count xs =", "count"))
         .expect("direct recursive function hover should exist without a written signature");
-    assert!(
-        hover.signature().starts_with("count : \u{2200}"),
-        "recursive count should infer a generalized list-element type: {}",
-        hover.signature()
-    );
-    assert!(
-        hover.signature().contains(". List") && hover.signature().ends_with(" -> Int"),
-        "recursive count should infer a list-to-int function: {}",
-        hover.signature()
-    );
+    assert_eq!(hover.signature(), "count : forall a. List a -> Int");
 
     let _ = fs::remove_dir_all(project_root);
 }
@@ -220,7 +211,7 @@ main = contains 2 [1, 2, 3]
         .expect("explicit qualified recursive function hover should exist");
     assert_eq!(
         hover.signature(),
-        "contains : \u{2200} (a : *). Eq a => a -> List a -> Bool"
+        "contains : forall a. Eq a => a -> [a] -> Bool"
     );
 
     let _ = fs::remove_dir_all(project_root);
@@ -495,6 +486,48 @@ main = answer
     let fixed = apply_action(source, action);
 
     assert!(fixed.starts_with("answer : Int\nanswer = 42"));
+    compilation.set_overlay(&source_path, fixed);
+    let result = compilation.check(true).expect("fixed check should finish");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn inferred_signature_action_inserts_source_friendly_polymorphic_scheme() {
+    let project_root = temp_root("polymorphic_signature");
+    let source_path = project_root.join("scratch.sv");
+    let source = r#"triple x y z = x + y + z
+
+main : Int
+main = triple 1 2 3
+"#;
+    write_source(&source_path, source);
+    let mut compilation = Compilation::for_source_file(&source_path);
+
+    let result = compilation.check(true).expect("check should finish");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let actions = compilation.code_actions_at_range(
+        &source_path,
+        SourcePosition::new(0, 0),
+        SourcePosition::new(0, 6),
+        PositionEncoding::Utf16,
+    );
+    let action = action_named(&actions, "Add type signature for `triple`");
+    assert_eq!(
+        action.category(),
+        SourceCodeActionCategory::InferredSignature
+    );
+    let fixed = apply_action(source, action);
+
+    assert!(
+        fixed.starts_with("triple : forall a. Num a => a -> a -> a -> a\ntriple x y z = x + y + z"),
+        "{fixed}"
+    );
+    assert!(!fixed.contains('∀'), "{fixed}");
+    assert!(!fixed.contains(": *"), "{fixed}");
+
     compilation.set_overlay(&source_path, fixed);
     let result = compilation.check(true).expect("fixed check should finish");
     assert!(result.success(), "{:#?}", result.diagnostics());

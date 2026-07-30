@@ -2,7 +2,7 @@ use solveig_base::FxHashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use petgraph::algo::{tarjan_scc, toposort};
+use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{

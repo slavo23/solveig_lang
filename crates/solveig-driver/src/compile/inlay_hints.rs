@@ -343,7 +343,10 @@ fn push_inferred_signature_hint(
 ) {
     out.push(SourceInlayHint::new(
         FileSpan::new(file, Span::new(name.1.end, name.1.end)),
-        format!(": {}", scheme.pretty_with_tables(tables)),
+        format!(
+            ": {}",
+            source_signature::pretty_source_scheme(scheme, tables)
+        ),
         SourceInlayHintKind::Type,
         SourceInlayHintCategory::InferredSignature,
     ));
