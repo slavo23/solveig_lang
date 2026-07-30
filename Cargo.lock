@@ -756,6 +756,7 @@ dependencies = [
 name = "solveig-check"
 version = "0.1.0"
 dependencies = [
+ "petgraph",
  "solveig-ast",
  "solveig-base",
 ]

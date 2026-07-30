@@ -207,6 +207,232 @@ fn orphan_instance_warning(
     })
 }
 
+struct FunctionDependencyGroups {
+    groups: Vec<Vec<usize>>,
+    adjacency: Vec<Vec<usize>>,
+}
+
+enum FunctionSignatureSource {
+    Explicit(Scheme),
+    Inferred(Ty),
+}
+
+fn substitute_generalized_type(ty: &Ty, subst: &FxHashMap<EvarId, Ty>) -> Ty {
+    subst
+        .iter()
+        .fold(ty.clone(), |acc, (evar, replacement)| {
+            acc.substitute_evar(*evar, replacement)
+        })
+}
+
+fn substitute_generalized_predicate(
+    pred: &Predicate,
+    subst: &FxHashMap<EvarId, Ty>,
+) -> Predicate {
+    Predicate {
+        class_id: pred.class_id,
+        args: pred
+            .args
+            .iter()
+            .map(|arg| substitute_generalized_type(arg, subst))
+            .collect(),
+    }
+}
+
+fn substitute_generalized_ev(ev: Ev, subst: &FxHashMap<EvarId, Ty>) -> Ev {
+    match ev {
+        Ev::Var(_) | Ev::Placeholder(_) => ev,
+        Ev::Inst(id, ty_args, ev_args) => Ev::Inst(
+            id,
+            ty_args
+                .into_iter()
+                .map(|ty| substitute_generalized_type(&ty, subst))
+                .collect(),
+            ev_args
+                .into_iter()
+                .map(|ev| substitute_generalized_ev(ev, subst))
+                .collect(),
+        ),
+        Ev::Super(inner, class_id, index) => Ev::Super(
+            Box::new(substitute_generalized_ev(*inner, subst)),
+            class_id,
+            index,
+        ),
+    }
+}
+
+fn substitute_generalized_expr(
+    expr: TermExprNode<TcMetadata, Span>,
+    subst: &FxHashMap<EvarId, Ty>,
+) -> TermExprNode<TcMetadata, Span> {
+    let span = expr.anno.span;
+    let ty = substitute_generalized_type(&expr.anno.inferred_type, subst);
+    let node = match expr.node {
+        TermExpr::Unit => TermExpr::Unit,
+        TermExpr::Var(var) => TermExpr::Var(var),
+        TermExpr::Lit(lit) => TermExpr::Lit(lit),
+        TermExpr::Hole => TermExpr::Hole,
+        TermExpr::App(func, arg) => TermExpr::App(
+            Box::new(substitute_generalized_expr(*func, subst)),
+            Box::new(substitute_generalized_expr(*arg, subst)),
+        ),
+        TermExpr::Abs(param, annotation, body) => TermExpr::Abs(
+            param,
+            annotation.map(|ty| substitute_generalized_type(&ty, subst)),
+            Box::new(substitute_generalized_expr(*body, subst)),
+        ),
+        TermExpr::TyAbs(param, kind, body) => {
+            TermExpr::TyAbs(param, kind, Box::new(substitute_generalized_expr(*body, subst)))
+        }
+        TermExpr::TyApp(inner, ty) => TermExpr::TyApp(
+            Box::new(substitute_generalized_expr(*inner, subst)),
+            substitute_generalized_type(&ty, subst),
+        ),
+        TermExpr::EvAbs(ev, pred, body) => TermExpr::EvAbs(
+            ev,
+            substitute_generalized_predicate(&pred, subst),
+            Box::new(substitute_generalized_expr(*body, subst)),
+        ),
+        TermExpr::EvApp(inner, ev) => TermExpr::EvApp(
+            Box::new(substitute_generalized_expr(*inner, subst)),
+            substitute_generalized_ev(ev, subst),
+        ),
+        TermExpr::Anno(inner, ty) => TermExpr::Anno(
+            Box::new(substitute_generalized_expr(*inner, subst)),
+            substitute_generalized_type(&ty, subst),
+        ),
+        TermExpr::Con(id) => TermExpr::Con(id),
+        TermExpr::Case(scrutinee, arms) => TermExpr::Case(
+            Box::new(substitute_generalized_expr(*scrutinee, subst)),
+            arms.into_iter()
+                .map(|arm| {
+                    CaseArmNode::new(
+                        CaseArm {
+                            pattern: arm.node.pattern,
+                            expr: substitute_generalized_expr(arm.node.expr, subst),
+                        },
+                        arm.anno,
+                    )
+                })
+                .collect(),
+        ),
+        TermExpr::IfThenElse(cond, then_branch, else_branch) => TermExpr::IfThenElse(
+            Box::new(substitute_generalized_expr(*cond, subst)),
+            Box::new(substitute_generalized_expr(*then_branch, subst)),
+            Box::new(substitute_generalized_expr(*else_branch, subst)),
+        ),
+        TermExpr::Let(name, binder, body) => TermExpr::Let(
+            name,
+            Box::new(substitute_generalized_expr(*binder, subst)),
+            Box::new(substitute_generalized_expr(*body, subst)),
+        ),
+    };
+
+    elab_node(node, span, ty)
+}
+
+fn wrap_inferred_quantifiers(
+    names: &Names,
+    mut body: TermExprNode<TcMetadata, Span>,
+    scheme: &Scheme,
+    span: Span,
+) -> TermExprNode<TcMetadata, Span> {
+    for index in (0..scheme.quantifiers.len()).rev() {
+        let (param, kind) = &scheme.quantifiers[index];
+        let result_type = Ty::make_forall_group(
+            scheme.quantifiers[index..].to_vec(),
+            scheme.predicates.clone(),
+            scheme.ty.clone(),
+        );
+        body = elab_node(
+            TermExpr::TyAbs(
+                names.tyvar_display_name(*param),
+                kind.clone(),
+                Box::new(body),
+            ),
+            span.clone(),
+            result_type,
+        );
+    }
+
+    body
+}
+
+fn collect_function_deps<A, P>(
+    expr: &TermExprNode<A, P>,
+    local_indices: &FxHashMap<DefId, usize>,
+    out: &mut FxHashSet<usize>,
+) {
+    match &expr.node {
+        TermExpr::Var(VarRef::Global(def_id)) => {
+            if let Some(index) = local_indices.get(def_id) {
+                out.insert(*index);
+            }
+        }
+        TermExpr::App(func, arg) => {
+            collect_function_deps(func, local_indices, out);
+            collect_function_deps(arg, local_indices, out);
+        }
+        TermExpr::Abs(_, _, body)
+        | TermExpr::TyAbs(_, _, body)
+        | TermExpr::TyApp(body, _)
+        | TermExpr::EvAbs(_, _, body)
+        | TermExpr::EvApp(body, _)
+        | TermExpr::Anno(body, _) => {
+            collect_function_deps(body, local_indices, out);
+        }
+        TermExpr::Case(scrutinee, arms) => {
+            collect_function_deps(scrutinee, local_indices, out);
+            for arm in arms {
+                collect_function_deps(&arm.node.expr, local_indices, out);
+            }
+        }
+        TermExpr::IfThenElse(cond, then_branch, else_branch) => {
+            collect_function_deps(cond, local_indices, out);
+            collect_function_deps(then_branch, local_indices, out);
+            collect_function_deps(else_branch, local_indices, out);
+        }
+        TermExpr::Let(_, binder, body) => {
+            collect_function_deps(binder, local_indices, out);
+            collect_function_deps(body, local_indices, out);
+        }
+        TermExpr::Unit
+        | TermExpr::Lit(_)
+        | TermExpr::Hole
+        | TermExpr::Con(_)
+        | TermExpr::Var(VarRef::Local(_)) => {}
+    }
+}
+
+fn function_dependency_groups(func_defs: &[TermDefinition<Span>]) -> FunctionDependencyGroups {
+    let local_indices = func_defs
+        .iter()
+        .enumerate()
+        .map(|(index, def)| (def.id, index))
+        .collect::<FxHashMap<_, _>>();
+    let mut adjacency = vec![Vec::new(); func_defs.len()];
+
+    for (index, def) in func_defs.iter().enumerate() {
+        let mut deps = FxHashSet::default();
+        collect_function_deps(&def.body, &local_indices, &mut deps);
+
+        for candidate in 0..func_defs.len() {
+            if deps.contains(&candidate) {
+                adjacency[index].push(candidate);
+            }
+        }
+    }
+
+    FunctionDependencyGroups {
+        groups: crate::dependency_graph::dependency_ordered_sccs(&adjacency),
+        adjacency,
+    }
+}
+
+fn function_group_needs_placeholders(group: &[usize], adjacency: &[Vec<usize>]) -> bool {
+    group.len() > 1 || group.iter().any(|index| adjacency[*index].contains(index))
+}
+
 pub fn check_and_elab_module(
     module: &ResolvedModule<Span>,
     env: &TypeCheckEnv,
@@ -215,7 +441,6 @@ pub fn check_and_elab_module(
     let mut errors = Vec::new();
     let mut names = env.names.clone();
 
-    let mut checked_defs = Vec::new();
     let mut checked_instance_defs = Vec::new();
 
     let mut available_func_schemes = env.func_schemes.clone();
@@ -470,76 +695,156 @@ pub fn check_and_elab_module(
         });
     }
 
-    for func_def in &module.func_defs {
+    let function_dependencies = function_dependency_groups(&module.func_defs);
+    let mut checked_defs_by_index: Vec<Option<TermDefinition<TcMetadata, Span>>> =
+        vec![None; module.func_defs.len()];
+
+    for group_indices in function_dependencies.groups {
         let mut checker_env = env.clone();
         checker_env.names = names.clone();
         let mut checker = TypeChecker::with_env(&checker_env, file);
-        checker.func_schemes = available_func_schemes.clone();
 
-        match &func_def.signature {
-            Some(sig) => {
-                let expected_type = TypeChecker::scheme_to_type(sig);
+        let needs_placeholders = function_group_needs_placeholders(
+            &group_indices,
+            &function_dependencies.adjacency,
+        );
+        let mut group_ctx = Context::new();
+        let mut group_func_schemes = available_func_schemes.clone();
+        let mut placeholders = FxHashMap::<DefId, Ty>::default();
 
-                match checker.solve_checking(Context::new(), &func_def.body, &expected_type) {
-                    Ok((final_ctx, elaborated)) => {
-                        let unresolved = checker.unresolved_wanteds();
+        if needs_placeholders {
+            for &index in &group_indices {
+                let func_def = &module.func_defs[index];
+                if func_def.signature.is_some() {
+                    continue;
+                }
 
-                        if !unresolved.is_empty() {
-                            errors.push(checker.wanteds_error(unresolved));
-                        } else {
-                            let zonked_expr = checker.zonk_expr(&elaborated);
-                            let final_scheme = checker.zonk_scheme(sig);
+                let evar = checker.fresh_evar_id();
+                let placeholder = TypeChecker::evar_type(evar);
+                group_ctx = group_ctx.add_entry(ContextEntry::ExVar(evar, Kind::Star));
+                placeholders.insert(func_def.id, placeholder.clone());
+                group_func_schemes.insert(func_def.id, Scheme::mono(placeholder));
+            }
+        }
 
-                            checked_defs.push(TermDefinition {
-                                id: func_def.id,
-                                name: func_def.name.clone(),
-                                short_name: func_def.short_name.clone(),
-                                signature: Some(final_scheme.clone()),
-                                body: zonked_expr,
-                            });
+        checker.func_schemes = group_func_schemes.clone();
+        let mut group_results =
+            Vec::<(usize, TermExprNode<TcMetadata, Span>, FunctionSignatureSource)>::new();
+        let mut group_errors = Vec::new();
 
-                            available_func_schemes.insert(func_def.id, final_scheme.clone());
-                            checked_func_schemes.insert(func_def.id, final_scheme);
+        for &index in &group_indices {
+            let func_def = &module.func_defs[index];
+            checker.func_schemes = group_func_schemes.clone();
+
+            match &func_def.signature {
+                Some(sig) => {
+                    let expected_type = TypeChecker::scheme_to_type(sig);
+
+                    match checker.solve_checking(group_ctx.clone(), &func_def.body, &expected_type)
+                    {
+                        Ok((final_ctx, elaborated)) => {
+                            let unresolved = checker.unresolved_wanteds();
+
+                            if !unresolved.is_empty() {
+                                group_errors.push(checker.wanteds_error(unresolved));
+                                break;
+                            }
+
+                            group_ctx = final_ctx;
+                            group_results.push((
+                                index,
+                                elaborated,
+                                FunctionSignatureSource::Explicit(sig.clone()),
+                            ));
                         }
 
-                        let _ = final_ctx;
+                        Err(err) => {
+                            group_errors.push(err);
+                            break;
+                        }
                     }
+                }
 
-                    Err(err) => {
-                        errors.push(err);
+                None => {
+                    let inferred = if let Some(expected_type) = placeholders.get(&func_def.id) {
+                        checker
+                            .solve_checking(group_ctx.clone(), &func_def.body, expected_type)
+                            .map(|(final_ctx, elaborated)| {
+                                (final_ctx, elaborated, expected_type.clone())
+                            })
+                    } else {
+                        checker.solve_inference(Context::new(), &func_def.body)
+                    };
+
+                    match inferred {
+                        Ok((final_ctx, elaborated, inferred_type)) => {
+                            let unresolved = checker.unresolved_wanteds();
+
+                            if !unresolved.is_empty() {
+                                group_errors.push(checker.wanteds_error(unresolved));
+                                break;
+                            }
+
+                            group_ctx = final_ctx;
+                            group_results.push((
+                                index,
+                                elaborated,
+                                FunctionSignatureSource::Inferred(inferred_type),
+                            ));
+                        }
+
+                        Err(err) => {
+                            group_errors.push(err);
+                            break;
+                        }
                     }
                 }
             }
+        }
 
-            None => match checker.solve_inference(Context::new(), &func_def.body) {
-                Ok((final_ctx, elaborated, inferred_type)) => {
-                    let unresolved = checker.unresolved_wanteds();
+        if !group_errors.is_empty() {
+            errors.extend(group_errors);
+            checker.finalize_holes();
+            names = checker.names.clone();
+            all_holes.extend(checker.holes);
+            all_warnings.extend(checker.warnings);
+            continue;
+        }
 
-                    if !unresolved.is_empty() {
-                        errors.push(checker.wanteds_error(unresolved));
-                    } else {
-                        let zonked_expr = checker.zonk_expr(&elaborated);
-                        let final_sig =
-                            checker.generalize_top_level_type(&final_ctx, &inferred_type);
-                        let final_scheme = TypeChecker::type_to_scheme(&final_sig);
-
-                        checked_defs.push(TermDefinition {
-                            id: func_def.id,
-                            name: func_def.name.clone(),
-                            short_name: func_def.short_name.clone(),
-                            signature: Some(final_scheme.clone()),
-                            body: zonked_expr,
-                        });
-
-                        available_func_schemes.insert(func_def.id, final_scheme.clone());
-                        checked_func_schemes.insert(func_def.id, final_scheme);
-                    }
+        for (index, elaborated, signature_source) in group_results {
+            let func_def = &module.func_defs[index];
+            let (final_scheme, final_body) = match signature_source {
+                FunctionSignatureSource::Explicit(sig) => {
+                    let final_scheme = checker.zonk_scheme(&sig);
+                    (final_scheme, checker.zonk_expr(&elaborated))
                 }
+                FunctionSignatureSource::Inferred(inferred_type) => {
+                    let (final_sig, generalized_subst) =
+                        checker.generalize_top_level_type_with_subst(&group_ctx, &inferred_type);
+                    let final_scheme = TypeChecker::type_to_scheme(&final_sig);
+                    let zonked = checker.zonk_expr(&elaborated);
+                    let substituted = substitute_generalized_expr(zonked, &generalized_subst);
+                    let wrapped = wrap_inferred_quantifiers(
+                        &checker.names,
+                        substituted,
+                        &final_scheme,
+                        func_def.body.anno.clone(),
+                    );
 
-                Err(err) => {
-                    errors.push(err);
+                    (final_scheme, wrapped)
                 }
-            },
+            };
+
+            checked_defs_by_index[index] = Some(TermDefinition {
+                id: func_def.id,
+                name: func_def.name.clone(),
+                short_name: func_def.short_name.clone(),
+                signature: Some(final_scheme.clone()),
+                body: final_body,
+            });
+
+            available_func_schemes.insert(func_def.id, final_scheme.clone());
+            checked_func_schemes.insert(func_def.id, final_scheme);
         }
 
         checker.finalize_holes();
@@ -547,6 +852,9 @@ pub fn check_and_elab_module(
         all_holes.extend(checker.holes);
         all_warnings.extend(checker.warnings);
     }
+
+    let checked_defs: Vec<TermDefinition<TcMetadata, Span>> =
+        checked_defs_by_index.into_iter().flatten().collect();
 
     if errors.is_empty() {
         Ok(TCOutput {

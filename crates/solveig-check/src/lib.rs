@@ -5,6 +5,7 @@
 pub mod core_lint;
 /// Infers kinds for algebraic data declarations.
 pub mod data_kind_infer;
+mod dependency_graph;
 /// Contains bidirectional type checking, holes, and exhaustiveness analysis.
 pub mod inference;
 /// Infers kinds for type signatures and class predicates.

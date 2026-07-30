@@ -775,6 +775,81 @@ main = answer
     }
 
     #[test]
+    fn inferred_signature_hint_survives_save_and_file_watcher() {
+        let project_root = temp_root("signature_hint_save");
+        let source = project_root.join("scratch.sv");
+        let initial = r#"count : List Int -> Int
+count xs =
+    case xs of
+        [] => 0
+        | _ :: rest => 1 + count rest
+
+main : Int
+main = count [1, 2, 3]
+"#;
+        let edited = r#"count xs =
+    case xs of
+        [] => 0
+        | _ :: rest => 1 + count rest
+
+main : Int
+main = count [1, 2, 3]
+"#;
+        write_source(&source, initial);
+        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+        let config = ServerConfig {
+            inferred_signature_hints_enabled: true,
+            ..ServerConfig::default()
+        };
+        let mut state = ServerState::new_with_config(PositionEncoding::Utf16, config);
+
+        state.open_document(&uri, initial.to_string());
+        let initial_publications = state.check_all();
+        assert!(
+            diagnostics_for_uri(&initial_publications, &uri)
+                .iter()
+                .all(|diagnostic| diagnostic.code.as_ref()
+                    != Some(&NumberOrString::String(
+                        INFERRED_SIGNATURE_DIAGNOSTIC_CODE.to_string(),
+                    ))),
+            "written signature should not produce inferred-signature hint"
+        );
+
+        state.change_document(&uri, edited.to_string());
+        let changed_publications = state.check_all();
+        assert!(
+            diagnostics_for_uri(&changed_publications, &uri)
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_ref()
+                    == Some(&NumberOrString::String(
+                        INFERRED_SIGNATURE_DIAGNOSTIC_CODE.to_string(),
+                    ))),
+            "editing out the signature should produce a hint: {changed_publications:#?}"
+        );
+
+        write_source(&source, edited);
+        state.save_document(&uri, None);
+        state.touch_path(&source);
+        let saved_publications = state.check_all();
+        assert!(
+            diagnostics_for_uri(&saved_publications, &uri)
+                .iter()
+                .any(|diagnostic| diagnostic.code.as_ref()
+                    == Some(&NumberOrString::String(
+                        INFERRED_SIGNATURE_DIAGNOSTIC_CODE.to_string(),
+                    ))),
+            "saved signature-less recursive function should keep the hint: {saved_publications:#?}"
+        );
+
+        let hover = state
+            .hover(&uri, Position::new(0, 0))
+            .expect("hover should survive saving a signature-less recursive function");
+        assert_hover_contains(hover, "count : \u{2200}");
+
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
     fn non_project_workspace_root_uses_nested_solveig_project_roots() {
         let container = temp_root("nested_roots");
         let first_root = container.join("first");

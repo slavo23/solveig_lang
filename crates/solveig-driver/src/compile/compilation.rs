@@ -667,7 +667,9 @@ fn discover_project_for_source_file(source_file: &Path) -> (PathBuf, Option<Path
     (source_dir.to_path_buf(), Some(source_file.to_path_buf()))
 }
 
-fn checked_project_tables(modules: &[CheckedModule]) -> (TyConTable, CtorTable, ClassTable) {
+pub(super) fn checked_project_tables(
+    modules: &[CheckedModule],
+) -> (TyConTable, CtorTable, ClassTable) {
     let mut tycon_table = TyConTable::new();
     let mut ctor_table = CtorTable::new();
     let mut class_table = ClassTable::new();

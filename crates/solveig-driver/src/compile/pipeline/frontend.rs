@@ -285,7 +285,57 @@ impl<'a> FrontendState<'a> {
             &modules,
         );
         let incremental_cache = self.capture_incremental_cache();
-        let freshly_checked_modules = module_names_as_strings(self.session, &self.freshly_checked_modules);
+        let (tycon_table, _ctor_table, class_table) =
+            super::compilation::checked_project_tables(&modules);
+        let mut code_actions = self.code_actions;
+        let mut completion_candidates = self.completion_candidates;
+
+        for module_name in order {
+            let Some(module_id) = self.project.module_table.id(module_name) else {
+                continue;
+            };
+            let Some(checked) = self.checked.get(&module_id) else {
+                continue;
+            };
+
+            let parsed = self.parsed.get(self.session, module_name);
+            code_actions.extend(code_actions::inferred_signature_code_actions(
+                self.session,
+                parsed,
+                module_id,
+                checked,
+                PrettyTables {
+                    names: self.names,
+                    tycons: &tycon_table,
+                    classes: &class_table,
+                },
+            ));
+
+            let Some(local_typed_api) = self.typed_apis.get(module_name) else {
+                continue;
+            };
+            let imports = effective_imports(
+                self.session,
+                module_name,
+                &parsed.imports,
+                parsed.file,
+            );
+            completion_candidates.extend(completion::typed_module_completion_candidates(
+                completion::TypedModuleCompletionInput {
+                    session: self.session,
+                    names: self.names,
+                    module_name,
+                    parsed,
+                    imports: &imports,
+                    local_api: &self.apis[module_name],
+                    local_typed_api,
+                    typed_apis: &self.typed_apis,
+                },
+            ));
+        }
+
+        let freshly_checked_modules =
+            module_names_as_strings(self.session, &self.freshly_checked_modules);
         let reused_modules = module_names_as_strings(self.session, &self.reused_modules);
         let mut resolutions = self.resolutions;
         for (module_id, span, def_id) in artifacts.import_name_resolutions {
@@ -325,8 +375,8 @@ impl<'a> FrontendState<'a> {
             },
             self.prelude_cache,
             Some(incremental_cache),
-            self.code_actions,
-            self.completion_candidates,
+            code_actions,
+            completion_candidates,
             inlay_hints,
             freshly_checked_modules,
             reused_modules,
@@ -383,19 +433,6 @@ impl<'a> FrontendState<'a> {
                 self.apis[module_name].docs.clone(),
             ));
 
-            self.completion_candidates
-                .extend(completion::typed_module_completion_candidates(
-                    completion::TypedModuleCompletionInput {
-                        session: self.session,
-                        names: self.names,
-                        module_name,
-                        parsed,
-                        imports: &imports,
-                        local_api: &self.apis[module_name],
-                        local_typed_api: &typed_api,
-                        typed_apis: &self.typed_apis,
-                    },
-                ));
             self.typed_apis.insert(module_name.clone(), typed_api);
             self.module_files.insert(module_id, parsed.file);
             self.checked.insert(module_id, checked.clone());
@@ -583,14 +620,6 @@ impl<'a> FrontendState<'a> {
             }
         }
 
-        self.code_actions
-            .extend(code_actions::inferred_signature_code_actions(
-                self.session,
-                parsed,
-                module_id,
-                &checked_raw.module,
-                check_env.pretty_tables(),
-            ));
         self.completion_candidates
             .extend(completion::typed_local_completion_candidates(
                 &checked_raw.module,

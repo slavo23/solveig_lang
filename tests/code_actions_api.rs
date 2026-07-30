@@ -45,6 +45,17 @@ fn apply_action(source: &str, action: &SourceCodeAction) -> String {
     out
 }
 
+fn offset_in_line(source: &str, line: &str, needle: &str) -> usize {
+    let line_start = source
+        .find(line)
+        .unwrap_or_else(|| panic!("test source should contain line `{line}`"));
+    let needle_offset = line
+        .find(needle)
+        .unwrap_or_else(|| panic!("line `{line}` should contain `{needle}`"));
+
+    line_start + needle_offset
+}
+
 #[test]
 fn typed_hole_actions_fill_suggested_constructor_and_recheck() {
     let project_root = temp_root("hole");
@@ -75,6 +86,229 @@ main = ??
     compilation.set_overlay(&source_path, fixed);
     let result = compilation.check(true).expect("fixed check should finish");
     assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn missing_signature_action_handles_scry_mutual_recursion() {
+    let project_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/scry");
+    let source_path = project_root.join("src/scry/parser.sv");
+    let source = fs::read_to_string(&source_path).expect("scry parser source should load");
+    let edited = source.replacen("goalsFromSExps : [SExp] -> Maybe [Goal]\n", "", 1);
+    let mut compilation = Compilation::new(&project_root);
+
+    compilation.set_overlay(&source_path, edited.clone());
+    let result = compilation
+        .check(true)
+        .expect("scry parser without goalsFromSExps signature should check");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let action = compilation
+        .source_code_actions()
+        .iter()
+        .find(|action| action.title() == "Add type signature for `goalsFromSExps`")
+        .unwrap_or_else(|| {
+            panic!(
+                "missing inferred signature action after recursive inference: {:#?}",
+                compilation.source_code_actions()
+            )
+        });
+    assert_eq!(
+        action.category(),
+        SourceCodeActionCategory::InferredSignature
+    );
+
+    let hover = compilation
+        .hover_info(
+            &source_path,
+            offset_in_line(&edited, "goalsFromSExps sexps =", "goalsFromSExps"),
+        )
+        .expect("recursive function hover should exist without a written signature");
+    assert_eq!(
+        hover.signature(),
+        "goalsFromSExps : List SExp -> Maybe (List Goal)"
+    );
+}
+
+#[test]
+fn missing_signature_action_handles_direct_recursion() {
+    let project_root = temp_root("direct_recursion_signature");
+    let source_path = project_root.join("scratch.sv");
+    let source = r#"count xs =
+    case xs of
+        [] => 0
+        | _ :: rest => 1 + count rest
+
+main : Int
+main = count [1, 2, 3]
+"#;
+    write_source(&source_path, source);
+    let mut compilation = Compilation::for_source_file(&source_path);
+
+    let result = compilation
+        .check(true)
+        .expect("direct recursive function without signature should check");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let action = compilation
+        .source_code_actions()
+        .iter()
+        .find(|action| action.title() == "Add type signature for `count`")
+        .unwrap_or_else(|| {
+            panic!(
+                "missing inferred signature action for direct recursion: {:#?}",
+                compilation.source_code_actions()
+            )
+        });
+    assert_eq!(
+        action.category(),
+        SourceCodeActionCategory::InferredSignature
+    );
+
+    let hover = compilation
+        .hover_info(&source_path, offset_in_line(source, "count xs =", "count"))
+        .expect("direct recursive function hover should exist without a written signature");
+    assert!(
+        hover.signature().starts_with("count : \u{2200}"),
+        "recursive count should infer a generalized list-element type: {}",
+        hover.signature()
+    );
+    assert!(
+        hover.signature().contains(". List") && hover.signature().ends_with(" -> Int"),
+        "recursive count should infer a list-to-int function: {}",
+        hover.signature()
+    );
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn recursive_explicit_qualified_signature_still_checks() {
+    let project_root = temp_root("explicit_qualified_recursion");
+    let source_path = project_root.join("scratch.sv");
+    let source = r#"contains : forall a. Eq a => a -> [a] -> Bool
+contains target xs =
+    case xs of
+        [] => False
+        | x :: rest => if x == target then True else contains target rest
+
+main : Bool
+main = contains 2 [1, 2, 3]
+"#;
+    write_source(&source_path, source);
+    let mut compilation = Compilation::for_source_file(&source_path);
+
+    let result = compilation
+        .check(true)
+        .expect("explicit qualified recursive function should check");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+    assert!(
+        compilation.source_code_actions().iter().all(|action| {
+            action.title() != "Add type signature for `contains`"
+                || action.category() != SourceCodeActionCategory::InferredSignature
+        }),
+        "explicit signatures should not receive inferred-signature actions: {:#?}",
+        compilation.source_code_actions()
+    );
+
+    let hover = compilation
+        .hover_info(
+            &source_path,
+            offset_in_line(source, "contains target xs =", "contains"),
+        )
+        .expect("explicit qualified recursive function hover should exist");
+    assert_eq!(
+        hover.signature(),
+        "contains : \u{2200} (a : *). Eq a => a -> List a -> Bool"
+    );
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn signatureless_recursive_function_solves_concrete_typeclass_evidence() {
+    let project_root = temp_root("concrete_typeclass_recursion");
+    let source_path = project_root.join("scratch.sv");
+    let source = r#"hasZero xs =
+    case xs of
+        [] => False
+        | x :: rest => if x == 0 then True else hasZero rest
+
+main : Bool
+main = hasZero [1, 2, 3]
+"#;
+    write_source(&source_path, source);
+    let mut compilation = Compilation::for_source_file(&source_path);
+
+    let result = compilation
+        .check(true)
+        .expect("signature-less recursive function with concrete typeclass evidence should check");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let action = compilation
+        .source_code_actions()
+        .iter()
+        .find(|action| action.title() == "Add type signature for `hasZero`")
+        .unwrap_or_else(|| {
+            panic!(
+                "missing inferred signature action for concrete typeclass recursion: {:#?}",
+                compilation.source_code_actions()
+            )
+        });
+    assert_eq!(
+        action.category(),
+        SourceCodeActionCategory::InferredSignature
+    );
+
+    let hover = compilation
+        .hover_info(
+            &source_path,
+            offset_in_line(source, "hasZero xs =", "hasZero"),
+        )
+        .expect("concrete typeclass recursive function hover should exist");
+    assert_eq!(hover.signature(), "hasZero : List Int -> Bool");
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn signatureless_recursive_function_does_not_infer_new_typeclass_constraint() {
+    let project_root = temp_root("polymorphic_typeclass_recursion");
+    let source_path = project_root.join("scratch.sv");
+    let source = r#"containsPoly target xs =
+    case xs of
+        [] => False
+        | x :: rest => if x == target then True else containsPoly target rest
+"#;
+    write_source(&source_path, source);
+    let mut compilation = Compilation::for_source_file(&source_path);
+
+    let result = compilation
+        .check(true)
+        .expect("polymorphic typeclass recursion should report diagnostics, not driver failure");
+    assert!(
+        !result.success(),
+        "signature-less polymorphic typeclass recursion should not be accepted without qualified signature"
+    );
+    assert!(
+        result.diagnostics().iter().any(|diagnostic| {
+            diagnostic
+                .message
+                .contains("unsatisfied type class constraints")
+                || diagnostic.message.contains("no matching instance found")
+        }),
+        "expected a typeclass diagnostic, got: {:#?}",
+        result.diagnostics()
+    );
+    assert!(
+        compilation.source_code_actions().iter().all(|action| {
+            action.title() != "Add type signature for `containsPoly`"
+                || action.category() != SourceCodeActionCategory::InferredSignature
+        }),
+        "failed qualified inference should not produce an inferred-signature action: {:#?}",
+        compilation.source_code_actions()
+    );
 
     let _ = fs::remove_dir_all(project_root);
 }

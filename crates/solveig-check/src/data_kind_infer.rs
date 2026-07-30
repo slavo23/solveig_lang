@@ -514,62 +514,6 @@ fn collect_tycon_refs(ty: &Ty, out: &mut FxHashSet<TyConId>) {
     }
 }
 
-fn tarjan_scc(n: usize, adj: &[Vec<usize>]) -> Vec<Vec<usize>> {
-    struct St {
-        idx: usize,
-        stack: Vec<usize>,
-        on_stack: Vec<bool>,
-        num: Vec<Option<usize>>,
-        low: Vec<usize>,
-        out: Vec<Vec<usize>>,
-    }
-    fn go(v: usize, adj: &[Vec<usize>], s: &mut St) {
-        s.num[v] = Some(s.idx);
-        s.low[v] = s.idx;
-        s.idx += 1;
-        s.stack.push(v);
-        s.on_stack[v] = true;
-        for &w in &adj[v] {
-            if s.num[w].is_none() {
-                go(w, adj, s);
-                s.low[v] = s.low[v].min(s.low[w]);
-            } else if s.on_stack[w] {
-                s.low[v] = s.low[v]
-                    .min(s.num[w].expect("ICE: Tarjan on-stack node must have a discovery index"));
-            }
-        }
-        if s.low[v] == s.num[v].expect("ICE: Tarjan root node must have a discovery index") {
-            let mut scc = Vec::new();
-            loop {
-                let w = s
-                    .stack
-                    .pop()
-                    .expect("ICE: Tarjan SCC stack must contain the root");
-                s.on_stack[w] = false;
-                scc.push(w);
-                if w == v {
-                    break;
-                }
-            }
-            s.out.push(scc);
-        }
-    }
-    let mut s = St {
-        idx: 0,
-        stack: vec![],
-        on_stack: vec![false; n],
-        num: vec![None; n],
-        low: vec![0; n],
-        out: vec![],
-    };
-    for v in 0..n {
-        if s.num[v].is_none() {
-            go(v, adj, &mut s);
-        }
-    }
-    s.out
-}
-
 pub fn dependency_analysis(defs: &[RawDataDef]) -> Vec<Vec<usize>> {
     let n = defs.len();
     if n == 0 {
@@ -595,7 +539,7 @@ pub fn dependency_analysis(defs: &[RawDataDef]) -> Vec<Vec<usize>> {
         }
     }
 
-    tarjan_scc(n, &adj)
+    crate::dependency_graph::dependency_ordered_sccs(&adj)
 }
 
 pub fn infer_all_data_kinds_with_env(

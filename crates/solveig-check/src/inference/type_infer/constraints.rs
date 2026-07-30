@@ -528,25 +528,31 @@ impl TypeChecker {
             Ty::TyUnit | Ty::TyVar(_) | Ty::TyCon(_) => {}
         }
     }
-    fn generalize_top_level_type(&mut self, ctx: &Context, ty: &Ty) -> Ty {
+    fn generalize_top_level_type_with_subst(
+        &mut self,
+        ctx: &Context,
+        ty: &Ty,
+    ) -> (Ty, FxHashMap<EvarId, Ty>) {
         let zonked = self.zonk_type(&ctx.apply(ty));
 
         let mut evars = Vec::new();
         Self::collect_exvars_in_type(&zonked, &mut evars);
 
         if evars.is_empty() {
-            return zonked;
+            return (zonked, FxHashMap::default());
         }
 
         let mut result = zonked;
         let mut binders = Vec::new();
+        let mut subst = FxHashMap::default();
 
         for evar in evars {
-            let (universal_id, universal) = self.fresh_universal("t");
+            let (universal_id, _) = self.fresh_universal("t");
             let kind = ctx.evar_kind_id(evar).unwrap_or(Kind::Star);
+            let replacement = Ty::TyVar(universal_id);
 
-            result = result.substitute_evar(evar, &Ty::TyVar(universal_id));
-            let _ = universal;
+            result = result.substitute_evar(evar, &replacement);
+            subst.insert(evar, replacement);
             binders.push((universal_id, kind));
         }
 
@@ -554,7 +560,7 @@ impl TypeChecker {
             result = Ty::make_forall_id(name, kind, result);
         }
 
-        result
+        (result, subst)
     }
 }
 
