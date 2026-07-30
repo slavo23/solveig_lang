@@ -405,6 +405,57 @@ answer = 42
 }
 
 #[test]
+fn selected_import_name_must_be_exported_by_module() {
+    let project_root = temp_root("bad_selected_import");
+    let main = project_root.join("src/main.sv");
+    let lib = project_root.join("src/lib.sv");
+    write_source(
+        &lib,
+        r#"answer : Int
+answer = 42
+"#,
+    );
+    write_source(
+        &main,
+        r#"import lib(answer, missingAnswer)
+
+main : Int
+main = answer
+"#,
+    );
+    let mut compilation = Compilation::new(&project_root);
+
+    let result = compilation.check(true).expect("check should finish");
+    assert!(
+        result.diagnostics().iter().any(|diagnostic| {
+            diagnostic.code == "RES0014"
+                && diagnostic.severity == Severity::Error
+                && diagnostic.message.contains("missingAnswer")
+        }),
+        "missing selected import should be diagnosed: {:#?}",
+        result.diagnostics()
+    );
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn bundled_typeclasses_file_checks_when_opened_directly() {
+    let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("crates/solveig-driver/src/prelude/typeclasses.sv");
+    let mut compilation = Compilation::for_source_file(&source_path);
+
+    let result = compilation
+        .check(true)
+        .expect("direct prelude file check should finish");
+    assert!(
+        result.success(),
+        "bundled prelude file should check as prelude.typeclasses, got: {:#?}",
+        result.diagnostics()
+    );
+}
+
+#[test]
 fn inferred_signature_action_inserts_scheme_before_definition() {
     let project_root = temp_root("signature");
     let source_path = project_root.join("scratch.sv");

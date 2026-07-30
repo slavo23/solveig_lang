@@ -230,14 +230,19 @@ impl CompilationArtifacts {
 }
 
 impl PreludeCache {
-    pub(super) fn can_reuse(&self, modules: &ModuleTable, verify_core: bool) -> bool {
+    pub(super) fn can_reuse(&self, project: &Project, verify_core: bool) -> bool {
         if verify_core && !self.verified_core {
             return false;
         }
 
-        self.module_ids
-            .iter()
-            .all(|(module, cached_id)| modules.id(module) == Some(*cached_id))
+        self.module_ids.iter().all(|(module, cached_id)| {
+            project.module_table.id(module) == Some(*cached_id)
+                && self
+                    .project_modules
+                    .get(module)
+                    .zip(project.modules.get(module))
+                    .is_some_and(|(cached, current)| cached.source_hash == current.source_hash)
+        })
     }
 }
 

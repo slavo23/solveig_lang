@@ -30,4 +30,26 @@ fn checked_project_docs_include_importable_declarations() {
         docs.get("docsLib.describe"),
         Some(&"Converts a value into a friendly label.".to_string())
     );
+    assert_eq!(
+        docs.get("prelude.builtins.Int"),
+        Some(
+            &"Whole-number values used for counting, indexing, and integer arithmetic.".to_string()
+        )
+    );
+    assert_eq!(
+        docs.get("prelude.builtins.Maybe"),
+        Some(&"A value that may be present or absent.".to_string())
+    );
+    assert_eq!(
+        docs.get("prelude.list.Nil"),
+        Some(&"The empty list.".to_string())
+    );
+    assert_eq!(
+        docs.get("prelude.typeclasses.show"),
+        Some(&"Renders a value as a string.".to_string())
+    );
+    assert_eq!(
+        docs.get("prelude.prim.intCompare"),
+        Some(&"Compares two integers and returns their ordering.".to_string())
+    );
 }

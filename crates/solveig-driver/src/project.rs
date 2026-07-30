@@ -20,6 +20,7 @@ const PRELUDE_BUILTINS_SRC: &str = include_str!("./prelude/builtins.sv");
 const PRELUDE_LIST_SRC: &str = include_str!("./prelude/list.sv");
 const PRELUDE_TYPECLASS_SRC: &str = include_str!("./prelude/typeclasses.sv");
 const PRELUDE_PRIM_SRC: &str = "";
+const BUNDLED_PRELUDE_FILES: [&str; 3] = ["builtins.sv", "list.sv", "typeclasses.sv"];
 
 #[derive(Debug)]
 pub enum ProjectError {
@@ -61,6 +62,19 @@ fn source_hash(source: &str) -> u64 {
     let mut hasher = DefaultHasher::new();
     source.hash(&mut hasher);
     hasher.finish()
+}
+
+fn bundled_prelude_source_root(entry_file: &Path) -> Option<PathBuf> {
+    let driver_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+    let prelude_dir = driver_src.join("prelude");
+    let rel = entry_file.strip_prefix(&prelude_dir).ok()?;
+    let file_name = rel.file_name()?.to_str()?;
+
+    if rel.components().count() == 1 && BUNDLED_PRELUDE_FILES.contains(&file_name) {
+        Some(driver_src)
+    } else {
+        None
+    }
 }
 
 fn mk_virtual_prelude_file(
@@ -215,12 +229,16 @@ pub(crate) fn load_project_with_source_provider(
     sources: &SourceProvider,
     cached_prelude_modules: Option<&FxHashMap<ModuleName, ModuleFile>>,
 ) -> Result<(PathBuf, Project), ProjectError> {
-    let root = entry_file
-        .parent()
-        .ok_or_else(|| DriverError::SourceRootMissing {
-            entry_file: entry_file.to_path_buf(),
-        })?
-        .to_path_buf();
+    let root = if let Some(root) = bundled_prelude_source_root(entry_file) {
+        root
+    } else {
+        entry_file
+            .parent()
+            .ok_or_else(|| DriverError::SourceRootMissing {
+                entry_file: entry_file.to_path_buf(),
+            })?
+            .to_path_buf()
+    };
 
     let mut modules = FxHashMap::<ModuleName, ModuleFile>::default();
     let mut stack = vec![PendingModule {

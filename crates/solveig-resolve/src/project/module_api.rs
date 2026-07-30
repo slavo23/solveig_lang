@@ -85,6 +85,14 @@ impl ModuleApi {
         }
     }
 
+    pub fn exports_name(&self, name: Symbol) -> bool {
+        self.terms.contains_key(&name)
+            || self.types.contains_key(&name)
+            || self.type_aliases.contains_key(&name)
+            || self.constructors.contains_key(&name)
+            || self.classes.contains_key(&name)
+    }
+
     pub fn filtered(&self, spec: &ImportSpec) -> Self {
         match spec {
             ImportSpec::All => self.clone(),
@@ -451,21 +459,109 @@ pub fn seed_compiler_prelude_module_api(
     if module_name == &compiler_prelude_builtins_module(session) {
         for (name, _id) in compiler_type_entries() {
             let symbol = session.intern(name);
-            api.types.insert(symbol, local_def_id(module_id, symbol));
+            let def_id = local_def_id(module_id, symbol);
+            api.types.insert(symbol, def_id);
+            insert_compiler_doc(api, def_id, compiler_type_doc(name));
         }
 
         for (name, _id) in compiler_constructor_entries() {
             let symbol = session.intern(name);
-            api.constructors
-                .insert(symbol, local_def_id(module_id, symbol));
+            let def_id = local_def_id(module_id, symbol);
+            api.constructors.insert(symbol, def_id);
+            insert_compiler_doc(api, def_id, compiler_constructor_doc(name));
         }
     }
 
     for builtin in &builtins.builtin_defs {
         if builtin.id.module == module_id {
             api.terms.insert(builtin.id.name, builtin.id);
+            insert_compiler_doc(api, builtin.id, compiler_builtin_doc(&builtin.short_name));
         }
     }
+}
+
+fn insert_compiler_doc(api: &mut ModuleApi, def_id: DefId, doc: Option<&'static str>) {
+    if let Some(doc) = doc {
+        api.docs
+            .entry(def_id)
+            .or_insert_with(|| DocComment::new(doc));
+    }
+}
+
+fn compiler_type_doc(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "Int" => "Whole-number values used for counting, indexing, and integer arithmetic.",
+        "Float" => "Floating-point numbers used for approximate numeric calculations.",
+        "Char" => "A single character value.",
+        "String" => "Text represented as a sequence of characters.",
+        "IO" => "An effectful action that produces a value when run by the program entry point.",
+        "Bool" => "A truth value, either True or False.",
+        _ => return None,
+    })
+}
+
+fn compiler_constructor_doc(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "True" => "The true boolean value.",
+        "False" => "The false boolean value.",
+        _ => return None,
+    })
+}
+
+fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
+    Some(match name {
+        "intAdd" => "Adds two integers.",
+        "intSub" => "Subtracts the second integer from the first.",
+        "intMul" => "Multiplies two integers.",
+        "intDiv" => "Divides two integers using integer division.",
+        "intMod" => "Returns the integer remainder after division.",
+        "intNeg" => "Negates an integer.",
+        "intEq" => "Checks whether two integers are equal.",
+        "intLt" => "Checks whether the first integer is less than the second.",
+        "intLe" => "Checks whether the first integer is less than or equal to the second.",
+        "intGt" => "Checks whether the first integer is greater than the second.",
+        "intGe" => "Checks whether the first integer is greater than or equal to the second.",
+        "intCompare" => "Compares two integers and returns their ordering.",
+        "floatAdd" => "Adds two floating-point numbers.",
+        "floatSub" => "Subtracts the second floating-point number from the first.",
+        "floatMul" => "Multiplies two floating-point numbers.",
+        "floatDiv" => "Divides two floating-point numbers.",
+        "floatNeg" => "Negates a floating-point number.",
+        "floatEq" => "Checks whether two floating-point numbers are equal.",
+        "floatLt" => "Checks whether the first floating-point number is less than the second.",
+        "floatLe" => {
+            "Checks whether the first floating-point number is less than or equal to the second."
+        }
+        "floatGt" => "Checks whether the first floating-point number is greater than the second.",
+        "floatGe" => {
+            "Checks whether the first floating-point number is greater than or equal to the second."
+        }
+        "intToFloat" => "Converts an integer to a floating-point number.",
+        "floatToInt" => "Converts a floating-point number to an integer by truncating toward zero.",
+        "intToString" => "Renders an integer as text.",
+        "floatToString" => "Renders a floating-point number as text.",
+        "charToString" => "Converts a character to a one-character string.",
+        "stringLength" => "Counts the characters in a string.",
+        "stringAppend" => "Concatenates two strings.",
+        "stringSlice" => "Takes a substring starting at an index for a given character count.",
+        "stringCharAt" => "Returns the character at an index when it exists.",
+        "stringEq" => "Checks whether two strings are equal.",
+        "stringCompare" => "Compares two strings lexicographically.",
+        "charEq" => "Checks whether two characters are equal.",
+        "charCompare" => "Compares two characters by their ordering.",
+        "stringToChars" => "Breaks a string into a list of characters.",
+        "charsToString" => "Builds a string from a list of characters.",
+        "pureIO" => "Creates an IO action that immediately returns a value.",
+        "bindIO" => "Sequences an IO action and passes its result to the next action.",
+        "printLine" => "Writes text followed by a newline.",
+        "printStr" => "Writes text without adding a newline.",
+        "readLine" => "Reads one line of input.",
+        "getArgs" => "Reads the command-line arguments passed to the program.",
+        "readFile" => "Reads a file as text.",
+        "writeFile" => "Writes text to a file, replacing its previous contents.",
+        "appendFile" => "Appends text to the end of a file.",
+        _ => return None,
+    })
 }
 
 fn compiler_type_entries() -> [(&'static str, TyConId); 6] {

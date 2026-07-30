@@ -7,7 +7,7 @@ import stressTestTwo(runStressTestTwo)
 import quicksort(sampleSortedQuickSort)
 import mergesort(sampleSortedMergeSort)
 import knapsack(sampleTreeDp)
-import treeMap(fromList, Map, intComparator, Entry, size)
+import treeMap(fromList, Map, Entry, size)
 import tcTests.classes(advancedTypeclassRegressionMain)
 import tcTests.tcStressTest(typeclassSuperclassSuccessMain);
 import tcTests.tcImportClient(importSmokeMain)

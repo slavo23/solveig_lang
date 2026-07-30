@@ -149,6 +149,10 @@ impl<'a> FrontendState<'a> {
         if !errors.is_empty() {
             return Err(errors);
         }
+        errors.extend(validate_selected_import_names(project, &apis));
+        if !errors.is_empty() {
+            return Err(errors);
+        }
 
         let mut typed_apis = prelude_cache
             .map(|cache| cache.typed_apis.clone())
@@ -163,6 +167,10 @@ impl<'a> FrontendState<'a> {
             .map(|cache| cache.resolutions.clone())
             .unwrap_or_default();
         let mut next_instance_id = prelude_cache.map_or(0, |cache| cache.next_instance_id);
+
+        if let Some(cache) = prelude_cache {
+            rebase_cached_prelude_artifacts(project, cache, &mut module_files, &mut resolutions);
+        }
 
         if let Some(cache) = incremental_cache {
             next_instance_id = next_instance_id.max(cache.next_instance_id);
@@ -716,6 +724,58 @@ fn module_names_as_strings(session: &Session, modules: &[ModuleName]) -> Vec<Str
         .iter()
         .map(|module| module.as_string(session))
         .collect()
+}
+
+fn validate_selected_import_names(
+    project: &Project,
+    apis: &FxHashMap<ModuleName, SharedModuleApi>,
+) -> Vec<ResolveError> {
+    let mut errors = Vec::new();
+
+    for module_file in project.modules.values() {
+        for import in &module_file.imports {
+            let ImportSpec::Only(_) = &import.spec else {
+                continue;
+            };
+            let Some(api) = apis.get(&import.module) else {
+                continue;
+            };
+
+            for selected_name in &import.selected_names {
+                if !api.exports_name(selected_name.0) {
+                    errors.push(ResolveError::UnknownImportName {
+                        span: FileSpan::new(module_file.parsed.file, selected_name.1),
+                        module: import.module.clone(),
+                        name: selected_name.0,
+                    });
+                }
+            }
+        }
+    }
+
+    errors
+}
+
+fn rebase_cached_prelude_artifacts(
+    project: &Project,
+    cache: &PreludeCache,
+    module_files: &mut FxHashMap<ModuleId, FileId>,
+    resolutions: &mut FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
+) {
+    for (module_name, module_id) in &cache.module_ids {
+        let Some(module_file) = project.modules.get(module_name) else {
+            continue;
+        };
+        let current_file = module_file.parsed.file;
+
+        module_files.insert(*module_id, current_file);
+        if let Some(cached_resolutions) = cache.resolutions.get(module_id) {
+            resolutions.insert(
+                *module_id,
+                rebase_resolutions_file(cached_resolutions, current_file),
+            );
+        }
+    }
 }
 
 include!("frontend/imported_type_info.rs");

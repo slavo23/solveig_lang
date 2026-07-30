@@ -6,16 +6,28 @@ infix 4 ==, /=, <, <=, >, >=
 infixl 6 +, -
 infixl 7 *, /
 
-data Ordering = LT | EQ | GT
+-- | The result of comparing two values.
+data Ordering =
+    -- | The first value is less than the second.
+    LT
+  | -- | The two values compare as equal.
+    EQ
+  | -- | The first value is greater than the second.
+    GT
 
+-- | Values that can be checked for equality.
 class Eq a where
+    -- | Checks whether two values are equal.
     (==) : a -> a -> Bool
+    -- | Checks whether two values are different.
     (/=) : a -> a -> Bool
     default (/=) x y = not (x == y)
 
+-- | Named form of equality.
 eq : forall a. Eq a => a -> a -> Bool
 eq x y = x == y
 
+-- | Named form of inequality.
 notEq : forall a. Eq a => a -> a -> Bool
 notEq x y = x /= y
 
@@ -74,11 +86,17 @@ instance (Eq a, Eq b) => Eq (Pair a b) where
                     MkPair rightA rightB =>
                         if leftA == rightA then leftB == rightB else False
 
+-- | Values that can be ordered.
 class Eq a => Ord a where
+    -- | Compares two values and returns their ordering.
     compare : a -> a -> Ordering
+    -- | Checks whether the first value is less than the second.
     (<) : a -> a -> Bool
+    -- | Checks whether the first value is less than or equal to the second.
     (<=) : a -> a -> Bool
+    -- | Checks whether the first value is greater than the second.
     (>) : a -> a -> Bool
+    -- | Checks whether the first value is greater than or equal to the second.
     (>=) : a -> a -> Bool
     default (<) x y =
         case compare x y of
@@ -101,24 +119,31 @@ class Eq a => Ord a where
             | EQ => True
             | GT => True
 
+-- | Named form of less-than comparison.
 less : forall a. Ord a => a -> a -> Bool
 less x y = x < y
 
+-- | Named form of less-than-or-equal comparison.
 lessEq : forall a. Ord a => a -> a -> Bool
 lessEq x y = x <= y
 
+-- | Named form of greater-than comparison.
 greater : forall a. Ord a => a -> a -> Bool
 greater x y = x > y
 
+-- | Named form of greater-than-or-equal comparison.
 greaterEq : forall a. Ord a => a -> a -> Bool
 greaterEq x y = x >= y
 
+-- | Returns the smaller of two ordered values.
 minOrd : forall a. Ord a => a -> a -> a
 minOrd x y = if x <= y then x else y
 
+-- | Returns the larger of two ordered values.
 maxOrd : forall a. Ord a => a -> a -> a
 maxOrd x y = if x <= y then y else x
 
+-- | Restricts a value to the inclusive range between low and high.
 clampOrd : forall a. Ord a => a -> a -> a -> a
 clampOrd low high x =
     if x < low then low
@@ -190,10 +215,15 @@ instance (Ord a, Ord b) => Ord (Pair a b) where
                             | GT => GT
                             | EQ => compare leftB rightB
 
+-- | Values that support basic numeric arithmetic.
 class Num a where
+    -- | Adds two numbers.
     (+) : a -> a -> a
+    -- | Subtracts the second number from the first.
     (-) : a -> a -> a
+    -- | Multiplies two numbers.
     (*) : a -> a -> a
+    -- | Negates a number.
     negate : a -> a
 
 instance Num Int where
@@ -208,22 +238,29 @@ instance Num Float where
     (*) x y = floatMul x y
     negate x = floatNeg x
 
+-- | Divides two integers using integer division.
 div : Int -> Int -> Int
 div x y = intDiv x y
 
+-- | Returns the integer remainder after division.
 mod : Int -> Int -> Int
 mod x y = intMod x y
 
+-- | Subtracts the first argument from the second.
 subtract : forall a. Num a => a -> a -> a
 subtract x y = y - x
 
+-- | Numeric values that support division.
 class Num a => Fractional a where
+    -- | Divides one fractional value by another.
     (/) : a -> a -> a
 
 instance Fractional Float where
     (/) x y = floatDiv x y
 
+-- | Type constructors whose contents can be transformed.
 class Functor f where
+    -- | Applies a function inside a context.
     fmap : forall a b. (a -> b) -> f a -> f b
 
 instance Functor Maybe where
@@ -245,16 +282,22 @@ instance Functor IO where
         prelude.builtins.bindIO action (fun value =>
             prelude.builtins.pureIO (f value))
 
+-- | Functors that can lift values and apply wrapped functions.
 class Functor f => Applicative f where
+    -- | Lifts a plain value into a context.
     pure : forall a. a -> f a
+    -- | Applies a wrapped function to a wrapped value.
     apply : forall a b. f (a -> b) -> f a -> f b
 
+-- | Combines two contextual values with a binary function.
 liftA2 : forall f a b c. Applicative f => (a -> b -> c) -> f a -> f b -> f c
 liftA2 f fx fy = apply (fmap f fx) fy
 
+-- | Runs two contextual values and keeps the result of the second.
 applyRight : forall f a b. Applicative f => f a -> f b -> f b
 applyRight left right = liftA2 (fun x => fun y => y) left right
 
+-- | Runs two contextual values and keeps the result of the first.
 applyLeft : forall f a b. Applicative f => f a -> f b -> f a
 applyLeft left right = liftA2 (fun x => fun y => x) left right
 
@@ -279,22 +322,28 @@ instance Applicative IO where
             prelude.builtins.bindIO actionX (fun x =>
                 prelude.builtins.pureIO (f x)))
 
+-- | Applicative contexts that can sequence dependent computations.
 class Applicative m => Monad m where
+    -- | Sequences a computation and passes its result to the next computation.
     bind : forall a b. m a -> (a -> m b) -> m b
 
+-- | Runs two monadic computations and keeps the result of the second.
 thenM : forall m a b. Monad m => m a -> m b -> m b
 thenM mx my = bind mx (fun x => my)
 
+-- | Flattens one layer of monadic nesting.
 join : forall m a. Monad m => m (m a) -> m a
 join mmx = do
     mx <- mmx
     mx
 
+-- | Composes two functions that return monadic results.
 composeK : forall m a b c. Monad m => (a -> m b) -> (b -> m c) -> a -> m c
 composeK f g x = do
     y <- f x
     g y
 
+-- | Maps a function that returns monadic results over a list.
 mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]
 mapM f xs =
     case xs of
@@ -304,9 +353,11 @@ mapM f xs =
             zs <- mapM f ys
             pure (z :: zs)
 
+-- | Turns a list of monadic computations into one computation producing a list.
 sequence : forall m a. Monad m => [m a] -> m [a]
 sequence xs = mapM (fun x => x) xs
 
+-- | Filters a list with a predicate that returns monadic results.
 filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
 filterM p xs =
     case xs of
@@ -328,12 +379,15 @@ instance Monad List where
 instance Monad IO where
     bind action f = prelude.builtins.bindIO action f
 
+-- | Reads the command-line arguments passed to the program.
 getArgs : IO [String]
 getArgs = prelude.prim.getArgs
 
+-- | Runs two IO actions and keeps the result of the second.
 seqIO : forall a b. IO a -> IO b -> IO b
 seqIO left right = thenM left right
 
+-- | Runs an IO action for every element of a list and discards the results.
 mapIO_ : forall a. (a -> IO ()) -> [a] -> IO ()
 mapIO_ f xs =
     case xs of
@@ -342,9 +396,12 @@ mapIO_ f xs =
             f y
             mapIO_ f ys
 
+-- | Values that can be rendered as text.
 class Show a where
+    -- | Renders a value as a string.
     show : a -> String
 
+-- | Escapes a character for display inside character literals.
 showCharPayload : Char -> String
 showCharPayload c =
     if c == '\n' then "\\n"
@@ -354,6 +411,7 @@ showCharPayload c =
     else if c == '"' then "\\\""
     else charToString c
 
+-- | Escapes a character for display inside string literals.
 showStringPayload : Char -> String
 showStringPayload c =
     if c == '\n' then "\\n"
@@ -362,12 +420,14 @@ showStringPayload c =
     else if c == '"' then "\\\""
     else charToString c
 
+-- | Renders the characters inside a string literal.
 showStringChars : [Char] -> String
 showStringChars chars =
     case chars of
         [] => ""
         | c :: rest => stringAppend (showStringPayload c) (showStringChars rest)
 
+-- | Renders the comma-separated contents of a list.
 showListItems : forall a. Show a => [a] -> String
 showListItems xs =
     case xs of
@@ -419,12 +479,17 @@ instance (Show a, Show b) => Show (Pair a b) where
         case value of
             MkPair a b => stringAppend "(" (stringAppend (show a) (stringAppend ", " (stringAppend (show b) ")")))
 
+-- | Values that can be combined associatively.
 class Semigroup a where
+    -- | Combines two values.
     appendS : a -> a -> a
 
+-- | Semigroups that also provide an empty value.
 class Semigroup a => Monoid a where
+    -- | The identity value for appendS.
     empty : a
 
+-- | Combines all values in a list.
 mconcat : forall a. Monoid a => [a] -> a
 mconcat xs = foldr appendS empty xs
 

@@ -355,6 +355,39 @@ fn hover_info_covers_h13_semantic_targets() {
     assert_contains(class_method_reference.signature(), "class Describe a");
     assert_contains(class_method_reference.signature(), "describe :");
 
+    let prelude_primitive_type = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "localValue : Int", "Int"),
+        )
+        .expect("primitive prelude type hover should exist");
+    assert_eq!(
+        prelude_primitive_type.documentation(),
+        Some("Whole-number values used for counting, indexing, and integer arithmetic.")
+    );
+
+    let prelude_type = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "maybeResult : Maybe Int", "Maybe"),
+        )
+        .expect("prelude type hover should exist");
+    assert_eq!(
+        prelude_type.documentation(),
+        Some("A value that may be present or absent.")
+    );
+
+    let prelude_constructor = compilation
+        .hover_info(
+            &main_file,
+            offset_in_line(&main_source, "    x <- Just 2", "Just"),
+        )
+        .expect("prelude constructor hover should exist");
+    assert_eq!(
+        prelude_constructor.documentation(),
+        Some("Wraps a present value.")
+    );
+
     let do_expression = compilation
         .hover_info(
             &main_file,
@@ -363,6 +396,10 @@ fn hover_info_covers_h13_semantic_targets() {
         .expect("do-block expression hover should exist");
     assert_contains(do_expression.signature(), "Applicative f");
     assert_contains(do_expression.signature(), "pure :");
+    assert_eq!(
+        do_expression.documentation(),
+        Some("Lifts a plain value into a context.")
+    );
     assert!(!do_expression.signature().contains("thenM"));
     assert!(!do_expression.signature().contains("bind :"));
 
@@ -680,6 +717,65 @@ fn hover_covers_non_empty_and_nested_list_literal_brackets() {
         .hover_info(&cool_file, offset_in_line(&cool_source, inner_line, "]"))
         .expect("inner list closing bracket should hover");
     assert_eq!(inner_close.signature(), "List Int");
+}
+
+#[test]
+fn hover_covers_direct_prelude_imported_references() {
+    let workspace_root = fixture_root(".");
+    let typeclasses_file = workspace_root.join("crates/solveig-driver/src/prelude/typeclasses.sv");
+    let typeclasses_source =
+        fs::read_to_string(&typeclasses_file).expect("typeclasses source should load");
+    let mut compilation = Compilation::for_source_file(&typeclasses_file);
+    let result = compilation
+        .check(true)
+        .expect("direct typeclasses check should finish");
+
+    assert!(
+        result.success(),
+        "direct typeclasses diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    for (line, needle, expected) in [
+        (
+            "    compare x y = intCompare x y",
+            "intCompare",
+            "intCompare : Int -> Int -> Ordering",
+        ),
+        (
+            "    compare x y = charCompare x y",
+            "charCompare",
+            "charCompare : Char -> Char -> Ordering",
+        ),
+        (
+            "    compare x y = stringCompare x y",
+            "stringCompare",
+            "stringCompare : String -> String -> Ordering",
+        ),
+        (
+            "getArgs = prelude.prim.getArgs",
+            "prelude.prim.getArgs",
+            "getArgs : IO (List String)",
+        ),
+        (
+            "    apply fs xs = concat (map (fun f => map f xs) fs)",
+            "map",
+            "map : \u{2200} (a : *) (b : *). (a -> b) -> List a -> List b",
+        ),
+        (
+            "mconcat xs = foldr appendS empty xs",
+            "foldr",
+            "foldr : \u{2200} (a : *) (b : *). (a -> b -> b) -> b -> List a -> b",
+        ),
+    ] {
+        let hover = compilation
+            .hover_info(
+                &typeclasses_file,
+                offset_in_line(&typeclasses_source, line, needle),
+            )
+            .unwrap_or_else(|| panic!("`{needle}` in `{line}` should hover"));
+        assert_eq!(hover.signature(), expected);
+    }
 }
 
 #[test]

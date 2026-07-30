@@ -850,6 +850,92 @@ main = count [1, 2, 3]
     }
 
     #[test]
+    fn bundled_prelude_file_opens_as_canonical_module() {
+        let source = workspace_root().join("crates/solveig-driver/src/prelude/typeclasses.sv");
+        let text = fs::read_to_string(&source).expect("bundled typeclasses source should load");
+        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+        let target_line = text
+            .lines()
+            .position(|line| line.contains("compare x y = intCompare x y"))
+            .expect("typeclasses source should contain the Int Ord instance");
+        let target_character = text
+            .lines()
+            .nth(target_line)
+            .and_then(|line| line.find("intCompare"))
+            .expect("target line should contain intCompare");
+        let mut state = ServerState::new(PositionEncoding::Utf16);
+
+        state.open_document(&uri, text.clone());
+        let hover = state
+            .hover(
+                &uri,
+                Position::new(target_line as u32, target_character as u32),
+            )
+            .expect("hover should work in directly opened bundled prelude");
+        assert_hover_contains(hover, "intCompare : Int -> Int -> Ordering");
+
+        let checked_publications = state.check_all();
+        assert!(
+            diagnostics_for_uri(&checked_publications, &uri).is_empty(),
+            "direct bundled prelude diagnostics should stay clean after hover-triggered check: {checked_publications:#?}"
+        );
+        for (line_text, needle, expected) in [
+            (
+                "compare x y = charCompare x y",
+                "charCompare",
+                "charCompare : Char -> Char -> Ordering",
+            ),
+            (
+                "compare x y = stringCompare x y",
+                "stringCompare",
+                "stringCompare : String -> String -> Ordering",
+            ),
+            (
+                "getArgs = prelude.prim.getArgs",
+                "prelude.prim.getArgs",
+                "getArgs : IO (List String)",
+            ),
+            (
+                "apply fs xs = concat (map (fun f => map f xs) fs)",
+                "map",
+                "map : \u{2200} (a : *) (b : *). (a -> b) -> List a -> List b",
+            ),
+            (
+                "mconcat xs = foldr appendS empty xs",
+                "foldr",
+                "foldr : \u{2200} (a : *) (b : *). (a -> b -> b) -> b -> List a -> b",
+            ),
+        ] {
+            let line = text
+                .lines()
+                .position(|line| line.contains(line_text))
+                .unwrap_or_else(|| panic!("typeclasses source should contain `{line_text}`"));
+            let character = text
+                .lines()
+                .nth(line)
+                .and_then(|line| line.find(needle))
+                .unwrap_or_else(|| panic!("target line should contain `{needle}`"));
+            let hover = state
+                .hover(&uri, Position::new(line as u32, character as u32))
+                .unwrap_or_else(|| {
+                    panic!("hover should survive prelude-cache reuse for `{needle}`")
+                });
+            assert_hover_contains(hover, expected);
+        }
+
+        let edited = text.replacen("compare x y = intCompare x y", "compare x y = True", 1);
+        state.change_document(&uri, edited);
+        let edited_publications = state.check_all();
+        let edited_diagnostics = diagnostics_for_uri(&edited_publications, &uri);
+        assert!(
+            edited_diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.severity == Some(DiagnosticSeverity::ERROR)),
+            "direct bundled prelude edits should invalidate stale cache: {edited_publications:#?}"
+        );
+    }
+
+    #[test]
     fn non_project_workspace_root_uses_nested_solveig_project_roots() {
         let container = temp_root("nested_roots");
         let first_root = container.join("first");

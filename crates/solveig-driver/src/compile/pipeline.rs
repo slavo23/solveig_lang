@@ -111,7 +111,7 @@ impl Compilation {
         let prelude_cache = self
             .prelude_cache
             .as_ref()
-            .filter(|cache| cache.can_reuse(&project.module_table, verify_core));
+            .filter(|cache| cache.can_reuse(&project, verify_core));
         let reusable_modules = self
             .incremental_cache
             .as_ref()

@@ -41,6 +41,11 @@ pub enum ResolveError {
         span: FileSpan,
         module: ModuleName,
     },
+    UnknownImportName {
+        span: FileSpan,
+        module: ModuleName,
+        name: Symbol,
+    },
     UnknownName {
         span: FileSpan,
         kind: ResolveNameKind,
@@ -142,6 +147,18 @@ impl ResolveError {
             .with_label(Label::primary(
                 *span,
                 format!("module `{}` could not be found", module.as_string(session)),
+            )),
+            Self::UnknownImportName { span, module, name } => Diagnostic::error(
+                "RES0014",
+                format!(
+                    "module `{}` does not export `{}`",
+                    module.as_string(session),
+                    session.str(*name)
+                ),
+            )
+            .with_label(Label::primary(
+                *span,
+                format!("`{}` is not exported by this module", session.str(*name)),
             )),
             Self::UnknownName { span, kind, name } => {
                 Diagnostic::error("RES0003", format!("unknown {} `{}`", kind.as_str(), name))
