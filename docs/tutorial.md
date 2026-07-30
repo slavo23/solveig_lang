@@ -1,7 +1,8 @@
 # Solveig Tutorial
 
-This tutorial walks through the current Solveig language. It assumes you are
-running commands from the repository root.
+This tutorial walks through the current Solveig language. It assumes the
+`solveig` command is installed and that you are running commands from the
+repository root.
 
 ## 1. Create A Project
 
@@ -24,7 +25,7 @@ main = 42
 Run it:
 
 ```bash
-cargo run -- --project-root hello
+solveig --project-root hello
 ```
 
 For a non-IO `main`, Solveig evaluates the value and displays it. If the type
@@ -416,7 +417,7 @@ binds are reserved for later.
 Run it:
 
 ```bash
-cargo run -- --project-root hello
+solveig --project-root hello
 ```
 
 Pass program args after `--`:
@@ -429,7 +430,7 @@ main = do
 ```
 
 ```bash
-cargo run -- --project-root args-demo -- first second
+solveig --project-root args-demo -- first second
 ```
 
 ## 13. File IO
@@ -455,7 +456,7 @@ main = do
 The repository includes a richer example:
 
 ```bash
-cargo run -- --project-root examples/quiz_game
+solveig --project-root examples/quiz_game
 ```
 
 It reads `questions.txt`, prompts for answers, prints a score, writes

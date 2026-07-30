@@ -28,7 +28,11 @@ solveig --help
 
 If that command works, continue to **Install the Extension**.
 
-To install Solveig from the repository:
+The current installer builds the Solveig command from source, so you need a
+Rust toolchain with Cargo. Cargo is only used to install, update, or remove the
+binary. After installation, the command you use is `solveig`.
+
+To install the latest Solveig command from the repository:
 
 ```bash
 cargo install --git https://github.com/slavo23/lang_experiments.git
@@ -46,7 +50,9 @@ Cargo usually installs the binary to `~/.cargo/bin/solveig` on macOS and Linux,
 or `%USERPROFILE%\.cargo\bin\solveig.exe` on Windows.
 
 If `solveig --help` still says the command cannot be found, add Cargo's bin
-directory to your PATH. On macOS or Linux:
+directory to your PATH.
+
+On macOS or Linux:
 
 ```bash
 export PATH="$HOME/.cargo/bin:$PATH"
@@ -54,15 +60,18 @@ export PATH="$HOME/.cargo/bin:$PATH"
 
 For a permanent setup, add that line to your shell profile.
 
+On Windows, add `%USERPROFILE%\.cargo\bin` to your user `Path` environment
+variable, then restart your terminal and VS Code.
+
 ## Install the Extension
 
-After marketplace publishing, install the extension with:
+If the extension is available by id, install it from a terminal with:
 
 ```bash
 code --install-extension solveig-lang.solveig
 ```
 
-Until marketplace publishing is available, install a packaged `.vsix` file:
+Otherwise, install a packaged `.vsix` file:
 
 ```bash
 code --install-extension /path/to/solveig-0.1.0.vsix
@@ -172,8 +181,8 @@ that run the Solveig command. Use it in `.vscode/tasks.json` like this:
 
 ## Update
 
-To update the Solveig command after installing with Cargo, run the same install
-command again:
+To update a Cargo-installed Solveig command, run the same install command again
+with `--force`:
 
 ```bash
 cargo install --git https://github.com/slavo23/lang_experiments.git --force
@@ -194,23 +203,34 @@ code --install-extension /path/to/solveig-0.1.0.vsix --force
 
 ## Uninstall
 
-Uninstall the VS Code extension:
+The VS Code extension and the Solveig command are installed separately, so
+remove each one you no longer want.
+
+Uninstall the VS Code extension from a terminal:
 
 ```bash
 code --uninstall-extension solveig-lang.solveig
 ```
 
-You can also uninstall from the Extensions view in VS Code.
+You can also uninstall it from VS Code: open the Extensions view, search for
+Solveig, open the extension entry, and choose **Uninstall**. Reload VS Code if
+it asks.
 
-Uninstall the Solveig command:
+Uninstall the Solveig command if you installed it with Cargo:
 
 ```bash
 cargo uninstall solveig
 ```
 
+That removes the `solveig` executable from Cargo's bin directory. It does not
+delete your Solveig projects or this repository checkout.
+
 If you installed Solveig by manually copying a binary, delete that copied
-binary from the directory where you placed it. If you only ran `cargo build`,
-nothing was installed system-wide.
+binary from the directory where you placed it. If you only built the repository
+for development, nothing was installed system-wide.
+
+If you set **Solveig: Server Path** to a custom path, remove or update that
+setting after uninstalling or moving the binary.
 
 ## Development
 

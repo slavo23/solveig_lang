@@ -7,13 +7,13 @@ program runs an interactive query prompt.
 Run it from the repository root:
 
 ```bash
-cargo run -- --project-root examples/scry
+solveig --project-root examples/scry
 ```
 
 Or feed the sample session:
 
 ```bash
-cargo run -- --project-root examples/scry < examples/scry/sample-input.txt
+solveig --project-root examples/scry < examples/scry/sample-input.txt
 ```
 
 ## Language

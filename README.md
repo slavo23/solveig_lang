@@ -10,7 +10,7 @@ nontrivial examples, interactive terminal programs, and simple text-file IO.
 
 ## Install
 
-Solveig has two pieces:
+Solveig has two installable pieces:
 
 - the `solveig` command, which builds, checks, and runs Solveig projects
 - the VS Code extension, which adds editor features for `.sv` files
@@ -20,8 +20,11 @@ automatically when you open Solveig files.
 
 ### Prerequisites
 
-You need a Rust toolchain with Cargo. If `cargo --version` works in your
-terminal, you are ready to install Solveig.
+The current installer builds Solveig from source, so you need a Rust toolchain
+with Cargo. Cargo is only used to install, update, or remove the binary. After
+installation, you run Solveig programs with the `solveig` command.
+
+If `cargo --version` works in your terminal, you are ready to install Solveig.
 
 For the VS Code extension, you also need Visual Studio Code. The terminal
 commands below use VS Code's `code` command; if `code --version` does not work,
@@ -43,8 +46,10 @@ cd lang_experiments
 cargo install --path .
 ```
 
-Cargo installs the command as `solveig`, usually into `~/.cargo/bin` on macOS
-and Linux or `%USERPROFILE%\.cargo\bin` on Windows.
+Cargo installs the executable as `solveig`. The usual install locations are:
+
+- macOS and Linux: `~/.cargo/bin/solveig`
+- Windows: `%USERPROFILE%\.cargo\bin\solveig.exe`
 
 Check the installation:
 
@@ -62,6 +67,23 @@ export PATH="$HOME/.cargo/bin:$PATH"
 Add that line to your shell profile if you want it to apply to future terminal
 sessions.
 
+On Windows, add `%USERPROFILE%\.cargo\bin` to your user `Path` environment
+variable, then restart your terminal and VS Code.
+
+To update a Cargo-installed Solveig binary later, run the same install command
+again with `--force`:
+
+```bash
+cargo install --git https://github.com/slavo23/lang_experiments.git --force
+```
+
+From a local checkout:
+
+```bash
+git pull
+cargo install --path . --force
+```
+
 ### Uninstall the Solveig Command
 
 If you installed Solveig with Cargo, uninstall it with:
@@ -70,53 +92,37 @@ If you installed Solveig with Cargo, uninstall it with:
 cargo uninstall solveig
 ```
 
-If you only built the repository with `cargo build`, nothing was installed
-system-wide. If you manually copied a `solveig` binary somewhere, remove that
-copied file from the directory where you put it.
+This removes the installed `solveig` executable from Cargo's bin directory. It
+does not remove your Solveig projects or this repository checkout.
+
+If you manually copied a `solveig` binary somewhere, delete that copied file
+from the directory where you placed it. If you only built the repository for
+development, nothing was installed system-wide.
 
 ## Quick Start
 
-Build the compiler:
+After installing, check that the command is available:
 
 ```bash
-cargo build --workspace
+solveig --help
 ```
 
 Run the smoke example suite:
 
 ```bash
-cargo run -- --project-root examples/smoke_suite
+solveig --project-root examples/smoke_suite
 ```
 
 Run the interactive quiz example:
 
 ```bash
-cargo run -- --project-root examples/quiz_game
+solveig --project-root examples/quiz_game
 ```
 
 Run the Scry mini rule engine:
 
 ```bash
-cargo run -- --project-root examples/scry < examples/scry/sample-input.txt
-```
-
-Run all tests:
-
-```bash
-cargo test --workspace
-```
-
-Smoke-test the language server diagnostics path:
-
-```bash
-cargo build
-python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
-```
-
-Run clippy:
-
-```bash
-cargo clippy --workspace --all-targets
+solveig --project-root examples/scry < examples/scry/sample-input.txt
 ```
 
 ## Command Line
@@ -124,7 +130,7 @@ cargo clippy --workspace --all-targets
 The CLI runs a Solveig project by pointing at a project root:
 
 ```bash
-cargo run -- --project-root <path>
+solveig --project-root <path>
 ```
 
 Useful options:
@@ -141,10 +147,10 @@ Useful options:
 Examples:
 
 ```bash
-cargo run -- --project-root examples/smoke_suite
-cargo run -- --project-root examples/smoke_suite --dump-bytecode
-cargo run -- --project-root examples/quiz_game
-cargo run -- --project-root my-project -- first second third
+solveig --project-root examples/smoke_suite
+solveig --project-root examples/smoke_suite --dump-bytecode
+solveig --project-root examples/quiz_game
+solveig --project-root my-project -- first second third
 ```
 
 Inside Solveig, program args are available through:
@@ -156,13 +162,7 @@ getArgs : IO [String]
 Start the language server:
 
 ```bash
-cargo run -- lsp
-```
-
-Or, after building:
-
-```bash
-target/debug/solveig lsp
+solveig lsp
 ```
 
 This command is meant to be launched by an editor or test client, so running it
@@ -186,8 +186,7 @@ For capability details and the robustness testing plan, see
 Manual smoke test:
 
 ```bash
-cargo build
-python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
+SOLVEIG_BIN="$(command -v solveig)" python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
 ```
 
 Expected output includes a `TC0005` type mismatch diagnostic with its editor
@@ -200,6 +199,8 @@ command automatically for `.sv` files and provides errors, hover, completion,
 rename, go to definition, find references, document outline, folding, signature
 help, and module links.
 
+### Install the VS Code Extension
+
 Install the `solveig` command first and check that VS Code will be able to find
 it:
 
@@ -207,13 +208,13 @@ it:
 solveig --help
 ```
 
-After the extension is published, install it by extension id:
+If the extension is available by id, install it from a terminal with:
 
 ```bash
 code --install-extension solveig-lang.solveig
 ```
 
-Until then, install from a packaged `.vsix` file:
+Otherwise, install from a packaged `.vsix` file:
 
 ```bash
 code --install-extension /path/to/solveig-0.1.0.vsix
@@ -227,6 +228,9 @@ npm install
 npm run package -- --out /tmp/solveig.vsix
 code --install-extension /tmp/solveig.vsix --force
 ```
+
+You can also install a `.vsix` from inside VS Code: open the Extensions view,
+open the `...` menu, choose **Install from VSIX...**, and select the file.
 
 If the `solveig` command is not on your PATH, set **Solveig: Server Path** in
 VS Code settings to the executable path. A Cargo install usually puts the
@@ -252,17 +256,27 @@ If it shows an error, run **Solveig: Show Output** from the Command Palette.
 The extension also offers a quick fix to add an inferred type signature for a
 top-level definition when Solveig can infer one.
 
-Uninstall the extension:
+### Uninstall the VS Code Extension
+
+The extension and the `solveig` command are installed separately. Remove the
+extension if you no longer want editor support:
 
 ```bash
 code --uninstall-extension solveig-lang.solveig
 ```
 
-Uninstall the `solveig` command separately if you no longer want it:
+You can also uninstall it from VS Code: open the Extensions view, search for
+Solveig, open the extension entry, and choose **Uninstall**.
+
+Uninstall the `solveig` command separately if you no longer want the compiler
+or language server command:
 
 ```bash
 cargo uninstall solveig
 ```
+
+If you set **Solveig: Server Path** to a custom binary, remove or update that
+setting after uninstalling or moving the command.
 
 See `solveig_vscode/README.md` for the full extension guide and contributor
 workflow.
@@ -302,7 +316,7 @@ main = 42
 Run it with:
 
 ```bash
-cargo run -- --project-root my-project
+solveig --project-root my-project
 ```
 
 ## Language Features
@@ -473,11 +487,24 @@ scope.
 - Float literal patterns are rejected.
 - Constructor operators are reserved for later work.
 - The REPL is planned but not complete.
-- The LSP currently runs over stdio and has no packaged editor extension yet.
-  It publishes diagnostics and supports hover, go-to-definition, references,
-  document symbols, workspace symbols, semantic tokens, quick-fix code actions,
-  completion, inlay hints, highlights, folding, selection ranges, signature
-  help, rename, and module document links.
+- The language server runs through the `solveig lsp` command. The VS Code
+  extension starts it automatically for editor features.
+
+## Contributor Checks
+
+For compiler and extension development from this repository:
+
+```bash
+cargo build --workspace
+cargo test --workspace
+cargo clippy --workspace --all-targets
+```
+
+To smoke-test the installed language server command from macOS or Linux:
+
+```bash
+SOLVEIG_BIN="$(command -v solveig)" python3 scripts/lsp_smoke.py tests/golden/diag/type_mismatch
+```
 
 ## More Documentation
 
