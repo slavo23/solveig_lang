@@ -1,11 +1,13 @@
 //! Lowers the lossless CST into the symbolized surface AST.
 //!
-//! This stage runs after parsing, so it may use a `Session` for interning.
+//! This stage mirrors rust-analyzer's `hir_def` tree-lowering pattern: the
+//! parser owns concrete syntax decisions, while lowering walks existing syntax
+//! nodes and interns the user-facing names it finds.
 
 use solveig_base::{Diagnostic, FileId, FileSpan, Session, Span, Symbol};
 
 use crate::ast::*;
-use crate::cst::{CstId, SyntaxTree};
+use crate::cst::{CstId, NodeOrToken, SyntaxTree, TokenId};
 use crate::lexer::{self, PosToken, Token};
 use crate::parser::{ParseError, ParsedCst, parse};
 use crate::syntax::{Event, SyntaxKind};
@@ -15,8 +17,7 @@ use lists::{
     literal_pattern,
 };
 
-type NameSpan = (Symbol, usize, usize);
-
+type NameSpan = (Symbol, usize, usize, CstId);
 type LambdaParam = (Spanned<Symbol>, Option<Spanned<SurfaceTy>>);
 
 fn mk_span(start: usize, end: usize) -> Span {
@@ -43,577 +44,411 @@ fn is_ctor_like(name: &str) -> bool {
     name.chars().next().is_some_and(char::is_uppercase)
 }
 
-struct AstLowerer<'a> {
+struct CstToAst<'a> {
     session: &'a Session,
     file: FileId,
     source: &'a str,
-    tokens: Vec<PosToken>,
-    cst: Option<&'a SyntaxTree>,
-    events: Vec<Event>,
+    cst: &'a SyntaxTree,
     diagnostics: Vec<Diagnostic>,
-    pos: usize,
-    emit_events: bool,
-    report_diagnostics: bool,
-    cst_nodes: Vec<(CstId, SyntaxKind)>,
-    next_node: usize,
-    node_stack: Vec<CstId>,
-    last_finished_node: Option<CstId>,
 }
 
-#[derive(Clone, Copy)]
-struct LowererCheckpoint {
-    pos: usize,
-    events_len: usize,
-    next_node: usize,
-    node_stack_len: usize,
-    last_finished_node: Option<CstId>,
-}
-
-impl<'a> AstLowerer<'a> {
-    fn from_cst(session: &'a Session, file: FileId, source: &'a str, cst: &'a SyntaxTree) -> Self {
+impl<'a> CstToAst<'a> {
+    fn new(session: &'a Session, file: FileId, source: &'a str, cst: &'a SyntaxTree) -> Self {
         Self {
             session,
             file,
             source,
-            tokens: cst.tokens().to_vec(),
-            cst: Some(cst),
-            events: Vec::new(),
+            cst,
             diagnostics: Vec::new(),
-            pos: 0,
-            emit_events: false,
-            report_diagnostics: false,
-            cst_nodes: cst.nodes().map(|(id, node)| (id, node.kind())).collect(),
-            next_node: 0,
-            node_stack: Vec::new(),
-            last_finished_node: None,
         }
-    }
-
-    fn checkpoint(&self) -> LowererCheckpoint {
-        LowererCheckpoint {
-            pos: self.pos,
-            events_len: self.events.len(),
-            next_node: self.next_node,
-            node_stack_len: self.node_stack.len(),
-            last_finished_node: self.last_finished_node,
-        }
-    }
-
-    fn restore(&mut self, checkpoint: LowererCheckpoint) {
-        self.pos = checkpoint.pos;
-        self.events.truncate(checkpoint.events_len);
-        self.next_node = checkpoint.next_node;
-        self.node_stack.truncate(checkpoint.node_stack_len);
-        self.last_finished_node = checkpoint.last_finished_node;
-    }
-
-    fn start_node(&mut self, kind: SyntaxKind) -> CstId {
-        let cst_id = if self.cst_nodes.is_empty() {
-            CstId::new(self.next_node)
-        } else {
-            match self.cst_nodes.get(self.next_node).copied() {
-                Some((cst_id, cst_kind)) if cst_kind == kind => {
-                    self.next_node += 1;
-                    cst_id
-                }
-                Some((cst_id, _)) => self.node_stack.last().copied().unwrap_or(cst_id),
-                None => *self
-                    .node_stack
-                    .last()
-                    .expect("ICE: AST lowering visited past CST root scope"),
-            }
-        };
-
-        if self.cst_nodes.is_empty() {
-            self.next_node += 1;
-        }
-        self.node_stack.push(cst_id);
-        self.last_finished_node = None;
-
-        if self.emit_events {
-            self.events.push(Event::StartNode(kind));
-        }
-
-        cst_id
-    }
-
-    fn finish_node(&mut self) {
-        let cst_id = self
-            .node_stack
-            .pop()
-            .expect("ICE: parser finished a syntax node without starting one");
-        self.last_finished_node = Some(cst_id);
-
-        if self.emit_events {
-            self.events.push(Event::FinishNode);
-        }
-    }
-
-    fn current_cst_id(&self) -> CstId {
-        *self
-            .node_stack
-            .last()
-            .expect("ICE: parser built AST outside a syntax node")
-    }
-
-    fn completed_cst_id(&self) -> CstId {
-        self.last_finished_node
-            .expect("ICE: parser expected a completed syntax node")
-    }
-
-    fn sp<T>(&self, value: T, start: usize, end: usize) -> Spanned<T> {
-        sp(value, start, end, self.current_cst_id())
-    }
-
-    fn node<T>(
-        &mut self,
-        kind: SyntaxKind,
-        parse: impl FnOnce(&mut Self) -> Result<T, ParseError>,
-    ) -> Result<T, ParseError> {
-        self.start_node(kind);
-        let result = parse(self);
-        self.finish_node();
-        result
-    }
-
-    fn node_value<T>(&mut self, kind: SyntaxKind, parse: impl FnOnce(&mut Self) -> T) -> T {
-        self.start_node(kind);
-        let value = parse(self);
-        self.finish_node();
-        value
-    }
-
-    fn significant_index_from(&self, start: usize, offset: usize) -> Option<usize> {
-        let mut seen = 0usize;
-        for (index, token) in self.tokens.iter().enumerate().skip(start) {
-            if token.kind.is_trivia() {
-                continue;
-            }
-
-            if seen == offset {
-                return Some(index);
-            }
-
-            seen += 1;
-        }
-
-        None
-    }
-
-    fn current_index(&self) -> usize {
-        self.significant_index_from(self.pos, 0)
-            .unwrap_or_else(|| self.tokens.len().saturating_sub(1))
-    }
-
-    fn previous_significant_index(&self, before: usize) -> Option<usize> {
-        self.tokens[..before.min(self.tokens.len())]
-            .iter()
-            .enumerate()
-            .rev()
-            .find(|(_, token)| !token.kind.is_trivia())
-            .map(|(index, _)| index)
-    }
-
-    fn peek_kind(&self, offset: usize) -> Option<&Token> {
-        self.significant_index_from(self.pos, offset)
-            .map(|index| &self.tokens[index].kind)
-    }
-
-    fn emit_remaining_tokens(&mut self) {
-        while self.pos < self.tokens.len() {
-            if self.emit_events {
-                self.events.push(Event::Token(self.pos));
-            }
-            self.pos += 1;
-        }
-    }
-
-    fn current(&self) -> &PosToken {
-        &self.tokens[self.current_index()]
-    }
-
-    fn current_kind(&self) -> &Token {
-        &self.current().kind
-    }
-
-    fn current_start(&self) -> usize {
-        self.current().start()
-    }
-
-    fn at(&self, token: &Token) -> bool {
-        std::mem::discriminant(self.current_kind()) == std::mem::discriminant(token)
-    }
-
-    fn at_eof(&self) -> bool {
-        matches!(self.current_kind(), Token::Eof)
-    }
-
-    fn advance(&mut self) -> PosToken {
-        if self.pos >= self.tokens.len() {
-            return *self
-                .tokens
-                .last()
-                .expect("ICE: parser token stream must contain EOF");
-        }
-
-        let index = self.current_index();
-        for token_index in self.pos..=index {
-            if self.emit_events {
-                self.events.push(Event::Token(token_index));
-            }
-        }
-        self.pos = index + 1;
-
-        self.tokens[index]
-    }
-
-    fn current_span(&self) -> FileSpan {
-        let token = self.current();
-        FileSpan::new(self.file, mk_span(token.start(), token.end()))
-    }
-
-    fn error(&self, message: impl Into<String>) -> ParseError {
-        ParseError {
-            span: self.current_span(),
-            message: message.into(),
-        }
-    }
-
-    fn push_error_diagnostic(&mut self, error: &ParseError) -> Diagnostic {
-        let diagnostic = error.to_diagnostic();
-        if self.report_diagnostics {
-            self.diagnostics.push(diagnostic.clone());
-        }
-        diagnostic
     }
 
     pub(super) fn intern(&self, text: &str) -> Symbol {
         self.session.intern(text)
     }
 
-    fn token_source_text(&self, token: &PosToken) -> &str {
-        token.source_text(self.source)
+    fn sp_between<T>(&self, node: CstId, value: T, start: usize, end: usize) -> Spanned<T> {
+        sp(value, start, end, node)
     }
 
-    fn current_source_text(&self) -> &str {
-        self.token_source_text(self.current())
+    fn node_span(&self, node: CstId) -> Span {
+        self.cst.node(node).span()
+    }
+
+    fn children(&self, node: CstId) -> Vec<NodeOrToken> {
+        self.cst.children(node).to_vec()
+    }
+
+    fn child_nodes(&self, node: CstId) -> Vec<CstId> {
+        self.cst
+            .children(node)
+            .iter()
+            .filter_map(|child| match child {
+                NodeOrToken::Node(id) => Some(*id),
+                NodeOrToken::Token(_) => None,
+            })
+            .collect()
+    }
+
+    fn child_nodes_of_kind(&self, node: CstId, kind: SyntaxKind) -> Vec<CstId> {
+        self.child_nodes(node)
+            .into_iter()
+            .filter(|child| self.cst.node(*child).kind() == kind)
+            .collect()
+    }
+
+    fn first_child_of_kind(&self, node: CstId, kind: SyntaxKind) -> Option<CstId> {
+        self.child_nodes(node)
+            .into_iter()
+            .find(|child| self.cst.node(*child).kind() == kind)
+    }
+
+    fn first_type_child(&self, node: CstId) -> Option<CstId> {
+        self.child_nodes(node)
+            .into_iter()
+            .find(|child| self.node_is_type_like(*child))
+    }
+
+    fn last_type_child(&self, node: CstId) -> Option<CstId> {
+        self.child_nodes(node)
+            .into_iter()
+            .rev()
+            .find(|child| self.node_is_type_like(*child))
+    }
+
+    fn child_exprs(&self, node: CstId) -> Vec<CstId> {
+        self.child_nodes(node)
+            .into_iter()
+            .filter(|child| self.node_is_expr_like(*child))
+            .collect()
+    }
+
+    fn child_patterns(&self, node: CstId) -> Vec<CstId> {
+        self.child_nodes(node)
+            .into_iter()
+            .filter(|child| self.node_is_pattern_like(*child))
+            .collect()
+    }
+
+    fn node_is_type_like(&self, node: CstId) -> bool {
+        matches!(
+            self.cst.node(node).kind(),
+            SyntaxKind::Type
+                | SyntaxKind::QualifiedType
+                | SyntaxKind::TypeArrow
+                | SyntaxKind::TypeApp
+                | SyntaxKind::TypeAtom
+                | SyntaxKind::NamePath
+        )
+    }
+
+    fn node_is_expr_like(&self, node: CstId) -> bool {
+        matches!(
+            self.cst.node(node).kind(),
+            SyntaxKind::Expr
+                | SyntaxKind::LambdaExpr
+                | SyntaxKind::LetExpr
+                | SyntaxKind::DoExpr
+                | SyntaxKind::IfExpr
+                | SyntaxKind::CaseExpr
+                | SyntaxKind::OpChain
+                | SyntaxKind::OpOperand
+                | SyntaxKind::AppExpr
+                | SyntaxKind::AtomExpr
+                | SyntaxKind::ParenExpr
+                | SyntaxKind::ListExpr
+                | SyntaxKind::OperatorSection
+                | SyntaxKind::NamePath
+        )
+    }
+
+    fn node_is_pattern_like(&self, node: CstId) -> bool {
+        matches!(
+            self.cst.node(node).kind(),
+            SyntaxKind::Pattern
+                | SyntaxKind::PatternHead
+                | SyntaxKind::PatternArg
+                | SyntaxKind::NamePath
+        )
+    }
+
+    fn node_has_token(&self, node: CstId, kind: Token) -> bool {
+        self.cst.children(node).iter().any(|child| match child {
+            NodeOrToken::Token(token) => self.cst.token(*token).kind == kind,
+            NodeOrToken::Node(_) => false,
+        })
+    }
+
+    fn direct_tokens(&self, node: CstId) -> Vec<TokenId> {
+        self.cst
+            .children(node)
+            .iter()
+            .filter_map(|child| match child {
+                NodeOrToken::Token(id) => Some(*id),
+                NodeOrToken::Node(_) => None,
+            })
+            .collect()
+    }
+
+    fn direct_meaningful_tokens(&self, node: CstId) -> Vec<TokenId> {
+        self.direct_tokens(node)
+            .into_iter()
+            .filter(|token| self.token_is_meaningful(*token))
+            .collect()
+    }
+
+    fn first_meaningful_token(&self, node: CstId) -> Option<TokenId> {
+        for child in self.cst.children(node) {
+            match child {
+                NodeOrToken::Node(id) => {
+                    if let Some(token) = self.first_meaningful_token(*id) {
+                        return Some(token);
+                    }
+                }
+                NodeOrToken::Token(id) if self.token_is_meaningful(*id) => return Some(*id),
+                NodeOrToken::Token(_) => {}
+            }
+        }
+        None
+    }
+
+    fn last_meaningful_token(&self, node: CstId) -> Option<TokenId> {
+        for child in self.cst.children(node).iter().rev() {
+            match child {
+                NodeOrToken::Node(id) => {
+                    if let Some(token) = self.last_meaningful_token(*id) {
+                        return Some(token);
+                    }
+                }
+                NodeOrToken::Token(id) if self.token_is_meaningful(*id) => return Some(*id),
+                NodeOrToken::Token(_) => {}
+            }
+        }
+        None
+    }
+
+    fn following_significant_start_after_node(&self, node: CstId) -> usize {
+        let Some(last) = self.last_meaningful_token(node) else {
+            return self.node_span(node).end as usize;
+        };
+
+        self.cst
+            .tokens()
+            .iter()
+            .skip(last.index() + 1)
+            .find(|token| !token.kind.is_trivia())
+            .map_or(self.node_span(node).end as usize, PosToken::start)
+    }
+
+    fn token_is_meaningful(&self, token: TokenId) -> bool {
+        token_is_meaningful(self.cst.token(token))
+    }
+
+    fn token_text(&self, token: TokenId) -> &str {
+        self.cst.token(token).source_text(self.source)
+    }
+
+    fn token_span(&self, token: TokenId) -> Span {
+        let token = self.cst.token(token);
+        mk_span(token.start(), token.end())
+    }
+
+    fn token_file_span(&self, token: TokenId) -> FileSpan {
+        FileSpan::new(self.file, self.token_span(token))
     }
 
     fn spanned_source_text<T>(&self, spanned: &Spanned<T>) -> &str {
         self.source.get(spanned.1.to_usize_range()).unwrap_or("")
     }
 
-    fn name_ref_source_text(&self, name_ref: &Spanned<NameRef>) -> &str {
-        self.spanned_source_text(name_ref)
-    }
-
-    fn name_ref_last_source_text(&self, name_ref: &Spanned<NameRef>) -> &str {
-        self.name_ref_source_text(name_ref)
-            .rsplit('.')
-            .next()
-            .unwrap_or("")
-    }
-
-    fn describe_current(&self) -> String {
-        match self.current_kind() {
-            Token::Ident => format!("identifier `{}`", self.current_source_text()),
-            Token::UpperIdent => format!("constructor `{}`", self.current_source_text()),
-            Token::Operator => format!("operator `{}`", self.current_source_text()),
-            Token::ReservedOp => format!("reserved operator `{}`", self.current_source_text()),
+    fn describe_token(&self, token: TokenId) -> String {
+        match self.cst.token(token).kind {
+            Token::Ident => format!("identifier `{}`", self.token_text(token)),
+            Token::UpperIdent => format!("constructor `{}`", self.token_text(token)),
+            Token::Operator => format!("operator `{}`", self.token_text(token)),
+            Token::ReservedOp => format!("reserved operator `{}`", self.token_text(token)),
             Token::Backtick => "`".to_string(),
-            Token::Int => format!("integer literal `{}`", self.current_source_text()),
-            Token::Float => format!("float literal `{}`", self.current_source_text()),
-            Token::Char => format!("char literal `{}`", self.current_source_text()),
+            Token::Int => format!("integer literal `{}`", self.token_text(token)),
+            Token::Float => format!("float literal `{}`", self.token_text(token)),
+            Token::Char => format!("char literal `{}`", self.token_text(token)),
             Token::Str => "string literal".to_string(),
             other => format!("{other:?}"),
         }
     }
 
-    fn expect(&mut self, token: &Token) -> Result<PosToken, ParseError> {
-        if self.at(token) {
-            Ok(self.advance())
-        } else {
-            Err(self.error(format!(
-                "expected {:?}, got {}",
-                token,
-                self.describe_current()
-            )))
+    fn error_at_token(&self, token: TokenId, message: impl Into<String>) -> ParseError {
+        ParseError {
+            span: self.token_file_span(token),
+            message: message.into(),
         }
     }
 
-    fn expect_ident(&mut self) -> Result<NameSpan, ParseError> {
-        match self.current_kind() {
-            Token::Ident => {
-                let token = self.advance();
-                let name = self.intern(self.token_source_text(&token));
-                Ok((name, token.start(), token.end()))
-            }
-            _ => Err(self.error(format!(
-                "expected identifier, got {}",
-                self.describe_current()
-            ))),
+    fn error_at_node(&self, node: CstId, message: impl Into<String>) -> ParseError {
+        ParseError {
+            span: FileSpan::new(self.file, self.node_span(node)),
+            message: message.into(),
         }
     }
 
-    fn expect_upper(&mut self) -> Result<NameSpan, ParseError> {
-        match self.current_kind() {
-            Token::UpperIdent => {
-                let token = self.advance();
-                let name = self.intern(self.token_source_text(&token));
-                Ok((name, token.start(), token.end()))
-            }
-            _ => Err(self.error(format!(
-                "expected constructor, got {}",
-                self.describe_current()
-            ))),
-        }
+    fn record_error(&mut self, error: &ParseError) {
+        self.diagnostics.push(error.to_diagnostic());
     }
 
-    fn expect_module_name_segment(&mut self) -> Result<Symbol, ParseError> {
-        match self.current_kind() {
-            Token::Ident | Token::UpperIdent => {
-                let token = self.advance();
-                let name = self.intern(self.token_source_text(&token));
-                Ok(name)
-            }
-            _ => Err(self.error(format!(
-                "expected module name, got {}",
-                self.describe_current()
-            ))),
-        }
-    }
-
-    fn expect_import_name_segment(&mut self) -> Result<NameSpan, ParseError> {
-        match self.current_kind() {
-            Token::Ident | Token::UpperIdent => {
-                let token = self.advance();
-                let name = self.intern(self.token_source_text(&token));
-                Ok((name, token.start(), token.end()))
-            }
-            _ => Err(self.error(format!(
-                "expected import name, got {}",
-                self.describe_current()
-            ))),
-        }
-    }
-
-    fn fixed_operator_text(token: &Token) -> Option<&'static str> {
-        match token {
-            Token::Plus => Some("+"),
-            Token::Minus => Some("-"),
-            Token::Star => Some("*"),
-            Token::Slash => Some("/"),
-            Token::Percent => Some("%"),
-            Token::EqEq => Some("=="),
-            Token::Less => Some("<"),
-            Token::Greater => Some(">"),
-            Token::LessEq => Some("<="),
-            Token::GreaterEq => Some(">="),
-            Token::Cons => Some("::"),
-            Token::Dot => Some("."),
-            _ => None,
-        }
-    }
-
-    fn current_operator_text(&self) -> Option<(&str, bool)> {
-        match self.current_kind() {
-            Token::Operator => Some((self.current_source_text(), false)),
-            token => {
-                Self::fixed_operator_text(token).map(|text| (text, matches!(token, Token::Cons)))
-            }
-        }
-    }
-
-    fn current_operator_symbol(&self) -> Option<(Symbol, bool)> {
-        self.current_operator_text()
-            .map(|(text, is_cons_syntax)| (self.intern(text), is_cons_syntax))
-    }
-
-    fn is_infix_operator(&self) -> bool {
-        self.current_operator_symbol().is_some() || self.starts_backticked_operator_name()
-    }
-
-    fn expect_operator_symbol(&mut self, allow_cons_syntax: bool) -> Result<NameSpan, ParseError> {
-        let Some((symbol, is_cons_syntax)) = self.current_operator_symbol() else {
-            return Err(self.error(format!(
-                "expected operator, got {}",
-                self.describe_current()
-            )));
-        };
-
-        if is_cons_syntax && !allow_cons_syntax {
-            return Err(self.error("list cons `::` is reserved syntax, not an operator name"));
+    fn node_has_diagnostics(&self, node: CstId) -> bool {
+        if !self.cst.node(node).diagnostics().is_empty() {
+            return true;
         }
 
-        let text = self
-            .current_operator_text()
-            .map(|(text, _)| text)
-            .expect("ICE: current operator text disappeared after symbol lookup");
-        let is_reserved_constructor_operator = text.starts_with(':') && !is_cons_syntax;
-
-        if is_reserved_constructor_operator {
-            return Err(self.error(
-                "operators starting with `:` are reserved for future constructor operators",
-            ));
-        }
-
-        let token = self.advance();
-        Ok((symbol, token.start(), token.end()))
+        self.child_nodes(node)
+            .into_iter()
+            .any(|child| self.node_has_diagnostics(child))
     }
 
-    fn parse_parenthesized_operator_name(&mut self) -> Result<NameSpan, ParseError> {
-        let start = self.expect(&Token::LParen)?.start();
-        let (symbol, _, _) = self.expect_operator_symbol(false)?;
-        let end = self.expect(&Token::RParen)?.end();
-        Ok((symbol, start, end))
+    fn required_child(
+        &self,
+        node: CstId,
+        child: Option<CstId>,
+        message: &'static str,
+    ) -> Result<CstId, ParseError> {
+        child.ok_or_else(|| self.error_at_node(node, message))
     }
 
-    fn starts_parenthesized_operator_name(&self) -> bool {
-        if !self.at(&Token::LParen) {
-            return false;
-        }
-
-        self.peek_kind(1).is_some_and(|kind| match kind {
-            Token::Operator => true,
-            other => Self::fixed_operator_text(other)
-                .is_some_and(|text| text != "::" && !text.starts_with(':')),
-        }) && self
-            .peek_kind(2)
-            .is_some_and(|kind| matches!(kind, Token::RParen))
+    fn required_token(
+        &self,
+        node: CstId,
+        token: Option<TokenId>,
+        message: &'static str,
+    ) -> Result<TokenId, ParseError> {
+        token.ok_or_else(|| self.error_at_node(node, message))
     }
 
-    fn expect_value_name(&mut self) -> Result<NameSpan, ParseError> {
-        if self.starts_parenthesized_operator_name() {
-            self.parse_parenthesized_operator_name()
-        } else {
-            self.expect_ident()
-        }
+    fn symbol_from_token(&self, token: TokenId) -> Symbol {
+        self.intern(self.token_text(token))
     }
 
-    fn parse_import_name(&mut self) -> Result<Spanned<Symbol>, ParseError> {
-        let (symbol, start, end) = if self.starts_parenthesized_operator_name() {
-            self.parse_parenthesized_operator_name()?
-        } else {
-            self.expect_import_name_segment()?
-        };
-
-        Ok(self.sp(symbol, start, end))
-    }
-
-    fn expect_binder(&mut self) -> Result<NameSpan, ParseError> {
-        match self.current_kind() {
-            Token::Ident => {
-                let token = self.advance();
-                let name = self.intern(self.token_source_text(&token));
-                Ok((name, token.start(), token.end()))
-            }
-            Token::Underscore => {
-                let underscore = self.intern("_");
-                let token = self.advance();
-                Ok((underscore, token.start(), token.end()))
-            }
-            _ => Err(self.error(format!("expected binder, got {}", self.describe_current()))),
-        }
-    }
-
-    fn skip_separators(&mut self) {
-        while matches!(self.current_kind(), Token::VSemi | Token::Semicolon) {
-            self.advance();
-        }
-    }
-
-    fn is_final_module_vclose(&self) -> bool {
-        if !self.at(&Token::VClose) {
-            return false;
-        }
-
-        let mut offset = 0usize;
-        loop {
-            match self.peek_kind(offset) {
-                Some(Token::VClose | Token::VSemi | Token::Semicolon) => offset += 1,
-                Some(Token::Eof) | None => return true,
-                Some(_) => return false,
-            }
-        }
-    }
-
-    fn skip_top_level_junk(&mut self) {
-        loop {
-            self.skip_separators();
-            if self.at(&Token::VClose) && !self.is_final_module_vclose() {
-                self.advance();
-                continue;
-            }
-            break;
-        }
-    }
-
-    fn layout_depth_before_current(&self) -> usize {
-        self.tokens[..self.current_index().min(self.tokens.len())]
-            .iter()
-            .fold(0usize, |depth, token| match token.kind {
-                Token::VOpen => depth + 1,
-                Token::VClose => depth.saturating_sub(1),
-                _ => depth,
-            })
-    }
-
-    fn is_top_level_sync_keyword(&self) -> bool {
-        matches!(
-            self.current_kind(),
-            Token::Data
-                | Token::Type
-                | Token::Sig
-                | Token::Class
-                | Token::Instance
-                | Token::Import
-                | Token::Infixl
-                | Token::Infixr
-                | Token::Infix
+    fn symbol_span_from_token(&self, token: TokenId, cst_id: CstId) -> Spanned<Symbol> {
+        let source_token = self.cst.token(token);
+        sp(
+            self.symbol_from_token(token),
+            source_token.start(),
+            source_token.end(),
+            cst_id,
         )
     }
 
-    fn recover_top_level(&mut self) {
-        let mut depth = self.layout_depth_before_current();
-        let start_pos = self.pos;
+    fn binder_span_from_token(&self, token: TokenId, cst_id: CstId) -> Spanned<Symbol> {
+        let source_token = self.cst.token(token);
+        let symbol = if source_token.kind == Token::Underscore {
+            self.intern("_")
+        } else {
+            self.symbol_from_token(token)
+        };
+        sp(symbol, source_token.start(), source_token.end(), cst_id)
+    }
 
-        while !self.at_eof() {
-            match self.current_kind() {
-                Token::VOpen => {
-                    depth += 1;
-                    self.advance();
-                }
-                Token::VClose => {
-                    if depth <= 1 {
-                        return;
-                    }
+    fn lower_value_name_from_children(
+        &self,
+        node: CstId,
+        children: &[NodeOrToken],
+        index: &mut usize,
+    ) -> Result<Spanned<Symbol>, ParseError> {
+        self.skip_trivia_children(children, index);
+        let Some(child) = children.get(*index).copied() else {
+            return Err(self.error_at_node(node, "expected value name"));
+        };
 
-                    depth -= 1;
-                    self.advance();
-                }
-                Token::VSemi | Token::Semicolon if depth <= 1 => {
-                    self.advance();
-                    return;
-                }
-                _ if self.pos != start_pos && depth <= 1 && self.is_top_level_sync_keyword() => {
-                    return;
-                }
-                _ => {
-                    self.advance();
-                }
+        match child {
+            NodeOrToken::Token(token) if self.cst.token(token).kind == Token::Ident => {
+                *index += 1;
+                Ok(self.symbol_span_from_token(token, node))
+            }
+            NodeOrToken::Token(token) if self.cst.token(token).kind == Token::LParen => {
+                let start = self.cst.token(token).start();
+                *index += 1;
+                self.skip_trivia_children(children, index);
+                let op = self.required_child_token(children.get(*index).copied(), node)?;
+                let symbol = self.operator_symbol_from_token(op, false)?;
+                *index += 1;
+                self.skip_trivia_children(children, index);
+                let end = if let Some(NodeOrToken::Token(close)) = children.get(*index).copied()
+                    && self.cst.token(close).kind == Token::RParen
+                {
+                    *index += 1;
+                    self.cst.token(close).end()
+                } else {
+                    self.cst.token(op).end()
+                };
+                Ok(sp(symbol, start, end, node))
+            }
+            _ => Err(self.error_at_node(node, "expected value name")),
+        }
+    }
+
+    fn lower_import_name_from_children(
+        &self,
+        node: CstId,
+        children: &[NodeOrToken],
+        index: &mut usize,
+    ) -> Result<Spanned<Symbol>, ParseError> {
+        self.skip_trivia_children(children, index);
+        let Some(child) = children.get(*index).copied() else {
+            return Err(self.error_at_node(node, "expected import name"));
+        };
+
+        match child {
+            NodeOrToken::Token(token)
+                if matches!(self.cst.token(token).kind, Token::Ident | Token::UpperIdent) =>
+            {
+                *index += 1;
+                Ok(self.symbol_span_from_token(token, node))
+            }
+            NodeOrToken::Token(token) if self.cst.token(token).kind == Token::LParen => {
+                self.lower_value_name_from_children(node, children, index)
+            }
+            _ => Err(self.error_at_node(node, "expected import name")),
+        }
+    }
+
+    fn required_child_token(
+        &self,
+        child: Option<NodeOrToken>,
+        node: CstId,
+    ) -> Result<TokenId, ParseError> {
+        match child {
+            Some(NodeOrToken::Token(token)) => Ok(token),
+            _ => Err(self.error_at_node(node, "expected token")),
+        }
+    }
+
+    fn skip_trivia_children(&self, children: &[NodeOrToken], index: &mut usize) {
+        while let Some(NodeOrToken::Token(token)) = children.get(*index) {
+            if !self.cst.token(*token).kind.is_trivia() {
+                break;
+            }
+            *index += 1;
+        }
+    }
+
+    fn skip_body_separators(&self, children: &[NodeOrToken], index: &mut usize) {
+        loop {
+            self.skip_trivia_children(children, index);
+            let Some(NodeOrToken::Token(token)) = children.get(*index) else {
+                return;
+            };
+            if matches!(
+                self.cst.token(*token).kind,
+                Token::VOpen | Token::VSemi | Token::Semicolon
+            ) {
+                *index += 1;
+            } else {
+                return;
             }
         }
     }
+}
 
-    fn recover_top_level_as_error_node(&mut self, error: &ParseError) {
-        let diagnostic = self.push_error_diagnostic(error);
-        self.start_node(SyntaxKind::Error);
-        if self.emit_events {
-            self.events.push(Event::Error(diagnostic));
-        }
-        self.recover_top_level();
-        self.finish_node();
-    }
+fn token_is_meaningful(token: &PosToken) -> bool {
+    !token.kind.is_trivia() && !token.is_synthetic() && !matches!(token.kind, Token::Eof)
 }
 
 mod decl;
@@ -635,18 +470,17 @@ pub fn lower(session: &Session, parsed: &ParsedCst, source: &str) -> ParsedModul
     }
 
     let cst = parsed.cst.clone();
-    let (imports, defs) = {
-        let mut lowerer = AstLowerer::from_cst(session, parsed.file, source, &cst);
-        let (imports, defs) = lowerer.parse_module_surface();
-        if !lowerer.cst_nodes.is_empty() {
-            assert_eq!(
-                lowerer.next_node,
-                lowerer.cst_nodes.len(),
-                "ICE: AST lowering did not visit every CST node"
-            );
-        }
-        (imports, defs)
+    let (imports, defs, diagnostics) = {
+        let mut lowerer = CstToAst::new(session, parsed.file, source, &cst);
+        let (imports, defs) = lowerer.lower_module_surface();
+        (imports, defs, lowerer.diagnostics)
     };
+
+    if parsed.diagnostics.is_empty() {
+        for diagnostic in diagnostics {
+            session.diagnostics().push(diagnostic);
+        }
+    }
 
     ParsedModule {
         file: parsed.file,

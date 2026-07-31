@@ -2,12 +2,12 @@
 
 use super::*;
 
-fn parse_string_literal(slice: &str) -> Option<String> {
+fn cook_string_literal(slice: &str) -> Option<String> {
     let body = slice.strip_prefix('"')?.strip_suffix('"')?;
     decode_escaped_body(body)
 }
 
-fn parse_char_literal(slice: &str) -> Option<char> {
+fn cook_char_literal(slice: &str) -> Option<char> {
     let body = slice.strip_prefix('\'')?.strip_suffix('\'')?;
     let decoded = decode_escaped_body(body)?;
     let mut chars = decoded.chars();
@@ -75,39 +75,37 @@ fn decode_unicode_escape(chars: &mut std::str::Chars<'_>) -> Option<char> {
     char::from_u32(scalar)
 }
 
-impl AstLowerer<'_> {
-    fn literal_error(&self, token: &PosToken) -> ParseError {
+impl CstToAst<'_> {
+    fn literal_error(&self, token: TokenId) -> ParseError {
         ParseError {
-            span: FileSpan::new(self.file, mk_span(token.start(), token.end())),
-            message: format!("unexpected character '{}'", self.token_source_text(token)),
+            span: self.token_file_span(token),
+            message: format!("unexpected character '{}'", self.token_text(token)),
         }
     }
 
-    fn push_literal_error(&self, token: &PosToken) -> ParseError {
+    fn push_literal_error(&mut self, token: TokenId) -> ParseError {
         let error = self.literal_error(token);
-        self.session.diagnostics().push(error.to_diagnostic());
+        self.diagnostics.push(error.to_diagnostic());
         error
     }
 
-    pub(super) fn parse_int_literal(&self, token: &PosToken) -> Result<i64, ParseError> {
-        self.token_source_text(token)
+    pub(super) fn lower_int_literal(&mut self, token: TokenId) -> Result<i64, ParseError> {
+        self.token_text(token)
             .parse::<i64>()
             .map_err(|_| self.push_literal_error(token))
     }
 
-    pub(super) fn parse_float_literal(&self, token: &PosToken) -> Result<f64, ParseError> {
-        self.token_source_text(token)
+    pub(super) fn lower_float_literal(&mut self, token: TokenId) -> Result<f64, ParseError> {
+        self.token_text(token)
             .parse::<f64>()
             .map_err(|_| self.push_literal_error(token))
     }
 
-    pub(super) fn parse_char_literal(&self, token: &PosToken) -> Result<char, ParseError> {
-        parse_char_literal(self.token_source_text(token))
-            .ok_or_else(|| self.push_literal_error(token))
+    pub(super) fn lower_char_literal(&mut self, token: TokenId) -> Result<char, ParseError> {
+        cook_char_literal(self.token_text(token)).ok_or_else(|| self.push_literal_error(token))
     }
 
-    pub(super) fn parse_string_literal(&self, token: &PosToken) -> Result<String, ParseError> {
-        parse_string_literal(self.token_source_text(token))
-            .ok_or_else(|| self.push_literal_error(token))
+    pub(super) fn lower_string_literal(&mut self, token: TokenId) -> Result<String, ParseError> {
+        cook_string_literal(self.token_text(token)).ok_or_else(|| self.push_literal_error(token))
     }
 }

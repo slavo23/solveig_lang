@@ -1,6 +1,6 @@
-Module @0..165
+Module @0..166
   VOpen @0..0 line=0 col=0 synthetic text=""
-  DefinitionList @0..165
+  DefinitionList @0..166
     FixityDef @0..14
       Infixl @0..6 line=0 col=0 text="infixl"
       Whitespace @6..7 line=0 col=6 text=" "
@@ -93,13 +93,13 @@ Module @0..165
         RParen @87..88 line=6 col=10 text=")"
     Newline @88..89 line=6 col=11 text="\n"
     VSemi @89..89 line=7 col=0 synthetic text=""
-    FunctionDef @89..165
+    FunctionDef @89..166
       Ident @89..96 line=7 col=0 text="pattern"
       Whitespace @96..97 line=7 col=7 text=" "
       Eq @97..98 line=7 col=8 text="="
       Newline @98..99 line=7 col=9 text="\n"
       Whitespace @99..103 line=8 col=0 text="    "
-      CaseExpr @103..165
+      CaseExpr @103..166
         Case @103..107 line=8 col=4 text="case"
         Whitespace @107..108 line=8 col=8 text=" "
         AppExpr @108..118

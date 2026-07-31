@@ -1,6 +1,6 @@
-Module @0..249
+Module @0..250
   VOpen @0..0 line=0 col=0 synthetic text=""
-  DefinitionList @0..249
+  DefinitionList @0..250
     DataDef @0..39
       Data @0..4 line=0 col=0 text="data"
       Whitespace @4..5 line=0 col=4 text=" "
@@ -26,13 +26,13 @@ Module @0..249
           UpperIdent @35..39 line=0 col=35 text="Tree"
     Newline @39..41 line=0 col=39 text="\n\n"
     VSemi @41..41 line=2 col=0 synthetic text=""
-    FunctionDef @41..249
+    FunctionDef @41..250
       Ident @41..45 line=2 col=0 text="main"
       Whitespace @45..46 line=2 col=4 text=" "
       Eq @46..47 line=2 col=5 text="="
       Newline @47..48 line=2 col=6 text="\n"
       Whitespace @48..52 line=3 col=0 text="    "
-      CaseExpr @52..249
+      CaseExpr @52..250
         Case @52..56 line=3 col=4 text="case"
         Whitespace @56..57 line=3 col=8 text=" "
         AppExpr @57..81
@@ -78,7 +78,7 @@ Module @0..249
             Ident @107..112 line=4 col=22 text="value"
         Newline @112..113 line=4 col=27 text="\n"
         Whitespace @113..119 line=5 col=0 text="      "
-        CaseArm @119..249
+        CaseArm @119..250
           Pipe @119..120 line=5 col=6 text="|"
           Whitespace @120..121 line=5 col=7 text=" "
           PatternHead @121..145
@@ -101,7 +101,7 @@ Module @0..249
           FatArrow @146..148 line=5 col=33 text="=>"
           Newline @148..149 line=5 col=35 text="\n"
           Whitespace @149..161 line=6 col=0 text="            "
-          CaseExpr @161..249
+          CaseExpr @161..250
             Case @161..165 line=6 col=12 text="case"
             Whitespace @165..166 line=6 col=16 text=" "
             NamePath @166..171

@@ -1,6 +1,6 @@
 use super::*;
 
-fn parse_test_source(source: &str) -> ParsedModule {
+fn lower_test_source(source: &str) -> ParsedModule {
     let session = Session::new();
     let file = session.add_file("test.sv", source);
 
@@ -9,7 +9,7 @@ fn parse_test_source(source: &str) -> ParsedModule {
 
 #[test]
 fn lowered_ast_nodes_point_into_cst_arena() {
-    let parsed = parse_test_source("main : IO ()\nmain = do\n    printLine \"ok\"\n");
+    let parsed = lower_test_source("main : IO ()\nmain = do\n    printLine \"ok\"\n");
     let signature = &parsed.defs[0];
     let main_function = &parsed.defs[1];
 
@@ -28,7 +28,7 @@ fn lowered_ast_nodes_point_into_cst_arena() {
 
 #[test]
 fn doc_comment_lowering_uses_explicit_cst_attachments() {
-    let parsed = parse_test_source(
+    let parsed = lower_test_source(
         "\
 -- ordinary note
 -- | Attached docs.

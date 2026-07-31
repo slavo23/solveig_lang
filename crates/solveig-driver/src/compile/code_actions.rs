@@ -72,7 +72,6 @@ pub(super) fn resolve_code_actions(
             continue;
         }
 
-        let source_map = session.source_map();
         let name_symbol = session.intern(name);
         let mut candidates = apis
             .iter()
@@ -83,26 +82,30 @@ pub(super) fn resolve_code_actions(
         candidates.sort_by_key(|(module_name, _)| module_name.as_string(session));
         let mut seen_modules = Vec::new();
 
-        for (module_name, _) in candidates {
-            seen_modules.push(module_name.as_string(session));
-            if let Some(action) =
-                missing_import_action(session, &source_map, parsed, *span, module_name, name)
-            {
-                out.push(action);
+        {
+            let source_map = session.source_map();
+            for (module_name, _) in candidates {
+                seen_modules.push(module_name.as_string(session));
+                if let Some(action) =
+                    missing_import_action(session, &source_map, parsed, *span, module_name, name)
+                {
+                    out.push(action);
+                }
             }
         }
         let mut excluded_modules = vec![current_module.as_string(session)];
         excluded_modules.extend(seen_modules);
 
-        out.extend(scanned_missing_import_actions(
+        for module_text in scanned_import_modules_exporting_name(
+            session,
             source_root,
             source_provider,
-            parsed,
-            *span,
             name,
             *kind,
             &excluded_modules,
-        ));
+        ) {
+            out.push(new_import_action(parsed, *span, &module_text, name));
+        }
     }
 
     out
@@ -265,15 +268,14 @@ fn missing_import_action(
     Some(new_import_action(parsed, trigger, &module_text, name))
 }
 
-fn scanned_missing_import_actions(
+fn scanned_import_modules_exporting_name(
+    session: &Session,
     source_root: &Path,
     source_provider: &SourceProvider,
-    parsed: &ParsedModule,
-    trigger: FileSpan,
     name: &str,
     kind: ResolveNameKind,
     excluded_modules: &[String],
-) -> Vec<SourceCodeAction> {
+) -> Vec<String> {
     let mut files = Vec::new();
     collect_solveig_files(source_root, &mut files);
 
@@ -282,7 +284,7 @@ fn scanned_missing_import_actions(
 
     for file in files {
         let Some(module_text) =
-            scanned_module_exports_name(source_root, source_provider, &file, name, kind)
+            scanned_module_exports_name(session, source_root, source_provider, &file, name, kind)
         else {
             continue;
         };
@@ -291,13 +293,14 @@ fn scanned_missing_import_actions(
         }
 
         seen.push(module_text.clone());
-        out.push(new_import_action(parsed, trigger, &module_text, name));
+        out.push(module_text);
     }
 
     out
 }
 
 fn scanned_module_exports_name(
+    session: &Session,
     source_root: &Path,
     source_provider: &SourceProvider,
     file: &Path,
@@ -305,16 +308,16 @@ fn scanned_module_exports_name(
     kind: ResolveNameKind,
 ) -> Option<String> {
     let source = source_provider.read_to_string(file).ok()?;
-    let session = Session::new();
-    let module_name = crate::project::module_name_from_file(&session, source_root, file).ok()?;
-    let file_id = session.add_file(file.to_path_buf(), source.clone());
-    let parsed = solveig_syntax::lowering::parse_source(&session, file_id, &source);
-    if session.diagnostics().has_errors() {
-        return None;
+    let module_name = crate::project::module_name_from_file(session, source_root, file).ok()?;
+    let file_id = {
+        let source_map = session.source_map();
+        source_lookup::source_file_id_in_source_map(&source_map, file)
     }
+    .unwrap_or_else(|| session.add_file(file.to_path_buf(), source.clone()));
+    let parsed = solveig_syntax::lowering::parse_source(session, file_id, &source);
 
     let api = build_module_api(ModuleId(0), &parsed).ok()?;
-    api_exports_name_text(&session, &api, name, kind).then(|| module_name.as_string(&session))
+    api_exports_name_text(session, &api, name, kind).then(|| module_name.as_string(session))
 }
 
 fn collect_solveig_files(root: &Path, out: &mut Vec<PathBuf>) {

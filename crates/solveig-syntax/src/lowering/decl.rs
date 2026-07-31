@@ -1,404 +1,578 @@
-//! Declaration parsing for modules, data types, classes, instances, and fixities.
-//! Parsed declarations feed fixity resolution and project API construction.
+//! Declaration lowering for modules, data types, classes, instances, and fixities.
+//! Lowered declarations feed fixity resolution and project API construction.
 
 use super::*;
 
-impl AstLowerer<'_> {
-    pub(super) fn parse_func_or_sig(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        let kind = self.current_value_definition_kind();
-        self.node(kind, |this| {
-            let (name, start, end) = this.expect_value_name()?;
-            let name = this.sp(name, start, end);
+impl CstToAst<'_> {
+    pub(super) fn lower_signature(&mut self, node: CstId) -> Result<SurfaceDefinition, ParseError> {
+        let children = self.children(node);
+        let mut index = 0usize;
+        let name = self.lower_value_name_from_children(node, &children, &mut index)?;
+        let ty =
+            self.required_child(node, self.last_type_child(node), "expected signature type")?;
 
-            if this.at(&Token::Colon) {
-                this.advance();
-                let ty = this.parse_type()?;
-                return Ok(SurfaceDefinition::SigDef {
-                    name,
-                    ty,
-                    docs: None,
-                });
-            }
-
-            let mut params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident | Token::Underscore) {
-                let (param, start, end) = this.expect_binder()?;
-                params.push(this.sp(param, start, end));
-            }
-
-            this.expect(&Token::Eq)?;
-            let body = this.parse_expr()?;
-
-            Ok(SurfaceDefinition::FunDef {
-                name,
-                body,
-                params,
-                docs: None,
-            })
+        Ok(SurfaceDefinition::SigDef {
+            name,
+            ty: self.lower_type(ty)?,
+            docs: None,
         })
     }
 
-    fn current_value_definition_kind(&self) -> SyntaxKind {
-        let token_after_name = if self.starts_parenthesized_operator_name() {
-            3
-        } else if self.at(&Token::Ident) {
-            1
-        } else {
-            return SyntaxKind::FunctionDef;
+    pub(super) fn lower_function_def(
+        &mut self,
+        node: CstId,
+    ) -> Result<SurfaceDefinition, ParseError> {
+        let children = self.children(node);
+        let mut index = 0usize;
+        let name = self.lower_value_name_from_children(node, &children, &mut index)?;
+        let mut params = Vec::new();
+
+        while index < children.len() {
+            self.skip_trivia_children(&children, &mut index);
+            let Some(child) = children.get(index).copied() else {
+                break;
+            };
+            match child {
+                NodeOrToken::Token(token) if self.cst.token(token).kind == Token::Eq => {
+                    index += 1;
+                    break;
+                }
+                NodeOrToken::Token(token)
+                    if matches!(self.cst.token(token).kind, Token::Ident | Token::Underscore) =>
+                {
+                    params.push(self.binder_span_from_token(token, node));
+                    index += 1;
+                }
+                _ => index += 1,
+            }
+        }
+
+        let body = self.required_child(
+            node,
+            children.iter().skip(index).find_map(|child| match child {
+                NodeOrToken::Node(expr) if self.node_is_expr_like(*expr) => Some(*expr),
+                _ => None,
+            }),
+            "expected function body",
+        )?;
+
+        Ok(SurfaceDefinition::FunDef {
+            name,
+            body: self.lower_expr(body)?,
+            params,
+            docs: None,
+        })
+    }
+
+    pub(super) fn lower_fixity_def(
+        &mut self,
+        node: CstId,
+    ) -> Result<SurfaceDefinition, ParseError> {
+        let children = self.children(node);
+        let mut index = 0usize;
+        let assoc_token = self.required_token(
+            node,
+            self.direct_meaningful_tokens(node)
+                .into_iter()
+                .find(|token| {
+                    matches!(
+                        self.cst.token(*token).kind,
+                        Token::Infixl | Token::Infixr | Token::Infix
+                    )
+                }),
+            "expected fixity declaration",
+        )?;
+        let assoc = match self.cst.token(assoc_token).kind {
+            Token::Infixl => Assoc::Left,
+            Token::Infixr => Assoc::Right,
+            Token::Infix => Assoc::None,
+            _ => unreachable!("ICE: fixity token was filtered above"),
         };
 
-        if matches!(self.peek_kind(token_after_name), Some(Token::Colon)) {
-            SyntaxKind::Signature
+        while let Some(child) = children.get(index) {
+            if matches!(child, NodeOrToken::Token(token) if *token == assoc_token) {
+                index += 1;
+                break;
+            }
+            index += 1;
+        }
+
+        self.skip_trivia_children(&children, &mut index);
+        let prec = if let Some(NodeOrToken::Token(token)) = children.get(index).copied() {
+            if self.cst.token(token).kind == Token::Int {
+                index += 1;
+                let value = self.lower_int_literal(token)?;
+                u8::try_from(value)
+                    .ok()
+                    .filter(|value| *value <= 9)
+                    .ok_or_else(|| {
+                        self.error_at_token(token, "fixity precedence must be in the range 0..9")
+                    })?
+            } else {
+                Fixity::DEFAULT.prec
+            }
         } else {
-            SyntaxKind::FunctionDef
+            Fixity::DEFAULT.prec
+        };
+
+        let mut ops = Vec::new();
+        while index < children.len() {
+            self.skip_trivia_children(&children, &mut index);
+            if matches!(
+                children.get(index),
+                Some(NodeOrToken::Token(token)) if self.cst.token(*token).kind == Token::Comma
+            ) {
+                index += 1;
+                continue;
+            }
+
+            let Some(child) = children.get(index).copied() else {
+                break;
+            };
+            match child {
+                NodeOrToken::Node(child)
+                    if self.cst.node(child).kind() == SyntaxKind::BacktickOperator =>
+                {
+                    let (op, start, end, cst_id) =
+                        self.lower_backticked_operator_name(child, false)?;
+                    ops.push(sp(op, start, end, cst_id));
+                    index += 1;
+                }
+                NodeOrToken::Token(token) if self.cst.token(token).kind == Token::LParen => {
+                    ops.push(self.lower_value_name_from_children(node, &children, &mut index)?);
+                }
+                NodeOrToken::Token(token)
+                    if self.child_is_operator(NodeOrToken::Token(token), false) =>
+                {
+                    let symbol = self.operator_symbol_from_token(token, false)?;
+                    let source_token = self.cst.token(token);
+                    ops.push(sp(symbol, source_token.start(), source_token.end(), node));
+                    index += 1;
+                }
+                _ => break,
+            }
+        }
+
+        Ok(SurfaceDefinition::FixityDef {
+            fixity: Fixity { prec, assoc },
+            ops,
+            docs: None,
+        })
+    }
+
+    pub(super) fn lower_data_def(&mut self, node: CstId) -> Result<SurfaceDefinition, ParseError> {
+        let children = self.children(node);
+        let data_index = self.index_after_token(&children, Token::Data).unwrap_or(0);
+        let name = self.required_token(
+            node,
+            children
+                .iter()
+                .skip(data_index)
+                .find_map(|child| match child {
+                    NodeOrToken::Token(token)
+                        if self.cst.token(*token).kind == Token::UpperIdent =>
+                    {
+                        Some(*token)
+                    }
+                    _ => None,
+                }),
+            "expected data type name",
+        )?;
+        let mut params = Vec::new();
+        let mut seen_name = false;
+
+        for child in &children {
+            match child {
+                NodeOrToken::Token(token) if *token == name => seen_name = true,
+                NodeOrToken::Token(token)
+                    if seen_name && self.cst.token(*token).kind == Token::Eq =>
+                {
+                    break;
+                }
+                NodeOrToken::Token(token)
+                    if seen_name && self.cst.token(*token).kind == Token::Ident =>
+                {
+                    params.push(self.symbol_span_from_token(*token, node));
+                }
+                _ => {}
+            }
+        }
+
+        let constructors = self
+            .child_nodes_of_kind(node, SyntaxKind::Constructor)
+            .into_iter()
+            .map(|ctor| {
+                let span = self.node_span(ctor);
+                self.lower_constructor(ctor)
+                    .map(|ctor_value| sp(ctor_value, span.start as usize, span.end as usize, ctor))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        Ok(SurfaceDefinition::DataDef {
+            name: self.symbol_span_from_token(name, node),
+            ty_params: params,
+            constructors,
+            docs: None,
+        })
+    }
+
+    pub(super) fn lower_type_alias_def(
+        &mut self,
+        node: CstId,
+    ) -> Result<SurfaceDefinition, ParseError> {
+        let children = self.children(node);
+        let type_index = self.index_after_token(&children, Token::Type).unwrap_or(0);
+        let name = self.required_token(
+            node,
+            children
+                .iter()
+                .skip(type_index)
+                .find_map(|child| match child {
+                    NodeOrToken::Token(token)
+                        if self.cst.token(*token).kind == Token::UpperIdent =>
+                    {
+                        Some(*token)
+                    }
+                    _ => None,
+                }),
+            "expected type alias name",
+        )?;
+        let mut params = Vec::new();
+        let mut seen_name = false;
+
+        for child in &children {
+            match child {
+                NodeOrToken::Token(token) if *token == name => seen_name = true,
+                NodeOrToken::Token(token)
+                    if seen_name && self.cst.token(*token).kind == Token::Eq =>
+                {
+                    break;
+                }
+                NodeOrToken::Token(token)
+                    if seen_name && self.cst.token(*token).kind == Token::Ident =>
+                {
+                    params.push(self.symbol_span_from_token(*token, node));
+                }
+                _ => {}
+            }
+        }
+
+        let ty = self.required_child(node, self.last_type_child(node), "expected alias body")?;
+        Ok(SurfaceDefinition::TypeAliasDef {
+            name: self.symbol_span_from_token(name, node),
+            ty_params: params,
+            ty: self.lower_type(ty)?,
+            docs: None,
+        })
+    }
+
+    pub(super) fn lower_constructor(
+        &mut self,
+        node: CstId,
+    ) -> Result<SurfaceConstructor, ParseError> {
+        let leading_docs = self.doc_comment_before_node(node);
+        let name = self.required_token(
+            node,
+            self.direct_meaningful_tokens(node)
+                .into_iter()
+                .find(|token| self.cst.token(*token).kind == Token::UpperIdent),
+            "expected constructor name",
+        )?;
+        let param_nodes = self
+            .child_nodes(node)
+            .into_iter()
+            .filter(|child| self.node_is_type_like(*child))
+            .collect::<Vec<_>>();
+        let mut params = Vec::new();
+        for param in param_nodes {
+            params.push(self.lower_type_atom(param)?);
+        }
+        let trailing_docs = self.doc_comment_after_node(node);
+
+        Ok(SurfaceConstructor {
+            name: self.symbol_span_from_token(name, node),
+            params,
+            docs: self.attached_doc_comment(leading_docs, trailing_docs),
+        })
+    }
+
+    pub(super) fn lower_class_def(&mut self, node: CstId) -> Result<SurfaceDefinition, ParseError> {
+        let children = self.children(node);
+        let superclasses = if self.node_has_token(node, Token::FatArrow) {
+            self.lower_context_predicates(node)?
+        } else {
+            Vec::new()
+        };
+        let class_index = self.index_after_token(&children, Token::Class).unwrap_or(0);
+        let name = self.required_token(
+            node,
+            children
+                .iter()
+                .skip(class_index)
+                .find_map(|child| match child {
+                    NodeOrToken::Token(token)
+                        if self.cst.token(*token).kind == Token::UpperIdent =>
+                    {
+                        Some(*token)
+                    }
+                    _ => None,
+                }),
+            "expected class name",
+        )?;
+        let mut ty_params = Vec::new();
+        let mut seen_name = false;
+
+        for child in &children {
+            match child {
+                NodeOrToken::Token(token) if *token == name => seen_name = true,
+                NodeOrToken::Token(token)
+                    if seen_name && self.cst.token(*token).kind == Token::Where =>
+                {
+                    break;
+                }
+                NodeOrToken::Token(token)
+                    if seen_name && self.cst.token(*token).kind == Token::Ident =>
+                {
+                    ty_params.push(self.symbol_span_from_token(*token, node));
+                }
+                _ => {}
+            }
+        }
+
+        if ty_params.is_empty() {
+            return Err(
+                self.error_at_node(node, "class declaration needs at least one type parameter")
+            );
+        }
+
+        let mut methods = Vec::new();
+        let mut defaults = Vec::new();
+        let mut index = self
+            .index_after_token(&children, Token::Where)
+            .unwrap_or(children.len());
+
+        loop {
+            self.skip_body_separators(&children, &mut index);
+            if self.body_is_done(&children, index) {
+                break;
+            }
+
+            if matches!(
+                children.get(index),
+                Some(NodeOrToken::Token(token)) if self.cst.token(*token).kind == Token::Default
+            ) {
+                defaults.push(self.lower_instance_method_entry(node, &children, &mut index, true)?);
+            } else {
+                methods.push(self.lower_class_method_entry(node, &children, &mut index)?);
+            }
+        }
+
+        Ok(SurfaceDefinition::ClassDef {
+            name: self.symbol_span_from_token(name, node),
+            ty_params,
+            superclasses,
+            methods,
+            defaults,
+            docs: None,
+        })
+    }
+
+    pub(super) fn lower_instance_def(
+        &mut self,
+        node: CstId,
+    ) -> Result<SurfaceDefinition, ParseError> {
+        let children = self.children(node);
+        let context = if self.node_has_token(node, Token::FatArrow) {
+            self.lower_context_predicates(node)?
+        } else {
+            Vec::new()
+        };
+        let instance_index = self
+            .index_after_token(&children, Token::Instance)
+            .unwrap_or(0);
+        let class_name = self.required_token(
+            node,
+            children
+                .iter()
+                .skip(instance_index)
+                .find_map(|child| match child {
+                    NodeOrToken::Token(token)
+                        if self.cst.token(*token).kind == Token::UpperIdent =>
+                    {
+                        Some(*token)
+                    }
+                    _ => None,
+                }),
+            "expected instance class name",
+        )?;
+
+        let mut args = Vec::new();
+        let mut seen_class = false;
+        for child in &children {
+            match child {
+                NodeOrToken::Token(token) if *token == class_name => seen_class = true,
+                NodeOrToken::Token(token)
+                    if seen_class && self.cst.token(*token).kind == Token::Where =>
+                {
+                    break;
+                }
+                NodeOrToken::Node(ty) if seen_class && self.node_is_type_like(*ty) => {
+                    args.push(self.lower_type_atom(*ty)?);
+                }
+                _ => {}
+            }
+        }
+
+        if args.is_empty() {
+            return Err(self.error_at_node(node, "instance head needs at least one type argument"));
+        }
+
+        let mut methods = Vec::new();
+        let mut index = self
+            .index_after_token(&children, Token::Where)
+            .unwrap_or(children.len());
+        loop {
+            self.skip_body_separators(&children, &mut index);
+            if self.body_is_done(&children, index) {
+                break;
+            }
+            methods.push(self.lower_instance_method_entry(node, &children, &mut index, false)?);
+        }
+
+        Ok(SurfaceDefinition::InstanceDef {
+            context,
+            class_name: self.symbol_span_from_token(class_name, node),
+            args,
+            methods,
+            docs: None,
+        })
+    }
+
+    fn lower_class_method_entry(
+        &mut self,
+        owner: CstId,
+        children: &[NodeOrToken],
+        index: &mut usize,
+    ) -> Result<ClassMethod, ParseError> {
+        let doc_anchor = self.first_meaningful_child_token_from(children, *index);
+        let leading_docs = doc_anchor.and_then(|token| self.doc_comment_before_token(token));
+        let name = self.lower_value_name_from_children(owner, children, index)?;
+        self.consume_until_token(children, index, Token::Colon);
+        let ty_node = self.required_child(
+            owner,
+            children.iter().skip(*index).find_map(|child| match child {
+                NodeOrToken::Node(ty) if self.node_is_type_like(*ty) => Some(*ty),
+                _ => None,
+            }),
+            "expected method type",
+        )?;
+        *index = self.child_index_after_node(children, ty_node);
+        let trailing_docs = self
+            .last_meaningful_token(ty_node)
+            .and_then(|token| self.doc_comment_after_token(token));
+
+        Ok(ClassMethod {
+            name,
+            ty: self.lower_type(ty_node)?,
+            docs: self.attached_doc_comment(leading_docs, trailing_docs),
+            cst_id: owner,
+        })
+    }
+
+    fn lower_instance_method_entry(
+        &mut self,
+        owner: CstId,
+        children: &[NodeOrToken],
+        index: &mut usize,
+        has_default_keyword: bool,
+    ) -> Result<InstanceMethod, ParseError> {
+        if has_default_keyword {
+            *index += 1;
+        }
+
+        let name = self.lower_value_name_from_children(owner, children, index)?;
+        let mut params = Vec::new();
+
+        loop {
+            self.skip_trivia_children(children, index);
+            let Some(child) = children.get(*index).copied() else {
+                break;
+            };
+            match child {
+                NodeOrToken::Token(token) if self.cst.token(token).kind == Token::Eq => {
+                    *index += 1;
+                    break;
+                }
+                NodeOrToken::Token(token)
+                    if matches!(self.cst.token(token).kind, Token::Ident | Token::Underscore) =>
+                {
+                    params.push(self.binder_span_from_token(token, owner));
+                    *index += 1;
+                }
+                _ => *index += 1,
+            }
+        }
+
+        let body_node = self.required_child(
+            owner,
+            children.iter().skip(*index).find_map(|child| match child {
+                NodeOrToken::Node(expr) if self.node_is_expr_like(*expr) => Some(*expr),
+                _ => None,
+            }),
+            "expected method body",
+        )?;
+        *index = self.child_index_after_node(children, body_node);
+
+        Ok(InstanceMethod {
+            name,
+            params,
+            body: self.lower_expr(body_node)?,
+            cst_id: owner,
+        })
+    }
+
+    fn index_after_token(&self, children: &[NodeOrToken], kind: Token) -> Option<usize> {
+        children.iter().position(|child| {
+            matches!(child, NodeOrToken::Token(token) if self.cst.token(*token).kind == kind)
+        })
+        .map(|index| index + 1)
+    }
+
+    fn consume_until_token(&self, children: &[NodeOrToken], index: &mut usize, kind: Token) {
+        while let Some(child) = children.get(*index) {
+            *index += 1;
+            if matches!(child, NodeOrToken::Token(token) if self.cst.token(*token).kind == kind) {
+                break;
+            }
         }
     }
 
-    pub(super) fn parse_fixity_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::FixityDef, |this| {
-            let assoc = match this.current_kind() {
-                Token::Infixl => Assoc::Left,
-                Token::Infixr => Assoc::Right,
-                Token::Infix => Assoc::None,
-                _ => {
-                    return Err(this.error(format!(
-                        "expected fixity declaration, got {}",
-                        this.describe_current()
-                    )));
-                }
-            };
-            this.advance();
-
-            let prec = match this.current_kind() {
-                Token::Int => {
-                    let token = this.advance();
-                    let value = this.parse_int_literal(&token)?;
-                    u8::try_from(value)
-                        .ok()
-                        .filter(|value| *value <= 9)
-                        .ok_or_else(|| this.error("fixity precedence must be in the range 0..9"))?
-                }
-                _ => Fixity::DEFAULT.prec,
-            };
-
-            let mut ops = Vec::new();
-            loop {
-                let (op, start, end) = if this.starts_backticked_operator_name() {
-                    this.parse_backticked_operator_name()?
-                } else if this.starts_parenthesized_operator_name() {
-                    this.parse_parenthesized_operator_name()?
-                } else {
-                    this.expect_operator_symbol(false)?
-                };
-                ops.push(this.sp(op, start, end));
-
-                if !this.at(&Token::Comma) {
-                    break;
-                }
-                this.advance();
-            }
-
-            Ok(SurfaceDefinition::FixityDef {
-                fixity: Fixity { prec, assoc },
-                ops,
-                docs: None,
-            })
-        })
+    fn child_index_after_node(&self, children: &[NodeOrToken], node: CstId) -> usize {
+        children
+            .iter()
+            .position(|child| *child == NodeOrToken::Node(node))
+            .map_or(children.len(), |index| index + 1)
     }
 
-    pub(super) fn parse_data_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::DataDef, |this| {
-            this.expect(&Token::Data)?;
-            let (name, start, end) = this.expect_upper()?;
-            let name = this.sp(name, start, end);
-
-            let mut ty_params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident) {
-                let (param, start, end) = this.expect_ident()?;
-                ty_params.push(this.sp(param, start, end));
+    fn body_is_done(&self, children: &[NodeOrToken], index: usize) -> bool {
+        match children.get(index) {
+            None => true,
+            Some(NodeOrToken::Token(token)) => {
+                matches!(self.cst.token(*token).kind, Token::VClose | Token::Eof)
             }
-
-            this.expect(&Token::Eq)?;
-
-            let mut constructors = Vec::new();
-            loop {
-                if this.at(&Token::Pipe) {
-                    this.advance();
-                }
-
-                let start = this.current_start();
-                let ctor = this.parse_constructor()?;
-                let end = this.current_start();
-                constructors.push(sp(ctor, start, end, this.completed_cst_id()));
-
-                if !this.at(&Token::Pipe) {
-                    break;
-                }
-            }
-
-            Ok(SurfaceDefinition::DataDef {
-                name,
-                ty_params,
-                constructors,
-                docs: None,
-            })
-        })
+            Some(NodeOrToken::Node(_)) => false,
+        }
     }
 
-    pub(super) fn parse_type_alias_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::TypeAliasDef, |this| {
-            this.expect(&Token::Type)?;
-            let (name, start, end) = this.expect_upper()?;
-            let name = this.sp(name, start, end);
-
-            let mut ty_params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident) {
-                let (param, start, end) = this.expect_ident()?;
-                ty_params.push(this.sp(param, start, end));
-            }
-
-            this.expect(&Token::Eq)?;
-            let ty = this.parse_type()?;
-
-            Ok(SurfaceDefinition::TypeAliasDef {
-                name,
-                ty_params,
-                ty,
-                docs: None,
-            })
-        })
-    }
-
-    pub(super) fn parse_constructor(&mut self) -> Result<SurfaceConstructor, ParseError> {
-        self.node(SyntaxKind::Constructor, |this| {
-            let leading_docs = this.doc_comment_before_current();
-            let (name, start, end) = this.expect_upper()?;
-            let mut params = Vec::new();
-            while this.is_type_atom_start() {
-                params.push(this.parse_type_atom()?);
-            }
-            let trailing_docs = this.doc_comment_after_previous_significant();
-            Ok(SurfaceConstructor {
-                name: this.sp(name, start, end),
-                params,
-                docs: this.attached_doc_comment(leading_docs, trailing_docs),
-            })
-        })
-    }
-
-    pub(super) fn parse_predicate(&mut self) -> Result<Spanned<SurfacePredicate>, ParseError> {
-        self.node(SyntaxKind::Predicate, |this| {
-            let start = this.current_start();
-
-            let class_name = this.parse_name_path()?;
-            if !is_ctor_like(this.name_ref_last_source_text(&class_name)) {
-                return Err(this.error(format!(
-                    "expected class name, got {}",
-                    this.name_ref_source_text(&class_name)
-                )));
-            }
-
-            let mut args = Vec::new();
-            while this.is_type_atom_start() {
-                args.push(this.parse_type_atom()?);
-            }
-
-            if args.is_empty() {
-                return Err(
-                    this.error("expected at least one type argument in predicate".to_string())
-                );
-            }
-
-            let end = args.last().map_or_else(|| span_end(&class_name), span_end);
-
-            Ok(this.sp(SurfacePredicate { class_name, args }, start, end))
-        })
-    }
-
-    pub(super) fn parse_predicate_list(
-        &mut self,
-    ) -> Result<Vec<Spanned<SurfacePredicate>>, ParseError> {
-        self.node(SyntaxKind::PredicateList, |this| {
-            if this.at(&Token::LParen) {
-                this.advance();
-
-                let mut preds = vec![this.parse_predicate()?];
-                while this.at(&Token::Comma) {
-                    this.advance();
-                    preds.push(this.parse_predicate()?);
-                }
-
-                this.expect(&Token::RParen)?;
-                Ok(preds)
-            } else {
-                Ok(vec![this.parse_predicate()?])
-            }
-        })
-    }
-
-    pub(super) fn parse_class_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::ClassDef, |this| {
-            this.expect(&Token::Class)?;
-
-            let checkpoint = this.checkpoint();
-            let superclasses = if let Ok(preds) = this.parse_predicate_list() {
-                if this.at(&Token::FatArrow) {
-                    this.advance();
-                    preds
-                } else {
-                    this.restore(checkpoint);
-                    Vec::new()
-                }
-            } else {
-                this.restore(checkpoint);
-                Vec::new()
-            };
-
-            let (name, ns, ne) = this.expect_upper()?;
-
-            let mut ty_params = Vec::new();
-            while matches!(this.current_kind(), Token::Ident) {
-                let (p, ps, pe) = this.expect_ident()?;
-                ty_params.push(this.sp(p, ps, pe));
-            }
-
-            if ty_params.is_empty() {
-                return Err(
-                    this.error("class declaration needs at least one type parameter".to_string())
-                );
-            }
-
-            this.expect(&Token::Where)?;
-
-            if this.at(&Token::VOpen) {
-                this.advance();
-            }
-
-            let mut methods = Vec::new();
-            let mut defaults = Vec::new();
-            loop {
-                this.skip_separators();
-                if this.at(&Token::VClose) || this.at_eof() {
-                    break;
-                }
-
-                if this.at(&Token::Default) {
-                    this.advance();
-                    let (mname, ms, me) = this.expect_value_name()?;
-                    let mut mparams = Vec::new();
-                    while matches!(this.current_kind(), Token::Ident | Token::Underscore) {
-                        let (p, ps, pe) = this.expect_binder()?;
-                        mparams.push(this.sp(p, ps, pe));
-                    }
-                    this.expect(&Token::Eq)?;
-                    let mbody = this.parse_expr()?;
-                    defaults.push(InstanceMethod {
-                        name: this.sp(mname, ms, me),
-                        params: mparams,
-                        body: mbody,
-                        cst_id: this.current_cst_id(),
-                    });
-                    continue;
-                }
-
-                let leading_docs = this.doc_comment_before_current();
-                let (mname, ms, me) = this.expect_value_name()?;
-                this.expect(&Token::Colon)?;
-                let mty = this.parse_type()?;
-                let trailing_docs = this.doc_comment_after_previous_significant();
-                methods.push(ClassMethod {
-                    name: this.sp(mname, ms, me),
-                    ty: mty,
-                    docs: this.attached_doc_comment(leading_docs, trailing_docs),
-                    cst_id: this.current_cst_id(),
-                });
-            }
-
-            if this.at(&Token::VClose) {
-                this.advance();
-            }
-
-            Ok(SurfaceDefinition::ClassDef {
-                name: this.sp(name, ns, ne),
-                ty_params,
-                superclasses,
-                methods,
-                defaults,
-                docs: None,
-            })
-        })
-    }
-
-    pub(super) fn parse_instance_def(&mut self) -> Result<SurfaceDefinition, ParseError> {
-        self.node(SyntaxKind::InstanceDef, |this| {
-            this.expect(&Token::Instance)?;
-
-            let checkpoint = this.checkpoint();
-            let context = if let Ok(preds) = this.parse_predicate_list() {
-                if this.at(&Token::FatArrow) {
-                    this.advance();
-                    preds
-                } else {
-                    this.restore(checkpoint);
-                    Vec::new()
-                }
-            } else {
-                this.restore(checkpoint);
-                Vec::new()
-            };
-
-            let (cname, cs, ce) = this.expect_upper()?;
-
-            let mut args = Vec::new();
-            while this.is_type_atom_start() {
-                args.push(this.parse_type_atom()?);
-            }
-
-            if args.is_empty() {
-                return Err(
-                    this.error("instance head needs at least one type argument".to_string())
-                );
-            }
-
-            this.expect(&Token::Where)?;
-
-            if this.at(&Token::VOpen) {
-                this.advance();
-            }
-
-            let mut methods = Vec::new();
-            loop {
-                this.skip_separators();
-                if this.at(&Token::VClose) || this.at_eof() {
-                    break;
-                }
-                let (mname, ms, me) = this.expect_value_name()?;
-                let mut mparams = Vec::new();
-                while matches!(this.current_kind(), Token::Ident | Token::Underscore) {
-                    let (p, ps, pe) = this.expect_binder()?;
-                    mparams.push(this.sp(p, ps, pe));
-                }
-                this.expect(&Token::Eq)?;
-                let mbody = this.parse_expr()?;
-                methods.push(InstanceMethod {
-                    name: this.sp(mname, ms, me),
-                    params: mparams,
-                    body: mbody,
-                    cst_id: this.current_cst_id(),
-                });
-            }
-
-            if this.at(&Token::VClose) {
-                this.advance();
-            }
-
-            Ok(SurfaceDefinition::InstanceDef {
-                context,
-                class_name: this.sp(cname, cs, ce),
-                args,
-                methods,
-                docs: None,
-            })
+    fn first_meaningful_child_token_from(
+        &self,
+        children: &[NodeOrToken],
+        start: usize,
+    ) -> Option<TokenId> {
+        children.iter().skip(start).find_map(|child| match child {
+            NodeOrToken::Token(token) if self.token_is_meaningful(*token) => Some(*token),
+            NodeOrToken::Node(node) => self.first_meaningful_token(*node),
+            _ => None,
         })
     }
 }

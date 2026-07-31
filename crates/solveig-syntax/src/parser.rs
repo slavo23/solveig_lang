@@ -6,7 +6,7 @@
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Span};
 
 use crate::cst::SyntaxTree;
-use crate::lexer::{self, LexError, PosToken, Token};
+use crate::lexer::{LexError, PosToken, Token};
 use crate::syntax::{Event, SyntaxKind};
 
 mod decl;
@@ -552,7 +552,7 @@ impl<'source> Parser<'source> {
 
 #[cfg(test)]
 pub(crate) fn parse_source_events(file: FileId, source: &str) -> Result<ParsedEvents, ParseError> {
-    let tokens = lexer::lex(file, source)?;
+    let tokens = crate::lexer::lex(file, source)?;
     let mut parser = Parser::new(file, source, tokens);
     parser.parse_module_surface();
     Ok(ParsedEvents {
@@ -561,7 +561,7 @@ pub(crate) fn parse_source_events(file: FileId, source: &str) -> Result<ParsedEv
     })
 }
 
-pub fn parse(file: FileId, source: &str, tokens: &[PosToken]) -> ParsedCst {
+pub(crate) fn parse(file: FileId, source: &str, tokens: &[PosToken]) -> ParsedCst {
     let mut parser = Parser::new(file, source, tokens.to_vec());
     parser.parse_module_surface();
     let cst = SyntaxTree::from_events(file, parser.tokens.clone(), &parser.events);
@@ -573,8 +573,12 @@ pub fn parse(file: FileId, source: &str, tokens: &[PosToken]) -> ParsedCst {
     }
 }
 
-pub fn parse_cst(file: FileId, source: &str) -> Result<(SyntaxTree, Vec<Diagnostic>), ParseError> {
-    let tokens = lexer::lex(file, source)?;
+#[cfg(test)]
+pub(crate) fn parse_cst(
+    file: FileId,
+    source: &str,
+) -> Result<(SyntaxTree, Vec<Diagnostic>), ParseError> {
+    let tokens = crate::lexer::lex(file, source)?;
     let parsed = parse(file, source, &tokens);
     Ok((parsed.cst, parsed.diagnostics))
 }

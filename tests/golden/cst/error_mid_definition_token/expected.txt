@@ -1,4 +1,4 @@
-Module @0..41
+Module @0..42
   VOpen @0..0 line=0 col=0 synthetic text=""
   DefinitionList @0..41
     FunctionDef @0..23
@@ -16,7 +16,7 @@ Module @0..41
         Then @19..23 line=1 col=12 text="then"
         AtomExpr @0..0
     Whitespace @23..24 line=1 col=16 text=" "
-    Error @24..32
+    Error @24..33
       diagnostic PAR0001 Error "parse error"
         label primary @24..25 "expected expression, got RParen"
       RParen @24..25 line=1 col=17 text=")"

@@ -1,8 +1,8 @@
-Module @21..221
+Module @0..222
   LineComment @0..20 line=0 col=0 text="-- | Top-level docs."
   Newline @20..21 line=0 col=20 text="\n"
   VOpen @21..21 line=1 col=0 synthetic text=""
-  DefinitionList @21..221
+  DefinitionList @21..222
     FunctionDef @21..29
       Ident @21..25 line=1 col=0 text="main"
         leading-comment @0..20 text="-- | Top-level docs."
@@ -40,7 +40,7 @@ Module @21..221
     LineComment @133..149 line=8 col=0 text="-- | Class docs."
     Newline @149..150 line=8 col=16 text="\n"
     VSemi @150..150 line=9 col=0 synthetic text=""
-    ClassDef @150..221
+    ClassDef @150..222
       Class @150..155 line=9 col=0 text="class"
         leading-comment @133..149 text="-- | Class docs."
       Whitespace @155..156 line=9 col=5 text=" "

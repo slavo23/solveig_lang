@@ -234,6 +234,31 @@ data Documented =
 }
 
 #[test]
+fn doc_comment_text_has_one_text_owner_and_one_attachment_owner() {
+    let source = "-- | Docs.\nmain = 1\n";
+    let parsed = parse_test_source(source);
+    let tree = &parsed.cst;
+    let reconstructed = tree.reconstruct_text(source);
+
+    assert_eq!(reconstructed.matches("-- | Docs.").count(), 1);
+
+    let attached_count = tree
+        .tokens()
+        .iter()
+        .enumerate()
+        .flat_map(|(index, _)| {
+            let id = TokenId::new(index);
+            tree.leading_comments(id)
+                .iter()
+                .chain(tree.trailing_comments(id).iter())
+        })
+        .filter(|comment| tree.token(**comment).source_text(source) == "-- | Docs.")
+        .count();
+
+    assert_eq!(attached_count, 1);
+}
+
+#[test]
 fn cst_does_not_attach_leading_comment_across_blank_line() {
     let source = "-- | Detached docs.\n\nmain = 1\n";
     let parsed = parse_test_source(source);

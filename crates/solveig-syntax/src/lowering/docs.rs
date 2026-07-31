@@ -3,11 +3,10 @@
 //! to nearby source tokens, and these routines produce owned `DocComment`s.
 
 use super::*;
-use crate::cst::TokenId;
 
-impl AstLowerer<'_> {
+impl CstToAst<'_> {
     fn doc_line_text(&self, token: &PosToken, marker: &str) -> Option<String> {
-        let text = self.token_source_text(token);
+        let text = token.source_text(self.source);
         let rest = text.trim_start().strip_prefix(marker)?;
         Some(
             rest.strip_prefix(' ')
@@ -21,7 +20,7 @@ impl AstLowerer<'_> {
         let mut lines = Vec::new();
 
         for comment in comments.iter().rev() {
-            let Some(line) = self.doc_line_text(self.cst?.token(*comment), "-- |") else {
+            let Some(line) = self.doc_line_text(self.cst.token(*comment), "-- |") else {
                 break;
             };
             lines.push(line);
@@ -37,18 +36,26 @@ impl AstLowerer<'_> {
 
     fn trailing_doc_comment_from_tokens(&self, comments: &[TokenId]) -> Option<DocComment> {
         let comment = comments.first()?;
-        self.doc_line_text(self.cst?.token(*comment), "-- ^")
+        self.doc_line_text(self.cst.token(*comment), "-- ^")
             .map(DocComment::new)
     }
 
-    pub(super) fn doc_comment_before_current(&self) -> Option<DocComment> {
-        let token = TokenId::new(self.current_index());
-        self.leading_doc_comment_from_tokens(self.cst?.leading_comments(token))
+    pub(super) fn doc_comment_before_token(&self, token: TokenId) -> Option<DocComment> {
+        self.leading_doc_comment_from_tokens(self.cst.leading_comments(token))
     }
 
-    pub(super) fn doc_comment_after_previous_significant(&self) -> Option<DocComment> {
-        let token = TokenId::new(self.previous_significant_index(self.pos)?);
-        self.trailing_doc_comment_from_tokens(self.cst?.trailing_comments(token))
+    pub(super) fn doc_comment_after_token(&self, token: TokenId) -> Option<DocComment> {
+        self.trailing_doc_comment_from_tokens(self.cst.trailing_comments(token))
+    }
+
+    pub(super) fn doc_comment_before_node(&self, node: CstId) -> Option<DocComment> {
+        let token = self.first_meaningful_token(node)?;
+        self.doc_comment_before_token(token)
+    }
+
+    pub(super) fn doc_comment_after_node(&self, node: CstId) -> Option<DocComment> {
+        let token = self.last_meaningful_token(node)?;
+        self.doc_comment_after_token(token)
     }
 
     pub(super) fn attached_doc_comment(

@@ -1,4 +1,4 @@
-Module @0..67
+Module @0..68
   VOpen @0..0 line=0 col=0 synthetic text=""
   DefinitionList @0..67
     TypeAliasDef @0..28

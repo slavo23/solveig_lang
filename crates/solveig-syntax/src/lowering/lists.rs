@@ -1,9 +1,9 @@
-//! List syntax desugaring for parser-owned surface AST nodes.
+//! List syntax desugaring for lowered surface AST nodes.
 
 use super::*;
 
 fn qref(
-    parser: &AstLowerer<'_>,
+    lowerer: &CstToAst<'_>,
     segments: &[&str],
     start: usize,
     end: usize,
@@ -13,7 +13,7 @@ fn qref(
         NameRef {
             segments: segments
                 .iter()
-                .map(|segment| parser.intern(segment))
+                .map(|segment| lowerer.intern(segment))
                 .collect(),
         },
         start,
@@ -23,14 +23,14 @@ fn qref(
 }
 
 pub(super) fn list_nil_pattern(
-    parser: &AstLowerer<'_>,
+    lowerer: &CstToAst<'_>,
     start: usize,
     end: usize,
     cst_id: CstId,
 ) -> Spanned<SurfacePattern> {
     sp(
         SurfacePattern::Con(
-            qref(parser, &["prelude", "list", "Nil"], start, end, cst_id),
+            qref(lowerer, &["prelude", "list", "Nil"], start, end, cst_id),
             vec![],
         ),
         start,
@@ -40,14 +40,14 @@ pub(super) fn list_nil_pattern(
 }
 
 pub(super) fn list_nil_expr(
-    parser: &AstLowerer<'_>,
+    lowerer: &CstToAst<'_>,
     start: usize,
     end: usize,
     cst_id: CstId,
 ) -> Spanned<SurfaceExpr> {
     sp(
         SurfaceExpr::Con(qref(
-            parser,
+            lowerer,
             &["prelude", "list", "Nil"],
             start,
             end,
@@ -60,7 +60,7 @@ pub(super) fn list_nil_expr(
 }
 
 pub(super) fn list_ty(
-    parser: &AstLowerer<'_>,
+    lowerer: &CstToAst<'_>,
     elem_ty: Spanned<SurfaceTy>,
     start: usize,
     end: usize,
@@ -68,7 +68,7 @@ pub(super) fn list_ty(
 ) -> Spanned<SurfaceTy> {
     let list_con = sp(
         SurfaceTy::Con(qref(
-            parser,
+            lowerer,
             &["prelude", "list", "List"],
             start,
             start,
@@ -110,7 +110,7 @@ pub(super) fn literal_pattern(
 }
 
 pub(super) fn cons_pattern(
-    parser: &AstLowerer<'_>,
+    lowerer: &CstToAst<'_>,
     head: Spanned<SurfacePattern>,
     tail: Spanned<SurfacePattern>,
     cons_start: usize,
@@ -121,7 +121,7 @@ pub(super) fn cons_pattern(
     sp(
         SurfacePattern::Con(
             qref(
-                parser,
+                lowerer,
                 &["prelude", "list", "Cons"],
                 cons_start,
                 cons_end,
@@ -136,7 +136,7 @@ pub(super) fn cons_pattern(
 }
 
 pub(super) fn list_pattern(
-    parser: &AstLowerer<'_>,
+    lowerer: &CstToAst<'_>,
     elems: Vec<Spanned<SurfacePattern>>,
     _start: usize,
     end: usize,
@@ -145,14 +145,14 @@ pub(super) fn list_pattern(
     elems
         .into_iter()
         .rev()
-        .fold(list_nil_pattern(parser, end, end, cst_id), |acc, elem| {
+        .fold(list_nil_pattern(lowerer, end, end, cst_id), |acc, elem| {
             let generated = span_start(&elem);
-            cons_pattern(parser, elem, acc, generated, generated, cst_id)
+            cons_pattern(lowerer, elem, acc, generated, generated, cst_id)
         })
 }
 
 pub(super) fn cons_expr(
-    parser: &AstLowerer<'_>,
+    lowerer: &CstToAst<'_>,
     head: Spanned<SurfaceExpr>,
     tail: Spanned<SurfaceExpr>,
     start: usize,
@@ -161,7 +161,7 @@ pub(super) fn cons_expr(
 ) -> Spanned<SurfaceExpr> {
     let cons = sp(
         SurfaceExpr::Con(qref(
-            parser,
+            lowerer,
             &["prelude", "list", "Cons"],
             start,
             start,
@@ -186,7 +186,7 @@ pub(super) fn cons_expr(
 }
 
 pub(super) fn list_expr(
-    parser: &AstLowerer<'_>,
+    lowerer: &CstToAst<'_>,
     elems: Vec<Spanned<SurfaceExpr>>,
     start: usize,
     end: usize,
@@ -196,10 +196,10 @@ pub(super) fn list_expr(
         elems
             .into_iter()
             .rev()
-            .fold(list_nil_expr(parser, end, end, cst_id), |acc, elem| {
+            .fold(list_nil_expr(lowerer, end, end, cst_id), |acc, elem| {
                 let start = span_start(&elem);
                 let end = span_end(&acc);
-                cons_expr(parser, elem, acc, start, end, cst_id)
+                cons_expr(lowerer, elem, acc, start, end, cst_id)
             });
 
     sp(expr.0, start, end, cst_id)

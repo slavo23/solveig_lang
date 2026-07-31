@@ -1,7 +1,7 @@
-Module @0..189
+Module @0..190
   VOpen @0..0 line=0 col=0 synthetic text=""
   DefinitionList @0..189
-    ClassDef @0..119
+    ClassDef @0..121
       Class @0..5 line=0 col=0 text="class"
       Whitespace @5..6 line=0 col=5 text=" "
       UpperIdent @6..12 line=0 col=6 text="TinyEq"
@@ -70,7 +70,7 @@ Module @0..189
       Newline @119..121 line=3 col=42 text="\n\n"
       VClose @121..121 line=5 col=0 synthetic text=""
     VSemi @121..121 line=5 col=0 synthetic text=""
-    InstanceDef @121..170
+    InstanceDef @121..172
       Instance @121..129 line=5 col=0 text="instance"
       Whitespace @129..130 line=5 col=8 text=" "
       UpperIdent @130..136 line=5 col=9 text="TinyEq"

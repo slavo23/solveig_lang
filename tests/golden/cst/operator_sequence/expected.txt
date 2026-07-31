@@ -1,4 +1,4 @@
-Module @0..98
+Module @0..99
   VOpen @0..0 line=0 col=0 synthetic text=""
   DefinitionList @0..98
     FixityDef @0..11

@@ -1,12 +1,18 @@
 //! Hand-rolled concrete syntax tree for Solveig source files.
-//! The parser emits flat events; this module builds the arena used by H4
-//! lowering and later editor features.
+//!
+//! The parser emits flat events; this module builds the arena used by lowering
+//! and later editor features. The token stream is authoritative for source text
+//! reconstruction. Comment attachment lists are authoritative for which
+//! declaration a documentation comment documents; consumers must not rediscover
+//! documentation ownership by scanning spans.
 
 use la_arena::{Arena, Idx, RawIdx};
 use solveig_base::{Diagnostic, FileId, Span};
 
 use crate::lexer::{PosToken, Token};
 use crate::syntax::{Event, SyntaxKind};
+
+mod rebuild;
 
 /// Identifies a syntax node in a `SyntaxTree` arena.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -187,7 +193,9 @@ impl SyntaxTree {
 
         tree.root = root;
         tree.collapse_trivial_wrappers();
+        tree.recompute_node_spans();
         tree.attach_comment_trivia();
+        tree.assert_span_invariants();
         tree
     }
 
@@ -296,29 +304,52 @@ impl SyntaxTree {
     }
 
     fn collapse_trivial_wrappers(&mut self) {
-        let old_nodes = std::mem::replace(&mut self.nodes, Arena::new());
-        let old_root = self.root;
-        let mut rebuilder = CstRebuilder {
-            old_nodes,
-            tokens: &self.tokens,
-            nodes: Arena::new(),
-            token_parents: vec![None; self.tokens.len()],
-        };
+        rebuild::collapse_trivial_wrappers(self);
+    }
 
-        let rebuilt = rebuilder.rebuild_node(old_root, true);
-        let [NodeOrToken::Node(root)] = rebuilt.as_slice() else {
-            panic!("ICE: CST root rebuild must produce exactly one root node");
-        };
+    fn recompute_node_spans(&mut self) {
+        self.recompute_node_span(self.root);
+    }
 
-        self.root = *root;
-        self.nodes = rebuilder.nodes;
-        self.token_parents = rebuilder.token_parents;
+    fn recompute_node_span(&mut self, id: CstId) -> Span {
+        let children = self.node(id).children.clone();
+        for child in children {
+            if let NodeOrToken::Node(child) = child {
+                self.recompute_node_span(child);
+            }
+        }
 
-        for (index, parent) in self.token_parents.iter().enumerate() {
-            assert!(
-                parent.is_some(),
-                "ICE: CST collapse lost parent for token {index}"
-            );
+        let span = self.span_for_node(id);
+        self.node_mut(id).span = span;
+        span
+    }
+
+    fn assert_span_invariants(&self) {
+        for (id, node) in self.nodes() {
+            let parent_span = node.span();
+            let mut previous = None;
+
+            for child in node.children() {
+                let Some(child_span) = self.child_span(child) else {
+                    continue;
+                };
+
+                assert!(
+                    span_contains_span(parent_span, child_span),
+                    "ICE: CST parent {id:?} {parent_span:?} does not contain child span {child_span:?}"
+                );
+
+                if let Some(order_span) = self.child_order_span(child) {
+                    if let Some(previous_span) = previous {
+                        assert!(
+                            spans_are_non_decreasing(previous_span, order_span),
+                            "ICE: CST children of {id:?} are out of source order: {previous_span:?} before {order_span:?}"
+                        );
+                    }
+
+                    previous = Some(order_span);
+                }
+            }
         }
     }
 
@@ -354,24 +385,62 @@ impl SyntaxTree {
         let mut span = None;
 
         for child in &node.children {
+            let child_span = self.child_span(child);
+            if let Some(child_span) = child_span {
+                span = Some(merge_span(span, child_span));
+            }
+        }
+
+        span = span.or_else(|| self.diagnostic_span(node));
+
+        span.unwrap_or_else(|| Span::new(0, 0))
+    }
+
+    fn child_span(&self, child: &NodeOrToken) -> Option<Span> {
+        match child {
+            NodeOrToken::Node(id) => self.node_source_span(*id),
+            NodeOrToken::Token(id) => Some(token_span(self.token(*id))),
+        }
+    }
+
+    fn node_source_span(&self, id: CstId) -> Option<Span> {
+        self.concrete_node_span(id)
+            .or_else(|| self.diagnostic_span(self.node(id)))
+    }
+
+    fn diagnostic_span(&self, node: &SyntaxNode) -> Option<Span> {
+        node.diagnostics.iter().fold(None, |span, diagnostic| {
+            if let Some(anchor) = diagnostic.anchor_span()
+                && anchor.file == self.file
+            {
+                Some(merge_span(span, anchor.span))
+            } else {
+                span
+            }
+        })
+    }
+
+    fn child_order_span(&self, child: &NodeOrToken) -> Option<Span> {
+        match child {
+            NodeOrToken::Node(id) => self.concrete_node_span(*id),
+            NodeOrToken::Token(id) => Some(token_span(self.token(*id))),
+        }
+    }
+
+    fn concrete_node_span(&self, id: CstId) -> Option<Span> {
+        let mut span = None;
+
+        for child in self.node(id).children() {
             let child_span = match child {
-                NodeOrToken::Node(id) => node_meaningful_span(self.node(*id)),
-                NodeOrToken::Token(id) => meaningful_token_span(self.token(*id)),
+                NodeOrToken::Node(child) => self.concrete_node_span(*child),
+                NodeOrToken::Token(token) => Some(token_span(self.token(*token))),
             };
             if let Some(child_span) = child_span {
                 span = Some(merge_span(span, child_span));
             }
         }
 
-        for diagnostic in &node.diagnostics {
-            if let Some(anchor) = diagnostic.anchor_span()
-                && anchor.file == self.file
-            {
-                span = Some(merge_span(span, anchor.span));
-            }
-        }
-
-        span.unwrap_or_else(|| Span::new(0, 0))
+        span
     }
 
     fn node_at_offset_from(&self, id: CstId, offset: usize) -> CstId {
@@ -398,89 +467,6 @@ impl SyntaxTree {
     }
 }
 
-struct CstRebuilder<'a> {
-    old_nodes: Arena<SyntaxNode>,
-    tokens: &'a [PosToken],
-    nodes: Arena<SyntaxNode>,
-    token_parents: Vec<Option<CstId>>,
-}
-
-impl CstRebuilder<'_> {
-    fn rebuild_node(&mut self, old_id: CstId, force_keep: bool) -> Vec<NodeOrToken> {
-        if !force_keep && self.should_collapse(old_id) {
-            return self.rebuild_children(old_id, None);
-        }
-
-        let old = &self.old_nodes[old_id.0];
-        let new_id = CstId(self.nodes.alloc(SyntaxNode {
-            kind: old.kind,
-            span: old.span,
-            parent: None,
-            children: Vec::new(),
-            diagnostics: old.diagnostics.clone(),
-        }));
-        let children = self.rebuild_children(old_id, Some(new_id));
-        self.nodes[new_id.0].children = children;
-
-        vec![NodeOrToken::Node(new_id)]
-    }
-
-    fn rebuild_children(&mut self, old_id: CstId, parent: Option<CstId>) -> Vec<NodeOrToken> {
-        let old_children = self.old_nodes[old_id.0].children.clone();
-        let mut children = Vec::new();
-
-        for child in old_children {
-            match child {
-                NodeOrToken::Node(old_child) => {
-                    let rebuilt = self.rebuild_node(old_child, false);
-                    for entry in rebuilt {
-                        self.attach_rebuilt_child(parent, entry);
-                        children.push(entry);
-                    }
-                }
-                NodeOrToken::Token(token) => {
-                    self.attach_rebuilt_child(parent, NodeOrToken::Token(token));
-                    children.push(NodeOrToken::Token(token));
-                }
-            }
-        }
-
-        children
-    }
-
-    fn attach_rebuilt_child(&mut self, parent: Option<CstId>, child: NodeOrToken) {
-        let Some(parent) = parent else {
-            return;
-        };
-
-        match child {
-            NodeOrToken::Node(id) => self.nodes[id.0].parent = Some(parent),
-            NodeOrToken::Token(id) => self.token_parents[id.index()] = Some(parent),
-        }
-    }
-
-    fn should_collapse(&self, old_id: CstId) -> bool {
-        let old = &self.old_nodes[old_id.0];
-
-        if !old.diagnostics.is_empty() {
-            return false;
-        }
-
-        let mut child_nodes = 0usize;
-        for child in &old.children {
-            match child {
-                NodeOrToken::Node(_) => child_nodes += 1,
-                NodeOrToken::Token(id) if token_is_meaningful(&self.tokens[id.index()]) => {
-                    return false;
-                }
-                NodeOrToken::Token(_) => {}
-            }
-        }
-
-        child_nodes == 1
-    }
-}
-
 fn merge_span(current: Option<Span>, next: Span) -> Span {
     match current {
         Some(current) => Span::new(current.start.min(next.start), current.end.max(next.end)),
@@ -490,14 +476,6 @@ fn merge_span(current: Option<Span>, next: Span) -> Span {
 
 fn token_span(token: &PosToken) -> Span {
     Span::from_usize_range(token.start()..token.end())
-}
-
-fn meaningful_token_span(token: &PosToken) -> Option<Span> {
-    token_is_meaningful(token).then(|| token_span(token))
-}
-
-fn node_meaningful_span(node: &SyntaxNode) -> Option<Span> {
-    (!node.span.is_empty()).then_some(node.span)
 }
 
 fn token_is_trivia(token: &PosToken) -> bool {
@@ -601,6 +579,14 @@ fn span_contains_offset(span: Span, offset: usize) -> bool {
     } else {
         start <= offset && offset < end
     }
+}
+
+fn span_contains_span(parent: Span, child: Span) -> bool {
+    parent.start <= child.start && child.end <= parent.end
+}
+
+fn spans_are_non_decreasing(previous: Span, next: Span) -> bool {
+    previous.start < next.start || (previous.start == next.start && previous.end <= next.end)
 }
 
 fn token_contains_offset(token: &PosToken, offset: usize) -> bool {

@@ -1,6 +1,6 @@
-Module @0..135
+Module @0..136
   VOpen @0..0 line=0 col=0 synthetic text=""
-  DefinitionList @0..135
+  DefinitionList @0..136
     Signature @0..12
       Ident @0..4 line=0 col=0 text="main"
       Whitespace @4..5 line=0 col=4 text=" "
@@ -15,12 +15,12 @@ Module @0..135
           RParen @11..12 line=0 col=11 text=")"
     Newline @12..13 line=0 col=12 text="\n"
     VSemi @13..13 line=1 col=0 synthetic text=""
-    FunctionDef @13..135
+    FunctionDef @13..136
       Ident @13..17 line=1 col=0 text="main"
       Whitespace @17..18 line=1 col=4 text=" "
       Eq @18..19 line=1 col=5 text="="
       Whitespace @19..20 line=1 col=6 text=" "
-      DoExpr @20..135
+      DoExpr @20..136
         Do @20..22 line=1 col=7 text="do"
         Newline @22..23 line=1 col=9 text="\n"
         Whitespace @23..27 line=2 col=0 text="    "
