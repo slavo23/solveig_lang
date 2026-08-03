@@ -2,7 +2,9 @@
 
 use std::collections::HashMap;
 
-use lsp_types::{CodeAction, CodeActionKind, CodeActionOrCommand, TextEdit, WorkspaceEdit};
+use async_lsp::lsp_types::{
+    CodeAction, CodeActionKind, CodeActionOrCommand, TextEdit, WorkspaceEdit,
+};
 use solveig_base::{PositionEncoding, SourceMap};
 use solveig_ide::SourceCodeAction;
 

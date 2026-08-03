@@ -1,11 +1,15 @@
-//! Tower-LSP server lifecycle and text-document synchronization.
+//! Async-LSP server lifecycle and text-document synchronization.
 
+use std::future::Future;
+use std::ops::ControlFlow;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-use lsp_types::{
+use async_lsp::lsp_types::notification::{LogMessage, PublishDiagnostics};
+use async_lsp::lsp_types::{
     ClientCapabilities, CodeActionKind, CodeActionOptions, CodeActionParams,
     CodeActionProviderCapability, CodeActionResponse, CompletionOptions, CompletionParams,
     CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
@@ -13,30 +17,37 @@ use lsp_types::{
     DocumentHighlight, DocumentHighlightParams, DocumentLink, DocumentLinkOptions,
     DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FoldingRange,
     FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
-    GotoDefinitionResponse, HoverParams, HoverProviderCapability, InitializeParams,
-    InitializeResult, InitializedParams, InlayHintOptions, InlayHintParams,
-    InlayHintServerCapabilities, Location, MessageType, OneOf, PositionEncodingKind,
-    PrepareRenameResponse, ReferenceParams, RenameOptions, RenameParams, SelectionRange,
-    SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokensFullDeltaResult,
-    SemanticTokensFullOptions, SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
-    SignatureHelpParams, SymbolInformation, TextDocumentSyncCapability, TextDocumentSyncKind,
-    WorkspaceEdit, WorkspaceSymbolParams,
+    GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
+    InitializeResult, InitializedParams, InlayHint, InlayHintOptions, InlayHintParams,
+    InlayHintServerCapabilities, Location, LogMessageParams, MessageType, OneOf,
+    PositionEncodingKind, PrepareRenameResponse, PublishDiagnosticsParams, ReferenceParams,
+    RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
+    SelectionRangeProviderCapability, SemanticTokensFullOptions, SemanticTokensOptions,
+    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
+    ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, WorkspaceEdit,
+    WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
+use async_lsp::router::Router;
+use async_lsp::{ClientSocket, LanguageServer, MainLoop, ResponseError};
 use solveig_base::PositionEncoding;
-use tokio::io::{stdin, stdout};
-use tokio::sync::Mutex;
-use tower_lsp::{Client, LanguageServer, LspService, Server};
 
 use crate::semantic_tokens::semantic_tokens_legend;
-use crate::workspace::{ServerConfig, ServerState};
+use crate::workspace::{ServerConfig, ServerState, WorkspaceSnapshot, check_workspaces};
 
 const CHECK_DEBOUNCE: Duration = Duration::from_millis(150);
 
+type LspResult<T> = Result<T, ResponseError>;
+type LspFuture<T> = Pin<Box<dyn Future<Output = LspResult<T>> + Send + 'static>>;
+type NotifyResult = ControlFlow<async_lsp::Result<()>>;
+
 /// Serves Solveig LSP requests over stdin/stdout.
-pub async fn run_stdio() {
-    let (service, socket) = LspService::new(LspServer::new);
-    Server::new(stdin(), stdout(), socket).serve(service).await;
+pub async fn run_stdio() -> async_lsp::Result<()> {
+    let (server, _) = MainLoop::new_server(LspServer::router);
+    let stdin = async_lsp::stdio::PipeStdin::lock_tokio()?;
+    let stdout = async_lsp::stdio::PipeStdout::lock_tokio()?;
+
+    server.run_buffered(stdin, stdout).await
 }
 
 /// Runs the stdio server on a current-thread Tokio runtime.
@@ -44,18 +55,21 @@ pub fn run_stdio_blocking() -> std::io::Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    runtime.block_on(run_stdio());
-    Ok(())
+    runtime
+        .block_on(run_stdio())
+        .map_err(|err| std::io::Error::other(err.to_string()))
 }
 
+/// Adapts Solveig workspace state to async-lsp protocol requests.
 pub struct LspServer {
-    client: Client,
+    client: ClientSocket,
     state: Arc<Mutex<ServerState>>,
     revision: Arc<AtomicU64>,
 }
 
 impl LspServer {
-    pub fn new(client: Client) -> Self {
+    /// Creates a server with an LSP client socket.
+    pub fn new(client: ClientSocket) -> Self {
         Self {
             client,
             state: Arc::new(Mutex::new(ServerState::new(PositionEncoding::default()))),
@@ -63,122 +77,157 @@ impl LspServer {
         }
     }
 
+    fn router(client: ClientSocket) -> Router<Self> {
+        Router::from_language_server(Self::new(client))
+    }
+
     fn bump_revision(&self) -> u64 {
         self.revision.fetch_add(1, Ordering::SeqCst) + 1
     }
 
-    async fn schedule_check(&self, revision: u64) {
-        let mut state = self.state.lock().await;
+    fn schedule_check(&self, revision: u64) {
+        let state_ref = Arc::clone(&self.state);
+        let revision_ref = Arc::clone(&self.revision);
+        let client = self.client.clone();
+
+        let mut state = lock_state(&self.state);
         if let Some(handle) = state.pending_check.take() {
             handle.abort();
         }
 
-        let state_ref = Arc::clone(&self.state);
-        let revision_ref = Arc::clone(&self.revision);
-        let client = self.client.clone();
         state.pending_check = Some(tokio::spawn(async move {
             tokio::time::sleep(CHECK_DEBOUNCE).await;
             if revision_ref.load(Ordering::SeqCst) != revision {
                 return;
             }
 
+            let (encoding, config, plan) = {
+                let state = lock_state(&state_ref);
+                state.check_context()
+            };
+            let outcomes = check_workspaces(plan, encoding, config);
+
             let publications = {
-                let mut state = state_ref.lock().await;
-                let publications = state.check_all();
+                let mut state = lock_state(&state_ref);
+                if revision_ref.load(Ordering::SeqCst) != revision {
+                    return;
+                }
+
                 state.pending_check = None;
-                publications
+                state.finish_check(outcomes)
             };
 
-            if revision_ref.load(Ordering::SeqCst) != revision {
-                return;
-            }
-
-            for (uri, diagnostics) in publications {
-                client.publish_diagnostics(uri, diagnostics, None).await;
-            }
+            publish_diagnostics(&client, publications);
         }));
     }
 
-    async fn check_after_change(&self) {
+    fn check_after_change(&self) {
         let revision = self.bump_revision();
-        self.schedule_check(revision).await;
+        self.schedule_check(revision);
+    }
+
+    fn log_message(&self, typ: MessageType, message: impl Into<String>) {
+        let message = message.into();
+        if let Err(err) = self
+            .client
+            .notify::<LogMessage>(LogMessageParams { typ, message })
+        {
+            tracing::debug!(error = %err, "Failed to send Solveig LSP log message");
+        }
     }
 }
 
-#[tower_lsp::async_trait]
 impl LanguageServer for LspServer {
-    async fn initialize(
-        &self,
-        params: InitializeParams,
-    ) -> tower_lsp::jsonrpc::Result<InitializeResult> {
+    type Error = ResponseError;
+    type NotifyResult = NotifyResult;
+
+    fn initialize(&mut self, params: InitializeParams) -> LspFuture<InitializeResult> {
         let (encoding, lsp_encoding) = negotiate_position_encoding(&params.capabilities);
         let roots = workspace_roots(&params);
         let config = server_config_from_initialize(&params);
         {
-            let mut state = self.state.lock().await;
+            let mut state = lock_state(&self.state);
             *state = ServerState::new_with_config(encoding, config);
             state.set_roots(roots);
         }
 
-        Ok(InitializeResult {
+        ready_response(InitializeResult {
             capabilities: server_capabilities(lsp_encoding),
             server_info: None,
         })
     }
 
-    async fn initialized(&self, _: InitializedParams) {
-        self.client
-            .log_message(MessageType::INFO, "Solveig language server initialized")
-            .await;
+    fn initialized(&mut self, _: InitializedParams) -> NotifyResult {
+        tracing::info!("Solveig language server initialized");
+        self.log_message(MessageType::INFO, "Solveig language server initialized");
+        ControlFlow::Continue(())
     }
 
-    async fn shutdown(&self) -> tower_lsp::jsonrpc::Result<()> {
-        let mut state = self.state.lock().await;
+    fn shutdown(&mut self, (): ()) -> LspFuture<()> {
+        let mut state = lock_state(&self.state);
         if let Some(handle) = state.pending_check.take() {
             handle.abort();
         }
-        Ok(())
+
+        ready_response(())
     }
 
-    async fn did_open(&self, params: DidOpenTextDocumentParams) {
+    fn exit(&mut self, (): ()) -> NotifyResult {
+        let mut state = lock_state(&self.state);
+        if let Some(handle) = state.pending_check.take() {
+            handle.abort();
+        }
+
+        ControlFlow::Break(Ok(()))
+    }
+
+    fn did_open(&mut self, params: DidOpenTextDocumentParams) -> NotifyResult {
         {
-            let mut state = self.state.lock().await;
+            let mut state = lock_state(&self.state);
             state.open_document(&params.text_document.uri, params.text_document.text);
         }
-        self.check_after_change().await;
+        self.check_after_change();
+
+        ControlFlow::Continue(())
     }
 
-    async fn did_change(&self, mut params: DidChangeTextDocumentParams) {
+    fn did_change(&mut self, mut params: DidChangeTextDocumentParams) -> NotifyResult {
         let Some(change) = params.content_changes.pop() else {
-            return;
+            return ControlFlow::Continue(());
         };
 
         {
-            let mut state = self.state.lock().await;
+            let mut state = lock_state(&self.state);
             state.change_document(&params.text_document.uri, change.text);
         }
-        self.check_after_change().await;
+        self.check_after_change();
+
+        ControlFlow::Continue(())
     }
 
-    async fn did_save(&self, params: DidSaveTextDocumentParams) {
+    fn did_save(&mut self, params: DidSaveTextDocumentParams) -> NotifyResult {
         {
-            let mut state = self.state.lock().await;
+            let mut state = lock_state(&self.state);
             state.save_document(&params.text_document.uri, params.text);
         }
-        self.check_after_change().await;
+        self.check_after_change();
+
+        ControlFlow::Continue(())
     }
 
-    async fn did_close(&self, params: DidCloseTextDocumentParams) {
+    fn did_close(&mut self, params: DidCloseTextDocumentParams) -> NotifyResult {
         {
-            let mut state = self.state.lock().await;
+            let mut state = lock_state(&self.state);
             state.close_document(&params.text_document.uri);
         }
-        self.check_after_change().await;
+        self.check_after_change();
+
+        ControlFlow::Continue(())
     }
 
-    async fn did_change_watched_files(&self, params: DidChangeWatchedFilesParams) {
+    fn did_change_watched_files(&mut self, params: DidChangeWatchedFilesParams) -> NotifyResult {
         {
-            let mut state = self.state.lock().await;
+            let mut state = lock_state(&self.state);
             for change in params.changes {
                 if matches!(
                     change.typ,
@@ -189,176 +238,276 @@ impl LanguageServer for LspServer {
                 }
             }
         }
-        self.check_after_change().await;
+        self.check_after_change();
+
+        ControlFlow::Continue(())
     }
 
-    async fn hover(
-        &self,
-        params: HoverParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<lsp_types::Hover>> {
-        let mut state = self.state.lock().await;
+    fn hover(&mut self, params: HoverParams) -> LspFuture<Option<Hover>> {
         let params = params.text_document_position_params;
+        let position = params.position;
 
-        Ok(state.hover(&params.text_document.uri, params.position))
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| snapshot.hover(&path, position, encoding),
+        )
     }
 
-    async fn goto_definition(
-        &self,
+    fn definition(
+        &mut self,
         params: GotoDefinitionParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<GotoDefinitionResponse>> {
-        let mut state = self.state.lock().await;
+    ) -> LspFuture<Option<GotoDefinitionResponse>> {
         let params = params.text_document_position_params;
+        let position = params.position;
 
-        Ok(state
-            .definition(&params.text_document.uri, params.position)
-            .map(GotoDefinitionResponse::Scalar))
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| {
+                snapshot
+                    .definition(&path, position, encoding)
+                    .map(GotoDefinitionResponse::Scalar)
+            },
+        )
     }
 
-    async fn references(
-        &self,
-        params: ReferenceParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<Vec<Location>>> {
-        let mut state = self.state.lock().await;
+    fn references(&mut self, params: ReferenceParams) -> LspFuture<Option<Vec<Location>>> {
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri;
+        let include_declaration = params.context.include_declaration;
 
-        Ok(state.references(&uri, position, params.context.include_declaration))
+        snapshot_response(&self.state, &uri, move |path, encoding, _, snapshot| {
+            snapshot.references(&path, position, encoding, include_declaration)
+        })
     }
 
-    async fn document_highlight(
-        &self,
+    fn document_highlight(
+        &mut self,
         params: DocumentHighlightParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<Vec<DocumentHighlight>>> {
-        let mut state = self.state.lock().await;
+    ) -> LspFuture<Option<Vec<DocumentHighlight>>> {
         let params = params.text_document_position_params;
+        let position = params.position;
 
-        Ok(state.document_highlights(&params.text_document.uri, params.position))
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| {
+                snapshot.document_highlights(&path, position, encoding)
+            },
+        )
     }
 
-    async fn document_link(
-        &self,
+    fn document_link(
+        &mut self,
         params: DocumentLinkParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<Vec<DocumentLink>>> {
-        let mut state = self.state.lock().await;
-
-        Ok(state.document_links(&params.text_document.uri))
+    ) -> LspFuture<Option<Vec<DocumentLink>>> {
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| snapshot.document_links(&path, encoding),
+        )
     }
 
-    async fn completion(
-        &self,
-        params: CompletionParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<CompletionResponse>> {
-        let mut state = self.state.lock().await;
+    fn completion(&mut self, params: CompletionParams) -> LspFuture<Option<CompletionResponse>> {
         let params = params.text_document_position;
+        let position = params.position;
 
-        Ok(state.completion(&params.text_document.uri, params.position))
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| snapshot.completion(&path, position, encoding),
+        )
     }
 
-    async fn inlay_hint(
-        &self,
-        params: InlayHintParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<Vec<lsp_types::InlayHint>>> {
-        let mut state = self.state.lock().await;
+    fn inlay_hint(&mut self, params: InlayHintParams) -> LspFuture<Option<Vec<InlayHint>>> {
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, config, snapshot| {
+                if !config.inlay_hints_enabled {
+                    return Some(Vec::new());
+                }
 
-        Ok(state.inlay_hints(&params.text_document.uri, params.range))
+                snapshot.inlay_hints(&path, params.range, encoding)
+            },
+        )
     }
 
-    async fn folding_range(
-        &self,
+    fn folding_range(
+        &mut self,
         params: FoldingRangeParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<Vec<FoldingRange>>> {
-        let mut state = self.state.lock().await;
-
-        Ok(state.folding_ranges(&params.text_document.uri))
+    ) -> LspFuture<Option<Vec<FoldingRange>>> {
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| snapshot.folding_ranges(&path, encoding),
+        )
     }
 
-    async fn selection_range(
-        &self,
+    fn selection_range(
+        &mut self,
         params: SelectionRangeParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<Vec<SelectionRange>>> {
-        let mut state = self.state.lock().await;
-
-        Ok(state.selection_ranges(&params.text_document.uri, params.positions))
+    ) -> LspFuture<Option<Vec<SelectionRange>>> {
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| {
+                snapshot.selection_ranges(&path, params.positions, encoding)
+            },
+        )
     }
 
-    async fn signature_help(
-        &self,
-        params: SignatureHelpParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<SignatureHelp>> {
-        let mut state = self.state.lock().await;
+    fn signature_help(&mut self, params: SignatureHelpParams) -> LspFuture<Option<SignatureHelp>> {
         let params = params.text_document_position_params;
+        let position = params.position;
 
-        Ok(state.signature_help(&params.text_document.uri, params.position))
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| snapshot.signature_help(&path, position, encoding),
+        )
     }
 
-    async fn prepare_rename(
-        &self,
-        params: lsp_types::TextDocumentPositionParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<PrepareRenameResponse>> {
-        let mut state = self.state.lock().await;
+    fn prepare_rename(
+        &mut self,
+        params: TextDocumentPositionParams,
+    ) -> LspFuture<Option<PrepareRenameResponse>> {
+        let position = params.position;
 
-        Ok(state.prepare_rename(&params.text_document.uri, params.position))
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| snapshot.prepare_rename(&path, position, encoding),
+        )
     }
 
-    async fn rename(
-        &self,
-        params: RenameParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<WorkspaceEdit>> {
-        let mut state = self.state.lock().await;
+    fn rename(&mut self, params: RenameParams) -> LspFuture<Option<WorkspaceEdit>> {
         let position = params.text_document_position.position;
         let uri = params.text_document_position.text_document.uri;
+        let new_name = params.new_name;
 
-        Ok(state.rename(&uri, position, &params.new_name))
+        snapshot_response(&self.state, &uri, move |path, encoding, _, snapshot| {
+            snapshot.rename(&path, position, encoding, &new_name)
+        })
     }
 
-    async fn document_symbol(
-        &self,
+    fn document_symbol(
+        &mut self,
         params: DocumentSymbolParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<DocumentSymbolResponse>> {
-        let mut state = self.state.lock().await;
-
-        Ok(state
-            .document_symbols(&params.text_document.uri)
-            .map(DocumentSymbolResponse::Nested))
+    ) -> LspFuture<Option<DocumentSymbolResponse>> {
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| {
+                snapshot
+                    .document_symbols(&path, encoding)
+                    .map(DocumentSymbolResponse::Nested)
+            },
+        )
     }
 
-    async fn symbol(
-        &self,
+    fn symbol(
+        &mut self,
         params: WorkspaceSymbolParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<Vec<SymbolInformation>>> {
-        let mut state = self.state.lock().await;
+    ) -> LspFuture<Option<WorkspaceSymbolResponse>> {
+        let (encoding, snapshots) = {
+            let state = lock_state(&self.state);
+            state.workspace_snapshots()
+        };
 
-        Ok(Some(state.workspace_symbols(&params.query)))
+        Box::pin(async move {
+            let mut out = Vec::new();
+            for snapshot in &snapshots {
+                out.extend(snapshot.workspace_symbols(&params.query, encoding));
+            }
+
+            Ok(Some(WorkspaceSymbolResponse::Flat(out)))
+        })
     }
 
-    async fn semantic_tokens_full(
-        &self,
+    fn semantic_tokens_full(
+        &mut self,
         params: SemanticTokensParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<SemanticTokensResult>> {
-        let mut state = self.state.lock().await;
-
-        Ok(state
-            .semantic_tokens_full(&params.text_document.uri)
-            .map(SemanticTokensResult::Tokens))
+    ) -> LspFuture<Option<SemanticTokensResult>> {
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| {
+                snapshot
+                    .semantic_tokens_full(&path, encoding)
+                    .map(SemanticTokensResult::Tokens)
+            },
+        )
     }
 
-    async fn semantic_tokens_full_delta(
-        &self,
-        params: lsp_types::SemanticTokensDeltaParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<SemanticTokensFullDeltaResult>> {
-        let mut state = self.state.lock().await;
-
-        Ok(state.semantic_tokens_delta(&params.text_document.uri, &params.previous_result_id))
+    fn code_action(&mut self, params: CodeActionParams) -> LspFuture<Option<CodeActionResponse>> {
+        snapshot_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, config, snapshot| {
+                snapshot.code_actions(
+                    &path,
+                    params.range,
+                    encoding,
+                    config.inferred_signature_hints_enabled,
+                )
+            },
+        )
     }
+}
 
-    async fn code_action(
-        &self,
-        params: CodeActionParams,
-    ) -> tower_lsp::jsonrpc::Result<Option<CodeActionResponse>> {
-        let mut state = self.state.lock().await;
+fn snapshot_response<T>(
+    state: &Arc<Mutex<ServerState>>,
+    uri: &async_lsp::lsp_types::Url,
+    f: impl FnOnce(PathBuf, PositionEncoding, ServerConfig, WorkspaceSnapshot) -> Option<T>
+    + Send
+    + 'static,
+) -> LspFuture<Option<T>>
+where
+    T: Send + 'static,
+{
+    let snapshot = {
+        let state = lock_state(state);
+        state.snapshot_for_uri(uri)
+    };
 
-        Ok(state.code_actions(&params.text_document.uri, params.range))
+    Box::pin(async move {
+        Ok(snapshot
+            .and_then(|(path, encoding, config, snapshot)| f(path, encoding, config, snapshot)))
+    })
+}
+
+fn ready_response<T>(value: T) -> LspFuture<T>
+where
+    T: Send + 'static,
+{
+    Box::pin(std::future::ready(Ok(value)))
+}
+
+fn publish_diagnostics(
+    client: &ClientSocket,
+    publications: Vec<(
+        async_lsp::lsp_types::Url,
+        Vec<async_lsp::lsp_types::Diagnostic>,
+    )>,
+) {
+    for (uri, diagnostics) in publications {
+        if let Err(err) = client.notify::<PublishDiagnostics>(PublishDiagnosticsParams {
+            uri,
+            diagnostics,
+            version: None,
+        }) {
+            tracing::debug!(error = %err, "Failed to publish Solveig diagnostics");
+            return;
+        }
     }
+}
+
+fn lock_state(state: &Mutex<ServerState>) -> MutexGuard<'_, ServerState> {
+    state
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
 fn server_config_from_initialize(params: &InitializeParams) -> ServerConfig {
@@ -434,7 +583,7 @@ fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
                 work_done_progress_options: Default::default(),
                 legend: semantic_tokens_legend(),
                 range: None,
-                full: Some(SemanticTokensFullOptions::Delta { delta: Some(true) }),
+                full: Some(SemanticTokensFullOptions::Bool(true)),
             },
         )),
         ..ServerCapabilities::default()
@@ -460,6 +609,10 @@ fn negotiate_position_encoding(
     }
 }
 
+#[expect(
+    deprecated,
+    reason = "LSP clients may still send rootUri when workspaceFolders is absent"
+)]
 fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
     if let Some(folders) = &params.workspace_folders {
         let mut roots = folders

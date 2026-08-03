@@ -1,17 +1,19 @@
-//! Workspace state and synchronous checks behind the async language-server lock.
+//! Workspace state, published read snapshots, and synchronous project checks.
 
+use std::any::Any;
 use std::collections::{BTreeMap, BTreeSet};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Instant;
 
-use lsp_types::{
+use async_lsp::lsp_types::{
     CodeActionResponse, CompletionResponse, Diagnostic, DocumentSymbol, Hover, InlayHint, Location,
-    Position, Range, SemanticToken, SemanticTokens, SemanticTokensDelta, SemanticTokensEdit,
-    SemanticTokensFullDeltaResult, SymbolInformation, Url,
+    Position, Range, SemanticTokens, SymbolInformation, Url,
 };
-use solveig_base::{PositionEncoding, SourcePosition};
-use solveig_driver::{Compilation, DriverError};
-use solveig_ide::{CompilationIdeExt, SourceCodeActionCategory, SourceInlayHintConfig};
+use solveig_base::{PositionEncoding, Session, SourceMap, SourcePosition};
+use solveig_driver::{Compilation, CompilationSnapshot, DriverError, SourceProvider};
+use solveig_ide::{ProjectSnapshotView, SourceCodeActionCategory, SourceInlayHintConfig};
 use tokio::task::JoinHandle;
 
 use crate::code_actions::lsp_code_actions;
@@ -27,19 +29,47 @@ use crate::semantic_tokens::lsp_semantic_tokens;
 mod editor_features;
 
 pub(crate) struct ServerState {
-    workspaces: BTreeMap<PathBuf, Workspace>,
+    workspaces: BTreeMap<PathBuf, Arc<Mutex<Workspace>>>,
     roots: Vec<PathBuf>,
-    previous_diagnostics: BTreeSet<Url>,
-    semantic_token_results: BTreeMap<String, Vec<SemanticToken>>,
-    next_semantic_token_result: u64,
+    previous_diagnostics: BTreeMap<PathBuf, BTreeSet<Url>>,
+    published_snapshots: BTreeMap<PathBuf, WorkspaceSnapshot>,
     pub(crate) pending_check: Option<JoinHandle<()>>,
     encoding: PositionEncoding,
     config: ServerConfig,
 }
 
 pub(crate) struct Workspace {
+    root: PathBuf,
+    first_file: PathBuf,
     compilation: Compilation,
-    open_files: BTreeSet<PathBuf>,
+    open_files: BTreeMap<PathBuf, String>,
+    poisoned: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct WorkspaceSnapshot {
+    session: Session,
+    source_map: SourceMap,
+    source_provider: SourceProvider,
+    snapshot: Arc<CompilationSnapshot>,
+    success: bool,
+}
+
+#[derive(Clone)]
+pub(crate) struct WorkspaceCheckPlan {
+    root: PathBuf,
+    workspace: Arc<Mutex<Workspace>>,
+}
+
+pub(crate) struct WorkspaceCheckOutcome {
+    root: PathBuf,
+    diagnostics: BTreeMap<Url, Vec<Diagnostic>>,
+    snapshot: Option<WorkspaceSnapshot>,
+    failed: bool,
+}
+
+enum LspFailure {
+    Panic,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,9 +96,8 @@ impl ServerState {
         Self {
             workspaces: BTreeMap::new(),
             roots: Vec::new(),
-            previous_diagnostics: BTreeSet::new(),
-            semantic_token_results: BTreeMap::new(),
-            next_semantic_token_result: 0,
+            previous_diagnostics: BTreeMap::new(),
+            published_snapshots: BTreeMap::new(),
             pending_check: None,
             encoding,
             config,
@@ -82,36 +111,28 @@ impl ServerState {
     pub(crate) fn open_document(&mut self, uri: &Url, text: String) -> Option<()> {
         let path = uri.to_file_path().ok()?;
         let workspace = self.workspace_for_path(&path);
-        workspace.open_files.insert(path.clone());
-        workspace.compilation.set_overlay(path, text);
+        lock_workspace(&workspace).open_document(path, text);
         Some(())
     }
 
     pub(crate) fn change_document(&mut self, uri: &Url, text: String) -> Option<()> {
         let path = uri.to_file_path().ok()?;
-        self.workspace_for_path(&path)
-            .compilation
-            .set_overlay(path, text);
+        let workspace = self.workspace_for_path(&path);
+        lock_workspace(&workspace).change_document(path, text);
         Some(())
     }
 
     pub(crate) fn save_document(&mut self, uri: &Url, text: Option<String>) -> Option<()> {
         let path = uri.to_file_path().ok()?;
-        if let Some(text) = text {
-            self.workspace_for_path(&path)
-                .compilation
-                .set_overlay(path, text);
-        } else {
-            self.workspace_for_path(&path);
-        }
+        let workspace = self.workspace_for_path(&path);
+        lock_workspace(&workspace).save_document(path, text);
         Some(())
     }
 
     pub(crate) fn close_document(&mut self, uri: &Url) -> Option<()> {
         let path = uri.to_file_path().ok()?;
         let workspace = self.workspace_for_path(&path);
-        workspace.open_files.remove(&path);
-        workspace.compilation.clear_overlay(path);
+        lock_workspace(&workspace).close_document(path);
         Some(())
     }
 
@@ -119,160 +140,75 @@ impl ServerState {
         self.workspace_for_path(path);
     }
 
+    #[cfg(test)]
     pub(crate) fn check_all(&mut self) -> Vec<(Url, Vec<Diagnostic>)> {
-        let mut current = BTreeMap::<Url, Vec<Diagnostic>>::new();
+        let outcomes = check_workspaces(self.check_plan(), self.encoding, self.config);
+        self.finish_check(outcomes)
+    }
 
-        for workspace in self.workspaces.values_mut() {
-            current.extend(workspace.check(self.encoding, self.config));
-        }
+    pub(crate) fn check_context(
+        &self,
+    ) -> (PositionEncoding, ServerConfig, Vec<WorkspaceCheckPlan>) {
+        (self.encoding, self.config, self.check_plan())
+    }
 
+    pub(crate) fn check_plan(&self) -> Vec<WorkspaceCheckPlan> {
+        self.workspaces
+            .iter()
+            .map(|(root, workspace)| WorkspaceCheckPlan {
+                root: root.clone(),
+                workspace: Arc::clone(workspace),
+            })
+            .collect()
+    }
+
+    pub(crate) fn finish_check(
+        &mut self,
+        outcomes: Vec<WorkspaceCheckOutcome>,
+    ) -> Vec<(Url, Vec<Diagnostic>)> {
         let mut publications = Vec::new();
-        let current_uris = current.keys().cloned().collect::<BTreeSet<_>>();
 
-        for (uri, diagnostics) in current {
-            publications.push((uri, diagnostics));
+        for mut outcome in outcomes {
+            if let Some(snapshot) = outcome.snapshot.take() {
+                self.published_snapshots
+                    .insert(outcome.root.clone(), snapshot);
+            }
+            publications.extend(self.finish_workspace_check(outcome));
         }
 
-        for uri in self.previous_diagnostics.difference(&current_uris) {
-            publications.push((uri.clone(), Vec::new()));
-        }
-
-        self.previous_diagnostics = current_uris;
         publications
     }
 
-    pub(crate) fn hover(&mut self, uri: &Url, position: Position) -> Option<Hover> {
-        let path = uri.to_file_path().ok()?;
-        let encoding = self.encoding;
-
-        self.workspace_for_path(&path)
-            .hover(&path, position, encoding)
-    }
-
-    pub(crate) fn definition(&mut self, uri: &Url, position: Position) -> Option<Location> {
-        let path = uri.to_file_path().ok()?;
-        let encoding = self.encoding;
-
-        self.workspace_for_path(&path)
-            .definition(&path, position, encoding)
-    }
-
-    pub(crate) fn references(
-        &mut self,
+    pub(crate) fn snapshot_for_uri(
+        &self,
         uri: &Url,
-        position: Position,
-        include_declaration: bool,
-    ) -> Option<Vec<Location>> {
+    ) -> Option<(PathBuf, PositionEncoding, ServerConfig, WorkspaceSnapshot)> {
         let path = uri.to_file_path().ok()?;
-        let encoding = self.encoding;
+        let root = self.workspace_root_for_path(&path);
+        let snapshot = self.published_snapshots.get(&root)?.clone();
 
-        self.workspace_for_path(&path)
-            .references(&path, position, encoding, include_declaration)
+        Some((path, self.encoding, self.config, snapshot))
     }
 
-    pub(crate) fn completion(
-        &mut self,
-        uri: &Url,
-        position: Position,
-    ) -> Option<CompletionResponse> {
-        let path = uri.to_file_path().ok()?;
-        let encoding = self.encoding;
-
-        self.workspace_for_path(&path)
-            .completion(&path, position, encoding)
-    }
-
-    pub(crate) fn inlay_hints(&mut self, uri: &Url, range: Range) -> Option<Vec<InlayHint>> {
-        if !self.config.inlay_hints_enabled {
-            return Some(Vec::new());
-        }
-
-        let path = uri.to_file_path().ok()?;
-        let encoding = self.encoding;
-
-        self.workspace_for_path(&path)
-            .inlay_hints(&path, range, encoding)
-    }
-
-    pub(crate) fn document_symbols(&mut self, uri: &Url) -> Option<Vec<DocumentSymbol>> {
-        let path = uri.to_file_path().ok()?;
-        let encoding = self.encoding;
-
-        self.workspace_for_path(&path)
-            .document_symbols(&path, encoding)
-    }
-
-    pub(crate) fn workspace_symbols(&mut self, query: &str) -> Vec<SymbolInformation> {
-        let encoding = self.encoding;
-        let mut out = Vec::new();
-
-        for workspace in self.workspaces.values_mut() {
-            out.extend(workspace.workspace_symbols(query, encoding));
-        }
-
-        out
-    }
-
-    pub(crate) fn semantic_tokens_full(&mut self, uri: &Url) -> Option<SemanticTokens> {
-        let path = uri.to_file_path().ok()?;
-        let encoding = self.encoding;
-        let tokens = self
-            .workspace_for_path(&path)
-            .semantic_tokens(&path, encoding)?;
-
-        Some(self.remember_semantic_tokens(tokens))
-    }
-
-    pub(crate) fn semantic_tokens_delta(
-        &mut self,
-        uri: &Url,
-        previous_result_id: &str,
-    ) -> Option<SemanticTokensFullDeltaResult> {
-        let path = uri.to_file_path().ok()?;
-        let encoding = self.encoding;
-        let tokens = self
-            .workspace_for_path(&path)
-            .semantic_tokens(&path, encoding)?;
-        let previous = self.semantic_token_results.get(previous_result_id).cloned();
-        let result = self.remember_semantic_tokens(tokens.clone());
-
-        Some(match previous {
-            Some(previous) => SemanticTokensFullDeltaResult::TokensDelta(SemanticTokensDelta {
-                result_id: result.result_id,
-                edits: vec![SemanticTokensEdit {
-                    start: 0,
-                    delete_count: semantic_token_u32_len(&previous),
-                    data: Some(tokens),
-                }],
-            }),
-            None => SemanticTokensFullDeltaResult::Tokens(result),
-        })
-    }
-
-    pub(crate) fn code_actions(&mut self, uri: &Url, range: Range) -> Option<CodeActionResponse> {
-        let path = uri.to_file_path().ok()?;
-        let encoding = self.encoding;
-        let include_inferred_signatures = self.config.inferred_signature_hints_enabled;
-
-        self.workspace_for_path(&path).code_actions(
-            &path,
-            range,
-            encoding,
-            include_inferred_signatures,
+    pub(crate) fn workspace_snapshots(&self) -> (PositionEncoding, Vec<WorkspaceSnapshot>) {
+        (
+            self.encoding,
+            self.published_snapshots.values().cloned().collect(),
         )
     }
 
     #[cfg(test)]
     pub(crate) fn previous_diagnostic_count(&self) -> usize {
-        self.previous_diagnostics.len()
+        self.previous_diagnostics.values().map(BTreeSet::len).sum()
     }
 
-    fn workspace_for_path(&mut self, path: &Path) -> &mut Workspace {
+    fn workspace_for_path(&mut self, path: &Path) -> Arc<Mutex<Workspace>> {
         let root = self.workspace_root_for_path(path);
 
         self.workspaces
             .entry(root)
-            .or_insert_with_key(|root| Workspace::new(root, path))
+            .or_insert_with_key(|root| Arc::new(Mutex::new(Workspace::new(root, path))))
+            .clone()
     }
 
     fn workspace_root_for_path(&self, path: &Path) -> PathBuf {
@@ -288,115 +224,282 @@ impl ServerState {
         }
     }
 
-    fn remember_semantic_tokens(&mut self, tokens: Vec<SemanticToken>) -> SemanticTokens {
-        self.next_semantic_token_result = self.next_semantic_token_result.saturating_add(1);
-        let result_id = format!("solveig-semantic-{}", self.next_semantic_token_result);
-        self.semantic_token_results
-            .insert(result_id.clone(), tokens.clone());
+    fn finish_workspace_check(
+        &mut self,
+        outcome: WorkspaceCheckOutcome,
+    ) -> Vec<(Url, Vec<Diagnostic>)> {
+        let current_uris = outcome.diagnostics.keys().cloned().collect::<BTreeSet<_>>();
+        let mut publications = outcome.diagnostics.into_iter().collect::<Vec<_>>();
 
-        SemanticTokens {
-            result_id: Some(result_id),
-            data: tokens,
+        if outcome.failed {
+            return publications;
         }
+
+        let previous = self
+            .previous_diagnostics
+            .remove(&outcome.root)
+            .unwrap_or_default();
+        for uri in previous.difference(&current_uris) {
+            publications.push((uri.clone(), Vec::new()));
+        }
+        self.previous_diagnostics.insert(outcome.root, current_uris);
+
+        publications
+    }
+}
+
+#[cfg(test)]
+impl ServerState {
+    pub(crate) fn hover(&self, uri: &Url, position: Position) -> Option<Hover> {
+        let (path, encoding, _config, snapshot) = self.snapshot_for_uri(uri)?;
+
+        snapshot.hover(&path, position, encoding)
+    }
+
+    pub(crate) fn code_actions(&self, uri: &Url, range: Range) -> Option<CodeActionResponse> {
+        let (path, encoding, config, snapshot) = self.snapshot_for_uri(uri)?;
+
+        snapshot.code_actions(
+            &path,
+            range,
+            encoding,
+            config.inferred_signature_hints_enabled,
+        )
     }
 }
 
 impl Workspace {
     fn new(root: &Path, first_file: &Path) -> Self {
-        let compilation = if root.join("src").join("main.sv").is_file() {
-            Compilation::new(root)
-        } else {
-            Compilation::for_source_file(first_file)
-        };
-
         Self {
-            compilation,
-            open_files: BTreeSet::new(),
+            root: root.to_path_buf(),
+            first_file: first_file.to_path_buf(),
+            compilation: compilation_for(root, first_file),
+            open_files: BTreeMap::new(),
+            poisoned: false,
         }
     }
 
-    fn check(
+    fn open_document(&mut self, path: PathBuf, text: String) {
+        self.open_files.insert(path.clone(), text.clone());
+        self.compilation.set_overlay(path, text);
+    }
+
+    fn change_document(&mut self, path: PathBuf, text: String) {
+        self.open_files.insert(path.clone(), text.clone());
+        self.compilation.set_overlay(path, text);
+    }
+
+    fn save_document(&mut self, path: PathBuf, text: Option<String>) {
+        if let Some(text) = text {
+            self.open_files.insert(path.clone(), text.clone());
+            self.compilation.set_overlay(path, text);
+        }
+    }
+
+    fn close_document(&mut self, path: PathBuf) {
+        self.open_files.remove(&path);
+        self.compilation.clear_overlay(path);
+    }
+
+    fn check(&mut self, encoding: PositionEncoding, config: ServerConfig) -> WorkspaceCheckOutcome {
+        if self.poisoned {
+            self.rebuild_compilation();
+        }
+
+        let root = self.root.clone();
+        let started = Instant::now();
+        match guarded("workspace check", || self.check_inner(encoding, config)) {
+            Ok(Ok(outcome)) => {
+                self.poisoned = false;
+                tracing::info!(
+                    root = %root.display(),
+                    elapsed_ms = started.elapsed().as_millis(),
+                    failed = false,
+                    "Solveig workspace check completed"
+                );
+                outcome
+            }
+            Ok(Err(DriverError::EntryFileMissing { path })) => {
+                tracing::warn!(
+                    root = %root.display(),
+                    path = %path.display(),
+                    "Solveig workspace entry file is missing"
+                );
+                WorkspaceCheckOutcome {
+                    root,
+                    diagnostics: missing_entry_diagnostic(&path).into_iter().collect(),
+                    snapshot: None,
+                    failed: false,
+                }
+            }
+            Ok(Err(err)) => {
+                tracing::warn!(
+                    root = %root.display(),
+                    error = %err,
+                    "Solveig workspace check failed before diagnostics were available"
+                );
+                WorkspaceCheckOutcome {
+                    root,
+                    diagnostics: BTreeMap::new(),
+                    snapshot: None,
+                    failed: true,
+                }
+            }
+            Err(LspFailure::Panic) => {
+                self.poisoned = true;
+                WorkspaceCheckOutcome {
+                    root,
+                    diagnostics: BTreeMap::new(),
+                    snapshot: None,
+                    failed: true,
+                }
+            }
+        }
+    }
+
+    fn check_inner(
         &mut self,
         encoding: PositionEncoding,
         config: ServerConfig,
-    ) -> BTreeMap<Url, Vec<Diagnostic>> {
-        let checked = catch_unwind(AssertUnwindSafe(|| {
-            let mut diagnostics = {
-                let result = self.compilation.check(true)?;
-                diagnostic_map(result.diagnostics(), result.source_map(), encoding)
-            };
+    ) -> Result<WorkspaceCheckOutcome, DriverError> {
+        let (mut diagnostics, source_map, success, fresh, reused) = {
+            let result = self.compilation.check(false)?;
+            (
+                diagnostic_map(result.diagnostics(), result.source_map(), encoding),
+                result.source_map().clone(),
+                result.success(),
+                result.freshly_checked_modules().len(),
+                result.reused_modules().len(),
+            )
+        };
+        let snapshot = self.compilation.snapshot().map(|snapshot| {
+            WorkspaceSnapshot::from_compilation(
+                &self.compilation,
+                source_map.clone(),
+                snapshot,
+                success,
+            )
+        });
 
-            if config.inferred_signature_hints_enabled {
-                let source_code_actions = self.compilation.source_code_actions();
-                extend_diagnostic_map(
-                    &mut diagnostics,
-                    inferred_signature_diagnostic_map(
-                        &source_code_actions,
-                        self.compilation.source_map(),
-                        encoding,
-                    ),
-                );
-            }
+        if config.inferred_signature_hints_enabled
+            && let Some(snapshot) = snapshot.as_ref()
+        {
+            extend_diagnostic_map(
+                &mut diagnostics,
+                inferred_signature_diagnostic_map(
+                    &snapshot.source_code_actions(),
+                    &snapshot.source_map,
+                    encoding,
+                ),
+            );
+        }
 
-            Ok(diagnostics)
-        }));
+        tracing::info!(
+            root = %self.root.display(),
+            fresh,
+            reused,
+            success,
+            "Solveig workspace check retained snapshot"
+        );
 
-        match checked {
-            Ok(Ok(diagnostics)) => diagnostics,
-            Ok(Err(DriverError::EntryFileMissing { path })) => {
-                missing_entry_diagnostic(&path).into_iter().collect()
-            }
-            Ok(Err(_)) | Err(_) => BTreeMap::new(),
+        Ok(WorkspaceCheckOutcome {
+            root: self.root.clone(),
+            diagnostics,
+            snapshot,
+            failed: false,
+        })
+    }
+
+    fn rebuild_compilation(&mut self) {
+        tracing::info!(
+            root = %self.root.display(),
+            "Rebuilding poisoned Solveig workspace compilation"
+        );
+        self.compilation = compilation_for(&self.root, &self.first_file);
+        for (path, text) in &self.open_files {
+            self.compilation.set_overlay(path, text.clone());
+        }
+        self.poisoned = false;
+    }
+}
+
+impl WorkspaceSnapshot {
+    fn from_compilation(
+        compilation: &Compilation,
+        source_map: SourceMap,
+        snapshot: &CompilationSnapshot,
+        success: bool,
+    ) -> Self {
+        Self {
+            session: compilation.session().clone(),
+            source_map,
+            source_provider: compilation.source_provider().clone(),
+            snapshot: Arc::new(snapshot.clone()),
+            success,
         }
     }
 
-    fn hover(
-        &mut self,
+    fn view(&self) -> ProjectSnapshotView<'_> {
+        ProjectSnapshotView::new(
+            &self.session,
+            &self.source_map,
+            &self.source_provider,
+            &self.snapshot,
+            self.success,
+        )
+    }
+
+    fn source_code_actions(&self) -> Vec<solveig_ide::SourceCodeAction> {
+        self.view().source_code_actions()
+    }
+
+    pub(crate) fn hover(
+        &self,
         path: &Path,
         position: Position,
         encoding: PositionEncoding,
     ) -> Option<Hover> {
-        catch_unwind(AssertUnwindSafe(|| {
-            let info = self.compilation.hover_at_position(
+        guarded("hover request", || {
+            let info = self.view().hover_at_position(
                 path,
                 SourcePosition::new(position.line, position.character),
                 encoding,
             )?;
 
-            Some(lsp_hover(&info, self.compilation.source_map(), encoding))
-        }))
+            Some(lsp_hover(&info, &self.source_map, encoding))
+        })
         .ok()
         .flatten()
     }
 
-    fn definition(
-        &mut self,
+    pub(crate) fn definition(
+        &self,
         path: &Path,
         position: Position,
         encoding: PositionEncoding,
     ) -> Option<Location> {
-        catch_unwind(AssertUnwindSafe(|| {
-            let span = self.compilation.definition_at_position(
+        guarded("definition request", || {
+            let span = self.view().definition_at_position(
                 path,
                 SourcePosition::new(position.line, position.character),
                 encoding,
             )?;
 
-            lsp_location(span, self.compilation.source_map(), encoding)
-        }))
+            lsp_location(span, &self.source_map, encoding)
+        })
         .ok()
         .flatten()
     }
 
-    fn references(
-        &mut self,
+    pub(crate) fn references(
+        &self,
         path: &Path,
         position: Position,
         encoding: PositionEncoding,
         include_declaration: bool,
     ) -> Option<Vec<Location>> {
-        catch_unwind(AssertUnwindSafe(|| {
-            let spans = self.compilation.references_at_position(
+        guarded("references request", || {
+            let spans = self.view().references_at_position(
                 path,
                 SourcePosition::new(position.line, position.character),
                 encoding,
@@ -406,41 +509,41 @@ impl Workspace {
             Some(
                 spans
                     .into_iter()
-                    .filter_map(|span| lsp_location(span, self.compilation.source_map(), encoding))
+                    .filter_map(|span| lsp_location(span, &self.source_map, encoding))
                     .collect(),
             )
-        }))
+        })
         .ok()
         .flatten()
     }
 
-    fn completion(
-        &mut self,
+    pub(crate) fn completion(
+        &self,
         path: &Path,
         position: Position,
         encoding: PositionEncoding,
     ) -> Option<CompletionResponse> {
-        catch_unwind(AssertUnwindSafe(|| {
-            let items = self.compilation.completion_items_at_position(
+        guarded("completion request", || {
+            let items = self.view().completion_items_at_position(
                 path,
                 SourcePosition::new(position.line, position.character),
                 encoding,
             );
 
             Some(CompletionResponse::Array(lsp_completion_items(&items)))
-        }))
+        })
         .ok()
         .flatten()
     }
 
-    fn inlay_hints(
-        &mut self,
+    pub(crate) fn inlay_hints(
+        &self,
         path: &Path,
         range: Range,
         encoding: PositionEncoding,
     ) -> Option<Vec<InlayHint>> {
-        catch_unwind(AssertUnwindSafe(|| {
-            let hints = self.compilation.inlay_hints_at_range(
+        guarded("inlay-hints request", || {
+            let hints = self.view().inlay_hints_at_range(
                 path,
                 SourcePosition::new(range.start.line, range.start.character),
                 SourcePosition::new(range.end.line, range.end.character),
@@ -448,71 +551,62 @@ impl Workspace {
                 SourceInlayHintConfig::default(),
             );
 
-            Some(lsp_inlay_hints(
-                &hints,
-                self.compilation.source_map(),
-                encoding,
-            ))
-        }))
+            Some(lsp_inlay_hints(&hints, &self.source_map, encoding))
+        })
         .ok()
         .flatten()
     }
 
-    fn document_symbols(
-        &mut self,
+    pub(crate) fn document_symbols(
+        &self,
         path: &Path,
         encoding: PositionEncoding,
     ) -> Option<Vec<DocumentSymbol>> {
-        catch_unwind(AssertUnwindSafe(|| {
-            let symbols = self.compilation.document_symbols(path);
-            Some(lsp_document_symbols(
-                &symbols,
-                self.compilation.source_map(),
-                encoding,
-            ))
-        }))
+        guarded("document-symbol request", || {
+            let symbols = self.view().document_symbols(path);
+            Some(lsp_document_symbols(&symbols, &self.source_map, encoding))
+        })
         .ok()
         .flatten()
     }
 
-    fn workspace_symbols(
-        &mut self,
+    pub(crate) fn workspace_symbols(
+        &self,
         query: &str,
         encoding: PositionEncoding,
     ) -> Vec<SymbolInformation> {
-        catch_unwind(AssertUnwindSafe(|| {
-            let symbols = self.compilation.workspace_symbols(query);
-            lsp_symbol_information(&symbols, self.compilation.source_map(), encoding)
-        }))
+        guarded("workspace-symbol request", || {
+            let symbols = self.view().workspace_symbols(query);
+            lsp_symbol_information(&symbols, &self.source_map, encoding)
+        })
         .unwrap_or_default()
     }
 
-    fn semantic_tokens(
-        &mut self,
+    pub(crate) fn semantic_tokens_full(
+        &self,
         path: &Path,
         encoding: PositionEncoding,
-    ) -> Option<Vec<SemanticToken>> {
-        catch_unwind(AssertUnwindSafe(|| {
-            let tokens = self.compilation.semantic_tokens(path);
-            Some(lsp_semantic_tokens(
-                &tokens,
-                self.compilation.source_map(),
-                encoding,
-            ))
-        }))
+    ) -> Option<SemanticTokens> {
+        guarded("semantic-tokens request", || {
+            let tokens = self.view().semantic_tokens(path);
+            Some(SemanticTokens {
+                result_id: None,
+                data: lsp_semantic_tokens(&tokens, &self.source_map, encoding),
+            })
+        })
         .ok()
         .flatten()
     }
 
-    fn code_actions(
-        &mut self,
+    pub(crate) fn code_actions(
+        &self,
         path: &Path,
         range: Range,
         encoding: PositionEncoding,
         include_inferred_signatures: bool,
     ) -> Option<CodeActionResponse> {
-        catch_unwind(AssertUnwindSafe(|| {
-            let mut actions = self.compilation.code_actions_at_range(
+        guarded("code-action request", || {
+            let mut actions = self.view().code_actions_at_range(
                 path,
                 SourcePosition::new(range.start.line, range.start.character),
                 SourcePosition::new(range.end.line, range.end.character),
@@ -524,23 +618,54 @@ impl Workspace {
                 });
             }
 
-            Some(lsp_code_actions(
-                &actions,
-                self.compilation.source_map(),
-                encoding,
-            ))
-        }))
+            Some(lsp_code_actions(&actions, &self.source_map, encoding))
+        })
         .ok()
         .flatten()
     }
 }
 
-fn semantic_token_u32_len(tokens: &[SemanticToken]) -> u32 {
-    tokens
-        .len()
-        .saturating_mul(5)
-        .try_into()
-        .unwrap_or(u32::MAX)
+pub(crate) fn check_workspaces(
+    plan: Vec<WorkspaceCheckPlan>,
+    encoding: PositionEncoding,
+    config: ServerConfig,
+) -> Vec<WorkspaceCheckOutcome> {
+    plan.into_iter()
+        .map(|item| {
+            tracing::debug!(root = %item.root.display(), "Checking Solveig workspace");
+            lock_workspace(&item.workspace).check(encoding, config)
+        })
+        .collect()
+}
+
+fn lock_workspace(workspace: &Mutex<Workspace>) -> MutexGuard<'_, Workspace> {
+    workspace
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
+fn guarded<T>(operation: &'static str, f: impl FnOnce() -> T) -> Result<T, LspFailure> {
+    match catch_unwind(AssertUnwindSafe(f)) {
+        Ok(value) => Ok(value),
+        Err(payload) => {
+            tracing::error!(
+                operation,
+                panic = %panic_message(payload.as_ref()),
+                "Solveig LSP operation panicked"
+            );
+            Err(LspFailure::Panic)
+        }
+    }
+}
+
+fn panic_message(payload: &(dyn Any + Send)) -> String {
+    if let Some(message) = payload.downcast_ref::<&'static str>() {
+        (*message).to_string()
+    } else if let Some(message) = payload.downcast_ref::<String>() {
+        message.clone()
+    } else {
+        "non-string panic payload".to_string()
+    }
 }
 
 fn extend_diagnostic_map(
@@ -568,11 +693,21 @@ fn is_solveig_project_root(path: &Path) -> bool {
     path.join("src").join("main.sv").is_file()
 }
 
+fn compilation_for(root: &Path, first_file: &Path) -> Compilation {
+    if root.join("src").join("main.sv").is_file() {
+        Compilation::new(root)
+    } else {
+        Compilation::for_source_file(first_file)
+    }
+}
+
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::diagnostics::INFERRED_SIGNATURE_DIAGNOSTIC_CODE;
-    use lsp_types::{CodeActionOrCommand, DiagnosticSeverity, HoverContents, NumberOrString};
+    use async_lsp::lsp_types::{
+        CodeActionOrCommand, DiagnosticSeverity, HoverContents, NumberOrString,
+    };
     use solveig_driver::Compilation;
     use std::fs;
     use std::process;
@@ -644,7 +779,7 @@ pub(crate) mod tests {
 
             let mut compilation = Compilation::new(&case_root);
             let result = compilation
-                .check(true)
+                .check(false)
                 .unwrap_or_else(|err| panic!("{case_name} should return diagnostics: {err}"));
             let expected = diagnostic_map(
                 result.diagnostics(),
@@ -748,6 +883,7 @@ main = if True then ?? else False
         let mut state = ServerState::new(PositionEncoding::Utf16);
 
         state.open_document(&uri, text.to_string());
+        let _publications = state.check_all();
         let hover = state
             .hover(&uri, Position::new(1, 20))
             .expect("typed hole should have LSP hover");
@@ -1091,6 +1227,11 @@ main = count [1, 2, 3]
         let mut state = ServerState::new(PositionEncoding::Utf16);
 
         state.open_document(&uri, text.clone());
+        let initial_publications = state.check_all();
+        assert!(
+            diagnostics_for_uri(&initial_publications, &uri).is_empty(),
+            "direct bundled prelude diagnostics should stay clean before hover: {initial_publications:#?}"
+        );
         let hover = state
             .hover(
                 &uri,
@@ -1102,7 +1243,7 @@ main = count [1, 2, 3]
         let checked_publications = state.check_all();
         assert!(
             diagnostics_for_uri(&checked_publications, &uri).is_empty(),
-            "direct bundled prelude diagnostics should stay clean after hover-triggered check: {checked_publications:#?}"
+            "direct bundled prelude diagnostics should stay clean after recheck: {checked_publications:#?}"
         );
         for (line_text, needle, expected) in [
             (
@@ -1216,6 +1357,7 @@ secondAnswer = 2
         assert!(state.workspaces.contains_key(&first_root));
         assert!(state.workspaces.contains_key(&second_root));
         assert!(!state.workspaces.contains_key(&container));
+        let _publications = state.check_all();
 
         let first_hover = state
             .hover(&first_uri, Position::new(3, 7))

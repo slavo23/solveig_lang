@@ -5,7 +5,7 @@ use crate::diagnostics::DiagnosticSink;
 use crate::source::{FileId, SourceMap};
 use crate::symbol::{Interner, Symbol};
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Session {
     interner: RefCell<Interner>,
     source_map: RefCell<SourceMap>,

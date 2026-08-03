@@ -1,12 +1,12 @@
-use lsp_types::{
-    ClientCapabilities, DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse,
-    GotoDefinitionParams, GotoDefinitionResponse, InitializeParams, PartialResultParams, Position,
-    ReferenceContext, ReferenceParams, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, WorkDoneProgressParams, WorkspaceSymbolParams,
+use async_lsp::lsp_types::{
+    DidOpenTextDocumentParams, DocumentSymbolParams, DocumentSymbolResponse, GotoDefinitionParams,
+    GotoDefinitionResponse, PartialResultParams, Position, ReferenceContext, ReferenceParams,
+    TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
+    WorkDoneProgressParams, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
-use tower_lsp::{LanguageServer, LspService};
+use async_lsp::{ClientSocket, LanguageServer};
 
-use super::{temp_root, write_source};
+use super::{flush_checks, initialize_params, temp_root, write_source};
 use crate::server::LspServer;
 
 #[tokio::test(flavor = "current_thread")]
@@ -34,31 +34,29 @@ unwrap value =
     let lib_uri = Url::from_file_path(&lib).expect("test path should become a file URI");
     let root_uri =
         Url::from_directory_path(&project_root).expect("test root should become a file URI");
-    let (service, _socket) = LspService::new(LspServer::new);
-    let server = service.inner();
+    let mut server = LspServer::new(ClientSocket::new_closed());
 
     server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            capabilities: ClientCapabilities::default(),
-            ..InitializeParams::default()
-        })
+        .initialize(initialize_params(root_uri))
         .await
         .expect("initialize should succeed");
 
-    server
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: main_uri.clone(),
-                language_id: "solveig".to_string(),
-                version: 1,
-                text: main_text.to_string(),
-            },
-        })
-        .await;
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: main_uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: main_text.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
 
     let definition = server
-        .goto_definition(GotoDefinitionParams {
+        .definition(GotoDefinitionParams {
             text_document_position_params: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier {
                     uri: main_uri.clone(),
@@ -133,6 +131,9 @@ unwrap value =
         .await
         .expect("workspace symbol request should succeed")
         .expect("workspace symbol response should exist");
+    let WorkspaceSymbolResponse::Flat(workspace_symbols) = workspace_symbols else {
+        panic!("workspace symbols should use flat symbol information");
+    };
     let names = workspace_symbols
         .iter()
         .map(|symbol| symbol.name.as_str())
@@ -141,6 +142,6 @@ unwrap value =
     assert!(names.contains(&"Box"));
     assert!(names.contains(&"MkBox"));
 
-    server.shutdown().await.expect("shutdown should succeed");
+    server.shutdown(()).await.expect("shutdown should succeed");
     let _ = std::fs::remove_dir_all(project_root);
 }

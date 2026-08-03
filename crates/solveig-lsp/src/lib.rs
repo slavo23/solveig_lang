@@ -1,5 +1,5 @@
 //! Language Server Protocol support for Solveig.
-//! This crate adapts the driver API to `tower-lsp` over stdio.
+//! This crate adapts the driver and IDE APIs to `async-lsp` over stdio.
 
 mod code_actions;
 mod completion;

@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use lsp_types::{
+use async_lsp::lsp_types::{
     DocumentHighlight, DocumentHighlightKind, DocumentLink, Documentation, FoldingRange,
     FoldingRangeKind, ParameterInformation, ParameterLabel, PrepareRenameResponse, SelectionRange,
     SignatureHelp, SignatureInformation, TextEdit, WorkspaceEdit,
@@ -124,7 +124,7 @@ pub(crate) fn lsp_document_links(
         .iter()
         .map(|link| DocumentLink {
             range: lsp_range(source_map, link.file_span(), encoding),
-            target: lsp_types::Url::from_file_path(link.target()).ok(),
+            target: async_lsp::lsp_types::Url::from_file_path(link.target()).ok(),
             tooltip: link.tooltip().map(str::to_string),
             data: None,
         })

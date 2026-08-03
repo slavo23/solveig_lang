@@ -10,7 +10,7 @@ use crate::FxHashMap;
 pub struct Symbol(pub u32);
 
 /// Bidirectional string-to-symbol table for a single compiler session.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Interner {
     strings: Vec<String>,
     symbols: FxHashMap<String, Symbol>,

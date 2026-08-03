@@ -1,6 +1,6 @@
 //! Conversion from driver semantic hover payloads into LSP hover responses.
 
-use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind};
+use async_lsp::lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind};
 use solveig_base::{PositionEncoding, SourceMap};
 use solveig_ide::HoverInfo;
 

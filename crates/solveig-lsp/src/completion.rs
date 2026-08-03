@@ -1,6 +1,8 @@
 //! Conversion from driver completion items into LSP completion payloads.
 
-use lsp_types::{CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind};
+use async_lsp::lsp_types::{
+    CompletionItem, CompletionItemKind, Documentation, MarkupContent, MarkupKind,
+};
 use solveig_ide::{SourceCompletionItem, SourceCompletionItemKind};
 
 pub(crate) fn lsp_completion_items(items: &[SourceCompletionItem]) -> Vec<CompletionItem> {

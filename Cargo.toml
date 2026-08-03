@@ -10,6 +10,8 @@ solveig-driver = { path = "crates/solveig-driver", version = "0.1.0" }
 solveig-lsp = { path = "crates/solveig-lsp", version = "0.1.0" }
 solveig-report = { path = "crates/solveig-report", version = "0.1.0" }
 clap = { version = "4.6.0", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
 
 [dev-dependencies]
 solveig-base = { path = "crates/solveig-base", version = "0.1.0" }

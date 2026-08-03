@@ -70,7 +70,7 @@ use code_actions::{
 use completion::{completion_items_in_compilation, syntax_completion_candidates};
 use document_highlights::document_highlights_at_position_in_artifacts;
 use document_links::document_links_in_artifacts;
-pub use editor_api::CompilationIdeExt;
+pub use editor_api::{CompilationIdeExt, ProjectSnapshotView};
 use hover::{hole_hover_infos, hover_at_position_in_artifacts, hover_in_artifacts};
 use hover_artifacts::collect_retained_ide_artifacts;
 use inlay_hints::{inlay_hints_in_compilation, project_inlay_hints, project_local_hovers};

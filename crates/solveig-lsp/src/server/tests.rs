@@ -1,16 +1,16 @@
 use super::*;
-use lsp_types::{
+use async_lsp::lsp_types::{
     CodeActionContext, CodeActionKind, CodeActionOrCommand, CodeActionParams,
     CodeActionProviderCapability, CompletionItemKind, CompletionParams, CompletionResponse,
     DidSaveTextDocumentParams, FoldingRangeProviderCapability, GeneralClientCapabilities,
     HoverContents, InlayHintKind, InlayHintLabel, InlayHintParams, InlayHintServerCapabilities,
     PartialResultParams, Position, Range, SelectionRangeProviderCapability, SemanticTokenType,
-    SemanticTokensDeltaParams, SemanticTokensFullDeltaResult, SemanticTokensFullOptions,
-    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
-    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
-    WorkspaceFolder,
+    SemanticTokensFullOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
+    WorkDoneProgressParams, WorkspaceFolder,
 };
+use async_lsp::{ClientSocket, LanguageServer};
 use std::fs;
 use std::path::Path;
 use std::process;
@@ -34,6 +34,35 @@ fn write_source(path: &Path, source: &str) {
     )
     .expect("test source directory should be creatable");
     fs::write(path, source).expect("test source should be writable");
+}
+
+fn initialize_params(root_uri: Url) -> InitializeParams {
+    InitializeParams {
+        workspace_folders: Some(vec![WorkspaceFolder {
+            uri: root_uri,
+            name: "test".to_string(),
+        }]),
+        capabilities: ClientCapabilities::default(),
+        ..InitializeParams::default()
+    }
+}
+
+fn initialize_params_with_options(
+    root_uri: Url,
+    initialization_options: serde_json::Value,
+) -> InitializeParams {
+    InitializeParams {
+        initialization_options: Some(initialization_options),
+        ..initialize_params(root_uri)
+    }
+}
+
+fn flush_checks(server: &LspServer) {
+    let mut state = lock_state(&server.state);
+    if let Some(handle) = state.pending_check.take() {
+        handle.abort();
+    }
+    let _publications = state.check_all();
 }
 
 #[test]
@@ -147,7 +176,7 @@ fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
     );
     assert!(matches!(
         options.full,
-        Some(SemanticTokensFullOptions::Delta { delta: Some(true) })
+        Some(SemanticTokensFullOptions::Bool(true))
     ));
 }
 
@@ -186,28 +215,26 @@ main = prelude.builtins.True
     let uri = Url::from_file_path(&source).expect("test path should become a file URI");
     let root_uri =
         Url::from_directory_path(&project_root).expect("test root should become a file URI");
-    let (service, _socket) = LspService::new(LspServer::new);
-    let server = service.inner();
+    let mut server = LspServer::new(ClientSocket::new_closed());
 
     server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            capabilities: ClientCapabilities::default(),
-            ..InitializeParams::default()
-        })
+        .initialize(initialize_params(root_uri))
         .await
         .expect("initialize should succeed");
 
-    server
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "solveig".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
 
     let completion = server
         .completion(CompletionParams {
@@ -243,7 +270,7 @@ main = prelude.builtins.True
             .any(|item| item.label == "builtins" && item.kind == Some(CompletionItemKind::MODULE))
     );
 
-    server.shutdown().await.expect("shutdown should succeed");
+    server.shutdown(()).await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);
 }
 
@@ -259,28 +286,26 @@ async fn text_document_inlay_hint_returns_type_hints() {
     let uri = Url::from_file_path(&source).expect("test path should become a file URI");
     let root_uri =
         Url::from_directory_path(&project_root).expect("test root should become a file URI");
-    let (service, _socket) = LspService::new(LspServer::new);
-    let server = service.inner();
+    let mut server = LspServer::new(ClientSocket::new_closed());
 
     server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            capabilities: ClientCapabilities::default(),
-            ..InitializeParams::default()
-        })
+        .initialize(initialize_params(root_uri))
         .await
         .expect("initialize should succeed");
 
-    server
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "solveig".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
 
     let hints = server
         .inlay_hint(InlayHintParams {
@@ -302,7 +327,7 @@ async fn text_document_inlay_hint_returns_type_hints() {
     assert_eq!(local_hint.padding_left, Some(false));
     assert_eq!(local_hint.padding_right, Some(true));
 
-    server.shutdown().await.expect("shutdown should succeed");
+    server.shutdown(()).await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);
 }
 
@@ -318,33 +343,33 @@ async fn text_document_inlay_hint_respects_disabled_initialization_option() {
     let uri = Url::from_file_path(&source).expect("test path should become a file URI");
     let root_uri =
         Url::from_directory_path(&project_root).expect("test root should become a file URI");
-    let (service, _socket) = LspService::new(LspServer::new);
-    let server = service.inner();
+    let mut server = LspServer::new(ClientSocket::new_closed());
 
     server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            capabilities: ClientCapabilities::default(),
-            initialization_options: Some(serde_json::json!({
+        .initialize(initialize_params_with_options(
+            root_uri,
+            serde_json::json!({
                 "inlayHints": {
                     "enabled": false
                 }
-            })),
-            ..InitializeParams::default()
-        })
+            }),
+        ))
         .await
         .expect("initialize should succeed");
 
-    server
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "solveig".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
 
     let hints = server
         .inlay_hint(InlayHintParams {
@@ -358,7 +383,7 @@ async fn text_document_inlay_hint_respects_disabled_initialization_option() {
 
     assert!(hints.is_empty(), "disabled inlay hints leaked: {hints:#?}");
 
-    server.shutdown().await.expect("shutdown should succeed");
+    server.shutdown(()).await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);
 }
 
@@ -373,28 +398,26 @@ main = ??
     let uri = Url::from_file_path(&source).expect("test path should become a file URI");
     let root_uri =
         Url::from_directory_path(&project_root).expect("test root should become a file URI");
-    let (service, _socket) = LspService::new(LspServer::new);
-    let server = service.inner();
+    let mut server = LspServer::new(ClientSocket::new_closed());
 
     server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            capabilities: ClientCapabilities::default(),
-            ..InitializeParams::default()
-        })
+        .initialize(initialize_params(root_uri))
         .await
         .expect("initialize should succeed");
 
-    server
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "solveig".to_string(),
-                version: 1,
-                text: text.to_string(),
-            },
-        })
-        .await;
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
 
     let actions = server
         .code_action(CodeActionParams {
@@ -436,11 +459,15 @@ main = ??
     );
     assert_eq!(text_edit.new_text, "True");
 
-    server.shutdown().await.expect("shutdown should succeed");
+    server.shutdown(()).await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);
 }
 
 #[test]
+#[expect(
+    deprecated,
+    reason = "This test covers rootUri fallback when workspaceFolders is absent"
+)]
 fn initialize_roots_use_workspace_folders_before_root_uri() {
     let first = Url::from_file_path("/tmp/solveig-first").expect("test URI should be valid");
     let second = Url::from_file_path("/tmp/solveig-second").expect("test URI should be valid");
@@ -472,34 +499,31 @@ main = True
     let uri = Url::from_file_path(&source).expect("test path should become a file URI");
     let root_uri =
         Url::from_directory_path(&project_root).expect("test root should become a file URI");
-    let (service, _socket) = LspService::new(LspServer::new);
-    let server = service.inner();
+    let mut server = LspServer::new(ClientSocket::new_closed());
 
     server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            capabilities: ClientCapabilities::default(),
-            ..InitializeParams::default()
-        })
+        .initialize(initialize_params(root_uri))
         .await
         .expect("initialize should succeed");
 
-    server
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "solveig".to_string(),
-                version: 1,
-                text: r#"main : Int
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: r#"main : Int
 main = True
 "#
-                .to_string(),
-            },
-        })
-        .await;
+                    .to_string(),
+                },
+            })
+            .is_continue()
+    );
 
     {
-        let state = server.state.lock().await;
+        let state = lock_state(&server.state);
         assert!(state.pending_check.is_some());
     }
 
@@ -508,39 +532,41 @@ main = True
     tokio::task::yield_now().await;
 
     {
-        let state = server.state.lock().await;
+        let state = lock_state(&server.state);
         assert!(state.pending_check.is_none());
         assert_eq!(state.previous_diagnostic_count(), 1);
     }
 
-    server
-        .did_change(DidChangeTextDocumentParams {
-            text_document: VersionedTextDocumentIdentifier {
-                uri: uri.clone(),
-                version: 2,
-            },
-            content_changes: vec![TextDocumentContentChangeEvent {
-                range: None,
-                range_length: None,
-                text: r#"main : Int
+    assert!(
+        server
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: r#"main : Int
 main = 1
 "#
-                .to_string(),
-            }],
-        })
-        .await;
+                    .to_string(),
+                }],
+            })
+            .is_continue()
+    );
 
     tokio::task::yield_now().await;
     tokio::time::advance(CHECK_DEBOUNCE).await;
     tokio::task::yield_now().await;
 
     {
-        let state = server.state.lock().await;
+        let state = lock_state(&server.state);
         assert!(state.pending_check.is_none());
         assert_eq!(state.previous_diagnostic_count(), 0);
     }
 
-    server.shutdown().await.expect("shutdown should succeed");
+    server.shutdown(()).await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);
 }
 
@@ -560,35 +586,35 @@ main = helper 41
     let uri = Url::from_file_path(&source).expect("test path should become a file URI");
     let root_uri =
         Url::from_directory_path(&project_root).expect("test root should become a file URI");
-    let (service, _socket) = LspService::new(LspServer::new);
-    let server = service.inner();
+    let mut server = LspServer::new(ClientSocket::new_closed());
 
     server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            capabilities: ClientCapabilities::default(),
-            initialization_options: Some(serde_json::json!({
+        .initialize(initialize_params_with_options(
+            root_uri,
+            serde_json::json!({
                 "diagnostics": {
                     "inferredSignatures": {
                         "enabled": true
                     }
                 }
-            })),
-            ..InitializeParams::default()
-        })
+            }),
+        ))
         .await
         .expect("initialize should succeed");
 
-    server
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "solveig".to_string(),
-                version: 1,
-                text: initial.to_string(),
-            },
-        })
-        .await;
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: initial.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
 
     let initial_main = server
         .hover(HoverParams {
@@ -606,25 +632,30 @@ main = helper 41
         "initial main hover should work"
     );
 
-    server
-        .did_change(DidChangeTextDocumentParams {
-            text_document: VersionedTextDocumentIdentifier {
-                uri: uri.clone(),
-                version: 2,
-            },
-            content_changes: vec![TextDocumentContentChangeEvent {
-                range: None,
-                range_length: None,
-                text: edited.to_string(),
-            }],
-        })
-        .await;
-    server
-        .did_save(DidSaveTextDocumentParams {
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            text: None,
-        })
-        .await;
+    assert!(
+        server
+            .did_change(DidChangeTextDocumentParams {
+                text_document: VersionedTextDocumentIdentifier {
+                    uri: uri.clone(),
+                    version: 2,
+                },
+                content_changes: vec![TextDocumentContentChangeEvent {
+                    range: None,
+                    range_length: None,
+                    text: edited.to_string(),
+                }],
+            })
+            .is_continue()
+    );
+    assert!(
+        server
+            .did_save(DidSaveTextDocumentParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                text: None,
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
 
     tokio::task::yield_now().await;
     tokio::time::advance(CHECK_DEBOUNCE).await;
@@ -678,12 +709,12 @@ main = helper 41
         "existing hovers should survive an edit/save"
     );
 
-    server.shutdown().await.expect("shutdown should succeed");
+    server.shutdown(()).await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn text_document_semantic_tokens_return_full_and_delta() {
+async fn text_document_semantic_tokens_return_full_without_delta_state() {
     let project_root = temp_root("server_semantic_tokens");
     let source = project_root.join("scratch.sv");
     let initial = r#"main : Int
@@ -693,28 +724,26 @@ main = 41 + 1
     let uri = Url::from_file_path(&source).expect("test path should become a file URI");
     let root_uri =
         Url::from_directory_path(&project_root).expect("test root should become a file URI");
-    let (service, _socket) = LspService::new(LspServer::new);
-    let server = service.inner();
+    let mut server = LspServer::new(ClientSocket::new_closed());
 
     server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            capabilities: ClientCapabilities::default(),
-            ..InitializeParams::default()
-        })
+        .initialize(initialize_params(root_uri))
         .await
         .expect("initialize should succeed");
 
-    server
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "solveig".to_string(),
-                version: 1,
-                text: initial.to_string(),
-            },
-        })
-        .await;
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: initial.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
 
     let full = server
         .semantic_tokens_full(SemanticTokensParams {
@@ -728,62 +757,15 @@ main = 41 + 1
     let SemanticTokensResult::Tokens(full) = full else {
         panic!("semantic-token full response should be a complete token set");
     };
-    let previous_result_id = full
-        .result_id
-        .clone()
-        .expect("semantic-token full response should carry a result id");
-
+    assert!(full.result_id.is_none());
     assert!(!full.data.is_empty());
     assert_relative_tokens_well_formed(&full.data);
 
-    server
-        .did_change(DidChangeTextDocumentParams {
-            text_document: VersionedTextDocumentIdentifier {
-                uri: uri.clone(),
-                version: 2,
-            },
-            content_changes: vec![TextDocumentContentChangeEvent {
-                range: None,
-                range_length: None,
-                text: r#"main : Int
-main = 42 + 1
-"#
-                .to_string(),
-            }],
-        })
-        .await;
-
-    let delta = server
-        .semantic_tokens_full_delta(SemanticTokensDeltaParams {
-            work_done_progress_params: WorkDoneProgressParams::default(),
-            partial_result_params: PartialResultParams::default(),
-            text_document: TextDocumentIdentifier { uri: uri.clone() },
-            previous_result_id,
-        })
-        .await
-        .expect("semantic-token delta request should succeed")
-        .expect("semantic-token delta response should exist");
-
-    let SemanticTokensFullDeltaResult::TokensDelta(delta) = delta else {
-        panic!("semantic-token delta response should be an edit");
-    };
-
-    assert!(delta.result_id.is_some());
-    assert_eq!(delta.edits.len(), 1);
-    assert_eq!(delta.edits[0].start, 0);
-    assert_eq!(delta.edits[0].delete_count, (full.data.len() * 5) as u32);
-    assert!(
-        delta.edits[0]
-            .data
-            .as_ref()
-            .is_some_and(|data| !data.is_empty())
-    );
-
-    server.shutdown().await.expect("shutdown should succeed");
+    server.shutdown(()).await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);
 }
 
-fn assert_relative_tokens_well_formed(tokens: &[lsp_types::SemanticToken]) {
+fn assert_relative_tokens_well_formed(tokens: &[async_lsp::lsp_types::SemanticToken]) {
     let mut line = 0u32;
     let mut character = 0u32;
 
@@ -807,7 +789,7 @@ fn assert_relative_tokens_well_formed(tokens: &[lsp_types::SemanticToken]) {
     let _ = (line, character);
 }
 
-fn hover_markup_value(hover: lsp_types::Hover) -> String {
+fn hover_markup_value(hover: async_lsp::lsp_types::Hover) -> String {
     let HoverContents::Markup(markup) = hover.contents else {
         panic!("hover should use markdown markup content");
     };
@@ -832,35 +814,33 @@ main = answer
     let uri = Url::from_file_path(&source).expect("test path should become a file URI");
     let root_uri =
         Url::from_directory_path(&project_root).expect("test root should become a file URI");
-    let (service, _socket) = LspService::new(LspServer::new);
-    let server = service.inner();
+    let mut server = LspServer::new(ClientSocket::new_closed());
 
     server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            capabilities: ClientCapabilities::default(),
-            ..InitializeParams::default()
-        })
+        .initialize(initialize_params(root_uri))
         .await
         .expect("initialize should succeed");
 
-    server
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: uri.clone(),
-                language_id: "solveig".to_string(),
-                version: 1,
-                text: r#"-- | The answer used by hover.
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: r#"-- | The answer used by hover.
 answer : Int
 answer = 42
 
 main : Int
 main = answer
 "#
-                .to_string(),
-            },
-        })
-        .await;
+                    .to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
 
     let hover = server
         .hover(HoverParams {
@@ -887,6 +867,6 @@ main = answer
         1
     );
 
-    server.shutdown().await.expect("shutdown should succeed");
+    server.shutdown(()).await.expect("shutdown should succeed");
     let _ = fs::remove_dir_all(project_root);
 }

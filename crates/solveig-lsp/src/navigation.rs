@@ -1,6 +1,6 @@
 //! Conversion from driver navigation payloads into LSP locations and symbols.
 
-use lsp_types::{DocumentSymbol, Location, SymbolInformation, SymbolKind};
+use async_lsp::lsp_types::{DocumentSymbol, Location, SymbolInformation, SymbolKind};
 use solveig_base::{FileSpan, PositionEncoding, SourceMap};
 use solveig_ide::{SourceSymbol, SourceSymbolKind};
 

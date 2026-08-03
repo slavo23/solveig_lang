@@ -134,29 +134,51 @@ pub trait CompilationIdeExt {
     ) -> Vec<SourceInlayHint>;
 }
 
-impl CompilationIdeExt for Compilation {
-    fn hover(&self, file: impl AsRef<Path>, offset: usize) -> Option<String> {
-        self.hover_info(file, offset)
-            .map(|info| info.signature().to_string())
+/// Provides editor queries over one retained driver snapshot without re-checking.
+pub struct ProjectSnapshotView<'a> {
+    session: &'a Session,
+    source_map: &'a SourceMap,
+    source_provider: &'a SourceProvider,
+    snapshot: &'a CompilationSnapshot,
+    success: bool,
+}
+
+impl<'a> ProjectSnapshotView<'a> {
+    /// Creates a borrowed editor-query view over a checked project snapshot.
+    pub fn new(
+        session: &'a Session,
+        source_map: &'a SourceMap,
+        source_provider: &'a SourceProvider,
+        snapshot: &'a CompilationSnapshot,
+        success: bool,
+    ) -> Self {
+        Self {
+            session,
+            source_map,
+            source_provider,
+            snapshot,
+            success,
+        }
     }
 
-    fn hover_info(&self, file: impl AsRef<Path>, offset: usize) -> Option<HoverInfo> {
-        with_artifacts_for_snapshot(self.session(), self.snapshot()?, |artifacts| {
+    /// Looks up semantic hover information at a byte offset.
+    pub fn hover_info(&self, file: impl AsRef<Path>, offset: usize) -> Option<HoverInfo> {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             hover_in_artifacts(artifacts, file.as_ref(), offset)
         })
     }
 
-    fn hover_at_position(
-        &mut self,
+    /// Looks up semantic hover information at an editor position.
+    pub fn hover_at_position(
+        &self,
         file: impl AsRef<Path>,
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Option<HoverInfo> {
-        self.ensure_checked(true).ok()?;
-        with_artifacts_for_snapshot(self.session(), self.snapshot()?, |artifacts| {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             hover_at_position_in_artifacts(
                 artifacts,
-                self.source_map(),
+                self.source_map,
                 file.as_ref(),
                 position,
                 encoding,
@@ -164,23 +186,24 @@ impl CompilationIdeExt for Compilation {
         })
     }
 
-    fn definition(&self, file: impl AsRef<Path>, offset: usize) -> Option<FileSpan> {
-        with_artifacts_for_snapshot(self.session(), self.snapshot()?, |artifacts| {
+    /// Looks up a definition target at a byte offset.
+    pub fn definition(&self, file: impl AsRef<Path>, offset: usize) -> Option<FileSpan> {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             definition_in_artifacts(artifacts, file.as_ref(), offset)
         })
     }
 
-    fn definition_at_position(
-        &mut self,
+    /// Looks up a definition target at an editor position.
+    pub fn definition_at_position(
+        &self,
         file: impl AsRef<Path>,
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Option<FileSpan> {
-        self.ensure_checked(true).ok()?;
-        with_artifacts_for_snapshot(self.session(), self.snapshot()?, |artifacts| {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             definition_at_position_in_artifacts(
                 artifacts,
-                self.source_map(),
+                self.source_map,
                 file.as_ref(),
                 position,
                 encoding,
@@ -188,29 +211,30 @@ impl CompilationIdeExt for Compilation {
         })
     }
 
-    fn references(
+    /// Looks up project-wide references at a byte offset.
+    pub fn references(
         &self,
         file: impl AsRef<Path>,
         offset: usize,
         include_declaration: bool,
     ) -> Option<Vec<FileSpan>> {
-        with_artifacts_for_snapshot(self.session(), self.snapshot()?, |artifacts| {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             references_in_artifacts(artifacts, file.as_ref(), offset, include_declaration)
         })
     }
 
-    fn references_at_position(
-        &mut self,
+    /// Looks up project-wide references at an editor position.
+    pub fn references_at_position(
+        &self,
         file: impl AsRef<Path>,
         position: SourcePosition,
         encoding: PositionEncoding,
         include_declaration: bool,
     ) -> Option<Vec<FileSpan>> {
-        self.ensure_checked(true).ok()?;
-        with_artifacts_for_snapshot(self.session(), self.snapshot()?, |artifacts| {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             references_at_position_in_artifacts(
                 artifacts,
-                self.source_map(),
+                self.source_map,
                 file.as_ref(),
                 position,
                 encoding,
@@ -219,44 +243,37 @@ impl CompilationIdeExt for Compilation {
         })
     }
 
-    fn document_symbols(&mut self, file: impl AsRef<Path>) -> Vec<SourceSymbol> {
-        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
+    /// Returns hierarchical symbols for one source file.
+    pub fn document_symbols(&self, file: impl AsRef<Path>) -> Vec<SourceSymbol> {
+        if !self.success {
             return Vec::new();
         }
 
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
-        with_artifacts_for_snapshot(self.session(), snapshot, |artifacts| {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             document_symbols_in_artifacts(artifacts, file.as_ref())
         })
     }
 
-    fn workspace_symbols(&mut self, query: &str) -> Vec<SourceSymbol> {
-        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
+    /// Returns project-wide symbols matching `query`.
+    pub fn workspace_symbols(&self, query: &str) -> Vec<SourceSymbol> {
+        if !self.success {
             return Vec::new();
         }
 
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
-        with_artifacts_for_snapshot(self.session(), snapshot, |artifacts| {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             workspace_symbols_in_artifacts(artifacts, query)
         })
     }
 
-    fn semantic_tokens(&mut self, file: impl AsRef<Path>) -> Vec<SourceSemanticToken> {
-        let _ = self.ensure_checked(true);
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
+    /// Returns semantic tokens for one source file.
+    pub fn semantic_tokens(&self, file: impl AsRef<Path>) -> Vec<SourceSemanticToken> {
         with_artifacts_and_syntax_tokens_for_snapshot(
-            self.session(),
-            snapshot,
+            self.session,
+            self.snapshot,
             |artifacts, syntax_tokens| {
                 semantic_tokens_in_compilation(
                     Some(artifacts),
-                    self.source_map(),
+                    self.source_map,
                     syntax_tokens,
                     file.as_ref(),
                 )
@@ -264,81 +281,64 @@ impl CompilationIdeExt for Compilation {
         )
     }
 
-    fn code_actions_at_range(
-        &mut self,
+    /// Returns all retained source-level code actions.
+    pub fn source_code_actions(&self) -> Vec<SourceCodeAction> {
+        source_code_actions_for_snapshot(
+            self.session,
+            self.source_map,
+            self.source_provider,
+            self.snapshot,
+        )
+    }
+
+    /// Returns code actions visible for an editor range.
+    pub fn code_actions_at_range(
+        &self,
         file: impl AsRef<Path>,
         start: SourcePosition,
         end: SourcePosition,
         encoding: PositionEncoding,
     ) -> Vec<SourceCodeAction> {
-        if self.source_map().is_empty() {
-            let _ = self.ensure_checked(true);
+        if self.source_map.is_empty() {
+            return Vec::new();
         }
 
         let Some(file_id) =
-            source_lookup::source_file_id_in_source_map(self.source_map(), file.as_ref())
+            source_lookup::source_file_id_in_source_map(self.source_map, file.as_ref())
         else {
             return Vec::new();
         };
-        let start = self.source_map().offset(file_id, start, encoding);
-        let end = self.source_map().offset(file_id, end, encoding);
+        let start = self.source_map.offset(file_id, start, encoding);
+        let end = self.source_map.offset(file_id, end, encoding);
         let (start, end) = if start <= end {
             (start, end)
         } else {
             (end, start)
         };
-
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
-        let actions = source_code_actions_for_snapshot(
-            self.session(),
-            self.source_map(),
-            self.source_provider(),
-            snapshot,
-        );
+        let actions = self.source_code_actions();
 
         code_actions_in_compilation(
-            self.source_map(),
+            self.source_map,
             &actions,
             file.as_ref(),
             Span::new(start, end),
         )
     }
 
-    fn source_code_actions(&self) -> Vec<SourceCodeAction> {
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
-
-        source_code_actions_for_snapshot(
-            self.session(),
-            self.source_map(),
-            self.source_provider(),
-            snapshot,
-        )
-    }
-
-    fn completion_items_at_position(
-        &mut self,
+    /// Returns completion items visible at an editor position.
+    pub fn completion_items_at_position(
+        &self,
         file: impl AsRef<Path>,
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Vec<SourceCompletionItem> {
-        if self.source_map().is_empty() {
-            let _ = self.ensure_checked(true);
-        }
-
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
         with_artifacts_and_completion_candidates_for_snapshot(
-            self.session(),
-            snapshot,
+            self.session,
+            self.snapshot,
             |artifacts, candidates| {
                 completion_items_in_compilation(
                     artifacts,
-                    self.source_map(),
+                    self.source_map,
                     candidates,
                     file.as_ref(),
                     position,
@@ -348,23 +348,21 @@ impl CompilationIdeExt for Compilation {
         )
     }
 
-    fn document_highlights_at_position(
-        &mut self,
+    /// Returns document highlights for the symbol at an editor position.
+    pub fn document_highlights_at_position(
+        &self,
         file: impl AsRef<Path>,
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Vec<SourceDocumentHighlight> {
-        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
+        if !self.success {
             return Vec::new();
         }
 
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
-        with_artifacts_for_snapshot(self.session(), snapshot, |artifacts| {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             document_highlights_at_position_in_artifacts(
                 artifacts,
-                self.source_map(),
+                self.source_map,
                 file.as_ref(),
                 position,
                 encoding,
@@ -372,14 +370,264 @@ impl CompilationIdeExt for Compilation {
         })
     }
 
-    fn folding_ranges(&mut self, file: impl AsRef<Path>) -> Vec<SourceFoldingRange> {
-        let _ = self.ensure_checked(true);
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
-        with_syntax_trees_for_snapshot(self.session(), snapshot, |syntax_trees| {
-            folding_ranges_in_syntax_trees(self.source_map(), syntax_trees, file.as_ref())
+    /// Returns foldable ranges for one source file.
+    pub fn folding_ranges(&self, file: impl AsRef<Path>) -> Vec<SourceFoldingRange> {
+        with_syntax_trees_for_snapshot(self.session, self.snapshot, |syntax_trees| {
+            folding_ranges_in_syntax_trees(self.source_map, syntax_trees, file.as_ref())
         })
+    }
+
+    /// Returns CST-backed selection ranges.
+    pub fn selection_ranges(
+        &self,
+        file: impl AsRef<Path>,
+        positions: &[SourcePosition],
+        encoding: PositionEncoding,
+    ) -> Vec<SourceSelectionRange> {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
+            selection_ranges_at_positions_in_artifacts(
+                artifacts,
+                self.source_map,
+                file.as_ref(),
+                positions,
+                encoding,
+            )
+        })
+    }
+
+    /// Returns signature help at an editor position.
+    pub fn signature_help_at_position(
+        &self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Option<SourceSignatureHelp> {
+        if !self.success {
+            return None;
+        }
+
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
+            signature_help_at_position_in_artifacts(
+                artifacts,
+                self.source_map,
+                file.as_ref(),
+                position,
+                encoding,
+            )
+        })
+    }
+
+    /// Checks whether the symbol at an editor position can be renamed.
+    pub fn prepare_rename_at_position(
+        &self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Option<FileSpan> {
+        if !self.success {
+            return None;
+        }
+
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
+            prepare_rename_in_artifacts(
+                artifacts,
+                self.source_map,
+                file.as_ref(),
+                position,
+                encoding,
+            )
+        })
+    }
+
+    /// Returns edits that rename a semantic symbol.
+    pub fn rename_at_position(
+        &self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+        new_name: &str,
+    ) -> Vec<SourceTextEdit> {
+        if !self.success {
+            return Vec::new();
+        }
+
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
+            rename_edits_in_artifacts(
+                artifacts,
+                self.source_map,
+                file.as_ref(),
+                position,
+                encoding,
+                new_name,
+            )
+        })
+    }
+
+    /// Returns module document links for one source file.
+    pub fn document_links(&self, file: impl AsRef<Path>) -> Vec<SourceDocumentLink> {
+        if !self.success {
+            return Vec::new();
+        }
+
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
+            document_links_in_artifacts(artifacts, self.source_map, file.as_ref())
+        })
+    }
+
+    /// Returns inlay hints visible for an editor range.
+    pub fn inlay_hints_at_range(
+        &self,
+        file: impl AsRef<Path>,
+        start: SourcePosition,
+        end: SourcePosition,
+        encoding: PositionEncoding,
+        config: SourceInlayHintConfig,
+    ) -> Vec<SourceInlayHint> {
+        with_inlay_hints_for_snapshot(self.session, self.snapshot, |hints| {
+            inlay_hints_in_compilation(
+                self.source_map,
+                hints,
+                file.as_ref(),
+                start,
+                end,
+                encoding,
+                config,
+            )
+        })
+    }
+}
+
+impl CompilationIdeExt for Compilation {
+    fn hover(&self, file: impl AsRef<Path>, offset: usize) -> Option<String> {
+        self.hover_info(file, offset)
+            .map(|info| info.signature().to_string())
+    }
+
+    fn hover_info(&self, file: impl AsRef<Path>, offset: usize) -> Option<HoverInfo> {
+        project_snapshot_view(self, true)?.hover_info(file, offset)
+    }
+
+    fn hover_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Option<HoverInfo> {
+        let success = self.ensure_checked(false).ok()?.success();
+
+        project_snapshot_view(self, success)?.hover_at_position(file, position, encoding)
+    }
+
+    fn definition(&self, file: impl AsRef<Path>, offset: usize) -> Option<FileSpan> {
+        project_snapshot_view(self, true)?.definition(file, offset)
+    }
+
+    fn definition_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Option<FileSpan> {
+        let success = self.ensure_checked(false).ok()?.success();
+
+        project_snapshot_view(self, success)?.definition_at_position(file, position, encoding)
+    }
+
+    fn references(
+        &self,
+        file: impl AsRef<Path>,
+        offset: usize,
+        include_declaration: bool,
+    ) -> Option<Vec<FileSpan>> {
+        project_snapshot_view(self, true)?.references(file, offset, include_declaration)
+    }
+
+    fn references_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+        include_declaration: bool,
+    ) -> Option<Vec<FileSpan>> {
+        let success = self.ensure_checked(false).ok()?.success();
+
+        project_snapshot_view(self, success)?.references_at_position(
+            file,
+            position,
+            encoding,
+            include_declaration,
+        )
+    }
+
+    fn document_symbols(&mut self, file: impl AsRef<Path>) -> Vec<SourceSymbol> {
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
+
+        project_snapshot_view(self, success)
+            .map_or_else(Vec::new, |view| view.document_symbols(file))
+    }
+
+    fn workspace_symbols(&mut self, query: &str) -> Vec<SourceSymbol> {
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
+
+        project_snapshot_view(self, success)
+            .map_or_else(Vec::new, |view| view.workspace_symbols(query))
+    }
+
+    fn semantic_tokens(&mut self, file: impl AsRef<Path>) -> Vec<SourceSemanticToken> {
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
+
+        project_snapshot_view(self, success)
+            .map_or_else(Vec::new, |view| view.semantic_tokens(file))
+    }
+
+    fn code_actions_at_range(
+        &mut self,
+        file: impl AsRef<Path>,
+        start: SourcePosition,
+        end: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Vec<SourceCodeAction> {
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
+
+        project_snapshot_view(self, success).map_or_else(Vec::new, |view| {
+            view.code_actions_at_range(file, start, end, encoding)
+        })
+    }
+
+    fn source_code_actions(&self) -> Vec<SourceCodeAction> {
+        project_snapshot_view(self, true).map_or_else(Vec::new, |view| view.source_code_actions())
+    }
+
+    fn completion_items_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Vec<SourceCompletionItem> {
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
+
+        project_snapshot_view(self, success).map_or_else(Vec::new, |view| {
+            view.completion_items_at_position(file, position, encoding)
+        })
+    }
+
+    fn document_highlights_at_position(
+        &mut self,
+        file: impl AsRef<Path>,
+        position: SourcePosition,
+        encoding: PositionEncoding,
+    ) -> Vec<SourceDocumentHighlight> {
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
+
+        project_snapshot_view(self, success).map_or_else(Vec::new, |view| {
+            view.document_highlights_at_position(file, position, encoding)
+        })
+    }
+
+    fn folding_ranges(&mut self, file: impl AsRef<Path>) -> Vec<SourceFoldingRange> {
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
+
+        project_snapshot_view(self, success).map_or_else(Vec::new, |view| view.folding_ranges(file))
     }
 
     fn selection_ranges(
@@ -388,18 +636,10 @@ impl CompilationIdeExt for Compilation {
         positions: &[SourcePosition],
         encoding: PositionEncoding,
     ) -> Vec<SourceSelectionRange> {
-        let _ = self.ensure_checked(true);
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
-        with_artifacts_for_snapshot(self.session(), snapshot, |artifacts| {
-            selection_ranges_at_positions_in_artifacts(
-                artifacts,
-                self.source_map(),
-                file.as_ref(),
-                positions,
-                encoding,
-            )
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
+
+        project_snapshot_view(self, success).map_or_else(Vec::new, |view| {
+            view.selection_ranges(file, positions, encoding)
         })
     }
 
@@ -409,19 +649,9 @@ impl CompilationIdeExt for Compilation {
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Option<SourceSignatureHelp> {
-        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
-            return None;
-        }
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
 
-        with_artifacts_for_snapshot(self.session(), self.snapshot()?, |artifacts| {
-            signature_help_at_position_in_artifacts(
-                artifacts,
-                self.source_map(),
-                file.as_ref(),
-                position,
-                encoding,
-            )
-        })
+        project_snapshot_view(self, success)?.signature_help_at_position(file, position, encoding)
     }
 
     fn prepare_rename_at_position(
@@ -430,19 +660,9 @@ impl CompilationIdeExt for Compilation {
         position: SourcePosition,
         encoding: PositionEncoding,
     ) -> Option<FileSpan> {
-        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
-            return None;
-        }
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
 
-        with_artifacts_for_snapshot(self.session(), self.snapshot()?, |artifacts| {
-            prepare_rename_in_artifacts(
-                artifacts,
-                self.source_map(),
-                file.as_ref(),
-                position,
-                encoding,
-            )
-        })
+        project_snapshot_view(self, success)?.prepare_rename_at_position(file, position, encoding)
     }
 
     fn rename_at_position(
@@ -452,36 +672,17 @@ impl CompilationIdeExt for Compilation {
         encoding: PositionEncoding,
         new_name: &str,
     ) -> Vec<SourceTextEdit> {
-        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
-            return Vec::new();
-        }
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
 
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
-        with_artifacts_for_snapshot(self.session(), snapshot, |artifacts| {
-            rename_edits_in_artifacts(
-                artifacts,
-                self.source_map(),
-                file.as_ref(),
-                position,
-                encoding,
-                new_name,
-            )
+        project_snapshot_view(self, success).map_or_else(Vec::new, |view| {
+            view.rename_at_position(file, position, encoding, new_name)
         })
     }
 
     fn document_links(&mut self, file: impl AsRef<Path>) -> Vec<SourceDocumentLink> {
-        if !self.ensure_checked(true).is_ok_and(CheckResult::success) {
-            return Vec::new();
-        }
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
 
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
-        with_artifacts_for_snapshot(self.session(), snapshot, |artifacts| {
-            document_links_in_artifacts(artifacts, self.source_map(), file.as_ref())
-        })
+        project_snapshot_view(self, success).map_or_else(Vec::new, |view| view.document_links(file))
     }
 
     fn inlay_hints_at_range(
@@ -492,20 +693,23 @@ impl CompilationIdeExt for Compilation {
         encoding: PositionEncoding,
         config: SourceInlayHintConfig,
     ) -> Vec<SourceInlayHint> {
-        let _ = self.ensure_checked(true);
-        let Some(snapshot) = self.snapshot() else {
-            return Vec::new();
-        };
-        with_inlay_hints_for_snapshot(self.session(), snapshot, |hints| {
-            inlay_hints_in_compilation(
-                self.source_map(),
-                hints,
-                file.as_ref(),
-                start,
-                end,
-                encoding,
-                config,
-            )
+        let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
+
+        project_snapshot_view(self, success).map_or_else(Vec::new, |view| {
+            view.inlay_hints_at_range(file, start, end, encoding, config)
         })
     }
+}
+
+fn project_snapshot_view(
+    compilation: &Compilation,
+    success: bool,
+) -> Option<ProjectSnapshotView<'_>> {
+    Some(ProjectSnapshotView::new(
+        compilation.session(),
+        compilation.source_map(),
+        compilation.source_provider(),
+        compilation.snapshot()?,
+        success,
+    ))
 }

@@ -1,13 +1,12 @@
-use lsp_types::{
-    ClientCapabilities, DidOpenTextDocumentParams, DocumentHighlightKind, DocumentHighlightParams,
-    DocumentLinkParams, FoldingRangeKind, FoldingRangeParams, InitializeParams,
-    PartialResultParams, Position, PrepareRenameResponse, RenameParams, SelectionRangeParams,
-    SignatureHelpParams, TextDocumentIdentifier, TextDocumentItem, TextDocumentPositionParams, Url,
-    WorkDoneProgressParams,
+use async_lsp::lsp_types::{
+    DidOpenTextDocumentParams, DocumentHighlightKind, DocumentHighlightParams, DocumentLinkParams,
+    FoldingRangeKind, FoldingRangeParams, PartialResultParams, Position, PrepareRenameResponse,
+    RenameParams, SelectionRangeParams, SignatureHelpParams, TextDocumentIdentifier,
+    TextDocumentItem, TextDocumentPositionParams, Url, WorkDoneProgressParams,
 };
-use tower_lsp::{LanguageServer, LspService};
+use async_lsp::{ClientSocket, LanguageServer};
 
-use super::{temp_root, write_source};
+use super::{flush_checks, initialize_params, temp_root, write_source};
 use crate::server::LspServer;
 
 fn position_in_line(source: &str, line: &str, needle: &str) -> Position {
@@ -63,28 +62,26 @@ increment value = value + 1
         Url::from_directory_path(&project_root).expect("test root should become a file URI");
     let increment_position = position_in_line(main_text, "    increment 41", "increment");
     let argument_position = position_in_line(main_text, "    increment 41", "41");
-    let (service, _socket) = LspService::new(LspServer::new);
-    let server = service.inner();
+    let mut server = LspServer::new(ClientSocket::new_closed());
 
     server
-        .initialize(InitializeParams {
-            root_uri: Some(root_uri),
-            capabilities: ClientCapabilities::default(),
-            ..InitializeParams::default()
-        })
+        .initialize(initialize_params(root_uri))
         .await
         .expect("initialize should succeed");
 
-    server
-        .did_open(DidOpenTextDocumentParams {
-            text_document: TextDocumentItem {
-                uri: main_uri.clone(),
-                language_id: "solveig".to_string(),
-                version: 1,
-                text: main_text.to_string(),
-            },
-        })
-        .await;
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: main_uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: main_text.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
 
     let highlights = server
         .document_highlight(DocumentHighlightParams {
@@ -227,6 +224,6 @@ increment value = value + 1
     assert_eq!(helper_link.range.start, Position::new(0, 7));
     assert_eq!(helper_link.range.end, Position::new(0, 13));
 
-    server.shutdown().await.expect("shutdown should succeed");
+    server.shutdown(()).await.expect("shutdown should succeed");
     let _ = std::fs::remove_dir_all(project_root);
 }

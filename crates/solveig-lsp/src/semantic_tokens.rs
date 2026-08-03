@@ -1,6 +1,8 @@
 //! Conversion from driver semantic tokens into LSP semantic-token payloads.
 
-use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend};
+use async_lsp::lsp_types::{
+    SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend,
+};
 use solveig_base::{PositionEncoding, SourceFile, SourceMap};
 use solveig_ide::{SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier};
 

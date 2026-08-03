@@ -93,7 +93,7 @@ pub trait IntoDiagnostic<Context = ()> {
     fn into_diagnostic(self, context: Context) -> Diagnostic;
 }
 
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct DiagnosticSink {
     diagnostics: RefCell<Vec<Diagnostic>>,
 }
