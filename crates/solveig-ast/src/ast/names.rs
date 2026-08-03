@@ -31,6 +31,13 @@ pub struct Names {
     next_tyvar_id: u32,
 }
 
+/// Records display names allocated speculatively before merging them into `Names`.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct NameScratch {
+    base_tyvar_id: u32,
+    fresh_tyvars: Vec<(TyVarId, String)>,
+}
+
 pub(super) fn tycon_fallback_name(id: TyConId) -> String {
     format!("T{}", id.0)
 }
@@ -128,6 +135,11 @@ impl Names {
         (allocated, display_name)
     }
 
+    /// Returns the next type-variable id that would be allocated by this table.
+    pub fn next_tyvar_id(&self) -> TyVarId {
+        TyVarId(self.next_tyvar_id)
+    }
+
     pub fn register_tyvar_name(&mut self, id: TyVarId, display_name: &str) {
         self.tyvar_names.insert(id, display_name.to_string());
         if id.0 >= self.next_tyvar_id {
@@ -209,6 +221,71 @@ impl Names {
 
     pub fn string_literals(&self) -> &[String] {
         &self.string_values
+    }
+}
+
+impl NameScratch {
+    /// Creates an empty scratch table whose ids continue after `names`.
+    pub fn from_names(names: &Names) -> Self {
+        Self {
+            base_tyvar_id: names.next_tyvar_id().0,
+            fresh_tyvars: Vec::new(),
+        }
+    }
+
+    /// Allocates one scratch type-variable display name.
+    pub fn fresh_tyvar(&mut self, display_name: &str) -> TyVarId {
+        let offset = u32::try_from(self.fresh_tyvars.len())
+            .expect("ICE: name scratch exceeded u32 capacity");
+        let id = TyVarId(
+            self.base_tyvar_id
+                .checked_add(offset)
+                .expect("ICE: type variable id table exceeded u32 capacity"),
+        );
+        self.fresh_tyvars.push((id, display_name.to_string()));
+        id
+    }
+
+    /// Allocates one generated scratch type-variable display name.
+    pub fn fresh_generated_tyvar(&mut self, base: &str) -> (TyVarId, String) {
+        let id = TyVarId(
+            self.base_tyvar_id
+                .checked_add(
+                    u32::try_from(self.fresh_tyvars.len())
+                        .expect("ICE: name scratch exceeded u32 capacity"),
+                )
+                .expect("ICE: type variable id table exceeded u32 capacity"),
+        );
+        let display_name = generated_tyvar_name(base, id);
+        let allocated = self.fresh_tyvar(&display_name);
+        debug_assert_eq!(allocated, id);
+        (allocated, display_name)
+    }
+
+    /// Looks up a type-variable display name, preferring scratch entries.
+    pub fn tyvar_display_name(&self, names: &Names, id: TyVarId) -> String {
+        self.fresh_tyvars
+            .iter()
+            .rev()
+            .find_map(|(fresh_id, display_name)| (*fresh_id == id).then(|| display_name.clone()))
+            .unwrap_or_else(|| names.tyvar_display_name(id))
+    }
+
+    /// Captures the current scratch length for later rollback.
+    pub fn checkpoint(&self) -> usize {
+        self.fresh_tyvars.len()
+    }
+
+    /// Restores the scratch table to a previous checkpoint.
+    pub fn restore(&mut self, checkpoint: usize) {
+        self.fresh_tyvars.truncate(checkpoint);
+    }
+
+    /// Merges all scratch names into the shared name table.
+    pub fn merge_into(self, names: &mut Names) {
+        for (id, display_name) in self.fresh_tyvars {
+            names.register_tyvar_name(id, &display_name);
+        }
     }
 }
 

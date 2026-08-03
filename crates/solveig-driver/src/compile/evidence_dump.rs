@@ -4,11 +4,7 @@
 use super::*;
 
 pub(super) fn dump_solved_evidence(module: &CheckedModule, names: &Names) {
-    let tables = PrettyTables {
-        names,
-        tycons: &module.tycon_table,
-        classes: &module.class_table,
-    };
+    let tables = PrettyTables::new(names, &module.tycon_table, &module.class_table);
     let mut printed_any = false;
 
     eprintln!("=== Evidence ===");

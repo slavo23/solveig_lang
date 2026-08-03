@@ -157,27 +157,47 @@ impl<A, P> InstanceTable<A, P> {
     }
 
     pub fn overlaps(&self) -> Vec<InstanceOverlap> {
-        let mut overlaps = Vec::new();
+        overlaps_from_heads(
+            self.entries
+                .iter()
+                .map(|(id, info)| (*id, info.class, &info.head)),
+        )
+    }
+}
 
-        for (left_index, (left_id, left)) in self.entries.iter().enumerate() {
-            for (right_id, right) in self.entries.iter().skip(left_index + 1) {
-                if left.class != right.class || left.head.args.len() != right.head.args.len() {
-                    continue;
-                }
+/// Returns overlapping instance heads from borrowed instance definitions.
+pub fn instance_overlaps<A, P>(definitions: &[InstanceDefinition<A, P>]) -> Vec<InstanceOverlap> {
+    overlaps_from_heads(
+        definitions
+            .iter()
+            .map(|definition| (definition.id, definition.head.class_id, &definition.head)),
+    )
+}
 
-                if instance_heads_unify(&left.head, &right.head) {
-                    overlaps.push(InstanceOverlap {
-                        first: *left_id,
-                        second: *right_id,
-                        class: left.class,
-                        instance_args: right.head.args.clone(),
-                    });
-                }
+fn overlaps_from_heads<'a>(
+    heads: impl Iterator<Item = (InstanceId, ClassId, &'a Predicate)>,
+) -> Vec<InstanceOverlap> {
+    let heads = heads.collect::<Vec<_>>();
+    let mut overlaps = Vec::new();
+
+    for (left_index, (left_id, left_class, left_head)) in heads.iter().enumerate() {
+        for (right_id, right_class, right_head) in heads.iter().skip(left_index + 1) {
+            if left_class != right_class || left_head.args.len() != right_head.args.len() {
+                continue;
+            }
+
+            if instance_heads_unify(left_head, right_head) {
+                overlaps.push(InstanceOverlap {
+                    first: *left_id,
+                    second: *right_id,
+                    class: *left_class,
+                    instance_args: right_head.args.clone(),
+                });
             }
         }
-
-        overlaps
     }
+
+    overlaps
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]

@@ -1,6 +1,6 @@
 mod entailment_tests {
     use super::*;
-    use solveig_ast::ast::{InstanceId, ModuleId};
+    use solveig_ast::ast::{InstanceId, InstanceTable, ModuleId};
 
     const EQ: ClassId = ClassId(1);
     const ORD: ClassId = ClassId(2);
@@ -64,7 +64,13 @@ mod entailment_tests {
         }
     }
 
-    fn tiny_checker() -> TypeChecker {
+    struct TinyCheckFixture {
+        names: Names,
+        env: TypeCheckEnv,
+    }
+
+    impl TinyCheckFixture {
+        fn new() -> Self {
         let a = var("a");
         let b = var("b");
         let instance_defs = vec![
@@ -86,8 +92,8 @@ mod entailment_tests {
             ),
         ];
 
+        let names = Names::new();
         let env = TypeCheckEnv {
-            names: Names::new(),
             constructor_types: FxHashMap::default(),
             func_schemes: FxHashMap::default(),
             class_defs: FxHashMap::from_iter([
@@ -121,12 +127,18 @@ mod entailment_tests {
             tycon_kinds: FxHashMap::default(),
         };
 
-        TypeChecker::with_env(&env, FileId(0))
+            Self { names, env }
+        }
+
+        fn checker(&self) -> TypeChecker<'_> {
+            TypeChecker::with_env(&self.env, &self.names, FileId(0))
+        }
     }
 
     #[test]
     fn entailment_returns_structural_evidence() {
-        let checker = tiny_checker();
+        let fixture = TinyCheckFixture::new();
+        let checker = fixture.checker();
         let int = tycon(INT);
         let maybe_int = maybe(int.clone());
         let list_maybe_int = list(maybe_int.clone());
@@ -197,7 +209,8 @@ mod entailment_tests {
 
     #[test]
     fn wanted_solving_records_evidence_by_destination() {
-        let mut checker = tiny_checker();
+        let fixture = TinyCheckFixture::new();
+        let mut checker = fixture.checker();
         let destinations = checker.add_wanteds(vec![pred(EQ, tycon(INT))], 0..1);
 
         let unresolved = checker.unresolved_wanteds();
@@ -211,7 +224,8 @@ mod entailment_tests {
 
     #[test]
     fn qualified_checking_wraps_body_in_evidence_abstraction() {
-        let mut checker = tiny_checker();
+        let fixture = TinyCheckFixture::new();
+        let mut checker = fixture.checker();
         let expected = Ty::make_qualified(vec![pred(EQ, tycon(INT))], Ty::TyUnit);
         let expr = TermExprNode::new(TermExpr::Unit, 0..1);
 
@@ -230,7 +244,8 @@ mod entailment_tests {
 
     #[test]
     fn zonking_replaces_evidence_placeholders() {
-        let mut checker = tiny_checker();
+        let fixture = TinyCheckFixture::new();
+        let mut checker = fixture.checker();
         let destinations = checker.add_wanteds(vec![pred(EQ, tycon(INT))], 0..1);
         let base = elab_node(TermExpr::Unit, 0..1, Ty::TyUnit);
         let expr = wrap_ev_apps(base, destinations, 0..1, &Ty::TyUnit);
@@ -251,12 +266,13 @@ mod entailment_tests {
 
     #[test]
     fn global_scheme_instantiation_wraps_reference_in_placeholder_application() {
-        let mut checker = tiny_checker();
+        let fixture = TinyCheckFixture::new();
+        let mut checker = fixture.checker();
         let def_id = DefId {
             module: ModuleId(9),
             name: solveig_base::Symbol(42),
         };
-        checker.func_schemes.insert(
+        checker.delta.func_schemes.insert(
             def_id,
             Scheme {
                 quantifiers: Vec::new(),
@@ -283,8 +299,9 @@ mod entailment_tests {
 
     #[test]
     fn subsumption_context_wanteds_wrap_checked_expression() {
-        let mut checker = tiny_checker();
-        let local_symbol = checker.names.symbol("localQualified");
+        let mut fixture = TinyCheckFixture::new();
+        let local_symbol = fixture.names.symbol("localQualified");
+        let mut checker = fixture.checker();
         let local_name = "localQualified".to_string();
         let expr = TermExprNode::new(TermExpr::Var(VarRef::Local(local_symbol)), 0..1);
         let qualified_type = Ty::make_qualified(vec![pred(EQ, tycon(INT))], Ty::TyUnit);

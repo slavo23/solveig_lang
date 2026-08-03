@@ -10,9 +10,10 @@ use crate::inference::holes::HoleInfo;
 use crate::inference::inference_ctx::{Context, ContextEntry};
 use solveig_ast::ast::{
     CaseArm, CaseArmNode, ClassDefinition, ClassId, ClassMethodDef, ClassTable, CtorId, CtorTable,
-    DefId, Ev, EvVarId, EvarId, InstanceDefinition, InstanceMethodDef, InstanceTable, Kind,
-    Literal, Names, PRIM_TYS, Pattern, PatternNode, Predicate, PrettyTables, ResolvedModule,
+    DefId, Ev, EvVarId, EvarId, InstanceDefinition, InstanceId, InstanceMethodDef, Kind, Literal,
+    NameScratch, Names, PRIM_TYS, Pattern, PatternNode, Predicate, PrettyTables, ResolvedModule,
     Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId, TyConTable, TyVarId, VarRef,
+    instance_overlaps,
 };
 use solveig_base::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};

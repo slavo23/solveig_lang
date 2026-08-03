@@ -25,11 +25,11 @@ pub(super) fn signature_help_at_position_in_artifacts(
         .find_map(|(module_id, module_file)| (*module_file == file_id).then_some(*module_id))?;
     let checked = artifacts.checked.get(&module_id)?;
     let offset = source_map.offset(file_id, position, encoding) as usize;
-    let tables = PrettyTables {
-        names: &artifacts.names,
-        tycons: &artifacts.tycon_table,
-        classes: &artifacts.class_table,
-    };
+    let tables = PrettyTables::new(
+        &artifacts.names,
+        &artifacts.tycon_table,
+        &artifacts.class_table,
+    );
     let mut best = None;
 
     for def in &checked.func_defs {

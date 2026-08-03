@@ -30,11 +30,7 @@ pub(crate) fn typed_module_completion_candidates(
     let mut out = Vec::new();
     let (tycon_table, class_table) =
         completion_display_tables(session, names, local_typed_api, typed_apis);
-    let tables = PrettyTables {
-        names,
-        tycons: &tycon_table,
-        classes: &class_table,
-    };
+    let tables = PrettyTables::new(names, &tycon_table, &class_table);
 
     out.extend(typed_api_candidates(
         session,

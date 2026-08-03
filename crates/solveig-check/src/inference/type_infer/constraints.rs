@@ -5,7 +5,7 @@ struct GeneralizedInferred {
     retained: Vec<GivenEvidence>,
 }
 
-impl TypeChecker {
+impl TypeChecker<'_> {
     fn free_type_vars_in_type(ty: &Ty, out: &mut BTreeSet<TyVarId>) {
         match ty {
             Ty::TyVar(id) => {
@@ -177,7 +177,7 @@ impl TypeChecker {
     fn superclass_predicates_for_given(&self, given: &Predicate) -> Vec<Predicate> {
         let given = self.zonk_predicate(given);
 
-        let Some(class_def) = self.class_defs.get(&given.class_id) else {
+        let Some(class_def) = self.tables.class_defs.get(&given.class_id) else {
             return Vec::new();
         };
 
@@ -265,8 +265,7 @@ impl TypeChecker {
         }
     }
     fn check_instance_overlaps(&self) -> Vec<TypeError> {
-        self.instance_table
-            .overlaps()
+        instance_overlaps(self.tables.instance_defs)
             .into_iter()
             .map(|overlap| TypeError::OverlappingInstances {
                 span: self.get_file_span(0..0),
@@ -398,8 +397,11 @@ impl TypeChecker {
             return Err(Unsolved { pred: wanted });
         }
 
-        for (instance_id, inst) in self.instance_table.iter() {
-            if inst.class != wanted.class_id || inst.head.args.len() != wanted.args.len() {
+        for inst in self.tables.instance_defs {
+            if self.disabled_instance == Some(inst.id)
+                || inst.head.class_id != wanted.class_id
+                || inst.head.args.len() != wanted.args.len()
+            {
                 continue;
             }
 
@@ -424,7 +426,7 @@ impl TypeChecker {
             if solved_context {
                 seen.remove(&wanted);
                 return Ok(Ev::Inst(
-                    instance_id,
+                    inst.id,
                     Self::evidence_ty_args_for_instance(&inst.head, &inst.context, &subst),
                     sub_evidence,
                 ));
@@ -585,26 +587,28 @@ impl TypeChecker {
             Self::collect_exvars_in_predicate(&wanted.pred, &mut evars);
         }
 
-        let mut names = self.names.clone();
+        let scratch_checkpoint = self.delta.names.checkpoint();
         let mut subst = FxHashMap::default();
         for (index, evar) in evars.into_iter().enumerate() {
-            let universal_id = names.fresh_tyvar(&Self::ambiguous_tyvar_name(index));
+            let universal_id = self
+                .delta
+                .names
+                .fresh_tyvar(&Self::ambiguous_tyvar_name(index));
             let replacement = Ty::TyVar(universal_id);
             subst.insert(evar, replacement);
         }
-        let tables = PrettyTables {
-            names: &names,
-            tycons: &self.tycon_table,
-            classes: &self.class_table,
-        };
+        let tables = PrettyTables::new(self.names, self.tables.tycon_table, self.tables.class_table)
+            .with_name_scratch(&self.delta.names);
 
-        wanteds
+        let predicates = wanteds
             .iter()
             .map(|wanted| {
                 let pred = Self::substitute_evars_in_predicate(&wanted.pred, &subst);
                 pred.pretty_with_tables(tables)
             })
-            .collect()
+            .collect();
+        self.delta.names.restore(scratch_checkpoint);
+        predicates
     }
     fn split_generalized_wanteds(
         &mut self,

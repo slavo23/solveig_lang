@@ -1,4 +1,4 @@
-impl TypeChecker {
+impl TypeChecker<'_> {
     fn bool_type(&self) -> Ty {
         Ty::make_con_id(PRIM_TYS.bool)
     }
@@ -120,8 +120,8 @@ impl TypeChecker {
 
         let case_diagnostics = exhaustiveness::check_case(
             self.file,
-            &self.tycon_table,
-            &self.ctor_table,
+            self.tables.tycon_table,
+            self.tables.ctor_table,
             self.pretty_tables(),
             &scrutinee_type_for_exhaustiveness,
             arms,
@@ -174,6 +174,7 @@ impl TypeChecker {
             }
             Pattern::Con(constructor_id, sub_patterns) => {
                 let constructor_type = self
+                    .tables
                     .constructor_types
                     .get(constructor_id)
                     .cloned()

@@ -321,11 +321,7 @@ impl<'a> FrontendState<'a> {
                 parsed,
                 module_id,
                 checked,
-                PrettyTables {
-                    names: self.names,
-                    tycons: &tycon_table,
-                    classes: &class_table,
-                },
+                PrettyTables::new(self.names, &tycon_table, &class_table),
             ));
 
             let Some(local_typed_api) = self.typed_apis.get(module_name) else {
@@ -556,7 +552,7 @@ impl<'a> FrontendState<'a> {
             class_table: imported_class_table,
         } = collect_imported_type_info(&imported_typed);
 
-        let mut check_env = TypeCheckEnv::from_module(&resolved, self.names);
+        let mut check_env = TypeCheckEnv::from_module(&resolved);
 
         check_env.func_schemes.extend(func_schemes);
         check_env.tycon_kinds.extend(tycon_kinds);
@@ -577,7 +573,7 @@ impl<'a> FrontendState<'a> {
                 .map(|inst| inst.map_anno(&mut |meta| meta.span, &mut |span| span)),
         );
 
-        let checked_raw = match check_and_elab_module(&resolved, &check_env, file) {
+        let checked_raw = match check_and_elab_module(&resolved, &check_env, self.names, file) {
             Ok(c) => c,
             Err(errors) => {
                 {
@@ -594,8 +590,7 @@ impl<'a> FrontendState<'a> {
                 return Err(FrontendPhase::Type);
             }
         };
-        *self.names = checked_raw.names.clone();
-        check_env.names = checked_raw.names.clone();
+        checked_raw.name_scratch.merge_into(self.names);
 
         for diagnostic in &checked_raw.diagnostics {
             self.session
@@ -609,13 +604,13 @@ impl<'a> FrontendState<'a> {
                 &checked_raw.holes,
                 &check_env.constructor_types,
                 &check_env.ctor_table,
-                check_env.pretty_tables(),
+                check_env.pretty_tables(self.names),
             ));
             let diagnostics = hole_diagnostics(
                 &checked_raw.holes,
                 &check_env.constructor_types,
                 &check_env.ctor_table,
-                check_env.pretty_tables(),
+                check_env.pretty_tables(self.names),
             );
 
             for diagnostic in diagnostics {
@@ -626,8 +621,9 @@ impl<'a> FrontendState<'a> {
         }
 
         if self.verify_core && failure.is_none() {
-            let lint_env = CoreLintEnv::from_typecheck_env(&checked_raw.module, &check_env)
-                .with_file(module_id, file);
+            let lint_env =
+                CoreLintEnv::from_typecheck_env(&checked_raw.module, &check_env, self.names)
+                    .with_file(module_id, file);
             let diagnostics = lint_checked_module(&checked_raw.module, &lint_env);
 
             if !diagnostics.is_empty() {
@@ -642,7 +638,7 @@ impl<'a> FrontendState<'a> {
             .extend(completion::typed_local_completion_candidates(
                 &checked_raw.module,
                 file,
-                check_env.pretty_tables(),
+                check_env.pretty_tables(self.names),
             ));
 
         Ok(ModuleCheck {

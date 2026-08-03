@@ -23,11 +23,7 @@ pub(super) fn project_inlay_hints(
     modules: &[CheckedModule],
 ) -> Vec<SourceInlayHint> {
     let (tycon_table, _, class_table) = inlay_display_tables(modules);
-    let tables = PrettyTables {
-        names,
-        tycons: &tycon_table,
-        classes: &class_table,
-    };
+    let tables = PrettyTables::new(names, &tycon_table, &class_table);
     let source_map = session.source_map();
     let mut out = Vec::new();
 
@@ -65,11 +61,7 @@ pub(super) fn project_local_hovers(
     modules: &[CheckedModule],
 ) -> Vec<HoverInfo> {
     let (tycon_table, ctor_table, class_table) = inlay_display_tables(modules);
-    let tables = PrettyTables {
-        names,
-        tycons: &tycon_table,
-        classes: &class_table,
-    };
+    let tables = PrettyTables::new(names, &tycon_table, &class_table);
     let source_map = session.source_map();
     let mut out = Vec::new();
 

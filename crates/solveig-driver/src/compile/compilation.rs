@@ -401,11 +401,7 @@ impl Compilation {
             .expect("ICE: successful check did not retain checked project");
         let (tycon_table, _ctor_table, class_table) =
             checked_project_tables(&checked_project.modules);
-        let pretty_tables = PrettyTables {
-            names: &checked_project.names,
-            tycons: &tycon_table,
-            classes: &class_table,
-        };
+        let pretty_tables = PrettyTables::new(&checked_project.names, &tycon_table, &class_table);
         let mut schemes = BTreeMap::new();
 
         for module in &checked_project.modules {

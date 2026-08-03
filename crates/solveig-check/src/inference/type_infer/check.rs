@@ -1,4 +1,4 @@
-impl TypeChecker {
+impl TypeChecker<'_> {
     pub fn solve_checking(
         &mut self,
         ctx: Context,
@@ -141,7 +141,7 @@ impl TypeChecker {
                 let result_type = expected_type.clone();
                 let elaborated = elab_node(
                     TermExpr::TyAbs(
-                        self.names.tyvar_display_name(*quantifier),
+                        self.tyvar_display_name(*quantifier),
                         kind.clone(),
                         Box::new(elaborated_body),
                     ),
@@ -188,17 +188,19 @@ impl TypeChecker {
 fn orphan_instance_warning(
     inst: &InstanceDefinition<Span>,
     env: &TypeCheckEnv,
+    names: &Names,
     file: FileId,
 ) -> Option<TypeError> {
     if inst.class_module == Some(inst.def_module) || inst.type_module == Some(inst.def_module) {
         return None;
     }
 
-    let class_name = env.display_class_name(inst.head.class_id);
+    let class_name = env.display_class_name(names, inst.head.class_id);
     let instance_type = inst
         .head
         .args
-        .first().map_or_else(|| "_".to_string(), |ty| ty.pretty_with_tables(env.pretty_tables()));
+        .first()
+        .map_or_else(|| "_".to_string(), |ty| ty.pretty_with_tables(env.pretty_tables(names)));
 
     Some(TypeError::OrphanInstance {
         span: file_span(file, inst.span.clone()),
@@ -333,6 +335,7 @@ fn substitute_generalized_expr(
 
 fn wrap_inferred_quantifiers(
     names: &Names,
+    name_scratch: &NameScratch,
     body: TermExprNode<TcMetadata, Span>,
     scheme: &Scheme,
     retained: Vec<GivenEvidence>,
@@ -351,7 +354,7 @@ fn wrap_inferred_quantifiers(
         );
         body = elab_node(
             TermExpr::TyAbs(
-                names.tyvar_display_name(*param),
+                name_scratch.tyvar_display_name(names, *param),
                 kind.clone(),
                 Box::new(body),
             ),
@@ -438,17 +441,31 @@ fn function_group_needs_placeholders(group: &[usize], adjacency: &[Vec<usize>]) 
     group.len() > 1 || group.iter().any(|index| adjacency[*index].contains(index))
 }
 
+fn restore_func_scheme_placeholders(
+    func_schemes: &mut FxHashMap<DefId, Scheme>,
+    placeholders: Vec<(DefId, Option<Scheme>)>,
+) {
+    for (id, previous) in placeholders {
+        if let Some(scheme) = previous {
+            func_schemes.insert(id, scheme);
+        } else {
+            func_schemes.remove(&id);
+        }
+    }
+}
+
 pub fn check_and_elab_module(
     module: &ResolvedModule<Span>,
     env: &TypeCheckEnv,
+    names: &Names,
     file: FileId,
 ) -> Result<TCOutput, Vec<TypeError>> {
     let mut errors = Vec::new();
-    let mut names = env.names.clone();
+    let tables = ModuleTables::from_env(env);
+    let mut delta = CheckDelta::from_env(env, names);
 
     let mut checked_instance_defs = Vec::new();
 
-    let mut available_func_schemes = env.func_schemes.clone();
     let mut checked_func_schemes = module
         .builtin_defs
         .iter()
@@ -459,10 +476,10 @@ pub fn check_and_elab_module(
     let mut all_warnings = Vec::new();
 
     {
-        let mut checker_env = env.clone();
-        checker_env.names = names.clone();
-        let checker = TypeChecker::with_env(&checker_env, file);
+        let checker = TypeChecker::with_delta(tables, names, file, delta);
         let overlap_errors = checker.check_instance_overlaps();
+        let (next_delta, _, _) = checker.finish();
+        delta = next_delta;
         if !overlap_errors.is_empty() {
             return Err(overlap_errors);
         }
@@ -478,10 +495,7 @@ pub fn check_and_elab_module(
                 TypeChecker::class_method_scheme_for_term_lookup(class_def, method);
             let expected_type = TypeChecker::scheme_to_type(&expected_scheme);
 
-            let mut checker_env = env.clone();
-            checker_env.names = names.clone();
-            let mut checker = TypeChecker::with_env(&checker_env, file);
-            checker.func_schemes = available_func_schemes.clone();
+            let mut checker = TypeChecker::with_delta(tables, names, file, delta);
 
             match checker.solve_checking(Context::new(), default_body, &expected_type) {
                 Ok((_final_ctx, elaborated_default)) => {
@@ -514,21 +528,22 @@ pub fn check_and_elab_module(
             }
 
             checker.finalize_holes();
-            names = checker.names.clone();
-            all_holes.extend(checker.holes);
-            all_warnings.extend(checker.warnings);
+            let (next_delta, holes, warnings) = checker.finish();
+            delta = next_delta;
+            all_holes.extend(holes);
+            all_warnings.extend(warnings);
         }
     }
 
     for inst in &module.instance_defs {
-        if let Some(warning) = orphan_instance_warning(inst, env, file) {
+        if let Some(warning) = orphan_instance_warning(inst, env, names, file) {
             all_warnings.push(warning);
         }
     }
 
     for inst in &module.instance_defs {
-        let env_pretty_tables = env.pretty_tables();
-        let inst_class_name = env.display_class_name(inst.head.class_id);
+        let env_pretty_tables = env.pretty_tables(names);
+        let inst_class_name = env.display_class_name(names, inst.head.class_id);
         let class_def = env.class_defs.get(&inst.head.class_id);
 
         let class_def = match class_def {
@@ -545,24 +560,17 @@ pub fn check_and_elab_module(
         let superclass_obligations =
             TypeChecker::specialize_superclasses_for_instance(class_def, &inst.head);
 
-        let mut checker_env = env.clone();
-        checker_env.names = names.clone();
-        let mut checker = TypeChecker::with_env(&checker_env, file);
+        let mut checker = TypeChecker::with_delta(tables, names, file, delta);
 
         // While validating `instance C t`, do not use that same instance as evidence
         // for its own superclass obligations. This avoids accepting recursive proofs
         // such as constructing `Eq Int` through the `Ord Int` dictionary currently
         // being checked.
-        let superclass_instance_defs = env
-            .instance_defs
-            .iter()
-            .filter(|candidate| candidate.id != inst.id)
-            .cloned()
-            .collect::<Vec<_>>();
-        checker.instance_table = InstanceTable::from_definitions(superclass_instance_defs);
+        checker.disabled_instance = Some(inst.id);
 
         let (context_givens, superclass_results) =
             checker.solve_predicates_with_givens(&superclass_obligations, &inst.context);
+        checker.disabled_instance = None;
         let context_evidence = context_givens
             .iter()
             .map(|given| given.ev)
@@ -595,7 +603,10 @@ pub fn check_and_elab_module(
         }
 
         let mut checked_methods = Vec::new();
-        names = checker.names.clone();
+        let (next_delta, holes, warnings) = checker.finish();
+        delta = next_delta;
+        all_holes.extend(holes);
+        all_warnings.extend(warnings);
 
         for inst_method in &inst.methods {
             if !class_def.methods.iter().any(|method| {
@@ -640,10 +651,7 @@ pub fn check_and_elab_module(
 
             let expected_type = TypeChecker::scheme_to_type(&expected_scheme);
 
-            let mut checker_env = env.clone();
-            checker_env.names = names.clone();
-            let mut checker = TypeChecker::with_env(&checker_env, file);
-            checker.func_schemes = available_func_schemes.clone();
+            let mut checker = TypeChecker::with_delta(tables, names, file, delta);
 
             match checker.solve_checking(Context::new(), method_body, &expected_type) {
                 Ok((_final_ctx, elaborated_method)) => {
@@ -681,9 +689,10 @@ pub fn check_and_elab_module(
             }
 
             checker.finalize_holes();
-            names = checker.names.clone();
-            all_holes.extend(checker.holes);
-            all_warnings.extend(checker.warnings);
+            let (next_delta, holes, warnings) = checker.finish();
+            delta = next_delta;
+            all_holes.extend(holes);
+            all_warnings.extend(warnings);
         }
 
         checked_instance_defs.push(InstanceDefinition {
@@ -705,17 +714,15 @@ pub fn check_and_elab_module(
         vec![None; module.func_defs.len()];
 
     for group_indices in function_dependencies.groups {
-        let mut checker_env = env.clone();
-        checker_env.names = names.clone();
-        let mut checker = TypeChecker::with_env(&checker_env, file);
+        let mut checker = TypeChecker::with_delta(tables, names, file, delta);
 
         let needs_placeholders = function_group_needs_placeholders(
             &group_indices,
             &function_dependencies.adjacency,
         );
         let mut group_ctx = Context::new();
-        let mut group_func_schemes = available_func_schemes.clone();
         let mut placeholders = FxHashMap::<DefId, Ty>::default();
+        let mut placeholder_schemes = Vec::<(DefId, Option<Scheme>)>::new();
 
         if needs_placeholders {
             for &index in &group_indices {
@@ -728,11 +735,14 @@ pub fn check_and_elab_module(
                 let placeholder = TypeChecker::evar_type(evar);
                 group_ctx = group_ctx.add_entry(ContextEntry::ExVar(evar, Kind::Star));
                 placeholders.insert(func_def.id, placeholder.clone());
-                group_func_schemes.insert(func_def.id, Scheme::mono(placeholder));
+                let previous = checker
+                    .delta
+                    .func_schemes
+                    .insert(func_def.id, Scheme::mono(placeholder));
+                placeholder_schemes.push((func_def.id, previous));
             }
         }
 
-        checker.func_schemes = group_func_schemes.clone();
         let mut group_results = Vec::<(
             usize,
             TermExprNode<TcMetadata, Span>,
@@ -743,7 +753,6 @@ pub fn check_and_elab_module(
 
         for &index in &group_indices {
             let func_def = &module.func_defs[index];
-            checker.func_schemes = group_func_schemes.clone();
             let wanted_start = checker.wanted_count();
             let checkpoint = checker.checkpoint();
 
@@ -814,10 +823,12 @@ pub fn check_and_elab_module(
 
         if !group_errors.is_empty() {
             errors.extend(group_errors);
+            restore_func_scheme_placeholders(&mut checker.delta.func_schemes, placeholder_schemes);
             checker.finalize_holes();
-            names = checker.names.clone();
-            all_holes.extend(checker.holes);
-            all_warnings.extend(checker.warnings);
+            let (next_delta, holes, warnings) = checker.finish();
+            delta = next_delta;
+            all_holes.extend(holes);
+            all_warnings.extend(warnings);
             continue;
         }
 
@@ -850,7 +861,8 @@ pub fn check_and_elab_module(
                     let zonked = checker.zonk_expr(&elaborated);
                     let substituted = substitute_generalized_expr(zonked, &generalized.subst);
                     let wrapped = wrap_inferred_quantifiers(
-                        &checker.names,
+                        checker.names,
+                        &checker.delta.names,
                         substituted,
                         &final_scheme,
                         generalized.retained,
@@ -874,23 +886,29 @@ pub fn check_and_elab_module(
 
         if !group_errors.is_empty() {
             errors.extend(group_errors);
+            restore_func_scheme_placeholders(&mut checker.delta.func_schemes, placeholder_schemes);
             checker.finalize_holes();
-            names = checker.names.clone();
-            all_holes.extend(checker.holes);
-            all_warnings.extend(checker.warnings);
+            let (next_delta, holes, warnings) = checker.finish();
+            delta = next_delta;
+            all_holes.extend(holes);
+            all_warnings.extend(warnings);
             continue;
         }
 
         for (index, checked_def, final_scheme) in finalized_defs {
-            available_func_schemes.insert(checked_def.id, final_scheme.clone());
+            checker
+                .delta
+                .func_schemes
+                .insert(checked_def.id, final_scheme.clone());
             checked_func_schemes.insert(checked_def.id, final_scheme);
             checked_defs_by_index[index] = Some(checked_def);
         }
 
         checker.finalize_holes();
-        names = checker.names.clone();
-        all_holes.extend(checker.holes);
-        all_warnings.extend(checker.warnings);
+        let (next_delta, holes, warnings) = checker.finish();
+        delta = next_delta;
+        all_holes.extend(holes);
+        all_warnings.extend(warnings);
     }
 
     let checked_defs: Vec<TermDefinition<TcMetadata, Span>> =
@@ -898,7 +916,7 @@ pub fn check_and_elab_module(
 
     if errors.is_empty() {
         Ok(TCOutput {
-            names,
+            name_scratch: delta.names,
             module: ResolvedModule {
                 data_defs: module.data_defs.clone(),
                 class_defs: module.class_defs.clone(),
@@ -928,8 +946,8 @@ pub fn check_and_elab_expr_in_checked_module(
     expected_type: &Ty,
     names: &Names,
 ) -> Result<Option<TermExprNode<TcMetadata, Span>>, TypeError> {
-    let env = TypeCheckEnv::from_checked_module(module, names);
-    let mut checker = TypeChecker::with_env(&env, file);
+    let env = TypeCheckEnv::from_checked_module(module);
+    let mut checker = TypeChecker::with_env(&env, names, file);
     let (_ctx, elaborated) = checker.solve_checking(Context::new(), expr, expected_type)?;
     let unresolved = checker.unresolved_wanteds();
 

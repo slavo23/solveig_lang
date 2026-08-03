@@ -43,14 +43,18 @@ impl CoreLintEnv {
         env
     }
 
-    pub fn from_typecheck_env(module: &CheckedModule, check_env: &TypeCheckEnv) -> Self {
+    pub fn from_typecheck_env(
+        module: &CheckedModule,
+        check_env: &TypeCheckEnv,
+        names: &Names,
+    ) -> Self {
         let mut env = Self {
             func_schemes: check_env.func_schemes.clone(),
             class_defs: check_env.class_defs.clone(),
             ctor_table: check_env.ctor_table.clone(),
             tycon_table: check_env.tycon_table.clone(),
             class_table: check_env.class_table.clone(),
-            names: check_env.names.clone(),
+            names: names.clone(),
             ..Self::default()
         };
 

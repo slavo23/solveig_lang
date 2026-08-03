@@ -122,6 +122,26 @@ fn generated_tyvar_names_generated_ids() {
 }
 
 #[test]
+fn name_scratch_rolls_back_and_merges_tyvar_names() {
+    let mut names = Names::new();
+    let existing = names.fresh_tyvar("a");
+    let mut scratch = NameScratch::from_names(&names);
+    let checkpoint = scratch.checkpoint();
+
+    let discarded = scratch.fresh_tyvar("b");
+    assert_eq!(scratch.tyvar_display_name(&names, existing), "a");
+    assert_eq!(scratch.tyvar_display_name(&names, discarded), "b");
+    assert_eq!(names.tyvar_display_name(discarded), "t1");
+
+    scratch.restore(checkpoint);
+    let retained = scratch.fresh_tyvar("c");
+    assert_eq!(retained, discarded);
+
+    scratch.merge_into(&mut names);
+    assert_eq!(names.tyvar_display_name(retained), "c");
+}
+
+#[test]
 fn names_table_preserves_type_constructor_names() {
     let mut names = Names::new();
     let name = "test.module.Widget";
@@ -269,11 +289,7 @@ fn table_backed_pretty_uses_identity_tables() {
         },
     );
 
-    let tables = PrettyTables {
-        names: &names,
-        tycons: &tycons,
-        classes: &classes,
-    };
+    let tables = PrettyTables::new(&names, &tycons, &classes);
     let scheme = Scheme {
         quantifiers: Vec::new(),
         predicates: vec![Predicate {
@@ -297,11 +313,7 @@ fn table_backed_pretty_falls_back_for_missing_table_entries() {
     let class_id = names.class_id("FallbackClass");
     let tycons = TyConTable::new();
     let classes = ClassTable::new();
-    let tables = PrettyTables {
-        names: &names,
-        tycons: &tycons,
-        classes: &classes,
-    };
+    let tables = PrettyTables::new(&names, &tycons, &classes);
     let scheme = Scheme {
         quantifiers: Vec::new(),
         predicates: vec![Predicate {

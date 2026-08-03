@@ -46,7 +46,7 @@ fn wrap_ev_abs(
     body
 }
 
-impl TypeChecker {
+impl TypeChecker<'_> {
     fn zonk_scheme(&self, scheme: &Scheme) -> Scheme {
         Scheme {
             quantifiers: scheme.quantifiers.clone(),

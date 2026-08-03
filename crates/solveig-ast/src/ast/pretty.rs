@@ -24,6 +24,32 @@ pub struct PrettyTables<'a> {
     pub names: &'a Names,
     pub tycons: &'a TyConTable,
     pub classes: &'a ClassTable,
+    name_scratch: Option<&'a NameScratch>,
+}
+
+impl<'a> PrettyTables<'a> {
+    /// Creates table-backed pretty-printing state without speculative names.
+    pub fn new(names: &'a Names, tycons: &'a TyConTable, classes: &'a ClassTable) -> Self {
+        Self {
+            names,
+            tycons,
+            classes,
+            name_scratch: None,
+        }
+    }
+
+    /// Returns a view that consults speculative type-variable names first.
+    pub fn with_name_scratch(mut self, name_scratch: &'a NameScratch) -> Self {
+        self.name_scratch = Some(name_scratch);
+        self
+    }
+
+    fn tyvar_display_name(self, id: TyVarId) -> String {
+        self.name_scratch.map_or_else(
+            || self.names.tyvar_display_name(id),
+            |scratch| scratch.tyvar_display_name(self.names, id),
+        )
+    }
 }
 
 fn tycon_pretty_name(id: TyConId, tables: PrettyTables<'_>) -> String {
@@ -219,7 +245,7 @@ impl<'a> TypePrinter<'a> {
     fn source_tyvar_name(&self, id: TyVarId) -> Option<String> {
         let name = self.tables.map_or_else(
             || tyvar_display_name(id),
-            |tables| tables.names.tyvar_display_name(id),
+            |tables| tables.tyvar_display_name(id),
         );
 
         if is_generated_tyvar_name(&name) || !is_source_tyvar_name(&name) {

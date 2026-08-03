@@ -1,4 +1,4 @@
-impl TypeChecker {
+impl TypeChecker<'_> {
     fn lookup_local_term_var(&self, ctx: &Context, name: &str) -> Option<Ty> {
         ctx.lookup_term_var(name)
     }
@@ -144,7 +144,7 @@ impl TypeChecker {
         arg_part: &Ty,
     ) -> Result<(Kind, Kind), ()> {
         let arg_kind = ctx
-            .kind_of_type(arg_part, &self.tycon_kinds)
+            .kind_of_type(arg_part, self.tables.tycon_kinds)
             .map_err(|_| ())?;
 
         let result_kind = ctx

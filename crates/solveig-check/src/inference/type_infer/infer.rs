@@ -1,4 +1,4 @@
-impl TypeChecker {
+impl TypeChecker<'_> {
     fn infer_lambda_param_type(
         &mut self,
         ctx: Context,
@@ -68,7 +68,7 @@ impl TypeChecker {
                 }
 
                 if let VarRef::Global(def_id) = name
-                    && let Some(scheme) = self.func_schemes.get(def_id).cloned()
+                    && let Some(scheme) = self.delta.func_schemes.get(def_id).cloned()
                 {
                     let (ctx, preds, instantiated_ty) = self.instantiate_scheme(ctx, &scheme);
                     let evidence_args = self.add_wanteds(preds, span.clone());
@@ -101,7 +101,7 @@ impl TypeChecker {
             }
             TermExpr::Con(id) => {
                 let constructor_type =
-                    self.constructor_types.get(id).cloned().ok_or_else(|| {
+                    self.tables.constructor_types.get(id).cloned().ok_or_else(|| {
                         TypeError::UnknownConstructor {
                             span: self.get_file_span(span.clone()),
                             name: self.display_ctor_name(*id),
@@ -195,7 +195,7 @@ impl TypeChecker {
                 Ok((delta, elaborated, result_type))
             }
             TermExpr::TyAbs(param, kind, body) => {
-                let param_id = self.names.fresh_tyvar(param);
+                let param_id = self.delta.names.fresh_tyvar(param);
                 let universal_entry = self.universal_entry(param_id, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
 

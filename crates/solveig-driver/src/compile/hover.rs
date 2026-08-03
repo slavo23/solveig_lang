@@ -75,11 +75,11 @@ fn hover_in_file_id(
     file_id: FileId,
     offset: usize,
 ) -> Option<HoverInfo> {
-    let pretty_tables = PrettyTables {
-        names: &artifacts.names,
-        tycons: &artifacts.tycon_table,
-        classes: &artifacts.class_table,
-    };
+    let pretty_tables = PrettyTables::new(
+        &artifacts.names,
+        &artifacts.tycon_table,
+        &artifacts.class_table,
+    );
     let mut best = None;
     let source_file = artifacts.source_files.get(file_id.0 as usize);
     let hover_token = source_file.and_then(|source_file| hover_token_at(source_file, offset));

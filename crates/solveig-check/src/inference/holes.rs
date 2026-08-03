@@ -264,11 +264,7 @@ mod tests {
             &[hole],
             &constructors,
             &ctor_table,
-            PrettyTables {
-                names: &names,
-                tycons: &tycon_table,
-                classes: &class_table,
-            },
+            PrettyTables::new(&names, &tycon_table, &class_table),
         );
 
         let diagnostic = &diagnostics[0];

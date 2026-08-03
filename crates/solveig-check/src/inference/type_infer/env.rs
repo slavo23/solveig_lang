@@ -40,18 +40,13 @@ fn file_span(file: FileId, span: Span) -> FileSpan {
     FileSpan::new(file, SourceSpan::from_usize_range(span))
 }
 
-pub struct TypeChecker {
+pub struct TypeChecker<'a> {
     file: FileId,
-    names: Names,
+    names: &'a Names,
+    tables: ModuleTables<'a>,
+    delta: CheckDelta,
     counter: u32,
-    constructor_types: FxHashMap<CtorId, Ty>,
-    func_schemes: FxHashMap<DefId, Scheme>,
-    class_defs: FxHashMap<ClassId, ClassDefinition>,
-    instance_table: InstanceTable<Span>,
-    tycon_table: TyConTable,
-    ctor_table: CtorTable,
-    class_table: ClassTable,
-    tycon_kinds: FxHashMap<TyConId, Kind>,
+    disabled_instance: Option<InstanceId>,
     givens: Vec<GivenEvidence>,
     wanteds: Vec<Wanted>,
     evar_solutions: FxHashMap<EvarId, Ty>,
@@ -62,9 +57,8 @@ pub struct TypeChecker {
 
 #[derive(Clone)]
 struct TypeCheckerCheckpoint {
-    names: Names,
+    names: usize,
     counter: u32,
-    func_schemes: FxHashMap<DefId, Scheme>,
     givens: Vec<GivenEvidence>,
     wanteds: Vec<Wanted>,
     evar_solutions: FxHashMap<EvarId, Ty>,
@@ -73,47 +67,29 @@ struct TypeCheckerCheckpoint {
     warnings: Vec<TypeError>,
 }
 
-impl Default for TypeChecker {
-    fn default() -> Self {
-        Self::new()
+impl<'a> TypeChecker<'a> {
+    pub fn with_env(env: &'a TypeCheckEnv, names: &'a Names, file: FileId) -> Self {
+        Self::with_delta(
+            ModuleTables::from_env(env),
+            names,
+            file,
+            CheckDelta::from_env(env, names),
+        )
     }
-}
 
-impl TypeChecker {
-    pub fn new() -> Self {
-        Self {
-            file: FileId(0),
-            names: Names::new(),
-            counter: 0,
-            constructor_types: FxHashMap::default(),
-            func_schemes: FxHashMap::default(),
-            class_defs: FxHashMap::default(),
-            instance_table: InstanceTable::new(),
-            tycon_table: TyConTable::new(),
-            ctor_table: CtorTable::new(),
-            class_table: ClassTable::new(),
-            tycon_kinds: FxHashMap::default(),
-            givens: Vec::new(),
-            wanteds: Vec::new(),
-            evar_solutions: FxHashMap::default(),
-            evidence_solutions: FxHashMap::default(),
-            holes: Vec::new(),
-            warnings: Vec::new(),
-        }
-    }
-    pub fn with_env(env: &TypeCheckEnv, file: FileId) -> Self {
+    fn with_delta(
+        tables: ModuleTables<'a>,
+        names: &'a Names,
+        file: FileId,
+        delta: CheckDelta,
+    ) -> Self {
         Self {
             file,
-            names: env.names.clone(),
+            names,
+            tables,
+            delta,
             counter: 0,
-            constructor_types: env.constructor_types.clone(),
-            func_schemes: env.func_schemes.clone(),
-            class_defs: env.class_defs.clone(),
-            instance_table: InstanceTable::from_definitions(env.instance_defs.clone()),
-            tycon_table: env.tycon_table.clone(),
-            ctor_table: env.ctor_table.clone(),
-            class_table: env.class_table.clone(),
-            tycon_kinds: env.tycon_kinds.clone(),
+            disabled_instance: None,
             givens: Vec::new(),
             wanteds: Vec::new(),
             evar_solutions: FxHashMap::default(),
@@ -122,19 +98,17 @@ impl TypeChecker {
             warnings: Vec::new(),
         }
     }
-    pub fn with_module_context(module: &ResolvedModule<Span>, file: FileId, names: &Names) -> Self {
-        let env = TypeCheckEnv::from_module(module, names);
-        Self::with_env(&env, file)
+
+    fn finish(self) -> (CheckDelta, Vec<HoleInfo>, Vec<TypeError>) {
+        (self.delta, self.holes, self.warnings)
     }
+
     fn get_file_span(&self, span: Span) -> FileSpan {
         file_span(self.file, span)
     }
     fn pretty_tables(&self) -> PrettyTables<'_> {
-        PrettyTables {
-            names: &self.names,
-            tycons: &self.tycon_table,
-            classes: &self.class_table,
-        }
+        PrettyTables::new(self.names, self.tables.tycon_table, self.tables.class_table)
+            .with_name_scratch(&self.delta.names)
     }
     fn pretty_type(&self, ty: &Ty) -> String {
         ty.pretty_with_tables(self.pretty_tables())
@@ -146,12 +120,16 @@ impl TypeChecker {
         scheme.pretty_with_tables(self.pretty_tables())
     }
     fn display_class_name(&self, id: ClassId) -> String {
-        self.class_table
-            .get(id).map_or_else(|| panic!("ICE: type checker class table missing ClassId {id:?}"), |info| self.names.symbol_display_name(info.name))
+        self.tables.class_table.get(id).map_or_else(
+            || panic!("ICE: type checker class table missing ClassId {id:?}"),
+            |info| self.names.symbol_display_name(info.name),
+        )
     }
     fn display_ctor_name(&self, id: CtorId) -> String {
-        self.ctor_table
-            .get(id).map_or_else(|| panic!("ICE: type checker constructor table missing CtorId {id:?}"), |info| self.names.symbol_display_name(info.name))
+        self.tables.ctor_table.get(id).map_or_else(
+            || panic!("ICE: type checker constructor table missing CtorId {id:?}"),
+            |info| self.names.symbol_display_name(info.name),
+        )
     }
     fn fresh_id(&mut self) -> u32 {
         self.counter += 1;
@@ -167,12 +145,15 @@ impl TypeChecker {
         Ty::make_evar(id)
     }
     fn fresh_universal(&mut self, base: &str) -> (TyVarId, String) {
-        self.names.fresh_generated_tyvar(base)
+        self.delta.names.fresh_generated_tyvar(base)
+    }
+    fn tyvar_display_name(&self, id: TyVarId) -> String {
+        self.delta.names.tyvar_display_name(self.names, id)
     }
     fn universal_entry(&self, id: TyVarId, kind: Kind) -> ContextEntry {
         ContextEntry::UniVar {
             id,
-            name: self.names.tyvar_display_name(id),
+            name: self.tyvar_display_name(id),
             kind,
         }
     }
@@ -201,7 +182,7 @@ impl TypeChecker {
         }
     }
     fn lookup_class_method_scheme(&self, id: DefId) -> Option<Scheme> {
-        self.class_defs.values().find_map(|class_def| {
+        self.tables.class_defs.values().find_map(|class_def| {
             class_def.methods.iter().find_map(|method| {
                 if method.id == id {
                     Some(Self::class_method_scheme_for_term_lookup(class_def, method))
@@ -216,9 +197,8 @@ impl TypeChecker {
     }
     fn checkpoint(&self) -> TypeCheckerCheckpoint {
         TypeCheckerCheckpoint {
-            names: self.names.clone(),
+            names: self.delta.names.checkpoint(),
             counter: self.counter,
-            func_schemes: self.func_schemes.clone(),
             givens: self.givens.clone(),
             wanteds: self.wanteds.clone(),
             evar_solutions: self.evar_solutions.clone(),
@@ -228,9 +208,8 @@ impl TypeChecker {
         }
     }
     fn restore(&mut self, checkpoint: TypeCheckerCheckpoint) {
-        self.names = checkpoint.names;
+        self.delta.names.restore(checkpoint.names);
         self.counter = checkpoint.counter;
-        self.func_schemes = checkpoint.func_schemes;
         self.givens = checkpoint.givens;
         self.wanteds = checkpoint.wanteds;
         self.evar_solutions = checkpoint.evar_solutions;
@@ -242,9 +221,9 @@ impl TypeChecker {
 
 pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
 
-#[derive(Clone, Debug)]
+/// Owns the resolved APIs available to a module before type checking.
+#[derive(Debug)]
 pub struct TypeCheckEnv {
-    pub names: Names,
     pub constructor_types: FxHashMap<CtorId, Ty>,
     pub func_schemes: FxHashMap<DefId, Scheme>,
     pub class_defs: FxHashMap<ClassId, ClassDefinition>,
@@ -255,10 +234,28 @@ pub struct TypeCheckEnv {
     pub tycon_kinds: FxHashMap<TyConId, Kind>,
 }
 
+/// Immutable type-checking tables borrowed for one module check.
+#[derive(Clone, Copy)]
+pub struct ModuleTables<'a> {
+    pub constructor_types: &'a FxHashMap<CtorId, Ty>,
+    pub class_defs: &'a FxHashMap<ClassId, ClassDefinition>,
+    pub instance_defs: &'a [InstanceDefinition<Span>],
+    pub tycon_table: &'a TyConTable,
+    pub ctor_table: &'a CtorTable,
+    pub class_table: &'a ClassTable,
+    pub tycon_kinds: &'a FxHashMap<TyConId, Kind>,
+}
+
+/// Contains the mutable state accumulated during one module check.
+#[derive(Clone, Debug)]
+pub struct CheckDelta {
+    pub func_schemes: FxHashMap<DefId, Scheme>,
+    pub names: NameScratch,
+}
+
 impl TypeCheckEnv {
-    pub fn from_module(module: &ResolvedModule<Span>, names: &Names) -> Self {
+    pub fn from_module(module: &ResolvedModule<Span>) -> Self {
         Self {
-            names: names.clone(),
             constructor_types: module.constructor_types.clone(),
             func_schemes: module.func_schemes.clone(),
             class_defs: module
@@ -274,12 +271,11 @@ impl TypeCheckEnv {
         }
     }
 
-    pub fn from_checked_module(module: &CheckedModule, names: &Names) -> Self {
+    pub fn from_checked_module(module: &CheckedModule) -> Self {
         let mut expr_anno = |metadata: TcMetadata| metadata.span;
         let mut pattern_anno = |span: Span| span;
 
         Self {
-            names: names.clone(),
             constructor_types: module.constructor_types.clone(),
             func_schemes: module.func_schemes.clone(),
             class_defs: module
@@ -300,22 +296,43 @@ impl TypeCheckEnv {
         }
     }
 
-    pub fn pretty_tables(&self) -> PrettyTables<'_> {
-        PrettyTables {
-            names: &self.names,
-            tycons: &self.tycon_table,
-            classes: &self.class_table,
-        }
+    pub fn pretty_tables<'a>(&'a self, names: &'a Names) -> PrettyTables<'a> {
+        PrettyTables::new(names, &self.tycon_table, &self.class_table)
     }
 
-    fn display_class_name(&self, id: ClassId) -> String {
-        self.class_table
-            .get(id).map_or_else(|| panic!("ICE: type check env class table missing ClassId {id:?}"), |info| self.names.symbol_display_name(info.name))
+    fn display_class_name(&self, names: &Names, id: ClassId) -> String {
+        self.class_table.get(id).map_or_else(
+            || panic!("ICE: type check env class table missing ClassId {id:?}"),
+            |info| names.symbol_display_name(info.name),
+        )
+    }
+}
+
+impl<'a> ModuleTables<'a> {
+    fn from_env(env: &'a TypeCheckEnv) -> Self {
+        Self {
+            constructor_types: &env.constructor_types,
+            class_defs: &env.class_defs,
+            instance_defs: &env.instance_defs,
+            tycon_table: &env.tycon_table,
+            ctor_table: &env.ctor_table,
+            class_table: &env.class_table,
+            tycon_kinds: &env.tycon_kinds,
+        }
+    }
+}
+
+impl CheckDelta {
+    fn from_env(env: &TypeCheckEnv, names: &Names) -> Self {
+        Self {
+            func_schemes: env.func_schemes.clone(),
+            names: NameScratch::from_names(names),
+        }
     }
 }
 
 pub struct TCOutput {
-    pub names: Names,
+    pub name_scratch: NameScratch,
     pub module: CheckedModule,
     pub holes: Vec<HoleInfo>,
     pub diagnostics: Vec<TypeError>,
@@ -337,8 +354,8 @@ mod tests {
             name: solveig_base::Symbol(4),
         };
 
+        let names = Names::new();
         let mut env = TypeCheckEnv {
-            names: Names::new(),
             constructor_types: FxHashMap::default(),
             func_schemes: FxHashMap::default(),
             class_defs: FxHashMap::default(),
@@ -351,7 +368,7 @@ mod tests {
         env.func_schemes
             .insert(def_id, Scheme::mono(Ty::TyUnit));
 
-        let mut checker = TypeChecker::with_env(&env, FileId(0));
+        let mut checker = TypeChecker::with_env(&env, &names, FileId(0));
         let expr = TermExprNode::new(TermExpr::Var(VarRef::Global(def_id)), 0..0);
 
         let result = checker.solve_inference(Context::new(), &expr);
@@ -379,7 +396,6 @@ mod tests {
         let mut names = Names::new();
         let class_id = names.class_id("C");
         let env = TypeCheckEnv {
-            names,
             constructor_types: FxHashMap::default(),
             func_schemes: FxHashMap::default(),
             class_defs: FxHashMap::from_iter([(
@@ -406,7 +422,7 @@ mod tests {
             tycon_kinds: FxHashMap::default(),
         };
 
-        let mut checker = TypeChecker::with_env(&env, FileId(0));
+        let mut checker = TypeChecker::with_env(&env, &names, FileId(0));
         let expr = TermExprNode::new(TermExpr::Var(VarRef::Global(method_id)), 0..0);
 
         let result = checker.solve_inference(Context::new(), &expr);
@@ -418,7 +434,75 @@ mod tests {
             checker
                 .solve_inference(Context::new(), &missing_expr)
                 .is_err()
+            );
+    }
+
+    #[test]
+    fn module_check_returns_name_scratch_without_mutating_names() {
+        let file = FileId(0);
+        let mut names = Names::new();
+        let module_id = solveig_ast::ast::ModuleId(3);
+        let def_id = DefId {
+            module: module_id,
+            name: names.symbol("test.identity"),
+        };
+        names.register_def(def_id, "test.identity");
+        let param_symbol = names.symbol("x");
+        let next_before = names.next_tyvar_id();
+        let body = TermExprNode::new(
+            TermExpr::Abs(
+                "x".to_string(),
+                None,
+                Box::new(TermExprNode::new(
+                    TermExpr::Var(VarRef::Local(param_symbol)),
+                    2..3,
+                )),
+            ),
+            0..3,
         );
+        let module = ResolvedModule::<Span> {
+            data_defs: Vec::new(),
+            class_defs: Vec::new(),
+            instance_defs: Vec::new(),
+            builtin_defs: Vec::new(),
+            tycon_table: TyConTable::new(),
+            ctor_table: CtorTable::new(),
+            class_table: ClassTable::new(),
+            tycon_kinds: FxHashMap::default(),
+            constructor_types: FxHashMap::default(),
+            func_schemes: FxHashMap::default(),
+            func_defs: vec![TermDefinition {
+                id: def_id,
+                name: "test.identity".to_string(),
+                short_name: "identity".to_string(),
+                signature: None,
+                body,
+            }],
+        };
+        let env = TypeCheckEnv::from_module(&module);
+
+        let output = check_and_elab_module(&module, &env, &names, file)
+            .expect("unsignatured identity should check");
+
+        assert_eq!(names.next_tyvar_id(), next_before);
+        let scheme = output
+            .module
+            .func_schemes
+            .get(&def_id)
+            .expect("checked module should publish inferred scheme");
+        let (quantifier, _) = scheme
+            .quantifiers
+            .first()
+            .cloned()
+            .expect("identity should infer one quantifier");
+        assert_eq!(
+            output.name_scratch.tyvar_display_name(&names, quantifier),
+            "t0"
+        );
+
+        output.name_scratch.merge_into(&mut names);
+        assert_eq!(names.next_tyvar_id(), TyVarId(1));
+        assert_eq!(names.tyvar_display_name(quantifier), "t0");
     }
 
     #[test]
@@ -489,7 +573,7 @@ mod tests {
             func_defs: Vec::new(),
         };
 
-        let env = TypeCheckEnv::from_module(&module, &names);
+        let env = TypeCheckEnv::from_module(&module);
 
         assert!(env.class_defs.contains_key(&class_id));
         assert!(!env
@@ -507,8 +591,8 @@ mod tests {
         let class_id = names.class_id(&class_name);
         let superclass_id = names.class_id(&superclass_name);
         let param = names.fresh_tyvar("a");
+        let superclass = Predicate::named(&mut names, &superclass_name, vec![Ty::TyVar(param)]);
         let env = TypeCheckEnv {
-            names: names.clone(),
             constructor_types: FxHashMap::default(),
             func_schemes: FxHashMap::default(),
             class_defs: FxHashMap::from_iter([(
@@ -518,11 +602,7 @@ mod tests {
                     name: class_name.clone(),
                     short_name: "Sub".to_string(),
                     params: vec![(param, Kind::Star)],
-                    superclasses: vec![Predicate::named(
-                        &mut names,
-                        &superclass_name,
-                        vec![Ty::TyVar(param)],
-                    )],
+                    superclasses: vec![superclass],
                     methods: Vec::new(),
                 },
             )]),
@@ -533,8 +613,8 @@ mod tests {
             tycon_kinds: FxHashMap::default(),
         };
 
-        let checker = TypeChecker::with_env(&env, FileId(0));
         let given = Predicate::named(&mut names, &class_name, vec![int_ty.clone()]);
+        let checker = TypeChecker::with_env(&env, &names, FileId(0));
         let superclasses = checker.superclass_predicates_for_given(&given);
 
         assert_eq!(superclasses.len(), 1);
@@ -580,7 +660,6 @@ mod tests {
         );
 
         let env = TypeCheckEnv {
-            names,
             constructor_types: FxHashMap::default(),
             func_schemes: FxHashMap::default(),
             class_defs: FxHashMap::default(),
@@ -591,7 +670,7 @@ mod tests {
             tycon_kinds: FxHashMap::default(),
         };
 
-        let checker = TypeChecker::with_env(&env, FileId(0));
+        let checker = TypeChecker::with_env(&env, &names, FileId(0));
         let widget = Ty::TyCon(tycon_id);
         let pred = Predicate {
             class_id,
