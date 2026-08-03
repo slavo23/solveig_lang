@@ -1,6 +1,7 @@
 //! Source-level prepare-rename and rename edits over semantic references.
 
-use super::navigation::{declaration_span, def_id_at_offset, references_to_def};
+use super::navigation::{declaration_span, def_target_at_position, references_to_def};
+use super::position::DefTarget;
 use super::*;
 
 pub(super) fn prepare_rename_in_artifacts(
@@ -64,11 +65,8 @@ fn rename_candidate_at_position(
     file: &Path,
     position: SourcePosition,
     encoding: PositionEncoding,
-) -> Option<super::navigation::DefCandidate> {
-    let file_id = source_lookup::source_file_id_in_source_map(source_map, file)?;
-    let offset = source_map.offset(file_id, position, encoding) as usize;
-
-    def_id_at_offset(artifacts, file_id, offset)
+) -> Option<DefTarget> {
+    def_target_at_position(artifacts, source_map, file, position, encoding)
 }
 
 fn renameable_def(artifacts: &CompilationArtifacts, source_map: &SourceMap, def_id: DefId) -> bool {

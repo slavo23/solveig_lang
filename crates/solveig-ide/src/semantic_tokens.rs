@@ -1,7 +1,7 @@
 //! Semantic-token extraction for editor integrations.
 //! The IDE layer owns Solveig-aware token classification; protocol crates only encode it.
 
-use super::source_lookup::{is_atomic_source_span, source_file_id_in_source_map};
+use super::source_lookup::source_file_id_in_source_map;
 use super::*;
 use solveig_syntax::lexer::{PosToken, Token};
 
@@ -237,7 +237,7 @@ fn semantic_candidates(artifacts: &CompilationArtifacts, file_id: FileId) -> Vec
             let Some(source_file) = source_file else {
                 continue;
             };
-            if !is_atomic_source_span(source_file, span.span) {
+            if !semantic_reference_span_has_one_token(source_file, span.span) {
                 continue;
             }
 
@@ -261,6 +261,15 @@ fn semantic_candidates(artifacts: &CompilationArtifacts, file_id: FileId) -> Vec
     }
 
     out
+}
+
+fn semantic_reference_span_has_one_token(source_file: &SourceFile, span: Span) -> bool {
+    let range = span.to_usize_range();
+    let Some(text) = source_file.src.get(range) else {
+        return false;
+    };
+
+    !text.is_empty() && !text.chars().any(char::is_whitespace)
 }
 
 fn push_symbol_declarations(symbol: &SourceSymbol, file_id: FileId, out: &mut Vec<TokenCandidate>) {

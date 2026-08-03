@@ -1,6 +1,6 @@
 //! Source-level document highlight collection.
 
-use super::navigation::{def_id_at_offset, is_declaration_span, references_to_def};
+use super::navigation::{def_target_at_position, is_declaration_span, references_to_def};
 use super::*;
 
 pub(super) fn document_highlights_at_position_in_artifacts(
@@ -10,13 +10,11 @@ pub(super) fn document_highlights_at_position_in_artifacts(
     position: SourcePosition,
     encoding: PositionEncoding,
 ) -> Vec<SourceDocumentHighlight> {
-    let Some(file_id) = source_lookup::source_file_id_in_source_map(source_map, file) else {
+    let Some(candidate) = def_target_at_position(artifacts, source_map, file, position, encoding)
+    else {
         return Vec::new();
     };
-    let offset = source_map.offset(file_id, position, encoding) as usize;
-    let Some(candidate) = def_id_at_offset(artifacts, file_id, offset) else {
-        return Vec::new();
-    };
+    let file_id = candidate.span.file;
 
     references_to_def(artifacts, candidate.def_id, true)
         .into_iter()

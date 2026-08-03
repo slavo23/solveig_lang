@@ -332,15 +332,20 @@ impl CompilationIdeExt for Compilation {
         let Some(snapshot) = self.snapshot() else {
             return Vec::new();
         };
-        with_completion_candidates_for_snapshot(self.session(), snapshot, |candidates| {
-            completion_items_in_compilation(
-                self.source_map(),
-                candidates,
-                file.as_ref(),
-                position,
-                encoding,
-            )
-        })
+        with_artifacts_and_completion_candidates_for_snapshot(
+            self.session(),
+            snapshot,
+            |artifacts, candidates| {
+                completion_items_in_compilation(
+                    artifacts,
+                    self.source_map(),
+                    candidates,
+                    file.as_ref(),
+                    position,
+                    encoding,
+                )
+            },
+        )
     }
 
     fn document_highlights_at_position(
@@ -387,10 +392,10 @@ impl CompilationIdeExt for Compilation {
         let Some(snapshot) = self.snapshot() else {
             return Vec::new();
         };
-        with_syntax_trees_for_snapshot(self.session(), snapshot, |syntax_trees| {
-            selection_ranges_in_syntax_trees(
+        with_artifacts_for_snapshot(self.session(), snapshot, |artifacts| {
+            selection_ranges_at_positions_in_artifacts(
+                artifacts,
                 self.source_map(),
-                syntax_trees,
                 file.as_ref(),
                 positions,
                 encoding,

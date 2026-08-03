@@ -996,6 +996,46 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
 }
 
 #[test]
+fn hover_on_paren_left_operand_of_cons_uses_group_span() {
+    let project_root = temp_root("paren_cons_left_operand_hover");
+    let file = project_root.join("src/main.sv");
+    let source = r#"import prelude.prim(charsToString)
+
+data Tok = TAtom String
+
+flushAtom : [Char] -> [Tok] -> [Tok]
+flushAtom current tokens =
+    case current of
+        [] => tokens
+        | _ => TAtom (charsToString (reverse current)) :: tokens
+
+main = 0
+"#;
+    write_source(&file, source);
+
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation
+        .check(true)
+        .expect("paren cons hover fixture should check");
+
+    assert!(
+        result.success(),
+        "paren cons hover diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let line = "        | _ => TAtom (charsToString (reverse current)) :: tokens";
+    let hover = compilation
+        .hover_info(&file, offset_in_line(source, line, "(charsToString"))
+        .expect("opening paren around TAtom argument should hover");
+
+    assert_eq!(hover.signature(), "String");
+    assert_eq!(&source[hover.span()], "(charsToString (reverse current))");
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
 fn hover_covers_pattern_wildcard_types() {
     let scry_root = fixture_root("examples/scry");
     let parser_file = scry_root.join("src/scry/parser.sv");

@@ -25,21 +25,27 @@ struct CompletionContext {
 }
 
 pub(super) fn completion_items_in_compilation(
+    artifacts: &CompilationArtifacts,
     source_map: &SourceMap,
     candidates: &[SourceCompletionCandidate],
     file: &Path,
     position: SourcePosition,
     encoding: PositionEncoding,
 ) -> Vec<SourceCompletionItem> {
-    let Some(file_id) = source_lookup::source_file_id_in_source_map(source_map, file) else {
+    let Some(target) =
+        position::target_at_position_in_artifacts(artifacts, source_map, file, position, encoding)
+    else {
         return Vec::new();
     };
-    let offset = source_map.offset(file_id, position, encoding);
-    let context = completion_context(source_map, file_id, offset);
+    let context = completion_context(source_map, target.file, target.offset);
     let mut by_key = BTreeMap::<CompletionKey, SourceCompletionItem>::new();
 
     for candidate in candidates {
-        if !candidate.is_visible_at(file_id, offset, context.qualifier.as_deref()) {
+        if !candidate.is_visible_at(
+            target.file,
+            u32::try_from(target.offset).unwrap_or(u32::MAX),
+            context.qualifier.as_deref(),
+        ) {
             continue;
         }
 
@@ -102,11 +108,11 @@ fn completion_kind_rank(kind: SourceCompletionItemKind) -> u8 {
     }
 }
 
-fn completion_context(source_map: &SourceMap, file: FileId, offset: u32) -> CompletionContext {
+fn completion_context(source_map: &SourceMap, file: FileId, offset: usize) -> CompletionContext {
     let Some(source) = source_map.files().get(file.0 as usize) else {
         return CompletionContext { qualifier: None };
     };
-    let offset = (offset as usize).min(source.src.len());
+    let offset = offset.min(source.src.len());
     let start = source.src[..offset]
         .rfind(|ch: char| !completion_path_char(ch))
         .map_or(0, |index| index + 1);

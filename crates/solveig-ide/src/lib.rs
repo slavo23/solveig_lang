@@ -44,6 +44,7 @@ mod hover;
 mod hover_artifacts;
 mod inlay_hints;
 mod navigation;
+mod position;
 mod rename;
 mod semantic_tokens;
 mod signature_help;
@@ -77,6 +78,9 @@ use navigation::{
     definition_at_position_in_artifacts, definition_in_artifacts, document_symbols_in_artifacts,
     references_at_position_in_artifacts, references_in_artifacts, workspace_symbols_in_artifacts,
 };
+use position::{
+    PositionIndex, project_position_indexes, selection_ranges_at_positions_in_artifacts,
+};
 use rename::{prepare_rename_in_artifacts, rename_edits_in_artifacts};
 use semantic_tokens::{semantic_tokens_in_compilation, syntax_semantic_tokens};
 use signature_help::signature_help_at_position_in_artifacts;
@@ -96,10 +100,7 @@ pub use source_semantic_token::{
 };
 pub use source_signature_help::{SourceSignatureHelp, SourceSignatureInformation};
 pub use source_symbol::{SourceSymbol, SourceSymbolKind};
-use syntax_features::{
-    SourceSyntaxTree, folding_ranges_in_syntax_trees, project_syntax_trees,
-    selection_ranges_in_syntax_trees,
-};
+use syntax_features::{SourceSyntaxTree, folding_ranges_in_syntax_trees, project_syntax_trees};
 
 /// Hover content and source range before conversion to any editor protocol.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -183,6 +184,7 @@ pub(crate) struct CompilationArtifacts {
     pub(crate) module_imports: Vec<(FileSpan, ModuleId)>,
     pub(crate) local_hovers: Vec<HoverInfo>,
     pub(crate) source_symbols: Vec<SourceSymbol>,
+    pub(crate) position_indexes: FxHashMap<FileId, PositionIndex>,
     pub(crate) tycon_table: TyConTable,
     pub(crate) ctor_table: CtorTable,
     pub(crate) class_table: ClassTable,
@@ -260,20 +262,29 @@ fn build_artifacts_for_snapshot(
         &ctor_table,
         PrettyTables::new(&snapshot.names, &tycon_table, &class_table),
     ));
-    local_hovers.extend(retained.source_type_var_hovers);
+    local_hovers.extend(retained.source_type_var_hovers.iter().cloned());
     local_hovers.sort_by_key(|info| {
         let span = info.file_span();
         (span.file, span.span.start, span.span.end)
     });
 
     let mut resolutions = snapshot.resolutions.clone();
-    for (module_id, span, def_id) in retained.import_name_resolutions {
+    for (module_id, span, def_id) in &retained.import_name_resolutions {
         resolutions
-            .entry(module_id)
+            .entry(*module_id)
             .or_default()
-            .push((span, def_id));
+            .push((*span, *def_id));
     }
     sort_and_dedup_resolutions(&mut resolutions);
+    let position_indexes = project_position_indexes(
+        session,
+        snapshot,
+        &retained,
+        &resolutions,
+        &local_hovers,
+        &ctor_table,
+        PrettyTables::new(&snapshot.names, &tycon_table, &class_table),
+    );
 
     CompilationArtifacts {
         names: snapshot.names.clone(),
@@ -289,6 +300,7 @@ fn build_artifacts_for_snapshot(
         module_imports: retained.module_imports,
         local_hovers,
         source_symbols: retained.source_symbols,
+        position_indexes,
         tycon_table,
         ctor_table,
         class_table,
@@ -348,21 +360,30 @@ pub(crate) fn source_code_actions_for_snapshot(
     out
 }
 
-pub(crate) fn with_completion_candidates_for_snapshot<T>(
+pub(crate) fn with_artifacts_and_completion_candidates_for_snapshot<T>(
     session: &Session,
     snapshot: &CompilationSnapshot,
-    f: impl FnOnce(&[SourceCompletionCandidate]) -> T,
+    f: impl FnOnce(&CompilationArtifacts, &[SourceCompletionCandidate]) -> T,
 ) -> T {
     with_snapshot_cache(session, snapshot, |cache| {
+        if cache.artifacts.is_none() {
+            cache.artifacts = Some(build_artifacts_for_snapshot(session, snapshot));
+        }
         if cache.completion_candidates.is_none() {
             cache.completion_candidates =
                 Some(build_completion_candidates_for_snapshot(session, snapshot));
         }
 
-        f(cache
-            .completion_candidates
-            .as_ref()
-            .expect("IDE completion candidates should be cached"))
+        f(
+            cache
+                .artifacts
+                .as_ref()
+                .expect("IDE artifacts should be cached"),
+            cache
+                .completion_candidates
+                .as_ref()
+                .expect("IDE completion candidates should be cached"),
+        )
     })
 }
 

@@ -42,12 +42,81 @@ fn position_in_line(source: &str, line: &str, needle: &str) -> SourcePosition {
     SourcePosition::new(line_number as u32, needle_offset as u32)
 }
 
+fn position_in_line_last(source: &str, line: &str, needle: &str) -> SourcePosition {
+    let line_start = source
+        .find(line)
+        .unwrap_or_else(|| panic!("source should contain line `{line}`"));
+    let needle_offset = line
+        .rfind(needle)
+        .unwrap_or_else(|| panic!("line `{line}` should contain `{needle}`"));
+    let line_number = source[..line_start]
+        .bytes()
+        .filter(|byte| *byte == b'\n')
+        .count();
+
+    SourcePosition::new(line_number as u32, needle_offset as u32)
+}
+
 fn source_text(source_map: &SourceMap, span: FileSpan) -> &str {
     source_map
         .lookup(span.file)
         .src
         .get(span.span.to_usize_range())
         .expect("span should slice retained source")
+}
+
+fn signature_label_at(
+    compilation: &mut Compilation,
+    file: &Path,
+    source: &str,
+    line: &str,
+    needle: &str,
+) -> (String, Vec<String>, u32, Option<String>) {
+    let help = compilation
+        .signature_help_at_position(
+            file,
+            position_in_line(source, line, needle),
+            PositionEncoding::Utf8,
+        )
+        .unwrap_or_else(|| panic!("signature help should exist at `{needle}` in `{line}`"));
+    let signature = help
+        .signatures()
+        .first()
+        .expect("signature help should include one signature");
+
+    (
+        signature.label().to_string(),
+        signature.parameters().to_vec(),
+        help.active_parameter(),
+        signature.documentation().map(str::to_string),
+    )
+}
+
+fn signature_label_at_last(
+    compilation: &mut Compilation,
+    file: &Path,
+    source: &str,
+    line: &str,
+    needle: &str,
+) -> (String, Vec<String>, u32, Option<String>) {
+    let help = compilation
+        .signature_help_at_position(
+            file,
+            position_in_line_last(source, line, needle),
+            PositionEncoding::Utf8,
+        )
+        .unwrap_or_else(|| panic!("signature help should exist at last `{needle}` in `{line}`"));
+    let signature = help
+        .signatures()
+        .first()
+        .expect("signature help should include one signature");
+
+    (
+        signature.label().to_string(),
+        signature.parameters().to_vec(),
+        help.active_parameter(),
+        signature.documentation().map(str::to_string),
+    )
 }
 
 #[test]
@@ -184,6 +253,115 @@ increment value = value + 1
         "helper"
     );
     assert_eq!(link.tooltip(), Some("Open module helper"));
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn signature_help_uses_position_index_for_nested_and_desugared_contexts() {
+    let project_root = temp_root("signature_index");
+    let main = project_root.join("src/main.sv");
+    let source = r#"data Packet = Packet Int String
+
+nested : String
+nested = appendString (appendString "a" "b") "c"
+
+mkPacket : Packet
+mkPacket = Packet 1 "ok"
+
+consed : [Int] -> [Int]
+consed tail = 1 :: tail
+
+helpText : String
+helpText = "help"
+
+main : IO ()
+main =
+    do
+        printStr helpText
+        pure ()
+"#;
+    write_source(&main, source);
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation.check(true).expect("check should finish");
+
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let (inner_label, inner_params, inner_active, _) = signature_label_at(
+        &mut compilation,
+        &main,
+        source,
+        r#"nested = appendString (appendString "a" "b") "c""#,
+        r#""b""#,
+    );
+    assert!(
+        inner_label.contains("appendString : String -> String -> String"),
+        "{inner_label}"
+    );
+    assert_eq!(inner_params, ["String", "String"]);
+    assert_eq!(inner_active, 1);
+
+    let (outer_label, outer_params, outer_active, _) = signature_label_at(
+        &mut compilation,
+        &main,
+        source,
+        r#"nested = appendString (appendString "a" "b") "c""#,
+        r#""c""#,
+    );
+    assert!(
+        outer_label.contains("appendString : String -> String -> String"),
+        "{outer_label}"
+    );
+    assert_eq!(outer_params, ["String", "String"]);
+    assert_eq!(outer_active, 1);
+
+    let (ctor_label, ctor_params, ctor_active, _) = signature_label_at(
+        &mut compilation,
+        &main,
+        source,
+        r#"mkPacket = Packet 1 "ok""#,
+        r#""ok""#,
+    );
+    assert!(
+        ctor_label.contains("Packet : Int -> String -> Packet"),
+        "{ctor_label}"
+    );
+    assert_eq!(ctor_params, ["Int", "String"]);
+    assert_eq!(ctor_active, 1);
+
+    let (cons_label, cons_params, cons_active, _) = signature_label_at_last(
+        &mut compilation,
+        &main,
+        source,
+        "consed tail = 1 :: tail",
+        "tail",
+    );
+    assert!(
+        cons_label.contains("Cons : forall a. a -> [a] -> [a]"),
+        "{cons_label}"
+    );
+    assert_eq!(cons_params.len(), 2);
+    assert_eq!(cons_active, 1);
+
+    let (do_label, do_params, do_active, do_docs) = signature_label_at(
+        &mut compilation,
+        &main,
+        source,
+        "        printStr helpText",
+        "helpText",
+    );
+    assert!(
+        do_label.contains("printStr : String -> IO ()"),
+        "{do_label}"
+    );
+    assert!(!do_label.contains("thenM"));
+    assert!(!do_label.contains("bind"));
+    assert_eq!(do_params, ["String"]);
+    assert_eq!(do_active, 0);
+    assert_eq!(
+        do_docs.as_deref(),
+        Some("Writes text without adding a newline.")
+    );
 
     let _ = fs::remove_dir_all(project_root);
 }

@@ -1,23 +1,18 @@
 //! Definition, reference, and symbol lookup over retained compiler artifacts.
 //! These queries keep semantic indexing protocol-agnostic while LSP stays a DTO boundary.
 
-use super::source_lookup::{is_atomic_source_span, source_file_id, span_contains_offset, span_len};
+use super::position::{
+    DefTarget, TargetKind, target_at_offset_in_artifacts, target_at_position_in_artifacts,
+};
+use super::source_lookup::source_file_id;
 use super::*;
-
-#[derive(Clone, Copy, Debug)]
-pub(super) struct DefCandidate {
-    pub(super) span: FileSpan,
-    pub(super) def_id: DefId,
-    priority: u8,
-}
 
 pub(super) fn definition_in_artifacts(
     artifacts: &CompilationArtifacts,
     file: &Path,
     offset: usize,
 ) -> Option<FileSpan> {
-    let file_id = source_file_id(artifacts, file)?;
-    let def_id = def_id_at_offset(artifacts, file_id, offset)?.def_id;
+    let def_id = def_target_at_offset(artifacts, file, offset)?.def_id;
 
     declaration_span(artifacts, def_id)
 }
@@ -29,10 +24,9 @@ pub(super) fn definition_at_position_in_artifacts(
     position: SourcePosition,
     encoding: PositionEncoding,
 ) -> Option<FileSpan> {
-    let file_id = source_file_id(artifacts, file)?;
-    let offset = source_map.offset(file_id, position, encoding) as usize;
+    let def_id = def_target_at_position(artifacts, source_map, file, position, encoding)?.def_id;
 
-    definition_in_artifacts_by_file_id(artifacts, file_id, offset)
+    declaration_span(artifacts, def_id)
 }
 
 pub(super) fn references_in_artifacts(
@@ -41,8 +35,7 @@ pub(super) fn references_in_artifacts(
     offset: usize,
     include_declaration: bool,
 ) -> Option<Vec<FileSpan>> {
-    let file_id = source_file_id(artifacts, file)?;
-    let def_id = def_id_at_offset(artifacts, file_id, offset)?.def_id;
+    let def_id = def_target_at_offset(artifacts, file, offset)?.def_id;
 
     Some(references_to_def(artifacts, def_id, include_declaration))
 }
@@ -55,9 +48,7 @@ pub(super) fn references_at_position_in_artifacts(
     encoding: PositionEncoding,
     include_declaration: bool,
 ) -> Option<Vec<FileSpan>> {
-    let file_id = source_file_id(artifacts, file)?;
-    let offset = source_map.offset(file_id, position, encoding) as usize;
-    let def_id = def_id_at_offset(artifacts, file_id, offset)?.def_id;
+    let def_id = def_target_at_position(artifacts, source_map, file, position, encoding)?.def_id;
 
     Some(references_to_def(artifacts, def_id, include_declaration))
 }
@@ -93,43 +84,37 @@ pub(super) fn workspace_symbols_in_artifacts(
     out
 }
 
-fn definition_in_artifacts_by_file_id(
+pub(super) fn def_target_at_offset(
     artifacts: &CompilationArtifacts,
-    file_id: FileId,
+    file: &Path,
     offset: usize,
-) -> Option<FileSpan> {
-    let def_id = def_id_at_offset(artifacts, file_id, offset)?.def_id;
-
-    declaration_span(artifacts, def_id)
+) -> Option<DefTarget> {
+    def_target_from_kind(target_at_offset_in_artifacts(artifacts, file, offset)?.kind)
 }
 
-pub(super) fn def_id_at_offset(
+pub(super) fn def_target_at_position(
     artifacts: &CompilationArtifacts,
-    file_id: FileId,
-    offset: usize,
-) -> Option<DefCandidate> {
-    let mut best = None;
+    source_map: &SourceMap,
+    file: &Path,
+    position: SourcePosition,
+    encoding: PositionEncoding,
+) -> Option<DefTarget> {
+    def_target_from_kind(
+        target_at_position_in_artifacts(artifacts, source_map, file, position, encoding)?.kind,
+    )
+}
 
-    for (span, def_id) in &artifacts.declaration_spans {
-        if span.file == file_id && span_contains_offset(&span.span.to_usize_range(), offset) {
-            consider_def_candidate(&mut best, *span, *def_id, 2);
-        }
+fn def_target_from_kind(kind: TargetKind) -> Option<DefTarget> {
+    match kind {
+        TargetKind::Definition(target) | TargetKind::Reference(target) => Some(target),
+        TargetKind::Local
+        | TargetKind::Module(_)
+        | TargetKind::Literal(_)
+        | TargetKind::Identifier
+        | TargetKind::Keyword
+        | TargetKind::Punctuation
+        | TargetKind::Trivia => None,
     }
-
-    let source_file = artifacts.source_files.get(file_id.0 as usize);
-    for resolutions in artifacts.resolutions.values() {
-        for (span, def_id) in resolutions {
-            if span.file == file_id
-                && source_file
-                    .is_some_and(|source_file| is_atomic_source_span(source_file, span.span))
-                && span_contains_offset(&span.span.to_usize_range(), offset)
-            {
-                consider_def_candidate(&mut best, *span, *def_id, 1);
-            }
-        }
-    }
-
-    best
 }
 
 pub(super) fn declaration_span(
@@ -171,7 +156,7 @@ pub(super) fn references_to_def(
                 continue;
             }
 
-            if !is_user_reference_span(artifacts, *span) {
+            if span.is_empty() {
                 continue;
             }
 
@@ -195,13 +180,6 @@ pub(super) fn is_declaration_span(
         .any(|(decl_span, candidate)| *candidate == def_id && *decl_span == span)
 }
 
-fn is_user_reference_span(artifacts: &CompilationArtifacts, span: FileSpan) -> bool {
-    artifacts
-        .source_files
-        .get(span.file.0 as usize)
-        .is_some_and(|source_file| is_atomic_source_span(source_file, span.span))
-}
-
 fn push_matching_symbols(symbol: &SourceSymbol, query: &str, out: &mut Vec<SourceSymbol>) {
     if query.is_empty() || symbol.name().to_ascii_lowercase().contains(query) {
         out.push(symbol.clone());
@@ -209,29 +187,6 @@ fn push_matching_symbols(symbol: &SourceSymbol, query: &str, out: &mut Vec<Sourc
 
     for child in symbol.children() {
         push_matching_symbols(child, query, out);
-    }
-}
-
-fn consider_def_candidate(
-    best: &mut Option<DefCandidate>,
-    span: FileSpan,
-    def_id: DefId,
-    priority: u8,
-) {
-    let replace = best.as_ref().is_none_or(|current| {
-        let current_len = span_len(&current.span.span.to_usize_range());
-        let candidate_len = span_len(&span.span.to_usize_range());
-
-        candidate_len < current_len
-            || (candidate_len == current_len && priority >= current.priority)
-    });
-
-    if replace {
-        *best = Some(DefCandidate {
-            span,
-            def_id,
-            priority,
-        });
     }
 }
 

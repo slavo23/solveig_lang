@@ -49,30 +49,6 @@ pub(super) fn folding_ranges_in_syntax_trees(
     out
 }
 
-pub(super) fn selection_ranges_in_syntax_trees(
-    source_map: &SourceMap,
-    syntax_trees: &[SourceSyntaxTree],
-    file: &Path,
-    positions: &[SourcePosition],
-    encoding: PositionEncoding,
-) -> Vec<SourceSelectionRange> {
-    let Some(file_id) = source_lookup::source_file_id_in_source_map(source_map, file) else {
-        return Vec::new();
-    };
-    let Some(tree) = syntax_tree_for_file(syntax_trees, file_id) else {
-        return Vec::new();
-    };
-
-    positions
-        .iter()
-        .map(|position| {
-            let offset = source_map.offset(file_id, *position, encoding);
-            selection_range_at_offset(tree, offset as usize)
-                .unwrap_or_else(|| empty_selection_range(file_id, offset))
-        })
-        .collect()
-}
-
 fn collect_syntax_folds(
     source_map: &SourceMap,
     tree: &SourceSyntaxTree,
@@ -142,48 +118,6 @@ fn collect_comment_folds(
 
         index = next;
     }
-}
-
-fn selection_range_at_offset(
-    tree: &SourceSyntaxTree,
-    offset: usize,
-) -> Option<SourceSelectionRange> {
-    let mut spans = Vec::<FileSpan>::new();
-
-    if let Some(token) = tree.cst.token_at_offset(offset) {
-        let span = token_span(tree.cst.token(token));
-        if !span.is_empty() {
-            spans.push(FileSpan::new(tree.file, span));
-        }
-        push_parent_node_spans(tree, tree.cst.token_parent(token), &mut spans);
-    } else if let Some(node) = tree.cst.node_at_offset(offset) {
-        push_parent_node_spans(tree, Some(node), &mut spans);
-    }
-
-    spans.dedup();
-    let mut parent = None;
-    for span in spans.into_iter().rev() {
-        parent = Some(SourceSelectionRange::new(span, parent));
-    }
-    parent
-}
-
-fn push_parent_node_spans(
-    tree: &SourceSyntaxTree,
-    mut node: Option<solveig_syntax::cst::CstId>,
-    spans: &mut Vec<FileSpan>,
-) {
-    while let Some(id) = node {
-        let span = tree.cst.node(id).span();
-        if !span.is_empty() {
-            spans.push(FileSpan::new(tree.file, span));
-        }
-        node = tree.cst.parent(id);
-    }
-}
-
-fn empty_selection_range(file: FileId, offset: u32) -> SourceSelectionRange {
-    SourceSelectionRange::new(FileSpan::new(file, Span::new(offset, offset)), None)
 }
 
 fn foldable_syntax_kind(kind: SyntaxKind) -> bool {
