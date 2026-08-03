@@ -5,7 +5,7 @@ use solveig_ast::ast::{EvarId, Kind, Predicate, Ty, TyConId, TyVarId, tyvar_disp
 use solveig_base::FxHashMap;
 use std::iter::successors;
 
-use crate::signature_infer::KindError;
+use crate::kind_unify::KindError;
 
 #[derive(Clone, PartialEq, Debug)]
 pub enum ContextEntry {

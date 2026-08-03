@@ -33,6 +33,7 @@ members = [
 ]
 
 [workspace.dependencies]
+ena = "0.14.4"
 la-arena = "0.3.1"
 petgraph = "0.8.3"
 rustc-hash = "2.1.1"

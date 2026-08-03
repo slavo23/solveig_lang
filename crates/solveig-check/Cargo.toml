@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+ena = { workspace = true }
 petgraph = { workspace = true }
 solveig-ast = { path = "../solveig-ast" }
 solveig-base = { path = "../solveig-base" }

@@ -4,15 +4,13 @@
 use solveig_base::FxHashMap;
 
 use solveig_ast::ast::{
-    ClassDefinition, ClassId, Kind, KindMetaId, Predicate, Scheme, Ty, TyConId, TyVarId,
-    tyvar_display_name,
+    ClassDefinition, ClassId, Kind, Predicate, Scheme, Ty, TyConId, TyVarId, tyvar_display_name,
 };
 
-use crate::signature_infer::KindError;
+use crate::kind_unify::{KindError, KindUnifier};
 
 pub struct ClassKindInferencer {
-    next_meta: u32,
-    subst: FxHashMap<KindMetaId, Kind>,
+    unifier: KindUnifier,
     tycon_env: FxHashMap<TyConId, Kind>,
     class_env: FxHashMap<ClassId, Vec<Kind>>,
 }
@@ -23,83 +21,14 @@ impl ClassKindInferencer {
         class_env: FxHashMap<ClassId, Vec<Kind>>,
     ) -> Self {
         Self {
-            next_meta: 0,
-            subst: FxHashMap::default(),
+            unifier: KindUnifier::new(),
             tycon_env,
             class_env,
         }
     }
 
-    fn fresh_meta(&mut self) -> Kind {
-        let id = KindMetaId(self.next_meta);
-        self.next_meta += 1;
-        Kind::make_meta(id)
-    }
-
-    fn apply_kind(&self, kind: &Kind) -> Kind {
-        match kind {
-            Kind::Star => Kind::Star,
-            Kind::Meta(id) => {
-                if let Some(sol) = self.subst.get(id) {
-                    self.apply_kind(sol)
-                } else {
-                    Kind::Meta(*id)
-                }
-            }
-            Kind::Arrow(lhs, rhs) => Kind::make_arrow(self.apply_kind(lhs), self.apply_kind(rhs)),
-        }
-    }
-
-    fn occurs(&self, needle: KindMetaId, kind: &Kind) -> bool {
-        match self.apply_kind(kind) {
-            Kind::Star => false,
-            Kind::Meta(id) => id == needle,
-            Kind::Arrow(lhs, rhs) => self.occurs(needle, &lhs) || self.occurs(needle, &rhs),
-        }
-    }
-
-    fn bind_meta(&mut self, var: KindMetaId, kind: &Kind) -> Result<(), KindError> {
-        let kind = self.apply_kind(kind);
-
-        if kind == Kind::Meta(var) {
-            return Ok(());
-        }
-
-        if self.occurs(var, &kind) {
-            return Err(KindError::occurs_check_failed(format!("?k{}", var.0), kind));
-        }
-
-        self.subst.insert(var, kind);
-        Ok(())
-    }
-
-    fn unify(&mut self, lhs: &Kind, rhs: &Kind) -> Result<(), KindError> {
-        let lhs = self.apply_kind(lhs);
-        let rhs = self.apply_kind(rhs);
-
-        match (lhs, rhs) {
-            (Kind::Star, Kind::Star) => Ok(()),
-            (Kind::Meta(left), Kind::Meta(right)) if left == right => Ok(()),
-            (Kind::Meta(v), other) | (other, Kind::Meta(v)) => self.bind_meta(v, &other),
-            (Kind::Arrow(l1, r1), Kind::Arrow(l2, r2)) => {
-                self.unify(&l1, &l2)?;
-                self.unify(&r1, &r2)
-            }
-            (lhs, rhs) => Err(KindError::cannot_unify(lhs, rhs)),
-        }
-    }
-
-    fn default_unsolved(kind: Kind) -> Kind {
-        match kind {
-            Kind::Meta(_) | Kind::Star => Kind::Star,
-            Kind::Arrow(lhs, rhs) => {
-                Kind::make_arrow(Self::default_unsolved(*lhs), Self::default_unsolved(*rhs))
-            }
-        }
-    }
-
-    fn zonk_kind_for_binder(&self, kind: &Kind) -> Kind {
-        Self::default_unsolved(self.apply_kind(kind))
+    fn zonk_kind_for_binder(&mut self, kind: &Kind) -> Kind {
+        self.unifier.default_to_star(kind)
     }
 
     fn infer_type_kind(
@@ -113,21 +42,21 @@ impl ClassKindInferencer {
             Ty::TyVar(id) => env
                 .get(id)
                 .cloned()
-                .map(|k| self.apply_kind(&k))
+                .map(|k| self.unifier.resolve(&k))
                 .ok_or_else(|| KindError::unbound_type_variable(tyvar_display_name(*id))),
 
             Ty::TyCon(id) => self
                 .tycon_env
                 .get(id)
                 .cloned()
-                .map(|k| self.apply_kind(&k))
+                .map(|k| self.unifier.resolve(&k))
                 .ok_or_else(|| KindError::unbound_type_constructor(tycon_id_display(*id))),
 
             Ty::TyArr(lhs, rhs) => {
                 let lhs_kind = self.infer_type_kind(lhs, env)?;
                 let rhs_kind = self.infer_type_kind(rhs, env)?;
-                self.unify(&lhs_kind, &Kind::Star)?;
-                self.unify(&rhs_kind, &Kind::Star)?;
+                self.unifier.unify(&lhs_kind, &Kind::Star)?;
+                self.unifier.unify(&rhs_kind, &Kind::Star)?;
                 Ok(Kind::Star)
             }
 
@@ -142,16 +71,17 @@ impl ClassKindInferencer {
 
                 let lhs_kind = self.infer_type_kind(lhs, env)?;
                 let rhs_kind = self.infer_type_kind(rhs, env)?;
-                let result_kind = self.fresh_meta();
+                let result_kind = self.unifier.fresh();
 
-                self.unify(&lhs_kind, &Kind::make_arrow(rhs_kind, result_kind.clone()))?;
-                Ok(self.apply_kind(&result_kind))
+                self.unifier
+                    .unify(&lhs_kind, &Kind::make_arrow(rhs_kind, result_kind.clone()))?;
+                Ok(self.unifier.resolve(&result_kind))
             }
 
             Ty::TyForAll(binders, preds, body) => {
                 let mut old_bindings = Vec::with_capacity(binders.len());
                 for (name, _) in binders {
-                    old_bindings.push((*name, env.insert(*name, self.fresh_meta())));
+                    old_bindings.push((*name, env.insert(*name, self.unifier.fresh())));
                 }
 
                 for pred in preds {
@@ -159,7 +89,7 @@ impl ClassKindInferencer {
                 }
 
                 let body_kind = self.infer_type_kind(body, env)?;
-                self.unify(&body_kind, &Kind::Star)?;
+                self.unifier.unify(&body_kind, &Kind::Star)?;
 
                 for (name, old) in old_bindings.into_iter().rev() {
                     match old {
@@ -177,7 +107,7 @@ impl ClassKindInferencer {
         }
     }
 
-    fn zonk_type_with_env(&self, ty: &Ty, env: &FxHashMap<TyVarId, Kind>) -> Ty {
+    fn zonk_type_with_env(&mut self, ty: &Ty, env: &FxHashMap<TyVarId, Kind>) -> Ty {
         match ty {
             Ty::TyUnit => Ty::TyUnit,
             Ty::TyVar(id) => Ty::TyVar(*id),
@@ -211,7 +141,7 @@ impl ClassKindInferencer {
     }
 
     fn zonk_predicate_with_env(
-        &self,
+        &mut self,
         pred: &Predicate,
         env: &FxHashMap<TyVarId, Kind>,
     ) -> Predicate {
@@ -244,7 +174,7 @@ impl ClassKindInferencer {
 
         for (arg, expected_kind) in pred.args.iter().zip(expected_kinds.iter()) {
             let actual_kind = self.infer_type_kind(arg, env)?;
-            self.unify(&actual_kind, expected_kind)?;
+            self.unifier.unify(&actual_kind, expected_kind)?;
         }
 
         Ok(self.zonk_predicate_with_env(pred, env))
@@ -258,7 +188,7 @@ impl ClassKindInferencer {
         let mut env = outer_env.clone();
 
         for (name, _kind) in &scheme.quantifiers {
-            env.insert(*name, self.fresh_meta());
+            env.insert(*name, self.unifier.fresh());
         }
 
         for pred in &scheme.predicates {
@@ -266,7 +196,7 @@ impl ClassKindInferencer {
         }
 
         let body_kind = self.infer_type_kind(&scheme.ty, &mut env)?;
-        self.unify(&body_kind, &Kind::Star)?;
+        self.unifier.unify(&body_kind, &Kind::Star)?;
 
         let quantifiers = scheme
             .quantifiers
@@ -301,7 +231,7 @@ impl ClassKindInferencer {
         let mut env = FxHashMap::<TyVarId, Kind>::default();
 
         for (id, _kind) in &class_def.params {
-            env.insert(*id, self.fresh_meta());
+            env.insert(*id, self.unifier.fresh());
         }
 
         let methods = class_def

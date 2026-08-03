@@ -33,6 +33,12 @@ impl TypeChecker<'_> {
         right: &Ty,
         origin_span: Span,
     ) -> Result<Context, ()> {
+        // The context is ORDERED and that ordering is load-bearing: DK 2013
+        // §4 permits solving an existential only to a type whose variables
+        // appear EARLIER in the context. A union-find table has no notion of
+        // scope, so replacing this with ena would silently admit exactly the
+        // unsoundness the ordering prevents. Kind inference (kind_unify.rs) is
+        // the only place plain HM unification is correct here.
         let left = &ctx.apply(left);
         let right = &ctx.apply(right);
 

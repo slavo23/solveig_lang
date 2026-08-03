@@ -8,5 +8,7 @@ pub mod data_kind_infer;
 mod dependency_graph;
 /// Contains bidirectional type checking, holes, and exhaustiveness analysis.
 pub mod inference;
+/// Provides the shared HM kind unifier used by kind inference passes.
+pub mod kind_unify;
 /// Infers kinds for type signatures and class predicates.
 pub mod signature_infer;
