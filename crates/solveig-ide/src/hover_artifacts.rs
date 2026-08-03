@@ -1,32 +1,33 @@
-struct RetainedFrontendArtifacts {
-    docs: FxHashMap<DefId, DocComment>,
-    source_signatures: FxHashMap<DefId, String>,
-    source_type_var_hovers: Vec<HoverInfo>,
-    declaration_spans: Vec<(FileSpan, DefId)>,
-    module_display_names: FxHashMap<ModuleId, String>,
-    module_paths: FxHashMap<ModuleId, PathBuf>,
-    module_imports: Vec<(FileSpan, ModuleId)>,
-    import_name_resolutions: Vec<(ModuleId, FileSpan, DefId)>,
-    source_symbols: Vec<SourceSymbol>,
+use super::*;
+use crate::symbol_artifacts::collect_source_symbols;
+
+pub(super) struct RetainedIdeArtifacts {
+    pub(super) docs: FxHashMap<DefId, DocComment>,
+    pub(super) source_signatures: FxHashMap<DefId, String>,
+    pub(super) source_type_var_hovers: Vec<HoverInfo>,
+    pub(super) declaration_spans: Vec<(FileSpan, DefId)>,
+    pub(super) module_display_names: FxHashMap<ModuleId, String>,
+    pub(super) module_paths: FxHashMap<ModuleId, PathBuf>,
+    pub(super) module_imports: Vec<(FileSpan, ModuleId)>,
+    pub(super) import_name_resolutions: Vec<(ModuleId, FileSpan, DefId)>,
+    pub(super) source_symbols: Vec<SourceSymbol>,
 }
 
-fn collect_retained_frontend_artifacts(
+pub(super) fn collect_retained_ide_artifacts(
     session: &Session,
     names: &Names,
     project: &Project,
     typed_apis: &FxHashMap<ModuleName, SharedTypedModuleApi>,
-) -> RetainedFrontendArtifacts {
+) -> RetainedIdeArtifacts {
     let docs = typed_apis
         .values()
         .flat_map(|api| api.docs.iter().map(|(id, doc)| (*id, doc.clone())))
         .collect();
 
-    RetainedFrontendArtifacts {
+    RetainedIdeArtifacts {
         docs,
         source_signatures: collect_hover_source_signatures(session, project),
-        source_type_var_hovers: collect_source_type_var_hovers(
-            session, names, project, typed_apis,
-        ),
+        source_type_var_hovers: collect_source_type_var_hovers(session, names, project, typed_apis),
         declaration_spans: collect_hover_declaration_spans(project),
         module_display_names: collect_hover_module_display_names(session, project),
         module_paths: collect_hover_module_paths(project),
@@ -95,7 +96,15 @@ fn collect_hover_declaration_spans(project: &Project) -> Vec<(FileSpan, DefId)> 
         }
     }
 
-    out.sort_by_key(|(span, def)| (span.file, span.span.start, span.span.end, def.module, def.name));
+    out.sort_by_key(|(span, def)| {
+        (
+            span.file,
+            span.span.start,
+            span.span.end,
+            def.module,
+            def.name,
+        )
+    });
     out
 }
 
@@ -151,7 +160,8 @@ fn collect_source_type_var_hovers(
                         module: module_id,
                         name: name.0,
                     };
-                    if let Some(data_def) = data_def_for_source(session, typed_api, name.0, def_id) {
+                    if let Some(data_def) = data_def_for_source(session, typed_api, name.0, def_id)
+                    {
                         push_type_param_hovers(
                             session,
                             names,
@@ -176,7 +186,10 @@ fn collect_source_type_var_hovers(
                     }
                 }
                 SurfaceDefinition::TypeAliasDef {
-                    name, ty_params, ty, ..
+                    name,
+                    ty_params,
+                    ty,
+                    ..
                 } => {
                     let def_id = DefId {
                         module: module_id,
@@ -248,8 +261,7 @@ fn collect_source_type_var_hovers(
                         let source_method_name = session.str(method.name.0).to_string();
                         if let Some(method_def) = class_def.methods.iter().find(|method_def| {
                             method_def.id == def_id || method_def.short_name == source_method_name
-                        })
-                        {
+                        }) {
                             collect_type_var_hovers_in_ty(
                                 session,
                                 names,
@@ -324,8 +336,7 @@ impl<'a, 'out> SourceTypeVarHoverCollector<'a, 'out> {
         out: &'out mut Vec<HoverInfo>,
     ) -> Self {
         let mut globals = FxHashMap::default();
-        let mut forall_kinds =
-            FxHashMap::<String, std::collections::VecDeque<Kind>>::default();
+        let mut forall_kinds = FxHashMap::<String, std::collections::VecDeque<Kind>>::default();
 
         for (id, kind) in outer.iter().chain(quantifiers.iter()) {
             globals
@@ -555,7 +566,11 @@ fn infer_instance_type_var_kinds(
         |_| {
             let mut seen = FxHashSet::default();
             let mut out = Vec::new();
-            for predicate in instance.context.iter().chain(std::iter::once(&instance.head)) {
+            for predicate in instance
+                .context
+                .iter()
+                .chain(std::iter::once(&instance.head))
+            {
                 for arg in &predicate.args {
                     collect_free_tyvar_kinds(arg, &mut Vec::new(), &mut seen, &mut out);
                 }
@@ -742,7 +757,10 @@ fn collect_hover_module_imports(project: &Project) -> Vec<(FileSpan, ModuleId)> 
     for module_file in project.modules.values() {
         for import in &module_file.imports {
             if let Some(module_id) = project.module_table.id(&import.module) {
-                out.push((FileSpan::new(module_file.parsed.file, import.span), module_id));
+                out.push((
+                    FileSpan::new(module_file.parsed.file, import.span),
+                    module_id,
+                ));
             }
         }
     }
@@ -796,16 +814,36 @@ fn collect_hover_import_name_resolutions(
 fn typed_import_def_ids_for_name(api: &TypedModuleApi, name: Symbol) -> Vec<DefId> {
     let mut out = Vec::new();
 
-    out.extend(api.term_schemes.keys().copied().filter(|def| def.name == name));
-    out.extend(api.type_kinds.keys().copied().filter(|def| def.name == name));
-    out.extend(api.type_aliases.keys().copied().filter(|def| def.name == name));
+    out.extend(
+        api.term_schemes
+            .keys()
+            .copied()
+            .filter(|def| def.name == name),
+    );
+    out.extend(
+        api.type_kinds
+            .keys()
+            .copied()
+            .filter(|def| def.name == name),
+    );
+    out.extend(
+        api.type_aliases
+            .keys()
+            .copied()
+            .filter(|def| def.name == name),
+    );
     out.extend(
         api.constructor_types
             .keys()
             .copied()
             .filter(|def| def.name == name),
     );
-    out.extend(api.class_defs.keys().copied().filter(|def| def.name == name));
+    out.extend(
+        api.class_defs
+            .keys()
+            .copied()
+            .filter(|def| def.name == name),
+    );
     out.extend(api.class_defs.values().flat_map(|class_def| {
         class_def
             .methods

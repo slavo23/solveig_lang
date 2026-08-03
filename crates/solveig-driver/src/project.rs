@@ -50,7 +50,7 @@ fn prelude_module(session: &Session, module: &ModuleName) -> Option<&'static str
     }
 }
 
-pub(crate) fn is_compiler_prelude_module(session: &Session, module: &ModuleName) -> bool {
+pub fn is_compiler_prelude_module(session: &Session, module: &ModuleName) -> bool {
     prelude_module(session, module).is_some()
 }
 

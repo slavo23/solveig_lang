@@ -1,5 +1,5 @@
 //! Definition, reference, and symbol lookup over retained compiler artifacts.
-//! These queries keep semantic indexing in the driver while LSP stays a DTO boundary.
+//! These queries keep semantic indexing protocol-agnostic while LSP stays a DTO boundary.
 
 use super::source_lookup::{is_atomic_source_span, source_file_id, span_contains_offset, span_len};
 use super::*;

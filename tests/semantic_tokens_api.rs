@@ -5,8 +5,9 @@ use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use solveig_base::{FileSpan, SourceMap};
-use solveig_driver::{
-    Compilation, SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
+use solveig_driver::Compilation;
+use solveig_ide::{
+    CompilationIdeExt, SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
 };
 
 #[derive(Debug)]

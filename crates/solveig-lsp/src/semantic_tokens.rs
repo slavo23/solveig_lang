@@ -2,7 +2,7 @@
 
 use lsp_types::{SemanticToken, SemanticTokenModifier, SemanticTokenType, SemanticTokensLegend};
 use solveig_base::{PositionEncoding, SourceFile, SourceMap};
-use solveig_driver::{SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier};
+use solveig_ide::{SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 struct AbsoluteToken {
@@ -218,7 +218,7 @@ fn line_text_end(source_file: &SourceFile, line: usize) -> usize {
 mod tests {
     use super::*;
     use solveig_base::{FileSpan, SourceMap, Span};
-    use solveig_driver::SourceSemanticTokenModifiers;
+    use solveig_ide::SourceSemanticTokenModifiers;
 
     #[test]
     fn lsp_tokens_are_relative_and_split_by_line() {

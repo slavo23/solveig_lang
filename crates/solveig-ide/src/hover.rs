@@ -1,5 +1,5 @@
 //! Hover lookup over retained checked artifacts.
-//! The driver keeps enough table state here to render types after checking.
+//! The IDE layer renders types and provenance from retained driver snapshots.
 
 use super::source_lookup::{is_atomic_source_span, source_file_id, span_contains_offset, span_len};
 use super::*;

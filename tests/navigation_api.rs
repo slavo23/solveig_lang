@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use solveig_base::{FileSpan, SourceMap};
-use solveig_driver::{Compilation, SourceSymbol, SourceSymbolKind};
+use solveig_driver::Compilation;
+use solveig_ide::{CompilationIdeExt, SourceSymbol, SourceSymbolKind};
 
 fn fixture_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)

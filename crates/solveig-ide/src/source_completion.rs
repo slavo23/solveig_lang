@@ -1,4 +1,4 @@
-//! Driver-owned completion payloads for editor integrations.
+//! IDE-owned completion payloads for editor integrations.
 
 use super::*;
 

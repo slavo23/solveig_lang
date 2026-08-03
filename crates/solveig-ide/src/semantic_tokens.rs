@@ -1,5 +1,5 @@
 //! Semantic-token extraction for editor integrations.
-//! The driver owns Solveig-aware token classification; protocol crates only encode it.
+//! The IDE layer owns Solveig-aware token classification; protocol crates only encode it.
 
 use super::source_lookup::{is_atomic_source_span, source_file_id_in_source_map};
 use super::*;

@@ -1,6 +1,7 @@
 use solveig_base::{PositionEncoding, SourcePosition};
-use solveig_driver::{
-    Compilation, SourceInlayHint, SourceInlayHintCategory, SourceInlayHintConfig,
+use solveig_driver::Compilation;
+use solveig_ide::{
+    CompilationIdeExt, SourceInlayHint, SourceInlayHintCategory, SourceInlayHintConfig,
 };
 use std::fs;
 use std::path::{Path, PathBuf};

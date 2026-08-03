@@ -4,12 +4,7 @@
 use super::*;
 
 pub(super) struct CheckProjectOutcome {
-    pub(super) checked_project: Option<CheckedProject>,
-    pub(super) semantic_tokens: Vec<SourceSemanticToken>,
-    pub(super) code_actions: Vec<SourceCodeAction>,
-    pub(super) completion_candidates: Vec<SourceCompletionCandidate>,
-    pub(super) inlay_hints: Vec<SourceInlayHint>,
-    pub(super) syntax_trees: Vec<SourceSyntaxTree>,
+    pub(super) snapshot: Option<CompilationSnapshot>,
     pub(super) phase: Option<FrontendPhase>,
     pub(super) freshly_checked_modules: Vec<String>,
     pub(super) reused_modules: Vec<String>,
@@ -59,31 +54,25 @@ impl Compilation {
             Err(ProjectError::Resolve(error)) => {
                 push_resolve_errors(&self.session, None, vec![error]);
                 return Ok(CheckProjectOutcome {
-                    checked_project: None,
-                    semantic_tokens: Vec::new(),
-                    code_actions: Vec::new(),
-                    completion_candidates: Vec::new(),
-                    inlay_hints: Vec::new(),
-                    syntax_trees: Vec::new(),
+                    snapshot: None,
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
                 });
             }
         };
-        let syntax_trees = project_syntax_trees(&project);
-        let semantic_tokens = syntax_semantic_tokens(&project);
-        let mut completion_candidates =
-            completion::syntax_completion_candidates(&self.session, &project);
+        let parsed = parse_project(&project);
 
         if self.session.diagnostics().has_errors() {
+            let source_files = self.session.source_map().files().to_vec();
             return Ok(CheckProjectOutcome {
-                checked_project: None,
-                semantic_tokens,
-                code_actions: Vec::new(),
-                completion_candidates,
-                inlay_hints: Vec::new(),
-                syntax_trees,
+                snapshot: Some(empty_compilation_snapshot(
+                    source_root,
+                    project,
+                    parsed,
+                    self.names.clone(),
+                    source_files,
+                )),
                 phase: Some(FrontendPhase::Parse),
                 freshly_checked_modules: Vec::new(),
                 reused_modules: Vec::new(),
@@ -94,20 +83,21 @@ impl Compilation {
             Ok(order) => order,
             Err(error) => {
                 push_resolve_errors(&self.session, Some(&project.module_table), vec![error]);
+                let source_files = self.session.source_map().files().to_vec();
                 return Ok(CheckProjectOutcome {
-                    checked_project: None,
-                    semantic_tokens,
-                    code_actions: Vec::new(),
-                    completion_candidates,
-                    inlay_hints: Vec::new(),
-                    syntax_trees,
+                    snapshot: Some(empty_compilation_snapshot(
+                        source_root,
+                        project,
+                        parsed,
+                        self.names.clone(),
+                        source_files,
+                    )),
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
                 });
             }
         };
-        let parsed = parse_project(&project);
         let prelude_cache = self
             .prelude_cache
             .as_ref()
@@ -126,7 +116,6 @@ impl Compilation {
         let mut state = match FrontendState::new(
             &self.session,
             &mut self.names,
-            (&source_root, &self.source_provider),
             (&project, &parsed, &order),
             verify_core,
             caches,
@@ -134,13 +123,15 @@ impl Compilation {
             Ok(state) => state,
             Err(errors) => {
                 push_resolve_errors(&self.session, Some(&project.module_table), errors);
+                let source_files = self.session.source_map().files().to_vec();
                 return Ok(CheckProjectOutcome {
-                    checked_project: None,
-                    semantic_tokens,
-                    code_actions: Vec::new(),
-                    completion_candidates,
-                    inlay_hints: Vec::new(),
-                    syntax_trees,
+                    snapshot: Some(empty_compilation_snapshot(
+                        source_root,
+                        project,
+                        parsed,
+                        self.names.clone(),
+                        source_files,
+                    )),
                     phase: Some(FrontendPhase::Resolve),
                     freshly_checked_modules: Vec::new(),
                     reused_modules: Vec::new(),
@@ -150,17 +141,8 @@ impl Compilation {
         let phase = state.check_all(&order);
 
         let source_files = self.session.source_map().files().to_vec();
-        let (
-            checked_project,
-            prelude_cache,
-            incremental_cache,
-            code_actions,
-            typed_completion_candidates,
-            inlay_hints,
-            freshly_checked_modules,
-            reused_modules,
-        ) = state.into_checked_project(source_files, &order);
-        completion_candidates.extend(typed_completion_candidates);
+        let (snapshot, prelude_cache, incremental_cache, freshly_checked_modules, reused_modules) =
+            state.into_snapshot(source_root, source_files, &order);
         if let Some(prelude_cache) = prelude_cache {
             self.prelude_cache = Some(prelude_cache);
         }
@@ -169,13 +151,8 @@ impl Compilation {
         }
 
         Ok(CheckProjectOutcome {
-            checked_project: Some(checked_project),
-            semantic_tokens,
-            code_actions,
-            completion_candidates,
-            inlay_hints,
+            snapshot: Some(snapshot),
             phase,
-            syntax_trees,
             freshly_checked_modules,
             reused_modules,
         })
@@ -196,8 +173,31 @@ fn push_resolve_errors(
 
 include!("pipeline/frontend.rs");
 include!("pipeline/frontend/cache_artifacts.rs");
-include!("pipeline/frontend/symbol_artifacts.rs");
-include!("pipeline/frontend/hover_artifacts.rs");
+
+fn empty_compilation_snapshot(
+    source_root: PathBuf,
+    project: Project,
+    parsed: ParsedProject,
+    names: Names,
+    source_files: Vec<SourceFile>,
+) -> CompilationSnapshot {
+    CompilationSnapshot {
+        source_root,
+        project,
+        parsed,
+        names,
+        apis: FxHashMap::default(),
+        typed_apis: FxHashMap::default(),
+        modules: Vec::new(),
+        checked: FxHashMap::default(),
+        module_files: FxHashMap::default(),
+        source_files,
+        resolutions: FxHashMap::default(),
+        resolve_errors: Vec::new(),
+        type_errors: Vec::new(),
+        holes: Vec::new(),
+    }
+}
 
 fn find_entry_file(
     project_root: &Path,

@@ -1,4 +1,6 @@
-fn collect_source_symbols(session: &Session, project: &Project) -> Vec<SourceSymbol> {
+use super::*;
+
+pub(super) fn collect_source_symbols(session: &Session, project: &Project) -> Vec<SourceSymbol> {
     let mut out = Vec::new();
 
     for (module_name, module_file) in &project.modules {
@@ -148,6 +150,11 @@ fn method_symbols(
 fn sort_symbols(symbols: &mut [SourceSymbol]) {
     symbols.sort_by_key(|symbol| {
         let span = symbol.selection_span();
-        (span.file, span.span.start, span.span.end, symbol.name().to_string())
+        (
+            span.file,
+            span.span.start,
+            span.span.end,
+            symbol.name().to_string(),
+        )
     });
 }

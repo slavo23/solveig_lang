@@ -8,7 +8,7 @@ use lsp_types::{
     SignatureHelp, SignatureInformation, TextEdit, WorkspaceEdit,
 };
 use solveig_base::{FileSpan, PositionEncoding, SourceMap};
-use solveig_driver::{
+use solveig_ide::{
     SourceDocumentHighlight, SourceDocumentHighlightKind, SourceDocumentLink, SourceFoldingRange,
     SourceFoldingRangeKind, SourceSelectionRange, SourceSignatureHelp, SourceTextEdit,
 };

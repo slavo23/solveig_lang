@@ -10,7 +10,8 @@ use lsp_types::{
     SemanticTokensFullDeltaResult, SymbolInformation, Url,
 };
 use solveig_base::{PositionEncoding, SourcePosition};
-use solveig_driver::{Compilation, DriverError, SourceCodeActionCategory, SourceInlayHintConfig};
+use solveig_driver::{Compilation, DriverError};
+use solveig_ide::{CompilationIdeExt, SourceCodeActionCategory, SourceInlayHintConfig};
 use tokio::task::JoinHandle;
 
 use crate::code_actions::lsp_code_actions;
@@ -326,10 +327,11 @@ impl Workspace {
             };
 
             if config.inferred_signature_hints_enabled {
+                let source_code_actions = self.compilation.source_code_actions();
                 extend_diagnostic_map(
                     &mut diagnostics,
                     inferred_signature_diagnostic_map(
-                        self.compilation.source_code_actions(),
+                        &source_code_actions,
                         self.compilation.source_map(),
                         encoding,
                     ),

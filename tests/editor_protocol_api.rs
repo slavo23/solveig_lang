@@ -1,5 +1,6 @@
 use solveig_base::{FileSpan, PositionEncoding, SourceMap, SourcePosition};
-use solveig_driver::{Compilation, SourceDocumentHighlightKind, SourceFoldingRangeKind};
+use solveig_driver::Compilation;
+use solveig_ide::{CompilationIdeExt, SourceDocumentHighlightKind, SourceFoldingRangeKind};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;

@@ -754,6 +754,7 @@ dependencies = [
  "clap",
  "solveig-base",
  "solveig-driver",
+ "solveig-ide",
  "solveig-lsp",
  "solveig-report",
  "solveig-syntax",
@@ -799,6 +800,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "solveig-ide"
+version = "0.1.0"
+dependencies = [
+ "solveig-ast",
+ "solveig-base",
+ "solveig-check",
+ "solveig-driver",
+ "solveig-resolve",
+ "solveig-syntax",
+]
+
+[[package]]
 name = "solveig-lower"
 version = "0.1.0"
 dependencies = [
@@ -814,6 +827,7 @@ dependencies = [
  "serde_json",
  "solveig-base",
  "solveig-driver",
+ "solveig-ide",
  "tokio",
  "tower-lsp",
 ]

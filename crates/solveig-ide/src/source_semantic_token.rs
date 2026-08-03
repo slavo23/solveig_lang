@@ -1,4 +1,4 @@
-//! Driver-owned semantic-token DTOs for editor integrations.
+//! IDE-owned semantic-token DTOs for editor integrations.
 
 use super::*;
 

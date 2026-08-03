@@ -23,12 +23,13 @@ pub struct ModuleFile {
     pub parsed: ParsedModule,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Project {
     pub modules: FxHashMap<ModuleName, ModuleFile>,
     pub module_table: ModuleTable,
 }
 
+#[derive(Clone, Debug)]
 pub struct ParsedProject {
     pub modules: FxHashMap<ModuleName, ParsedModule>,
 }

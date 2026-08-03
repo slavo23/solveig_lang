@@ -2,7 +2,7 @@
 
 use lsp_types::{Hover, HoverContents, MarkupContent, MarkupKind};
 use solveig_base::{PositionEncoding, SourceMap};
-use solveig_driver::HoverInfo;
+use solveig_ide::HoverInfo;
 
 use crate::diagnostics::lsp_range;
 

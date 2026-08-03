@@ -2,7 +2,7 @@
 
 use lsp_types::{InlayHint, InlayHintKind, InlayHintLabel};
 use solveig_base::{PositionEncoding, SourceMap};
-use solveig_driver::{SourceInlayHint, SourceInlayHintKind};
+use solveig_ide::{SourceInlayHint, SourceInlayHintKind};
 
 pub(crate) fn lsp_inlay_hints(
     hints: &[SourceInlayHint],

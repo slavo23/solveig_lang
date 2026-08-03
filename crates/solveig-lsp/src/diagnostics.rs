@@ -10,7 +10,7 @@ use lsp_types::{
 use solveig_base::{
     Diagnostic as SolveigDiagnostic, FileSpan, PositionEncoding, Severity, SourceMap,
 };
-use solveig_driver::{SourceCodeAction, SourceCodeActionCategory};
+use solveig_ide::{SourceCodeAction, SourceCodeActionCategory};
 
 pub(crate) const INFERRED_SIGNATURE_DIAGNOSTIC_CODE: &str = "SIG0001";
 

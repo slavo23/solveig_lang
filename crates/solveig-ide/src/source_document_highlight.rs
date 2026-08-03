@@ -1,4 +1,4 @@
-//! Driver-owned document highlight payloads for editor integrations.
+//! IDE-owned document highlight payloads for editor integrations.
 
 use super::*;
 

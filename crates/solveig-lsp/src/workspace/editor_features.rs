@@ -8,6 +8,7 @@ use lsp_types::{
     SignatureHelp, Url, WorkspaceEdit,
 };
 use solveig_base::{PositionEncoding, SourcePosition};
+use solveig_ide::CompilationIdeExt;
 
 use super::{ServerState, Workspace};
 use crate::editor_features::{

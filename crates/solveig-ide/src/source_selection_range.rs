@@ -1,4 +1,4 @@
-//! Driver-owned selection range payloads for editor integrations.
+//! IDE-owned selection range payloads for editor integrations.
 
 use super::*;
 

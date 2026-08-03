@@ -13,6 +13,7 @@ clap = { version = "4.6.0", features = ["derive"] }
 
 [dev-dependencies]
 solveig-base = { path = "crates/solveig-base", version = "0.1.0" }
+solveig-ide = { path = "crates/solveig-ide", version = "0.1.0" }
 solveig-syntax = { path = "crates/solveig-syntax", version = "0.1.0" }
 
 [lints]
@@ -24,6 +25,7 @@ members = [
     "crates/solveig-base",
     "crates/solveig-check",
     "crates/solveig-driver",
+    "crates/solveig-ide",
     "crates/solveig-lsp",
     "crates/solveig-lower",
     "crates/solveig-report",

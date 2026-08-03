@@ -2,7 +2,7 @@
 
 use lsp_types::{DocumentSymbol, Location, SymbolInformation, SymbolKind};
 use solveig_base::{FileSpan, PositionEncoding, SourceMap};
-use solveig_driver::{SourceSymbol, SourceSymbolKind};
+use solveig_ide::{SourceSymbol, SourceSymbolKind};
 
 use crate::diagnostics::{lsp_range, uri_for_file};
 

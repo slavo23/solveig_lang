@@ -1,4 +1,4 @@
-//! Driver-owned folding range payloads for editor integrations.
+//! IDE-owned folding range payloads for editor integrations.
 
 use super::*;
 

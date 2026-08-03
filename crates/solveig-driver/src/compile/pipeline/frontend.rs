@@ -1,8 +1,6 @@
 struct FrontendState<'a> {
     session: &'a Session,
     names: &'a mut Names,
-    source_root: &'a Path,
-    source_provider: &'a SourceProvider,
     project: &'a Project,
     parsed: &'a ParsedProject,
     builtins: Arc<BuiltinApi>,
@@ -15,9 +13,9 @@ struct FrontendState<'a> {
     next_instance_id: u32,
     verify_core: bool,
     prelude_cache: Option<PreludeCache>,
-    code_actions: Vec<SourceCodeAction>,
-    completion_candidates: Vec<SourceCompletionCandidate>,
-    hole_hovers: Vec<HoverInfo>,
+    resolve_errors: Vec<ModuleResolveErrors>,
+    type_errors: Vec<TypeError>,
+    holes: Vec<HoleInfo>,
     non_reusable_modules: FxHashSet<ModuleName>,
     freshly_checked_modules: Vec<ModuleName>,
     reused_modules: Vec<ModuleName>,
@@ -28,15 +26,11 @@ type FrontendCaches<'cache> = (
     Option<&'cache IncrementalCache>,
     &'cache FxHashSet<ModuleName>,
 );
-type FrontendSources<'a> = (&'a Path, &'a SourceProvider);
 type FrontendProjectInput<'a> = (&'a Project, &'a ParsedProject, &'a [ModuleName]);
 type FrontendRetained = (
-    CheckedProject,
+    CompilationSnapshot,
     Option<PreludeCache>,
     Option<IncrementalCache>,
-    Vec<SourceCodeAction>,
-    Vec<SourceCompletionCandidate>,
-    Vec<SourceInlayHint>,
     Vec<String>,
     Vec<String>,
 );
@@ -73,12 +67,10 @@ impl<'a> FrontendState<'a> {
     fn new(
         session: &'a Session,
         names: &'a mut Names,
-        sources: FrontendSources<'a>,
         project_input: FrontendProjectInput<'a>,
         verify_core: bool,
         caches: FrontendCaches<'_>,
     ) -> Result<Self, Vec<ResolveError>> {
-        let (source_root, source_provider) = sources;
         let (project, parsed, order) = project_input;
         let mut apis = FxHashMap::default();
         let mut errors = Vec::new();
@@ -241,8 +233,6 @@ impl<'a> FrontendState<'a> {
         Ok(Self {
             session,
             names,
-            source_root,
-            source_provider,
             project,
             parsed,
             builtins,
@@ -255,26 +245,21 @@ impl<'a> FrontendState<'a> {
             next_instance_id,
             verify_core,
             prelude_cache: prelude_cache.cloned(),
-            code_actions: Vec::new(),
-            completion_candidates: Vec::new(),
-            hole_hovers: Vec::new(),
+            resolve_errors: Vec::new(),
+            type_errors: Vec::new(),
+            holes: Vec::new(),
             non_reusable_modules: FxHashSet::default(),
             freshly_checked_modules: Vec::new(),
             reused_modules: Vec::new(),
         })
     }
 
-    fn into_checked_project(
+    fn into_snapshot(
         self,
+        source_root: PathBuf,
         source_files: Vec<SourceFile>,
         order: &[ModuleName],
     ) -> FrontendRetained {
-        let artifacts = collect_retained_frontend_artifacts(
-            self.session,
-            self.names,
-            self.project,
-            &self.typed_apis,
-        );
         let modules: Vec<CheckedModule> = order
             .iter()
             .filter_map(|module_name| {
@@ -282,86 +267,11 @@ impl<'a> FrontendState<'a> {
                 self.checked.get(&module_id).cloned()
             })
             .collect();
-        let inlay_hints = inlay_hints::project_inlay_hints(
-            self.session,
-            self.project,
-            self.parsed,
-            order,
-            &self.checked,
-            self.names,
-            &modules,
-        );
-        let mut local_hovers = inlay_hints::project_local_hovers(
-            self.session,
-            self.project,
-            self.parsed,
-            order,
-            &self.checked,
-            self.names,
-            &modules,
-        );
-        local_hovers.extend(self.hole_hovers.clone());
-        local_hovers.extend(artifacts.source_type_var_hovers);
-        local_hovers.sort_by_key(|info| {
-            let span = info.file_span();
-            (span.file, span.span.start, span.span.end)
-        });
         let incremental_cache = self.capture_incremental_cache();
-        let (tycon_table, _ctor_table, class_table) =
-            super::compilation::checked_project_tables(&modules);
-        let mut code_actions = self.code_actions;
-        let mut completion_candidates = self.completion_candidates;
-
-        for module_name in order {
-            let Some(module_id) = self.project.module_table.id(module_name) else {
-                continue;
-            };
-            let Some(checked) = self.checked.get(&module_id) else {
-                continue;
-            };
-
-            let parsed = self.parsed.get(self.session, module_name);
-            code_actions.extend(code_actions::inferred_signature_code_actions(
-                self.session,
-                parsed,
-                module_id,
-                checked,
-                PrettyTables::new(self.names, &tycon_table, &class_table),
-            ));
-
-            let Some(local_typed_api) = self.typed_apis.get(module_name) else {
-                continue;
-            };
-            let imports = effective_imports(
-                self.session,
-                module_name,
-                &parsed.imports,
-                parsed.file,
-            );
-            completion_candidates.extend(completion::typed_module_completion_candidates(
-                completion::TypedModuleCompletionInput {
-                    session: self.session,
-                    names: self.names,
-                    module_name,
-                    parsed,
-                    imports: &imports,
-                    local_api: &self.apis[module_name],
-                    local_typed_api,
-                    typed_apis: &self.typed_apis,
-                },
-            ));
-        }
-
         let freshly_checked_modules =
             module_names_as_strings(self.session, &self.freshly_checked_modules);
         let reused_modules = module_names_as_strings(self.session, &self.reused_modules);
         let mut resolutions = self.resolutions;
-        for (module_id, span, def_id) in artifacts.import_name_resolutions {
-            resolutions
-                .entry(module_id)
-                .or_default()
-                .push((span, def_id));
-        }
         for entries in resolutions.values_mut() {
             entries.sort_by_key(|(span, def)| {
                 (
@@ -376,27 +286,24 @@ impl<'a> FrontendState<'a> {
         }
 
         (
-            CheckedProject {
+            CompilationSnapshot {
+                source_root,
+                project: self.project.clone(),
+                parsed: self.parsed.clone(),
                 names: self.names.clone(),
+                apis: self.apis,
+                typed_apis: self.typed_apis,
                 modules,
                 checked: self.checked,
                 module_files: self.module_files,
                 source_files,
-                docs: artifacts.docs,
-                source_signatures: artifacts.source_signatures,
                 resolutions,
-                declaration_spans: artifacts.declaration_spans,
-                module_display_names: artifacts.module_display_names,
-                module_paths: artifacts.module_paths,
-                module_imports: artifacts.module_imports,
-                local_hovers,
-                source_symbols: artifacts.source_symbols,
+                resolve_errors: self.resolve_errors,
+                type_errors: self.type_errors,
+                holes: self.holes,
             },
             self.prelude_cache,
             Some(incremental_cache),
-            code_actions,
-            completion_candidates,
-            inlay_hints,
             freshly_checked_modules,
             reused_modules,
         )
@@ -521,15 +428,10 @@ impl<'a> FrontendState<'a> {
             match resolver.resolve_module(module_name, parsed, &cx, &resolver_imports) {
                 Ok(resolved) => resolved,
                 Err(ResolverError::Resolve(errors)) => {
-                    self.code_actions.extend(code_actions::resolve_code_actions(
-                        self.session,
-                        self.source_root,
-                        self.source_provider,
-                        module_name,
-                        parsed,
-                        &self.apis,
-                        &errors,
-                    ));
+                    self.resolve_errors.push(ModuleResolveErrors {
+                        module: module_name.clone(),
+                        errors: errors.clone(),
+                    });
                     push_resolve_errors(self.session, Some(&self.project.module_table), errors);
                     return Err(FrontendPhase::Resolve);
                 }
@@ -581,14 +483,7 @@ impl<'a> FrontendState<'a> {
         let checked_raw = match check_and_elab_module(&resolved, &check_env, self.names, file) {
             Ok(c) => c,
             Err(errors) => {
-                {
-                    let source_map = self.session.source_map();
-                    self.code_actions.extend(code_actions::type_error_code_actions(
-                        &source_map,
-                        &errors,
-                    ));
-                }
-
+                self.type_errors.extend(errors.clone());
                 for error in errors {
                     self.session.diagnostics().push(error.into_diagnostic(()));
                 }
@@ -605,18 +500,7 @@ impl<'a> FrontendState<'a> {
 
         let mut failure = None;
         if !checked_raw.holes.is_empty() {
-            self.code_actions.extend(code_actions::hole_code_actions(
-                &checked_raw.holes,
-                &check_env.constructor_types,
-                &check_env.ctor_table,
-                check_env.pretty_tables(self.names),
-            ));
-            self.hole_hovers.extend(hover::hole_hover_infos(
-                &checked_raw.holes,
-                &check_env.constructor_types,
-                &check_env.ctor_table,
-                check_env.pretty_tables(self.names),
-            ));
+            self.holes.extend(checked_raw.holes.clone());
             let diagnostics = hole_diagnostics(
                 &checked_raw.holes,
                 &check_env.constructor_types,
@@ -645,13 +529,6 @@ impl<'a> FrontendState<'a> {
                 return Err(FrontendPhase::Core);
             }
         }
-
-        self.completion_candidates
-            .extend(completion::typed_local_completion_candidates(
-                &checked_raw.module,
-                file,
-                check_env.pretty_tables(self.names),
-            ));
 
         Ok(ModuleCheck {
             module: checked_raw.module,

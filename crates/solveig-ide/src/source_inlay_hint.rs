@@ -1,4 +1,4 @@
-//! Driver-owned inlay hint payloads for editor integrations.
+//! IDE-owned inlay hint payloads for editor integrations.
 
 use super::*;
 

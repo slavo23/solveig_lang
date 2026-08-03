@@ -1,4 +1,4 @@
-//! Driver-owned declaration symbol payloads for editor navigation.
+//! IDE-owned declaration symbol payloads for editor navigation.
 
 use super::*;
 
@@ -19,7 +19,7 @@ pub enum SourceSymbolKind {
     Method,
 }
 
-/// Represents one source declaration in the driver editor artifact snapshot.
+/// Represents one source declaration in an IDE artifact snapshot.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceSymbol {
     name: String,

@@ -1,7 +1,7 @@
 //! Driver compile facade.
-//! Child modules own compilation state, frontend orchestration, builtins, hover, Show wrappers, and evidence dumps.
+//! Child modules own compilation state, frontend orchestration, builtins, Show wrappers, and evidence dumps.
 
-use solveig_base::{FxHashMap, FxHashSet, Symbol};
+use solveig_base::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, Write};
 use std::ops::Range;
@@ -20,19 +20,13 @@ use solveig_ast::ast::{
     BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_STRING_APPEND,
     BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
     BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinDefinition,
-    BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassInfo, ClassTable,
-    CtorId, CtorTable, DataDefinition, DefId, Ev, InstanceDefinition, InstanceId, Kind, ModuleId,
-    Names, PRELUDE_LIST_NAME, PRIM_TYS, Pattern, PatternNode, Predicate, Pretty, PrettyTables,
-    Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConDefinition, TyConId, TyConInfo,
-    TyConTable, TyVarId, VarRef, compiler_bool_data_definition, prelude_list_tycon_id,
-    prelude_maybe_tycon_id, prelude_ordering_tycon_id,
+    BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId, ClassTable, CtorId,
+    CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, Names, PRIM_TYS, PrettyTables, Scheme,
+    TermDefinition, TermExpr, TermExprNode, Ty, TyConId, TyConTable, TyVarId, VarRef,
+    prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
 };
-use solveig_base::Span;
 use solveig_base::{Diagnostic, Severity, TypeError};
-use solveig_base::{
-    FileId, FileSpan, IntoDiagnostic, PositionEncoding, Session, SourceFile, SourceMap,
-    SourcePosition,
-};
+use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap};
 use solveig_check::core_lint::{CoreLintEnv, lint_checked_module};
 use solveig_check::inference::holes::{HoleInfo, hole_diagnostics};
 use solveig_check::inference::type_infer::{
@@ -43,18 +37,14 @@ use solveig_lower::closure_ir::CCProgram;
 use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
 use solveig_resolve::project::{
-    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleApi, ModuleContext,
-    ModuleFile, ModuleTable, ParsedProject, Project, ResolveError, ResolveNameKind,
-    SharedModuleApi, SharedTypedModuleApi, TypeAlias, TypedDisplayMaps, TypedModuleApi,
-    build_module_api, build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module,
-    effective_imports, module_order_checked, seed_compiler_prelude_module_api,
+    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleFile,
+    ModuleTable, ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi,
+    TypeAlias, TypedDisplayMaps, build_module_api, build_typed_module_api, compiler_builtin_api,
+    compiler_prelude_prim_module, effective_imports, module_order_checked,
+    seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
-use solveig_syntax::ast::{
-    ClassMethod, DocComment, ImportDecl, ImportSpec, ModuleName, ParsedModule, Spanned,
-    SurfaceConstructor, SurfaceDefinition, SurfaceDoStmt, SurfaceExpr, SurfacePattern,
-    SurfacePredicate, SurfaceTy,
-};
+use solveig_syntax::ast::{ImportSpec, ModuleName};
 use solveig_vm::vm::Machine;
 
 use crate::DriverError;
@@ -64,78 +54,22 @@ use crate::project::{
 use crate::source_provider::SourceProvider;
 
 mod builtins;
-mod code_actions;
 mod compilation;
-mod completion;
-mod document_highlights;
-mod document_links;
-mod editor_api;
 mod evidence_dump;
-mod hover;
 mod incremental;
-mod inlay_hints;
-mod navigation;
 mod pipeline;
-mod rename;
-mod semantic_tokens;
 mod show_entry;
-mod signature_help;
-mod source_code_action;
-mod source_completion;
-mod source_document_highlight;
-mod source_document_link;
-mod source_folding_range;
-mod source_inlay_hint;
-mod source_lookup;
-mod source_selection_range;
-mod source_semantic_token;
-mod source_signature;
-mod source_signature_help;
-mod source_symbol;
-mod syntax_features;
 
 use builtins::driver_builtin_api;
-use code_actions::code_actions_in_compilation;
 pub use compilation::{
-    CheckResult, Compilation, CompileOptions, HoverInfo, ProjectDocs, ProjectSchemes,
-    checked_project_docs, checked_project_schemes, compile_and_run_project,
-    compile_and_run_project_with_options, compile_and_run_project_with_options_and_args,
-    run_project_capture, run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
+    CheckResult, Compilation, CompilationSnapshot, CompileOptions, ModuleResolveErrors,
+    ProjectDocs, ProjectSchemes, checked_project_docs, checked_project_schemes,
+    compile_and_run_project, compile_and_run_project_with_options,
+    compile_and_run_project_with_options_and_args, run_project_capture,
+    run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
 };
-use compilation::{CheckedProject, CompilationArtifacts, PreludeCache};
-use completion::completion_items_in_compilation;
-use document_highlights::document_highlights_at_position_in_artifacts;
-use document_links::document_links_in_artifacts;
+use compilation::{CheckedProject, PreludeCache};
 use evidence_dump::dump_solved_evidence;
-use hover::{hover_at_position_in_artifacts, hover_in_artifacts};
 use incremental::IncrementalCache;
-use inlay_hints::inlay_hints_in_compilation;
-use navigation::{
-    definition_at_position_in_artifacts, definition_in_artifacts, document_symbols_in_artifacts,
-    references_at_position_in_artifacts, references_in_artifacts, workspace_symbols_in_artifacts,
-};
 use pipeline::{FrontendPhase, merge_checked_modules, verify_lowering_core};
-use rename::{prepare_rename_in_artifacts, rename_edits_in_artifacts};
-use semantic_tokens::{semantic_tokens_in_compilation, syntax_semantic_tokens};
 use show_entry::{add_show_entry_wrapper, entry_returns_io};
-use signature_help::signature_help_at_position_in_artifacts;
-pub use source_code_action::{SourceCodeAction, SourceCodeActionCategory, SourceTextEdit};
-use source_completion::SourceCompletionCandidate;
-pub use source_completion::{SourceCompletionItem, SourceCompletionItemKind};
-pub use source_document_highlight::{SourceDocumentHighlight, SourceDocumentHighlightKind};
-pub use source_document_link::SourceDocumentLink;
-pub use source_folding_range::{SourceFoldingRange, SourceFoldingRangeKind};
-pub use source_inlay_hint::{
-    SourceInlayHint, SourceInlayHintCategory, SourceInlayHintConfig, SourceInlayHintKind,
-};
-pub use source_selection_range::SourceSelectionRange;
-pub use source_semantic_token::{
-    SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
-    SourceSemanticTokenModifiers,
-};
-pub use source_signature_help::{SourceSignatureHelp, SourceSignatureInformation};
-pub use source_symbol::{SourceSymbol, SourceSymbolKind};
-use syntax_features::{
-    SourceSyntaxTree, folding_ranges_in_syntax_trees, project_syntax_trees,
-    selection_ranges_in_syntax_trees,
-};

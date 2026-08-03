@@ -2,7 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use solveig_base::{FileId, FileSpan, PositionEncoding, SourceMap, SourcePosition};
-use solveig_driver::{Compilation, SourceInlayHintConfig, SourceSelectionRange, SourceSymbol};
+use solveig_driver::Compilation;
+use solveig_ide::{CompilationIdeExt, SourceInlayHintConfig, SourceSelectionRange, SourceSymbol};
 use solveig_syntax::lexer::{Token, lex};
 
 fn fixture_root(name: &str) -> PathBuf {

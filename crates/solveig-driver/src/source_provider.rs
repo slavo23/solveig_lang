@@ -7,12 +7,14 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 #[derive(Clone, Debug, Default)]
-pub(crate) struct SourceProvider {
+/// Reads project files while allowing editor overlays to shadow disk contents.
+pub struct SourceProvider {
     overlays: BTreeMap<PathBuf, String>,
 }
 
 impl SourceProvider {
-    pub(crate) fn read_to_string(&self, path: &Path) -> io::Result<String> {
+    /// Reads an overlaid source when present, otherwise reads the path from disk.
+    pub fn read_to_string(&self, path: &Path) -> io::Result<String> {
         if let Some(source) = self.overlays.get(&source_key(path)) {
             return Ok(source.clone());
         }
@@ -20,15 +22,18 @@ impl SourceProvider {
         fs::read_to_string(path)
     }
 
-    pub(crate) fn has_source(&self, path: &Path) -> bool {
+    /// Returns whether the provider can read source text for `path`.
+    pub fn has_source(&self, path: &Path) -> bool {
         self.overlays.contains_key(&source_key(path)) || path.is_file()
     }
 
-    pub(crate) fn set_overlay(&mut self, path: impl AsRef<Path>, text: impl Into<String>) {
+    /// Sets source text for `path`, shadowing the file system.
+    pub fn set_overlay(&mut self, path: impl AsRef<Path>, text: impl Into<String>) {
         self.overlays.insert(source_key(path.as_ref()), text.into());
     }
 
-    pub(crate) fn clear_overlay(&mut self, path: impl AsRef<Path>) {
+    /// Removes any source text overlay for `path`.
+    pub fn clear_overlay(&mut self, path: impl AsRef<Path>) {
         self.overlays.remove(&source_key(path.as_ref()));
     }
 }

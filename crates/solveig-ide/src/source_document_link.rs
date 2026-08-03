@@ -1,4 +1,4 @@
-//! Driver-owned document link payloads for editor integrations.
+//! IDE-owned document link payloads for editor integrations.
 
 use super::*;
 

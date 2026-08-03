@@ -1,4 +1,4 @@
-//! Driver-owned quick-fix payloads for editor code actions.
+//! IDE-owned quick-fix payloads for editor code actions.
 
 use super::*;
 
@@ -49,7 +49,7 @@ pub enum SourceCodeActionCategory {
     InferredSignature,
 }
 
-/// Represents a source-level quick fix retained by the driver.
+/// Represents a source-level quick fix derived from retained compiler facts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceCodeAction {
     title: String,

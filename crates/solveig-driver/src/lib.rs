@@ -8,16 +8,13 @@ mod source_provider;
 
 /// Re-exports project compilation, checking, and execution entry points.
 pub use compile::{
-    CheckResult, Compilation, CompileOptions, HoverInfo, ProjectDocs, ProjectSchemes,
-    SourceCodeAction, SourceCodeActionCategory, SourceCompletionItem, SourceCompletionItemKind,
-    SourceDocumentHighlight, SourceDocumentHighlightKind, SourceDocumentLink, SourceFoldingRange,
-    SourceFoldingRangeKind, SourceInlayHint, SourceInlayHintCategory, SourceInlayHintConfig,
-    SourceInlayHintKind, SourceSelectionRange, SourceSemanticToken, SourceSemanticTokenKind,
-    SourceSemanticTokenModifier, SourceSemanticTokenModifiers, SourceSignatureHelp,
-    SourceSignatureInformation, SourceSymbol, SourceSymbolKind, SourceTextEdit,
-    checked_project_docs, checked_project_schemes, compile_and_run_project,
-    compile_and_run_project_with_options, compile_and_run_project_with_options_and_args,
-    run_project_capture, run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
+    CheckResult, Compilation, CompilationSnapshot, CompileOptions, ModuleResolveErrors,
+    ProjectDocs, ProjectSchemes, checked_project_docs, checked_project_schemes,
+    compile_and_run_project, compile_and_run_project_with_options,
+    compile_and_run_project_with_options_and_args, run_project_capture,
+    run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
 };
 /// Re-exports the top-level driver error type.
 pub use error::DriverError;
+pub use project::{is_compiler_prelude_module, module_name_from_file};
+pub use source_provider::SourceProvider;

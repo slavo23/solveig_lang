@@ -1,5 +1,6 @@
 use solveig_base::{PositionEncoding, SourcePosition};
-use solveig_driver::{Compilation, SourceCompletionItem, SourceCompletionItemKind};
+use solveig_driver::Compilation;
+use solveig_ide::{CompilationIdeExt, SourceCompletionItem, SourceCompletionItemKind};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;

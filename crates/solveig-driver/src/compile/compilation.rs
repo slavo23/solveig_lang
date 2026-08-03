@@ -9,13 +9,8 @@ pub struct Compilation {
     pub(super) session: Session,
     pub(super) names: Names,
     pub(super) source_provider: SourceProvider,
-    pub(super) artifacts: Option<CompilationArtifacts>,
+    pub(super) snapshot: Option<CompilationSnapshot>,
     pub(super) checked_project: Option<CheckedProject>,
-    pub(super) semantic_tokens: Vec<SourceSemanticToken>,
-    pub(super) code_actions: Vec<SourceCodeAction>,
-    pub(super) completion_candidates: Vec<SourceCompletionCandidate>,
-    pub(super) inlay_hints: Vec<SourceInlayHint>,
-    pub(super) syntax_trees: Vec<SourceSyntaxTree>,
     pub(super) prelude_cache: Option<PreludeCache>,
     pub(super) incremental_cache: Option<IncrementalCache>,
     pub(super) retained_verify_core: Option<bool>,
@@ -36,77 +31,29 @@ pub struct CheckResult {
 pub type ProjectSchemes = BTreeMap<String, String>;
 pub type ProjectDocs = BTreeMap<String, String>;
 
-/// Semantic hover payload retained by the driver after a successful check.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct HoverInfo {
-    file: FileId,
-    span: Range<usize>,
-    signature: String,
-    documentation: Option<String>,
-    provenance: Option<String>,
-    markdown: Option<String>,
+#[derive(Clone, Debug)]
+pub struct ModuleResolveErrors {
+    pub module: ModuleName,
+    pub errors: Vec<ResolveError>,
 }
 
-impl HoverInfo {
-    /// Creates a semantic hover for a byte span in one source file.
-    pub fn new(
-        file: FileId,
-        span: Range<usize>,
-        signature: impl Into<String>,
-        documentation: Option<String>,
-    ) -> Self {
-        Self {
-            file,
-            span,
-            signature: signature.into(),
-            documentation,
-            provenance: None,
-            markdown: None,
-        }
-    }
-
-    pub(super) fn with_markdown(mut self, markdown: impl Into<String>) -> Self {
-        self.markdown = Some(markdown.into());
-        self
-    }
-
-    pub(super) fn with_optional_provenance(mut self, provenance: Option<String>) -> Self {
-        self.provenance = provenance;
-        self
-    }
-
-    /// Returns this hover's span with its source file id attached.
-    pub fn file_span(&self) -> FileSpan {
-        FileSpan::new(
-            self.file,
-            solveig_base::Span::from_usize_range(self.span.clone()),
-        )
-    }
-
-    /// Returns this hover's byte span inside its source file.
-    pub fn span(&self) -> Range<usize> {
-        self.span.clone()
-    }
-
-    /// Returns the Solveig signature, type, or module path heading to display.
-    pub fn signature(&self) -> &str {
-        &self.signature
-    }
-
-    /// Returns documentation text attached to the hovered semantic item, when available.
-    pub fn documentation(&self) -> Option<&str> {
-        self.documentation.as_deref()
-    }
-
-    /// Returns where the hovered semantic item was defined, when available.
-    pub fn provenance(&self) -> Option<&str> {
-        self.provenance.as_deref()
-    }
-
-    /// Returns complete Markdown to display instead of the default signature block, when present.
-    pub fn markdown(&self) -> Option<&str> {
-        self.markdown.as_deref()
-    }
+/// Retains compiler and project facts from the last frontend check.
+#[derive(Clone, Debug)]
+pub struct CompilationSnapshot {
+    pub source_root: PathBuf,
+    pub project: Project,
+    pub parsed: ParsedProject,
+    pub names: Names,
+    pub apis: FxHashMap<ModuleName, SharedModuleApi>,
+    pub typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
+    pub modules: Vec<CheckedModule>,
+    pub checked: FxHashMap<ModuleId, CheckedModule>,
+    pub module_files: FxHashMap<ModuleId, FileId>,
+    pub source_files: Vec<SourceFile>,
+    pub resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
+    pub resolve_errors: Vec<ModuleResolveErrors>,
+    pub type_errors: Vec<TypeError>,
+    pub holes: Vec<HoleInfo>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -156,41 +103,10 @@ impl CheckResult {
 }
 
 #[derive(Clone, Debug)]
-pub(super) struct CompilationArtifacts {
-    pub(super) names: Names,
-    pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
-    pub(super) module_files: FxHashMap<ModuleId, FileId>,
-    pub(super) source_files: Vec<SourceFile>,
-    pub(super) docs: FxHashMap<DefId, DocComment>,
-    pub(super) source_signatures: FxHashMap<DefId, String>,
-    pub(super) resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
-    pub(super) declaration_spans: Vec<(FileSpan, DefId)>,
-    pub(super) module_display_names: FxHashMap<ModuleId, String>,
-    pub(super) module_paths: FxHashMap<ModuleId, PathBuf>,
-    pub(super) module_imports: Vec<(FileSpan, ModuleId)>,
-    pub(super) local_hovers: Vec<HoverInfo>,
-    pub(super) source_symbols: Vec<SourceSymbol>,
-    pub(super) tycon_table: TyConTable,
-    pub(super) ctor_table: CtorTable,
-    pub(super) class_table: ClassTable,
-}
-
-#[derive(Clone, Debug)]
 pub(super) struct CheckedProject {
     pub(super) names: Names,
     pub(super) modules: Vec<CheckedModule>,
-    pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
     pub(super) module_files: FxHashMap<ModuleId, FileId>,
-    pub(super) source_files: Vec<SourceFile>,
-    pub(super) docs: FxHashMap<DefId, DocComment>,
-    pub(super) source_signatures: FxHashMap<DefId, String>,
-    pub(super) resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
-    pub(super) declaration_spans: Vec<(FileSpan, DefId)>,
-    pub(super) module_display_names: FxHashMap<ModuleId, String>,
-    pub(super) module_paths: FxHashMap<ModuleId, PathBuf>,
-    pub(super) module_imports: Vec<(FileSpan, ModuleId)>,
-    pub(super) local_hovers: Vec<HoverInfo>,
-    pub(super) source_symbols: Vec<SourceSymbol>,
 }
 
 #[derive(Clone, Debug)]
@@ -219,27 +135,12 @@ struct PreparedRun {
     show_entry: Option<String>,
 }
 
-impl CompilationArtifacts {
-    fn from_checked_project(project: &CheckedProject) -> Self {
-        let (tycon_table, ctor_table, class_table) = checked_project_tables(&project.modules);
-
+impl CheckedProject {
+    fn from_snapshot(snapshot: &CompilationSnapshot) -> Self {
         Self {
-            names: project.names.clone(),
-            checked: project.checked.clone(),
-            module_files: project.module_files.clone(),
-            source_files: project.source_files.clone(),
-            docs: project.docs.clone(),
-            source_signatures: project.source_signatures.clone(),
-            resolutions: project.resolutions.clone(),
-            declaration_spans: project.declaration_spans.clone(),
-            module_display_names: project.module_display_names.clone(),
-            module_paths: project.module_paths.clone(),
-            module_imports: project.module_imports.clone(),
-            local_hovers: project.local_hovers.clone(),
-            source_symbols: project.source_symbols.clone(),
-            tycon_table,
-            ctor_table,
-            class_table,
+            names: snapshot.names.clone(),
+            modules: snapshot.modules.clone(),
+            module_files: snapshot.module_files.clone(),
         }
     }
 }
@@ -269,13 +170,8 @@ impl Compilation {
             session: Session::new(),
             names: Names::new(),
             source_provider: SourceProvider::default(),
-            artifacts: None,
+            snapshot: None,
             checked_project: None,
-            semantic_tokens: Vec::new(),
-            code_actions: Vec::new(),
-            completion_candidates: Vec::new(),
-            inlay_hints: Vec::new(),
-            syntax_trees: Vec::new(),
             prelude_cache: None,
             incremental_cache: None,
             retained_verify_core: None,
@@ -407,19 +303,18 @@ impl Compilation {
             return Err(DriverError::compilation_failed(message));
         }
 
-        let checked_project = self
-            .checked_project
+        let snapshot = self
+            .snapshot
             .as_ref()
-            .expect("ICE: successful check did not retain checked project");
-        let (tycon_table, _ctor_table, class_table) =
-            checked_project_tables(&checked_project.modules);
-        let pretty_tables = PrettyTables::new(&checked_project.names, &tycon_table, &class_table);
+            .expect("ICE: successful check did not retain compilation snapshot");
+        let (tycon_table, _ctor_table, class_table) = checked_project_tables(&snapshot.modules);
+        let pretty_tables = PrettyTables::new(&snapshot.names, &tycon_table, &class_table);
         let mut schemes = BTreeMap::new();
 
-        for module in &checked_project.modules {
+        for module in &snapshot.modules {
             for (id, scheme) in &module.func_schemes {
                 schemes.insert(
-                    checked_project.names.def_display_name(*id),
+                    snapshot.names.def_display_name(*id),
                     scheme.pretty_with_tables(pretty_tables),
                 );
             }
@@ -434,30 +329,24 @@ impl Compilation {
             return Err(DriverError::compilation_failed(message));
         }
 
-        let checked_project = self
-            .checked_project
+        let snapshot = self
+            .snapshot
             .as_ref()
-            .expect("ICE: successful check did not retain checked project");
+            .expect("ICE: successful check did not retain compilation snapshot");
         let mut docs = BTreeMap::new();
 
-        for (id, doc) in &checked_project.docs {
-            docs.insert(
-                checked_project.names.def_display_name(*id),
-                doc.text.clone(),
-            );
+        for api in snapshot.typed_apis.values() {
+            for (id, doc) in &api.docs {
+                docs.insert(snapshot.names.def_display_name(*id), doc.text.clone());
+            }
         }
 
         Ok(docs)
     }
 
     pub fn check(&mut self, verify_core: bool) -> Result<&CheckResult, DriverError> {
-        self.artifacts = None;
+        self.snapshot = None;
         self.checked_project = None;
-        self.semantic_tokens = Vec::new();
-        self.code_actions = Vec::new();
-        self.completion_candidates = Vec::new();
-        self.inlay_hints = Vec::new();
-        self.syntax_trees = Vec::new();
         self.retained_verify_core = None;
         self.session.diagnostics().drain();
         self.names = Names::new();
@@ -465,9 +354,9 @@ impl Compilation {
         let outcome = self.check_project_modules(verify_core)?;
         let diagnostics = self.session.diagnostics().sorted_by_file_and_span();
         let modules = outcome
-            .checked_project
+            .snapshot
             .as_ref()
-            .map(|project| project.modules.clone())
+            .map(|snapshot| snapshot.modules.clone())
             .unwrap_or_default();
         let source_map = self.session.source_map().clone();
         let success = outcome.phase.is_none()
@@ -475,15 +364,10 @@ impl Compilation {
                 .iter()
                 .any(|diagnostic| diagnostic.severity == Severity::Error);
 
-        if let Some(checked_project) = outcome.checked_project {
-            self.artifacts = Some(CompilationArtifacts::from_checked_project(&checked_project));
-            self.checked_project = Some(checked_project);
+        if let Some(snapshot) = outcome.snapshot {
+            self.checked_project = Some(CheckedProject::from_snapshot(&snapshot));
+            self.snapshot = Some(snapshot);
         }
-        self.semantic_tokens = outcome.semantic_tokens;
-        self.code_actions = outcome.code_actions;
-        self.completion_candidates = outcome.completion_candidates;
-        self.inlay_hints = outcome.inlay_hints;
-        self.syntax_trees = outcome.syntax_trees;
 
         self.check_result = CheckResult {
             diagnostics,
@@ -499,10 +383,7 @@ impl Compilation {
         Ok(&self.check_result)
     }
 
-    pub(super) fn ensure_checked(
-        &mut self,
-        verify_core: bool,
-    ) -> Result<&CheckResult, DriverError> {
+    pub fn ensure_checked(&mut self, verify_core: bool) -> Result<&CheckResult, DriverError> {
         let reusable_verify_core = self
             .retained_verify_core
             .is_some_and(|retained| retained || !verify_core);
@@ -517,12 +398,24 @@ impl Compilation {
         self.check_result.diagnostics()
     }
 
-    pub fn source_code_actions(&self) -> &[SourceCodeAction] {
-        &self.code_actions
-    }
-
     pub fn source_map(&self) -> &SourceMap {
         self.check_result.source_map()
+    }
+
+    pub fn snapshot(&self) -> Option<&CompilationSnapshot> {
+        self.snapshot.as_ref()
+    }
+
+    pub fn session(&self) -> &Session {
+        &self.session
+    }
+
+    pub fn project_root(&self) -> &Path {
+        &self.project_root
+    }
+
+    pub fn source_provider(&self) -> &SourceProvider {
+        &self.source_provider
     }
 
     fn compile_project_capture(
@@ -659,13 +552,8 @@ impl Compilation {
     }
 
     fn clear_retained_project(&mut self) {
-        self.artifacts = None;
+        self.snapshot = None;
         self.checked_project = None;
-        self.semantic_tokens = Vec::new();
-        self.code_actions = Vec::new();
-        self.completion_candidates = Vec::new();
-        self.inlay_hints = Vec::new();
-        self.syntax_trees = Vec::new();
         self.retained_verify_core = None;
         self.check_result = CheckResult::default();
     }

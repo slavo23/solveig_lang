@@ -4,6 +4,7 @@ use std::process;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use solveig_driver::Compilation;
+use solveig_ide::CompilationIdeExt;
 use solveig_syntax::lexer::lex;
 
 fn fixture_root(name: &str) -> PathBuf {

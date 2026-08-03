@@ -1,4 +1,4 @@
-//! Driver-owned signature help payloads for editor integrations.
+//! IDE-owned signature help payloads for editor integrations.
 
 /// Represents one callable signature shown by editor signature help.
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -1,5 +1,6 @@
 use solveig_base::{PositionEncoding, Severity, SourcePosition};
-use solveig_driver::{Compilation, SourceCodeAction, SourceCodeActionCategory};
+use solveig_driver::Compilation;
+use solveig_ide::{CompilationIdeExt, SourceCodeAction, SourceCodeActionCategory};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process;
@@ -104,15 +105,12 @@ fn missing_signature_action_handles_scry_mutual_recursion() {
         .expect("scry parser without goalsFromSExps signature should check");
     assert!(result.success(), "{:#?}", result.diagnostics());
 
-    let action = compilation
-        .source_code_actions()
+    let actions = compilation.source_code_actions();
+    let action = actions
         .iter()
         .find(|action| action.title() == "Add type signature for `goalsFromSExps`")
         .unwrap_or_else(|| {
-            panic!(
-                "missing inferred signature action after recursive inference: {:#?}",
-                compilation.source_code_actions()
-            )
+            panic!("missing inferred signature action after recursive inference: {actions:#?}")
         });
     assert_eq!(
         action.category(),
@@ -148,15 +146,12 @@ main = count [1, 2, 3]
         .expect("direct recursive function without signature should check");
     assert!(result.success(), "{:#?}", result.diagnostics());
 
-    let action = compilation
-        .source_code_actions()
+    let actions = compilation.source_code_actions();
+    let action = actions
         .iter()
         .find(|action| action.title() == "Add type signature for `count`")
         .unwrap_or_else(|| {
-            panic!(
-                "missing inferred signature action for direct recursion: {:#?}",
-                compilation.source_code_actions()
-            )
+            panic!("missing inferred signature action for direct recursion: {actions:#?}")
         });
     assert_eq!(
         action.category(),
@@ -234,14 +229,13 @@ main = hasZero [1, 2, 3]
         .expect("signature-less recursive function with concrete typeclass evidence should check");
     assert!(result.success(), "{:#?}", result.diagnostics());
 
-    let action = compilation
-        .source_code_actions()
+    let actions = compilation.source_code_actions();
+    let action = actions
         .iter()
         .find(|action| action.title() == "Add type signature for `hasZero`")
         .unwrap_or_else(|| {
             panic!(
-                "missing inferred signature action for concrete typeclass recursion: {:#?}",
-                compilation.source_code_actions()
+                "missing inferred signature action for concrete typeclass recursion: {actions:#?}"
             )
         });
     assert_eq!(
@@ -277,15 +271,12 @@ fn signatureless_recursive_function_infers_typeclass_constraint() {
         .expect("polymorphic typeclass recursion should check");
     assert!(result.success(), "{:#?}", result.diagnostics());
 
-    let action = compilation
-        .source_code_actions()
+    let actions = compilation.source_code_actions();
+    let action = actions
         .iter()
         .find(|action| action.title() == "Add type signature for `containsPoly`")
         .unwrap_or_else(|| {
-            panic!(
-                "missing inferred signature action for qualified recursion: {:#?}",
-                compilation.source_code_actions()
-            )
+            panic!("missing inferred signature action for qualified recursion: {actions:#?}")
         });
     assert_eq!(
         action.category(),

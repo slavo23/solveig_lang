@@ -4,7 +4,7 @@ use std::collections::HashMap;
 
 use lsp_types::{CodeAction, CodeActionKind, CodeActionOrCommand, TextEdit, WorkspaceEdit};
 use solveig_base::{PositionEncoding, SourceMap};
-use solveig_driver::SourceCodeAction;
+use solveig_ide::SourceCodeAction;
 
 use crate::diagnostics::{lsp_range, uri_for_file};
 

@@ -308,7 +308,7 @@ fn scanned_module_exports_name(
     kind: ResolveNameKind,
 ) -> Option<String> {
     let source = source_provider.read_to_string(file).ok()?;
-    let module_name = crate::project::module_name_from_file(session, source_root, file).ok()?;
+    let module_name = module_name_from_file(session, source_root, file).ok()?;
     let file_id = {
         let source_map = session.source_map();
         source_lookup::source_file_id_in_source_map(&source_map, file)
