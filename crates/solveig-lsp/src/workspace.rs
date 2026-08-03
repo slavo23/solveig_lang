@@ -700,6 +700,229 @@ main = 1
     }
 
     #[test]
+    fn typed_hole_diagnostic_publishes_for_open_file() {
+        let project_root = temp_root("hole_diagnostic");
+        let source = project_root.join("scratch.sv");
+        let text = r#"main : Bool
+main = ??
+"#;
+        write_source(&source, text);
+        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+        let mut state = ServerState::new(PositionEncoding::Utf16);
+
+        state.open_document(&uri, text.to_string());
+        let publications = state.check_all();
+        let diagnostics = diagnostics_for_uri(&publications, &uri);
+        let hole = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code.as_ref() == Some(&NumberOrString::String("HOLE".to_string()))
+            })
+            .unwrap_or_else(|| panic!("missing typed-hole diagnostic: {diagnostics:#?}"));
+
+        assert_eq!(hole.severity, Some(DiagnosticSeverity::ERROR));
+        assert_eq!(
+            hole.range,
+            Range::new(Position::new(1, 7), Position::new(1, 9))
+        );
+        assert!(
+            hole.message.contains("found hole of type `Bool`"),
+            "unexpected hole message: {}",
+            hole.message
+        );
+
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn typed_hole_hover_uses_hole_range() {
+        let project_root = temp_root("hole_hover");
+        let source = project_root.join("scratch.sv");
+        let text = r#"main : Bool
+main = if True then ?? else False
+"#;
+        write_source(&source, text);
+        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+        let mut state = ServerState::new(PositionEncoding::Utf16);
+
+        state.open_document(&uri, text.to_string());
+        let hover = state
+            .hover(&uri, Position::new(1, 20))
+            .expect("typed hole should have LSP hover");
+
+        assert_hover_contains(hover.clone(), "**Unfilled hole**");
+        assert_hover_contains(hover.clone(), "Expected type: `Bool`");
+        assert_eq!(
+            hover.range,
+            Some(Range::new(Position::new(1, 20), Position::new(1, 22)))
+        );
+
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn underscore_hole_diagnostic_and_hover_use_hole_range() {
+        let project_root = temp_root("underscore_hole");
+        let source = project_root.join("scratch.sv");
+        let text = r#"main : Bool
+main = _
+"#;
+        write_source(&source, text);
+        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+        let mut state = ServerState::new(PositionEncoding::Utf16);
+
+        state.open_document(&uri, text.to_string());
+        let publications = state.check_all();
+        let diagnostics = diagnostics_for_uri(&publications, &uri);
+        let hole = diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code.as_ref() == Some(&NumberOrString::String("HOLE".to_string()))
+            })
+            .unwrap_or_else(|| panic!("missing underscore-hole diagnostic: {diagnostics:#?}"));
+
+        assert_eq!(
+            hole.range,
+            Range::new(Position::new(1, 7), Position::new(1, 8))
+        );
+        assert_eq!(hole.severity, Some(DiagnosticSeverity::ERROR));
+
+        let hover = state
+            .hover(&uri, Position::new(1, 7))
+            .expect("underscore hole should have LSP hover");
+
+        assert_hover_contains(hover.clone(), "**Unfilled hole**");
+        assert_hover_contains(hover.clone(), "Expected type: `Bool`");
+        assert_eq!(
+            hover.range,
+            Some(Range::new(Position::new(1, 7), Position::new(1, 8)))
+        );
+
+        let _ = fs::remove_dir_all(project_root);
+    }
+
+    #[test]
+    fn nested_constructor_hole_hover_uses_hole_range() {
+        let project_root = workspace_root().join("examples/smoke_suite");
+        let source = project_root.join("src/main.sv");
+        let original = fs::read_to_string(&source).expect("smoke suite main source should load");
+        let text = original.replace("Entry iVal iVal", "Entry ?? iVal");
+        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+        let mut state = ServerState::new(PositionEncoding::Utf16);
+        let line = text
+            .lines()
+            .position(|line| line.contains("Entry ?? iVal"))
+            .expect("smoke suite overlay should contain the nested hole");
+        let character = text
+            .lines()
+            .nth(line)
+            .and_then(|line| line.find("??"))
+            .expect("nested hole line should contain the hole");
+        let position = Position::new(
+            u32::try_from(line).expect("test line should fit in u32"),
+            u32::try_from(character).expect("test character should fit in u32"),
+        );
+
+        state.open_document(&uri, text);
+        let publications = state.check_all();
+        let diagnostics = diagnostics_for_uri(&publications, &uri);
+        assert!(
+            diagnostics.iter().any(|diagnostic| {
+                diagnostic.code.as_ref() == Some(&NumberOrString::String("HOLE".to_string()))
+                    && diagnostic.severity == Some(DiagnosticSeverity::ERROR)
+            }),
+            "missing nested-hole diagnostic: {diagnostics:#?}"
+        );
+
+        let hover = state
+            .hover(&uri, position)
+            .expect("nested constructor hole should have LSP hover");
+
+        assert_hover_contains(hover.clone(), "**Unfilled hole**");
+        assert_hover_contains(hover.clone(), "Expected type: `Int`");
+        assert_eq!(
+            hover.range,
+            Some(Range::new(
+                position,
+                Position::new(position.line, position.character + 2)
+            ))
+        );
+    }
+
+    #[test]
+    fn hole_diagnostic_and_rich_hover_survive_save_recheck() {
+        let project_root = workspace_root().join("examples/smoke_suite");
+        let source = project_root.join("src/main.sv");
+        let original = fs::read_to_string(&source).expect("smoke suite main source should load");
+        let text = original.replace("Entry iVal iVal", "Entry iVal ??");
+        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+        let mut state = ServerState::new(PositionEncoding::Utf16);
+        let line = text
+            .lines()
+            .position(|line| line.contains("Entry iVal ??"))
+            .expect("smoke suite overlay should contain the second-arg hole");
+        let character = text
+            .lines()
+            .nth(line)
+            .and_then(|line| line.find("??"))
+            .expect("second-arg hole line should contain the hole");
+        let position = Position::new(
+            u32::try_from(line).expect("test line should fit in u32"),
+            u32::try_from(character).expect("test character should fit in u32"),
+        );
+
+        state.open_document(&uri, text.clone());
+        let first_publications = state.check_all();
+        let first_diagnostics = diagnostics_for_uri(&first_publications, &uri);
+        let first_hole = first_diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code.as_ref() == Some(&NumberOrString::String("HOLE".to_string()))
+            })
+            .unwrap_or_else(|| panic!("missing first hole diagnostic: {first_diagnostics:#?}"));
+        assert_eq!(first_hole.severity, Some(DiagnosticSeverity::ERROR));
+        assert!(
+            first_hole.message.contains("valid fills include: iVal"),
+            "first diagnostic should include fill suggestions: {}",
+            first_hole.message
+        );
+
+        state.save_document(&uri, Some(text));
+        let saved_publications = state.check_all();
+        let saved_diagnostics = diagnostics_for_uri(&saved_publications, &uri);
+        let saved_hole = saved_diagnostics
+            .iter()
+            .find(|diagnostic| {
+                diagnostic.code.as_ref() == Some(&NumberOrString::String("HOLE".to_string()))
+            })
+            .unwrap_or_else(|| panic!("missing saved hole diagnostic: {saved_diagnostics:#?}"));
+        assert_eq!(saved_hole.severity, Some(DiagnosticSeverity::ERROR));
+        assert!(
+            saved_hole.message.contains("valid fills include: iVal"),
+            "saved diagnostic should include fill suggestions: {}",
+            saved_hole.message
+        );
+
+        let hover = state
+            .hover(&uri, position)
+            .expect("saved second-arg constructor hole should have LSP hover");
+
+        assert_hover_contains(hover.clone(), "**Unfilled hole**");
+        assert_hover_contains(hover.clone(), "found hole of type `Int`");
+        assert_hover_contains(hover.clone(), "Bindings in scope");
+        assert_hover_contains(hover.clone(), "iVal : Int");
+        assert_hover_contains(hover.clone(), "Valid fills include");
+        assert_hover_contains(hover.clone(), "`iVal`");
+        assert_eq!(
+            hover.range,
+            Some(Range::new(
+                position,
+                Position::new(position.line, position.character + 2)
+            ))
+        );
+    }
+
+    #[test]
     fn inferred_signature_hints_are_configurable_editor_diagnostics() {
         let project_root = temp_root("signature_hints");
         let source = project_root.join("scratch.sv");

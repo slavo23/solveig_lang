@@ -186,7 +186,7 @@ impl HoleInfo {
     ) -> Diagnostic {
         let mut diag = Diagnostic::new(
             "HOLE",
-            Severity::Note,
+            Severity::Error,
             format!("found hole of type `{}`", self.pretty_type(tables),),
         )
         .with_label(Label::primary(

@@ -44,6 +44,7 @@ pub struct HoverInfo {
     signature: String,
     documentation: Option<String>,
     provenance: Option<String>,
+    markdown: Option<String>,
 }
 
 impl HoverInfo {
@@ -60,7 +61,13 @@ impl HoverInfo {
             signature: signature.into(),
             documentation,
             provenance: None,
+            markdown: None,
         }
+    }
+
+    pub(super) fn with_markdown(mut self, markdown: impl Into<String>) -> Self {
+        self.markdown = Some(markdown.into());
+        self
     }
 
     pub(super) fn with_optional_provenance(mut self, provenance: Option<String>) -> Self {
@@ -94,6 +101,11 @@ impl HoverInfo {
     /// Returns where the hovered semantic item was defined, when available.
     pub fn provenance(&self) -> Option<&str> {
         self.provenance.as_deref()
+    }
+
+    /// Returns complete Markdown to display instead of the default signature block, when present.
+    pub fn markdown(&self) -> Option<&str> {
+        self.markdown.as_deref()
     }
 }
 

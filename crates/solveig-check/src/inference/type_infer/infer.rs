@@ -1,3 +1,10 @@
+#[derive(Clone)]
+struct AppInferenceSpans {
+    application: Span,
+    function: Span,
+    argument: Span,
+}
+
 impl TypeChecker<'_> {
     fn infer_lambda_param_type(
         &mut self,
@@ -180,8 +187,11 @@ impl TypeChecker<'_> {
                     &function_type_applied,
                     argument,
                     &elaborated_function,
-                    function.anno.clone(),
-                    argument.anno.clone(),
+                    AppInferenceSpans {
+                        application: span,
+                        function: function.anno.clone(),
+                        argument: argument.anno.clone(),
+                    },
                 )
             }
             TermExpr::Anno(inner, annotation_type) => {
@@ -295,8 +305,7 @@ impl TypeChecker<'_> {
         function_type: &Ty,
         argument: &TermExprNode<Span>,
         elaborated_function: &TermExprNode<TcMetadata, Span>,
-        span: Span,
-        arg_span: Span,
+        spans: AppInferenceSpans,
     ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, Ty)> {
         let function_type = ctx.apply(function_type);
 
@@ -320,7 +329,7 @@ impl TypeChecker<'_> {
 
                 let wrapped_function = TermExprNode::new(
                     TermExpr::TyApp(Box::new(elaborated_function.clone()), ty_arg),
-                    TcMetadata::new(span.clone(), instantiated_type.clone()),
+                    TcMetadata::new(spans.function.clone(), instantiated_type.clone()),
                 );
 
                 self.solve_app_inference(
@@ -328,20 +337,25 @@ impl TypeChecker<'_> {
                     &instantiated_type,
                     argument,
                     &wrapped_function,
-                    span,
-                    arg_span,
+                    spans,
                 )
             }
             Ty::TyForAll(_, preds, body) => {
-                let evidence_args = self.add_wanteds(preds.clone(), span.clone());
+                let evidence_args = self.add_wanteds(preds.clone(), spans.function.clone());
                 let body_type = (**body).clone();
                 let wrapped_function = wrap_ev_apps(
                     elaborated_function.clone(),
                     evidence_args,
-                    span.clone(),
+                    spans.function.clone(),
                     &body_type,
                 );
-                self.solve_app_inference(ctx, &body_type, argument, &wrapped_function, span, arg_span)
+                self.solve_app_inference(
+                    ctx,
+                    &body_type,
+                    argument,
+                    &wrapped_function,
+                    spans,
+                )
             }
             Ty::TyArr(domain, codomain) => {
                 let (delta, elaborated_argument) = self.solve_checking(ctx, argument, domain)?;
@@ -352,7 +366,7 @@ impl TypeChecker<'_> {
                         Box::new(elaborated_function.clone()),
                         Box::new(elaborated_argument),
                     ),
-                    span,
+                    spans.application,
                     result_type.clone(),
                 );
                 Ok((delta, elaborated, result_type))
@@ -391,15 +405,15 @@ impl TypeChecker<'_> {
                         Box::new(elaborated_function.clone()),
                         Box::new(elaborated_argument),
                     ),
-                    span,
+                    spans.application,
                     result_type.clone(),
                 );
                 Ok((delta, elaborated, result_type))
             }
 
             other => Err(TypeError::NonFunctionApplication {
-                span: self.get_file_span(span),
-                arg_span: self.get_file_span(arg_span),
+                span: self.get_file_span(spans.function),
+                arg_span: self.get_file_span(spans.argument),
                 actual: self.pretty_type(other),
             }),
         }

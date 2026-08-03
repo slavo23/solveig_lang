@@ -11,8 +11,13 @@ pub(crate) fn lsp_hover(
     source_map: &SourceMap,
     encoding: PositionEncoding,
 ) -> Hover {
-    let signature = trim_hover_text(info.signature());
-    let mut value = format!("```solveig\n{signature}\n```");
+    let mut value = info.markdown().map_or_else(
+        || {
+            let signature = trim_hover_text(info.signature());
+            format!("```solveig\n{signature}\n```")
+        },
+        trim_hover_text,
+    );
 
     if let Some(documentation) = info
         .documentation()

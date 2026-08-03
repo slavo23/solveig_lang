@@ -242,6 +242,226 @@ main = 0
 }
 
 #[test]
+fn hover_on_typed_hole_uses_the_hole_span_and_type() {
+    let project_root = temp_root("typed_hole_hover");
+    let file = project_root.join("src/main.sv");
+    let source = r#"main : Bool
+main = if True then ?? else False
+"#;
+    write_source(&file, source);
+
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation
+        .check(true)
+        .expect("typed-hole hover fixture should check to diagnostics");
+
+    assert!(
+        !result.success(),
+        "typed-hole fixture should not be executable"
+    );
+    assert!(
+        result
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code == "HOLE"),
+        "typed-hole diagnostic missing: {:?}",
+        result.diagnostics()
+    );
+
+    let hole_start = offset_in_line(source, "main = if True then ?? else False", "??");
+    let hover = compilation
+        .hover_info(&file, hole_start)
+        .expect("typed hole should have hover info");
+
+    assert_eq!(hover.signature(), "found hole of type `Bool`");
+    let markdown = hover
+        .markdown()
+        .expect("typed-hole hover should provide diagnostic markdown");
+    assert_contains(markdown, "**Unfilled hole**");
+    assert_contains(markdown, "found hole of type `Bool`");
+    assert_contains(markdown, "Expected type: `Bool`");
+    assert_eq!(hover.span(), hole_start..hole_start + 2);
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn hover_on_underscore_hole_uses_the_hole_span_and_type() {
+    let project_root = temp_root("underscore_hole_hover");
+    let file = project_root.join("src/main.sv");
+    let source = r#"main : Bool
+main = if True then _ else False
+"#;
+    write_source(&file, source);
+
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation
+        .check(true)
+        .expect("underscore-hole hover fixture should check to diagnostics");
+
+    assert!(
+        result
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code == "HOLE"),
+        "underscore-hole diagnostic missing: {:?}",
+        result.diagnostics()
+    );
+
+    let hole_start = offset_in_line(source, "main = if True then _ else False", "_");
+    let hover = compilation
+        .hover_info(&file, hole_start)
+        .expect("underscore hole should have hover info");
+
+    assert_eq!(hover.signature(), "found hole of type `Bool`");
+    let markdown = hover
+        .markdown()
+        .expect("underscore-hole hover should provide diagnostic markdown");
+    assert_contains(markdown, "**Unfilled hole**");
+    assert_contains(markdown, "found hole of type `Bool`");
+    assert_contains(markdown, "Expected type: `Bool`");
+    assert_eq!(hover.span(), hole_start..hole_start + 1);
+
+    let _ = fs::remove_dir_all(project_root);
+}
+
+#[test]
+fn hover_on_hole_inside_map_constructor_lambda_uses_hole_type() {
+    let project_root = fixture_root("examples/smoke_suite");
+    let file = project_root.join("src/main.sv");
+    let original = fs::read_to_string(&file).expect("smoke suite main source should load");
+    let source = original.replace("Entry iVal iVal", "Entry ?? iVal");
+
+    let mut compilation = Compilation::new(&project_root);
+    compilation.set_overlay(&file, source.clone());
+    let result = compilation
+        .check(true)
+        .expect("smoke-suite hole fixture should check to diagnostics");
+
+    assert!(
+        result
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code == "HOLE"),
+        "constructor-lambda hole diagnostic missing: {:?}",
+        result.diagnostics()
+    );
+
+    let line = "    let intEntries = (map (fun iVal => Entry ?? iVal) (range 1 20000 True)) in ";
+    let hole_start = offset_in_line(&source, line, "??");
+    let hover = compilation
+        .hover_info(&file, hole_start)
+        .expect("constructor-lambda hole should have hover info");
+
+    assert_eq!(hover.signature(), "found hole of type `Int`");
+    let markdown = hover
+        .markdown()
+        .expect("constructor-lambda hole should provide diagnostic markdown");
+    assert_contains(markdown, "**Unfilled hole**");
+    assert_contains(markdown, "found hole of type `Int`");
+    assert_contains(markdown, "Expected type: `Int`");
+    assert_contains(markdown, "Bindings in scope");
+    assert_contains(markdown, "iVal : Int");
+    assert_contains(markdown, "Valid fills include");
+    assert_contains(markdown, "`iVal`");
+    assert_eq!(hover.span(), hole_start..hole_start + 2);
+}
+
+#[test]
+fn hover_on_second_map_constructor_lambda_hole_shows_fill_suggestions() {
+    let project_root = fixture_root("examples/smoke_suite");
+    let file = project_root.join("src/main.sv");
+    let original = fs::read_to_string(&file).expect("smoke suite main source should load");
+    let source = original.replace("Entry iVal iVal", "Entry iVal ??");
+
+    let mut compilation = Compilation::new(&project_root);
+    compilation.set_overlay(&file, source.clone());
+    let result = compilation
+        .check(true)
+        .expect("smoke-suite second-arg hole fixture should check to diagnostics");
+
+    assert!(
+        result
+            .diagnostics()
+            .iter()
+            .any(|diagnostic| diagnostic.code == "HOLE"),
+        "constructor-lambda second-arg hole diagnostic missing: {:?}",
+        result.diagnostics()
+    );
+
+    let line = "    let intEntries = (map (fun iVal => Entry iVal ??) (range 1 20000 True)) in ";
+    let hole_start = offset_in_line(&source, line, "??");
+    let hover = compilation
+        .hover_info(&file, hole_start)
+        .expect("constructor-lambda second-arg hole should have hover info");
+
+    assert_eq!(hover.signature(), "found hole of type `Int`");
+    let markdown = hover
+        .markdown()
+        .expect("constructor-lambda second-arg hole should provide diagnostic markdown");
+    assert_contains(markdown, "**Unfilled hole**");
+    assert_contains(markdown, "found hole of type `Int`");
+    assert_contains(markdown, "Expected type: `Int`");
+    assert_contains(markdown, "Bindings in scope");
+    assert_contains(markdown, "iVal : Int");
+    assert_contains(markdown, "Valid fills include");
+    assert_contains(markdown, "`iVal`");
+    assert_eq!(hover.span(), hole_start..hole_start + 2);
+}
+
+#[test]
+fn hole_diagnostics_and_hovers_survive_incremental_recheck() {
+    let project_root = fixture_root("examples/smoke_suite");
+    let file = project_root.join("src/main.sv");
+    let original = fs::read_to_string(&file).expect("smoke suite main source should load");
+    let source = original.replace("Entry iVal iVal", "Entry iVal ??");
+
+    let mut compilation = Compilation::new(&project_root);
+    compilation.set_overlay(&file, source.clone());
+
+    {
+        let result = compilation
+            .check(true)
+            .expect("first smoke-suite hole check should return diagnostics");
+        assert!(
+            result
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == "HOLE"),
+            "first check lost the hole diagnostic: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    {
+        let result = compilation
+            .check(true)
+            .expect("second smoke-suite hole check should return diagnostics");
+        assert!(
+            result
+                .diagnostics()
+                .iter()
+                .any(|diagnostic| diagnostic.code == "HOLE"),
+            "incremental recheck lost the hole diagnostic: {:?}",
+            result.diagnostics()
+        );
+    }
+
+    let line = "    let intEntries = (map (fun iVal => Entry iVal ??) (range 1 20000 True)) in ";
+    let hole_start = offset_in_line(&source, line, "??");
+    let hover = compilation
+        .hover_info(&file, hole_start)
+        .expect("incremental recheck should retain rich hole hover");
+    let markdown = hover
+        .markdown()
+        .expect("incremental recheck should retain diagnostic markdown");
+    assert_contains(markdown, "Bindings in scope");
+    assert_contains(markdown, "iVal : Int");
+    assert_contains(markdown, "Valid fills include");
+    assert_contains(markdown, "`iVal`");
+}
+
+#[test]
 fn hover_info_covers_h13_semantic_targets() {
     let project_root = fixture_root("tests/fixtures/hover");
     let main_file = project_root.join("src/main.sv");

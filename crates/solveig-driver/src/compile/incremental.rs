@@ -14,6 +14,7 @@ pub(super) struct IncrementalCache {
     pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
     pub(super) module_files: FxHashMap<ModuleId, FileId>,
     pub(super) resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
+    pub(super) non_reusable_modules: FxHashSet<ModuleName>,
     pub(super) next_instance_id: u32,
     pub(super) verified_core: bool,
 }
@@ -35,6 +36,7 @@ impl IncrementalCache {
         for module_name in project.modules.keys() {
             if invalidated.contains(module_name)
                 || is_compiler_prelude_module(session, module_name)
+                || self.non_reusable_modules.contains(module_name)
                 || !self.has_current_artifacts(project, module_name)
             {
                 continue;

@@ -70,7 +70,7 @@ main = ??
     assert!(!result.success());
     assert!(
         result.diagnostics().iter().any(|diagnostic| {
-            diagnostic.code == "HOLE" && diagnostic.severity == Severity::Note
+            diagnostic.code == "HOLE" && diagnostic.severity == Severity::Error
         })
     );
 
@@ -350,7 +350,7 @@ main = 1
         !result
             .diagnostics()
             .iter()
-            .any(|diagnostic| diagnostic.severity == Severity::Error),
+            .any(|diagnostic| diagnostic.code == "TC0019"),
         "{:#?}",
         result.diagnostics()
     );
@@ -358,7 +358,7 @@ main = 1
         result
             .diagnostics()
             .iter()
-            .any(|diagnostic| diagnostic.code == "HOLE")
+            .any(|diagnostic| diagnostic.code == "HOLE" && diagnostic.severity == Severity::Error)
     );
 
     let _ = fs::remove_dir_all(project_root);

@@ -17,6 +17,8 @@ struct FrontendState<'a> {
     prelude_cache: Option<PreludeCache>,
     code_actions: Vec<SourceCodeAction>,
     completion_candidates: Vec<SourceCompletionCandidate>,
+    hole_hovers: Vec<HoverInfo>,
+    non_reusable_modules: FxHashSet<ModuleName>,
     freshly_checked_modules: Vec<ModuleName>,
     reused_modules: Vec<ModuleName>,
 }
@@ -255,6 +257,8 @@ impl<'a> FrontendState<'a> {
             prelude_cache: prelude_cache.cloned(),
             code_actions: Vec::new(),
             completion_candidates: Vec::new(),
+            hole_hovers: Vec::new(),
+            non_reusable_modules: FxHashSet::default(),
             freshly_checked_modules: Vec::new(),
             reused_modules: Vec::new(),
         })
@@ -296,6 +300,7 @@ impl<'a> FrontendState<'a> {
             self.names,
             &modules,
         );
+        local_hovers.extend(self.hole_hovers.clone());
         local_hovers.extend(artifacts.source_type_var_hovers);
         local_hovers.sort_by_key(|info| {
             let span = info.file_span();
@@ -606,6 +611,12 @@ impl<'a> FrontendState<'a> {
                 &check_env.ctor_table,
                 check_env.pretty_tables(self.names),
             ));
+            self.hole_hovers.extend(hover::hole_hover_infos(
+                &checked_raw.holes,
+                &check_env.constructor_types,
+                &check_env.ctor_table,
+                check_env.pretty_tables(self.names),
+            ));
             let diagnostics = hole_diagnostics(
                 &checked_raw.holes,
                 &check_env.constructor_types,
@@ -617,6 +628,7 @@ impl<'a> FrontendState<'a> {
                 self.session.diagnostics().push(diagnostic);
             }
 
+            self.non_reusable_modules.insert(module_name.clone());
             failure = Some(FrontendPhase::Hole);
         }
 

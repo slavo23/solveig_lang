@@ -169,7 +169,8 @@ fn diff_preview(expected: &str, actual: &str) -> String {
 }
 
 fn preview_around(text: &str, byte_index: usize) -> String {
-    let start = text[..byte_index.min(text.len())]
+    let byte_index = previous_char_boundary(text, byte_index.min(text.len()));
+    let start = text[..byte_index]
         .char_indices()
         .rev()
         .nth(80)
@@ -184,4 +185,11 @@ fn preview_around(text: &str, byte_index: usize) -> String {
     let suffix = if end < text.len() { "..." } else { "" };
 
     format!("{prefix}{:?}{suffix}", &text[start..end])
+}
+
+fn previous_char_boundary(text: &str, mut byte_index: usize) -> usize {
+    while !text.is_char_boundary(byte_index) {
+        byte_index -= 1;
+    }
+    byte_index
 }

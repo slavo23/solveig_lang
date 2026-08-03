@@ -208,6 +208,7 @@ fn hover_token_kind(tokens: &[solveig_syntax::lexer::PosToken], index: usize) ->
         Token::Ident
         | Token::UpperIdent
         | Token::Hole
+        | Token::Underscore
         | Token::Operator
         | Token::Plus
         | Token::Minus
@@ -219,7 +220,7 @@ fn hover_token_kind(tokens: &[solveig_syntax::lexer::PosToken], index: usize) ->
         | Token::Greater
         | Token::LessEq
         | Token::GreaterEq => HoverTokenKind::Semantic,
-        Token::Underscore | Token::Cons => HoverTokenKind::ReferenceOnly,
+        Token::Cons => HoverTokenKind::ReferenceOnly,
         Token::LParen | Token::RParen | Token::LBrack | Token::RBrack => HoverTokenKind::Delimiter,
         _ => HoverTokenKind::Quiet,
     }
@@ -271,6 +272,66 @@ fn previous_significant_token(
         .rev()
         .find(|(_, token)| !token.is_synthetic() && !token.kind.is_trivia())
         .map(|(index, _)| index)
+}
+
+pub(super) fn hole_hover_infos(
+    holes: &[HoleInfo],
+    constructor_types: &FxHashMap<CtorId, Ty>,
+    ctor_table: &CtorTable,
+    pretty_tables: PrettyTables<'_>,
+) -> Vec<HoverInfo> {
+    holes
+        .iter()
+        .map(|hole| hole_hover_info(hole, constructor_types, ctor_table, pretty_tables))
+        .collect()
+}
+
+fn hole_hover_info(
+    hole: &HoleInfo,
+    constructor_types: &FxHashMap<CtorId, Ty>,
+    ctor_table: &CtorTable,
+    pretty_tables: PrettyTables<'_>,
+) -> HoverInfo {
+    let expected = source_signature::pretty_source_ty(
+        &solveig_check::inference::holes::prettify_evars(&hole.expected_type),
+        pretty_tables,
+    );
+    let mut markdown = format!(
+        "**Unfilled hole**\n\nfound hole of type `{expected}`\n\nExpected type: `{expected}`"
+    );
+
+    if !hole.context.is_empty() {
+        markdown.push_str("\n\nBindings in scope:\n\n```solveig\n");
+        for (name, ty) in &hole.context {
+            let ty = source_signature::pretty_source_ty(
+                &solveig_check::inference::holes::prettify_evars(ty),
+                pretty_tables,
+            );
+            markdown.push_str(name);
+            markdown.push_str(" : ");
+            markdown.push_str(&ty);
+            markdown.push('\n');
+        }
+        markdown.push_str("```");
+    }
+
+    let suggestions = hole.suggestions(constructor_types, ctor_table, pretty_tables.names);
+    if !suggestions.is_empty() {
+        markdown.push_str("\n\nValid fills include:\n\n");
+        for suggestion in suggestions {
+            markdown.push_str("- `");
+            markdown.push_str(&suggestion);
+            markdown.push_str("`\n");
+        }
+    }
+
+    HoverInfo::new(
+        hole.span.file,
+        hole.span.span.to_usize_range(),
+        format!("found hole of type `{expected}`"),
+        None,
+    )
+    .with_markdown(markdown)
 }
 
 fn token_hover_info(
@@ -547,17 +608,8 @@ fn hover_expr(
         return;
     }
 
-    if !expr.anno.span.is_empty() {
-        consider_hover_candidate(
-            best,
-            1,
-            HoverInfo::new(
-                file_id,
-                expr.anno.span.clone(),
-                expr.anno.inferred_type.pretty_with_tables(pretty_tables),
-                None,
-            ),
-        );
+    if let Some(info) = expr_hover_info(file_id, expr, pretty_tables) {
+        consider_hover_candidate(best, 1, info);
     }
 
     match &expr.node {
@@ -592,6 +644,29 @@ fn hover_expr(
             hover_expr(file_id, in_expr, pretty_tables, offset, best);
         }
     }
+}
+
+fn expr_hover_info(
+    file_id: FileId,
+    expr: &TermExprNode<TcMetadata, Range<usize>>,
+    pretty_tables: PrettyTables<'_>,
+) -> Option<HoverInfo> {
+    if expr.anno.span.is_empty() {
+        return None;
+    }
+
+    let ty = expr.anno.inferred_type.pretty_with_tables(pretty_tables);
+    if matches!(&expr.node, TermExpr::Hole) {
+        let message = format!("found hole of type `{ty}`");
+        let markdown = format!(
+            "**Unfilled hole**\n\nExpected type: `{ty}`\n\nFill this placeholder with an expression of the expected type."
+        );
+        return Some(
+            HoverInfo::new(file_id, expr.anno.span.clone(), message, None).with_markdown(markdown),
+        );
+    }
+
+    Some(HoverInfo::new(file_id, expr.anno.span.clone(), ty, None))
 }
 
 fn generated_hover_wrapper_body(

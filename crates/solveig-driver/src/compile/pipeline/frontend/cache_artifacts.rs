@@ -31,6 +31,7 @@ impl<'a> FrontendState<'a> {
             checked: self.checked.clone(),
             module_files: self.module_files.clone(),
             resolutions: self.resolutions.clone(),
+            non_reusable_modules: self.non_reusable_modules.clone(),
             next_instance_id: self.next_instance_id,
             verified_core: self.verify_core,
         }
