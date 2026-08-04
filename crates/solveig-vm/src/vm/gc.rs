@@ -174,7 +174,7 @@ impl Vm {
 
     pub(super) fn maybe_gc(&mut self) {
         // AOSA's GHC RTS chapter treats allocation checks as safe points; the
-        // stress knob makes that check fail at every allocation boundary.
+        // stress knob makes that check fail at a low fixed allocation threshold.
         if self.heap.should_collect() {
             self.collect_garbage();
         }

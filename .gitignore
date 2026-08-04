@@ -1,6 +1,7 @@
 /target
 /syntax/target
 /core_lang/target
+/fuzz/target
 /solveig_vscode/node_modules
 .DS_Store
 profile.json.gz

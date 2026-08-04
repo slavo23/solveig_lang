@@ -5,7 +5,7 @@ use crate::values::{ObjId, Value};
 
 const DEFAULT_GC_INITIAL_THRESHOLD: usize = 32_768;
 const DEFAULT_GC_LIVE_FLOOR: usize = 65_536;
-const GC_STRESS_INTERVAL: usize = 1;
+const DEFAULT_GC_STRESS_THRESHOLD: usize = 256;
 
 #[derive(Debug, Clone, Copy)]
 pub enum HeapObject {
@@ -85,11 +85,7 @@ impl Default for Heap {
     fn default() -> Self {
         let gc_stress = gc_stress_enabled();
         let gc_threshold_override = gc_threshold_override();
-        let next_gc_at = if gc_stress {
-            GC_STRESS_INTERVAL
-        } else {
-            gc_threshold_override.unwrap_or(DEFAULT_GC_INITIAL_THRESHOLD)
-        };
+        let next_gc_at = initial_gc_threshold(gc_stress, gc_threshold_override);
 
         Self {
             objects: Vec::new(),
@@ -113,13 +109,8 @@ impl Heap {
 
     pub fn reset_collection_accounting(&mut self, live: usize) {
         self.allocations_since_gc = 0;
-        self.next_gc_at = if self.gc_stress {
-            GC_STRESS_INTERVAL
-        } else if let Some(threshold) = self.gc_threshold_override {
-            threshold
-        } else {
-            live.max(DEFAULT_GC_LIVE_FLOOR) * 4
-        };
+        self.next_gc_at =
+            next_gc_threshold_after_collection(self.gc_stress, self.gc_threshold_override, live);
     }
 
     #[inline]
@@ -252,6 +243,54 @@ fn gc_threshold_override() -> Option<usize> {
         .ok()
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|threshold| *threshold > 0)
+}
+
+fn initial_gc_threshold(gc_stress: bool, gc_threshold_override: Option<usize>) -> usize {
+    gc_threshold_override.unwrap_or(if gc_stress {
+        DEFAULT_GC_STRESS_THRESHOLD
+    } else {
+        DEFAULT_GC_INITIAL_THRESHOLD
+    })
+}
+
+fn next_gc_threshold_after_collection(
+    gc_stress: bool,
+    gc_threshold_override: Option<usize>,
+    live: usize,
+) -> usize {
+    gc_threshold_override.unwrap_or(if gc_stress {
+        DEFAULT_GC_STRESS_THRESHOLD
+    } else {
+        live.max(DEFAULT_GC_LIVE_FLOOR) * 4
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gc_stress_uses_low_fixed_threshold_by_default() {
+        assert_eq!(
+            initial_gc_threshold(true, None),
+            DEFAULT_GC_STRESS_THRESHOLD
+        );
+        assert_eq!(
+            next_gc_threshold_after_collection(true, None, 100_000),
+            DEFAULT_GC_STRESS_THRESHOLD
+        );
+    }
+
+    #[test]
+    fn explicit_gc_threshold_overrides_stress_and_adaptive_thresholds() {
+        assert_eq!(initial_gc_threshold(true, Some(1)), 1);
+        assert_eq!(initial_gc_threshold(false, Some(512)), 512);
+        assert_eq!(next_gc_threshold_after_collection(true, Some(1), 100), 1);
+        assert_eq!(
+            next_gc_threshold_after_collection(false, Some(512), 100_000),
+            512
+        );
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
