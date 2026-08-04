@@ -2,8 +2,9 @@
 //! The parser owns structure; this pass only removes mechanically empty nodes.
 
 use la_arena::Arena;
+use solveig_base::ice;
 
-use super::{CstId, NodeOrToken, PosToken, SyntaxNode, SyntaxTree, token_is_meaningful};
+use super::{CstId, NodeOrToken, PosToken, SyntaxNode, SyntaxTree, TokenId, token_is_meaningful};
 
 pub(super) fn collapse_trivial_wrappers(tree: &mut SyntaxTree) {
     let old_nodes = std::mem::replace(&mut tree.nodes, Arena::new());
@@ -17,7 +18,7 @@ pub(super) fn collapse_trivial_wrappers(tree: &mut SyntaxTree) {
 
     let rebuilt = rebuilder.rebuild_node(old_root, true);
     let [NodeOrToken::Node(root)] = rebuilt.as_slice() else {
-        panic!("ICE: CST root rebuild must produce exactly one root node");
+        ice!("CST root rebuild must produce exactly one root node");
     };
 
     tree.root = *root;
@@ -89,7 +90,13 @@ impl CstRebuilder<'_> {
 
         match child {
             NodeOrToken::Node(id) => self.nodes[id.0].parent = Some(parent),
-            NodeOrToken::Token(id) => self.token_parents[id.index()] = Some(parent),
+            NodeOrToken::Token(id) => {
+                *self
+                    .token_parents
+                    .get_mut(id.index())
+                    .expect("ICE: rebuilt CST token parent index is outside token stream") =
+                    Some(parent);
+            }
         }
     }
 
@@ -104,7 +111,7 @@ impl CstRebuilder<'_> {
         for child in &old.children {
             match child {
                 NodeOrToken::Node(_) => child_nodes += 1,
-                NodeOrToken::Token(id) if token_is_meaningful(&self.tokens[id.index()]) => {
+                NodeOrToken::Token(id) if token_is_meaningful(self.token(*id)) => {
                     return false;
                 }
                 NodeOrToken::Token(_) => {}
@@ -112,5 +119,11 @@ impl CstRebuilder<'_> {
         }
 
         child_nodes == 1
+    }
+
+    fn token(&self, id: TokenId) -> &PosToken {
+        self.tokens
+            .get(id.index())
+            .expect("ICE: CST wrapper rebuild token id is outside token stream")
     }
 }

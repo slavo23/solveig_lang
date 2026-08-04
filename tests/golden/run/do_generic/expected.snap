@@ -1,0 +1,5 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+(Just 42, (22, 13))

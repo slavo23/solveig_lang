@@ -49,7 +49,9 @@ impl NameRef {
     }
 
     pub fn prefix(&self) -> &[Symbol] {
-        &self.segments[..self.segments.len().saturating_sub(1)]
+        self.segments
+            .get(..self.segments.len().saturating_sub(1))
+            .expect("ICE: NameRef prefix range must be in bounds")
     }
 
     pub fn display(&self, session: &Session) -> String {

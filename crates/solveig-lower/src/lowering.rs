@@ -56,7 +56,7 @@ impl LowerCtx {
                 arity: info.arity,
             });
         }
-        panic!("ICE: unbound variable during lowering: {name}");
+        solveig_base::ice!("unbound variable during lowering: {name}");
     }
 
     fn resolve_ev_var(&self, evvar: EvVarId) -> Rc<IRExpr> {
@@ -66,7 +66,7 @@ impl LowerCtx {
             }
         }
 
-        panic!("ICE: unbound evidence variable during lowering: {evvar:?}");
+        solveig_base::ice!("unbound evidence variable during lowering: {evvar:?}");
     }
 
     fn constructor_named(&self, name: &str) -> Option<&LowerConstructorInfo> {
@@ -145,8 +145,8 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
         },
         TermExpr::Con(id) => {
             let info = ctx.constructors.get(id).unwrap_or_else(|| {
-                panic!(
-                    "ICE: unknown constructor during lowering: {}",
+                solveig_base::ice!(
+                    "unknown constructor during lowering: {}",
                     ctx.constructor_name_for_error(*id)
                 )
             });
@@ -209,7 +209,7 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
 
             Rc::new(IRExpr::Let(lowered_binder, lowered_in_expr))
         }
-        TermExpr::Hole => panic!("ICE: driver allowed a typed hole to reach lowering"),
+        TermExpr::Hole => solveig_base::ice!("driver allowed a typed hole to reach lowering"),
     }
 }
 
@@ -246,18 +246,20 @@ fn lower_ev(ctx: &mut LowerCtx, ev: &Ev) -> Rc<IRExpr> {
     match ev {
         Ev::Var(evvar) => ctx.resolve_ev_var(*evvar),
         Ev::Placeholder(evvar) => {
-            panic!("ICE: evidence placeholder {evvar:?} survived into lowering")
+            solveig_base::ice!("evidence placeholder {evvar:?} survived into lowering")
         }
         Ev::Inst(instance_id, _ty_args, evidence_args) => {
             let global_name = ctx
                 .dicts
                 .instance_global(*instance_id)
                 .unwrap_or_else(|| {
-                    panic!("ICE: missing dictionary global for instance {instance_id:?}")
+                    solveig_base::ice!("missing dictionary global for instance {instance_id:?}")
                 })
                 .to_string();
             let global_index = *ctx.globals.get(&global_name).unwrap_or_else(|| {
-                panic!("ICE: dictionary global `{global_name}` was not registered before lowering")
+                solveig_base::ice!(
+                    "dictionary global `{global_name}` was not registered before lowering"
+                )
             });
 
             evidence_args
@@ -290,7 +292,7 @@ fn project_dict_field(
     let layout = ctx
         .dicts
         .class(class_id)
-        .unwrap_or_else(|| panic!("ICE: missing dictionary layout for class {class_id:?}"));
+        .unwrap_or_else(|| solveig_base::ice!("missing dictionary layout for class {class_id:?}"));
 
     project_dict_layout_field(layout, dict, field_index)
 }
@@ -365,8 +367,8 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> LowerPattern {
         Pattern::Lit(lit_val) => LowerPattern::Lit(lit_val.clone()),
         Pattern::Con(id, sub_patterns) => {
             let info = ctx.constructors.get(id).unwrap_or_else(|| {
-                panic!(
-                    "ICE: unknown constructor in pattern during lowering: {}",
+                solveig_base::ice!(
+                    "unknown constructor in pattern during lowering: {}",
                     ctx.constructor_name_for_error(*id)
                 )
             });
@@ -387,8 +389,8 @@ fn lower_instance_dict_global<A, P>(
         .dicts
         .class(inst.head.class_id)
         .unwrap_or_else(|| {
-            panic!(
-                "ICE: missing dictionary layout for instance head {:?}",
+            solveig_base::ice!(
+                "missing dictionary layout for instance head {:?}",
                 inst.head.class_id
             )
         })
@@ -425,9 +427,10 @@ fn lower_instance_dict_global<A, P>(
                 method.name == method_layout.name || method.name == method_layout.short_name
             })
             .unwrap_or_else(|| {
-                panic!(
-                    "ICE: instance {:?} missing implementation for class method {}",
-                    inst.id, method_layout.name
+                solveig_base::ice!(
+                    "instance {:?} missing implementation for class method {}",
+                    inst.id,
+                    method_layout.name
                 )
             });
 
@@ -465,12 +468,13 @@ fn build_constructor_table<A, P>(
                 .ctor_table
                 .get(constructor_def.id)
                 .unwrap_or_else(|| {
-                    panic!(
-                        "ICE: lowering constructor table missing CtorId {:?}",
+                    solveig_base::ice!(
+                        "lowering constructor table missing CtorId {:?}",
                         constructor_def.id
                     )
                 });
-            let arity = constructor_def.fields.len() as u16;
+            let arity = u16::try_from(constructor_def.fields.len())
+                .expect("ICE: constructor arity exceeded u16 capacity");
             table.insert(
                 constructor_def.id,
                 LowerConstructorInfo {
@@ -676,7 +680,7 @@ mod tests {
                 ));
                 assert!(matches!(arms[0].body.as_ref(), IRExpr::BVar(0)));
             }
-            other => panic!("ICE: expected dictionary projection case, got {other:?}"),
+            other => solveig_base::ice!("expected dictionary projection case, got {other:?}"),
         }
     }
 }

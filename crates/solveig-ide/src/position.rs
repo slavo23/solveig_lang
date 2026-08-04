@@ -407,13 +407,26 @@ impl PositionIndex {
 
     fn empty_list_token(&self, token_id: TokenId) -> bool {
         let token_index = token_id.index();
-        match self.cst.tokens()[token_index].kind {
+        let Some(token) = self.cst.tokens().get(token_index) else {
+            return false;
+        };
+        match token.kind {
             Token::LBrack => self
                 .next_significant_token(token_index)
-                .is_some_and(|next| self.cst.tokens()[next].kind == Token::RBrack),
+                .is_some_and(|next| {
+                    self.cst
+                        .tokens()
+                        .get(next)
+                        .is_some_and(|token| token.kind == Token::RBrack)
+                }),
             Token::RBrack => self
                 .previous_significant_token(token_index)
-                .is_some_and(|previous| self.cst.tokens()[previous].kind == Token::LBrack),
+                .is_some_and(|previous| {
+                    self.cst
+                        .tokens()
+                        .get(previous)
+                        .is_some_and(|token| token.kind == Token::LBrack)
+                }),
             _ => false,
         }
     }
@@ -429,7 +442,9 @@ impl PositionIndex {
     }
 
     fn previous_significant_token(&self, index: usize) -> Option<usize> {
-        self.cst.tokens()[..index]
+        self.cst
+            .tokens()
+            .get(..index)?
             .iter()
             .enumerate()
             .rev()

@@ -17,7 +17,7 @@ mod entailment_tests {
         let id = match name {
             "a" => TyVarId(0),
             "b" => TyVarId(1),
-            other => panic!("ICE: unknown test type variable `{other}`"),
+            other => solveig_base::ice!("unknown test type variable `{other}`"),
         };
         Ty::TyVar(id)
     }

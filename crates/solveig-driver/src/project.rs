@@ -91,7 +91,7 @@ fn mk_virtual_prelude_file(
         "<compiler-prelude>/{}.sv",
         module.as_string(session)
     ));
-    let file = session.add_file(path.clone(), source.clone());
+    let file = session.add_or_update_file(path.clone(), source.clone());
     let parsed = parse_source(session, file, &source);
     let imports = parsed.imports.clone();
 
@@ -150,7 +150,7 @@ fn scan_module_file(
         })?;
 
     let name = module_name_from_file(session, root, file)?;
-    let file_id = session.add_file(file.to_path_buf(), source.clone());
+    let file_id = session.add_or_update_file(file.to_path_buf(), source.clone());
     let parsed = parse_source(session, file_id, &source);
     let imports = parsed.imports.clone();
 
@@ -170,7 +170,7 @@ pub fn module_name_from_file(
 ) -> Result<ModuleName, DriverError> {
     let rel = file
         .strip_prefix(root)
-        .map_err(|_| DriverError::InvalidModulePath {
+        .map_err(|_error| DriverError::InvalidModulePath {
             file: file.to_path_buf(),
             root: root.to_path_buf(),
         })?;

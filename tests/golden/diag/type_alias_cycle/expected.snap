@@ -1,0 +1,14 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0013] Error: cyclic type alias
+   ╭─[ $WORKSPACE/tests/golden/diag/type_alias_cycle/src/main.sv:1:13 ]
+   │
+ 1 │ type Loop = Loop
+   │             ──┬─
+   │               ╰─── this alias expands through itself
+   │
+   │ Note: cycle: Loop -> Loop
+───╯
+resolve error

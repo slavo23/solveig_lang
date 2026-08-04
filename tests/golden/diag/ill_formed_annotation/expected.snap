@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[TC0011] Error: ill-formed type annotation
+   ╭─[ $WORKSPACE/tests/golden/diag/ill_formed_annotation/src/main.sv:1:8 ]
+   │
+ 1 │ main = fun (x : a) => x
+   │        ────────┬───────
+   │                ╰───────── annotation `a` is not well-formed for parameter `x`
+───╯
+type error

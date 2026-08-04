@@ -1140,7 +1140,7 @@ fn let_binding_hint_offset(source: &str, span: &Range<usize>, name: &str) -> Opt
 fn find_word(source: &str, word: &str, start: usize) -> Option<(usize, usize)> {
     let mut search_start = start.min(source.len());
 
-    while let Some(relative) = source[search_start..].find(word) {
+    while let Some(relative) = source.get(search_start..)?.find(word) {
         let word_start = search_start + relative;
         let word_end = word_start + word.len();
 
@@ -1156,18 +1156,22 @@ fn find_word(source: &str, word: &str, start: usize) -> Option<(usize, usize)> {
 
 fn is_word_start_boundary(source: &str, offset: usize) -> bool {
     offset == 0
-        || source[..offset]
-            .chars()
-            .next_back()
-            .is_none_or(|ch| !is_identifier_char(ch))
+        || source.get(..offset).is_none_or(|prefix| {
+            prefix
+                .chars()
+                .next_back()
+                .is_none_or(|ch| !is_identifier_char(ch))
+        })
 }
 
 fn is_word_end_boundary(source: &str, offset: usize) -> bool {
     offset >= source.len()
-        || source[offset..]
-            .chars()
-            .next()
-            .is_none_or(|ch| !is_identifier_char(ch))
+        || source.get(offset..).is_none_or(|suffix| {
+            suffix
+                .chars()
+                .next()
+                .is_none_or(|ch| !is_identifier_char(ch))
+        })
 }
 
 fn is_identifier_char(ch: char) -> bool {

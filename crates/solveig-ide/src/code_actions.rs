@@ -422,11 +422,19 @@ fn instance_method_insert_offset(source: &str, span: Span) -> u32 {
 
     let bytes = source.as_bytes();
     let mut before_trivia = end;
-    while before_trivia > start && bytes[before_trivia - 1].is_ascii_whitespace() {
+    while before_trivia > start
+        && bytes
+            .get(before_trivia - 1)
+            .is_some_and(|byte| byte.is_ascii_whitespace())
+    {
         before_trivia -= 1;
     }
 
-    if before_trivia > start && bytes[before_trivia - 1] == b'}' {
+    if before_trivia > start
+        && bytes
+            .get(before_trivia - 1)
+            .is_some_and(|byte| *byte == b'}')
+    {
         u32::try_from(before_trivia - 1).unwrap_or(span.end)
     } else {
         u32::try_from(end).unwrap_or(span.end)

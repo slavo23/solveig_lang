@@ -210,7 +210,7 @@ impl Parser<'_> {
     }
 
     pub(super) fn significant_before_index(&self, index: usize) -> Option<usize> {
-        self.tokens[..index.min(self.tokens.len())]
+        self.tokens_before(index)
             .iter()
             .enumerate()
             .rev()
@@ -243,17 +243,17 @@ impl Parser<'_> {
 
     pub(super) fn trailing_backticked_operator_start(&self, close_index: usize) -> Option<usize> {
         let close_backtick = self.significant_before_index(close_index)?;
-        if !matches!(self.tokens[close_backtick].kind, Token::Backtick) {
+        if !matches!(self.token(close_backtick).kind, Token::Backtick) {
             return None;
         }
 
         let name = self.significant_before_index(close_backtick)?;
-        if !matches!(self.tokens[name].kind, Token::Ident) {
+        if !matches!(self.token(name).kind, Token::Ident) {
             return None;
         }
 
         let open_backtick = self.significant_before_index(name)?;
-        if matches!(self.tokens[open_backtick].kind, Token::Backtick) {
+        if matches!(self.token(open_backtick).kind, Token::Backtick) {
             Some(open_backtick)
         } else {
             None
@@ -262,7 +262,7 @@ impl Parser<'_> {
 
     pub(super) fn trailing_operator_start(&self, close_index: usize) -> Option<usize> {
         let previous = self.significant_before_index(close_index)?;
-        if Self::token_is_section_operator(&self.tokens[previous].kind) {
+        if Self::token_is_section_operator(&self.token(previous).kind) {
             Some(previous)
         } else {
             self.trailing_backticked_operator_start(close_index)

@@ -22,8 +22,10 @@ fn mark_value(mark_bits: &mut [bool], value: Value, worklist: &mut Vec<ObjId>) {
 #[inline]
 fn mark_bit(mark_bits: &mut [bool], id: ObjId, worklist: &mut Vec<ObjId>) {
     let idx = id.0 as usize;
-    if idx < mark_bits.len() && !mark_bits[idx] {
-        mark_bits[idx] = true;
+    if let Some(marked) = mark_bits.get_mut(idx)
+        && !*marked
+    {
+        *marked = true;
         worklist.push(id);
     }
 }
@@ -211,15 +213,34 @@ impl Vm {
 
         let mut live = 0usize;
         for idx in 0..self.heap.objects.len() {
-            if self.heap.objects[idx].is_some() {
-                if self.heap.mark_bits[idx] {
-                    self.heap.mark_bits[idx] = false;
-                    live += 1;
+            let dead = {
+                let Some(object_slot) = self.heap.objects.get_mut(idx) else {
+                    solveig_base::ice!("GC sweep object index out of bounds");
+                };
+                if object_slot.is_none() {
+                    None
                 } else {
-                    let dead = self.heap.objects[idx].take().unwrap();
-                    self.heap.free_object_payloads(&dead);
-                    self.heap.free_list.push(idx as u32);
+                    let marked = self
+                        .heap
+                        .mark_bits
+                        .get_mut(idx)
+                        .expect("ICE: GC mark bit index out of bounds");
+                    if *marked {
+                        *marked = false;
+                        live += 1;
+                        None
+                    } else {
+                        object_slot.take()
+                    }
                 }
+            };
+
+            if let Some(dead) = dead {
+                self.heap.free_object_payloads(&dead);
+                self.heap.free_list.push(
+                    u32::try_from(idx)
+                        .unwrap_or_else(|_| solveig_base::ice!("heap free-list index overflow")),
+                );
             }
         }
 
@@ -255,7 +276,7 @@ fn mark_object_children(
     id: ObjId,
     worklist: &mut Vec<ObjId>,
 ) {
-    let children = match objects[id.0 as usize].as_ref() {
+    let children = match objects.get(id.0 as usize).and_then(Option::as_ref) {
         Some(HeapObject::Closure { captures, .. }) => Children::One(*captures),
         Some(HeapObject::PartialApp {
             captures,
@@ -319,12 +340,15 @@ fn assert_value_live(heap: &Heap, value: Value, seen: &mut [bool], worklist: &mu
 #[cfg(debug_assertions)]
 fn assert_object_live(heap: &Heap, id: ObjId, seen: &mut [bool], worklist: &mut Vec<ObjId>) {
     let idx = id.0 as usize;
-    if idx >= heap.objects.len() || heap.objects[idx].is_none() {
-        panic!("ICE: GC root set references freed object {}", id.0);
+    if !heap.objects.get(idx).is_some_and(Option::is_some) {
+        solveig_base::ice!("GC root set references freed object {}", id.0);
     }
 
-    if !seen[idx] {
-        seen[idx] = true;
+    let seen_slot = seen
+        .get_mut(idx)
+        .expect("ICE: GC seen index out of bounds for live object");
+    if !*seen_slot {
+        *seen_slot = true;
         worklist.push(id);
     }
 }
@@ -336,8 +360,8 @@ fn assert_object_children_live(
     seen: &mut [bool],
     worklist: &mut Vec<ObjId>,
 ) {
-    let Some(object) = heap.objects[id.0 as usize] else {
-        panic!("ICE: GC reachable object {} was freed", id.0);
+    let Some(object) = heap.objects.get(id.0 as usize).and_then(|slot| *slot) else {
+        solveig_base::ice!("GC reachable object {} was freed", id.0);
     };
 
     match object {
@@ -406,7 +430,7 @@ fn find_ctor_tag(arities: &[CtorRuntimeInfo], ctor: CtorId) -> u16 {
         .iter()
         .find(|info| info.arity == 0 && info.ctor == ctor)
         .map_or_else(
-            || panic!("ICE: runtime constructor metadata missing CtorId {ctor:?}"),
+            || solveig_base::ice!("runtime constructor metadata missing CtorId {ctor:?}"),
             |info| info.tag,
         )
 }

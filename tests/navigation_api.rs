@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    reason = "integration tests use panic messages to explain navigation fixture failures"
+)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -38,7 +43,9 @@ fn source_for_span<'a>(
         panic!("unexpected navigation span file {}", file.path.display());
     };
 
-    &source[span.span.to_usize_range()]
+    source
+        .get(span.span.to_usize_range())
+        .expect("navigation span should be on UTF-8 boundaries")
 }
 
 fn assert_definition_text(
@@ -233,9 +240,14 @@ fn source_lookup_main_file_id(source_map: &SourceMap, file: &Path) -> solveig_ba
         .iter()
         .enumerate()
         .find_map(|(index, source)| {
-            (source.path == file).then_some(solveig_base::FileId(index as u32))
+            (source.path == file)
+                .then(|| solveig_base::FileId(test_u32(index, "source file index")))
         })
         .expect("source map should contain main file")
+}
+
+fn test_u32(value: usize, what: &str) -> u32 {
+    u32::try_from(value).unwrap_or_else(|_| panic!("{what} should fit in u32"))
 }
 
 #[test]

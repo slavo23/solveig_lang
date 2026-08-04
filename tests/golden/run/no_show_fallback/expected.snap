@@ -1,0 +1,5 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+Box (S (S Z)) (Cons 1 (Cons 2 Nil))

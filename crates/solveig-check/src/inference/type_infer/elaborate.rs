@@ -140,8 +140,8 @@ impl TypeChecker<'_> {
             Ev::Var(evvar) => Ev::Var(*evvar),
             Ev::Placeholder(evvar) => {
                 let solved = self.evidence_solutions.get(evvar).unwrap_or_else(|| {
-                    panic!(
-                        "ICE: unsolved evidence placeholder {evvar:?} survived constraint solving"
+                    solveig_base::ice!(
+                        "unsolved evidence placeholder {evvar:?} survived constraint solving"
                     )
                 });
                 self.zonk_ev(solved)

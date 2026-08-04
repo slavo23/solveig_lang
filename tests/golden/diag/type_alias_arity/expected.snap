@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0011] Error: type alias `Name` has the wrong number of arguments
+   ╭─[ $WORKSPACE/tests/golden/diag/type_alias_arity/src/main.sv:3:7 ]
+   │
+ 3 │ bad : Name Int
+   │       ────┬───
+   │           ╰───── expected 0 arguments, but found 1
+───╯
+resolve error

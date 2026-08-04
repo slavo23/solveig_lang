@@ -16,12 +16,17 @@ fn position_in_line(source: &str, line: &str, needle: &str) -> Position {
     let needle_offset = line
         .find(needle)
         .unwrap_or_else(|| panic!("line `{line}` should contain `{needle}`"));
-    let line_number = source[..line_start]
+    let line_number = source
+        .get(..line_start)
+        .expect("test line start should be a UTF-8 boundary")
         .bytes()
         .filter(|byte| *byte == b'\n')
         .count();
 
-    Position::new(line_number as u32, needle_offset as u32)
+    Position::new(
+        u32::try_from(line_number).expect("test line number should fit in u32"),
+        u32::try_from(needle_offset).expect("test character offset should fit in u32"),
+    )
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -225,5 +230,5 @@ increment value = value + 1
     assert_eq!(helper_link.range.end, Position::new(0, 13));
 
     server.shutdown(()).await.expect("shutdown should succeed");
-    let _ = std::fs::remove_dir_all(project_root);
+    drop(project_root);
 }

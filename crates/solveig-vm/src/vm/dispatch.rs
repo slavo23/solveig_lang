@@ -20,7 +20,7 @@ impl Vm {
         for arm in arms {
             match &arm.pattern {
                 LowerPattern::Var => {
-                    self.store(arm.bind_slots[0], scrutinee);
+                    self.store(bind_slot(arm, 0), scrutinee);
                     self.pc = arm.target as usize;
                     return;
                 }
@@ -68,7 +68,7 @@ impl Vm {
                                 debug_assert!(bind_count <= 1);
 
                                 if bind_count == 1 {
-                                    self.store(arm.bind_slots[0], field);
+                                    self.store(bind_slot(arm, 0), field);
                                 }
 
                                 self.pc = arm.target as usize;
@@ -83,17 +83,20 @@ impl Vm {
                         } if *tag == *expected_tag && subs.len() == 2 => {
                             let f0 = *field0;
                             let f1 = *field1;
+                            let [sub0, sub1] = subs.as_slice() else {
+                                solveig_base::ice!("Data2 pattern length was checked above");
+                            };
 
                             if let Some(_bind_count) = try_flat_bind(subs) {
                                 let mut si = 0;
 
-                                if matches!(subs[0], LowerPattern::Var) {
-                                    self.store(arm.bind_slots[si], f0);
+                                if matches!(sub0, LowerPattern::Var) {
+                                    self.store(bind_slot(arm, si), f0);
                                     si += 1;
                                 }
 
-                                if matches!(subs[1], LowerPattern::Var) {
-                                    self.store(arm.bind_slots[si], f1);
+                                if matches!(sub1, LowerPattern::Var) {
+                                    self.store(bind_slot(arm, si), f1);
                                 }
 
                                 self.pc = arm.target as usize;
@@ -113,15 +116,21 @@ impl Vm {
                                 }
 
                                 self.binding_buffer.clear();
-                                for (i, sub) in subs.iter().enumerate() {
+                                for (sub, &field) in subs.iter().zip(fields.iter()) {
                                     if matches!(sub, LowerPattern::Var) {
-                                        self.binding_buffer.push(fields[i]);
+                                        self.binding_buffer.push(field);
                                     }
                                 }
 
                                 debug_assert_eq!(self.binding_buffer.len(), bind_count);
-                                for i in 0..bind_count {
-                                    self.store(arm.bind_slots[i], self.binding_buffer[i]);
+                                for (index, &slot) in
+                                    arm.bind_slots.iter().enumerate().take(bind_count)
+                                {
+                                    let value = *self
+                                        .binding_buffer
+                                        .get(index)
+                                        .expect("ICE: flat pattern binding index out of bounds");
+                                    self.store(slot, value);
                                 }
 
                                 self.pc = arm.target as usize;
@@ -140,8 +149,12 @@ impl Vm {
                         scrutinee,
                         &mut self.binding_buffer,
                     ) {
-                        for i in 0..arm.bind_slots.len() {
-                            self.store(arm.bind_slots[i], self.binding_buffer[i]);
+                        for (index, &slot) in arm.bind_slots.iter().enumerate() {
+                            let value = *self
+                                .binding_buffer
+                                .get(index)
+                                .expect("ICE: pattern binding index out of bounds");
+                            self.store(slot, value);
                         }
                         self.pc = arm.target as usize;
                         return;
@@ -154,8 +167,10 @@ impl Vm {
     }
 
     pub(super) fn dispatch(&mut self, program: &BytecodeProgram) -> Result<Value, RuntimeError> {
-        let mut code = &program.chunks[self.chunk].code;
+        let mut code = &program.chunk(self.chunk).code;
         loop {
+            // SAFETY: The bytecode emitter and jump patching only produce PCs
+            // inside the current chunk; any violation is an internal bytecode ICE.
             let instr = unsafe { *code.get_unchecked(self.pc) };
             self.pc += 1;
 
@@ -170,7 +185,9 @@ impl Vm {
                         .string_constants
                         .get(index as usize)
                         .unwrap_or_else(|| {
-                            panic!("ICE: bytecode references missing string constant {index}")
+                            solveig_base::ice!(
+                                "bytecode references missing string constant {index}"
+                            )
                         });
                     let value = self.heap.alloc_str(value);
                     self.push(value);
@@ -182,7 +199,7 @@ impl Vm {
                 }
                 Instr::LoadGlobal(index) => {
                     self.push_global_or_start_eval(program, index as usize)?;
-                    code = &program.chunks[self.chunk].code;
+                    code = &program.chunk(self.chunk).code;
                 }
                 Instr::PushCtorFn { tag, arity } => {
                     if arity == 0 {
@@ -275,7 +292,7 @@ impl Vm {
                         self.push(val);
                     }
 
-                    code = &program.chunks[self.chunk].code;
+                    code = &program.chunk(self.chunk).code;
                 }
 
                 Instr::CallKnown { chunk, arg_count } => {
@@ -288,7 +305,7 @@ impl Vm {
                         self.push(val);
                     }
 
-                    code = &program.chunks[self.chunk].code;
+                    code = &program.chunk(self.chunk).code;
                 }
                 Instr::TailCallN { arg_count } => {
                     let n = arg_count as usize;
@@ -300,7 +317,7 @@ impl Vm {
                         return Ok(done);
                     }
 
-                    code = &program.chunks[self.chunk].code;
+                    code = &program.chunk(self.chunk).code;
                 }
                 Instr::TailCallKnown { chunk, arg_count } => {
                     let chunk_id = chunk as usize;
@@ -313,7 +330,7 @@ impl Vm {
                         return Ok(done);
                     }
 
-                    code = &program.chunks[self.chunk].code;
+                    code = &program.chunk(self.chunk).code;
                 }
                 Instr::Return => {
                     let result = self.pop();
@@ -322,7 +339,7 @@ impl Vm {
                         return Ok(done);
                     }
 
-                    code = &program.chunks[self.chunk].code;
+                    code = &program.chunk(self.chunk).code;
                 }
                 Instr::Jump(target) => self.pc = target as usize,
                 Instr::JumpIfFalse(target) => {
@@ -333,7 +350,11 @@ impl Vm {
                 }
                 Instr::Match(table_idx) => {
                     let scrutinee = self.pop();
-                    let table = &program.chunks[self.chunk].match_tables[table_idx as usize];
+                    let table = program
+                        .chunk(self.chunk)
+                        .match_tables
+                        .get(table_idx as usize)
+                        .expect("ICE: bytecode match instruction references missing table");
                     self.dispatch_match(program, &table.arms, scrutinee, table.else_target);
                 }
                 Instr::Trap(code) => return Err(RuntimeError::trap(code)),
@@ -355,6 +376,13 @@ fn try_flat_bind(subs: &[LowerPattern]) -> Option<usize> {
     }
 
     Some(count)
+}
+
+#[inline]
+fn bind_slot(arm: &MatchArm, index: usize) -> u16 {
+    *arm.bind_slots
+        .get(index)
+        .expect("ICE: pattern bind slot index out of bounds")
 }
 
 fn match_pattern(
@@ -413,7 +441,10 @@ fn match_pattern_inner(
                     if *tag != *expected_tag || subs.len() != 1 {
                         return false;
                     }
-                    match_pattern_inner(program, heap, &subs[0], *field, bindings)
+                    let Some(sub) = subs.first() else {
+                        solveig_base::ice!("Data1 pattern length was checked above");
+                    };
+                    match_pattern_inner(program, heap, sub, *field, bindings)
                 }
                 HeapObject::Data2 {
                     tag,
@@ -423,12 +454,15 @@ fn match_pattern_inner(
                     if *tag != *expected_tag || subs.len() != 2 {
                         return false;
                     }
+                    let [sub0, sub1] = subs.as_slice() else {
+                        solveig_base::ice!("Data2 pattern length was checked above");
+                    };
                     let cp = bindings.len();
-                    if !match_pattern_inner(program, heap, &subs[0], *field0, bindings) {
+                    if !match_pattern_inner(program, heap, sub0, *field0, bindings) {
                         bindings.truncate(cp);
                         return false;
                     }
-                    if !match_pattern_inner(program, heap, &subs[1], *field1, bindings) {
+                    if !match_pattern_inner(program, heap, sub1, *field1, bindings) {
                         bindings.truncate(cp);
                         return false;
                     }

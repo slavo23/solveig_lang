@@ -112,7 +112,9 @@ impl<A, P> InstanceTable<A, P> {
     }
 
     pub fn insert(&mut self, info: InstanceInfo<A, P>) -> InstanceId {
-        let id = InstanceId(self.entries.len() as u32);
+        let id = InstanceId(
+            u32::try_from(self.entries.len()).expect("ICE: instance table exceeded u32 capacity"),
+        );
         self.entries.push((id, info));
         id
     }

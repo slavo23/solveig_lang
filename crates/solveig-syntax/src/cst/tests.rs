@@ -328,7 +328,12 @@ fn assert_node_span_text(
         .node_at_offset(offset)
         .expect("offset should resolve to a CST node");
     assert_eq!(tree.node(node).kind(), kind);
-    assert_eq!(&source[tree.node(node).span().to_usize_range()], expected);
+    assert_eq!(
+        source
+            .get(tree.node(node).span().to_usize_range())
+            .expect("CST test span should split source at UTF-8 boundaries"),
+        expected
+    );
 }
 
 fn token_at_text(tree: &SyntaxTree, source: &str, needle: &str) -> TokenId {

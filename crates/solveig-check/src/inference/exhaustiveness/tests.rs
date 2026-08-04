@@ -180,8 +180,8 @@ fn check_case_witnesses_use_constructor_table_names() {
             assert_eq!(scrutinee_type, "Widget");
             assert_eq!(missing, vec!["Shown"]);
         }
-        Some(error) => panic!("ICE: expected only exhaustiveness errors, got {error:?}"),
-        None => panic!("ICE: expected non-exhaustive pattern report"),
+        Some(error) => solveig_base::ice!("expected only exhaustiveness errors, got {error:?}"),
+        None => solveig_base::ice!("expected non-exhaustive pattern report"),
     }
 }
 
@@ -258,7 +258,7 @@ fn check_patterns(scrutinee_type: &Ty, patterns: Vec<Pattern<Span>>) -> CaseDiag
 
 fn assert_unreachable_warning(error: &TypeError) {
     let TypeError::UnreachablePattern { .. } = error else {
-        panic!("ICE: expected unreachable-pattern warning, got {error:?}");
+        solveig_base::ice!("expected unreachable-pattern warning, got {error:?}");
     };
 
     let diagnostic = error.to_diagnostic();
@@ -290,7 +290,7 @@ fn missing_patterns(
     {
         None => Vec::new(),
         Some(TypeError::NonExhaustivePatterns { missing, .. }) => missing,
-        Some(error) => panic!("ICE: expected only exhaustiveness errors, got {error:?}"),
+        Some(error) => solveig_base::ice!("expected only exhaustiveness errors, got {error:?}"),
     }
 }
 
@@ -460,7 +460,7 @@ fn data_def_named<'a>(tycon_table: &'a TyConTable, name: &str) -> &'a DataDefini
         .expect("ICE: test fixture must define requested tycon");
 
     let TyConDefinition::Data(data_def) = &info.definition else {
-        panic!("ICE: test fixture requested data definition from primitive tycon");
+        solveig_base::ice!("test fixture requested data definition from primitive tycon");
     };
 
     data_def
@@ -535,7 +535,7 @@ fn tycon_id(name: &str) -> TyConId {
         "Maybe" => TyConId(100),
         "List" => TyConId(101),
         "Pair" => TyConId(102),
-        other => panic!("ICE: unknown test type constructor `{other}`"),
+        other => solveig_base::ice!("unknown test type constructor `{other}`"),
     }
 }
 
@@ -548,7 +548,7 @@ fn ctor_id(name: &str) -> CtorId {
         "Nil" => CtorId(102),
         "Cons" => CtorId(103),
         "MkPair" => CtorId(104),
-        other => panic!("ICE: unknown test constructor `{other}`"),
+        other => solveig_base::ice!("unknown test constructor `{other}`"),
     }
 }
 
@@ -572,6 +572,6 @@ fn test_tyvar_id(name: &str) -> TyVarId {
     match name {
         "a" => TyVarId(0),
         "b" => TyVarId(1),
-        other => panic!("ICE: unknown test type variable `{other}`"),
+        other => solveig_base::ice!("unknown test type variable `{other}`"),
     }
 }

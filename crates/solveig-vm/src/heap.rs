@@ -124,17 +124,17 @@ impl Heap {
 
     #[inline]
     pub fn get(&self, id: ObjId) -> &HeapObject {
+        let idx = id.0 as usize;
         debug_assert!(
-            (id.0 as usize) < self.objects.len() && self.objects[id.0 as usize].is_some(),
+            self.objects.get(idx).is_some_and(Option::is_some),
             "dangling heap ref {}",
             id.0
         );
-        unsafe {
-            self.objects
-                .get_unchecked(id.0 as usize)
-                .as_ref()
-                .unwrap_unchecked()
-        }
+        // SAFETY: Value::Obj is only constructed from ids returned by Heap::alloc,
+        // and the debug assertion above checks that the slot is still live.
+        let slot = unsafe { self.objects.get_unchecked(idx) };
+        // SAFETY: The same invariant proves the live slot contains an object.
+        unsafe { slot.as_ref().unwrap_unchecked() }
     }
 
     #[inline]
@@ -143,11 +143,20 @@ impl Heap {
 
         if let Some(id) = self.free_list.pop() {
             let idx = id as usize;
-            self.objects[idx] = Some(obj);
-            self.mark_bits[idx] = false;
+            *self
+                .objects
+                .get_mut(idx)
+                .expect("ICE: heap free list object index out of bounds") = Some(obj);
+            *self
+                .mark_bits
+                .get_mut(idx)
+                .expect("ICE: heap free list mark-bit index out of bounds") = false;
             Value::Obj(ObjId(id))
         } else {
-            let id = ObjId(self.objects.len() as u32);
+            let id = ObjId(
+                u32::try_from(self.objects.len())
+                    .unwrap_or_else(|_| solveig_base::ice!("heap object id overflow")),
+            );
             self.objects.push(Some(obj));
             self.mark_bits.push(false);
             Value::Obj(id)
@@ -175,7 +184,11 @@ impl Heap {
     #[inline]
     pub fn copy_payload_to_stack(&self, span: PayloadRef, stack: &mut [Value], dst_start: usize) {
         let src = self.payloads.as_slice(span);
-        stack[dst_start..dst_start + src.len()].copy_from_slice(src);
+        let dst_end = dst_start + src.len();
+        stack
+            .get_mut(dst_start..dst_end)
+            .expect("ICE: stack payload destination out of bounds")
+            .copy_from_slice(src);
     }
 
     #[inline]
@@ -323,7 +336,9 @@ impl ByteStore {
 
     #[inline]
     fn as_slice(&self, span: ByteRef) -> &[u8] {
-        &self.bytes[span.start..span.end]
+        self.bytes
+            .get(span.start..span.end)
+            .expect("ICE: byte store span out of bounds")
     }
 
     #[inline]
@@ -334,7 +349,7 @@ impl ByteStore {
 
     fn take_free_span(&mut self, len: usize) -> Option<ByteRef> {
         let idx = self.free.iter().position(|r| r.len() >= len)?;
-        let span = self.free[idx];
+        let span = *self.free.get(idx)?;
 
         if span.len() == len {
             self.free.swap_remove(idx);
@@ -344,7 +359,7 @@ impl ByteStore {
                 start: span.start,
                 end: span.start + len,
             };
-            self.free[idx] = ByteRef {
+            *self.free.get_mut(idx)? = ByteRef {
                 start: span.start + len,
                 end: span.end,
             };
@@ -373,7 +388,10 @@ impl ByteStore {
         let span = self.reserve_span(bytes.len());
 
         if !span.is_empty() {
-            self.bytes[span.start..span.end].copy_from_slice(bytes);
+            self.bytes
+                .get_mut(span.start..span.end)
+                .expect("ICE: byte store allocation span out of bounds")
+                .copy_from_slice(bytes);
         }
 
         span
@@ -399,12 +417,14 @@ impl PayloadStore {
 
     #[inline]
     pub fn as_slice(&self, span: PayloadRef) -> &[Value] {
-        &self.values[span.start..span.end]
+        self.values
+            .get(span.start..span.end)
+            .expect("ICE: payload store span out of bounds")
     }
 
     pub fn take_free_span(&mut self, len: usize) -> Option<PayloadRef> {
         let idx = self.free.iter().position(|r| Self::len(r) >= len)?;
-        let span = self.free[idx];
+        let span = *self.free.get(idx)?;
         if Self::len(&span) == len {
             self.free.swap_remove(idx);
             Some(span)
@@ -413,7 +433,7 @@ impl PayloadStore {
                 start: span.start,
                 end: span.start + len,
             };
-            self.free[idx] = PayloadRef {
+            *self.free.get_mut(idx)? = PayloadRef {
                 start: span.start + len,
                 end: span.end,
             };
@@ -459,7 +479,13 @@ impl PayloadStore {
 
         let stack_start = stack.len() - n;
         let span = self.reserve_span(n);
-        self.values[span.start..span.end].copy_from_slice(&stack[stack_start..]);
+        let src = stack
+            .get(stack_start..)
+            .expect("ICE: stack payload source out of bounds");
+        self.values
+            .get_mut(span.start..span.end)
+            .expect("ICE: payload store allocation span out of bounds")
+            .copy_from_slice(src);
         stack.truncate(stack_start);
         span
     }
@@ -498,7 +524,13 @@ impl PayloadStore {
             let stack_start = stack.len() - suffix_len;
             let dst_start = dst.start + prefix_len;
             let dst_end = dst_start + suffix_len;
-            self.values[dst_start..dst_end].copy_from_slice(&stack[stack_start..]);
+            let src = stack
+                .get(stack_start..)
+                .expect("ICE: stack suffix source out of bounds");
+            self.values
+                .get_mut(dst_start..dst_end)
+                .expect("ICE: payload concat destination out of bounds")
+                .copy_from_slice(src);
             stack.truncate(stack_start);
         }
 

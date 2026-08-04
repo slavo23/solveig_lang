@@ -152,7 +152,11 @@ impl<'a> TypePrinter<'a> {
             format!("{prefix}{}", self.ty(body, PRECEDENCE_LOOSE))
         } else {
             let predicates = if predicates.len() == 1 {
-                self.predicate(&predicates[0])
+                self.predicate(
+                    predicates
+                        .first()
+                        .expect("ICE: non-empty predicate list has a first predicate"),
+                )
             } else {
                 format!(
                     "({})",

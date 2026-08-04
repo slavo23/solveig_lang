@@ -12,19 +12,43 @@ use async_lsp::lsp_types::{
 };
 use async_lsp::{ClientSocket, LanguageServer};
 use std::fs;
+use std::ops::Deref;
 use std::path::Path;
-use std::process;
-use std::time::{SystemTime, UNIX_EPOCH};
+use tempfile::{Builder, TempDir};
 
 mod editor_protocol;
 mod navigation;
 
-fn temp_root(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!("solveig_lsp_{name}_{}_{}", process::id(), nanos))
+struct TestRoot {
+    dir: TempDir,
+}
+
+impl TestRoot {
+    fn path(&self) -> &Path {
+        self.dir.path()
+    }
+}
+
+impl Deref for TestRoot {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        self.path()
+    }
+}
+
+impl AsRef<Path> for TestRoot {
+    fn as_ref(&self) -> &Path {
+        self.path()
+    }
+}
+
+fn temp_root(name: &str) -> TestRoot {
+    let dir = Builder::new()
+        .prefix(&format!("solveig_lsp_{name}_"))
+        .tempdir()
+        .expect("test temp directory should be creatable");
+    TestRoot { dir }
 }
 
 fn write_source(path: &Path, source: &str) {
@@ -271,7 +295,7 @@ main = prelude.builtins.True
     );
 
     server.shutdown(()).await.expect("shutdown should succeed");
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -328,7 +352,7 @@ async fn text_document_inlay_hint_returns_type_hints() {
     assert_eq!(local_hint.padding_right, Some(true));
 
     server.shutdown(()).await.expect("shutdown should succeed");
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -384,7 +408,7 @@ async fn text_document_inlay_hint_respects_disabled_initialization_option() {
     assert!(hints.is_empty(), "disabled inlay hints leaked: {hints:#?}");
 
     server.shutdown(()).await.expect("shutdown should succeed");
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -460,7 +484,7 @@ main = ??
     assert_eq!(text_edit.new_text, "True");
 
     server.shutdown(()).await.expect("shutdown should succeed");
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -567,7 +591,7 @@ main = 1
     }
 
     server.shutdown(()).await.expect("shutdown should succeed");
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[tokio::test(flavor = "current_thread", start_paused = true)]
@@ -710,7 +734,7 @@ main = helper 41
     );
 
     server.shutdown(()).await.expect("shutdown should succeed");
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -762,7 +786,7 @@ main = 41 + 1
     assert_relative_tokens_well_formed(&full.data);
 
     server.shutdown(()).await.expect("shutdown should succeed");
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 fn assert_relative_tokens_well_formed(tokens: &[async_lsp::lsp_types::SemanticToken]) {
@@ -868,5 +892,5 @@ main = answer
     );
 
     server.shutdown(()).await.expect("shutdown should succeed");
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }

@@ -1,25 +1,20 @@
+#![expect(
+    clippy::panic,
+    reason = "integration tests use panic messages to explain fixture lookup failures"
+)]
+
 use solveig_base::{PositionEncoding, SourcePosition};
 use solveig_driver::Compilation;
 use solveig_ide::{CompilationIdeExt, SourceCompletionItem, SourceCompletionItemKind};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
 
 const MARKER: &str = "$COMPLETE";
 
-fn temp_root(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    let thread_id = format!("{:?}", std::thread::current().id());
-    std::env::temp_dir().join(format!(
-        "solveig_completion_{name}_{}_{}_{}",
-        process::id(),
-        thread_id,
-        nanos
-    ))
+mod support;
+
+fn temp_root(name: &str) -> support::TestRoot {
+    support::temp_root("solveig_completion", name)
 }
 
 fn write_source(path: &Path, source: &str) {
@@ -35,10 +30,14 @@ fn source_without_marker(source: &str) -> (String, SourcePosition) {
     let marker_offset = source
         .find(MARKER)
         .expect("test source should include a completion marker");
-    let prefix = &source[..marker_offset];
-    let line = prefix.bytes().filter(|byte| *byte == b'\n').count() as u32;
+    let prefix = source
+        .get(..marker_offset)
+        .expect("completion marker offset should be a UTF-8 boundary");
+    let line = u32::try_from(prefix.bytes().filter(|byte| *byte == b'\n').count())
+        .expect("test line number should fit in u32");
     let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
-    let character = (prefix.len() - line_start) as u32;
+    let character =
+        u32::try_from(prefix.len() - line_start).expect("test character should fit in u32");
 
     (
         source.replacen(MARKER, "", 1),
@@ -56,7 +55,7 @@ fn completion_items(source: &str) -> Vec<SourceCompletionItem> {
     let items =
         compilation.completion_items_at_position(&source_path, position, PositionEncoding::Utf8);
 
-    let _ = fs::remove_dir_all(root);
+    drop(root);
     items
 }
 

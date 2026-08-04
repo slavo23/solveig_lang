@@ -1,25 +1,20 @@
+#![expect(
+    clippy::panic,
+    reason = "integration tests use panic messages to explain fixture lookup failures"
+)]
+
 use solveig_base::{PositionEncoding, SourcePosition};
 use solveig_driver::Compilation;
 use solveig_ide::{
     CompilationIdeExt, SourceInlayHint, SourceInlayHintCategory, SourceInlayHintConfig,
 };
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
 
-fn temp_root(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    let thread_id = format!("{:?}", std::thread::current().id());
-    std::env::temp_dir().join(format!(
-        "solveig_inlay_hints_{name}_{}_{}_{}",
-        process::id(),
-        thread_id,
-        nanos
-    ))
+mod support;
+
+fn temp_root(name: &str) -> support::TestRoot {
+    support::temp_root("solveig_inlay_hints", name)
 }
 
 fn write_source(path: &Path, source: &str) {
@@ -32,9 +27,13 @@ fn write_source(path: &Path, source: &str) {
 }
 
 fn end_position(source: &str) -> SourcePosition {
-    let line = source.bytes().filter(|byte| *byte == b'\n').count() as u32;
+    let line = u32::try_from(source.bytes().filter(|byte| *byte == b'\n').count())
+        .expect("test line number should fit in u32");
     let line_start = source.rfind('\n').map_or(0, |index| index + 1);
-    SourcePosition::new(line, (source.len() - line_start) as u32)
+    SourcePosition::new(
+        line,
+        u32::try_from(source.len() - line_start).expect("test character should fit in u32"),
+    )
 }
 
 fn inlay_hints(source: &str, config: SourceInlayHintConfig) -> Vec<SourceInlayHint> {
@@ -51,7 +50,7 @@ fn inlay_hints(source: &str, config: SourceInlayHintConfig) -> Vec<SourceInlayHi
         config,
     );
 
-    let _ = fs::remove_dir_all(root);
+    drop(root);
     hints
 }
 

@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0008] Error: conflicting operator fixities
+    ╭─[ $WORKSPACE/tests/golden/diag/fixity_conflict/src/main.sv:10:16 ]
+    │
+ 10 │ main = 1 <+> 2 <^> 3
+    │                ─┬─
+    │                 ╰─── operators `<+>` and `<^>` have the same precedence but cannot be mixed without parentheses
+────╯
+resolve error

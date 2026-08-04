@@ -1,0 +1,5 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+could not find entry file at $WORKSPACE/tests/golden/diag/missing_entry/src/main.sv

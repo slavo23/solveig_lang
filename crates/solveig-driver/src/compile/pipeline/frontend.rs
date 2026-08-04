@@ -94,8 +94,8 @@ impl<'a> FrontendState<'a> {
                     .apis
                     .get(module_name)
                     .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: usable prelude cache missing API for {}",
+                        solveig_base::ice!(
+                            "usable prelude cache missing API for {}",
                             module_name.as_string(session)
                         )
                     })
@@ -111,8 +111,8 @@ impl<'a> FrontendState<'a> {
                     .apis
                     .get(module_name)
                     .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: reusable cache missing API for {}",
+                        solveig_base::ice!(
+                            "reusable cache missing API for {}",
                             module_name.as_string(session)
                         )
                     })
@@ -180,8 +180,8 @@ impl<'a> FrontendState<'a> {
                         .typed_apis
                         .get(module_name)
                         .unwrap_or_else(|| {
-                            panic!(
-                                "ICE: reusable cache missing typed API for {}",
+                            solveig_base::ice!(
+                                "reusable cache missing typed API for {}",
                                 module_name.as_string(session)
                             )
                         })
@@ -193,8 +193,8 @@ impl<'a> FrontendState<'a> {
                         .checked
                         .get(&module_id)
                         .unwrap_or_else(|| {
-                            panic!(
-                                "ICE: reusable cache missing checked module {}",
+                            solveig_base::ice!(
+                                "reusable cache missing checked module {}",
                                 module_name.as_string(session)
                             )
                         })
@@ -204,8 +204,8 @@ impl<'a> FrontendState<'a> {
                     .modules
                     .get(module_name)
                     .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: reusable module missing project file {}",
+                        solveig_base::ice!(
+                            "reusable module missing project file {}",
                             module_name.as_string(session)
                         )
                     })
@@ -219,8 +219,8 @@ impl<'a> FrontendState<'a> {
                     module_id,
                     rebase_resolutions_file(
                         cache.resolutions.get(&module_id).unwrap_or_else(|| {
-                            panic!(
-                                "ICE: reusable cache missing resolutions for {}",
+                            solveig_base::ice!(
+                                "reusable cache missing resolutions for {}",
                                 module_name.as_string(session)
                             )
                         }),
@@ -314,11 +314,9 @@ impl<'a> FrontendState<'a> {
         let mut first_failure: Option<FrontendPhase> = None;
 
         for module_name in order {
-            let module_id = self
-                .project
-                .module_table
-                .id(module_name)
-                .expect("ICE: checked module order referenced unknown module");
+            let Some(module_id) = self.project.module_table.id(module_name) else {
+                solveig_base::ice!("checked module order referenced unknown module");
+            };
             if self.checked.contains_key(&module_id) {
                 self.reused_modules.push(module_name.clone());
                 continue;
@@ -356,7 +354,16 @@ impl<'a> FrontendState<'a> {
                 self.resolved_type_aliases
                     .remove(&module_id)
                     .unwrap_or_default(),
-                self.apis[module_name].docs.clone(),
+                self.apis
+                    .get(module_name)
+                    .unwrap_or_else(|| {
+                        solveig_base::ice!(
+                            "module API missing during typed API construction for {}",
+                            module_name.as_string(self.session)
+                        )
+                    })
+                    .docs
+                    .clone(),
             ));
 
             self.typed_apis.insert(module_name.clone(), typed_api);
@@ -412,7 +419,16 @@ impl<'a> FrontendState<'a> {
             module: module_name.clone(),
             module_id,
             file,
-            local_api: self.apis[module_name].clone(),
+            local_api: self
+                .apis
+                .get(module_name)
+                .unwrap_or_else(|| {
+                    solveig_base::ice!(
+                        "module API missing during resolve for {}",
+                        module_name.as_string(self.session)
+                    )
+                })
+                .clone(),
             imported_apis,
             builtins: self.builtins.clone(),
         };
@@ -553,7 +569,17 @@ impl<'a> FrontendState<'a> {
             .map(|imp| ImportedApi {
                 alias: imp.alias,
                 module: imp.module.clone(),
-                api: Arc::new(self.apis[&imp.module].filtered(&imp.spec)),
+                api: Arc::new(
+                    self.apis
+                        .get(&imp.module)
+                        .unwrap_or_else(|| {
+                            solveig_base::ice!(
+                                "imported module API missing for {}",
+                                imp.module.as_string(self.session)
+                            )
+                        })
+                        .filtered(&imp.spec),
+                ),
                 spec: imp.spec.clone(),
             })
             .collect()

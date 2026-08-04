@@ -226,11 +226,11 @@ impl TypeChecker<'_> {
 
                 match inner_type_applied {
                     Ty::TyForAll(ref binders, ref preds, ref body)
-                        if let Some((quantifier, _)) = binders.first() =>
+                        if let Some(((quantifier, _), rest_binders)) = binders.split_first() =>
                     {
                         let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                         let result_type = Ty::make_forall_group(
-                            binders[1..].to_vec(),
+                            rest_binders.to_vec(),
                             preds
                                 .iter()
                                 .map(|pred| Self::substitute_predicate(pred, &subst))
@@ -295,7 +295,7 @@ impl TypeChecker<'_> {
                 Ok((extended_ctx, elaborated, evar_type))
             }
             TermExpr::EvAbs(_, _, _) | TermExpr::EvApp(_, _) => {
-                panic!("ICE: evidence terms are introduced after source expression inference")
+                solveig_base::ice!("evidence terms are introduced after source expression inference")
             }
         }
     }
@@ -311,7 +311,9 @@ impl TypeChecker<'_> {
 
         match &function_type {
             Ty::TyForAll(binders, preds, body) if !binders.is_empty() => {
-                let (quantifier, kind) = &binders[0];
+                let Some(((quantifier, kind), rest_binders)) = binders.split_first() else {
+                    solveig_base::ice!("non-empty forall binder guard failed");
+                };
                 let fresh_evar = self.fresh_evar_id();
                 let evar_entry = ContextEntry::ExVar(fresh_evar, kind.clone());
                 let extended_ctx = ctx.add_entry(evar_entry);
@@ -319,7 +321,7 @@ impl TypeChecker<'_> {
                 let ty_arg = Self::evar_type(fresh_evar);
                 let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                 let instantiated_type = Ty::make_forall_group(
-                    binders[1..].to_vec(),
+                    rest_binders.to_vec(),
                     preds
                         .iter()
                         .map(|pred| Self::substitute_predicate(pred, &subst))
@@ -376,7 +378,7 @@ impl TypeChecker<'_> {
                 let evar_entry = ContextEntry::ExVar(
                     *evar_id,
                     ctx.evar_kind_id(*evar_id)
-                        .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", evar_id.0)),
+                        .unwrap_or_else(|| solveig_base::ice!("missing evar kind for ?{}", evar_id.0)),
                 );
                 let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 

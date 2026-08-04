@@ -345,6 +345,10 @@ fn int_to_float(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeEr
     Ok(Value::Float(value as f64))
 }
 
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "Solveig floatToInt is defined as Rust's saturating truncating f64-to-i64 conversion"
+)]
 fn float_to_int(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_float(args, 0, "floatToInt")?;
     // D3: truncate toward zero. Rust's f64 -> i64 cast is saturating and keeps
@@ -369,7 +373,7 @@ fn char_to_string(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeE
 
 fn string_length(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_string_owned(ctx, args, 0, "stringLength")?;
-    let len = i64::try_from(value.chars().count()).map_err(|_| {
+    let len = i64::try_from(value.chars().count()).map_err(|_error| {
         RuntimeError::builtin("stringLength result does not fit in Int".to_string())
     })?;
     Ok(Value::Int(len))

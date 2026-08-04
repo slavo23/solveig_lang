@@ -35,7 +35,8 @@ impl BytecodeProgram {
             let labels = collect_chunk_labels(chunk);
 
             for (pc, instr) in chunk.code.iter().enumerate() {
-                let pc_u32 = pc as u32;
+                let pc_u32 = u32::try_from(pc)
+                    .unwrap_or_else(|_| solveig_base::ice!("program counter {pc} does not fit in u32"));
 
                 if labels.contains(&pc_u32) {
                     out.push_str(&format_label_line(pc_u32));
@@ -45,9 +46,10 @@ impl BytecodeProgram {
                     Instr::Match(table_ix) => {
                         let table_ix = *table_ix as usize;
                         let table = chunk.match_tables.get(table_ix).unwrap_or_else(|| {
-                            panic!(
-                                "ICE: chunk '{}' references missing match table {}",
-                                chunk.name, table_ix
+                            solveig_base::ice!(
+                                "chunk '{}' references missing match table {}",
+                                chunk.name,
+                                table_ix
                             )
                         });
 
@@ -117,7 +119,10 @@ fn collect_chunk_labels(chunk: &Chunk) -> BTreeSet<u32> {
                 labels.insert(*target);
             }
             Instr::Match(table_ix) => {
-                let table = &chunk.match_tables[*table_ix as usize];
+                let table = chunk
+                    .match_tables
+                    .get(*table_ix as usize)
+                    .expect("ICE: bytecode match instruction references missing table");
                 labels.insert(table.else_target);
                 for arm in &table.arms {
                     labels.insert(arm.target);

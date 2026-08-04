@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    reason = "integration tests use panic messages to explain CST fixture failures"
+)]
+
 use std::env;
 use std::fmt::Write;
 use std::fs;
@@ -7,6 +12,8 @@ use solveig_base::{Diagnostic, Session, Span};
 use solveig_syntax::cst::{CstId, NodeOrToken, SyntaxTree, TokenId};
 use solveig_syntax::lexer::{PosToken, Token};
 use solveig_syntax::lowering::parse_source;
+
+mod snapshot_support;
 
 #[test]
 fn golden_cst_cases() {
@@ -44,30 +51,25 @@ fn golden_cst_cases() {
         );
 
         let expected_path = case_root.join("expected.txt");
-        if update {
+        let expected = if update {
             fs::write(&expected_path, &actual).unwrap_or_else(|err| {
                 panic!(
                     "failed to update CST golden for `{case_name}` at {}: {err}",
                     expected_path.display()
                 )
             });
-            continue;
-        }
+            actual.clone()
+        } else {
+            fs::read_to_string(&expected_path).unwrap_or_else(|err| {
+                panic!(
+                    "failed to read expected CST dump for `{case_name}` at {}: {err}\n\
+                     run with UPDATE_GOLDEN=1 to create or refresh it",
+                    expected_path.display()
+                )
+            })
+        };
 
-        let expected = fs::read_to_string(&expected_path).unwrap_or_else(|err| {
-            panic!(
-                "failed to read expected CST dump for `{case_name}` at {}: {err}\n\
-                 run with UPDATE_GOLDEN=1 to create or refresh it",
-                expected_path.display()
-            )
-        });
-
-        assert_eq!(
-            actual,
-            expected,
-            "CST golden case `{case_name}` changed:\n{}",
-            diff_preview(&expected, &actual)
-        );
+        snapshot_support::assert_fixture_snapshot(&case_root, case_name, &expected, &actual);
     }
 }
 
@@ -228,39 +230,4 @@ fn case_name(case_root: &Path) -> &str {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("<invalid-case-name>")
-}
-
-fn diff_preview(expected: &str, actual: &str) -> String {
-    let first_diff = expected
-        .bytes()
-        .zip(actual.bytes())
-        .position(|(left, right)| left != right)
-        .unwrap_or_else(|| expected.len().min(actual.len()));
-
-    format!(
-        "expected len: {}\nactual len:   {}\nfirst diff byte: {}\nexpected: {}\nactual:   {}",
-        expected.len(),
-        actual.len(),
-        first_diff,
-        preview_around(expected, first_diff),
-        preview_around(actual, first_diff)
-    )
-}
-
-fn preview_around(text: &str, byte_index: usize) -> String {
-    let start = text[..byte_index.min(text.len())]
-        .char_indices()
-        .rev()
-        .nth(80)
-        .map_or(0, |(index, _)| index);
-
-    let end = text[byte_index.min(text.len())..]
-        .char_indices()
-        .nth(160)
-        .map_or(text.len(), |(index, _)| byte_index.min(text.len()) + index);
-
-    let prefix = if start > 0 { "..." } else { "" };
-    let suffix = if end < text.len() { "..." } else { "" };
-
-    format!("{prefix}{:?}{suffix}", &text[start..end])
 }

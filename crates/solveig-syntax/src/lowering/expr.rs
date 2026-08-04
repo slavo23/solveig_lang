@@ -345,22 +345,24 @@ impl CstToAst<'_> {
         node: CstId,
     ) -> Result<Option<Spanned<Symbol>>, ParseError> {
         let tokens = self.direct_meaningful_tokens(node);
-        if tokens.len() != 3
-            || self.cst.token(tokens[0]).kind != Token::LParen
-            || self.cst.token(tokens[2]).kind != Token::RParen
+        let [left_paren, operator, right_paren] = tokens.as_slice() else {
+            return Ok(None);
+        };
+        if self.cst.token(*left_paren).kind != Token::LParen
+            || self.cst.token(*right_paren).kind != Token::RParen
         {
             return Ok(None);
         }
 
-        if !self.child_is_operator(NodeOrToken::Token(tokens[1]), false) {
+        if !self.child_is_operator(NodeOrToken::Token(*operator), false) {
             return Ok(None);
         }
 
-        let symbol = self.operator_symbol_from_token(tokens[1], false)?;
+        let symbol = self.operator_symbol_from_token(*operator, false)?;
         Ok(Some(sp(
             symbol,
-            self.cst.token(tokens[0]).start(),
-            self.cst.token(tokens[2]).end(),
+            self.cst.token(*left_paren).start(),
+            self.cst.token(*right_paren).end(),
             node,
         )))
     }
@@ -469,27 +471,25 @@ impl CstToAst<'_> {
                             matches!(child, NodeOrToken::Token(token) if self.cst.token(*token).kind == Token::RParen)
                         })
                         .map_or(arrow_index, |(index, _)| index);
-                    let name =
-                        children[index + 1..param_end]
-                            .iter()
-                            .find_map(|child| match child {
-                                NodeOrToken::Token(token)
-                                    if matches!(
-                                        self.cst.token(*token).kind,
-                                        Token::Ident | Token::Underscore
-                                    ) =>
-                                {
-                                    Some(*token)
-                                }
-                                _ => None,
-                            });
+                    let parameter_children = children
+                        .get(index + 1..param_end)
+                        .expect("ICE: function parameter child range must be in bounds");
+                    let name = parameter_children.iter().find_map(|child| match child {
+                        NodeOrToken::Token(token)
+                            if matches!(
+                                self.cst.token(*token).kind,
+                                Token::Ident | Token::Underscore
+                            ) =>
+                        {
+                            Some(*token)
+                        }
+                        _ => None,
+                    });
                     let name = self.required_token(node, name, "expected binder")?;
-                    let ty = children[index + 1..param_end]
-                        .iter()
-                        .find_map(|child| match child {
-                            NodeOrToken::Node(ty) if self.node_is_type_like(*ty) => Some(*ty),
-                            _ => None,
-                        });
+                    let ty = parameter_children.iter().find_map(|child| match child {
+                        NodeOrToken::Node(ty) if self.node_is_type_like(*ty) => Some(*ty),
+                        _ => None,
+                    });
                     let ty = self.required_child(node, ty, "expected parameter type")?;
                     params.push((
                         self.binder_span_from_token(name, node),

@@ -1,0 +1,98 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+Module @0..99
+  VOpen @0..0 line=0 col=0 synthetic text=""
+  DefinitionList @0..98
+    FixityDef @0..11
+      Infixr @0..6 line=0 col=0 text="infixr"
+      Whitespace @6..7 line=0 col=6 text=" "
+      Int @7..8 line=0 col=7 text="8"
+      Whitespace @8..9 line=0 col=8 text=" "
+      Operator @9..11 line=0 col=9 text="^^"
+    Newline @11..12 line=0 col=11 text="\n"
+    VSemi @12..12 line=1 col=0 synthetic text=""
+    FixityDef @12..24
+      Infixl @12..18 line=1 col=0 text="infixl"
+      Whitespace @18..19 line=1 col=6 text=" "
+      Int @19..20 line=1 col=7 text="6"
+      Whitespace @20..21 line=1 col=8 text=" "
+      Operator @21..24 line=1 col=9 text="<+>"
+    Newline @24..26 line=1 col=12 text="\n\n"
+    VSemi @26..26 line=3 col=0 synthetic text=""
+    Signature @26..51
+      LParen @26..27 line=3 col=0 text="("
+      Operator @27..30 line=3 col=1 text="<+>"
+      RParen @30..31 line=3 col=4 text=")"
+      Whitespace @31..32 line=3 col=5 text=" "
+      Colon @32..33 line=3 col=6 text=":"
+      Whitespace @33..34 line=3 col=7 text=" "
+      TypeArrow @34..51
+        NamePath @34..37
+          UpperIdent @34..37 line=3 col=8 text="Int"
+        Whitespace @37..38 line=3 col=11 text=" "
+        Arrow @38..40 line=3 col=12 text="->"
+        Whitespace @40..41 line=3 col=14 text=" "
+        TypeArrow @41..51
+          NamePath @41..44
+            UpperIdent @41..44 line=3 col=15 text="Int"
+          Whitespace @44..45 line=3 col=18 text=" "
+          Arrow @45..47 line=3 col=19 text="->"
+          Whitespace @47..48 line=3 col=21 text=" "
+          NamePath @48..51
+            UpperIdent @48..51 line=3 col=22 text="Int"
+    Newline @51..52 line=3 col=25 text="\n"
+    VSemi @52..52 line=4 col=0 synthetic text=""
+    FunctionDef @52..69
+      LParen @52..53 line=4 col=0 text="("
+      Operator @53..56 line=4 col=1 text="<+>"
+      RParen @56..57 line=4 col=4 text=")"
+      Whitespace @57..58 line=4 col=5 text=" "
+      Ident @58..59 line=4 col=6 text="x"
+      Whitespace @59..60 line=4 col=7 text=" "
+      Ident @60..61 line=4 col=8 text="y"
+      Whitespace @61..62 line=4 col=9 text=" "
+      Eq @62..63 line=4 col=10 text="="
+      Whitespace @63..64 line=4 col=11 text=" "
+      OpChain @64..69
+        NamePath @64..65
+          Ident @64..65 line=4 col=12 text="x"
+        Whitespace @65..66 line=4 col=13 text=" "
+        Plus @66..67 line=4 col=14 text="+"
+        Whitespace @67..68 line=4 col=15 text=" "
+        NamePath @68..69
+          Ident @68..69 line=4 col=16 text="y"
+    Newline @69..71 line=4 col=17 text="\n\n"
+    VSemi @71..71 line=6 col=0 synthetic text=""
+    FunctionDef @71..98
+      Ident @71..75 line=6 col=0 text="main"
+      Whitespace @75..76 line=6 col=4 text=" "
+      Eq @76..77 line=6 col=5 text="="
+      Whitespace @77..78 line=6 col=6 text=" "
+      OpChain @78..98
+        AtomExpr @78..79
+          Int @78..79 line=6 col=7 text="1"
+        Whitespace @79..80 line=6 col=8 text=" "
+        Plus @80..81 line=6 col=9 text="+"
+        Whitespace @81..82 line=6 col=10 text=" "
+        AtomExpr @82..83
+          Int @82..83 line=6 col=11 text="2"
+        Whitespace @83..84 line=6 col=12 text=" "
+        Star @84..85 line=6 col=13 text="*"
+        Whitespace @85..86 line=6 col=14 text=" "
+        AtomExpr @86..87
+          Int @86..87 line=6 col=15 text="3"
+        Whitespace @87..88 line=6 col=16 text=" "
+        Operator @88..90 line=6 col=17 text="^^"
+        Whitespace @90..91 line=6 col=19 text=" "
+        AtomExpr @91..92
+          Int @91..92 line=6 col=20 text="4"
+        Whitespace @92..93 line=6 col=21 text=" "
+        Operator @93..96 line=6 col=22 text="<+>"
+        Whitespace @96..97 line=6 col=25 text=" "
+        AtomExpr @97..98
+          Int @97..98 line=6 col=26 text="5"
+  Newline @98..99 line=6 col=27 text="\n"
+  VClose @99..99 line=7 col=0 synthetic text=""
+  Eof @99..99 line=7 col=0 text=""

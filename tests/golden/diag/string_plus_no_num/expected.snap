@@ -1,0 +1,15 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[TC0013] Error: unsatisfied type class constraints: Num String
+   ╭─[ $WORKSPACE/tests/golden/diag/string_plus_no_num/src/main.sv:2:15 ]
+   │
+ 2 │ main = "left" + "right"
+   │               ┬
+   │               ╰── constraints arise from this expression
+   │
+   │ Note: no matching instance found for:
+   │         Num String
+───╯
+type error

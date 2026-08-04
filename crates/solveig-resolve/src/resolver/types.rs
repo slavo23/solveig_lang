@@ -27,7 +27,7 @@ impl<'a> Resolver<'a> {
             ..
         } = defn
         else {
-            panic!("ICE: local type alias cache contained a non-alias definition");
+            solveig_base::ice!("local type alias cache contained a non-alias definition");
         };
 
         self.type_alias_stack.push(def_id);
@@ -71,7 +71,10 @@ impl<'a> Resolver<'a> {
             .iter()
             .position(|stacked| *stacked == def_id)
         {
-            let mut names = self.type_alias_stack[index..]
+            let Some(cycle) = self.type_alias_stack.get(index..) else {
+                solveig_base::ice!("type alias cycle stack index out of bounds");
+            };
+            let mut names = cycle
                 .iter()
                 .map(|alias| alias.name)
                 .collect::<Vec<_>>();
@@ -122,7 +125,10 @@ impl<'a> Resolver<'a> {
                 }
 
                 if type_candidates.is_empty() && alias_candidates.len() == 1 {
-                    return Ok(Some(alias_candidates[0]));
+                    let Some(def_id) = alias_candidates.first().copied() else {
+                        solveig_base::ice!("single alias candidate check lost the candidate");
+                    };
+                    return Ok(Some(def_id));
                 }
 
                 alias_candidates.extend(type_candidates);
@@ -138,9 +144,9 @@ impl<'a> Resolver<'a> {
             }
 
             [_first, rest @ ..] => {
-                let local_name = *rest
-                    .last()
-                    .expect("ICE: qualified type alias name must have a last segment");
+                let Some(local_name) = rest.last().copied() else {
+                    solveig_base::ice!("qualified type alias name must have a last segment");
+                };
 
                 if cx.module.0.as_slice() == r.prefix() {
                     if cx.local_api.types.contains_key(&local_name) {
@@ -161,7 +167,7 @@ impl<'a> Resolver<'a> {
                 Ok(imp.api.type_aliases.get(&local_name).copied())
             }
 
-            [] => panic!("ICE: empty type alias name ref"),
+            [] => solveig_base::ice!("empty type alias name ref"),
         }
     }
 
@@ -191,9 +197,7 @@ impl<'a> Resolver<'a> {
             }
 
             [_first, rest @ ..] => {
-                let local_name = *rest
-                    .last()
-                    .expect("ICE: qualified type alias name must have a last segment");
+                let local_name = *rest.last()?;
 
                 if cx.module.0.as_slice() == r.prefix() {
                     if cx.local_api.types.contains_key(&local_name) {
@@ -354,9 +358,7 @@ impl<'a> Resolver<'a> {
             }
 
             [_first, rest @ ..] => {
-                let local_name = *rest
-                    .last()
-                    .expect("ICE: qualified type constructor name must have a last segment");
+                let local_name = *rest.last()?;
 
                 if cx.module.0.as_slice() == r.prefix() {
                     if let Some(sym) = cx.local_api.types.get(&local_name) {
@@ -388,7 +390,7 @@ impl<'a> Resolver<'a> {
                 None
             }
 
-            [] => panic!("ICE: empty type constructor name ref"),
+            [] => solveig_base::ice!("empty type constructor name ref"),
         }
     }
     fn resolve_surface_type_in_module(
@@ -461,7 +463,10 @@ impl<'a> Resolver<'a> {
             local,
         )
     }
-    #[allow(clippy::too_many_arguments)]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "signature resolution threads the module context pieces without hiding them in a temporary aggregate"
+    )]
     fn resolve_signatures(
         &mut self,
         module_name: &ModuleName,

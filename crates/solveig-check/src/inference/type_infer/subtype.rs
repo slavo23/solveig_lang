@@ -75,7 +75,9 @@ impl TypeChecker<'_> {
             }
 
             (Ty::TyForAll(binders, preds, body), _) if !binders.is_empty() => {
-                let (quantifier, kind) = &binders[0];
+                let Some(((quantifier, kind), rest_binders)) = binders.split_first() else {
+                    solveig_base::ice!("non-empty forall binder guard failed");
+                };
                 let fresh_evar = self.fresh_evar_id();
                 let marker = ContextEntry::Marker {
                     var_name: solveig_ast::ast::evar_display_name(fresh_evar),
@@ -87,7 +89,7 @@ impl TypeChecker<'_> {
                 let ty_arg = Self::evar_type(fresh_evar);
                 let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                 let instantiated_body = Ty::make_forall_group(
-                    binders[1..].to_vec(),
+                    rest_binders.to_vec(),
                     preds
                         .iter()
                         .map(|pred| Self::substitute_predicate(pred, &subst))
@@ -108,11 +110,13 @@ impl TypeChecker<'_> {
             }
 
             (_, Ty::TyForAll(binders, preds, body)) if !binders.is_empty() => {
-                let (quantifier, kind) = &binders[0];
+                let Some(((quantifier, kind), rest_binders)) = binders.split_first() else {
+                    solveig_base::ice!("non-empty forall binder guard failed");
+                };
                 let universal_entry = self.universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let body = Ty::make_forall_group(
-                    binders[1..].to_vec(),
+                    rest_binders.to_vec(),
                     preds.clone(),
                     (**body).clone(),
                 );
@@ -151,11 +155,11 @@ impl TypeChecker<'_> {
     ) -> Result<(Kind, Kind), ()> {
         let arg_kind = ctx
             .kind_of_type(arg_part, self.tables.tycon_kinds)
-            .map_err(|_| ())?;
+            .map_err(|_error| ())?;
 
         let result_kind = ctx
             .evar_kind_id(result_evar)
-            .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", result_evar.0));
+            .unwrap_or_else(|| solveig_base::ice!("missing evar kind for ?{}", result_evar.0));
 
         let func_kind = Kind::make_arrow(arg_kind.clone(), result_kind);
 
@@ -173,7 +177,7 @@ impl TypeChecker<'_> {
         let evar_entry = ContextEntry::ExVar(
             evar_id,
             ctx.evar_kind_id(evar_id)
-                .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", evar_id.0)),
+                .unwrap_or_else(|| solveig_base::ice!("missing evar kind for ?{}", evar_id.0)),
         );
         let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 
@@ -200,7 +204,7 @@ impl TypeChecker<'_> {
                     &ContextEntry::ExVar(
                         *other_evar,
                         ctx.evar_kind_id(*other_evar)
-                            .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", other_evar.0)),
+                            .unwrap_or_else(|| solveig_base::ice!("missing evar kind for ?{}", other_evar.0)),
                     ),
                     &solution,
                 ))
@@ -264,11 +268,13 @@ impl TypeChecker<'_> {
                 self.instantiate_left(theta, arg_evar, &arg_applied, origin_span)
             }
             Ty::TyForAll(binders, preds, body) if !binders.is_empty() => {
-                let (quantifier, kind) = &binders[0];
+                let Some(((quantifier, kind), rest_binders)) = binders.split_first() else {
+                    solveig_base::ice!("non-empty forall binder guard failed");
+                };
                 let universal_entry = self.universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let body = Ty::make_forall_group(
-                    binders[1..].to_vec(),
+                    rest_binders.to_vec(),
                     preds.clone(),
                     (**body).clone(),
                 );
@@ -296,7 +302,7 @@ impl TypeChecker<'_> {
         let evar_entry = ContextEntry::ExVar(
             evar_id,
             ctx.evar_kind_id(evar_id)
-                .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", evar_id.0)),
+                .unwrap_or_else(|| solveig_base::ice!("missing evar kind for ?{}", evar_id.0)),
         );
         let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
         let left_ctx = Context::from_entries(left_entries.clone());
@@ -322,7 +328,7 @@ impl TypeChecker<'_> {
                     &ContextEntry::ExVar(
                         *other_evar,
                         ctx.evar_kind_id(*other_evar)
-                            .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", other_evar.0)),
+                            .unwrap_or_else(|| solveig_base::ice!("missing evar kind for ?{}", other_evar.0)),
                     ),
                     &solution,
                 ))
@@ -386,7 +392,9 @@ impl TypeChecker<'_> {
                 self.instantiate_right(theta, &arg_applied, arg_evar, origin_span)
             }
             Ty::TyForAll(binders, preds, body) if !binders.is_empty() => {
-                let (quantifier, kind) = &binders[0];
+                let Some(((quantifier, kind), rest_binders)) = binders.split_first() else {
+                    solveig_base::ice!("non-empty forall binder guard failed");
+                };
                 let fresh_evar = self.fresh_evar_id();
                 let marker = ContextEntry::Marker {
                     var_name: solveig_ast::ast::evar_display_name(fresh_evar),
@@ -398,7 +406,7 @@ impl TypeChecker<'_> {
                 let ty_arg = Self::evar_type(fresh_evar);
                 let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                 let instantiated = Ty::make_forall_group(
-                    binders[1..].to_vec(),
+                    rest_binders.to_vec(),
                     preds
                         .iter()
                         .map(|pred| Self::substitute_predicate(pred, &subst))
@@ -431,13 +439,15 @@ impl TypeChecker<'_> {
             }
 
             Ty::TyForAll(binders, preds, body) if !binders.is_empty() => {
-                let (quantifier, kind) = &binders[0];
+                let Some(((quantifier, kind), rest_binders)) = binders.split_first() else {
+                    solveig_base::ice!("non-empty forall binder guard failed");
+                };
                 let fresh_evar = self.fresh_evar_id();
                 let new_ctx = ctx.add_entry(ContextEntry::ExVar(fresh_evar, kind.clone()));
                 let ty_arg = Self::evar_type(fresh_evar);
                 let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                 let instantiated = Ty::make_forall_group(
-                    binders[1..].to_vec(),
+                    rest_binders.to_vec(),
                     preds
                         .iter()
                         .map(|pred| Self::substitute_predicate(pred, &subst))
@@ -455,7 +465,7 @@ impl TypeChecker<'_> {
                 let evar_entry = ContextEntry::ExVar(
                     *evar_id,
                     ctx.evar_kind_id(*evar_id)
-                        .unwrap_or_else(|| panic!("ICE: missing evar kind for ?{}", evar_id.0)),
+                        .unwrap_or_else(|| solveig_base::ice!("missing evar kind for ?{}", evar_id.0)),
                 );
                 let (mut left_entries, _, right_entries) = ctx.split_at(&evar_entry);
 

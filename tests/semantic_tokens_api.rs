@@ -1,14 +1,16 @@
+use std::collections::BTreeSet;
+use std::env;
 use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use solveig_base::{FileSpan, SourceMap};
 use solveig_driver::Compilation;
 use solveig_ide::{
     CompilationIdeExt, SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
 };
+
+mod snapshot_support;
 
 #[derive(Debug)]
 struct DecodedToken {
@@ -19,27 +21,6 @@ struct DecodedToken {
 
 fn fixture_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
-}
-
-fn temp_root(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "solveig_semantic_tokens_{name}_{}_{}",
-        process::id(),
-        nanos
-    ))
-}
-
-fn write_source(path: &Path, source: &str) {
-    fs::create_dir_all(
-        path.parent()
-            .expect("test source should have a parent directory"),
-    )
-    .expect("test source directory should be creatable");
-    fs::write(path, source).expect("test source should be writable");
 }
 
 #[test]
@@ -58,8 +39,17 @@ fn semantic_tokens_golden_decoded_stream() {
         )
     });
 
-    assert_eq!(actual, expected);
+    snapshot_support::assert_fixture_snapshot(
+        expected_path
+            .parent()
+            .expect("semantic-token golden should have a parent"),
+        "semantic_tokens_h15",
+        &expected,
+        &actual,
+    );
     assert_sorted_and_non_overlapping(&tokens);
+    assert_all_kinds_covered(&decoded);
+    assert_all_modifiers_covered(&decoded);
     assert_has(
         &decoded,
         "semanticLib",
@@ -148,24 +138,43 @@ fn semantic_tokens_golden_decoded_stream() {
 }
 
 #[test]
-fn semantic_tokens_survive_mid_edit_parse_errors() {
-    let root = temp_root("broken");
-    let source_file = root.join("scratch.sv");
-    write_source(
-        &source_file,
-        r#"main : Int
-main = if True then
-"#,
-    );
+fn semantic_tokens_mid_edit_unparseable_file_golden() {
+    let case_root = fixture_root("tests/golden/semantic_tokens/mid_edit");
+    let source_file = case_root.join("source.sv");
     let mut compilation = Compilation::for_source_file(&source_file);
     let tokens = compilation.semantic_tokens(&source_file);
     let decoded = decode_tokens(&tokens, compilation.source_map());
+    let actual = dump_tokens(&tokens, compilation.source_map());
+    let expected_path = case_root.join("expected.txt");
+    let update = env::var("UPDATE_GOLDEN").is_ok_and(|value| value == "1");
 
+    let expected = if update {
+        fs::write(&expected_path, &actual).unwrap_or_else(|error| {
+            panic!(
+                "failed to update mid-edit semantic-token golden at {}: {error}",
+                expected_path.display()
+            )
+        });
+        actual.clone()
+    } else {
+        fs::read_to_string(&expected_path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read mid-edit semantic-token golden at {}: {error}\n\
+                 run with UPDATE_GOLDEN=1 to create or refresh it",
+                expected_path.display()
+            )
+        })
+    };
+
+    snapshot_support::assert_fixture_snapshot(
+        &case_root,
+        "semantic_tokens_mid_edit",
+        &expected,
+        &actual,
+    );
     assert_sorted_and_non_overlapping(&tokens);
     assert_has(&decoded, "if", SourceSemanticTokenKind::Keyword, &[]);
     assert_has(&decoded, "then", SourceSemanticTokenKind::Keyword, &[]);
-
-    let _ = fs::remove_dir_all(root);
 }
 
 fn decode_tokens(tokens: &[SourceSemanticToken], source_map: &SourceMap) -> Vec<DecodedToken> {
@@ -175,7 +184,11 @@ fn decode_tokens(tokens: &[SourceSemanticToken], source_map: &SourceMap) -> Vec<
             let span = token.file_span();
             let source = source_map.lookup(span.file);
             DecodedToken {
-                text: source.src[span.span.to_usize_range()].to_string(),
+                text: source
+                    .src
+                    .get(span.span.to_usize_range())
+                    .expect("semantic token span should slice source")
+                    .to_string(),
                 kind: token.kind(),
                 modifiers: token.modifiers().iter().collect(),
             }
@@ -191,7 +204,11 @@ fn dump_tokens(tokens: &[SourceSemanticToken], source_map: &SourceMap) -> String
         let source = source_map.lookup(span.file);
         let (line, col) = source_map.line_col(span.file, span.span.start);
         let (end_line, end_col) = source_map.line_col(span.file, span.span.end);
-        let text = source.src[span.span.to_usize_range()].escape_debug();
+        let text = source
+            .src
+            .get(span.span.to_usize_range())
+            .expect("semantic token span should slice source")
+            .escape_debug();
         let modifiers = token
             .modifiers()
             .iter()
@@ -236,6 +253,46 @@ fn assert_has(
         }),
         "expected semantic token `{text}` with kind {kind:?} and modifiers {modifiers:?}"
     );
+}
+
+fn assert_all_kinds_covered(decoded: &[DecodedToken]) {
+    let actual = decoded
+        .iter()
+        .map(|token| token.kind)
+        .collect::<BTreeSet<_>>();
+    let expected = BTreeSet::from([
+        SourceSemanticTokenKind::Namespace,
+        SourceSemanticTokenKind::Type,
+        SourceSemanticTokenKind::Class,
+        SourceSemanticTokenKind::TypeParameter,
+        SourceSemanticTokenKind::Parameter,
+        SourceSemanticTokenKind::Variable,
+        SourceSemanticTokenKind::Function,
+        SourceSemanticTokenKind::EnumMember,
+        SourceSemanticTokenKind::Method,
+        SourceSemanticTokenKind::Keyword,
+        SourceSemanticTokenKind::Operator,
+        SourceSemanticTokenKind::String,
+        SourceSemanticTokenKind::Number,
+        SourceSemanticTokenKind::Comment,
+    ]);
+
+    pretty_assertions::assert_eq!(actual, expected);
+}
+
+fn assert_all_modifiers_covered(decoded: &[DecodedToken]) {
+    let actual = decoded
+        .iter()
+        .flat_map(|token| token.modifiers.iter().copied())
+        .collect::<BTreeSet<_>>();
+    let expected = BTreeSet::from([
+        SourceSemanticTokenModifier::Declaration,
+        SourceSemanticTokenModifier::Definition,
+        SourceSemanticTokenModifier::Readonly,
+        SourceSemanticTokenModifier::DefaultLibrary,
+    ]);
+
+    pretty_assertions::assert_eq!(actual, expected);
 }
 
 fn assert_sorted_and_non_overlapping(tokens: &[SourceSemanticToken]) {

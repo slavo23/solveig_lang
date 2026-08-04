@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+1:1-1:5 Function [Declaration|Definition|Readonly] `main`
+1:6-1:7 Operator [-] `:`
+1:8-1:11 Type [-] `Int`
+2:1-2:5 Variable [-] `main`
+2:6-2:7 Operator [-] `=`
+2:8-2:10 Keyword [-] `if`
+2:11-2:15 Type [-] `True`
+2:16-2:20 Keyword [-] `then`

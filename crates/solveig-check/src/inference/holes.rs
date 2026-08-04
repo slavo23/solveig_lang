@@ -160,7 +160,7 @@ fn fill_params(params: &[Ty], ctx: &[(String, Ty)]) -> Option<Vec<String>> {
 
 fn ctor_table_short_name(id: CtorId, ctor_table: &CtorTable, names: &Names) -> String {
     ctor_table.get(id).map_or_else(
-        || panic!("ICE: hole diagnostic constructor table missing CtorId {id:?}"),
+        || solveig_base::ice!("hole diagnostic constructor table missing CtorId {id:?}"),
         |info| names.symbol_display_name(info.short_name),
     )
 }

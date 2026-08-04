@@ -39,7 +39,10 @@ pub(crate) fn lsp_symbol_information(
         .collect()
 }
 
-#[allow(deprecated)]
+#[expect(
+    deprecated,
+    reason = "lsp-types keeps deprecated DTO fields that still need explicit wire values"
+)]
 fn lsp_document_symbol(
     symbol: &SourceSymbol,
     source_map: &SourceMap,
@@ -61,7 +64,10 @@ fn lsp_document_symbol(
     })
 }
 
-#[allow(deprecated)]
+#[expect(
+    deprecated,
+    reason = "lsp-types keeps deprecated DTO fields that still need explicit wire values"
+)]
 fn lsp_symbol_info(
     symbol: &SourceSymbol,
     source_map: &SourceMap,

@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[PAR0001] Error: parse error
+   ╭─[ $WORKSPACE/tests/golden/diag/do_final_bind/src/main.sv:3:5 ]
+   │
+ 3 │     name <- readLine
+   │     ────────┬───────
+   │             ╰───────── final do statement must be an expression
+───╯
+parse error

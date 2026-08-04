@@ -1,0 +1,13 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0007] Error: cyclic module imports
+   ╭─[ $WORKSPACE/tests/golden/diag/cyclic_imports/src/main.sv:1:1 ]
+   │
+ 1 │ ╭─▶ import other
+ 2 │ ├─▶
+   │ │
+   │ ╰────── cycle: main -> other
+───╯
+resolve error

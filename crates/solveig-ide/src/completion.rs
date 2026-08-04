@@ -113,12 +113,17 @@ fn completion_context(source_map: &SourceMap, file: FileId, offset: usize) -> Co
         return CompletionContext { qualifier: None };
     };
     let offset = offset.min(source.src.len());
-    let start = source.src[..offset]
+    let Some(prefix) = source.src.get(..offset) else {
+        return CompletionContext { qualifier: None };
+    };
+    let start = prefix
         .rfind(|ch: char| !completion_path_char(ch))
         .map_or(0, |index| index + 1);
-    let path = &source.src[start..offset];
+    let Some(path) = source.src.get(start..offset) else {
+        return CompletionContext { qualifier: None };
+    };
     let qualifier = path.rfind('.').and_then(|dot| {
-        let qualifier = &path[..dot];
+        let qualifier = path.get(..dot)?;
         (!qualifier.is_empty()).then(|| qualifier.to_string())
     });
 
@@ -135,12 +140,22 @@ fn push_module_path_candidates(
     out: &mut Vec<SourceCompletionCandidate>,
 ) {
     for index in 1..module_name.0.len() {
-        let qualifier = module_name.0[..index]
+        let qualifier = module_name
+            .0
+            .get(..index)
+            .expect("ICE: module path prefix index out of bounds")
             .iter()
             .map(|segment| session.str(*segment).to_string())
             .collect::<Vec<_>>()
             .join(".");
-        let label = session.str(module_name.0[index]).to_string();
+        let label = session
+            .str(
+                *module_name
+                    .0
+                    .get(index)
+                    .expect("ICE: module path segment index out of bounds"),
+            )
+            .to_string();
 
         out.push(
             SourceCompletionCandidate::new(SourceCompletionItem::new(

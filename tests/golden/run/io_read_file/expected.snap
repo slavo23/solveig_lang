@@ -1,0 +1,6 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+capital of Norway? | Oslo
+2 + 2? | 4

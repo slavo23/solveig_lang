@@ -1,7 +1,7 @@
 //! Explicit name and literal display tables for compiler identities.
 //! The driver owns this state and threads it through resolver, checker, and lowering.
 
-use solveig_base::FxHashMap;
+use solveig_base::{FxHashMap, ice};
 
 use solveig_base::Symbol;
 
@@ -214,7 +214,7 @@ impl Names {
 
     pub fn string_literal_value(&self, id: StrLitId) -> &str {
         self.string_values.get(id.0 as usize).map_or_else(
-            || panic!("ICE: missing string literal payload for StrLitId {id:?}"),
+            || ice!("missing string literal payload for StrLitId {id:?}"),
             String::as_str,
         )
     }

@@ -33,6 +33,10 @@ impl Session {
         self.source_map.borrow_mut().add_file(path, src)
     }
 
+    pub fn add_or_update_file(&self, path: impl Into<PathBuf>, src: impl Into<String>) -> FileId {
+        self.source_map.borrow_mut().add_or_update_file(path, src)
+    }
+
     pub fn line_col(&self, file: FileId, offset: u32) -> (u32, u32) {
         self.source_map.borrow().line_col(file, offset)
     }

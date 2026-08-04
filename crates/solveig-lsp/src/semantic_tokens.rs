@@ -107,8 +107,14 @@ fn push_absolute_segment(
     encoding: PositionEncoding,
     out: &mut Vec<AbsoluteToken>,
 ) {
-    let start = source_file.position(start_offset as u32, encoding);
-    let end = source_file.position(end_offset as u32, encoding);
+    let Ok(start_offset) = u32::try_from(start_offset) else {
+        return;
+    };
+    let Ok(end_offset) = u32::try_from(end_offset) else {
+        return;
+    };
+    let start = source_file.position(start_offset, encoding);
+    let end = source_file.position(end_offset, encoding);
 
     if start.line != end.line || end.character <= start.character {
         return;
@@ -199,16 +205,19 @@ fn line_index(source_file: &SourceFile, offset: usize) -> usize {
 }
 
 fn line_text_end(source_file: &SourceFile, line: usize) -> usize {
-    let start = source_file.line_starts[line] as usize;
+    let start = *source_file
+        .line_starts
+        .get(line)
+        .expect("ICE: semantic-token line index out of bounds") as usize;
     let mut end = source_file
         .line_starts
         .get(line + 1)
         .map_or(source_file.src.len(), |next| *next as usize);
     let bytes = source_file.src.as_bytes();
 
-    if start < end && bytes[end - 1] == b'\n' {
+    if start < end && bytes.get(end - 1).is_some_and(|byte| *byte == b'\n') {
         end -= 1;
-        if start < end && bytes[end - 1] == b'\r' {
+        if start < end && bytes.get(end - 1).is_some_and(|byte| *byte == b'\r') {
             end -= 1;
         }
     }

@@ -1,0 +1,8 @@
+1
+[TC0017] Warning: unreachable pattern
+   ╭─[ $WORKSPACE/tests/golden/warn/unreachable_pattern/src/main.sv:4:11 ]
+   │
+ 4 │         | True => 2
+   │           ──┬─  
+   │             ╰─── this pattern is already covered by earlier case arms
+───╯

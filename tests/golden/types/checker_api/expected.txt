@@ -1,0 +1,127 @@
+main.applyTwice : forall a. (a -> a) -> a -> a
+main.charId : Char -> Char
+main.compose : forall a b c. (b -> c) -> (a -> b) -> a -> c
+main.constLocal : forall a b. a -> b -> a
+main.floatId : Float -> Float
+main.ioIntId : IO Int -> IO Int
+main.lessInt : Bool
+main.lessViaOrd : forall a. Ord a => a -> a -> Bool
+main.letUnderQualified : forall a. Eq a => a -> Bool
+main.longElementId : forall element. element -> element
+main.longElementResult : Int
+main.main : Int
+main.mapBox : forall a b. (a -> b) -> Box a -> Box b
+main.mapBoxInt : Box Int -> Box Int
+main.notEqThrough : forall a. Eq a => a -> a -> Bool
+main.polyId : forall a. a -> a
+main.rank2EqResult : Bool
+main.rank2Result : Int
+main.sameViaOrd : forall a. Ord a => a -> a -> Bool
+main.sameWrap : forall a. Eq a => Wrap a -> Wrap a -> Bool
+main.shadowRank2 : forall a. (forall b. b -> b) -> a -> a
+main.shadowRank2Result : Int
+main.stringId : String -> String
+main.sumViaFoldr : [Int] -> Int
+main.useMap : [Int] -> [Int]
+main.useRank2 : (forall a. a -> a) -> Int
+main.useRank2Eq : (forall a. Eq a => a -> a -> Bool) -> Bool
+main.wrapNotEqInt : Bool
+prelude.builtins.and : Bool -> Bool -> Bool
+prelude.builtins.appendFile : String -> String -> IO ()
+prelude.builtins.appendString : String -> String -> String
+prelude.builtins.bindIO : forall a b. IO a -> (a -> IO b) -> IO b
+prelude.builtins.even : Int -> Bool
+prelude.builtins.not : Bool -> Bool
+prelude.builtins.odd : Int -> Bool
+prelude.builtins.or : Bool -> Bool -> Bool
+prelude.builtins.printLine : String -> IO ()
+prelude.builtins.printStr : String -> IO ()
+prelude.builtins.pureIO : forall a. a -> IO a
+prelude.builtins.readFile : String -> IO String
+prelude.builtins.readLine : IO String
+prelude.builtins.writeFile : String -> String -> IO ()
+prelude.list.append : forall a. [a] -> [a] -> [a]
+prelude.list.concat : forall a. [[a]] -> [a]
+prelude.list.filter : forall a. (a -> Bool) -> [a] -> [a]
+prelude.list.foldl : forall a b. (b -> a -> b) -> b -> [a] -> b
+prelude.list.foldr : forall a b. (a -> b -> b) -> b -> [a] -> b
+prelude.list.map : forall a b. (a -> b) -> [a] -> [b]
+prelude.list.range : Int -> Int -> Bool -> [Int]
+prelude.list.rangeDown : Int -> Int -> [Int] -> [Int]
+prelude.list.reverse : forall a. [a] -> [a]
+prelude.list.reverseGo : forall a. [a] -> [a] -> [a]
+prelude.prim.appendFile : String -> String -> IO ()
+prelude.prim.bindIO : forall a b. IO a -> (a -> IO b) -> IO b
+prelude.prim.charCompare : Char -> Char -> Ordering
+prelude.prim.charEq : Char -> Char -> Bool
+prelude.prim.charToString : Char -> String
+prelude.prim.charsToString : [Char] -> String
+prelude.prim.floatAdd : Float -> Float -> Float
+prelude.prim.floatDiv : Float -> Float -> Float
+prelude.prim.floatEq : Float -> Float -> Bool
+prelude.prim.floatGe : Float -> Float -> Bool
+prelude.prim.floatGt : Float -> Float -> Bool
+prelude.prim.floatLe : Float -> Float -> Bool
+prelude.prim.floatLt : Float -> Float -> Bool
+prelude.prim.floatMul : Float -> Float -> Float
+prelude.prim.floatNeg : Float -> Float
+prelude.prim.floatSub : Float -> Float -> Float
+prelude.prim.floatToInt : Float -> Int
+prelude.prim.floatToString : Float -> String
+prelude.prim.getArgs : IO [String]
+prelude.prim.intAdd : Int -> Int -> Int
+prelude.prim.intCompare : Int -> Int -> Ordering
+prelude.prim.intDiv : Int -> Int -> Int
+prelude.prim.intEq : Int -> Int -> Bool
+prelude.prim.intGe : Int -> Int -> Bool
+prelude.prim.intGt : Int -> Int -> Bool
+prelude.prim.intLe : Int -> Int -> Bool
+prelude.prim.intLt : Int -> Int -> Bool
+prelude.prim.intMod : Int -> Int -> Int
+prelude.prim.intMul : Int -> Int -> Int
+prelude.prim.intNeg : Int -> Int
+prelude.prim.intSub : Int -> Int -> Int
+prelude.prim.intToFloat : Int -> Float
+prelude.prim.intToString : Int -> String
+prelude.prim.printLine : String -> IO ()
+prelude.prim.printStr : String -> IO ()
+prelude.prim.pureIO : forall a. a -> IO a
+prelude.prim.readFile : String -> IO String
+prelude.prim.readLine : IO String
+prelude.prim.stringAppend : String -> String -> String
+prelude.prim.stringCharAt : String -> Int -> Maybe Char
+prelude.prim.stringCompare : String -> String -> Ordering
+prelude.prim.stringEq : String -> String -> Bool
+prelude.prim.stringLength : String -> Int
+prelude.prim.stringSlice : String -> Int -> Int -> String
+prelude.prim.stringToChars : String -> [Char]
+prelude.prim.writeFile : String -> String -> IO ()
+prelude.typeclasses.applyLeft : forall f a b. Applicative f => f a -> f b -> f a
+prelude.typeclasses.applyRight : forall f a b. Applicative f => f a -> f b -> f b
+prelude.typeclasses.clampOrd : forall a. Ord a => a -> a -> a -> a
+prelude.typeclasses.composeK : forall m a b c. Monad m => (a -> m b) -> (b -> m c) -> a -> m c
+prelude.typeclasses.div : Int -> Int -> Int
+prelude.typeclasses.eq : forall a. Eq a => a -> a -> Bool
+prelude.typeclasses.filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
+prelude.typeclasses.getArgs : IO [String]
+prelude.typeclasses.greater : forall a. Ord a => a -> a -> Bool
+prelude.typeclasses.greaterEq : forall a. Ord a => a -> a -> Bool
+prelude.typeclasses.join : forall m a. Monad m => m (m a) -> m a
+prelude.typeclasses.less : forall a. Ord a => a -> a -> Bool
+prelude.typeclasses.lessEq : forall a. Ord a => a -> a -> Bool
+prelude.typeclasses.liftA2 : forall f a b c. Applicative f => (a -> b -> c) -> f a -> f b -> f c
+prelude.typeclasses.mapIO_ : forall a. (a -> IO ()) -> [a] -> IO ()
+prelude.typeclasses.mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]
+prelude.typeclasses.maxOrd : forall a. Ord a => a -> a -> a
+prelude.typeclasses.mconcat : forall a. Monoid a => [a] -> a
+prelude.typeclasses.minOrd : forall a. Ord a => a -> a -> a
+prelude.typeclasses.mod : Int -> Int -> Int
+prelude.typeclasses.notEq : forall a. Eq a => a -> a -> Bool
+prelude.typeclasses.seqIO : forall a b. IO a -> IO b -> IO b
+prelude.typeclasses.sequence : forall m a. Monad m => [m a] -> m [a]
+prelude.typeclasses.showCharPayload : Char -> String
+prelude.typeclasses.showListItems : forall a. Show a => [a] -> String
+prelude.typeclasses.showStringChars : [Char] -> String
+prelude.typeclasses.showStringPayload : Char -> String
+prelude.typeclasses.subtract : forall a. Num a => a -> a -> a
+prelude.typeclasses.thenM : forall m a b. Monad m => m a -> m b -> m b

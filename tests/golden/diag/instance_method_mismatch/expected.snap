@@ -1,0 +1,16 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[TC0015] Error: type mismatch in instance method `local` of `main.Local`
+   ╭─[ $WORKSPACE/tests/golden/diag/instance_method_mismatch/src/main.sv:5:15 ]
+   │
+ 5 │     local x = True
+   │               ──┬─
+   │                 ╰─── this expression has type `Bool`
+   │
+   │ Note 1: but it was required to have type `Int`
+   │
+   │ Note 2: the class requires `Int -> Int`
+───╯
+type error

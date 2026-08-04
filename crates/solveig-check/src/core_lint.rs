@@ -564,10 +564,17 @@ impl CoreLinter<'_> {
                 }
 
                 let subst = subst_from_class_head(&class_def.params, &root_pred.args);
-                Some(substitute_predicate(
-                    &class_def.superclasses[*index],
-                    &subst,
-                ))
+                let Some(superclass) = class_def.superclasses.get(*index) else {
+                    self.report(
+                        None,
+                        format!(
+                            "ICE: EvSuper index {} out of range for class `{}`",
+                            index, class_def.name
+                        ),
+                    );
+                    return None;
+                };
+                Some(substitute_predicate(superclass, &subst))
             }
         }
     }

@@ -1,0 +1,5 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+((("scores", [1, 2, 3]), True), (("external", [4, 5]), True))

@@ -495,7 +495,11 @@ impl TypeChecker<'_> {
     fn unresolved_wanteds_in_range(&mut self, range: Range<usize>) -> Vec<Wanted> {
         let mut unresolved = Vec::new();
 
-        let wanteds = self.wanteds[range].to_vec();
+        let wanteds = self
+            .wanteds
+            .get(range)
+            .expect("ICE: wanted range out of bounds")
+            .to_vec();
         for wanted in wanteds {
             match self.entail(&wanted.givens, &wanted.pred) {
                 Ok(evidence) => {
@@ -625,7 +629,11 @@ impl TypeChecker<'_> {
         // generalized by the binding become retained constraints; concrete
         // unsolved predicates remain errors, and retained predicates whose
         // variables do not appear in the inferred type are ambiguous.
-        let wanteds = self.wanteds[wanted_range].to_vec();
+        let wanteds = self
+            .wanteds
+            .get(wanted_range)
+            .expect("ICE: generalized wanted range out of bounds")
+            .to_vec();
         for wanted in wanteds {
             let pred = self.zonk_predicate(&wanted.pred);
             let wanted = Wanted { pred, ..wanted };

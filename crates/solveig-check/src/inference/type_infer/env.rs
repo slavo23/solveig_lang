@@ -121,13 +121,13 @@ impl<'a> TypeChecker<'a> {
     }
     fn display_class_name(&self, id: ClassId) -> String {
         self.tables.class_table.get(id).map_or_else(
-            || panic!("ICE: type checker class table missing ClassId {id:?}"),
+            || solveig_base::ice!("type checker class table missing ClassId {id:?}"),
             |info| self.names.symbol_display_name(info.name),
         )
     }
     fn display_ctor_name(&self, id: CtorId) -> String {
         self.tables.ctor_table.get(id).map_or_else(
-            || panic!("ICE: type checker constructor table missing CtorId {id:?}"),
+            || solveig_base::ice!("type checker constructor table missing CtorId {id:?}"),
             |info| self.names.symbol_display_name(info.name),
         )
     }
@@ -302,7 +302,7 @@ impl TypeCheckEnv {
 
     fn display_class_name(&self, names: &Names, id: ClassId) -> String {
         self.class_table.get(id).map_or_else(
-            || panic!("ICE: type check env class table missing ClassId {id:?}"),
+            || solveig_base::ice!("type check env class table missing ClassId {id:?}"),
             |info| names.symbol_display_name(info.name),
         )
     }
@@ -375,11 +375,9 @@ mod tests {
         assert!(matches!(result, Ok((_, _, Ty::TyUnit))));
 
         let missing_expr = TermExprNode::new(TermExpr::Var(VarRef::Global(other_def_id)), 0..0);
-        assert!(
-            checker
-                .solve_inference(Context::new(), &missing_expr)
-                .is_err()
-        );
+        checker
+            .solve_inference(Context::new(), &missing_expr)
+            .unwrap_err();
     }
 
     #[test]
@@ -430,11 +428,9 @@ mod tests {
 
         let missing_expr =
             TermExprNode::new(TermExpr::Var(VarRef::Global(other_method_id)), 0..0);
-        assert!(
-            checker
-                .solve_inference(Context::new(), &missing_expr)
-                .is_err()
-            );
+        checker
+            .solve_inference(Context::new(), &missing_expr)
+            .unwrap_err();
     }
 
     #[test]

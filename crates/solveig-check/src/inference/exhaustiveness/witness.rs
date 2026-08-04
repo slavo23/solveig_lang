@@ -12,7 +12,6 @@ pub(super) enum LitPat {
 }
 
 impl LitPat {
-    #[allow(dead_code)]
     pub(super) fn from_literal(lit: &Literal) -> Self {
         match lit {
             Literal::Int(value) => LitPat::Int(*value),
@@ -96,11 +95,13 @@ impl Witness {
                     return "[]".to_string();
                 }
 
-                if name == "Cons" && args.len() == 2 {
+                if name == "Cons"
+                    && let [head, tail] = args.as_slice()
+                {
                     return format!(
                         "{} :: {}",
-                        args[0].pretty_atom(names, ctor_table),
-                        args[1].pretty(names, ctor_table)
+                        head.pretty_atom(names, ctor_table),
+                        tail.pretty(names, ctor_table)
                     );
                 }
 
@@ -136,7 +137,7 @@ impl Witness {
 
 pub(super) fn ctor_table_short_name(names: &Names, id: CtorId, ctor_table: &CtorTable) -> String {
     ctor_table.get(id).map_or_else(
-        || panic!("ICE: exhaustiveness constructor table missing CtorId {id:?}"),
+        || solveig_base::ice!("exhaustiveness constructor table missing CtorId {id:?}"),
         |info| names.symbol_display_name(info.short_name),
     )
 }

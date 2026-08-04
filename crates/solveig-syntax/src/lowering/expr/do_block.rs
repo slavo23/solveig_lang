@@ -67,12 +67,17 @@ impl CstToAst<'_> {
             .iter()
             .position(|token| self.cst.token(*token).kind == Token::BindArrow)
         {
-            let binder = tokens[..arrow_pos].iter().copied().find(|token| {
-                matches!(
-                    self.cst.token(*token).kind,
-                    Token::Ident | Token::Underscore
-                )
-            });
+            let binder = tokens
+                .get(..arrow_pos)
+                .expect("ICE: do bind arrow position must be in token range")
+                .iter()
+                .copied()
+                .find(|token| {
+                    matches!(
+                        self.cst.token(*token).kind,
+                        Token::Ident | Token::Underscore
+                    )
+                });
             let binder = self.required_token(node, binder, "expected binder")?;
             let expr = self.required_child(
                 node,

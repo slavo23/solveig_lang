@@ -2,6 +2,7 @@
 //! Lowered declarations feed fixity resolution and project API construction.
 
 use super::*;
+use solveig_base::ice;
 
 impl CstToAst<'_> {
     pub(super) fn lower_signature(&mut self, node: CstId) -> Result<SurfaceDefinition, ParseError> {
@@ -86,7 +87,7 @@ impl CstToAst<'_> {
             Token::Infixl => Assoc::Left,
             Token::Infixr => Assoc::Right,
             Token::Infix => Assoc::None,
-            _ => unreachable!("ICE: fixity token was filtered above"),
+            _ => ice!("fixity token was filtered above"),
         };
 
         while let Some(child) = children.get(index) {

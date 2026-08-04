@@ -1,0 +1,28 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+Module @0..17
+  VOpen @0..0 line=0 col=0 synthetic text=""
+  DefinitionList @0..16
+    FunctionDef @0..7
+      Ident @0..3 line=0 col=0 text="bad"
+      Whitespace @3..4 line=0 col=3 text=" "
+      Ident @4..5 line=0 col=4 text="x"
+      Whitespace @5..6 line=0 col=5 text=" "
+      Ident @6..7 line=0 col=6 text="x"
+    Newline @7..8 line=0 col=7 text="\n"
+    Error @8..8
+      diagnostic PAR0001 Error "parse error"
+        label primary @8..8 "expected Eq, got VSemi"
+      VSemi @8..8 line=1 col=0 synthetic text=""
+    FunctionDef @8..16
+      Ident @8..12 line=1 col=0 text="main"
+      Whitespace @12..13 line=1 col=4 text=" "
+      Eq @13..14 line=1 col=5 text="="
+      Whitespace @14..15 line=1 col=6 text=" "
+      AtomExpr @15..16
+        Int @15..16 line=1 col=7 text="0"
+  Newline @16..17 line=1 col=8 text="\n"
+  VClose @17..17 line=2 col=0 synthetic text=""
+  Eof @17..17 line=2 col=0 text=""

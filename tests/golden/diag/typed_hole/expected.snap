@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[HOLE] Error: found hole of type `Int`
+   ╭─[ $WORKSPACE/tests/golden/diag/typed_hole/src/main.sv:2:8 ]
+   │
+ 2 │ main = ??
+   │        ─┬
+   │         ╰── expects `Int`
+───╯
+Program has unfilled holes. Aborting compilation

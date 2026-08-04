@@ -14,9 +14,12 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 [dev-dependencies]
+insta = "1"
+pretty_assertions = "1"
 solveig-base = { path = "crates/solveig-base", version = "0.1.0" }
 solveig-ide = { path = "crates/solveig-ide", version = "0.1.0" }
 solveig-syntax = { path = "crates/solveig-syntax", version = "0.1.0" }
+tempfile = "3"
 
 [lints]
 workspace = true
@@ -44,6 +47,39 @@ rustc-hash = "2.1.1"
 text-size = "1.1.1"
 
 [workspace.lints.clippy]
+string_slice = "warn"
+indexing_slicing = "warn"
+unwrap_used = "warn"
+panic = "warn"
+todo = "warn"
+unimplemented = "warn"
+unreachable = "warn"
+get_unwrap = "warn"
+unwrap_in_result = "warn"
+panic_in_result_fn = "warn"
+let_underscore_must_use = "warn"
+unused_result_ok = "warn"
+map_err_ignore = "warn"
+assertions_on_result_states = "warn"
+mem_forget = "warn"
+undocumented_unsafe_blocks = "warn"
+multiple_unsafe_ops_per_block = "warn"
+unnecessary_safety_doc = "warn"
+unnecessary_safety_comment = "warn"
+float_cmp = "warn"
+float_cmp_const = "warn"
+lossy_float_literal = "warn"
+cast_sign_loss = "warn"
+cast_possible_truncation = "warn"
+invalid_upcast_comparisons = "warn"
+rc_mutex = "warn"
+debug_assert_with_mut_call = "warn"
+iter_not_returning_iterator = "warn"
+expl_impl_clone_on_copy = "warn"
+infallible_try_from = "warn"
+dbg_macro = "warn"
+allow_attributes = "warn"
+allow_attributes_without_reason = "warn"
 needless_pass_by_value = "warn"
 redundant_clone = "warn"
 inefficient_to_string = "warn"

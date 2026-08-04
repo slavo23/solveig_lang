@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0005] Error: class `PairLike` must have exactly one parameter
+   ╭─[ $WORKSPACE/tests/golden/diag/class_arity/src/main.sv:1:7 ]
+   │
+ 1 │ class PairLike a b where
+   │       ────┬───
+   │           ╰───── expected exactly one class parameter, but found 2
+───╯
+resolve error

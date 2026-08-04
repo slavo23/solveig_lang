@@ -237,7 +237,11 @@ impl DataKindInferencer {
         let mut dt_results: Vec<DtResult> = Vec::new();
 
         for def in group {
-            let tycon_kind = self.unifier.resolve(&tycon_env[&def.id]);
+            let tycon_kind = self.unifier.resolve(
+                tycon_env
+                    .get(&def.id)
+                    .expect("ICE: data kind environment missing current type constructor"),
+            );
 
             let mut param_metas = Vec::new();
             for p in &def.ty_params {
@@ -289,7 +293,11 @@ impl DataKindInferencer {
                 .map(|(n, m)| (*n, self.zonk(m)))
                 .collect();
 
-            let tycon_kind = self.zonk(&tycon_metas[&dt.id]);
+            let tycon_kind = self.zonk(
+                tycon_metas
+                    .get(&dt.id)
+                    .expect("ICE: data kind inference lost current type constructor meta"),
+            );
 
             let mut ctors = Vec::new();
             for (cn, short_cn, fields) in &dt.ctor_fields {
@@ -370,10 +378,13 @@ pub fn dependency_analysis(defs: &[RawDataDef]) -> Vec<Vec<usize>> {
             }
         }
         for r in refs {
-            if let Some(&j) = idx.get(&r)
-                && !adj[i].contains(&j)
-            {
-                adj[i].push(j);
+            if let Some(&j) = idx.get(&r) {
+                let dependencies = adj
+                    .get_mut(i)
+                    .expect("ICE: data dependency source index out of bounds");
+                if !dependencies.contains(&j) {
+                    dependencies.push(j);
+                }
             }
         }
     }
@@ -391,7 +402,15 @@ pub fn infer_all_data_kinds_with_env(
     let mut all_results: Vec<InferredDataDef> = Vec::new();
 
     for group_indices in &groups {
-        let group: Vec<RawDataDef> = group_indices.iter().map(|&i| raw_defs[i].clone()).collect();
+        let group: Vec<RawDataDef> = group_indices
+            .iter()
+            .map(|&index| {
+                raw_defs
+                    .get(index)
+                    .expect("ICE: data dependency group index out of bounds")
+                    .clone()
+            })
+            .collect();
 
         let mut inf = DataKindInferencer::new();
         let results = inf.infer_group(&group, &tycon_env)?;

@@ -1,0 +1,32 @@
+[package]
+name = "solveig-fuzz"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+arbitrary = { version = "1", features = ["derive"] }
+libfuzzer-sys = "0.4"
+solveig-base = { path = "../crates/solveig-base" }
+solveig-driver = { path = "../crates/solveig-driver" }
+solveig-syntax = { path = "../crates/solveig-syntax" }
+tempfile = "3"
+
+[[bin]]
+name = "parser_lossless"
+path = "fuzz_targets/parser_lossless.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "vm_pipeline_no_panic"
+path = "fuzz_targets/vm_pipeline_no_panic.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

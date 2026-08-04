@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    reason = "integration tests use panic messages to explain LSP audit failures"
+)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -318,7 +323,7 @@ fn audit_file(compilation: &mut Compilation, file: &Path, anomalies: &mut Vec<St
 
         let position = compilation.source_map().position(
             file_id,
-            token.start() as u32,
+            test_u32(token.start(), "token byte offset"),
             PositionEncoding::Utf8,
         );
         audit_token_features(compilation, file, position, token, text, anomalies);
@@ -373,9 +378,11 @@ fn audit_file_level_features(
     }
 
     let start = SourcePosition::new(0, 0);
-    let end = compilation
-        .source_map()
-        .position(file_id, source_len as u32, PositionEncoding::Utf8);
+    let end = compilation.source_map().position(
+        file_id,
+        test_u32(source_len, "source length"),
+        PositionEncoding::Utf8,
+    );
     for hint in compilation.inlay_hints_at_range(
         file,
         start,
@@ -534,7 +541,7 @@ fn source_file_id(source_map: &SourceMap, file: &Path) -> Option<solveig_base::F
         .enumerate()
         .find_map(|(index, source)| {
             (source.path == file || source.path.ends_with(file) || file.ends_with(&source.path))
-                .then_some(solveig_base::FileId(index as u32))
+                .then(|| solveig_base::FileId(test_u32(index, "source file index")))
         })
 }
 
@@ -542,8 +549,17 @@ fn line_end_positions(source: &str) -> Vec<SourcePosition> {
     source
         .lines()
         .enumerate()
-        .map(|(line, text)| SourcePosition::new(line as u32, text.len() as u32))
+        .map(|(line, text)| {
+            SourcePosition::new(
+                test_u32(line, "line index"),
+                test_u32(text.len(), "line byte length"),
+            )
+        })
         .collect()
+}
+
+fn test_u32(value: usize, what: &str) -> u32 {
+    u32::try_from(value).unwrap_or_else(|_| panic!("{what} should fit in u32"))
 }
 
 fn audit_symbol(source_map: &SourceMap, symbol: &SourceSymbol, anomalies: &mut Vec<String>) {

@@ -710,8 +710,8 @@ pub(crate) mod tests {
     };
     use solveig_driver::Compilation;
     use std::fs;
-    use std::process;
-    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::ops::Deref;
+    use tempfile::{Builder, TempDir};
 
     fn workspace_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -736,12 +736,36 @@ pub(crate) mod tests {
         cases
     }
 
-    fn temp_root(name: &str) -> PathBuf {
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system clock should be after unix epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!("solveig_lsp_{name}_{}_{}", process::id(), nanos))
+    struct TestRoot {
+        dir: TempDir,
+    }
+
+    impl TestRoot {
+        fn path(&self) -> &Path {
+            self.dir.path()
+        }
+    }
+
+    impl Deref for TestRoot {
+        type Target = Path;
+
+        fn deref(&self) -> &Self::Target {
+            self.path()
+        }
+    }
+
+    impl AsRef<Path> for TestRoot {
+        fn as_ref(&self) -> &Path {
+            self.path()
+        }
+    }
+
+    fn temp_root(name: &str) -> TestRoot {
+        let dir = Builder::new()
+            .prefix(&format!("solveig_lsp_{name}_"))
+            .tempdir()
+            .expect("test temp directory should be creatable");
+        TestRoot { dir }
     }
 
     fn write_source(path: &Path, source: &str) {
@@ -833,7 +857,64 @@ main = 1
         let second = state.check_all();
         assert_eq!(second, vec![(uri, Vec::new())]);
 
-        let _ = fs::remove_dir_all(project_root);
+        drop(project_root);
+    }
+
+    #[test]
+    fn repeated_document_edits_keep_retained_lsp_state_bounded() {
+        let project_root = temp_root("bounded_edits");
+        let source = project_root.join("scratch.sv");
+        let initial = "main : Int\nmain = 0\n";
+        write_source(&source, initial);
+        let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+        let mut state = ServerState::new(PositionEncoding::Utf16);
+
+        state.open_document(&uri, initial.to_string());
+        let initial_publications = state.check_all();
+        assert!(
+            diagnostics_for_uri(&initial_publications, &uri).is_empty(),
+            "initial edit-memory fixture should check: {initial_publications:#?}"
+        );
+        let baseline = retained_lsp_counts(&state, &uri);
+
+        for edit_index in 0..1_000 {
+            let edited = format!("main : Int\nmain = {}\n", edit_index % 97);
+            state.change_document(&uri, edited);
+            let publications = state.check_all();
+            assert!(
+                diagnostics_for_uri(&publications, &uri).is_empty(),
+                "edit {edit_index} should check without diagnostics: {publications:#?}"
+            );
+        }
+
+        let final_counts = retained_lsp_counts(&state, &uri);
+        assert_eq!(
+            final_counts.workspaces, baseline.workspaces,
+            "workspace table should not grow over repeated edits"
+        );
+        assert_eq!(
+            final_counts.open_files, baseline.open_files,
+            "open-file overlays should replace the previous text"
+        );
+        assert_eq!(
+            final_counts.published_snapshots, baseline.published_snapshots,
+            "published snapshots should be replaced per workspace"
+        );
+        assert_eq!(
+            final_counts.source_map_files, baseline.source_map_files,
+            "published source maps should not retain previous edits"
+        );
+        assert_eq!(
+            final_counts.snapshot_source_files, baseline.snapshot_source_files,
+            "compilation snapshots should not retain previous edits"
+        );
+
+        let hover = state
+            .hover(&uri, Position::new(1, 7))
+            .expect("final edited snapshot should still answer hovers");
+        assert_hover_contains(hover, "Int");
+
+        drop(project_root);
     }
 
     #[test]
@@ -868,7 +949,7 @@ main = ??
             hole.message
         );
 
-        let _ = fs::remove_dir_all(project_root);
+        drop(project_root);
     }
 
     #[test]
@@ -895,7 +976,7 @@ main = if True then ?? else False
             Some(Range::new(Position::new(1, 20), Position::new(1, 22)))
         );
 
-        let _ = fs::remove_dir_all(project_root);
+        drop(project_root);
     }
 
     #[test]
@@ -936,7 +1017,7 @@ main = _
             Some(Range::new(Position::new(1, 7), Position::new(1, 8)))
         );
 
-        let _ = fs::remove_dir_all(project_root);
+        drop(project_root);
     }
 
     #[test]
@@ -1132,7 +1213,7 @@ main = answer
             "disabled inferred-signature quick fix leaked: {disabled_actions:#?}"
         );
 
-        let _ = fs::remove_dir_all(project_root);
+        drop(project_root);
     }
 
     #[test]
@@ -1207,7 +1288,7 @@ main = count [1, 2, 3]
             .expect("hover should survive saving a signature-less recursive function");
         assert_hover_contains(hover, "count : forall a. [a] -> Int");
 
-        let _ = fs::remove_dir_all(project_root);
+        drop(project_root);
     }
 
     #[test]
@@ -1235,7 +1316,10 @@ main = count [1, 2, 3]
         let hover = state
             .hover(
                 &uri,
-                Position::new(target_line as u32, target_character as u32),
+                Position::new(
+                    u32::try_from(target_line).expect("test line should fit in u32"),
+                    u32::try_from(target_character).expect("test character should fit in u32"),
+                ),
             )
             .expect("hover should work in directly opened bundled prelude");
         assert_hover_contains(hover, "intCompare : Int -> Int -> Ordering");
@@ -1282,7 +1366,13 @@ main = count [1, 2, 3]
                 .and_then(|line| line.find(needle))
                 .unwrap_or_else(|| panic!("target line should contain `{needle}`"));
             let hover = state
-                .hover(&uri, Position::new(line as u32, character as u32))
+                .hover(
+                    &uri,
+                    Position::new(
+                        u32::try_from(line).expect("test line should fit in u32"),
+                        u32::try_from(character).expect("test character should fit in u32"),
+                    ),
+                )
                 .unwrap_or_else(|| {
                     panic!("hover should survive prelude-cache reuse for `{needle}`")
                 });
@@ -1343,7 +1433,8 @@ secondAnswer = 2
         let first_uri = Url::from_file_path(&first_main).expect("first URI should be valid");
         let second_uri = Url::from_file_path(&second_main).expect("second URI should be valid");
         let mut state = ServerState::new(PositionEncoding::Utf16);
-        state.set_roots(vec![container.clone()]);
+        let container_path = container.path().to_path_buf();
+        state.set_roots(vec![container_path.clone()]);
 
         state.open_document(
             &first_uri,
@@ -1356,7 +1447,7 @@ secondAnswer = 2
 
         assert!(state.workspaces.contains_key(&first_root));
         assert!(state.workspaces.contains_key(&second_root));
-        assert!(!state.workspaces.contains_key(&container));
+        assert!(!state.workspaces.contains_key(&container_path));
         let _publications = state.check_all();
 
         let first_hover = state
@@ -1369,7 +1460,7 @@ secondAnswer = 2
         assert_hover_contains(first_hover, "firstAnswer : Int");
         assert_hover_contains(second_hover, "secondAnswer : Int");
 
-        let _ = fs::remove_dir_all(container);
+        drop(container);
     }
 
     fn assert_hover_contains(hover: Hover, needle: &str) {
@@ -1391,6 +1482,39 @@ secondAnswer = 2
                 (published_uri == uri).then(|| diagnostics.clone())
             })
             .unwrap_or_default()
+    }
+
+    #[derive(Clone, Copy, Debug)]
+    struct RetainedLspCounts {
+        workspaces: usize,
+        open_files: usize,
+        published_snapshots: usize,
+        source_map_files: usize,
+        snapshot_source_files: usize,
+    }
+
+    fn retained_lsp_counts(state: &ServerState, uri: &Url) -> RetainedLspCounts {
+        let path = uri
+            .to_file_path()
+            .expect("test URI should convert to a file path");
+        let root = state.workspace_root_for_path(&path);
+        let workspace = state
+            .workspaces
+            .get(&root)
+            .unwrap_or_else(|| panic!("missing workspace for {}", path.display()));
+        let workspace = lock_workspace(workspace);
+        let snapshot = state
+            .published_snapshots
+            .get(&root)
+            .unwrap_or_else(|| panic!("missing published snapshot for {}", root.display()));
+
+        RetainedLspCounts {
+            workspaces: state.workspaces.len(),
+            open_files: workspace.open_files.len(),
+            published_snapshots: state.published_snapshots.len(),
+            source_map_files: snapshot.source_map.files().len(),
+            snapshot_source_files: snapshot.snapshot.source_files.len(),
+        }
     }
 
     fn diagnostic_keys(

@@ -53,9 +53,9 @@ impl Parser<'_> {
         let Some(next_index) = self.significant_index_from(dot_index + 1, 0) else {
             return false;
         };
-        let previous = &self.tokens[previous_index];
-        let dot = &self.tokens[dot_index];
-        let next = &self.tokens[next_index];
+        let previous = self.token(previous_index);
+        let dot = self.token(dot_index);
+        let next = self.token(next_index);
 
         previous.end() == dot.start()
             && dot.end() == next.start()

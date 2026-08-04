@@ -238,10 +238,7 @@ impl SyntaxTree {
 
     /// Returns a token's parent node id.
     pub fn token_parent(&self, id: TokenId) -> Option<CstId> {
-        self.token_parents
-            .get(id.index())
-            .copied()
-            .expect("ICE: TokenId not present in SyntaxTree")
+        self.token_parents.get(id.index()).copied().flatten()
     }
 
     /// Returns comments explicitly attached before this token.
@@ -370,13 +367,21 @@ impl SyntaxTree {
     }
 
     fn attach_comment_trivia(&mut self) {
-        for index in 0..self.tokens.len() {
-            if !token_is_meaningful(&self.tokens[index]) {
+        for (index, token) in self.tokens.iter().enumerate() {
+            if !token_is_meaningful(token) {
                 continue;
             }
 
-            self.leading_comments[index] = leading_comments_before(&self.tokens, index);
-            self.trailing_comments[index] = trailing_comments_after(&self.tokens, index);
+            *self
+                .leading_comments
+                .get_mut(index)
+                .expect("ICE: leading comment table must match token stream length") =
+                leading_comments_before(&self.tokens, index);
+            *self
+                .trailing_comments
+                .get_mut(index)
+                .expect("ICE: trailing comment table must match token stream length") =
+                trailing_comments_after(&self.tokens, index);
         }
     }
 
@@ -496,7 +501,9 @@ fn newline_has_blank_line(token: &PosToken) -> bool {
 
 fn mark_meaningful_tokens(stack: &[CstId], node_has_meaningful_token: &mut [bool]) {
     for id in stack {
-        node_has_meaningful_token[id.index()] = true;
+        *node_has_meaningful_token
+            .get_mut(id.index())
+            .expect("ICE: CST node marker table must contain every open node") = true;
     }
 }
 
@@ -505,7 +512,7 @@ fn trivia_placement(stack: &[CstId], node_has_meaningful_token: &[bool]) -> (Cst
         .last()
         .expect("ICE: CST trivia token event must be inside a syntax node");
 
-    if node_has_meaningful_token[top.index()] {
+    if node_has_meaningful_token_at(node_has_meaningful_token, top) {
         return (top, None);
     }
 
@@ -513,19 +520,34 @@ fn trivia_placement(stack: &[CstId], node_has_meaningful_token: &[bool]) -> (Cst
     // deepest wrapper, so leaf spans start at their meaningful token.
     let mut empty_subtree_root = stack.len() - 1;
     while empty_subtree_root > 0
-        && !node_has_meaningful_token[stack[empty_subtree_root - 1].index()]
+        && !node_has_meaningful_token_at(
+            node_has_meaningful_token,
+            stack_at(stack, empty_subtree_root - 1),
+        )
     {
         empty_subtree_root -= 1;
     }
 
     if empty_subtree_root == 0 {
-        (stack[0], None)
+        (stack_at(stack, 0), None)
     } else {
         (
-            stack[empty_subtree_root - 1],
-            Some(stack[empty_subtree_root]),
+            stack_at(stack, empty_subtree_root - 1),
+            Some(stack_at(stack, empty_subtree_root)),
         )
     }
+}
+
+fn node_has_meaningful_token_at(node_has_meaningful_token: &[bool], id: CstId) -> bool {
+    *node_has_meaningful_token
+        .get(id.index())
+        .expect("ICE: CST node marker table must contain every open node")
+}
+
+fn stack_at(stack: &[CstId], index: usize) -> CstId {
+    *stack
+        .get(index)
+        .expect("ICE: CST open-node stack index must be in bounds")
 }
 
 fn leading_comments_before(tokens: &[PosToken], anchor_index: usize) -> Vec<TokenId> {
@@ -534,7 +556,7 @@ fn leading_comments_before(tokens: &[PosToken], anchor_index: usize) -> Vec<Toke
 
     while index > 0 {
         index -= 1;
-        let token = &tokens[index];
+        let token = token_at(tokens, index);
 
         match token.kind {
             Token::Whitespace | Token::VOpen | Token::VClose | Token::VSemi => {}
@@ -553,7 +575,7 @@ fn leading_comments_before(tokens: &[PosToken], anchor_index: usize) -> Vec<Toke
 }
 
 fn trailing_comments_after(tokens: &[PosToken], anchor_index: usize) -> Vec<TokenId> {
-    let anchor_line = tokens[anchor_index].line;
+    let anchor_line = token_at(tokens, anchor_index).line;
     let mut comments = Vec::new();
 
     for (index, token) in tokens.iter().enumerate().skip(anchor_index + 1) {
@@ -568,6 +590,12 @@ fn trailing_comments_after(tokens: &[PosToken], anchor_index: usize) -> Vec<Toke
     }
 
     comments
+}
+
+fn token_at(tokens: &[PosToken], index: usize) -> &PosToken {
+    tokens
+        .get(index)
+        .expect("ICE: CST comment scan token index must be in bounds")
 }
 
 fn span_contains_offset(span: Span, offset: usize) -> bool {

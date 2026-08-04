@@ -49,15 +49,22 @@ impl BytecodeLowerer {
         self.chunks.push(chunk);
     }
 
+    fn function_chunk_id(&self, function_id: usize) -> usize {
+        *self
+            .function_chunk_ids
+            .get(&function_id)
+            .expect("ICE: closure function id missing bytecode chunk")
+    }
+
     fn lower_function(&self, func: &CCFunction) -> Chunk {
         let capture_count = u16::try_from(func.capture_count)
-            .unwrap_or_else(|_| panic!("ICE: too many captures in function '{}'", func.name));
+            .unwrap_or_else(|_| solveig_base::ice!("too many captures in function '{}'", func.name));
 
         let arity = u16::try_from(func.arity)
-            .unwrap_or_else(|_| panic!("ICE: arity too large in function '{}'", func.name));
+            .unwrap_or_else(|_| solveig_base::ice!("arity too large in function '{}'", func.name));
 
         let mut builder = ChunkBuilder::new_function(
-            self.function_chunk_ids[&func.id],
+            self.function_chunk_id(func.id),
             func.name.clone(),
             capture_count,
             arity,
@@ -103,7 +110,7 @@ impl BytecodeLowerer {
                 }
 
                 let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
-                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                    solveig_base::ice!("arg count {} does not fit in u16", args.len())
                 });
 
                 builder.emit(Instr::TailCallN { arg_count });
@@ -114,11 +121,11 @@ impl BytecodeLowerer {
                     self.compile_expr(builder, env, arg);
                 }
 
-                let chunk = self.function_chunk_ids[func];
+                let chunk = self.function_chunk_id(*func);
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("ICE: chunk id {chunk} does not fit in u32"));
+                    .unwrap_or_else(|_| solveig_base::ice!("chunk id {chunk} does not fit in u32"));
                 let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
-                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                    solveig_base::ice!("arg count {} does not fit in u16", args.len())
                 });
 
                 builder.emit(Instr::TailCallKnown { chunk, arg_count });
@@ -130,7 +137,7 @@ impl BytecodeLowerer {
                 }
 
                 let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
-                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                    solveig_base::ice!("arg count {} does not fit in u16", args.len())
                 });
 
                 builder.emit(Instr::CallBuiltin { id: *id, arg_count });
@@ -215,13 +222,13 @@ impl BytecodeLowerer {
 
             CCExpr::Capture(index) => {
                 let slot = u16::try_from(*index)
-                    .unwrap_or_else(|_| panic!("ICE: capture index {index} does not fit in u16"));
+                    .unwrap_or_else(|_| solveig_base::ice!("capture index {index} does not fit in u16"));
                 builder.emit(Instr::LoadLocal(slot));
             }
 
             CCExpr::Global(index) => {
                 let idx = u32::try_from(*index)
-                    .unwrap_or_else(|_| panic!("ICE: global index {index} does not fit in u32"));
+                    .unwrap_or_else(|_| solveig_base::ice!("global index {index} does not fit in u32"));
                 builder.emit(Instr::LoadGlobal(idx));
             }
 
@@ -248,11 +255,11 @@ impl BytecodeLowerer {
                     self.compile_expr(builder, env, capture);
                 }
 
-                let chunk = self.function_chunk_ids[func];
+                let chunk = self.function_chunk_id(*func);
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("ICE: chunk id {chunk} does not fit in u32"));
+                    .unwrap_or_else(|_| solveig_base::ice!("chunk id {chunk} does not fit in u32"));
                 let capture_count = u16::try_from(captures.len()).unwrap_or_else(|_| {
-                    panic!("ICE: capture count {} does not fit in u16", captures.len())
+                    solveig_base::ice!("capture count {} does not fit in u16", captures.len())
                 });
 
                 builder.emit(Instr::MakeClosure {
@@ -261,11 +268,11 @@ impl BytecodeLowerer {
                 });
             }
             CCExpr::FunctionRef { func, arity } => {
-                let chunk = self.function_chunk_ids[func];
+                let chunk = self.function_chunk_id(*func);
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("ICE: chunk id {chunk} does not fit in u32"));
+                    .unwrap_or_else(|_| solveig_base::ice!("chunk id {chunk} does not fit in u32"));
                 let arity = u16::try_from(*arity)
-                    .unwrap_or_else(|_| panic!("ICE: arity {arity} does not fit in u16"));
+                    .unwrap_or_else(|_| solveig_base::ice!("arity {arity} does not fit in u16"));
 
                 builder.emit(Instr::PushFunctionRef { chunk, arity });
             }
@@ -278,7 +285,7 @@ impl BytecodeLowerer {
                 }
 
                 let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
-                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                    solveig_base::ice!("arg count {} does not fit in u16", args.len())
                 });
 
                 builder.emit(Instr::CallN { arg_count });
@@ -289,11 +296,11 @@ impl BytecodeLowerer {
                     self.compile_expr(builder, env, arg);
                 }
 
-                let chunk = self.function_chunk_ids[func];
+                let chunk = self.function_chunk_id(*func);
                 let chunk = u32::try_from(chunk)
-                    .unwrap_or_else(|_| panic!("ICE: chunk id {chunk} does not fit in u32"));
+                    .unwrap_or_else(|_| solveig_base::ice!("chunk id {chunk} does not fit in u32"));
                 let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
-                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                    solveig_base::ice!("arg count {} does not fit in u16", args.len())
                 });
 
                 builder.emit(Instr::CallKnown { chunk, arg_count });
@@ -305,7 +312,7 @@ impl BytecodeLowerer {
                 }
 
                 let arg_count = u16::try_from(args.len()).unwrap_or_else(|_| {
-                    panic!("ICE: arg count {} does not fit in u16", args.len())
+                    solveig_base::ice!("arg count {} does not fit in u16", args.len())
                 });
 
                 builder.emit(Instr::CallBuiltin { id: *id, arg_count });
@@ -329,7 +336,7 @@ impl BytecodeLowerer {
                 }
 
                 let field_count = u16::try_from(fields.len()).unwrap_or_else(|_| {
-                    panic!("ICE: field count {} does not fit in u16", fields.len())
+                    solveig_base::ice!("field count {} does not fit in u16", fields.len())
                 });
 
                 builder.emit(Instr::Pack {
@@ -410,8 +417,11 @@ impl LocalEnv {
             .locals
             .len()
             .checked_sub(index + 1)
-            .unwrap_or_else(|| panic!("ICE: bad de Bruijn local index {index}"));
-        self.locals[pos]
+            .unwrap_or_else(|| solveig_base::ice!("bad de Bruijn local index {index}"));
+        *self
+            .locals
+            .get(pos)
+            .expect("ICE: de Bruijn local slot position out of bounds")
     }
 }
 
@@ -442,7 +452,7 @@ impl ChunkBuilder {
     fn new_function(id: usize, name: String, capture_count: u16, arity: u16) -> Self {
         let next_slot = capture_count
             .checked_add(arity)
-            .unwrap_or_else(|| panic!("ICE: slot overflow in function '{name}'"));
+            .unwrap_or_else(|| solveig_base::ice!("slot overflow in function '{name}'"));
 
         Self {
             id,
@@ -463,7 +473,7 @@ impl ChunkBuilder {
     }
 
     fn current_pc(&self) -> u32 {
-        u32::try_from(self.code.len()).unwrap_or_else(|_| panic!("ICE: program counter overflow"))
+        u32::try_from(self.code.len()).unwrap_or_else(|_| solveig_base::ice!("program counter overflow"))
     }
 
     fn emit_placeholder_jump(&mut self) -> usize {
@@ -473,9 +483,13 @@ impl ChunkBuilder {
     }
 
     fn patch_jump(&mut self, pos: usize, target: u32) {
-        match &mut self.code[pos] {
+        match self
+            .code
+            .get_mut(pos)
+            .expect("ICE: jump patch position out of bounds")
+        {
             Instr::Jump(slot) => *slot = target,
-            other => panic!("ICE: expected Jump at patch site, found {other:?}"),
+            other => solveig_base::ice!("expected Jump at patch site, found {other:?}"),
         }
     }
 
@@ -486,9 +500,13 @@ impl ChunkBuilder {
     }
 
     fn patch_jump_if_false(&mut self, pos: usize, target: u32) {
-        match &mut self.code[pos] {
+        match self
+            .code
+            .get_mut(pos)
+            .expect("ICE: conditional jump patch position out of bounds")
+        {
             Instr::JumpIfFalse(slot) => *slot = target,
-            other => panic!("ICE: expected JumpIfFalse at patch site, found {other:?}"),
+            other => solveig_base::ice!("expected JumpIfFalse at patch site, found {other:?}"),
         }
     }
 
@@ -498,12 +516,17 @@ impl ChunkBuilder {
             arms: Box::new([]),
             else_target: u32::MAX,
         });
-        self.code.push(Instr::Match(table_idx as u16));
+        let table_idx_u16 = u16::try_from(table_idx)
+            .unwrap_or_else(|_| solveig_base::ice!("match table index {table_idx} does not fit in u16"));
+        self.code.push(Instr::Match(table_idx_u16));
         table_idx
     }
 
     fn patch_match(&mut self, table_idx: usize, arms: Box<[MatchArm]>, else_target: u32) {
-        self.match_tables[table_idx] = MatchTable { arms, else_target };
+        *self
+            .match_tables
+            .get_mut(table_idx)
+            .expect("ICE: match table patch index out of bounds") = MatchTable { arms, else_target };
     }
 
     fn alloc_local_slot(&mut self) -> u16 {
@@ -511,7 +534,7 @@ impl ChunkBuilder {
         self.next_slot = self
             .next_slot
             .checked_add(1)
-            .unwrap_or_else(|| panic!("ICE: slot overflow in chunk '{}'", self.name));
+            .unwrap_or_else(|| solveig_base::ice!("slot overflow in chunk '{}'", self.name));
         self.max_slot_exclusive = self.max_slot_exclusive.max(self.next_slot);
         slot
     }

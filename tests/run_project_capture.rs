@@ -1,14 +1,20 @@
+#![expect(
+    clippy::panic,
+    reason = "integration tests use panic messages to explain fixture setup failures"
+)]
+
 use std::fs;
 use std::io::{Cursor, Write};
-use std::path::{Path, PathBuf};
-use std::process::{self, Command, Stdio};
+use std::path::Path;
+use std::process::{Command, Stdio};
 use std::sync::{Mutex, MutexGuard, OnceLock};
 use std::thread;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use solveig_driver::{
     Compilation, CompileOptions, run_project_capture, run_project_capture_with_stdin,
 };
+
+mod support;
 
 fn project_run_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -17,15 +23,11 @@ fn project_run_lock() -> MutexGuard<'static, ()> {
         .expect("project run lock should not be poisoned")
 }
 
-fn temp_project_root(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!("solveig_{name}_{}_{}", process::id(), nanos))
+fn temp_project_root(name: &str) -> support::TestRoot {
+    support::temp_root("solveig_run", name)
 }
 
-fn write_temp_project(name: &str, main_source: &str) -> PathBuf {
+fn write_temp_project(name: &str, main_source: &str) -> support::TestRoot {
     let project_root = temp_project_root(name);
     fs::create_dir_all(project_root.join("src")).unwrap_or_else(|err| {
         panic!(
@@ -58,8 +60,8 @@ fn quiz_game_example_reads_file_prompts_scores_and_writes_reports() {
     let project_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/quiz_game");
     let last_score = project_root.join("last-score.txt");
     let score_history = project_root.join("score-history.txt");
-    let _ = fs::remove_file(&last_score);
-    let _ = fs::remove_file(&score_history);
+    remove_file_if_exists(&last_score);
+    remove_file_if_exists(&score_history);
 
     let output = run_project_capture_with_stdin(&project_root, "main", "Oslo\n5\nblue\n")
         .expect("quiz game example should run");
@@ -77,8 +79,16 @@ fn quiz_game_example_reads_file_prompts_scores_and_writes_reports() {
         "Score: 2/3\n"
     );
 
-    let _ = fs::remove_file(last_score);
-    let _ = fs::remove_file(score_history);
+    remove_file_if_exists(&last_score);
+    remove_file_if_exists(&score_history);
+}
+
+fn remove_file_if_exists(path: &Path) {
+    match fs::remove_file(path) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => panic!("failed to remove {}: {error}", path.display()),
+    }
 }
 
 #[test]
@@ -142,7 +152,7 @@ main = do
         "name> Solveig\none\ntwo\n"
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -208,7 +218,7 @@ main = repeat {STEPS}
     assert_eq!(stdout.len(), STEPS);
     assert!(stdout.bytes().all(|byte| byte == b'x'));
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -280,7 +290,7 @@ fn repeated_checks_reuse_compiler_prelude_cache() {
         "cached checks should not add another virtual Prelude file set"
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -305,7 +315,7 @@ main = do
         "seed\nextra\n"
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -340,7 +350,7 @@ main = do
         "north\nsouth\n"
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]

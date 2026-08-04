@@ -3,6 +3,21 @@
 //! This crate owns source locations, diagnostics, symbol interning, and the
 //! preferred fast hash collections for compiler-internal lookup tables.
 
+/// Reports an internal compiler error and aborts the current operation.
+#[doc(hidden)]
+#[expect(clippy::panic, reason = "ICE reporting is centralised here")]
+pub fn report_ice(message: std::fmt::Arguments<'_>) -> ! {
+    panic!("ICE: {message}")
+}
+
+/// Reports an internal compiler error at the single approved panic boundary.
+#[macro_export]
+macro_rules! ice {
+    ($($arg:tt)*) => {
+        $crate::report_ice(format_args!($($arg)*))
+    };
+}
+
 /// Defines structured diagnostics emitted by compiler stages.
 pub mod diagnostics;
 /// Owns a compiler session and its source and symbol stores.

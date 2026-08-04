@@ -1,21 +1,18 @@
+#![expect(
+    clippy::panic,
+    reason = "integration tests use panic messages to explain fixture lookup failures"
+)]
+
 use solveig_base::{FileSpan, PositionEncoding, SourceMap, SourcePosition};
 use solveig_driver::Compilation;
 use solveig_ide::{CompilationIdeExt, SourceDocumentHighlightKind, SourceFoldingRangeKind};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
 
-fn temp_root(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "solveig_editor_protocol_{name}_{}_{}",
-        process::id(),
-        nanos
-    ))
+mod support;
+
+fn temp_root(name: &str) -> support::TestRoot {
+    support::temp_root("solveig_editor_protocol", name)
 }
 
 fn write_source(path: &Path, source: &str) {
@@ -34,12 +31,17 @@ fn position_in_line(source: &str, line: &str, needle: &str) -> SourcePosition {
     let needle_offset = line
         .find(needle)
         .unwrap_or_else(|| panic!("line `{line}` should contain `{needle}`"));
-    let line_number = source[..line_start]
+    let line_number = source
+        .get(..line_start)
+        .expect("test line start should be a UTF-8 boundary")
         .bytes()
         .filter(|byte| *byte == b'\n')
         .count();
 
-    SourcePosition::new(line_number as u32, needle_offset as u32)
+    SourcePosition::new(
+        u32::try_from(line_number).expect("test line number should fit in u32"),
+        u32::try_from(needle_offset).expect("test character offset should fit in u32"),
+    )
 }
 
 fn position_in_line_last(source: &str, line: &str, needle: &str) -> SourcePosition {
@@ -49,12 +51,17 @@ fn position_in_line_last(source: &str, line: &str, needle: &str) -> SourcePositi
     let needle_offset = line
         .rfind(needle)
         .unwrap_or_else(|| panic!("line `{line}` should contain `{needle}`"));
-    let line_number = source[..line_start]
+    let line_number = source
+        .get(..line_start)
+        .expect("test line start should be a UTF-8 boundary")
         .bytes()
         .filter(|byte| *byte == b'\n')
         .count();
 
-    SourcePosition::new(line_number as u32, needle_offset as u32)
+    SourcePosition::new(
+        u32::try_from(line_number).expect("test line number should fit in u32"),
+        u32::try_from(needle_offset).expect("test character offset should fit in u32"),
+    )
 }
 
 fn source_text(source_map: &SourceMap, span: FileSpan) -> &str {
@@ -254,7 +261,7 @@ increment value = value + 1
     );
     assert_eq!(link.tooltip(), Some("Open module helper"));
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -363,5 +370,5 @@ main =
         Some("Writes text without adding a newline.")
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }

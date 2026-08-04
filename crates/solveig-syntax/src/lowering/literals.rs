@@ -92,13 +92,13 @@ impl CstToAst<'_> {
     pub(super) fn lower_int_literal(&mut self, token: TokenId) -> Result<i64, ParseError> {
         self.token_text(token)
             .parse::<i64>()
-            .map_err(|_| self.push_literal_error(token))
+            .map_err(|_err| self.push_literal_error(token))
     }
 
     pub(super) fn lower_float_literal(&mut self, token: TokenId) -> Result<f64, ParseError> {
         self.token_text(token)
             .parse::<f64>()
-            .map_err(|_| self.push_literal_error(token))
+            .map_err(|_err| self.push_literal_error(token))
     }
 
     pub(super) fn lower_char_literal(&mut self, token: TokenId) -> Result<char, ParseError> {

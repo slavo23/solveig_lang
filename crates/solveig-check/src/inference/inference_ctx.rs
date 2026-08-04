@@ -109,9 +109,11 @@ impl Context {
     pub fn replace(&self, target: &ContextEntry, replacement: &ContextEntry) -> Context {
         let mut new_entries = self.entries.clone();
         if let Some(position) = new_entries.iter().rposition(|ent| ent == target) {
-            new_entries[position] = replacement.clone();
+            *new_entries
+                .get_mut(position)
+                .expect("ICE: replacement position was found above") = replacement.clone();
         } else {
-            panic!("ICE: replace target {target:?} not found in context");
+            solveig_base::ice!("replace target {target:?} not found in context");
         }
         Context {
             entries: new_entries,
@@ -125,13 +127,14 @@ impl Context {
         let found_position = self.entries.iter().rposition(|ent| ent == on_entry);
         match found_position {
             Some(position) => {
-                let middle = &self.entries[position];
-                let left = self.entries[..position].to_vec();
-                let right = self.entries[position + 1..].to_vec();
-                (left, middle, right)
+                let (left, middle_and_right) = self.entries.split_at(position);
+                let Some((middle, right)) = middle_and_right.split_first() else {
+                    solveig_base::ice!("split_at target position was found but had no entry");
+                };
+                (left.to_vec(), middle, right.to_vec())
             }
             None => {
-                panic!("ICE: split_at target {on_entry:?} not found in context");
+                solveig_base::ice!("split_at target {on_entry:?} not found in context");
             }
         }
     }
@@ -373,9 +376,7 @@ mod tests {
             ctx.kind_of_type(&list_unit, &tycon_kinds),
             Ok(Kind::Star)
         ));
-        assert!(
-            ctx.kind_of_type(&Ty::make_con_id(other_id), &tycon_kinds)
-                .is_err()
-        );
+        ctx.kind_of_type(&Ty::make_con_id(other_id), &tycon_kinds)
+            .unwrap_err();
     }
 }

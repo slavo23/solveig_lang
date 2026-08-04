@@ -99,10 +99,14 @@ impl CCProgram {
     }
 
     pub fn function(&self, id: usize) -> &CCFunction {
-        &self.functions[id]
+        self.functions
+            .get(id)
+            .expect("ICE: closure function id not present in program")
     }
 
     pub fn global(&self, id: usize) -> &CCGlobalDef {
-        &self.globals[id]
+        self.globals
+            .get(id)
+            .expect("ICE: closure global id not present in program")
     }
 }

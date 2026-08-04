@@ -1,9 +1,16 @@
+#![expect(
+    clippy::panic,
+    reason = "golden runner panics with fixture context when test setup fails"
+)]
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use solveig_driver::Compilation;
 use solveig_report::render_diagnostics_no_color;
+
+mod snapshot_support;
 
 #[test]
 fn golden_diagnostic_cases() {
@@ -31,31 +38,26 @@ fn golden_diagnostic_cases() {
 
         let expected_path = case_root.join("expected.txt");
 
-        if update {
+        let expected = if update {
             fs::write(&expected_path, &actual).unwrap_or_else(|err| {
                 panic!(
                     "failed to update expected diagnostics for `{case_name}` at {}: {err}",
                     expected_path.display()
                 )
             });
-            continue;
-        }
-
-        let expected = fs::read_to_string(&expected_path).unwrap_or_else(|err| {
-            panic!(
-                "failed to read expected diagnostics for `{case_name}` at {}: {err}\n\
-                 run with UPDATE_GOLDEN=1 to create or refresh it",
-                expected_path.display()
-            )
-        });
+            actual.clone()
+        } else {
+            fs::read_to_string(&expected_path).unwrap_or_else(|err| {
+                panic!(
+                    "failed to read expected diagnostics for `{case_name}` at {}: {err}\n\
+                     run with UPDATE_GOLDEN=1 to create or refresh it",
+                    expected_path.display()
+                )
+            })
+        };
         let expected = trim_line_end_whitespace(&expected);
 
-        assert_eq!(
-            actual,
-            expected,
-            "golden diagnostic case `{case_name}` changed:\n{}",
-            diff_preview(&expected, &actual)
-        );
+        snapshot_support::assert_fixture_snapshot(&case_root, case_name, &expected, &actual);
     }
 }
 
@@ -149,47 +151,4 @@ fn case_name(case_root: &Path) -> &str {
         .file_name()
         .and_then(|name| name.to_str())
         .unwrap_or("<invalid-case-name>")
-}
-
-fn diff_preview(expected: &str, actual: &str) -> String {
-    let first_diff = expected
-        .bytes()
-        .zip(actual.bytes())
-        .position(|(left, right)| left != right)
-        .unwrap_or_else(|| expected.len().min(actual.len()));
-
-    format!(
-        "expected len: {}\nactual len:   {}\nfirst diff byte: {}\nexpected: {}\nactual:   {}",
-        expected.len(),
-        actual.len(),
-        first_diff,
-        preview_around(expected, first_diff),
-        preview_around(actual, first_diff)
-    )
-}
-
-fn preview_around(text: &str, byte_index: usize) -> String {
-    let byte_index = previous_char_boundary(text, byte_index.min(text.len()));
-    let start = text[..byte_index]
-        .char_indices()
-        .rev()
-        .nth(80)
-        .map_or(0, |(index, _)| index);
-
-    let end = text[byte_index.min(text.len())..]
-        .char_indices()
-        .nth(160)
-        .map_or(text.len(), |(index, _)| byte_index.min(text.len()) + index);
-
-    let prefix = if start > 0 { "..." } else { "" };
-    let suffix = if end < text.len() { "..." } else { "" };
-
-    format!("{prefix}{:?}{suffix}", &text[start..end])
-}
-
-fn previous_char_boundary(text: &str, mut byte_index: usize) -> usize {
-    while !text.is_char_boundary(byte_index) {
-        byte_index -= 1;
-    }
-    byte_index
 }

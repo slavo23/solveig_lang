@@ -17,12 +17,12 @@ impl TypeChecker<'_> {
             (
                 TermExpr::TyAbs(param, _kind, body),
                 Ty::TyForAll(binders, preds, body_type),
-            ) if let Some((quantifier, quant_kind)) = binders.first() => {
+            ) if let Some(((quantifier, quant_kind), rest_binders)) = binders.split_first() => {
                 let param_id = *quantifier;
                 let ty_arg = Ty::TyVar(param_id);
                 let subst = FxHashMap::from_iter([(*quantifier, ty_arg.clone())]);
                 let substituted_body_type = Ty::make_forall_group(
-                    binders[1..].to_vec(),
+                    rest_binders.to_vec(),
                     preds
                         .iter()
                         .map(|pred| Self::substitute_predicate(pred, &subst))
@@ -126,11 +126,13 @@ impl TypeChecker<'_> {
             }
 
             (_, Ty::TyForAll(binders, preds, body_type)) if !binders.is_empty() => {
-                let (quantifier, kind) = &binders[0];
+                let Some(((quantifier, kind), rest_binders)) = binders.split_first() else {
+                    solveig_base::ice!("non-empty forall binder guard failed");
+                };
                 let universal_entry = self.universal_entry(*quantifier, kind.clone());
                 let extended_ctx = ctx.add_entry(universal_entry.clone());
                 let body_type = Ty::make_forall_group(
-                    binders[1..].to_vec(),
+                    rest_binders.to_vec(),
                     preds.clone(),
                     (**body_type).clone(),
                 );
@@ -172,7 +174,10 @@ impl TypeChecker<'_> {
                     &expected_applied,
                     self.get_file_span(span),
                 )?;
-                let evidence_args = self.wanteds[wanted_start..]
+                let evidence_args = self
+                    .wanteds
+                    .get(wanted_start..)
+                    .expect("ICE: wanted suffix out of bounds")
                     .iter()
                     .map(|wanted| wanted.ev)
                     .collect::<Vec<_>>();
@@ -345,10 +350,13 @@ fn wrap_inferred_quantifiers(
         Ty::make_forall_group(Vec::new(), scheme.predicates.clone(), scheme.ty.clone());
     let mut body = wrap_ev_abs(body, retained, span.clone(), &qualified_type);
 
-    for index in (0..scheme.quantifiers.len()).rev() {
-        let (param, kind) = &scheme.quantifiers[index];
+    for (index, (param, kind)) in scheme.quantifiers.iter().enumerate().rev() {
         let result_type = Ty::make_forall_group(
-            scheme.quantifiers[index..].to_vec(),
+            scheme
+                .quantifiers
+                .get(index..)
+                .expect("ICE: quantifier suffix out of bounds")
+                .to_vec(),
             scheme.predicates.clone(),
             scheme.ty.clone(),
         );
@@ -426,7 +434,10 @@ fn function_dependency_groups(func_defs: &[TermDefinition<Span>]) -> FunctionDep
 
         for candidate in 0..func_defs.len() {
             if deps.contains(&candidate) {
-                adjacency[index].push(candidate);
+                adjacency
+                    .get_mut(index)
+                    .expect("ICE: function dependency source index out of bounds")
+                    .push(candidate);
             }
         }
     }
@@ -438,7 +449,13 @@ fn function_dependency_groups(func_defs: &[TermDefinition<Span>]) -> FunctionDep
 }
 
 fn function_group_needs_placeholders(group: &[usize], adjacency: &[Vec<usize>]) -> bool {
-    group.len() > 1 || group.iter().any(|index| adjacency[*index].contains(index))
+    group.len() > 1
+        || group.iter().any(|index| {
+            adjacency
+                .get(*index)
+                .expect("ICE: function dependency group index out of bounds")
+                .contains(index)
+        })
 }
 
 fn restore_func_scheme_placeholders(
@@ -726,7 +743,10 @@ pub fn check_and_elab_module(
 
         if needs_placeholders {
             for &index in &group_indices {
-                let func_def = &module.func_defs[index];
+                let func_def = module
+                    .func_defs
+                    .get(index)
+                    .expect("ICE: function dependency group index out of bounds");
                 if func_def.signature.is_some() {
                     continue;
                 }
@@ -752,7 +772,10 @@ pub fn check_and_elab_module(
         let mut group_errors = Vec::new();
 
         for &index in &group_indices {
-            let func_def = &module.func_defs[index];
+            let func_def = module
+                .func_defs
+                .get(index)
+                .expect("ICE: function dependency group index out of bounds");
             let wanted_start = checker.wanted_count();
             let checkpoint = checker.checkpoint();
 
@@ -836,7 +859,10 @@ pub fn check_and_elab_module(
             Vec::<(usize, TermDefinition<TcMetadata, Span>, Scheme)>::new();
 
         for (index, elaborated, signature_source, wanted_range) in group_results {
-            let func_def = &module.func_defs[index];
+            let func_def = module
+                .func_defs
+                .get(index)
+                .expect("ICE: function dependency group index out of bounds");
             let checkpoint = checker.checkpoint();
             let (final_scheme, final_body) = match signature_source {
                 FunctionSignatureSource::Explicit(sig) => {
@@ -901,7 +927,9 @@ pub fn check_and_elab_module(
                 .func_schemes
                 .insert(checked_def.id, final_scheme.clone());
             checked_func_schemes.insert(checked_def.id, final_scheme);
-            checked_defs_by_index[index] = Some(checked_def);
+            *checked_defs_by_index
+                .get_mut(index)
+                .expect("ICE: checked definition index out of bounds") = Some(checked_def);
         }
 
         checker.finalize_holes();

@@ -93,13 +93,17 @@ fn collect_comment_folds(
 
     let mut index = 0;
     while index < line_comments.len() {
-        let (start_line, start_span) = line_comments[index];
+        let (start_line, start_span) = *line_comments
+            .get(index)
+            .expect("ICE: line comment group index out of bounds");
         let mut last_line = start_line;
         let mut end_span = start_span;
         let mut next = index + 1;
 
         while next < line_comments.len() {
-            let (next_line, next_span) = line_comments[next];
+            let (next_line, next_span) = *line_comments
+                .get(next)
+                .expect("ICE: next line comment index out of bounds");
             if next_line != last_line.saturating_add(1) {
                 break;
             }

@@ -78,8 +78,8 @@ impl<'a> FrontendState<'a> {
                     .modules
                     .get(module_name)
                     .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: prelude cache missing project module {}",
+                        solveig_base::ice!(
+                            "prelude cache missing project module {}",
                             module_name.as_string(self.session)
                         )
                     })
@@ -91,8 +91,8 @@ impl<'a> FrontendState<'a> {
                 self.apis
                     .get(module_name)
                     .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: prelude cache missing module API {}",
+                        solveig_base::ice!(
+                            "prelude cache missing module API {}",
                             module_name.as_string(self.session)
                         )
                     })
@@ -103,8 +103,8 @@ impl<'a> FrontendState<'a> {
                 self.typed_apis
                     .get(module_name)
                     .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: prelude cache missing typed API {}",
+                        solveig_base::ice!(
+                            "prelude cache missing typed API {}",
                             module_name.as_string(self.session)
                         )
                     })
@@ -115,8 +115,8 @@ impl<'a> FrontendState<'a> {
                 self.checked
                     .get(&module_id)
                     .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: prelude cache missing checked module {}",
+                        solveig_base::ice!(
+                            "prelude cache missing checked module {}",
                             module_name.as_string(self.session)
                         )
                     })
@@ -125,8 +125,8 @@ impl<'a> FrontendState<'a> {
             module_files.insert(
                 module_id,
                 *self.module_files.get(&module_id).unwrap_or_else(|| {
-                    panic!(
-                        "ICE: prelude cache missing file for {}",
+                    solveig_base::ice!(
+                        "prelude cache missing file for {}",
                         module_name.as_string(self.session)
                     )
                 }),
@@ -136,8 +136,8 @@ impl<'a> FrontendState<'a> {
                 self.resolutions
                     .get(&module_id)
                     .unwrap_or_else(|| {
-                        panic!(
-                            "ICE: prelude cache missing resolutions for {}",
+                        solveig_base::ice!(
+                            "prelude cache missing resolutions for {}",
                             module_name.as_string(self.session)
                         )
                     })

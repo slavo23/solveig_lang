@@ -233,7 +233,10 @@ where
     if next == tokens.len() {
         Ok(expr)
     } else {
-        match &tokens[next] {
+        match tokens
+            .get(next)
+            .expect("ICE: fixity parser returned token index outside token list")
+        {
             Token::Expr(expr) => Err(FixityError::ExpectedExpression { span: expr.1 }),
             Token::Op(op) => Err(FixityError::ExpectedExpression { span: op.symbol.1 }),
             Token::Neg(span) => Err(FixityError::IllegalUnaryMinus { span: *span }),

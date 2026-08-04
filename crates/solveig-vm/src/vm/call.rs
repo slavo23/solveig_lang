@@ -15,6 +15,8 @@ impl Vm {
 
     #[inline(always)]
     pub(super) fn pop(&mut self) -> Value {
+        // SAFETY: The bytecode emitter only emits pop-consuming instructions
+        // after their operands have been pushed in the same stack frame.
         unsafe { self.stack.pop().unwrap_unchecked() }
     }
 
@@ -22,6 +24,8 @@ impl Vm {
     pub(super) fn pop_int(&mut self) -> i64 {
         match self.pop() {
             Value::Int(n) => n,
+            // SAFETY: Integer bytecode ops are emitted only after type checking
+            // and lowering have proved both operands are Int.
             _ => unsafe { std::hint::unreachable_unchecked() },
         }
     }
@@ -42,16 +46,36 @@ impl Vm {
 
     #[inline(always)]
     pub(super) fn load(&self, slot: u16) -> Value {
+        // SAFETY: `ensure_slots` sizes the current frame before execution, and
+        // bytecode local slots are allocated by ChunkBuilder for that frame.
         unsafe { *self.stack.get_unchecked(self.frame_base + slot as usize) }
     }
 
     #[inline(always)]
     pub(super) fn store(&mut self, slot: u16, val: Value) {
+        // SAFETY: `ensure_slots` sizes the current frame before execution, and
+        // bytecode local slots are allocated by ChunkBuilder for that frame.
         unsafe {
             *self
                 .stack
                 .get_unchecked_mut(self.frame_base + slot as usize) = val;
         }
+    }
+
+    #[inline(always)]
+    fn stack_value_at(&self, index: usize) -> Value {
+        *self
+            .stack
+            .get(index)
+            .expect("ICE: VM stack read index out of bounds")
+    }
+
+    #[inline(always)]
+    fn set_stack_value_at(&mut self, index: usize, value: Value) {
+        *self
+            .stack
+            .get_mut(index)
+            .expect("ICE: VM stack write index out of bounds") = value;
     }
 
     pub(super) fn ensure_slots(&mut self, count: usize) {
@@ -76,7 +100,10 @@ impl Vm {
         index: usize,
         continuation: Continuation,
     ) -> Result<Option<Value>, RuntimeError> {
-        let thunk_chunk = match &self.globals[index] {
+        let Some(global_slot) = self.globals.get(index) else {
+            solveig_base::ice!("global index {index} out of bounds");
+        };
+        let thunk_chunk = match global_slot {
             GlobalSlot::Evaluated(val) => return Ok(Some(*val)),
             GlobalSlot::Evaluating => {
                 let name = program
@@ -88,7 +115,10 @@ impl Vm {
             GlobalSlot::Thunk { chunk } => *chunk,
         };
 
-        self.globals[index] = GlobalSlot::Evaluating;
+        *self
+            .globals
+            .get_mut(index)
+            .expect("ICE: global slot index was checked above") = GlobalSlot::Evaluating;
         self.continuations.push(continuation);
         self.enter_thunk(program, thunk_chunk);
         Ok(None)
@@ -164,7 +194,8 @@ impl Vm {
             InvokeMode::TailCall => {
                 if args_start != self.frame_base {
                     for i in 0..arg_count {
-                        self.stack[self.frame_base + i] = self.stack[args_start + i];
+                        let value = self.stack_value_at(args_start + i);
+                        self.set_stack_value_at(self.frame_base + i, value);
                     }
                 }
 
@@ -186,7 +217,8 @@ impl Vm {
         let prefix_len = bound.total_len();
 
         for i in (0..arg_count).rev() {
-            self.stack[self.frame_base + prefix_len + i] = self.stack[self.frame_base + i];
+            let value = self.stack_value_at(self.frame_base + i);
+            self.set_stack_value_at(self.frame_base + prefix_len + i, value);
         }
 
         let frame_base = self.frame_base;
@@ -239,8 +271,8 @@ impl Vm {
         let (capture_count, arity) = chunk_function_shape(program, chunk_id);
 
         if capture_count != 0 {
-            panic!(
-                "ICE: known call to captured function chunk {chunk_id} (captures {capture_count}, arity {arity})"
+            solveig_base::ice!(
+                "known call to captured function chunk {chunk_id} (captures {capture_count}, arity {arity})"
             );
         }
 
@@ -249,10 +281,11 @@ impl Vm {
             None
         } else if arg_count < arity {
             if arg_count == 0 {
-                let chunk = u32::try_from(chunk_id)
-                    .unwrap_or_else(|_| panic!("ICE: chunk id {chunk_id} does not fit in u32"));
+                let chunk = u32::try_from(chunk_id).unwrap_or_else(|_| {
+                    solveig_base::ice!("chunk id {chunk_id} does not fit in u32")
+                });
                 let arity = u16::try_from(arity)
-                    .unwrap_or_else(|_| panic!("ICE: arity {arity} does not fit in u16"));
+                    .unwrap_or_else(|_| solveig_base::ice!("arity {arity} does not fit in u16"));
 
                 Some(Value::FunctionRef { chunk, arity })
             } else {
@@ -266,8 +299,8 @@ impl Vm {
                 }))
             }
         } else {
-            panic!(
-                "ICE: over-application of known function chunk {chunk_id} (arity {arity}, got {arg_count})"
+            solveig_base::ice!(
+                "over-application of known function chunk {chunk_id} (arity {arity}, got {arg_count})"
             );
         }
     }
@@ -275,12 +308,15 @@ impl Vm {
     #[inline(always)]
     pub(super) fn take_callee_under_args(&mut self, arg_count: usize) -> Value {
         let callee_pos = self.stack.len() - arg_count - 1;
-        let callee = self.stack[callee_pos];
+        let callee = self.stack_value_at(callee_pos);
 
         for i in callee_pos..self.stack.len() - 1 {
-            self.stack[i] = self.stack[i + 1];
+            let value = self.stack_value_at(i + 1);
+            self.set_stack_value_at(i, value);
         }
-        self.stack.pop();
+        let Some(_removed_duplicate) = self.stack.pop() else {
+            solveig_base::ice!("callee removal underflowed the VM stack");
+        };
 
         callee
     }
@@ -315,8 +351,8 @@ impl Vm {
                         applied_args,
                     }))
                 } else {
-                    panic!(
-                        "ICE: over-application of function reference (arity {arity}, got {arg_count})"
+                    solveig_base::ice!(
+                        "over-application of function reference (arity {arity}, got {arg_count})"
                     );
                 }
             }
@@ -329,8 +365,8 @@ impl Vm {
                 result
             }
 
-            _ => panic!(
-                "ICE: cannot {}call {:?}",
+            _ => solveig_base::ice!(
+                "cannot {}call {:?}",
                 if matches!(mode, InvokeMode::TailCall) {
                     "tail-"
                 } else {
@@ -377,7 +413,9 @@ impl Vm {
                         applied_args,
                     }))
                 } else {
-                    panic!("ICE: over-application of closure (arity {arity}, got {arg_count})");
+                    solveig_base::ice!(
+                        "over-application of closure (arity {arity}, got {arg_count})"
+                    );
                 }
             }
 
@@ -419,7 +457,7 @@ impl Vm {
                         applied_args,
                     }))
                 } else {
-                    panic!("ICE: over-application of partial (arity {arity}, got {total})");
+                    solveig_base::ice!("over-application of partial (arity {arity}, got {total})");
                 }
             }
 
@@ -433,15 +471,15 @@ impl Vm {
             | HeapObject::Data1 { tag, .. }
             | HeapObject::Data2 { tag, .. }
             | HeapObject::DataN { tag, .. } => {
-                panic!("ICE: cannot apply saturated constructor tag {tag}");
+                solveig_base::ice!("cannot apply saturated constructor tag {tag}");
             }
 
             HeapObject::Str { .. } => {
-                panic!("ICE: heap string reached callable-object invocation");
+                solveig_base::ice!("heap string reached callable-object invocation");
             }
 
             HeapObject::IoAction(_) => {
-                panic!("ICE: IO action reached callable-object invocation");
+                solveig_base::ice!("IO action reached callable-object invocation");
             }
         }
     }
@@ -496,7 +534,7 @@ impl Vm {
                 applied_args,
             })
         } else {
-            panic!("ICE: over-applied constructor tag {tag}");
+            solveig_base::ice!("over-applied constructor tag {tag}");
         }
     }
 
@@ -522,12 +560,14 @@ impl Vm {
 
         self.maybe_gc();
 
-        let args_start = self
+        let Some(args_start) = self.stack.len().checked_sub(arg_count) else {
+            solveig_base::ice!("builtin call stack underflow");
+        };
+        let args = self
             .stack
-            .len()
-            .checked_sub(arg_count)
-            .expect("ICE: builtin call stack underflow");
-        let args = self.stack[args_start..].to_vec();
+            .get(args_start..)
+            .expect("ICE: builtin argument slice out of bounds")
+            .to_vec();
         let mut ctx = VmCtx::new(
             &mut self.heap,
             &program.constructor_arities,
@@ -560,11 +600,11 @@ impl Vm {
     pub(super) fn resume_after_return(&mut self, result: Value) -> Option<Value> {
         self.stack.truncate(self.frame_base);
 
-        match self
-            .continuations
-            .pop()
-            .expect("return with empty continuation stack")
-        {
+        let Some(continuation) = self.continuations.pop() else {
+            solveig_base::ice!("return with empty continuation stack");
+        };
+
+        match continuation {
             Continuation::Halt => Some(result),
 
             Continuation::CallerFrame {
@@ -580,7 +620,10 @@ impl Vm {
             }
 
             Continuation::PublishGlobalThenHalt { global_index } => {
-                self.globals[global_index] = GlobalSlot::Evaluated(result);
+                let Some(global_slot) = self.globals.get_mut(global_index) else {
+                    solveig_base::ice!("global publish index {global_index} out of bounds");
+                };
+                *global_slot = GlobalSlot::Evaluated(result);
                 Some(result)
             }
 
@@ -590,7 +633,10 @@ impl Vm {
                 pc,
                 frame_base,
             } => {
-                self.globals[global_index] = GlobalSlot::Evaluated(result);
+                let Some(global_slot) = self.globals.get_mut(global_index) else {
+                    solveig_base::ice!("global publish index {global_index} out of bounds");
+                };
+                *global_slot = GlobalSlot::Evaluated(result);
                 self.chunk = chunk;
                 self.pc = pc;
                 self.frame_base = frame_base;
@@ -607,7 +653,7 @@ fn chunk_function_shape(program: &BytecodeProgram, chunk_id: usize) -> (usize, u
             capture_count,
             arity,
         } => (capture_count as usize, arity as usize),
-        ChunkKind::GlobalThunk => panic!("ICE: thunk has no arity"),
+        ChunkKind::GlobalThunk => solveig_base::ice!("thunk has no arity"),
     }
 }
 

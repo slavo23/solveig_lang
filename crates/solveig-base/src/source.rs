@@ -117,9 +117,12 @@ impl SourceFile {
         let max_offset = u32::try_from(self.src.len()).unwrap_or(u32::MAX);
         let offset = offset.min(max_offset);
         let line = self.line_starts.partition_point(|start| *start <= offset) - 1;
-        let line_start = self.line_starts[line];
+        let line_start = self.line_start_u32(line);
 
-        (line as u32, offset - line_start)
+        (
+            u32::try_from(line).expect("ICE: source line index exceeded u32 capacity"),
+            offset - line_start,
+        )
     }
 
     /// Converts a byte offset into a line/character position using the selected encoding.
@@ -161,7 +164,14 @@ impl SourceFile {
     }
 
     fn line_start(&self, line: usize) -> usize {
-        self.line_starts[line] as usize
+        self.line_start_u32(line) as usize
+    }
+
+    fn line_start_u32(&self, line: usize) -> u32 {
+        *self
+            .line_starts
+            .get(line)
+            .expect("ICE: source line index not present in line table")
     }
 
     fn line_text_end(&self, line: usize) -> usize {
@@ -172,9 +182,9 @@ impl SourceFile {
             .map_or(self.src.len(), |next| *next as usize);
         let bytes = self.src.as_bytes();
 
-        if start < end && bytes[end - 1] == b'\n' {
+        if start < end && bytes.get(end - 1).is_some_and(|byte| *byte == b'\n') {
             end -= 1;
-            if start < end && bytes[end - 1] == b'\r' {
+            if start < end && bytes.get(end - 1).is_some_and(|byte| *byte == b'\r') {
                 end -= 1;
             }
         }
@@ -199,6 +209,29 @@ impl SourceMap {
 
         self.files.push(SourceFile::new(path, src));
         FileId(id)
+    }
+
+    pub fn add_or_update_file(
+        &mut self,
+        path: impl Into<PathBuf>,
+        src: impl Into<String>,
+    ) -> FileId {
+        let path = path.into();
+        let src = src.into();
+
+        if let Some((index, file)) = self
+            .files
+            .iter_mut()
+            .enumerate()
+            .find(|(_, file)| file.path == path)
+        {
+            *file = SourceFile::new(path, src);
+            return FileId(
+                u32::try_from(index).expect("ICE: source map file table exceeded u32 capacity"),
+            );
+        }
+
+        self.add_file(path, src)
     }
 
     pub fn lookup(&self, file: FileId) -> &SourceFile {
@@ -263,12 +296,19 @@ fn character_for_offset(src: &str, start: usize, offset: usize, encoding: Positi
             let mut units = 0u32;
 
             // LSP 3.17 `PositionEncodingKind` defines UTF-16 positions in code units.
-            for (rel, ch) in src[start..].char_indices() {
+            let line = src
+                .get(start..)
+                .expect("ICE: UTF position conversion started inside a code point");
+
+            for (rel, ch) in line.char_indices() {
                 let char_end = start + rel + ch.len_utf8();
                 if offset < char_end {
                     break;
                 }
-                units = units.saturating_add(ch.len_utf16() as u32);
+                units = units.saturating_add(
+                    u32::try_from(ch.len_utf16())
+                        .expect("ICE: UTF-16 code unit width exceeded u32 capacity"),
+                );
             }
 
             units
@@ -289,10 +329,17 @@ fn offset_for_character(
             let mut units = 0u32;
 
             // LSP 3.17 `PositionEncodingKind` defines UTF-16 positions in code units.
-            for (rel, ch) in src[start..end].char_indices() {
+            let line = src
+                .get(start..end)
+                .expect("ICE: UTF position conversion range split a code point");
+
+            for (rel, ch) in line.char_indices() {
                 let char_start = start + rel;
                 let char_end = char_start + ch.len_utf8();
-                let next_units = units.saturating_add(ch.len_utf16() as u32);
+                let next_units = units.saturating_add(
+                    u32::try_from(ch.len_utf16())
+                        .expect("ICE: UTF-16 code unit width exceeded u32 capacity"),
+                );
 
                 if character < next_units {
                     return char_start;

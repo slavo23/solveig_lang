@@ -359,9 +359,7 @@ impl<'a> Resolver<'a> {
             }
 
             [_first, rest @ ..] => {
-                let local_name = *rest
-                    .last()
-                    .expect("ICE: qualified term name must have a last segment");
+                let local_name = *rest.last()?;
 
                 if cx.module.0.as_slice() == r.prefix() {
                     if let Some(sym) = cx.local_api.terms.get(&local_name) {
@@ -385,7 +383,7 @@ impl<'a> Resolver<'a> {
                 None
             }
 
-            [] => panic!("ICE: empty term name ref"),
+            [] => solveig_base::ice!("empty term name ref"),
         }
     }
     fn resolve_term_ref_with_binders(

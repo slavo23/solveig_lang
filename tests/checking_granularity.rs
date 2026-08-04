@@ -1,24 +1,22 @@
 //! Driver tests for editor-oriented check granularity and single-file entry points.
 
+#![expect(
+    clippy::panic,
+    reason = "integration tests use panic messages to explain fixture setup failures"
+)]
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use solveig_base::Severity;
 use solveig_driver::{CheckResult, Compilation};
 
-fn temp_project_root(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "solveig_checking_{name}_{}_{}",
-        process::id(),
-        nanos
-    ))
+mod support;
+
+fn temp_project_root(name: &str) -> support::TestRoot {
+    support::temp_root("solveig_checking", name)
 }
 
 fn write_source(path: &Path, source: &str) {
@@ -34,7 +32,7 @@ fn write_source(path: &Path, source: &str) {
         .unwrap_or_else(|err| panic!("failed to write Solveig source {}: {err}", path.display()));
 }
 
-fn write_granularity_project(name: &str) -> PathBuf {
+fn write_granularity_project(name: &str) -> support::TestRoot {
     let project_root = temp_project_root(name);
     write_source(
         &project_root.join("src/main.sv"),
@@ -148,7 +146,7 @@ valueC = 4
     };
     assert_eq!(root_fresh, expected_modules(["a", "c", "main"]));
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -189,7 +187,7 @@ valueB = True
     assert_path_set_contains_file(&paths, "a.sv");
     assert_path_set_contains_file(&paths, "b.sv");
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -225,7 +223,7 @@ main = 0
         result.diagnostics()
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -256,7 +254,7 @@ answer = 41
     assert!(fresh.contains("main"));
     assert!(fresh.contains("a"));
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -281,7 +279,7 @@ answer = 41
         expected_modules(["scratch"])
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -335,11 +333,13 @@ main = value999 + {literal}
         p95.as_millis()
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 fn percentile_95(durations: &mut [Duration]) -> Duration {
     durations.sort();
     let index = (durations.len() * 95 / 100).min(durations.len().saturating_sub(1));
-    durations[index]
+    *durations
+        .get(index)
+        .expect("percentile index should be within collected durations")
 }

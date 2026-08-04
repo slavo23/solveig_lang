@@ -1,21 +1,18 @@
+#![expect(
+    clippy::panic,
+    reason = "integration tests use panic messages to explain fixture lookup failures"
+)]
+
 use solveig_base::{PositionEncoding, Severity, SourcePosition};
 use solveig_driver::Compilation;
 use solveig_ide::{CompilationIdeExt, SourceCodeAction, SourceCodeActionCategory};
 use std::fs;
-use std::path::{Path, PathBuf};
-use std::process;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::path::Path;
 
-fn temp_root(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "solveig_code_actions_{name}_{}_{}",
-        process::id(),
-        nanos
-    ))
+mod support;
+
+fn temp_root(name: &str) -> support::TestRoot {
+    support::temp_root("solveig_code_actions", name)
 }
 
 fn write_source(path: &Path, source: &str) {
@@ -88,7 +85,7 @@ main = ??
     let result = compilation.check(true).expect("fixed check should finish");
     assert!(result.success(), "{:#?}", result.diagnostics());
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -163,7 +160,7 @@ main = count [1, 2, 3]
         .expect("direct recursive function hover should exist without a written signature");
     assert_eq!(hover.signature(), "count : forall a. [a] -> Int");
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -206,7 +203,7 @@ main = contains 2 [1, 2, 3]
         "contains : forall a. Eq a => a -> [a] -> Bool"
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -251,7 +248,7 @@ main = hasZero [1, 2, 3]
         .expect("concrete typeclass recursive function hover should exist");
     assert_eq!(hover.signature(), "hasZero : [Int] -> Bool");
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -299,7 +296,7 @@ fn signatureless_recursive_function_infers_typeclass_constraint() {
         "containsPoly : forall a. Eq a => a -> [a] -> Bool"
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -352,7 +349,7 @@ main = 1
             .any(|diagnostic| diagnostic.code == "HOLE" && diagnostic.severity == Severity::Error)
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -390,7 +387,7 @@ answer = 42
     let result = compilation.check(true).expect("fixed check should finish");
     assert!(result.success(), "{:#?}", result.diagnostics());
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -425,7 +422,7 @@ main = answer
         result.diagnostics()
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -477,7 +474,7 @@ main = answer
     let result = compilation.check(true).expect("fixed check should finish");
     assert!(result.success(), "{:#?}", result.diagnostics());
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -519,5 +516,5 @@ main = triple 1 2 3
     let result = compilation.check(true).expect("fixed check should finish");
     assert!(result.success(), "{:#?}", result.diagnostics());
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }

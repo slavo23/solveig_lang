@@ -4,7 +4,7 @@
 use logos::Logos;
 use text_size::{TextRange, TextSize};
 
-use solveig_base::{FileId, FileSpan, Span};
+use solveig_base::{FileId, FileSpan, Span, ice};
 
 use crate::ast::{Assoc, Fixity};
 
@@ -145,7 +145,9 @@ impl PosToken {
         if self.synthetic {
             ""
         } else {
-            &source[self.start()..self.end()]
+            source
+                .get(self.start()..self.end())
+                .expect("ICE: token span must split source at UTF-8 boundaries")
         }
     }
 }
@@ -268,8 +270,14 @@ fn offset_to_line_col(line_starts: &[usize], offset: usize) -> (u32, u32) {
     let line_ix = line_starts
         .partition_point(|&start| start <= offset)
         .saturating_sub(1);
-    let col = offset - line_starts[line_ix];
-    (line_ix as u32, col as u32)
+    let line_start = *line_starts
+        .get(line_ix)
+        .expect("ICE: lexer line table must contain current line");
+    let col = offset - line_start;
+    (
+        u32::try_from(line_ix).expect("ICE: lexer line index exceeded u32 capacity"),
+        u32::try_from(col).expect("ICE: lexer column exceeded u32 capacity"),
+    )
 }
 
 fn lex_error(
@@ -284,31 +292,40 @@ fn lex_error(
         span: FileSpan::new(file, Span::from_usize_range(offset..end)),
         line,
         col,
-        message: format!("unexpected character '{}'", &source[offset..end]),
+        message: format!(
+            "unexpected character '{}'",
+            source
+                .get(offset..end)
+                .expect("ICE: lexer error span must split source at UTF-8 boundaries")
+        ),
     }
 }
 
 fn trivia_at(source: &str, offset: usize) -> Option<(Token, usize)> {
     let bytes = source.as_bytes();
-    let byte = bytes[offset];
+    let byte = *bytes.get(offset)?;
 
     match byte {
         b' ' | b'\t' | b'\r' => {
             let mut end = offset + 1;
-            while end < bytes.len() && matches!(bytes[end], b' ' | b'\t' | b'\r') {
+            while bytes
+                .get(end)
+                .is_some_and(|byte| matches!(*byte, b' ' | b'\t' | b'\r'))
+            {
                 end += 1;
             }
             Some((Token::Whitespace, end))
         }
         b'\n' => {
             let mut end = offset + 1;
-            while end < bytes.len() && bytes[end] == b'\n' {
+            while bytes.get(end).is_some_and(|byte| *byte == b'\n') {
                 end += 1;
             }
             Some((Token::Newline, end))
         }
         b'-' if bytes.get(offset + 1) == Some(&b'-') => {
-            let end = source[offset..]
+            let end = source
+                .get(offset..)?
                 .find('\n')
                 .map_or(bytes.len(), |line_end| offset + line_end);
             Some((Token::LineComment, end))
@@ -326,10 +343,16 @@ fn block_comment_end(source: &str, start: usize) -> usize {
     let mut offset = start + 2;
 
     while offset + 1 < bytes.len() {
-        if bytes[offset] == b'{' && bytes[offset + 1] == b'-' {
+        let current = bytes
+            .get(offset)
+            .expect("ICE: block comment scan offset must be in bounds");
+        let next = bytes
+            .get(offset + 1)
+            .expect("ICE: block comment lookahead must be in bounds");
+        if *current == b'{' && *next == b'-' {
             depth += 1;
             offset += 2;
-        } else if bytes[offset] == b'-' && bytes[offset + 1] == b'}' {
+        } else if *current == b'-' && *next == b'}' {
             depth -= 1;
             offset += 2;
             if depth == 0 {
@@ -435,7 +458,10 @@ fn raw_lex(file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
             continue;
         }
 
-        let mut lexer = RawToken::lexer(&source[offset..]);
+        let source_tail = source
+            .get(offset..)
+            .expect("ICE: lexer offset must split source at a UTF-8 boundary");
+        let mut lexer = RawToken::lexer(source_tail);
         let Some(result) = lexer.next() else {
             break;
         };
@@ -445,11 +471,13 @@ fn raw_lex(file: FileId, source: &str) -> Result<Vec<PosToken>, LexError> {
 
         let raw = match result {
             Ok(token) if span.start == 0 => token,
-            Ok(_) => panic!("ICE: lexer skipped non-trivia input before token"),
+            Ok(_) => ice!("lexer skipped non-trivia input before token"),
             Err(()) => return Err(lex_error(source, file, start, line, col, end)),
         };
 
-        let slice = &source[start..end];
+        let slice = source
+            .get(start..end)
+            .expect("ICE: raw token span must split source at UTF-8 boundaries");
         let kind = map_raw_token(raw, slice);
         out.push(PosToken::new(kind, start, end, line, col));
         offset = end;
@@ -492,10 +520,14 @@ fn is_layout_continuation(tok: &Token) -> bool {
 }
 
 fn effective_layout_col(tokens: &[PosToken], index: usize) -> u32 {
-    let token = &tokens[index];
+    let token = tokens
+        .get(index)
+        .expect("ICE: layout token index must be in bounds");
 
     if matches!(token.kind, Token::Pipe)
-        && let Some(next) = tokens[index + 1..]
+        && let Some(next) = tokens
+            .get(index + 1..)
+            .expect("ICE: layout token tail range must be in bounds")
             .iter()
             .find(|token| !token.kind.is_trivia())
         && next.line == token.line

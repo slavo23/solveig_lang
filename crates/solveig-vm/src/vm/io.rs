@@ -79,7 +79,7 @@ impl Vm {
         io: &mut IoRuntime<'_>,
     ) -> Result<Value, RuntimeError> {
         if self.io_current.is_some() || !self.io_stack.is_empty() {
-            panic!("ICE: IO machine entered while already active");
+            solveig_base::ice!("IO machine entered while already active");
         }
 
         self.io_current = Some(action);

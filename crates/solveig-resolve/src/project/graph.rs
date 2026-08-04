@@ -36,9 +36,9 @@ pub struct ParsedProject {
 
 impl ParsedProject {
     pub fn get(&self, session: &Session, module: &ModuleName) -> &ParsedModule {
-        self.modules
-            .get(module)
-            .unwrap_or_else(|| panic!("ICE: missing parsed module {}", module.as_string(session)))
+        self.modules.get(module).unwrap_or_else(|| {
+            solveig_base::ice!("missing parsed module {}", module.as_string(session))
+        })
     }
 }
 
@@ -118,7 +118,9 @@ pub fn ensure_acyclic_modules(session: &Session, graph: &ModuleGraph) -> Result<
             return Err(ResolveError::CyclicImports { span, modules });
         }
 
-        let ix = scc[0];
+        let ix = *scc
+            .first()
+            .unwrap_or_else(|| solveig_base::ice!("Tarjan returned an empty SCC"));
         if graph.graph.contains_edge(ix, ix) {
             let module = graph.graph[ix].clone();
             let span = graph
@@ -158,8 +160,13 @@ pub fn module_order(
 
     for item in graph.graph.node_indices() {
         for dependency in graph.graph.neighbors(item) {
-            dependents[dependency.index()].push(item);
-            indegree[item.index()] += 1;
+            dependents
+                .get_mut(dependency.index())
+                .expect("ICE: module graph dependency index out of bounds")
+                .push(item);
+            *indegree
+                .get_mut(item.index())
+                .expect("ICE: module graph item index out of bounds") += 1;
         }
     }
 
@@ -170,7 +177,12 @@ pub fn module_order(
     let mut ready = graph
         .graph
         .node_indices()
-        .filter(|node| indegree[node.index()] == 0)
+        .filter(|node| {
+            *indegree
+                .get(node.index())
+                .expect("ICE: module graph ready index out of bounds")
+                == 0
+        })
         .map(|node| (graph.graph[node].as_string(session), node.index()))
         .collect::<BTreeSet<_>>();
     let mut order = Vec::with_capacity(node_count);
@@ -179,13 +191,17 @@ pub fn module_order(
         let node = NodeIndex::new(node_index);
         order.push(graph.graph[node].clone());
 
-        for dependent in &dependents[node_index] {
-            indegree[dependent.index()] -= 1;
-            if indegree[dependent.index()] == 0 {
-                ready.insert((
-                    graph.graph[*dependent].as_string(session),
-                    dependent.index(),
-                ));
+        let dependent_nodes = dependents
+            .get(node_index)
+            .expect("ICE: module graph dependent list index out of bounds")
+            .clone();
+        for dependent in dependent_nodes {
+            let dependent_indegree = indegree
+                .get_mut(dependent.index())
+                .expect("ICE: module graph dependent indegree index out of bounds");
+            *dependent_indegree -= 1;
+            if *dependent_indegree == 0 {
+                ready.insert((graph.graph[dependent].as_string(session), dependent.index()));
             }
         }
     }
@@ -194,7 +210,12 @@ pub fn module_order(
         let cycle_node = graph
             .graph
             .node_indices()
-            .find(|node| indegree[node.index()] > 0)
+            .find(|node| {
+                *indegree
+                    .get(node.index())
+                    .expect("ICE: module graph cycle index out of bounds")
+                    > 0
+            })
             .expect("ICE: cyclic module graph must contain an unsorted node");
         let module = graph.graph[cycle_node].clone();
         let span = graph

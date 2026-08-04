@@ -45,7 +45,10 @@ impl ClosureLowerer {
                 if functions.len() <= func_id {
                     functions.resize_with(func_id + 1, || None);
                 }
-                known_global_funcs[global_idx] = Some(KnownGlobalFunc { func_id, arity });
+                *known_global_funcs
+                    .get_mut(global_idx)
+                    .expect("ICE: global function cache must match global table length") =
+                    Some(KnownGlobalFunc { func_id, arity });
             }
         }
 
@@ -71,7 +74,7 @@ impl ClosureLowerer {
             .enumerate()
             .map(|(id, func)| {
                 func.unwrap_or_else(|| {
-                    panic!("ICE: missing closure-converted function for id {id}")
+                    solveig_base::ice!("missing closure-converted function for id {id}")
                 })
             })
             .collect();
@@ -86,7 +89,7 @@ impl ClosureLowerer {
     }
 
     fn lower_global(&mut self, global_index: usize, global: &IRGlobalDef) -> CCGlobalDef {
-        if let Some(info) = self.known_global_funcs[global_index] {
+        if let Some(info) = self.known_global_func(global_index) {
             let (_, lambda_body) = collect_lambda_chain(&global.body);
 
             let (lowered_body, _capture_sources, capture_count) = {
@@ -162,12 +165,16 @@ impl ClosureLowerer {
             self.functions.resize_with(id + 1, || None);
         }
 
+        let slot = self
+            .functions
+            .get_mut(id)
+            .expect("ICE: closure function slot must exist after resize");
         assert!(
-            self.functions[id].is_none(),
+            slot.is_none(),
             "duplicate closure-converted function id {id}"
         );
 
-        self.functions[id] = Some(function);
+        *slot = Some(function);
     }
 }
 
@@ -372,9 +379,11 @@ impl<'a> ExprLowerer<'a> {
             .visible
             .len()
             .checked_sub(index + 1)
-            .unwrap_or_else(|| panic!("ICE: bad de Bruijn index {index} during closure lowering"));
+            .unwrap_or_else(|| {
+                solveig_base::ice!("bad de Bruijn index {index} during closure lowering")
+            });
 
-        match self.visible[visible_pos] {
+        match self.visible_binding(visible_pos) {
             VisibleBinding::Local => Rc::new(CCExpr::Local(
                 self.local_debruijn_from_visible_position(visible_pos),
             )),
@@ -386,7 +395,7 @@ impl<'a> ExprLowerer<'a> {
     }
 
     fn expr_for_visible_position(&mut self, visible_pos: usize) -> Rc<CCExpr> {
-        match self.visible[visible_pos] {
+        match self.visible_binding(visible_pos) {
             VisibleBinding::Local => Rc::new(CCExpr::Local(
                 self.local_debruijn_from_visible_position(visible_pos),
             )),
@@ -398,7 +407,9 @@ impl<'a> ExprLowerer<'a> {
     }
 
     fn local_debruijn_from_visible_position(&self, visible_pos: usize) -> usize {
-        self.visible[visible_pos + 1..]
+        self.visible
+            .get(visible_pos + 1..)
+            .expect("ICE: visible binding suffix must be in bounds")
             .iter()
             .filter(|binding| matches!(binding, VisibleBinding::Local))
             .count()
@@ -418,10 +429,18 @@ impl<'a> ExprLowerer<'a> {
         let mut out = vec![0; self.capture_slots.len()];
 
         for (&parent_visible_pos, &slot) in &self.capture_slots {
-            out[slot] = parent_visible_pos;
+            *out.get_mut(slot)
+                .expect("ICE: capture slot must be present in capture output") = parent_visible_pos;
         }
 
         out
+    }
+
+    fn visible_binding(&self, visible_pos: usize) -> VisibleBinding {
+        *self
+            .visible
+            .get(visible_pos)
+            .expect("ICE: visible binding index must be in bounds")
     }
 
     fn push_local(&mut self) {
@@ -432,9 +451,9 @@ impl<'a> ExprLowerer<'a> {
         match self.visible.pop() {
             Some(VisibleBinding::Local) => {}
             Some(VisibleBinding::Inherited(_)) => {
-                panic!("ICE: attempted to pop inherited binding as local")
+                solveig_base::ice!("attempted to pop inherited binding as local")
             }
-            None => panic!("ICE: attempted to pop local from empty visible stack"),
+            None => solveig_base::ice!("attempted to pop local from empty visible stack"),
         }
     }
 

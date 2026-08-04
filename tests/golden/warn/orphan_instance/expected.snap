@@ -1,0 +1,16 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+5
+[TC0018] Warning: orphan instance for `orphanLib.ForeignShow ForeignBox`
+   ╭─[ $WORKSPACE/tests/golden/warn/orphan_instance/src/main.sv:3:1 ]
+   │
+ 3 │ ╭─▶ instance ForeignShow ForeignBox where
+   ┆ ┆   
+ 7 │ ├─▶ 
+   │ │      
+   │ ╰────── this instance is defined outside both the class and type modules
+   │     
+   │     Note: orphan instances are globally visible and can make instance selection less predictable
+───╯

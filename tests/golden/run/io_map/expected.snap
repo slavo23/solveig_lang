@@ -1,0 +1,7 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+red
+green
+blue

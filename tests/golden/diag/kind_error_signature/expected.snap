@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[KIND0004] Error: kind mismatch: `*` is not `* -> ?k0`
+   ╭─[ $WORKSPACE/tests/golden/diag/kind_error_signature/src/main.sv:1:7 ]
+   │
+ 1 │ bad : Int Int
+   │       ───┬───
+   │          ╰───── this type has kind `*`, but kind `* -> ?k0` was required
+───╯
+kind error

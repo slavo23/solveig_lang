@@ -185,7 +185,7 @@ impl<'source> Parser<'source> {
     }
 
     fn previous_significant_index(&self, before: usize) -> Option<usize> {
-        self.tokens[..before.min(self.tokens.len())]
+        self.tokens_before(before)
             .iter()
             .enumerate()
             .rev()
@@ -195,12 +195,12 @@ impl<'source> Parser<'source> {
 
     fn previous_consumed_significant_token(&self) -> Option<&PosToken> {
         self.previous_significant_index(self.pos)
-            .map(|index| &self.tokens[index])
+            .map(|index| self.token(index))
     }
 
     fn peek_kind(&self, offset: usize) -> Option<&Token> {
         self.significant_index_from(self.pos, offset)
-            .map(|index| &self.tokens[index].kind)
+            .map(|index| &self.token(index).kind)
     }
 
     fn emit_remaining_tokens(&mut self) {
@@ -211,7 +211,7 @@ impl<'source> Parser<'source> {
     }
 
     fn current(&self) -> &PosToken {
-        &self.tokens[self.current_index()]
+        self.token(self.current_index())
     }
 
     fn current_kind(&self) -> &Token {
@@ -244,12 +244,24 @@ impl<'source> Parser<'source> {
         }
         self.pos = index + 1;
 
-        self.tokens[index]
+        *self.token(index)
     }
 
     fn current_span(&self) -> FileSpan {
         let token = self.current();
         FileSpan::new(self.file, mk_span(token.start(), token.end()))
+    }
+
+    fn token(&self, index: usize) -> &PosToken {
+        self.tokens
+            .get(index)
+            .expect("ICE: parser token index must be in bounds")
+    }
+
+    fn tokens_before(&self, before: usize) -> &[PosToken] {
+        self.tokens
+            .get(..before.min(self.tokens.len()))
+            .expect("ICE: parser token prefix range must be in bounds")
     }
 
     fn error(&self, message: impl Into<String>) -> ParseError {
@@ -485,7 +497,7 @@ impl<'source> Parser<'source> {
     }
 
     fn layout_depth_before_current(&self) -> usize {
-        self.tokens[..self.current_index().min(self.tokens.len())]
+        self.tokens_before(self.current_index())
             .iter()
             .fold(0usize, |depth, token| match token.kind {
                 Token::VOpen => depth + 1,

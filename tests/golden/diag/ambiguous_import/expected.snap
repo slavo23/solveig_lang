@@ -1,0 +1,14 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0001] Error: ambiguous imported term `value`
+   ╭─[ $WORKSPACE/tests/golden/diag/ambiguous_import/src/main.sv:4:8 ]
+   │
+ 4 │ main = value
+   │        ──┬──
+   │          ╰──── `value` is provided by more than one imported module
+   │
+   │ Note: candidates: a.value, b.value
+───╯
+resolve error

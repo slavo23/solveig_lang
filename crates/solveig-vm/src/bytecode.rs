@@ -126,7 +126,9 @@ impl BytecodeProgram {
     }
 
     pub fn chunk(&self, id: usize) -> &Chunk {
-        &self.chunks[id]
+        self.chunks
+            .get(id)
+            .expect("ICE: bytecode chunk id out of bounds")
     }
 
     pub fn global_index_by_name(&self, name: &str) -> Option<usize> {

@@ -5,6 +5,13 @@ use std::collections::BTreeSet;
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::DiGraph;
 
+fn first_component_node(components: &[Vec<usize>], component: usize) -> usize {
+    *components
+        .get(component)
+        .and_then(|nodes| nodes.first())
+        .expect("ICE: SCC component index must refer to a non-empty component")
+}
+
 /// Returns SCCs for `item -> dependency` edges in dependency-first order.
 pub(crate) fn dependency_ordered_sccs(adjacency: &[Vec<usize>]) -> Vec<Vec<usize>> {
     if adjacency.is_empty() {
@@ -21,7 +28,8 @@ pub(crate) fn dependency_ordered_sccs(adjacency: &[Vec<usize>]) -> Vec<Vec<usize
             let dependency_node = *nodes
                 .get(dependency)
                 .expect("ICE: SCC dependency index out of bounds");
-            graph.add_edge(nodes[item], dependency_node, ());
+            let item_node = *nodes.get(item).expect("ICE: SCC item index out of bounds");
+            graph.add_edge(item_node, dependency_node, ());
         }
     }
 
@@ -37,7 +45,9 @@ pub(crate) fn dependency_ordered_sccs(adjacency: &[Vec<usize>]) -> Vec<Vec<usize
 
         let component_id = components.len();
         for &node in &component {
-            component_by_node[node] = component_id;
+            *component_by_node
+                .get_mut(node)
+                .expect("ICE: SCC node index out of bounds") = component_id;
         }
         components.push(component);
     }
@@ -47,39 +57,70 @@ pub(crate) fn dependency_ordered_sccs(adjacency: &[Vec<usize>]) -> Vec<Vec<usize
     let mut indegree = vec![0; components.len()];
 
     for (item, dependencies) in adjacency.iter().enumerate() {
-        let item_component = component_by_node[item];
+        let item_component = *component_by_node
+            .get(item)
+            .expect("ICE: SCC item component index out of bounds");
         for &dependency in dependencies {
-            let dependency_component = component_by_node[dependency];
+            let dependency_component = *component_by_node
+                .get(dependency)
+                .expect("ICE: SCC dependency component index out of bounds");
             if dependency_component == item_component {
                 continue;
             }
 
             if component_edges.insert((dependency_component, item_component)) {
-                dependents[dependency_component].push(item_component);
-                indegree[item_component] += 1;
+                dependents
+                    .get_mut(dependency_component)
+                    .expect("ICE: SCC dependency component out of bounds")
+                    .push(item_component);
+                *indegree
+                    .get_mut(item_component)
+                    .expect("ICE: SCC item component out of bounds") += 1;
             }
         }
     }
 
     for entries in &mut dependents {
-        entries.sort_by_key(|component| components[*component][0]);
+        entries.sort_by_key(|component| first_component_node(&components, *component));
     }
 
     let mut ready = components
         .iter()
         .enumerate()
-        .filter(|(component, _)| indegree[*component] == 0)
-        .map(|(component, nodes)| (nodes[0], component))
+        .filter(|(component, _)| {
+            *indegree
+                .get(*component)
+                .expect("ICE: SCC ready component out of bounds")
+                == 0
+        })
+        .map(|(component, nodes)| {
+            (
+                *nodes.first().expect("ICE: SCC component must not be empty"),
+                component,
+            )
+        })
         .collect::<BTreeSet<_>>();
     let mut ordered = Vec::with_capacity(components.len());
 
     while let Some((_, component)) = ready.pop_first() {
-        ordered.push(components[component].clone());
+        ordered.push(
+            components
+                .get(component)
+                .expect("ICE: SCC ordered component out of bounds")
+                .clone(),
+        );
 
-        for &dependent in &dependents[component] {
-            indegree[dependent] -= 1;
-            if indegree[dependent] == 0 {
-                ready.insert((components[dependent][0], dependent));
+        let dependent_components = dependents
+            .get(component)
+            .expect("ICE: SCC dependent list out of bounds")
+            .clone();
+        for dependent in dependent_components {
+            let dependent_indegree = indegree
+                .get_mut(dependent)
+                .expect("ICE: SCC dependent indegree out of bounds");
+            *dependent_indegree -= 1;
+            if *dependent_indegree == 0 {
+                ready.insert((first_component_node(&components, dependent), dependent));
             }
         }
     }

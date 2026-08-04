@@ -1,0 +1,13 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0002] Error: unknown module `missing.module`
+   ╭─[ $WORKSPACE/tests/golden/diag/missing_import/src/main.sv:1:1 ]
+   │
+ 1 │ ╭─▶ import missing.module
+ 2 │ ├─▶
+   │ │
+   │ ╰────── module `missing.module` could not be found
+───╯
+resolve error

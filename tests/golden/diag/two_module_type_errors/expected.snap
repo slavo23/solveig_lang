@@ -1,0 +1,23 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[TC0005] Error: type mismatch
+   ╭─[ $WORKSPACE/tests/golden/diag/two_module_type_errors/src/b.sv:2:9 ]
+   │
+ 2 │ value = True
+   │         ──┬─
+   │           ╰─── this expression has type `Bool`
+   │
+   │ Note: but it was required to have type `Int`
+───╯
+[TC0005] Error: type mismatch
+   ╭─[ $WORKSPACE/tests/golden/diag/two_module_type_errors/src/a.sv:2:9 ]
+   │
+ 2 │ value = True
+   │         ──┬─
+   │           ╰─── this expression has type `Bool`
+   │
+   │ Note: but it was required to have type `Int`
+───╯
+type error

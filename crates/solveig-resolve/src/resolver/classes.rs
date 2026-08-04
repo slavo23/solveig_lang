@@ -25,9 +25,7 @@ impl<'a> Resolver<'a> {
             [name] => self.resolve_unqualified_class_defid(name, span, cx, local),
 
             [_first, rest @ ..] => {
-                let local_name = *rest
-                    .last()
-                    .expect("ICE: qualified class name must have a last segment");
+                let local_name = *rest.last()?;
 
                 if cx.module.0.as_slice() == r.prefix() {
                     if let Some(sym) = cx.local_api.classes.get(&local_name) {
@@ -51,7 +49,7 @@ impl<'a> Resolver<'a> {
                 None
             }
 
-            [] => panic!("ICE: empty class name ref"),
+            [] => solveig_base::ice!("empty class name ref"),
         }
     }
     fn resolve_unqualified_class_defid(
@@ -408,9 +406,7 @@ impl<'a> Resolver<'a> {
                 }),
 
             [_first, rest @ ..] => {
-                let local_name = *rest
-                    .last()
-                    .expect("ICE: qualified type constructor name must have a last segment");
+                let local_name = *rest.last()?;
 
                 if cx.module.0.as_slice() == r.prefix() {
                     return cx.local_api.types.get(&local_name).copied();
@@ -555,7 +551,7 @@ impl<'a> Resolver<'a> {
             instance_defs.push(InstanceDefinition {
                 id: solveig_ast::ast::InstanceId(
                     u32::try_from(instance_defs.len())
-                        .expect("ICE: module instance count does not fit in u32"),
+                        .unwrap_or_else(|_| solveig_base::ice!("module instance count does not fit in u32")),
                 ),
                 span: defn.1.to_usize_range(),
                 def_module: cx.module_id,

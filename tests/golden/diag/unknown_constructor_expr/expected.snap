@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0003] Error: unknown constructor `MissingValue`
+   ╭─[ $WORKSPACE/tests/golden/diag/unknown_constructor_expr/src/main.sv:1:8 ]
+   │
+ 1 │ main = MissingValue
+   │        ──────┬─────
+   │              ╰─────── no constructor named `MissingValue` is in scope here
+───╯
+resolve error

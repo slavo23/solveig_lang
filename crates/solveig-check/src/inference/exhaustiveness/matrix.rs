@@ -41,9 +41,11 @@ impl ExhaustivenessChecker<'_> {
             return None;
         }
 
-        let first_type = normalize_type(&types[0]);
+        let (first_pat, vector_tail) = vector.split_first()?;
+        let (first_type_raw, type_tail) = types.split_first()?;
+        let first_type = normalize_type(first_type_raw);
 
-        match &vector[0] {
+        match first_pat {
             Pat::Head(head, args) => {
                 let field_types = self.field_types_for_head(head, &first_type)?;
                 let field_count = field_types.len();
@@ -51,10 +53,10 @@ impl ExhaustivenessChecker<'_> {
                 let specialized_matrix = self.specialize_matrix(matrix, head, field_count);
 
                 let mut specialized_vector = args.clone();
-                specialized_vector.extend_from_slice(&vector[1..]);
+                specialized_vector.extend_from_slice(vector_tail);
 
                 let mut specialized_types = field_types;
-                specialized_types.extend_from_slice(&types[1..]);
+                specialized_types.extend_from_slice(type_tail);
 
                 let witness =
                     self.useful(&specialized_matrix, &specialized_vector, &specialized_types)?;
@@ -129,10 +131,10 @@ impl ExhaustivenessChecker<'_> {
             let specialized_matrix = self.specialize_matrix(matrix, &head, field_count);
 
             let mut specialized_vector = vec![Pat::Wild; field_count];
-            specialized_vector.extend_from_slice(&vector[1..]);
+            specialized_vector.extend_from_slice(vector.get(1..)?);
 
             let mut specialized_types = field_types;
-            specialized_types.extend_from_slice(&types[1..]);
+            specialized_types.extend_from_slice(types.get(1..)?);
 
             if let Some(witness) =
                 self.useful(&specialized_matrix, &specialized_vector, &specialized_types)
@@ -205,7 +207,7 @@ impl ExhaustivenessChecker<'_> {
 
         let default_matrix = self.default_matrix(matrix);
 
-        self.useful(&default_matrix, &vector[1..], &types[1..])
+        self.useful(&default_matrix, vector.get(1..)?, types.get(1..)?)
     }
 
     fn present_constructors(&self, matrix: &[Vec<Pat>]) -> FxHashSet<CtorId> {
@@ -318,11 +320,23 @@ pub(super) fn unreachable_pattern_warnings(
     let mut warnings = Vec::new();
 
     for (index, row) in matrix.iter().enumerate() {
-        if checker.useful(&matrix[..index], row, types).is_none() {
+        if checker
+            .useful(
+                matrix
+                    .get(..index)
+                    .expect("ICE: unreachable pattern matrix prefix out of bounds"),
+                row,
+                types,
+            )
+            .is_none()
+        {
+            let arm = arms
+                .get(index)
+                .expect("ICE: pattern matrix row without corresponding case arm");
             warnings.push(TypeError::UnreachablePattern {
                 span: FileSpan::new(
                     file,
-                    SourceSpan::from_usize_range(arms[index].node.pattern.anno.clone()),
+                    SourceSpan::from_usize_range(arm.node.pattern.anno.clone()),
                 ),
             });
         }

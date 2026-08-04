@@ -1,28 +1,23 @@
+#![expect(
+    clippy::panic,
+    reason = "integration tests use panic messages to explain fixture lookup failures"
+)]
+
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use solveig_driver::Compilation;
 use solveig_ide::CompilationIdeExt;
 use solveig_syntax::lexer::lex;
 
+mod support;
+
 fn fixture_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
 }
 
-fn temp_root(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    let thread_id = format!("{:?}", std::thread::current().id());
-    std::env::temp_dir().join(format!(
-        "solveig_hover_{name}_{}_{}_{}",
-        process::id(),
-        thread_id,
-        nanos
-    ))
+fn temp_root(name: &str) -> support::TestRoot {
+    support::temp_root("solveig_hover", name)
 }
 
 fn write_source(path: &Path, source: &str) {
@@ -283,7 +278,7 @@ main = if True then ?? else False
     assert_contains(markdown, "Expected type: `Bool`");
     assert_eq!(hover.span(), hole_start..hole_start + 2);
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -323,7 +318,7 @@ main = if True then _ else False
     assert_contains(markdown, "Expected type: `Bool`");
     assert_eq!(hover.span(), hole_start..hole_start + 1);
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -769,7 +764,7 @@ main = triple 1 2 3
         "triple : forall a. Num a => a -> a -> a -> a"
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -1030,9 +1025,14 @@ main = 0
         .expect("opening paren around TAtom argument should hover");
 
     assert_eq!(hover.signature(), "String");
-    assert_eq!(&source[hover.span()], "(charsToString (reverse current))");
+    assert_eq!(
+        source
+            .get(hover.span())
+            .expect("hover span should slice source"),
+        "(charsToString (reverse current))"
+    );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]

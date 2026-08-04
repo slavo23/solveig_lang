@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0003] Error: unknown term `missingValue`
+   ╭─[ $WORKSPACE/tests/golden/diag/unbound_variable/src/main.sv:1:8 ]
+   │
+ 1 │ main = missingValue
+   │        ──────┬─────
+   │              ╰─────── no term named `missingValue` is in scope here
+───╯
+resolve error

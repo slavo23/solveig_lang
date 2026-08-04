@@ -2,38 +2,21 @@
 //! These keep the virtual file system behavior exercised through the public Compilation API.
 
 use std::fs;
-use std::path::PathBuf;
-use std::process;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use solveig_driver::Compilation;
 
-fn temp_project_root(name: &str) -> PathBuf {
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("system clock should be after unix epoch")
-        .as_nanos();
-    std::env::temp_dir().join(format!(
-        "solveig_overlay_{name}_{}_{}",
-        process::id(),
-        nanos
-    ))
+mod support;
+
+fn temp_project_root(name: &str) -> support::TestRoot {
+    support::temp_root("solveig_overlay", name)
 }
 
-fn write_project(name: &str, main_source: &str) -> PathBuf {
+fn write_project(name: &str, main_source: &str) -> support::TestRoot {
     let project_root = temp_project_root(name);
-    fs::create_dir_all(project_root.join("src")).unwrap_or_else(|err| {
-        panic!(
-            "failed to create overlay test project at {}: {err}",
-            project_root.display()
-        )
-    });
-    fs::write(project_root.join("src/main.sv"), main_source).unwrap_or_else(|err| {
-        panic!(
-            "failed to write overlay test main file at {}: {err}",
-            project_root.join("src/main.sv").display()
-        )
-    });
+    fs::create_dir_all(project_root.join("src"))
+        .expect("overlay test project directory should be creatable");
+    fs::write(project_root.join("src/main.sv"), main_source)
+        .expect("overlay test main file should be writable");
     project_root
 }
 
@@ -66,7 +49,7 @@ answer = 41
 
     assert_eq!(output, "42");
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
@@ -100,18 +83,14 @@ main = 41
         "7"
     );
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }
 
 #[test]
 fn overlay_supplies_entry_file_with_no_disk_file() {
     let project_root = temp_project_root("entry");
-    fs::create_dir_all(project_root.join("src")).unwrap_or_else(|err| {
-        panic!(
-            "failed to create overlay-only entry project at {}: {err}",
-            project_root.display()
-        )
-    });
+    fs::create_dir_all(project_root.join("src"))
+        .expect("overlay-only entry project directory should be creatable");
     let main_path = project_root.join("src/main.sv");
     let mut compilation = Compilation::new(&project_root);
     compilation.set_overlay(
@@ -131,5 +110,5 @@ main = 99
 
     assert_eq!(output, "99");
 
-    let _ = fs::remove_dir_all(project_root);
+    drop(project_root);
 }

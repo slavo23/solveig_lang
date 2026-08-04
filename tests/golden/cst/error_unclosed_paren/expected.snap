@@ -1,0 +1,37 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+Module @0..23
+  VOpen @0..0 line=0 col=0 synthetic text=""
+  DefinitionList @0..22
+    FunctionDef @0..13
+      Ident @0..4 line=0 col=0 text="main"
+      Whitespace @4..5 line=0 col=4 text=" "
+      Eq @5..6 line=0 col=5 text="="
+      Whitespace @6..7 line=0 col=6 text=" "
+      ParenExpr @7..13
+        LParen @7..8 line=0 col=7 text="("
+        OpChain @8..13
+          AtomExpr @8..9
+            Int @8..9 line=0 col=8 text="1"
+          Whitespace @9..10 line=0 col=9 text=" "
+          Plus @10..11 line=0 col=10 text="+"
+          Whitespace @11..12 line=0 col=11 text=" "
+          AtomExpr @12..13
+            Int @12..13 line=0 col=12 text="2"
+    Newline @13..14 line=0 col=13 text="\n"
+    Error @14..14
+      diagnostic PAR0001 Error "parse error"
+        label primary @14..14 "expected RParen, got VSemi"
+      VSemi @14..14 line=1 col=0 synthetic text=""
+    FunctionDef @14..22
+      Ident @14..18 line=1 col=0 text="next"
+      Whitespace @18..19 line=1 col=4 text=" "
+      Eq @19..20 line=1 col=5 text="="
+      Whitespace @20..21 line=1 col=6 text=" "
+      AtomExpr @21..22
+        Int @21..22 line=1 col=7 text="3"
+  Newline @22..23 line=1 col=8 text="\n"
+  VClose @23..23 line=2 col=0 synthetic text=""
+  Eof @23..23 line=2 col=0 text=""

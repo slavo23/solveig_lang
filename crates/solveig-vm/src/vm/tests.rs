@@ -163,7 +163,7 @@ fn trap_returns_runtime_error() {
     );
 
     let err = match Machine::exec(&program, "main") {
-        Ok(_) => panic!("ICE: trap test unexpectedly evaluated successfully"),
+        Ok(_) => solveig_base::ice!("trap test unexpectedly evaluated successfully"),
         Err(err) => err,
     };
 
@@ -286,8 +286,10 @@ fn program_with_bool_names(
         .iter()
         .enumerate()
         .map(|(index, (name, tag, arity))| {
+            let constructor_offset =
+                u32::try_from(index).expect("VM test constructor count should fit in u32");
             ctor_spec(
-                CtorId(1_000 + index as u32),
+                CtorId(1_000 + constructor_offset),
                 CtorRuntimeRole::Ordinary,
                 name,
                 name,

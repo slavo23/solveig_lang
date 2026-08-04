@@ -1,0 +1,14 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[TC0014] Error: overlapping instance for `main.Local Int`
+   ╭─[ $WORKSPACE/tests/golden/diag/overlapping_instances/src/main.sv:1:1 ]
+   │
+ 1 │ class Local a where
+   │ │
+   │ ╰─ duplicate instance defined here
+   │
+   │ Note: an instance for this type already exists
+───╯
+type error

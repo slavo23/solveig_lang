@@ -320,7 +320,10 @@ impl TyConTable {
     }
 
     pub fn insert(&mut self, info: TyConInfo) -> TyConId {
-        let id = TyConId(self.entries.len() as u32);
+        let id = TyConId(
+            u32::try_from(self.entries.len())
+                .expect("ICE: type constructor table exceeded u32 capacity"),
+        );
         self.insert_with_id(id, info);
         id
     }
@@ -403,7 +406,10 @@ impl CtorTable {
     }
 
     pub fn insert(&mut self, info: CtorInfo) -> CtorId {
-        let id = CtorId(self.entries.len() as u32);
+        let id = CtorId(
+            u32::try_from(self.entries.len())
+                .expect("ICE: constructor table exceeded u32 capacity"),
+        );
         self.insert_with_id(id, info);
         id
     }
@@ -470,7 +476,9 @@ impl ClassTable {
     }
 
     pub fn insert(&mut self, mut info: ClassInfo) -> ClassId {
-        let id = ClassId(self.entries.len() as u32);
+        let id = ClassId(
+            u32::try_from(self.entries.len()).expect("ICE: class table exceeded u32 capacity"),
+        );
         info.definition.id = id;
         self.insert_with_id(id, info);
         id

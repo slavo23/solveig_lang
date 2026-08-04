@@ -2,6 +2,10 @@
 
 use super::*;
 
+fn file_id_from_index(index: usize) -> Option<FileId> {
+    u32::try_from(index).ok().map(FileId)
+}
+
 pub(super) fn source_file_id(artifacts: &CompilationArtifacts, file: &Path) -> Option<FileId> {
     let matching_file = |source: &&SourceFile| {
         source.path == file || (file.is_relative() && source.path.ends_with(file))
@@ -13,7 +17,9 @@ pub(super) fn source_file_id(artifacts: &CompilationArtifacts, file: &Path) -> O
         .enumerate()
         .rev()
         .find(|(index, source)| {
-            matching_file(source) && file_id_has_editor_artifacts(artifacts, FileId(*index as u32))
+            matching_file(source)
+                && file_id_from_index(*index)
+                    .is_some_and(|file| file_id_has_editor_artifacts(artifacts, file))
         })
         .or_else(|| {
             artifacts
@@ -23,7 +29,7 @@ pub(super) fn source_file_id(artifacts: &CompilationArtifacts, file: &Path) -> O
                 .rev()
                 .find(|(_, source)| matching_file(source))
         })
-        .map(|(index, _)| FileId(index as u32))
+        .and_then(|(index, _)| file_id_from_index(index))
 }
 
 fn file_id_has_editor_artifacts(artifacts: &CompilationArtifacts, file: FileId) -> bool {
@@ -60,7 +66,7 @@ pub(super) fn source_file_id_in_source_map(source_map: &SourceMap, file: &Path) 
                 .rev()
                 .find(|(_, source)| file.is_relative() && source.path.ends_with(file))
         })
-        .map(|(index, _)| FileId(index as u32))
+        .and_then(|(index, _)| file_id_from_index(index))
 }
 
 pub(super) fn span_contains_offset(span: &Range<usize>, offset: usize) -> bool {
@@ -79,7 +85,7 @@ pub(super) fn import_module_name_span(
     let text = source.get(import_span.to_usize_range())?;
     let import_start = text.find("import")?;
     let search_start = import_start + "import".len();
-    let name_start = text[search_start..].find(module_name)? + search_start;
+    let name_start = text.get(search_start..)?.find(module_name)? + search_start;
     let name_end = name_start + module_name.len();
 
     Some(Span::new(

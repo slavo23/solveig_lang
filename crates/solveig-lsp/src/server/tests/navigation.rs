@@ -143,5 +143,5 @@ unwrap value =
     assert!(names.contains(&"MkBox"));
 
     server.shutdown(()).await.expect("shutdown should succeed");
-    let _ = std::fs::remove_dir_all(project_root);
+    drop(project_root);
 }

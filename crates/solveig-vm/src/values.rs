@@ -136,7 +136,10 @@ impl NullaryCtorCache {
 
     #[inline]
     pub fn get(&self, tag: u16) -> Value {
-        self.tags[tag as usize].expect("missing nullary constructor")
+        self.tags
+            .get(tag as usize)
+            .and_then(|slot| *slot)
+            .expect("ICE: missing nullary constructor")
     }
 
     #[inline]
@@ -145,6 +148,9 @@ impl NullaryCtorCache {
     }
 
     pub fn set(&mut self, tag: u16, val: Value) {
-        self.tags[tag as usize] = Some(val);
+        *self
+            .tags
+            .get_mut(tag as usize)
+            .expect("ICE: nullary constructor tag out of bounds") = Some(val);
     }
 }

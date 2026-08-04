@@ -73,9 +73,7 @@ impl<'a> Resolver<'a> {
             }
 
             [_first, rest @ ..] => {
-                let local_name = *rest
-                    .last()
-                    .expect("ICE: qualified constructor name must have a last segment");
+                let local_name = *rest.last()?;
 
                 if cx.module.0.as_slice() == r.prefix() {
                     if let Some(sym) = cx.local_api.constructors.get(&local_name) {
@@ -107,7 +105,7 @@ impl<'a> Resolver<'a> {
                 None
             }
 
-            [] => panic!("ICE: empty constructor name ref"),
+            [] => solveig_base::ice!("empty constructor name ref"),
         }
     }
     fn resolve_surface_pattern_in_module(

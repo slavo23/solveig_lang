@@ -279,8 +279,8 @@ impl KindUnifier {
                     .table
                     .unify_var_value(var, KindValue::Known(Kind::Star));
                 if let Err((lhs, rhs)) = result {
-                    panic!(
-                        "ICE: defaulting unresolved kind meta conflicted with `{}` and `{}`",
+                    solveig_base::ice!(
+                        "defaulting unresolved kind meta conflicted with `{}` and `{}`",
                         lhs.pretty(),
                         rhs.pretty()
                     );
