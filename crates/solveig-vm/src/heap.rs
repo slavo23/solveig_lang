@@ -61,6 +61,10 @@ pub enum IoAction {
         action: Value,
         handler: Value,
     },
+    CatchDefect {
+        action: Value,
+        handler: Value,
+    },
     Finally {
         action: Value,
         cleanup: Value,
@@ -134,6 +138,10 @@ impl Heap {
     #[inline]
     pub(crate) fn should_collect_major(&self) -> bool {
         self.promoted_since_major >= self.next_major_at
+    }
+
+    pub(crate) fn live_slot_count(&self) -> usize {
+        self.nursery.len() + self.old.len() - self.free_list.len()
     }
 
     #[inline]

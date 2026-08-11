@@ -169,6 +169,9 @@ impl Interpreter<'_> {
     pub(super) fn dispatch(&mut self, program: &BytecodeProgram) -> Result<Value, StepOutcome> {
         let mut code = &program.chunk(self.chunk).code;
         loop {
+            if let Some(error) = self.resource_defect() {
+                return Err(error.into());
+            }
             // SAFETY: The bytecode emitter and jump patching only produce PCs
             // inside the current chunk; any violation is an internal bytecode ICE.
             let instr = unsafe { *code.get_unchecked(self.pc) };
@@ -248,7 +251,7 @@ impl Interpreter<'_> {
                         solveig_ast::ast::BinOp::Minus => Value::Int(lhs.wrapping_sub(rhs)),
                         solveig_ast::ast::BinOp::Mult => Value::Int(lhs.wrapping_mul(rhs)),
                         solveig_ast::ast::BinOp::Div => {
-                            Value::Int(builtins::int_div_trap(lhs, rhs, "/")?)
+                            Value::Int(builtins::int_div_or_defect(lhs, rhs)?)
                         }
                         solveig_ast::ast::BinOp::Less => self.bool_value(lhs < rhs),
                         solveig_ast::ast::BinOp::Greater => self.bool_value(lhs > rhs),
@@ -256,7 +259,7 @@ impl Interpreter<'_> {
                         solveig_ast::ast::BinOp::GreaterOrEqual => self.bool_value(lhs >= rhs),
                         solveig_ast::ast::BinOp::Equal => self.bool_value(lhs == rhs),
                         solveig_ast::ast::BinOp::Mod => {
-                            Value::Int(builtins::int_mod_trap(lhs, rhs, "%")?)
+                            Value::Int(builtins::int_mod_or_defect(lhs, rhs)?)
                         }
                     };
                     self.push(result);
@@ -388,6 +391,19 @@ impl Interpreter<'_> {
                 return Err(StepOutcome::Yielded);
             }
         }
+    }
+
+    pub(super) fn resource_defect(&mut self) -> Option<RuntimeError> {
+        if self.stack.len().saturating_add(self.continuations.len()) >= self.stack_limit {
+            return Some(RuntimeError::defect(DefectKind::StackExhausted));
+        }
+        if self.heap.live_slot_count() >= self.heap_limit {
+            self.collect_for_defect_recovery();
+            if self.heap.live_slot_count() >= self.heap_limit {
+                return Some(RuntimeError::defect(DefectKind::HeapExhausted));
+            }
+        }
+        None
     }
 }
 

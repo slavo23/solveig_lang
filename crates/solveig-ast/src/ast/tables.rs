@@ -138,6 +138,10 @@ pub fn prelude_io_error_tycon_id(names: &mut Names) -> TyConId {
     names.tycon_id(PRELUDE_IO_ERROR_NAME)
 }
 
+pub fn prelude_defect_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_DEFECT_NAME)
+}
+
 pub fn prelude_list_tycon_id(names: &mut Names) -> TyConId {
     names.tycon_id(PRELUDE_LIST_NAME)
 }
@@ -185,6 +189,10 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         PRELUDE_IO_ERROR_READ_FILE_NAME => CtorRuntimeRole::PreludeIoErrorReadFile,
         PRELUDE_IO_ERROR_WRITE_FILE_NAME => CtorRuntimeRole::PreludeIoErrorWriteFile,
         PRELUDE_IO_ERROR_APPEND_FILE_NAME => CtorRuntimeRole::PreludeIoErrorAppendFile,
+        PRELUDE_DEFECT_ERROR_NAME => CtorRuntimeRole::PreludeDefectError,
+        PRELUDE_DEFECT_DIVISION_BY_ZERO_NAME => CtorRuntimeRole::PreludeDefectDivisionByZero,
+        PRELUDE_DEFECT_STACK_EXHAUSTED_NAME => CtorRuntimeRole::PreludeDefectStackExhausted,
+        PRELUDE_DEFECT_HEAP_EXHAUSTED_NAME => CtorRuntimeRole::PreludeDefectHeapExhausted,
         _ => CtorRuntimeRole::Ordinary,
     }
 }
@@ -410,6 +418,10 @@ pub enum CtorRuntimeRole {
     PreludeIoErrorReadFile,
     PreludeIoErrorWriteFile,
     PreludeIoErrorAppendFile,
+    PreludeDefectError,
+    PreludeDefectDivisionByZero,
+    PreludeDefectStackExhausted,
+    PreludeDefectHeapExhausted,
 }
 
 #[derive(Clone, Debug, PartialEq)]

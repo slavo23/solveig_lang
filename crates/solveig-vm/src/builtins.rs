@@ -4,23 +4,24 @@
 use std::cmp::Ordering;
 
 use solveig_ast::ast::{
-    BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_CATCH_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ,
-    BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING, BUILTIN_FAIL_IO, BUILTIN_FINALLY_IO,
-    BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT,
-    BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB,
-    BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD,
-    BUILTIN_INT_COMPARE, BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT,
-    BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG,
-    BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_PRINT_LINE,
-    BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_SPAWN,
-    BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
-    BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE,
-    BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
+    BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_CATCH_DEFECT_IO, BUILTIN_CATCH_IO,
+    BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING,
+    BUILTIN_ERROR, BUILTIN_FAIL_IO, BUILTIN_FINALLY_IO, BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV,
+    BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT,
+    BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB, BUILTIN_FLOAT_TO_INT,
+    BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE,
+    BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE,
+    BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB,
+    BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR,
+    BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_SPAWN, BUILTIN_STRING_APPEND,
+    BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
+    BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo,
+    CtorRuntimeRole,
 };
 
 use crate::heap::{HeapObject, IoAction};
 use crate::values::Value;
-use crate::vm::{Interpreter, RuntimeError};
+use crate::vm::{DefectKind, Interpreter, RuntimeError};
 
 pub type BuiltinRun = for<'context, 'runtime> fn(
     &mut VmCtx<'context, 'runtime>,
@@ -92,7 +93,11 @@ impl<'context, 'runtime> VmCtx<'context, 'runtime> {
         Ok(info.tag)
     }
 
-    fn nullary_ctor(&self, role: CtorRuntimeRole, builtin: &str) -> Result<Value, RuntimeError> {
+    pub(crate) fn nullary_ctor(
+        &self,
+        role: CtorRuntimeRole,
+        builtin: &str,
+    ) -> Result<Value, RuntimeError> {
         let tag = self.ctor_tag_with_arity(role, 0, builtin)?;
         self.interpreter.nullary_ctors.try_get(tag).ok_or_else(|| {
             RuntimeError::builtin(format!(
@@ -253,6 +258,8 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_FAIL_IO, "failIO", 1, fail_io),
     builtin!(BUILTIN_CATCH_IO, "catchIO", 2, catch_io),
     builtin!(BUILTIN_FINALLY_IO, "finallyIO", 2, finally_io),
+    builtin!(BUILTIN_ERROR, "error", 1, raise_error),
+    builtin!(BUILTIN_CATCH_DEFECT_IO, "catchDefectIO", 2, catch_defect_io),
     builtin!(BUILTIN_PRINT_LINE, "printLine", 1, print_line),
     builtin!(BUILTIN_PRINT_STR, "printStr", 1, print_str),
     builtin!(BUILTIN_READ_LINE, "readLine", 0, read_line),
@@ -264,16 +271,16 @@ static ALL_BUILTINS: &[Builtin] = &[
 ];
 
 // D3 primitive semantics:
-// - Int add/sub/mul/neg wrap on i64 overflow. Division and modulo trap on zero;
+// - Int add/sub/mul/neg wrap on i64 overflow. Division and modulo defect on zero;
 //   i64::MIN divided/modded by -1 follows wrapping i64 behavior.
 // - Float arithmetic and comparisons delegate to f64, preserving IEEE-754 NaN
 //   and infinity behavior for arithmetic and relational predicates.
 // - String length, indexing, slicing, and char bridges use Unicode scalar values.
 //   Slicing clamps negative/out-of-range bounds instead of trapping.
 
-pub(crate) fn int_div_trap(lhs: i64, rhs: i64, op_name: &str) -> Result<i64, RuntimeError> {
+pub(crate) fn int_div_or_defect(lhs: i64, rhs: i64) -> Result<i64, RuntimeError> {
     if rhs == 0 {
-        return Err(RuntimeError::builtin(format!("{op_name} division by zero")));
+        return Err(RuntimeError::defect(DefectKind::DivisionByZero));
     }
     if lhs == i64::MIN && rhs == -1 {
         return Ok(i64::MIN);
@@ -281,9 +288,9 @@ pub(crate) fn int_div_trap(lhs: i64, rhs: i64, op_name: &str) -> Result<i64, Run
     Ok(lhs / rhs)
 }
 
-pub(crate) fn int_mod_trap(lhs: i64, rhs: i64, op_name: &str) -> Result<i64, RuntimeError> {
+pub(crate) fn int_mod_or_defect(lhs: i64, rhs: i64) -> Result<i64, RuntimeError> {
     if rhs == 0 {
-        return Err(RuntimeError::builtin(format!("{op_name} modulo by zero")));
+        return Err(RuntimeError::defect(DefectKind::DivisionByZero));
     }
     if lhs == i64::MIN && rhs == -1 {
         return Ok(0);
@@ -308,12 +315,12 @@ fn int_mul(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeErr
 
 fn int_div(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intDiv")?;
-    Ok(Value::Int(int_div_trap(lhs, rhs, "intDiv")?))
+    Ok(Value::Int(int_div_or_defect(lhs, rhs)?))
 }
 
 fn int_mod(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intMod")?;
-    Ok(Value::Int(int_mod_trap(lhs, rhs, "intMod")?))
+    Ok(Value::Int(int_mod_or_defect(lhs, rhs)?))
 }
 
 fn int_neg(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
@@ -534,10 +541,21 @@ fn fail_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeErro
     Ok(ctx.alloc_io_action(IoAction::Fail(error)))
 }
 
+fn raise_error(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let message = expect_string_owned(ctx, args, 0, "error")?;
+    Err(RuntimeError::defect(DefectKind::Error(message)))
+}
+
 fn catch_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let action = expect_value(args, 0, "catchIO")?;
     let handler = expect_value(args, 1, "catchIO")?;
     Ok(ctx.alloc_io_action(IoAction::Catch { action, handler }))
+}
+
+fn catch_defect_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let action = expect_value(args, 0, "catchDefectIO")?;
+    let handler = expect_value(args, 1, "catchDefectIO")?;
+    Ok(ctx.alloc_io_action(IoAction::CatchDefect { action, handler }))
 }
 
 fn finally_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {

@@ -17,6 +17,10 @@ impl Interpreter<'_> {
         program: &BytecodeProgram,
         action: Value,
     ) -> Result<Value, StepOutcome> {
+        if let Some(error) = self.pending_defect.take() {
+            self.resume_io_defect(program, error)?;
+        }
+
         if let Some(result) = self.io_result.take() {
             self.io_current = None;
             match result {
@@ -44,7 +48,13 @@ impl Interpreter<'_> {
             if self.continuations.is_empty() {
                 self.io_current = Some(action);
             } else {
-                self.io_current = Some(self.dispatch(program)?);
+                match self.dispatch(program) {
+                    Ok(next) => self.io_current = Some(next),
+                    Err(StepOutcome::Failed(error)) if error.defect_kind().is_some() => {
+                        self.resume_io_defect(program, error)?;
+                    }
+                    Err(outcome) => return Err(outcome),
+                }
             }
         }
 
@@ -61,6 +71,10 @@ impl Interpreter<'_> {
         // Awkward Squad section 2 gives IO bind the sequencing contract; AOSA's
         // GHC RTS chapter keeps resumable runtime state explicit at safe points.
         loop {
+            if let Some(error) = self.resource_defect() {
+                self.resume_io_defect(program, error)?;
+                continue;
+            }
             let current = self
                 .io_current
                 .expect("ICE: IO machine missing current action");
@@ -85,6 +99,11 @@ impl Interpreter<'_> {
                 }
                 IoAction::Catch { action, handler } => {
                     self.continuations.push(Continuation::IoCatch(handler));
+                    self.io_current = Some(action);
+                }
+                IoAction::CatchDefect { action, handler } => {
+                    self.continuations
+                        .push(Continuation::IoCatchDefect(handler));
                     self.io_current = Some(action);
                 }
                 IoAction::Finally { action, cleanup } => {
@@ -170,11 +189,16 @@ impl Interpreter<'_> {
             match frame {
                 Continuation::IoBind(continuation) => {
                     self.io_current = None;
-                    let next = self.call_value_for_result(program, continuation, &[value])?;
-                    self.io_current = Some(next);
+                    match self.call_value_for_result(program, continuation, &[value]) {
+                        Ok(next) => self.io_current = Some(next),
+                        Err(StepOutcome::Failed(error)) if error.defect_kind().is_some() => {
+                            self.resume_io_defect(program, error)?;
+                        }
+                        Err(outcome) => return Err(outcome),
+                    }
                     return Ok(None);
                 }
-                Continuation::IoCatch(_) => {}
+                Continuation::IoCatch(_) | Continuation::IoCatchDefect(_) => {}
                 Continuation::IoFinally(cleanup) => {
                     let outcome = self.alloc_io_success_action(value);
                     self.continuations.push(Continuation::IoRestore(outcome));
@@ -183,6 +207,10 @@ impl Interpreter<'_> {
                 }
                 Continuation::IoRestore(outcome) => {
                     self.io_current = Some(outcome);
+                    return Ok(None);
+                }
+                Continuation::IoRestoreDefect(defect) => {
+                    self.resume_io_defect_value(program, defect, false, None)?;
                     return Ok(None);
                 }
                 Continuation::Halt
@@ -207,11 +235,19 @@ impl Interpreter<'_> {
             };
 
             match frame {
-                Continuation::IoBind(_) | Continuation::IoRestore(_) => {}
+                Continuation::IoBind(_)
+                | Continuation::IoCatchDefect(_)
+                | Continuation::IoRestore(_)
+                | Continuation::IoRestoreDefect(_) => {}
                 Continuation::IoCatch(handler) => {
                     self.io_current = None;
-                    let next = self.call_value_for_result(program, handler, &[error])?;
-                    self.io_current = Some(next);
+                    match self.call_value_for_result(program, handler, &[error]) {
+                        Ok(next) => self.io_current = Some(next),
+                        Err(StepOutcome::Failed(error)) if error.defect_kind().is_some() => {
+                            self.resume_io_defect(program, error)?;
+                        }
+                        Err(outcome) => return Err(outcome),
+                    }
                     return Ok(None);
                 }
                 Continuation::IoFinally(cleanup) => {
@@ -226,6 +262,182 @@ impl Interpreter<'_> {
                     solveig_base::ice!("non-IO continuation reached the IO machine")
                 }
             }
+        }
+    }
+
+    fn resume_io_defect(
+        &mut self,
+        program: &BytecodeProgram,
+        error: RuntimeError,
+    ) -> Result<(), StepOutcome> {
+        let Some(kind) = error.defect_kind().cloned() else {
+            return Err(StepOutcome::Failed(error));
+        };
+        let recover_heap = matches!(kind, DefectKind::HeapExhausted);
+        let defect = self.alloc_defect(kind)?;
+        self.resume_io_defect_value(program, defect, recover_heap, Some(error))
+    }
+
+    fn resume_io_defect_value(
+        &mut self,
+        program: &BytecodeProgram,
+        defect: Value,
+        recover_heap: bool,
+        mut boundary_error: Option<RuntimeError>,
+    ) -> Result<(), StepOutcome> {
+        loop {
+            let frame_base = self.frame_base;
+            self.stack.truncate(frame_base);
+            let Some(frame) = self.continuations.pop() else {
+                let error = boundary_error.unwrap_or_else(|| self.render_uncaught_defect(defect));
+                return Err(StepOutcome::Failed(error));
+            };
+
+            match frame {
+                Continuation::CallerFrame {
+                    chunk,
+                    pc,
+                    frame_base,
+                } => {
+                    self.chunk = chunk;
+                    self.pc = pc;
+                    self.frame_base = frame_base;
+                }
+                Continuation::PublishGlobalThenResume {
+                    global_index,
+                    chunk,
+                    pc,
+                    frame_base,
+                } => {
+                    let error = boundary_error
+                        .get_or_insert_with(|| self.render_uncaught_defect(defect))
+                        .clone();
+                    self.publish_global_defect(global_index, &error);
+                    self.chunk = chunk;
+                    self.pc = pc;
+                    self.frame_base = frame_base;
+                }
+                Continuation::PublishGlobalThenHalt { global_index } => {
+                    let error = boundary_error
+                        .get_or_insert_with(|| self.render_uncaught_defect(defect))
+                        .clone();
+                    self.publish_global_defect(global_index, &error);
+                    self.frame_base = self.stack.len();
+                }
+                Continuation::Halt => {
+                    self.frame_base = self.stack.len();
+                }
+                Continuation::IoBind(_)
+                | Continuation::IoCatch(_)
+                | Continuation::IoRestore(_)
+                | Continuation::IoRestoreDefect(_) => {}
+                Continuation::IoFinally(cleanup) => {
+                    self.continuations
+                        .push(Continuation::IoRestoreDefect(defect));
+                    let cleanup = self.root_across_defect_recovery(cleanup, recover_heap);
+                    self.io_current = Some(cleanup);
+                    return Ok(());
+                }
+                Continuation::IoCatchDefect(handler) => {
+                    let checkpoint = self.temporary_roots.len();
+                    self.temporary_roots.extend([handler, defect]);
+                    if recover_heap {
+                        self.collect_for_defect_recovery();
+                    }
+                    let handler = *self
+                        .temporary_roots
+                        .get(checkpoint)
+                        .expect("ICE: defect handler root disappeared during recovery");
+                    let defect = *self
+                        .temporary_roots
+                        .get(checkpoint + 1)
+                        .expect("ICE: defect value root disappeared during recovery");
+                    self.temporary_roots.truncate(checkpoint);
+                    self.io_current = None;
+                    match self.call_value_for_result(program, handler, &[defect]) {
+                        Ok(next) => self.io_current = Some(next),
+                        Err(StepOutcome::Failed(error)) if error.defect_kind().is_some() => {
+                            return self.resume_io_defect(program, error);
+                        }
+                        Err(outcome) => return Err(outcome),
+                    }
+                    return Ok(());
+                }
+            }
+        }
+    }
+
+    fn root_across_defect_recovery(&mut self, value: Value, recover_heap: bool) -> Value {
+        if !recover_heap {
+            return value;
+        }
+        let checkpoint = self.temporary_roots.len();
+        self.temporary_roots.push(value);
+        self.collect_for_defect_recovery();
+        let value = *self
+            .temporary_roots
+            .get(checkpoint)
+            .expect("ICE: defect recovery root disappeared during collection");
+        self.temporary_roots.truncate(checkpoint);
+        value
+    }
+
+    fn alloc_defect(&mut self, defect: DefectKind) -> Result<Value, RuntimeError> {
+        match defect {
+            DefectKind::Error(message) => {
+                self.alloc_string_ctor(CtorRuntimeRole::PreludeDefectError, &message, "error")
+            }
+            DefectKind::DivisionByZero => VmCtx::new(self)
+                .nullary_ctor(CtorRuntimeRole::PreludeDefectDivisionByZero, "division"),
+            DefectKind::StackExhausted => VmCtx::new(self).nullary_ctor(
+                CtorRuntimeRole::PreludeDefectStackExhausted,
+                "stack exhaustion",
+            ),
+            DefectKind::HeapExhausted => VmCtx::new(self).nullary_ctor(
+                CtorRuntimeRole::PreludeDefectHeapExhausted,
+                "heap exhaustion",
+            ),
+        }
+    }
+
+    fn render_uncaught_defect(&self, defect: Value) -> RuntimeError {
+        let rendered = DisplayValue {
+            root: defect,
+            heap: &*self.heap,
+            arities: &self.program.constructor_arities,
+        }
+        .to_string();
+        RuntimeError::restored_defect(&rendered)
+    }
+
+    fn publish_global_defect(&mut self, global_index: usize, error: &RuntimeError) {
+        let process_id = self.id;
+        let Some(slot) = self.globals.get_mut(global_index) else {
+            solveig_base::ice!("defect unwind reached an out-of-bounds global index");
+        };
+        let waiters = match slot {
+            GlobalSlot::Evaluating { owner, waiters } if *owner == process_id => {
+                std::mem::take(waiters)
+            }
+            GlobalSlot::Evaluating { .. }
+            | GlobalSlot::Thunk { .. }
+            | GlobalSlot::Evaluated(_)
+            | GlobalSlot::Failed(_) => {
+                solveig_base::ice!("defect unwind lost ownership of its global blackhole")
+            }
+        };
+        *slot = GlobalSlot::Failed(error.clone());
+
+        for waiter_id in waiters {
+            let waiter = &mut self.inactive_processes[waiter_id];
+            if waiter.status
+                != ProcStatus::Blocked(BlockReason::Blackhole(GlobalIndex(global_index)))
+            {
+                solveig_base::ice!("defected global waiter has a mismatched process status");
+            }
+            waiter.pending_defect = Some(error.clone());
+            waiter.status = ProcStatus::Runnable;
+            self.run_queue.push_back(waiter_id);
         }
     }
 
@@ -261,12 +473,12 @@ impl Interpreter<'_> {
 
     fn alloc_io_error(&mut self, failure: IoFailure) -> Result<Value, RuntimeError> {
         match failure {
-            IoFailure::Print(error) => self.alloc_io_error1(
+            IoFailure::Print(error) => self.alloc_string_ctor(
                 CtorRuntimeRole::PreludeIoErrorStdout,
                 &error.to_string(),
                 "print",
             ),
-            IoFailure::ReadLine(error) => self.alloc_io_error1(
+            IoFailure::ReadLine(error) => self.alloc_string_ctor(
                 CtorRuntimeRole::PreludeIoErrorStdin,
                 &error.to_string(),
                 "readLine",
@@ -297,7 +509,7 @@ impl Interpreter<'_> {
         }
     }
 
-    fn alloc_io_error1(
+    fn alloc_string_ctor(
         &mut self,
         role: CtorRuntimeRole,
         message: &str,

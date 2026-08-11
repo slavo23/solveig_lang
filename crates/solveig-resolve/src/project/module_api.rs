@@ -553,6 +553,8 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "charsToString" => "Builds a string from a list of characters.",
         "pureIO" => "Creates an IO action that immediately returns a value.",
         "bindIO" => "Sequences an IO action and passes its result to the next action.",
+        "error" => "Raises a defect from pure code.",
+        "catchDefect" => "Handles a defect raised inside an installed IO scope.",
         "printLine" => "Writes text followed by a newline.",
         "printStr" => "Writes text without adding a newline.",
         "readLine" => "Reads one line of input.",

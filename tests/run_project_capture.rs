@@ -364,7 +364,7 @@ fn primitive_int_division_by_zero_reports_runtime_error() {
 
     assert!(
         err.to_string()
-            .contains("runtime error: intDiv division by zero"),
+            .contains("runtime error: uncaught defect: DivisionByZero"),
         "unexpected error: {err}"
     );
 }
@@ -380,7 +380,7 @@ fn primitive_int_modulo_by_zero_reports_runtime_error() {
 
     assert!(
         err.to_string()
-            .contains("runtime error: intMod modulo by zero"),
+            .contains("runtime error: uncaught defect: DivisionByZero"),
         "unexpected error: {err}"
     );
 }
@@ -396,8 +396,100 @@ fn prelude_int_division_by_zero_reports_runtime_error() {
 
     assert!(
         err.to_string()
-            .contains("runtime error: intDiv division by zero"),
+            .contains("runtime error: uncaught defect: DivisionByZero"),
         "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn catch_defect_recovers_from_managed_stack_exhaustion() {
+    let _guard = project_run_lock();
+    let project_root = write_temp_project(
+        "stack_defect",
+        r#"grow : Int -> Int
+grow n =
+    if n == 0 then 0
+    else 1 + grow (n - 1)
+
+stackAction : Task ()
+stackAction =
+    bindIO (pureIO ()) (fun ignored =>
+        bindIO (pureIO (grow 10000)) (fun value => pureIO ()))
+
+report : Defect -> Task ()
+report defect =
+    case defect of
+        StackExhausted => printLine "stack-caught"
+        | Error message => printLine "unexpected-error"
+        | DivisionByZero => printLine "unexpected-division"
+        | HeapExhausted => printLine "unexpected-heap"
+
+main : Task ()
+main = catchDefect stackAction report
+"#,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_solveig"))
+        .arg("--project-root")
+        .arg(&project_root)
+        .env("SOLVEIG_STACK_LIMIT", "128")
+        .output()
+        .expect("Solveig stack-exhaustion process should run");
+
+    assert!(
+        output.status.success(),
+        "stack exhaustion was not caught: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("Solveig stdout should be UTF-8"),
+        "stack-caught\n"
+    );
+}
+
+#[test]
+fn catch_defect_recovers_from_managed_heap_exhaustion() {
+    let _guard = project_run_lock();
+    let project_root = write_temp_project(
+        "heap_defect",
+        r#"build : Int -> [Int] -> [Int]
+build n values =
+    if n == 0 then values
+    else build (n - 1) (n :: values)
+
+heapAction : Task ()
+heapAction =
+    bindIO (pureIO ()) (fun ignored =>
+        bindIO (pureIO (build 10000 [])) (fun values => pureIO ()))
+
+report : Defect -> Task ()
+report defect =
+    case defect of
+        HeapExhausted => printLine "heap-caught"
+        | Error message => printLine "unexpected-error"
+        | DivisionByZero => printLine "unexpected-division"
+        | StackExhausted => printLine "unexpected-stack"
+
+main : Task ()
+main = catchDefect heapAction report
+"#,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_solveig"))
+        .arg("--project-root")
+        .arg(&project_root)
+        .env("SOLVEIG_HEAP_LIMIT", "4096")
+        .output()
+        .expect("Solveig heap-exhaustion process should run");
+
+    assert!(
+        output.status.success(),
+        "heap exhaustion was not caught: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout).expect("Solveig stdout should be UTF-8"),
+        "heap-caught\n"
     );
 }
 

@@ -60,6 +60,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let string = Ty::make_con_id(PRIM_TYS.string);
     let bool_ty = Ty::make_con_id(PRIM_TYS.bool);
     let thread_id = Ty::make_con_id(PRIM_TYS.thread_id);
+    let defect = Ty::make_con_id(prelude_defect_tycon_id(names));
     let io_error = Ty::make_con_id(prelude_io_error_tycon_id(names));
     let ordering = Ty::make_con_id(prelude_ordering_tycon_id(names));
     let list = Ty::make_con_id(prelude_list_tycon_id(names));
@@ -335,6 +336,16 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             ),
         ),
         prim_spec(
+            "error",
+            BUILTIN_ERROR,
+            1,
+            poly_arr(
+                std::slice::from_ref(&a_id),
+                std::slice::from_ref(&string),
+                a.clone(),
+            ),
+        ),
+        prim_spec(
             "catchIO",
             BUILTIN_CATCH_IO,
             2,
@@ -354,7 +365,20 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             poly_arr(
                 &[e_id, a_id, b_id],
                 &[io_of(e.clone(), a.clone()), io_of(e.clone(), b)],
-                io_of(e.clone(), a),
+                io_of(e.clone(), a.clone()),
+            ),
+        ),
+        prim_spec(
+            "catchDefectIO",
+            BUILTIN_CATCH_DEFECT_IO,
+            2,
+            poly_arr(
+                &[e_id, a_id],
+                &[
+                    io_of(e.clone(), a.clone()),
+                    Ty::make_arr(defect, io_of(e.clone(), a.clone())),
+                ],
+                io_of(e.clone(), a.clone()),
             ),
         ),
         prim_spec(

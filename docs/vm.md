@@ -44,8 +44,9 @@ Bytecode is trusted compiler output. Dispatch uses unchecked accesses only at
 sites where emission, jump patching, and frame sizing establish the bounds;
 the accompanying safety comments state those invariants. Source type and shape
 errors are rejected before this boundary, while dynamic faults such as division
-by zero become `RuntimeError`. A malformed emitted instruction is an internal
-compiler error, not a recoverable language error.
+by zero become tagged defects transported through the dispatch result. A
+malformed emitted instruction is an internal compiler error, not a recoverable
+language error.
 
 ## Runtime values
 
@@ -144,8 +145,10 @@ the continuation stack.
 | `PublishGlobalThenResume { global_index, chunk, pc, frame_base }` | Publish the thunk, restore the forcing caller, and push the value. |
 | `IoBind(continuation)` | Apply the saved Solveig continuation to the completed IO result and continue with the returned action. |
 | `IoCatch(handler)` | Handle the next typed failure below this frame; successful values pass through it. |
+| `IoCatchDefect(handler)` | Handle a defect raised while executing the action below this installed scope. |
 | `IoFinally(cleanup)` | Run cleanup after the action below finishes with a value or typed failure. |
 | `IoRestore(outcome)` | Resume the saved success or typed failure after cleanup succeeds. |
+| `IoRestoreDefect(defect)` | Resume defect unwinding after cleanup succeeds. |
 
 The enum is guarded at 40 bytes because `PublishGlobalThenResume` already sets
 its hot-path size; the IO frames must not widen it. GC traces the `Value`
@@ -191,10 +194,10 @@ process lifecycle while its outer loop interprets `IoAction` values.
 ## IO actions and sequencing
 
 `IoAction` is data, not an eagerly performed host effect. Its variants are
-`Pure`, typed `Fail`, `Bind`, `Catch`, `Finally`, terminal print/read,
-`GetArgs`, `Spawn`, and file read/write. The IO loop keeps the current action
-in `Process::io_current` and pushes the matching IO continuation when
-descending through a compound action. When an action yields a value, the loop
+`Pure`, typed `Fail`, `Bind`, `Catch`, `CatchDefect`, `Finally`, terminal
+print/read, `GetArgs`, `Spawn`, and file read/write. The IO loop keeps the
+current action in `Process::io_current` and pushes the matching IO continuation
+when descending through a compound action. When an action yields a value, the loop
 pops the saved continuation, applies it through bytecode when required, and
 treats the result as the next action. This is the operational IO sequencing
 model from Peyton Jones, “Tackling the Awkward Squad,” section 2.
@@ -206,6 +209,16 @@ without using `RuntimeError` or defect unwinding. If cleanup succeeds,
 `IoRestore` resumes the saved success or typed failure; a cleanup failure
 replaces the saved outcome. An unhandled typed error becomes a reported
 process failure only after it escapes this IO machinery.
+
+Defects are tagged separately from infrastructure `RuntimeError`s while pure
+bytecode evaluates. At an installed `IoCatchDefect` or `IoFinally` boundary,
+the tag becomes the matching closed Prelude `Defect` value. Unwinding discards
+bytecode callers, typed-error handlers, and binds in their actual continuation
+order; it fails owned global thunks, runs `IoFinally` cleanup, and enters only a
+defect handler. A cleanup defect replaces the saved defect. Infrastructure
+errors never enter this path, and an uncaught defect becomes a process failure
+at the scheduler boundary, so a spawned defect terminates and reports only its
+own thread.
 
 Worker-backed actions park the process. Their completion is plain Rust data in
 `io_result`; it becomes a `Value`, including any heap allocation for returned
@@ -516,6 +529,14 @@ state transition:
    allocation safe point on the scheduler thread. A host error becomes the
    matching closed `IOError` constructor and an inert `Fail` action there; it
    does not enter the VM defect channel.
+
+The VM enforces managed process-stack and heap-object ceilings. The defaults
+are intentionally above the million-bind regression; tests and embedders may
+lower them with `SOLVEIG_STACK_LIMIT` and `SOLVEIG_HEAP_LIMIT`. Reaching the
+heap ceiling first runs a full collection and raises `HeapExhausted` only if
+the retained object count still meets the limit. Defect constructors are
+available from the startup constructor cache, and the handler or cleanup is
+rooted across the recovery collection.
 
 Completed request-table slots are reused only after their completion has been
 consumed, so a `RequestId` identifies at most one outstanding operation. The

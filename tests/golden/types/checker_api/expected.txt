@@ -31,7 +31,9 @@ prelude.builtins.appendFile : String -> String -> IO IOError ()
 prelude.builtins.appendString : String -> String -> String
 prelude.builtins.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 prelude.builtins.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
+prelude.builtins.catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.builtins.catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a
+prelude.builtins.error : forall a. String -> a
 prelude.builtins.even : Int -> Bool
 prelude.builtins.failIO : forall e a. e -> IO e a
 prelude.builtins.finally : forall e a b. IO e a -> IO e b -> IO e a
@@ -60,11 +62,13 @@ prelude.list.reverse : forall a. [a] -> [a]
 prelude.list.reverseGo : forall a. [a] -> [a] -> [a]
 prelude.prim.appendFile : String -> String -> IO IOError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
+prelude.prim.catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.prim.catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.prim.charCompare : Char -> Char -> Ordering
 prelude.prim.charEq : Char -> Char -> Bool
 prelude.prim.charToString : Char -> String
 prelude.prim.charsToString : [Char] -> String
+prelude.prim.error : forall a. String -> a
 prelude.prim.failIO : forall e a. e -> IO e a
 prelude.prim.finallyIO : forall e a b. IO e a -> IO e b -> IO e a
 prelude.prim.floatAdd : Float -> Float -> Float

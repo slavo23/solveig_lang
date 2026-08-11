@@ -35,6 +35,17 @@ data IOError =
   | -- | Appending to a file failed, with path and host message.
     AppendFileError String String
 
+-- | A defect raised by pure evaluation or a managed runtime limit.
+data Defect =
+    -- | An explicit unrecoverable condition raised by user code.
+    Error String
+  | -- | Integer division or modulo used a zero divisor.
+    DivisionByZero
+  | -- | A process exceeded the managed VM stack limit.
+    StackExhausted
+  | -- | The runtime exceeded the managed heap-object limit.
+    HeapExhausted
+
 -- | An IO action using the built-in error vocabulary.
 type Task a = IO IOError a;
 
@@ -50,9 +61,17 @@ bindIO action continuation = prelude.prim.bindIO action continuation;
 failIO : forall e a. e -> IO e a;
 failIO error = prelude.prim.failIO error;
 
+-- | Raises a defect from pure code.
+error : forall a. String -> a;
+error message = prelude.prim.error message;
+
 -- | Handles a typed error and may change the action's error type.
 catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a;
 catchError action handler = prelude.prim.catchIO action handler;
+
+-- | Handles defects raised while executing an IO action's installed scope.
+catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a;
+catchDefect action handler = prelude.prim.catchDefectIO action handler;
 
 -- | Transforms the typed error of an IO action.
 mapError : forall e f a. (e -> f) -> IO e a -> IO f a;

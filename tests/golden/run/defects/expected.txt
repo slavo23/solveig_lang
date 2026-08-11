@@ -1,0 +1,7 @@
+error=boom
+division-by-zero
+division-by-zero
+use resource
+release resource
+division-by-zero
+typed-error

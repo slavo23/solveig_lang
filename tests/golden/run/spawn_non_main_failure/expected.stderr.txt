@@ -1,1 +1,1 @@
-thread 1 failed: intDiv division by zero
+thread 1 failed: uncaught defect: DivisionByZero

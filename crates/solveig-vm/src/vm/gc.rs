@@ -55,8 +55,10 @@ impl Roots<'_> {
             match frame {
                 Continuation::IoBind(value)
                 | Continuation::IoCatch(value)
+                | Continuation::IoCatchDefect(value)
                 | Continuation::IoFinally(value)
-                | Continuation::IoRestore(value) => visit(value),
+                | Continuation::IoRestore(value)
+                | Continuation::IoRestoreDefect(value) => visit(value),
                 Continuation::Halt
                 | Continuation::CallerFrame { .. }
                 | Continuation::PublishGlobalThenHalt { .. }
@@ -101,6 +103,21 @@ impl Interpreter<'_> {
             };
             collect_garbage(self.heap, &mut roots);
         }
+    }
+
+    pub(super) fn collect_for_defect_recovery(&mut self) {
+        let mut roots = Roots {
+            active_process: Some(self.process),
+            inactive_processes: self.inactive_processes,
+            globals: self.globals,
+            nullary_ctors: self.nullary_ctors,
+            bools: self.bools,
+        };
+        collect_minor(self.heap, &mut roots);
+        collect_major(self.heap, &mut roots);
+
+        #[cfg(debug_assertions)]
+        roots.assert_reachable_live(self.heap);
     }
 }
 
@@ -355,6 +372,10 @@ fn rewrite_io_action(
             action,
             handler: continuation,
         }
+        | IoAction::CatchDefect {
+            action,
+            handler: continuation,
+        }
         | IoAction::Finally {
             action,
             cleanup: continuation,
@@ -514,6 +535,10 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
             action,
             handler: continuation,
         }
+        | IoAction::CatchDefect {
+            action,
+            handler: continuation,
+        }
         | IoAction::Finally {
             action,
             cleanup: continuation,
@@ -599,6 +624,10 @@ fn assert_object_children_live(
                 continuation,
             }
             | IoAction::Catch {
+                action,
+                handler: continuation,
+            }
+            | IoAction::CatchDefect {
                 action,
                 handler: continuation,
             }

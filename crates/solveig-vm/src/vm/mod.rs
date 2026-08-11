@@ -31,6 +31,8 @@ use scheduler::evaluate_entry;
 use scheduler::{perform_process_io, run};
 
 const DEFAULT_REDUCTIONS: u32 = 4_096;
+const DEFAULT_STACK_LIMIT: usize = 16_777_216;
+const DEFAULT_HEAP_LIMIT: usize = 4_194_304;
 /// Identifies one process in a runtime's process arena.
 pub type ProcessId = Idx<Process>;
 
@@ -46,6 +48,7 @@ pub struct Process {
     pub(crate) temporary_roots: Vec<Value>,
     io_current: Option<Value>,
     io_result: Option<IoResult>,
+    pending_defect: Option<RuntimeError>,
     status: ProcStatus,
     reductions_left: u32,
 }
@@ -69,6 +72,8 @@ pub struct Runtime {
     run_queue: VecDeque<ProcessId>,
     io: IoSubsystem,
     reduction_budget: u32,
+    stack_limit: usize,
+    heap_limit: usize,
 }
 
 enum GlobalSlot {
@@ -136,6 +141,8 @@ pub(crate) struct Interpreter<'a> {
     run_queue: &'a mut VecDeque<ProcessId>,
     io: &'a mut IoSubsystem,
     reduction_budget: u32,
+    stack_limit: usize,
+    heap_limit: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -158,6 +165,7 @@ impl Process {
             temporary_roots: Vec::with_capacity(8),
             io_current: None,
             io_result: None,
+            pending_defect: None,
             status: ProcStatus::Runnable,
             reductions_left: reduction_budget,
         }
@@ -175,6 +183,7 @@ impl Process {
             temporary_roots: Vec::new(),
             io_current: None,
             io_result: None,
+            pending_defect: None,
             status: ProcStatus::Running,
             reductions_left: 0,
         }
@@ -226,8 +235,10 @@ impl Process {
                 | Continuation::PublishGlobalThenHalt { .. }
                 | Continuation::IoBind(_)
                 | Continuation::IoCatch(_)
+                | Continuation::IoCatchDefect(_)
                 | Continuation::IoFinally(_)
-                | Continuation::IoRestore(_) => None,
+                | Continuation::IoRestore(_)
+                | Continuation::IoRestoreDefect(_) => None,
             }
         }))
     }
@@ -285,6 +296,8 @@ impl Runtime {
             run_queue: VecDeque::new(),
             io,
             reduction_budget,
+            stack_limit: runtime_limit_from_env("SOLVEIG_STACK_LIMIT", DEFAULT_STACK_LIMIT),
+            heap_limit: runtime_limit_from_env("SOLVEIG_HEAP_LIMIT", DEFAULT_HEAP_LIMIT),
         };
         runtime.init_nullary();
         runtime
@@ -397,6 +410,8 @@ impl<'a> Interpreter<'a> {
             run_queue,
             io,
             reduction_budget,
+            stack_limit,
+            heap_limit,
         } = runtime;
         Self {
             process,
@@ -409,6 +424,8 @@ impl<'a> Interpreter<'a> {
             run_queue,
             io,
             reduction_budget: *reduction_budget,
+            stack_limit: *stack_limit,
+            heap_limit: *heap_limit,
         }
     }
 }
@@ -465,8 +482,10 @@ fn owned_globals(process: &Process) -> Vec<GlobalIndex> {
             | Continuation::CallerFrame { .. }
             | Continuation::IoBind(_)
             | Continuation::IoCatch(_)
+            | Continuation::IoCatchDefect(_)
             | Continuation::IoFinally(_)
-            | Continuation::IoRestore(_) => None,
+            | Continuation::IoRestore(_)
+            | Continuation::IoRestoreDefect(_) => None,
         })
         .collect()
 }
@@ -489,6 +508,14 @@ fn reduction_budget_from_env() -> u32 {
         .unwrap_or(DEFAULT_REDUCTIONS)
 }
 
+fn runtime_limit_from_env(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|limit| *limit > 0)
+        .unwrap_or(default)
+}
+
 pub struct EvalResult {
     root: Value,
     heap: Heap,
@@ -505,6 +532,15 @@ pub struct IoEvalResult {
 pub struct RuntimeError {
     pub code: u16,
     pub message: String,
+    defect: Option<DefectKind>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum DefectKind {
+    Error(String),
+    DivisionByZero,
+    StackExhausted,
+    HeapExhausted,
 }
 
 impl RuntimeError {
@@ -512,17 +548,49 @@ impl RuntimeError {
         Self {
             code,
             message: crate::bytecode::trap_message(code),
+            defect: None,
         }
     }
 
     pub(crate) fn builtin(message: String) -> Self {
-        Self { code: 2, message }
+        Self {
+            code: 2,
+            message,
+            defect: None,
+        }
     }
 
     fn cyclic_global(name: &str) -> Self {
         Self {
             code: 3,
             message: format!("cyclic global `{name}`"),
+            defect: None,
+        }
+    }
+
+    pub(crate) fn defect(defect: DefectKind) -> Self {
+        let message = match &defect {
+            DefectKind::Error(message) => format!("uncaught defect: Error {message:?}"),
+            DefectKind::DivisionByZero => "uncaught defect: DivisionByZero".to_string(),
+            DefectKind::StackExhausted => "uncaught defect: StackExhausted".to_string(),
+            DefectKind::HeapExhausted => "uncaught defect: HeapExhausted".to_string(),
+        };
+        Self {
+            code: 4,
+            message,
+            defect: Some(defect),
+        }
+    }
+
+    pub(crate) fn defect_kind(&self) -> Option<&DefectKind> {
+        self.defect.as_ref()
+    }
+
+    pub(crate) fn restored_defect(rendered: &str) -> Self {
+        Self {
+            code: 4,
+            message: format!("uncaught defect: {rendered}"),
+            defect: None,
         }
     }
 }
@@ -555,6 +623,7 @@ impl Machine {
             return Err(RuntimeError {
                 code: 0,
                 message: format!("entry '{entry_name}' not found"),
+                defect: None,
             });
         };
 
@@ -677,6 +746,7 @@ impl Machine {
             return Err(RuntimeError {
                 code: 0,
                 message: format!("entry '{entry_name}' not found"),
+                defect: None,
             });
         };
 

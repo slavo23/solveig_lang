@@ -369,10 +369,14 @@ fn typed_io_handler_frames_keep_their_values_live() {
     let caught = runtime.alloc_str_for_test("catch");
     let cleanup = runtime.alloc_str_for_test("finally");
     let restored = runtime.alloc_str_for_test("restore");
+    let defect_handler = runtime.alloc_str_for_test("defect-catch");
+    let restored_defect = runtime.alloc_str_for_test("defect-restore");
     runtime.processes[process].continuations.extend([
         Continuation::IoCatch(caught),
         Continuation::IoFinally(cleanup),
         Continuation::IoRestore(restored),
+        Continuation::IoCatchDefect(defect_handler),
+        Continuation::IoRestoreDefect(restored_defect),
     ]);
 
     runtime.collect_all_process_roots_for_test();
@@ -382,8 +386,10 @@ fn typed_io_handler_frames_keep_their_values_live() {
         .iter()
         .map(|continuation| match continuation {
             Continuation::IoCatch(value)
+            | Continuation::IoCatchDefect(value)
             | Continuation::IoFinally(value)
-            | Continuation::IoRestore(value) => *value,
+            | Continuation::IoRestore(value)
+            | Continuation::IoRestoreDefect(value) => *value,
             Continuation::Halt
             | Continuation::CallerFrame { .. }
             | Continuation::PublishGlobalThenHalt { .. }
@@ -405,7 +411,16 @@ fn typed_io_handler_frames_keep_their_values_live() {
             runtime.heap.str_value(*id, *bytes)
         })
         .collect::<Vec<_>>();
-    assert_eq!(strings, ["catch", "finally", "restore"]);
+    assert_eq!(
+        strings,
+        [
+            "catch",
+            "finally",
+            "restore",
+            "defect-catch",
+            "defect-restore"
+        ]
+    );
 }
 
 #[test]

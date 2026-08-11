@@ -43,6 +43,11 @@ data IOError =
   | ReadFileError String String
   | WriteFileError String String
   | AppendFileError String String
+data Defect =
+    Error String
+  | DivisionByZero
+  | StackExhausted
+  | HeapExhausted
 type Task a = IO IOError a
 ```
 
@@ -59,7 +64,9 @@ False : Bool
 pureIO : forall e a. a -> IO e a
 bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 failIO : forall e a. e -> IO e a
+error : forall a. String -> a
 catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a
+catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 mapError : forall e f a. (e -> f) -> IO e a -> IO f a
 orElse : forall e f a. IO e a -> IO f a -> IO f a
 finally : forall e a b. IO e a -> IO e b -> IO e a
@@ -81,8 +88,15 @@ after each print so prompts appear before `readLine`.
 Relative paths are resolved against the Solveig project root. Their host
 failures are ordinary `IOError` values and can be handled with `catchError`.
 `finally` runs cleanup after success or typed failure; `bracket` installs that
-cleanup after acquisition. Defect and interruption cleanup are completed by
-Phases P4 and J2, respectively.
+cleanup after acquisition. Defects raised while executing the installed action
+unwind through the same cleanup frame and may be handled only by
+`catchDefect`; interruption cleanup is completed by Phase J2.
+
+`error` raises `Error`; integer division and modulo by zero raise
+`DivisionByZero`. The VM's managed stack and heap-object ceilings raise
+`StackExhausted` and `HeapExhausted`. Because Solveig is strict, the protected
+action must be constructed before `catchDefect` installs its scope; pure work
+that should be protected belongs inside an executed IO callback.
 
 Example:
 
@@ -388,7 +402,9 @@ charCompare : Char -> Char -> Ordering
 pureIO : forall e a. a -> IO e a
 bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 failIO : forall e a. e -> IO e a
+error : forall a. String -> a
 catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
+catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 finallyIO : forall e a b. IO e a -> IO e b -> IO e a
 printLine : String -> IO IOError ()
 printStr : String -> IO IOError ()
@@ -400,5 +416,5 @@ appendFile : String -> String -> IO IOError ()
 ```
 
 Primitive Int add/sub/mul/neg wrap on `i64` overflow. `intDiv` and `intMod`
-report runtime errors on division/modulo by zero. String indexing and slicing
+raise `DivisionByZero` defects for a zero divisor. String indexing and slicing
 count Unicode scalar values.
