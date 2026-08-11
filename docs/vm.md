@@ -260,8 +260,10 @@ numeric operations or representation conversion for it.
 Program lifetime is owned by the main process:
 
 - When main finishes successfully, the scheduler returns its result and the
-  runtime is dropped immediately. Any other runnable or blocked processes are
-  killed; the runtime does not wait for them.
+  runtime is dropped. Any other runnable or blocked Solveig processes are
+  killed; their pending IO completions are not resumed. The scoped host worker
+  threads are joined before a library-backed execution call returns, so an
+  already-running host call is allowed to finish without touching VM state.
 - When main fails, that `RuntimeError` terminates the program.
 - When a non-main process fails, the scheduler writes
   `thread <id> failed: <error>` to stderr, retires that process, and continues
@@ -270,6 +272,45 @@ Program lifetime is owned by the main process:
 The ordering contract remains deterministic FIFO. `SOLVEIG_REDUCTIONS` fixes
 the quantum used by every process, and `SOLVEIG_SCHED_DETERMINISTIC=1` pins the
 policy explicitly for tests. Scheduling never uses sleeps or elapsed time.
+
+## Blocking IO workers
+
+Blocking host IO does not run on the scheduler thread. `Runtime` owns an
+`IoSubsystem` with four scoped OS workers, a typed request table, and one
+multi-producer/single-consumer completion channel. Performing `printLine`,
+`printStr`, `readLine`, `readFile`, `writeFile`, or `appendFile` follows this
+state transition:
+
+1. The scheduler thread resolves every VM operand to owned Rust data and
+   submits an `IoRequest` associated with the current `ProcessId`.
+2. The process records `Blocked(Io(RequestId))` and leaves the run queue.
+3. A worker performs the host call and returns only `String`, unit, or a
+   contextual `io::Error`. Workers never hold `Value`, `ObjId`, heap roots, or
+   any other VM reference.
+4. The scheduler drains completions, verifies that request and block reason
+   match, stores the plain result on the process, and returns it to the FIFO
+   run queue. That process converts text into a heap string at its next
+   allocation safe point on the scheduler thread.
+
+Completed request-table slots are reused only after their completion has been
+consumed, so a `RequestId` identifies at most one outstanding operation. The
+table contains the process association rather than encoding it in the id.
+
+Terminal reads and writes share worker zero and therefore retain submission
+order on the caller-provided streams. File requests are distributed
+round-robin across the other three workers and may finish in a different order;
+each completion wakes only its requesting process. Stream references are
+borrowed by scoped workers and protected by `Mutex` because multiple worker
+threads exist, but the mutex does not protect compiler or VM heap state.
+
+Every scheduler iteration first drains ready completions. If the run queue is
+empty while IO requests remain, it blocks on the completion receiver rather
+than polling or sleeping. If the queue is empty and no request can complete,
+execution fails with `all threads are blocked forever`. This is the external
+completion/deadlock distinction used by GHC's scheduler, described in the AOSA
+GHC runtime chapter. Standard-library per-worker `mpsc` queues express this
+I8 topology; Phase J's requirement to wait on either a completion or a timer
+deadline is the point at which a selecting channel may become necessary.
 
 ## Collector invariants for I4
 

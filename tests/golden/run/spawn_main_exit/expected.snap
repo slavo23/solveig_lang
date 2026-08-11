@@ -3,3 +3,4 @@ source: tests/snapshot_support.rs
 expression: actual
 ---
 main
+child

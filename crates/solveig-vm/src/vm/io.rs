@@ -1,97 +1,30 @@
 //! Runtime IO action representation and execution.
 //! The current action stays in one register while suspended binds share the VM's
-//! continuation stack. Builtin actions operate on files, stdin, stdout, and args.
+//! continuation stack. Blocking actions park the process until an IO worker
+//! returns plain Rust data for scheduler-thread conversion.
 
+use super::io_worker::{IoFailure, IoRequest, IoResult};
 use super::*;
 use crate::builtins::VmCtx;
 use crate::bytecode::BytecodeProgram;
 use crate::heap::{HeapObject, IoAction};
 use crate::values::{Continuation, Value};
-use std::fs::{self, OpenOptions};
-use std::io::{BufRead, Write};
-use std::path::{Path, PathBuf};
-
-pub(super) struct IoRuntime<'a> {
-    stdin: &'a mut dyn BufRead,
-    stdout: &'a mut dyn Write,
-    stderr: &'a mut dyn Write,
-    args: &'a [String],
-    cwd: &'a Path,
-    line_buffer: String,
-}
-
-impl<'a> IoRuntime<'a> {
-    pub(super) fn new(
-        stdin: &'a mut dyn BufRead,
-        stdout: &'a mut dyn Write,
-        stderr: &'a mut dyn Write,
-        args: &'a [String],
-        cwd: &'a Path,
-    ) -> Self {
-        Self {
-            stdin,
-            stdout,
-            stderr,
-            args,
-            cwd,
-            line_buffer: String::new(),
-        }
-    }
-
-    fn read_line(&mut self) -> Result<String, RuntimeError> {
-        self.line_buffer.clear();
-        let bytes = self
-            .stdin
-            .read_line(&mut self.line_buffer)
-            .map_err(|err| RuntimeError::builtin(format!("readLine failed: {err}")))?;
-        if bytes == 0 {
-            return Ok(String::new());
-        }
-
-        if self.line_buffer.ends_with('\n') {
-            self.line_buffer.pop();
-            if self.line_buffer.ends_with('\r') {
-                self.line_buffer.pop();
-            }
-        }
-
-        Ok(self.line_buffer.clone())
-    }
-
-    fn write_str(&mut self, text: &str) -> Result<(), RuntimeError> {
-        self.stdout
-            .write_all(text.as_bytes())
-            .and_then(|()| self.stdout.flush())
-            .map_err(|err| RuntimeError::builtin(format!("IO write failed: {err}")))
-    }
-
-    pub(super) fn report_thread_failure(
-        &mut self,
-        thread_id: u32,
-        error: &RuntimeError,
-    ) -> Result<(), RuntimeError> {
-        writeln!(self.stderr, "thread {thread_id} failed: {error}")
-            .and_then(|()| self.stderr.flush())
-            .map_err(|err| RuntimeError::builtin(format!("IO stderr write failed: {err}")))
-    }
-
-    fn resolve_path(&self, path: &str) -> PathBuf {
-        let path = Path::new(path);
-        if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            self.cwd.join(path)
-        }
-    }
-}
 
 impl Interpreter<'_> {
     pub(super) fn perform_io(
         &mut self,
         program: &BytecodeProgram,
         action: Value,
-        io: &mut IoRuntime<'_>,
     ) -> Result<Value, StepOutcome> {
+        if let Some(result) = self.io_result.take() {
+            self.io_current = None;
+            let value = self.io_result_value(result)?;
+            if let Some(value) = self.resume_io_value(program, value)? {
+                self.continuations.clear();
+                return Ok(value);
+            }
+        }
+
         if self.io_current.is_none() {
             if self.continuations.is_empty() {
                 self.io_current = Some(action);
@@ -100,7 +33,7 @@ impl Interpreter<'_> {
             }
         }
 
-        let result = self.perform_io_loop(program, io);
+        let result = self.perform_io_loop(program);
 
         if result.is_ok() {
             self.io_current = None;
@@ -109,11 +42,7 @@ impl Interpreter<'_> {
         result
     }
 
-    fn perform_io_loop(
-        &mut self,
-        program: &BytecodeProgram,
-        io: &mut IoRuntime<'_>,
-    ) -> Result<Value, StepOutcome> {
+    fn perform_io_loop(&mut self, program: &BytecodeProgram) -> Result<Value, StepOutcome> {
         // Awkward Squad section 2 gives IO bind the sequencing contract; AOSA's
         // GHC RTS chapter keeps resumable runtime state explicit at safe points.
         loop {
@@ -139,30 +68,25 @@ impl Interpreter<'_> {
                     if newline {
                         text.push('\n');
                     }
-                    io.write_str(&text)?;
-                    if let Some(value) = self.resume_io_value(program, Value::Unit)? {
-                        return Ok(value);
-                    }
+                    return self.block_on_io(IoRequest::Print(text));
                 }
                 IoAction::ReadLine => {
-                    let line = io.read_line()?;
-                    self.safe_point();
-                    let value = self.heap.alloc_str(&line);
-                    if let Some(value) = self.resume_io_value(program, value)? {
-                        return Ok(value);
-                    }
+                    return self.block_on_io(IoRequest::ReadLine);
                 }
                 IoAction::GetArgs => {
                     let checkpoint = self.temporary_roots.len();
-                    for arg in io.args {
+                    let arg_count = self.io.args().len();
+                    for index in 0..arg_count {
+                        let Some(arg) = self.io.args().get(index).cloned() else {
+                            solveig_base::ice!("IO argument index disappeared during allocation");
+                        };
                         self.safe_point();
-                        let value = self.heap.alloc_str(arg);
+                        let value = self.heap.alloc_str(&arg);
                         self.temporary_roots.push(value);
                     }
 
                     let mut ctx = VmCtx::new(self);
-                    let value =
-                        ctx.alloc_list_from_root_range(checkpoint, io.args.len(), "getArgs");
+                    let value = ctx.alloc_list_from_root_range(checkpoint, arg_count, "getArgs");
                     self.temporary_roots.truncate(checkpoint);
                     let value = value?;
                     if let Some(value) = self.resume_io_value(program, value)? {
@@ -177,18 +101,8 @@ impl Interpreter<'_> {
                 }
                 IoAction::ReadFile { path } => {
                     let path = self.expect_string_value(path, "readFile")?;
-                    let resolved = io.resolve_path(&path);
-                    let contents = fs::read_to_string(&resolved).map_err(|err| {
-                        RuntimeError::builtin(format!(
-                            "readFile failed for `{}`: {err}",
-                            resolved.display()
-                        ))
-                    })?;
-                    self.safe_point();
-                    let value = self.heap.alloc_str(&contents);
-                    if let Some(value) = self.resume_io_value(program, value)? {
-                        return Ok(value);
-                    }
+                    let resolved = self.io.resolve_path(&path);
+                    return self.block_on_io(IoRequest::ReadFile(resolved));
                 }
                 IoAction::WriteFile {
                     path,
@@ -198,32 +112,31 @@ impl Interpreter<'_> {
                     let builtin = if append { "appendFile" } else { "writeFile" };
                     let path = self.expect_string_value(path, builtin)?;
                     let contents = self.expect_string_value(contents, builtin)?;
-                    let resolved = io.resolve_path(&path);
-                    if append {
-                        OpenOptions::new()
-                            .create(true)
-                            .append(true)
-                            .open(&resolved)
-                            .and_then(|mut file| file.write_all(contents.as_bytes()))
-                            .map_err(|err| {
-                                RuntimeError::builtin(format!(
-                                    "appendFile failed for `{}`: {err}",
-                                    resolved.display()
-                                ))
-                            })?;
-                    } else {
-                        fs::write(&resolved, contents).map_err(|err| {
-                            RuntimeError::builtin(format!(
-                                "writeFile failed for `{}`: {err}",
-                                resolved.display()
-                            ))
-                        })?;
-                    }
-                    if let Some(value) = self.resume_io_value(program, Value::Unit)? {
-                        return Ok(value);
-                    }
+                    let resolved = self.io.resolve_path(&path);
+                    return self.block_on_io(IoRequest::WriteFile {
+                        path: resolved,
+                        contents,
+                        append,
+                    });
                 }
             }
+        }
+    }
+
+    fn block_on_io(&mut self, request: IoRequest) -> Result<Value, StepOutcome> {
+        let request_id = self.io.issue(self.id, request)?;
+        self.status = ProcStatus::Blocked(BlockReason::Io(request_id));
+        Err(StepOutcome::Blocked)
+    }
+
+    fn io_result_value(&mut self, result: IoResult) -> Result<Value, RuntimeError> {
+        match result {
+            IoResult::Unit => Ok(Value::Unit),
+            IoResult::Text(text) => {
+                self.safe_point();
+                Ok(self.heap.alloc_str(&text))
+            }
+            IoResult::Failed(failure) => Err(io_failure(failure)),
         }
     }
 
@@ -279,4 +192,23 @@ impl Interpreter<'_> {
             _ => Err(RuntimeError::builtin(format!("{context} expected String"))),
         }
     }
+}
+
+fn io_failure(failure: IoFailure) -> RuntimeError {
+    let message = match failure {
+        IoFailure::Print(error) => format!("IO write failed: {error}"),
+        IoFailure::ReadLine(error) => format!("readLine failed: {error}"),
+        IoFailure::ReadFile { path, source } => {
+            format!("readFile failed for `{}`: {source}", path.display())
+        }
+        IoFailure::WriteFile {
+            path,
+            append,
+            source,
+        } => {
+            let operation = if append { "appendFile" } else { "writeFile" };
+            format!("{operation} failed for `{}`: {source}", path.display())
+        }
+    };
+    RuntimeError::builtin(message)
 }

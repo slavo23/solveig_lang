@@ -13,16 +13,19 @@ use std::fmt;
 use std::io::{BufRead, Cursor, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
+use std::sync::Mutex;
+use std::thread;
 
 mod call;
 mod dispatch;
 mod gc;
 mod io;
+mod io_worker;
 mod scheduler;
 #[cfg(test)]
 mod tests;
 
-use io::IoRuntime;
+use io_worker::{IoResult, IoSubsystem};
 use scheduler::evaluate_entry;
 #[cfg(test)]
 use scheduler::{perform_process_io, run};
@@ -42,6 +45,7 @@ pub struct Process {
     binding_buffer: Vec<Value>,
     pub(crate) temporary_roots: Vec<Value>,
     io_current: Option<Value>,
+    io_result: Option<IoResult>,
     status: ProcStatus,
     reductions_left: u32,
 }
@@ -55,6 +59,7 @@ pub struct Runtime {
     bools: BoolCache,
     processes: Arena<Process>,
     run_queue: VecDeque<ProcessId>,
+    io: IoSubsystem,
     reduction_budget: u32,
 }
 
@@ -121,6 +126,7 @@ pub(crate) struct Interpreter<'a> {
     pub(crate) bools: &'a mut BoolCache,
     inactive_processes: &'a mut Arena<Process>,
     run_queue: &'a mut VecDeque<ProcessId>,
+    io: &'a mut IoSubsystem,
     reduction_budget: u32,
 }
 
@@ -143,6 +149,7 @@ impl Process {
             binding_buffer: Vec::with_capacity(8),
             temporary_roots: Vec::with_capacity(8),
             io_current: None,
+            io_result: None,
             status: ProcStatus::Runnable,
             reductions_left: reduction_budget,
         }
@@ -159,6 +166,7 @@ impl Process {
             binding_buffer: Vec::new(),
             temporary_roots: Vec::new(),
             io_current: None,
+            io_result: None,
             status: ProcStatus::Running,
             reductions_left: 0,
         }
@@ -188,6 +196,16 @@ impl Runtime {
             program,
             Heap::default(),
             reduction_budget_from_env(),
+            IoSubsystem::inactive(),
+        )
+    }
+
+    fn new_with_io(program: BytecodeProgram, io: IoSubsystem) -> Self {
+        Self::new_with_heap_and_reduction_budget(
+            program,
+            Heap::default(),
+            reduction_budget_from_env(),
+            io,
         )
     }
 
@@ -195,6 +213,7 @@ impl Runtime {
         program: BytecodeProgram,
         heap: Heap,
         reduction_budget: u32,
+        io: IoSubsystem,
     ) -> Self {
         let max_tag = program
             .constructor_arities
@@ -221,6 +240,7 @@ impl Runtime {
             },
             processes: Arena::new(),
             run_queue: VecDeque::new(),
+            io,
             reduction_budget,
         };
         runtime.init_nullary();
@@ -235,7 +255,12 @@ impl Runtime {
     ) -> Self {
         let mut heap = Heap::default();
         heap.set_collection_limits_for_test(nursery_slot_count, next_major_at);
-        Self::new_with_heap_and_reduction_budget(program, heap, reduction_budget_from_env())
+        Self::new_with_heap_and_reduction_budget(
+            program,
+            heap,
+            reduction_budget_from_env(),
+            IoSubsystem::inactive(),
+        )
     }
 
     fn allocate_process(&mut self) -> ProcessId {
@@ -263,6 +288,7 @@ impl Runtime {
             StepOutcome::Failed(error) => {
                 self.fail_owned_blackholes(process, error);
                 process.io_current = None;
+                process.io_result = None;
                 process.continuations.clear();
             }
             StepOutcome::Blocked | StepOutcome::Finished(_) => {}
@@ -299,6 +325,7 @@ impl Runtime {
                     }
                     owners.push((waiter_id, owned_globals(waiter)));
                     waiter.io_current = None;
+                    waiter.io_result = None;
                     waiter.continuations.clear();
                     waiter.status = ProcStatus::Failed(error.clone());
                 }
@@ -325,6 +352,7 @@ impl<'a> Interpreter<'a> {
             bools,
             processes,
             run_queue,
+            io,
             reduction_budget,
         } = runtime;
         Self {
@@ -336,6 +364,7 @@ impl<'a> Interpreter<'a> {
             bools,
             inactive_processes: processes,
             run_queue,
+            io,
             reduction_budget: *reduction_budget,
         }
     }
@@ -547,8 +576,8 @@ impl Machine {
     pub fn exec_io_with_streams(
         program: &CCProgram,
         entry_name: &str,
-        stdin: &mut dyn BufRead,
-        stdout: &mut dyn Write,
+        stdin: &mut (dyn BufRead + Send),
+        stdout: &mut (dyn Write + Send),
         args: &[String],
         cwd: &Path,
     ) -> Result<EvalResult, RuntimeError> {
@@ -569,8 +598,8 @@ impl Machine {
     pub fn exec_compiled_io_with_streams(
         program: &BytecodeProgram,
         entry_name: &str,
-        stdin: &mut dyn BufRead,
-        stdout: &mut dyn Write,
+        stdin: &mut (dyn BufRead + Send),
+        stdout: &mut (dyn Write + Send),
         args: &[String],
         cwd: &Path,
     ) -> Result<EvalResult, RuntimeError> {
@@ -590,8 +619,8 @@ impl Machine {
     fn exec_owned_io_with_streams(
         program: BytecodeProgram,
         entry_name: &str,
-        stdin: &mut dyn BufRead,
-        stdout: &mut dyn Write,
+        stdin: &mut (dyn BufRead + Send),
+        stdout: &mut (dyn Write + Send),
         stderr: &mut dyn Write,
         args: &[String],
         cwd: &Path,
@@ -603,13 +632,17 @@ impl Machine {
             });
         };
 
-        let mut runtime = Runtime::new(program);
-        let mut io = IoRuntime::new(stdin, stdout, stderr, args, cwd);
-        let (id, outcome) = evaluate_entry(&mut runtime, entry);
-        let action = outcome_value(outcome)?;
-        let root = scheduler::schedule_io(&mut runtime, id, action, &mut io)?;
+        let stdin = Mutex::new(stdin);
+        let stdout = Mutex::new(stdout);
+        thread::scope(|scope| {
+            let io = IoSubsystem::start(scope, &stdin, &stdout, args, cwd)?;
+            let mut runtime = Runtime::new_with_io(program, io);
+            let (id, outcome) = evaluate_entry(&mut runtime, entry);
+            let action = outcome_value(outcome)?;
+            let root = scheduler::schedule_io(&mut runtime, id, action, stderr)?;
 
-        Ok(runtime.into_eval_result(root))
+            Ok(runtime.into_eval_result(root))
+        })
     }
 
     pub fn dump_bytecode<P: AsRef<std::path::Path>>(

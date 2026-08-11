@@ -80,7 +80,6 @@ pub(super) fn perform_process_io(
     runtime: &mut Runtime,
     id: ProcessId,
     action: Value,
-    io: &mut IoRuntime<'_>,
 ) -> StepOutcome {
     let mut process = runtime.take_process(id);
     if process.reductions_left == 0 {
@@ -90,7 +89,7 @@ pub(super) fn perform_process_io(
     let result = {
         let mut interpreter = Interpreter::new(runtime, &mut process);
         let program = interpreter.program;
-        interpreter.perform_io(program, action, io)
+        interpreter.perform_io(program, action)
     };
     let outcome = match result {
         Ok(value) => StepOutcome::Finished(value),
@@ -123,7 +122,7 @@ pub(super) fn schedule_io(
     runtime: &mut Runtime,
     main: ProcessId,
     action: Value,
-    io: &mut IoRuntime<'_>,
+    stderr: &mut dyn Write,
 ) -> Result<Value, RuntimeError> {
     let main_process = &mut runtime.processes[main];
     main_process.io_current = Some(action);
@@ -131,23 +130,70 @@ pub(super) fn schedule_io(
     runtime.run_queue.push_back(main);
 
     loop {
-        let Some(id) = runtime.run_queue.pop_front() else {
-            return Err(RuntimeError::builtin(
-                "scheduler stopped with the main thread blocked".to_string(),
-            ));
-        };
+        let id = next_runnable(runtime)?;
         if runtime.processes[id].status != ProcStatus::Runnable {
             solveig_base::ice!("run queue contained a non-runnable process");
         }
 
-        let outcome = perform_process_io(runtime, id, Value::Unit, io);
+        let outcome = perform_process_io(runtime, id, Value::Unit);
         match outcome {
             StepOutcome::Finished(value) if id == main => return Ok(value),
             StepOutcome::Yielded | StepOutcome::Blocked | StepOutcome::Finished(_) => {}
             StepOutcome::Failed(error) if id == main => return Err(error),
             StepOutcome::Failed(error) => {
-                io.report_thread_failure(id.into_raw().into_u32(), &error)?;
+                report_thread_failure(stderr, id.into_raw().into_u32(), &error)?;
             }
         }
     }
+}
+
+/// Selects the next process without spinning when only worker IO can make
+/// progress. This follows GHC's scheduler rule: wait for external completion
+/// when one exists, otherwise report that all remaining threads are blocked.
+pub(super) fn next_runnable(runtime: &mut Runtime) -> Result<ProcessId, RuntimeError> {
+    loop {
+        while let Some(completion) = runtime.io.try_completion()? {
+            wake_io_process(runtime, completion);
+        }
+
+        if let Some(id) = runtime.run_queue.pop_front() {
+            return Ok(id);
+        }
+        if runtime.io.has_pending() {
+            let completion = runtime.io.wait_completion()?;
+            wake_io_process(runtime, completion);
+            continue;
+        }
+        return Err(RuntimeError::builtin(
+            "all threads are blocked forever".to_string(),
+        ));
+    }
+}
+
+fn wake_io_process(
+    runtime: &mut Runtime,
+    (request, process_id, result): (RequestId, ProcessId, IoResult),
+) {
+    let process = &mut runtime.processes[process_id];
+    if process.status != ProcStatus::Blocked(BlockReason::Io(request)) {
+        solveig_base::ice!("IO completion did not match the blocked process request");
+    }
+    if process.io_result.is_some() {
+        solveig_base::ice!("IO completion overwrote an unconsumed process result");
+    }
+    process.io_result = Some(result);
+    process.status = ProcStatus::Runnable;
+    runtime.run_queue.push_back(process_id);
+}
+
+fn report_thread_failure(
+    stderr: &mut dyn Write,
+    thread_id: u32,
+    error: &RuntimeError,
+) -> Result<(), RuntimeError> {
+    writeln!(stderr, "thread {thread_id} failed: {error}")
+        .and_then(|()| stderr.flush())
+        .map_err(|write_error| {
+            RuntimeError::builtin(format!("IO stderr write failed: {write_error}"))
+        })
 }

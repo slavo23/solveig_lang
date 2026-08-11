@@ -230,10 +230,8 @@ impl Compilation {
         options: CompileOptions,
         args: &[String],
     ) -> Result<(), DriverError> {
-        let stdin = io::stdin();
-        let mut stdin = stdin.lock();
-        let stdout = io::stdout();
-        let mut stdout = stdout.lock();
+        let mut stdin = io::BufReader::new(io::stdin());
+        let mut stdout = io::stdout();
 
         self.run_project_with_streams(entry_name, options, &mut stdin, &mut stdout, args)
     }
@@ -242,8 +240,8 @@ impl Compilation {
         &mut self,
         entry_name: &str,
         options: CompileOptions,
-        stdin: &mut dyn BufRead,
-        stdout: &mut dyn Write,
+        stdin: &mut (dyn BufRead + Send),
+        stdout: &mut (dyn Write + Send),
         args: &[String],
     ) -> Result<(), DriverError> {
         let prepared = self.prepare_project_run(entry_name, options)?;

@@ -209,15 +209,9 @@ fn io_callback_yields_and_resumes_through_the_same_safe_point() {
     let StepOutcome::Finished(action) = outcome else {
         solveig_base::ice!("IO safe-point fixture did not produce an action");
     };
-    let mut stdin = Cursor::new(Vec::<u8>::new());
-    let mut stdout = Vec::new();
-    let mut stderr = Vec::new();
-    let args = Vec::new();
-    let mut io = IoRuntime::new(&mut stdin, &mut stdout, &mut stderr, &args, Path::new("."));
-
     let mut yields = 0;
     let result = loop {
-        match perform_process_io(&mut runtime, process_id, action, &mut io) {
+        match perform_process_io(&mut runtime, process_id, action) {
             StepOutcome::Yielded => {
                 yields += 1;
                 assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
@@ -231,6 +225,104 @@ fn io_callback_yields_and_resumes_through_the_same_safe_point() {
 
     assert_eq!(result, Value::Int(42));
     assert!(yields >= 2);
+}
+
+#[test]
+fn scheduler_waits_for_worker_io_and_wakes_the_blocked_process() {
+    let program = program(vec![global("main", int(0))], vec![], &[]);
+    let bytecode = lower_to_bytecode(&program);
+    let mut input = Cursor::new(b"from worker\n".to_vec());
+    let mut output = Vec::new();
+    let input = Mutex::new(&mut input as &mut (dyn BufRead + Send));
+    let output = Mutex::new(&mut output as &mut (dyn Write + Send));
+
+    thread::scope(|scope| {
+        let io = IoSubsystem::start(scope, &input, &output, &[], Path::new("."))
+            .expect("IO workers should start");
+        let mut runtime = Runtime::new_with_io(bytecode, io);
+        let process_id = runtime.allocate_process();
+        assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
+        let request = runtime
+            .io
+            .issue(process_id, io_worker::IoRequest::ReadLine)
+            .expect("readLine request should enter the worker pool");
+        runtime.processes[process_id].status = ProcStatus::Blocked(BlockReason::Io(request));
+
+        assert_eq!(scheduler::next_runnable(&mut runtime), Ok(process_id));
+        assert_eq!(runtime.processes[process_id].status, ProcStatus::Runnable);
+        assert!(matches!(
+            runtime.processes[process_id].io_result.take(),
+            Some(IoResult::Text(line)) if line == "from worker"
+        ));
+    });
+}
+
+#[test]
+fn scheduler_runs_another_process_while_worker_io_is_blocked() {
+    struct GatedRead {
+        release: Option<std::sync::mpsc::Receiver<()>>,
+        contents: Cursor<Vec<u8>>,
+    }
+
+    impl std::io::Read for GatedRead {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if let Some(release) = self.release.take() {
+                release.recv().map_err(|disconnected| {
+                    std::io::Error::other(format!("read gate disconnected: {disconnected}"))
+                })?;
+            }
+            std::io::Read::read(&mut self.contents, buffer)
+        }
+    }
+
+    let program = program(vec![global("main", int(0))], vec![], &[]);
+    let bytecode = lower_to_bytecode(&program);
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let mut input = std::io::BufReader::new(GatedRead {
+        release: Some(release_rx),
+        contents: Cursor::new(b"eventually\n".to_vec()),
+    });
+    let mut output = Vec::new();
+    let input = Mutex::new(&mut input as &mut (dyn BufRead + Send));
+    let output = Mutex::new(&mut output as &mut (dyn Write + Send));
+
+    thread::scope(|scope| {
+        let io = IoSubsystem::start(scope, &input, &output, &[], Path::new("."))
+            .expect("IO workers should start");
+        let mut runtime = Runtime::new_with_io(bytecode, io);
+        let blocked = runtime.allocate_process();
+        assert_eq!(runtime.run_queue.pop_front(), Some(blocked));
+        let request = runtime
+            .io
+            .issue(blocked, io_worker::IoRequest::ReadLine)
+            .expect("readLine request should enter the worker pool");
+        runtime.processes[blocked].status = ProcStatus::Blocked(BlockReason::Io(request));
+        let runnable = runtime.allocate_process();
+
+        assert_eq!(scheduler::next_runnable(&mut runtime), Ok(runnable));
+        assert_eq!(
+            runtime.processes[blocked].status,
+            ProcStatus::Blocked(BlockReason::Io(request))
+        );
+
+        release_tx
+            .send(())
+            .expect("blocked test reader should still be connected");
+    });
+}
+
+#[test]
+fn scheduler_reports_deadlock_when_no_process_can_make_progress() {
+    let program = program(vec![global("main", int(0))], vec![], &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let process_id = runtime.allocate_process();
+    assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
+    runtime.processes[process_id].status =
+        ProcStatus::Blocked(BlockReason::Blackhole(GlobalIndex(0)));
+
+    let error = scheduler::next_runnable(&mut runtime)
+        .expect_err("an empty run queue without external work should deadlock");
+    assert_eq!(error.message, "all threads are blocked forever");
 }
 
 #[test]
@@ -567,7 +659,12 @@ fn start_process_global(runtime: &mut Runtime, process_id: ProcessId, global_ind
 }
 
 fn runtime_with_reduction_budget(program: BytecodeProgram, reduction_budget: u32) -> Runtime {
-    Runtime::new_with_heap_and_reduction_budget(program, Heap::default(), reduction_budget)
+    Runtime::new_with_heap_and_reduction_budget(
+        program,
+        Heap::default(),
+        reduction_budget,
+        IoSubsystem::inactive(),
+    )
 }
 
 fn run_process(runtime: &mut Runtime, process_id: ProcessId) -> StepOutcome {
@@ -748,14 +845,10 @@ fn scheduler_completes_ten_thousand_threads() {
     }
     runtime.restore_process(main_process);
 
-    let mut stdin = Cursor::new(Vec::<u8>::new());
-    let mut stdout = Vec::new();
     let mut stderr = Vec::new();
-    let args = Vec::new();
-    let mut io = IoRuntime::new(&mut stdin, &mut stdout, &mut stderr, &args, Path::new("."));
 
     assert_eq!(
-        scheduler::schedule_io(&mut runtime, main, action, &mut io),
+        scheduler::schedule_io(&mut runtime, main, action, &mut stderr),
         Ok(Value::Unit)
     );
     assert_eq!(
