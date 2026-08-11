@@ -31,6 +31,7 @@ impl DisplayValue<'_> {
             Value::Int(n) => n.to_string(),
             Value::Float(n) => n.to_string(),
             Value::Char(ch) => format!("'{}'", escape_char_literal(ch)),
+            Value::ThreadId(id) => format!("<thread {id}>"),
             Value::CtorFn { tag, .. } => {
                 format!("<ctor {}>", tag_name(self.arities, tag))
             }

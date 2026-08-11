@@ -14,6 +14,7 @@ use std::path::{Path, PathBuf};
 pub(super) struct IoRuntime<'a> {
     stdin: &'a mut dyn BufRead,
     stdout: &'a mut dyn Write,
+    stderr: &'a mut dyn Write,
     args: &'a [String],
     cwd: &'a Path,
     line_buffer: String,
@@ -23,12 +24,14 @@ impl<'a> IoRuntime<'a> {
     pub(super) fn new(
         stdin: &'a mut dyn BufRead,
         stdout: &'a mut dyn Write,
+        stderr: &'a mut dyn Write,
         args: &'a [String],
         cwd: &'a Path,
     ) -> Self {
         Self {
             stdin,
             stdout,
+            stderr,
             args,
             cwd,
             line_buffer: String::new(),
@@ -60,6 +63,16 @@ impl<'a> IoRuntime<'a> {
             .write_all(text.as_bytes())
             .and_then(|()| self.stdout.flush())
             .map_err(|err| RuntimeError::builtin(format!("IO write failed: {err}")))
+    }
+
+    pub(super) fn report_thread_failure(
+        &mut self,
+        thread_id: u32,
+        error: &RuntimeError,
+    ) -> Result<(), RuntimeError> {
+        writeln!(self.stderr, "thread {thread_id} failed: {error}")
+            .and_then(|()| self.stderr.flush())
+            .map_err(|err| RuntimeError::builtin(format!("IO stderr write failed: {err}")))
     }
 
     fn resolve_path(&self, path: &str) -> PathBuf {
@@ -153,6 +166,12 @@ impl Interpreter<'_> {
                     self.temporary_roots.truncate(checkpoint);
                     let value = value?;
                     if let Some(value) = self.resume_io_value(program, value)? {
+                        return Ok(value);
+                    }
+                }
+                IoAction::Spawn { action } => {
+                    let thread_id = self.spawn_io_process(action);
+                    if let Some(value) = self.resume_io_value(program, thread_id)? {
                         return Ok(value);
                     }
                 }

@@ -7,6 +7,7 @@ use std::env;
 use std::fs;
 use std::panic;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use solveig_driver::run_project_capture_with_stdin_and_args;
 
@@ -34,16 +35,20 @@ fn golden_run_cases() {
 
         let stdin = case_stdin(case_name, &case_root);
         let args = case_args(case_name, &case_root);
-        let actual = panic::catch_unwind(|| {
-            run_project_capture_with_stdin_and_args(&case_root, "main", &stdin, &args)
-        })
-        .unwrap_or_else(|payload| {
-            panic!(
-                "golden run case `{case_name}` panicked:\n{}",
-                panic_message(&payload)
-            )
-        })
-        .unwrap_or_else(|err| panic!("golden run case `{case_name}` failed:\n{err}"));
+        let actual = if case_root.join("expected.stderr.txt").is_file() {
+            run_cli_case(case_name, &case_root, &stdin, &args)
+        } else {
+            panic::catch_unwind(|| {
+                run_project_capture_with_stdin_and_args(&case_root, "main", &stdin, &args)
+            })
+            .unwrap_or_else(|payload| {
+                panic!(
+                    "golden run case `{case_name}` panicked:\n{}",
+                    panic_message(&payload)
+                )
+            })
+            .unwrap_or_else(|err| panic!("golden run case `{case_name}` failed:\n{err}"))
+        };
 
         let expected_path = case_root.join("expected.txt");
 
@@ -67,6 +72,58 @@ fn golden_run_cases() {
 
         snapshot_support::assert_fixture_snapshot(&case_root, case_name, &expected, &actual);
     }
+}
+
+fn run_cli_case(case_name: &str, case_root: &Path, stdin: &str, args: &[String]) -> String {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_solveig"));
+    command
+        .arg("--project-root")
+        .arg(case_root)
+        .env("SOLVEIG_SCHED_DETERMINISTIC", "1");
+    if let Ok(reductions) = fs::read_to_string(case_root.join("reductions.txt")) {
+        command.env("SOLVEIG_REDUCTIONS", reductions.trim());
+    }
+    if !args.is_empty() {
+        command.arg("--").args(args);
+    }
+
+    let mut child = command
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap_or_else(|err| panic!("golden run case `{case_name}` failed to start: {err}"));
+    std::io::Write::write_all(
+        child
+            .stdin
+            .as_mut()
+            .expect("golden CLI stdin should be piped"),
+        stdin.as_bytes(),
+    )
+    .unwrap_or_else(|err| panic!("golden run case `{case_name}` stdin failed: {err}"));
+    let output = child
+        .wait_with_output()
+        .unwrap_or_else(|err| panic!("golden run case `{case_name}` did not finish: {err}"));
+
+    let expected_success = !case_root.join("expected.failure").is_file();
+    assert_eq!(
+        output.status.success(),
+        expected_success,
+        "golden run case `{case_name}` exit status changed"
+    );
+    let stderr = String::from_utf8(output.stderr)
+        .unwrap_or_else(|err| panic!("golden run case `{case_name}` stderr was not UTF-8: {err}"));
+    let stderr = stderr.replace(&case_root.display().to_string(), "$CASE");
+    let expected_stderr = fs::read_to_string(case_root.join("expected.stderr.txt"))
+        .unwrap_or_else(|err| panic!("golden run case `{case_name}` stderr golden failed: {err}"));
+    pretty_assertions::assert_eq!(
+        expected_stderr,
+        stderr,
+        "golden run case `{case_name}` stderr changed"
+    );
+
+    String::from_utf8(output.stdout)
+        .unwrap_or_else(|err| panic!("golden run case `{case_name}` stdout was not UTF-8: {err}"))
 }
 
 fn case_stdin(case_name: &str, case_root: &Path) -> String {

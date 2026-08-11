@@ -62,6 +62,9 @@ pub enum IoAction {
     },
     ReadLine,
     GetArgs,
+    Spawn {
+        action: Value,
+    },
     ReadFile {
         path: Value,
     },

@@ -51,6 +51,10 @@ writeFile path contents = prelude.prim.writeFile path contents;
 appendFile : String -> String -> IO ();
 appendFile path contents = prelude.prim.appendFile path contents;
 
+-- | Starts an IO action in a new lightweight thread.
+spawn : IO () -> IO ThreadId;
+spawn action = prelude.prim.spawn action;
+
 -- | Concatenates two strings.
 appendString : String -> String -> String;
 appendString left right = prelude.prim.stringAppend left right;

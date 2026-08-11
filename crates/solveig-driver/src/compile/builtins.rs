@@ -59,6 +59,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let char_ty = Ty::make_con_id(PRIM_TYS.char);
     let string = Ty::make_con_id(PRIM_TYS.string);
     let bool_ty = Ty::make_con_id(PRIM_TYS.bool);
+    let thread_id = Ty::make_con_id(PRIM_TYS.thread_id);
     let ordering = Ty::make_con_id(prelude_ordering_tycon_id(names));
     let list = Ty::make_con_id(prelude_list_tycon_id(names));
     let maybe_char = Ty::make_app(
@@ -352,6 +353,12 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             BUILTIN_APPEND_FILE,
             2,
             arr(&[string.clone(), string], io_of(Ty::TyUnit)),
+        ),
+        prim_spec(
+            "spawn",
+            BUILTIN_SPAWN,
+            1,
+            unary(io_of(Ty::TyUnit), io_of(thread_id)),
         ),
     ]
 }

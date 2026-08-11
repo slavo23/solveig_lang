@@ -20,6 +20,7 @@ prelude.builtins.printStr : String -> IO ()
 prelude.builtins.pureIO : forall a. a -> IO a
 prelude.builtins.readFile : String -> IO String
 prelude.builtins.readLine : IO String
+prelude.builtins.spawn : IO () -> IO ThreadId
 prelude.builtins.writeFile : String -> String -> IO ()
 prelude.list.++ : forall a. [a] -> [a] -> [a]
 prelude.list.append : forall a. [a] -> [a] -> [a]
@@ -70,6 +71,7 @@ prelude.prim.printStr : String -> IO ()
 prelude.prim.pureIO : forall a. a -> IO a
 prelude.prim.readFile : String -> IO String
 prelude.prim.readLine : IO String
+prelude.prim.spawn : IO () -> IO ThreadId
 prelude.prim.stringAppend : String -> String -> String
 prelude.prim.stringCharAt : String -> Int -> Maybe Char
 prelude.prim.stringCompare : String -> String -> Ordering

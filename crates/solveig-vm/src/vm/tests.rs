@@ -3,6 +3,7 @@
 
 use super::*;
 use crate::bytecode::Instr;
+use crate::heap::IoAction;
 use solveig_ast::ast::{
     BUILTIN_BIND_IO, BUILTIN_CHARS_TO_STRING, BUILTIN_PURE_IO, BUILTIN_STRING_TO_CHARS, BinOp,
     BuiltinId, CtorId, CtorRuntimeRole, PRIM_TYS,
@@ -210,8 +211,9 @@ fn io_callback_yields_and_resumes_through_the_same_safe_point() {
     };
     let mut stdin = Cursor::new(Vec::<u8>::new());
     let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
     let args = Vec::new();
-    let mut io = IoRuntime::new(&mut stdin, &mut stdout, &args, Path::new("."));
+    let mut io = IoRuntime::new(&mut stdin, &mut stdout, &mut stderr, &args, Path::new("."));
 
     let mut yields = 0;
     let result = loop {
@@ -718,6 +720,54 @@ fn gc_traces_roots_in_every_inactive_process() {
     assert!(!runtime.heap.is_nursery_id(promoted_id));
     assert!(!runtime.heap.is_live(unrooted_id));
     assert!(runtime.heap.nursery.is_empty());
+}
+
+#[test]
+fn scheduler_completes_ten_thousand_threads() {
+    const THREADS: usize = 10_000;
+
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let main = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let action = runtime
+        .heap
+        .alloc(HeapObject::IoAction(IoAction::Pure(Value::Unit)));
+
+    let mut main_process = runtime.take_process(main);
+    {
+        let mut interpreter = Interpreter::new(&mut runtime, &mut main_process);
+        for expected_id in 1..=THREADS {
+            assert_eq!(
+                interpreter.spawn_io_process(action),
+                Value::ThreadId(
+                    u32::try_from(expected_id).expect("thread test identity should fit u32")
+                )
+            );
+        }
+    }
+    runtime.restore_process(main_process);
+
+    let mut stdin = Cursor::new(Vec::<u8>::new());
+    let mut stdout = Vec::new();
+    let mut stderr = Vec::new();
+    let args = Vec::new();
+    let mut io = IoRuntime::new(&mut stdin, &mut stdout, &mut stderr, &args, Path::new("."));
+
+    assert_eq!(
+        scheduler::schedule_io(&mut runtime, main, action, &mut io),
+        Ok(Value::Unit)
+    );
+    assert_eq!(
+        runtime
+            .processes
+            .iter()
+            .filter(|(id, process)| {
+                *id != main && process.status == ProcStatus::Finished(Value::Unit)
+            })
+            .count(),
+        THREADS
+    );
 }
 
 fn run_main(program: &CCProgram) -> String {

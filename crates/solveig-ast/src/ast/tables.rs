@@ -15,6 +15,7 @@ pub struct PrimTys {
     pub string: TyConId,
     pub io: TyConId,
     pub bool: TyConId,
+    pub thread_id: TyConId,
     pub true_ctor: CtorId,
     pub false_ctor: CtorId,
 }
@@ -26,6 +27,7 @@ pub const PRIM_TYS: PrimTys = PrimTys {
     string: TyConId(3),
     io: TyConId(4),
     bool: TyConId(5),
+    thread_id: TyConId(6),
     true_ctor: CtorId(0),
     false_ctor: CtorId(1),
 };
@@ -61,6 +63,13 @@ pub fn compiler_primitive_tycon_infos(names: &mut Names) -> Vec<(TyConId, TyConI
             "IO",
             Kind::make_arrow(Kind::Star, Kind::Star),
         ),
+        compiler_primitive_tycon_info(
+            names,
+            PRIM_TYS.thread_id,
+            COMPILER_THREAD_ID_NAME,
+            "ThreadId",
+            Kind::Star,
+        ),
     ]
 }
 
@@ -71,6 +80,7 @@ pub fn compiler_primitive_tycon_kinds() -> FxHashMap<TyConId, Kind> {
         (PRIM_TYS.char, Kind::Star),
         (PRIM_TYS.string, Kind::Star),
         (PRIM_TYS.io, Kind::make_arrow(Kind::Star, Kind::Star)),
+        (PRIM_TYS.thread_id, Kind::Star),
     ])
 }
 

@@ -234,11 +234,42 @@ overrides it; zero, malformed, and out-of-range values fall back to the default.
 The run queue is a strict `VecDeque` FIFO, and every yielded process rejoins at
 the back. This is the deterministic policy used by tests. Setting
 `SOLVEIG_SCHED_DETERMINISTIC=1` explicitly pins that contract; I6 has no
-alternative scheduler policy, so the setting is intentionally idempotent until
-I7 adds the complete scheduling loop. This follows the AOSA GHC runtime
+alternative scheduler policy, and the I7 loop deliberately preserves it, so
+the setting remains idempotent. This follows the AOSA GHC runtime
 chapter's rule that lightweight-thread context switches occur only where VM
 state is tidy, while adding explicit call and backward-jump points so a pure
 non-allocating loop cannot starve the run queue.
+
+## Scheduler, `spawn`, and program lifetime
+
+Solveig runs lightweight processes on one OS thread. The scheduler removes the
+front runnable process, runs its IO machine until it yields, blocks, finishes,
+or fails, and then re-queues, parks, or retires that process. A spawned process
+therefore shares the VM heap and global table but owns its instruction state,
+stacks, continuation frames, status, and reduction budget. This is the
+lightweight-thread model described in Peyton Jones, Gordon, and Finne,
+“Concurrent Haskell” (POPL 1996), with the explicit scheduler return reasons
+described by the AOSA GHC runtime chapter.
+
+`spawn : IO () -> IO ThreadId` constructs an inert IO action. Performing that
+action allocates a process, puts its child action in the process root set, and
+appends it to the FIFO run queue. `ThreadId` is an opaque primitive type: its
+runtime payload identifies the process arena entry, but the language exposes no
+numeric operations or representation conversion for it.
+
+Program lifetime is owned by the main process:
+
+- When main finishes successfully, the scheduler returns its result and the
+  runtime is dropped immediately. Any other runnable or blocked processes are
+  killed; the runtime does not wait for them.
+- When main fails, that `RuntimeError` terminates the program.
+- When a non-main process fails, the scheduler writes
+  `thread <id> failed: <error>` to stderr, retires that process, and continues
+  running the program. The failure does not propagate to main.
+
+The ordering contract remains deterministic FIFO. `SOLVEIG_REDUCTIONS` fixes
+the quantum used by every process, and `SOLVEIG_SCHED_DETERMINISTIC=1` pins the
+policy explicitly for tests. Scheduling never uses sleeps or elapsed time.
 
 ## Collector invariants for I4
 

@@ -12,7 +12,7 @@ use solveig_ast::ast::{
     BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE,
     BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB,
     BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR,
-    BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_STRING_APPEND,
+    BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_SPAWN, BUILTIN_STRING_APPEND,
     BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
     BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo,
     CtorRuntimeRole,
@@ -242,6 +242,7 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_READ_FILE, "readFile", 1, read_file),
     builtin!(BUILTIN_WRITE_FILE, "writeFile", 2, write_file),
     builtin!(BUILTIN_APPEND_FILE, "appendFile", 2, append_file),
+    builtin!(BUILTIN_SPAWN, "spawn", 1, spawn),
 ];
 
 // D3 primitive semantics:
@@ -557,6 +558,11 @@ fn append_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, Runtime
         contents,
         append: true,
     }))
+}
+
+fn spawn(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let action = expect_value(args, 0, "spawn")?;
+    Ok(ctx.alloc_io_action(IoAction::Spawn { action }))
 }
 
 fn ordering_value(

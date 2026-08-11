@@ -560,11 +560,12 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "readFile" => "Reads a file as text.",
         "writeFile" => "Writes text to a file, replacing its previous contents.",
         "appendFile" => "Appends text to the end of a file.",
+        "spawn" => "Starts an IO action in a new lightweight thread.",
         _ => return None,
     })
 }
 
-fn compiler_type_entries() -> [(&'static str, TyConId); 6] {
+fn compiler_type_entries() -> [(&'static str, TyConId); 7] {
     [
         ("Int", PRIM_TYS.int),
         ("Float", PRIM_TYS.float),
@@ -572,6 +573,7 @@ fn compiler_type_entries() -> [(&'static str, TyConId); 6] {
         ("String", PRIM_TYS.string),
         ("IO", PRIM_TYS.io),
         ("Bool", PRIM_TYS.bool),
+        ("ThreadId", PRIM_TYS.thread_id),
     ]
 }
 

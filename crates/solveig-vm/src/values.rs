@@ -12,6 +12,7 @@ pub enum Value {
     Int(i64),
     Float(f64),
     Char(char),
+    ThreadId(u32),
     CtorFn { tag: u16, arity: u16 },
     FunctionRef { chunk: u32, arity: u16 },
     Obj(ObjId),
@@ -38,6 +39,7 @@ impl PartialEq for Value {
             (Value::Int(lhs), Value::Int(rhs)) => lhs == rhs,
             (Value::Float(lhs), Value::Float(rhs)) => lhs.to_bits() == rhs.to_bits(),
             (Value::Char(lhs), Value::Char(rhs)) => lhs == rhs,
+            (Value::ThreadId(lhs), Value::ThreadId(rhs)) => lhs == rhs,
             (
                 Value::CtorFn {
                     tag: lhs_tag,
@@ -74,6 +76,7 @@ impl Hash for Value {
             Value::Int(value) => value.hash(state),
             Value::Float(value) => value.to_bits().hash(state),
             Value::Char(value) => value.hash(state),
+            Value::ThreadId(value) => value.hash(state),
             Value::CtorFn { tag, arity } => {
                 tag.hash(state);
                 arity.hash(state);

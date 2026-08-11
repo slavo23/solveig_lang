@@ -18,10 +18,14 @@ mod call;
 mod dispatch;
 mod gc;
 mod io;
+mod scheduler;
 #[cfg(test)]
 mod tests;
 
 use io::IoRuntime;
+use scheduler::evaluate_entry;
+#[cfg(test)]
+use scheduler::{perform_process_io, run};
 
 const DEFAULT_REDUCTIONS: u32 = 4_096;
 /// Identifies one process in a runtime's process arena.
@@ -117,6 +121,7 @@ pub(crate) struct Interpreter<'a> {
     pub(crate) bools: &'a mut BoolCache,
     inactive_processes: &'a mut Arena<Process>,
     run_queue: &'a mut VecDeque<ProcessId>,
+    reduction_budget: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -234,17 +239,12 @@ impl Runtime {
     }
 
     fn allocate_process(&mut self) -> ProcessId {
-        let raw = u32::try_from(self.processes.len())
-            .unwrap_or_else(|_| solveig_base::ice!("process arena exhausted u32 identities"));
-        let id = ProcessId::from_raw(RawIdx::from(raw));
-        let allocated = self
-            .processes
-            .alloc(Process::new(id, self.reduction_budget));
-        if allocated != id {
-            solveig_base::ice!("process arena returned a non-sequential identity");
-        }
-        self.run_queue.push_back(id);
-        id
+        allocate_process_in(
+            &mut self.processes,
+            &mut self.run_queue,
+            self.reduction_budget,
+            None,
+        )
     }
 
     fn take_process(&mut self, id: ProcessId) -> Process {
@@ -325,7 +325,7 @@ impl<'a> Interpreter<'a> {
             bools,
             processes,
             run_queue,
-            reduction_budget: _,
+            reduction_budget,
         } = runtime;
         Self {
             process,
@@ -336,8 +336,28 @@ impl<'a> Interpreter<'a> {
             bools,
             inactive_processes: processes,
             run_queue,
+            reduction_budget: *reduction_budget,
         }
     }
+}
+
+fn allocate_process_in(
+    processes: &mut Arena<Process>,
+    run_queue: &mut VecDeque<ProcessId>,
+    reduction_budget: u32,
+    io_action: Option<Value>,
+) -> ProcessId {
+    let raw = u32::try_from(processes.len())
+        .unwrap_or_else(|_| solveig_base::ice!("process arena exhausted u32 identities"));
+    let id = ProcessId::from_raw(RawIdx::from(raw));
+    let mut process = Process::new(id, reduction_budget);
+    process.io_current = io_action;
+    let allocated = processes.alloc(process);
+    if allocated != id {
+        solveig_base::ice!("process arena returned a non-sequential identity");
+    }
+    run_queue.push_back(id);
+    id
 }
 
 impl Deref for Interpreter<'_> {
@@ -352,105 +372,6 @@ impl DerefMut for Interpreter<'_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.process
     }
-}
-
-fn run(runtime: &mut Runtime, process: &mut Process) -> StepOutcome {
-    if process.reductions_left == 0 {
-        process.reductions_left = runtime.reduction_budget;
-    }
-    process.status = ProcStatus::Running;
-    let result = {
-        let mut interpreter = Interpreter::new(runtime, process);
-        let program = interpreter.program;
-        interpreter.dispatch(program)
-    };
-    let outcome = match result {
-        Ok(value) => StepOutcome::Finished(value),
-        Err(outcome) => outcome,
-    };
-    runtime.record_process_outcome(process, &outcome);
-    outcome
-}
-
-fn evaluate_entry(runtime: &mut Runtime, entry: usize) -> (ProcessId, StepOutcome) {
-    let id = runtime.allocate_process();
-    let Some(queued) = runtime.run_queue.pop_front() else {
-        solveig_base::ice!("new process was not placed on the run queue");
-    };
-    if queued != id {
-        solveig_base::ice!("run queue changed process creation order");
-    }
-
-    // The active process leaves the arena for the duration of a step so the
-    // interpreter can borrow shared runtime state without interior mutability.
-    let mut process = runtime.take_process(id);
-    let started = {
-        let mut interpreter = Interpreter::new(runtime, &mut process);
-        let program = interpreter.program;
-        interpreter.start_global_eval(
-            program,
-            entry,
-            Continuation::PublishGlobalThenHalt {
-                global_index: entry,
-            },
-        )
-    };
-    let outcome = match started {
-        Ok(GlobalEval::Evaluated(value)) => {
-            let outcome = StepOutcome::Finished(value);
-            runtime.record_process_outcome(&mut process, &outcome);
-            outcome
-        }
-        Ok(GlobalEval::Entered) => loop {
-            let outcome = run(runtime, &mut process);
-            if outcome != StepOutcome::Yielded {
-                break outcome;
-            }
-            let Some(queued) = runtime.run_queue.pop_front() else {
-                solveig_base::ice!("yielded process was not returned to the run queue");
-            };
-            if queued != id {
-                solveig_base::ice!("single-process evaluation lost FIFO run-queue order");
-            }
-        },
-        Ok(GlobalEval::Blocked) => {
-            let outcome = StepOutcome::Blocked;
-            runtime.record_process_outcome(&mut process, &outcome);
-            outcome
-        }
-        Err(error) => {
-            let outcome = StepOutcome::Failed(error);
-            runtime.record_process_outcome(&mut process, &outcome);
-            outcome
-        }
-    };
-    runtime.restore_process(process);
-    (id, outcome)
-}
-
-fn perform_process_io(
-    runtime: &mut Runtime,
-    id: ProcessId,
-    action: Value,
-    io: &mut IoRuntime<'_>,
-) -> StepOutcome {
-    let mut process = runtime.take_process(id);
-    if process.reductions_left == 0 {
-        process.reductions_left = runtime.reduction_budget;
-    }
-    process.status = ProcStatus::Running;
-    let result = {
-        let mut interpreter = Interpreter::new(runtime, &mut process);
-        let program = interpreter.program;
-        interpreter.perform_io(program, action, io)
-    };
-    let outcome = match result {
-        Ok(value) => StepOutcome::Finished(value),
-        Err(outcome) => outcome,
-    };
-    runtime.record_process_outcome(&mut process, &outcome);
-    runtime.restore_process(process);
-    outcome
 }
 
 impl From<RuntimeError> for StepOutcome {
@@ -500,6 +421,7 @@ pub struct EvalResult {
 pub struct IoEvalResult {
     pub result: EvalResult,
     pub stdout: String,
+    pub stderr: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -596,19 +518,30 @@ impl Machine {
     ) -> Result<IoEvalResult, RuntimeError> {
         let mut input = Cursor::new(stdin.as_bytes());
         let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
         let result = Self::exec_owned_io_with_streams(
             program,
             entry_name,
             &mut input,
             &mut stdout,
+            &mut stderr,
             args,
             cwd,
         )?;
         let stdout = String::from_utf8(stdout).map_err(|err| {
             RuntimeError::builtin(format!("captured IO output was not valid UTF-8: {err}"))
         })?;
+        let stderr = String::from_utf8(stderr).map_err(|err| {
+            RuntimeError::builtin(format!(
+                "captured IO error output was not valid UTF-8: {err}"
+            ))
+        })?;
 
-        Ok(IoEvalResult { result, stdout })
+        Ok(IoEvalResult {
+            result,
+            stdout,
+            stderr,
+        })
     }
 
     pub fn exec_io_with_streams(
@@ -620,7 +553,17 @@ impl Machine {
         cwd: &Path,
     ) -> Result<EvalResult, RuntimeError> {
         let bytecode = lower_to_bytecode(program);
-        Self::exec_owned_io_with_streams(bytecode, entry_name, stdin, stdout, args, cwd)
+        let stderr = std::io::stderr();
+        let mut stderr = stderr.lock();
+        Self::exec_owned_io_with_streams(
+            bytecode,
+            entry_name,
+            stdin,
+            stdout,
+            &mut stderr,
+            args,
+            cwd,
+        )
     }
 
     pub fn exec_compiled_io_with_streams(
@@ -631,7 +574,17 @@ impl Machine {
         args: &[String],
         cwd: &Path,
     ) -> Result<EvalResult, RuntimeError> {
-        Self::exec_owned_io_with_streams(program.clone(), entry_name, stdin, stdout, args, cwd)
+        let stderr = std::io::stderr();
+        let mut stderr = stderr.lock();
+        Self::exec_owned_io_with_streams(
+            program.clone(),
+            entry_name,
+            stdin,
+            stdout,
+            &mut stderr,
+            args,
+            cwd,
+        )
     }
 
     fn exec_owned_io_with_streams(
@@ -639,6 +592,7 @@ impl Machine {
         entry_name: &str,
         stdin: &mut dyn BufRead,
         stdout: &mut dyn Write,
+        stderr: &mut dyn Write,
         args: &[String],
         cwd: &Path,
     ) -> Result<EvalResult, RuntimeError> {
@@ -650,21 +604,10 @@ impl Machine {
         };
 
         let mut runtime = Runtime::new(program);
-        let mut io = IoRuntime::new(stdin, stdout, args, cwd);
+        let mut io = IoRuntime::new(stdin, stdout, stderr, args, cwd);
         let (id, outcome) = evaluate_entry(&mut runtime, entry);
         let action = outcome_value(outcome)?;
-        let root = loop {
-            let outcome = perform_process_io(&mut runtime, id, action, &mut io);
-            if outcome != StepOutcome::Yielded {
-                break outcome_value(outcome)?;
-            }
-            let Some(queued) = runtime.run_queue.pop_front() else {
-                solveig_base::ice!("yielded IO process was not returned to the run queue");
-            };
-            if queued != id {
-                solveig_base::ice!("single-process IO lost FIFO run-queue order");
-            }
-        };
+        let root = scheduler::schedule_io(&mut runtime, id, action, &mut io)?;
 
         Ok(runtime.into_eval_result(root))
     }
