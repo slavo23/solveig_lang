@@ -41,7 +41,7 @@ impl DisplayValue<'_> {
                     tag, applied_args, ..
                 } => {
                     let name = tag_name(self.arities, *tag);
-                    let applied_args = self.heap.payloads.as_slice(*applied_args);
+                    let applied_args = self.heap.payload_slice(id, *applied_args);
 
                     if applied_args.is_empty() {
                         format!("<partial {name}>")
@@ -69,7 +69,7 @@ impl DisplayValue<'_> {
                 }
                 HeapObject::DataN { tag, fields } => {
                     let name = tag_name(self.arities, *tag);
-                    let fields = self.heap.payloads.as_slice(*fields);
+                    let fields = self.heap.payload_slice(id, *fields);
 
                     if fields.is_empty() {
                         name
@@ -78,9 +78,15 @@ impl DisplayValue<'_> {
                     }
                 }
                 HeapObject::Str { bytes } => {
-                    format!("\"{}\"", escape_string_literal(self.heap.str_value(*bytes)))
+                    format!(
+                        "\"{}\"",
+                        escape_string_literal(self.heap.str_value(id, *bytes))
+                    )
                 }
                 HeapObject::IoAction(_) => "<io>".into(),
+                HeapObject::Forwarded(_) => {
+                    solveig_base::ice!("forwarding entry reached value display")
+                }
             },
         }
     }

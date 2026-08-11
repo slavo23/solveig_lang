@@ -110,7 +110,7 @@ impl Interpreter<'_> {
                             }
 
                             if let Some(bind_count) = try_flat_bind(subs) {
-                                let fields = self.heap.payloads.as_slice(*fields);
+                                let fields = self.heap.payload_slice(id, *fields);
                                 if fields.len() != subs.len() {
                                     continue;
                                 }
@@ -251,7 +251,7 @@ impl Interpreter<'_> {
                     self.push(result);
                 }
                 Instr::CallBuiltin { id, arg_count } => {
-                    let result = self.call_builtin(program, id, arg_count as usize)?;
+                    let result = self.call_builtin(id, arg_count as usize)?;
                     self.push(result);
                 }
                 Instr::Pack {
@@ -423,7 +423,7 @@ fn match_pattern_inner(
             (Literal::Str(expected), Value::Obj(id)) => match heap.get(id) {
                 HeapObject::Str { bytes } => program
                     .string_literal_value(*expected)
-                    .is_some_and(|expected| heap.str_value(*bytes) == expected),
+                    .is_some_and(|expected| heap.str_value(id, *bytes) == expected),
                 _ => false,
             },
             _ => false,
@@ -469,7 +469,7 @@ fn match_pattern_inner(
                     true
                 }
                 HeapObject::DataN { tag, fields } => {
-                    let fields = heap.payloads.as_slice(*fields);
+                    let fields = heap.payload_slice(id, *fields);
                     if *tag != *expected_tag || fields.len() != subs.len() {
                         return false;
                     }

@@ -18,11 +18,14 @@ use solveig_ast::ast::{
     CtorRuntimeRole,
 };
 
-use crate::heap::{Heap, HeapObject, IoAction};
-use crate::values::{NullaryCtorCache, Value};
-use crate::vm::RuntimeError;
+use crate::heap::{HeapObject, IoAction};
+use crate::values::Value;
+use crate::vm::{Interpreter, RuntimeError};
 
-pub type BuiltinRun = fn(&mut VmCtx<'_>, &[Value]) -> Result<Value, RuntimeError>;
+pub type BuiltinRun = for<'context, 'runtime> fn(
+    &mut VmCtx<'context, 'runtime>,
+    &[Value],
+) -> Result<Value, RuntimeError>;
 
 pub struct Builtin {
     pub id: BuiltinId,
@@ -31,41 +34,29 @@ pub struct Builtin {
     pub run: BuiltinRun,
 }
 
-pub struct VmCtx<'a> {
-    heap: &'a mut Heap,
-    constructors: &'a [CtorRuntimeInfo],
-    nullary_ctors: &'a NullaryCtorCache,
-    true_val: Value,
-    false_val: Value,
+pub struct VmCtx<'context, 'runtime> {
+    interpreter: &'context mut Interpreter<'runtime>,
 }
 
-impl<'a> VmCtx<'a> {
-    pub(crate) fn new(
-        heap: &'a mut Heap,
-        constructors: &'a [CtorRuntimeInfo],
-        nullary_ctors: &'a NullaryCtorCache,
-        true_val: Value,
-        false_val: Value,
-    ) -> Self {
-        Self {
-            heap,
-            constructors,
-            nullary_ctors,
-            true_val,
-            false_val,
-        }
+impl<'context, 'runtime> VmCtx<'context, 'runtime> {
+    pub(crate) fn new(interpreter: &'context mut Interpreter<'runtime>) -> Self {
+        Self { interpreter }
     }
 
     fn bool_value(&self, value: bool) -> Value {
-        if value { self.true_val } else { self.false_val }
+        if value {
+            self.interpreter.bools.true_val
+        } else {
+            self.interpreter.bools.false_val
+        }
     }
 
     fn alloc_str(&mut self, value: &str) -> Value {
-        self.heap.alloc_str(value)
+        self.interpreter.heap.alloc_str(value)
     }
 
     fn alloc_io_action(&mut self, action: IoAction) -> Value {
-        self.heap.alloc(HeapObject::IoAction(action))
+        self.interpreter.heap.alloc(HeapObject::IoAction(action))
     }
 
     fn ctor_info(
@@ -73,7 +64,9 @@ impl<'a> VmCtx<'a> {
         role: CtorRuntimeRole,
         builtin: &str,
     ) -> Result<&CtorRuntimeInfo, RuntimeError> {
-        self.constructors
+        self.interpreter
+            .program
+            .constructor_arities
             .iter()
             .find(|info| info.role == role)
             .ok_or_else(|| {
@@ -101,7 +94,7 @@ impl<'a> VmCtx<'a> {
 
     fn nullary_ctor(&self, role: CtorRuntimeRole, builtin: &str) -> Result<Value, RuntimeError> {
         let tag = self.ctor_tag_with_arity(role, 0, builtin)?;
-        self.nullary_ctors.try_get(tag).ok_or_else(|| {
+        self.interpreter.nullary_ctors.try_get(tag).ok_or_else(|| {
             RuntimeError::builtin(format!(
                 "{builtin} runtime nullary constructor cache missing tag {tag}"
             ))
@@ -115,7 +108,10 @@ impl<'a> VmCtx<'a> {
         builtin: &str,
     ) -> Result<Value, RuntimeError> {
         let tag = self.ctor_tag_with_arity(role, 1, builtin)?;
-        Ok(self.heap.alloc(HeapObject::Data1 { tag, field }))
+        Ok(self
+            .interpreter
+            .heap
+            .alloc(HeapObject::Data1 { tag, field }))
     }
 
     pub(crate) fn alloc_list_from_values(
@@ -123,17 +119,63 @@ impl<'a> VmCtx<'a> {
         values: &[Value],
         builtin: &str,
     ) -> Result<Value, RuntimeError> {
-        let cons_tag = self.ctor_tag_with_arity(CtorRuntimeRole::PreludeListCons, 2, builtin)?;
-        let mut result = self.nullary_ctor(CtorRuntimeRole::PreludeListNil, builtin)?;
+        let checkpoint = self.interpreter.process.temporary_roots.len();
+        self.interpreter
+            .process
+            .temporary_roots
+            .extend_from_slice(values);
+        let result = self.alloc_list_from_root_range(checkpoint, values.len(), builtin);
+        self.interpreter
+            .process
+            .temporary_roots
+            .truncate(checkpoint);
+        result
+    }
 
-        for value in values.iter().rev() {
-            result = self.heap.alloc(HeapObject::Data2 {
+    pub(crate) fn alloc_list_from_root_range(
+        &mut self,
+        root_start: usize,
+        value_count: usize,
+        builtin: &str,
+    ) -> Result<Value, RuntimeError> {
+        let cons_tag = self.ctor_tag_with_arity(CtorRuntimeRole::PreludeListCons, 2, builtin)?;
+        let nil = self.nullary_ctor(CtorRuntimeRole::PreludeListNil, builtin)?;
+        let result_root = self.interpreter.process.temporary_roots.len();
+        self.interpreter.process.temporary_roots.push(nil);
+
+        for offset in (0..value_count).rev() {
+            self.interpreter.maybe_gc();
+            let value = *self
+                .interpreter
+                .process
+                .temporary_roots
+                .get(root_start + offset)
+                .expect("ICE: rooted list element index out of bounds");
+            let result = *self
+                .interpreter
+                .process
+                .temporary_roots
+                .get(result_root)
+                .expect("ICE: rooted list result index out of bounds");
+            let result = self.interpreter.heap.alloc(HeapObject::Data2 {
                 tag: cons_tag,
-                field0: *value,
+                field0: value,
                 field1: result,
             });
+            *self
+                .interpreter
+                .process
+                .temporary_roots
+                .get_mut(result_root)
+                .expect("ICE: rooted list result index out of bounds") = result;
         }
 
+        let result = self
+            .interpreter
+            .process
+            .temporary_roots
+            .pop()
+            .expect("ICE: rooted list result disappeared");
         Ok(result)
     }
 }
@@ -230,117 +272,117 @@ pub(crate) fn int_mod_trap(lhs: i64, rhs: i64, op_name: &str) -> Result<i64, Run
     Ok(lhs % rhs)
 }
 
-fn int_add(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_add(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intAdd")?;
     Ok(Value::Int(lhs.wrapping_add(rhs)))
 }
 
-fn int_sub(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_sub(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intSub")?;
     Ok(Value::Int(lhs.wrapping_sub(rhs)))
 }
 
-fn int_mul(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_mul(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intMul")?;
     Ok(Value::Int(lhs.wrapping_mul(rhs)))
 }
 
-fn int_div(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_div(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intDiv")?;
     Ok(Value::Int(int_div_trap(lhs, rhs, "intDiv")?))
 }
 
-fn int_mod(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_mod(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intMod")?;
     Ok(Value::Int(int_mod_trap(lhs, rhs, "intMod")?))
 }
 
-fn int_neg(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_neg(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_int(args, 0, "intNeg")?;
     Ok(Value::Int(value.wrapping_neg()))
 }
 
-fn int_eq(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_eq(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intEq")?;
     Ok(ctx.bool_value(lhs == rhs))
 }
 
-fn int_lt(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_lt(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intLt")?;
     Ok(ctx.bool_value(lhs < rhs))
 }
 
-fn int_le(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_le(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intLe")?;
     Ok(ctx.bool_value(lhs <= rhs))
 }
 
-fn int_gt(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_gt(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intGt")?;
     Ok(ctx.bool_value(lhs > rhs))
 }
 
-fn int_ge(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_ge(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intGe")?;
     Ok(ctx.bool_value(lhs >= rhs))
 }
 
-fn int_compare(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_compare(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_int2(args, "intCompare")?;
     ordering_value(ctx, lhs.cmp(&rhs), "intCompare")
 }
 
-fn float_add(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_add(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_float2(args, "floatAdd")?;
     Ok(Value::Float(lhs + rhs))
 }
 
-fn float_sub(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_sub(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_float2(args, "floatSub")?;
     Ok(Value::Float(lhs - rhs))
 }
 
-fn float_mul(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_mul(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_float2(args, "floatMul")?;
     Ok(Value::Float(lhs * rhs))
 }
 
-fn float_div(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_div(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_float2(args, "floatDiv")?;
     Ok(Value::Float(lhs / rhs))
 }
 
-fn float_neg(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_neg(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_float(args, 0, "floatNeg")?;
     Ok(Value::Float(-value))
 }
 
-fn float_eq(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_eq(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_float2(args, "floatEq")?;
     Ok(ctx.bool_value(lhs == rhs))
 }
 
-fn float_lt(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_lt(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_float2(args, "floatLt")?;
     Ok(ctx.bool_value(lhs < rhs))
 }
 
-fn float_le(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_le(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_float2(args, "floatLe")?;
     Ok(ctx.bool_value(lhs <= rhs))
 }
 
-fn float_gt(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_gt(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_float2(args, "floatGt")?;
     Ok(ctx.bool_value(lhs > rhs))
 }
 
-fn float_ge(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_ge(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_float2(args, "floatGe")?;
     Ok(ctx.bool_value(lhs >= rhs))
 }
 
-fn int_to_float(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_to_float(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_int(args, 0, "intToFloat")?;
     Ok(Value::Float(value as f64))
 }
@@ -349,29 +391,29 @@ fn int_to_float(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeEr
     clippy::cast_possible_truncation,
     reason = "Solveig floatToInt is defined as Rust's saturating truncating f64-to-i64 conversion"
 )]
-fn float_to_int(_ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_to_int(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_float(args, 0, "floatToInt")?;
     // D3: truncate toward zero. Rust's f64 -> i64 cast is saturating and keeps
     // this conversion total for NaN and out-of-range values.
     Ok(Value::Int(value.trunc() as i64))
 }
 
-fn int_to_string(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn int_to_string(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_int(args, 0, "intToString")?;
     Ok(ctx.alloc_str(&value.to_string()))
 }
 
-fn float_to_string(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn float_to_string(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_float(args, 0, "floatToString")?;
     Ok(ctx.alloc_str(&value.to_string()))
 }
 
-fn char_to_string(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn char_to_string(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_char(args, 0, "charToString")?;
     Ok(ctx.alloc_str(&value.to_string()))
 }
 
-fn string_length(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn string_length(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_string_owned(ctx, args, 0, "stringLength")?;
     let len = i64::try_from(value.chars().count()).map_err(|_error| {
         RuntimeError::builtin("stringLength result does not fit in Int".to_string())
@@ -379,13 +421,13 @@ fn string_length(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeEr
     Ok(Value::Int(len))
 }
 
-fn string_append(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn string_append(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let lhs = expect_string_owned(ctx, args, 0, "stringAppend")?;
     let rhs = expect_string_owned(ctx, args, 1, "stringAppend")?;
     Ok(ctx.alloc_str(&(lhs + &rhs)))
 }
 
-fn string_slice(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn string_slice(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_string_owned(ctx, args, 0, "stringSlice")?;
     let start = expect_int(args, 1, "stringSlice")?;
     let len = expect_int(args, 2, "stringSlice")?;
@@ -403,7 +445,7 @@ fn string_slice(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeErr
     Ok(ctx.alloc_str(&sliced))
 }
 
-fn string_char_at(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn string_char_at(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_string_owned(ctx, args, 0, "stringCharAt")?;
     let index = expect_int(args, 1, "stringCharAt")?;
     let Some(index) = usize::try_from(index).ok() else {
@@ -420,46 +462,46 @@ fn string_char_at(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeE
     }
 }
 
-fn string_eq(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn string_eq(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let lhs = expect_string_owned(ctx, args, 0, "stringEq")?;
     let rhs = expect_string_owned(ctx, args, 1, "stringEq")?;
     Ok(ctx.bool_value(lhs == rhs))
 }
 
-fn string_compare(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn string_compare(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let lhs = expect_string_owned(ctx, args, 0, "stringCompare")?;
     let rhs = expect_string_owned(ctx, args, 1, "stringCompare")?;
     ordering_value(ctx, lhs.cmp(&rhs), "stringCompare")
 }
 
-fn char_eq(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn char_eq(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_char2(args, "charEq")?;
     Ok(ctx.bool_value(lhs == rhs))
 }
 
-fn char_compare(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn char_compare(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let (lhs, rhs) = expect_char2(args, "charCompare")?;
     ordering_value(ctx, lhs.cmp(&rhs), "charCompare")
 }
 
-fn string_to_chars(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn string_to_chars(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_string_owned(ctx, args, 0, "stringToChars")?;
     let chars = value.chars().map(Value::Char).collect::<Vec<_>>();
     ctx.alloc_list_from_values(&chars, "stringToChars")
 }
 
-fn chars_to_string(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn chars_to_string(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_value(args, 0, "charsToString")?;
     let string = expect_char_list(ctx, value, "charsToString")?;
     Ok(ctx.alloc_str(&string))
 }
 
-fn pure_io(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn pure_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_value(args, 0, "pureIO")?;
     Ok(ctx.alloc_io_action(IoAction::Pure(value)))
 }
 
-fn bind_io(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn bind_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let action = expect_value(args, 0, "bindIO")?;
     let continuation = expect_value(args, 1, "bindIO")?;
     Ok(ctx.alloc_io_action(IoAction::Bind {
@@ -468,7 +510,7 @@ fn bind_io(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
     }))
 }
 
-fn print_line(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn print_line(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let text = expect_value(args, 0, "printLine")?;
     Ok(ctx.alloc_io_action(IoAction::Print {
         text,
@@ -476,7 +518,7 @@ fn print_line(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError
     }))
 }
 
-fn print_str(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn print_str(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let text = expect_value(args, 0, "printStr")?;
     Ok(ctx.alloc_io_action(IoAction::Print {
         text,
@@ -484,20 +526,20 @@ fn print_str(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError>
     }))
 }
 
-fn read_line(ctx: &mut VmCtx<'_>, _args: &[Value]) -> Result<Value, RuntimeError> {
+fn read_line(ctx: &mut VmCtx<'_, '_>, _args: &[Value]) -> Result<Value, RuntimeError> {
     Ok(ctx.alloc_io_action(IoAction::ReadLine))
 }
 
-fn get_args(ctx: &mut VmCtx<'_>, _args: &[Value]) -> Result<Value, RuntimeError> {
+fn get_args(ctx: &mut VmCtx<'_, '_>, _args: &[Value]) -> Result<Value, RuntimeError> {
     Ok(ctx.alloc_io_action(IoAction::GetArgs))
 }
 
-fn read_file(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn read_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let path = expect_value(args, 0, "readFile")?;
     Ok(ctx.alloc_io_action(IoAction::ReadFile { path }))
 }
 
-fn write_file(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn write_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let path = expect_value(args, 0, "writeFile")?;
     let contents = expect_value(args, 1, "writeFile")?;
     Ok(ctx.alloc_io_action(IoAction::WriteFile {
@@ -507,7 +549,7 @@ fn write_file(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError
     }))
 }
 
-fn append_file(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeError> {
+fn append_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let path = expect_value(args, 0, "appendFile")?;
     let contents = expect_value(args, 1, "appendFile")?;
     Ok(ctx.alloc_io_action(IoAction::WriteFile {
@@ -518,7 +560,7 @@ fn append_file(ctx: &mut VmCtx<'_>, args: &[Value]) -> Result<Value, RuntimeErro
 }
 
 fn ordering_value(
-    ctx: &VmCtx<'_>,
+    ctx: &VmCtx<'_, '_>,
     ordering: Ordering,
     builtin: &str,
 ) -> Result<Value, RuntimeError> {
@@ -588,14 +630,14 @@ fn expect_char2(args: &[Value], builtin: &str) -> Result<(char, char), RuntimeEr
 }
 
 fn expect_string_owned(
-    ctx: &VmCtx<'_>,
+    ctx: &VmCtx<'_, '_>,
     args: &[Value],
     index: usize,
     builtin: &str,
 ) -> Result<String, RuntimeError> {
     match expect_value(args, index, builtin)? {
-        Value::Obj(id) => match ctx.heap.get(id) {
-            HeapObject::Str { bytes } => Ok(ctx.heap.str_value(*bytes).to_string()),
+        Value::Obj(id) => match ctx.interpreter.heap.get(id) {
+            HeapObject::Str { bytes } => Ok(ctx.interpreter.heap.str_value(id, *bytes).to_string()),
             _ => Err(RuntimeError::builtin(format!(
                 "{builtin} expected String argument at position {}",
                 index + 1
@@ -609,7 +651,7 @@ fn expect_string_owned(
 }
 
 fn expect_char_list(
-    ctx: &VmCtx<'_>,
+    ctx: &VmCtx<'_, '_>,
     mut current: Value,
     builtin: &str,
 ) -> Result<String, RuntimeError> {
@@ -624,7 +666,7 @@ fn expect_char_list(
             )));
         };
 
-        match ctx.heap.get(id) {
+        match ctx.interpreter.heap.get(id) {
             HeapObject::Data0 { tag } if *tag == nil_tag => return Ok(out),
             HeapObject::Data2 {
                 tag,

@@ -36,7 +36,7 @@ pub struct Process {
     stack: Vec<Value>,
     continuations: Vec<Continuation>,
     binding_buffer: Vec<Value>,
-    temporary_roots: Vec<Value>,
+    pub(crate) temporary_roots: Vec<Value>,
     io_current: Option<Value>,
 
     status: ProcStatus,
@@ -91,14 +91,14 @@ pub enum StepOutcome {
     Failed(RuntimeError),
 }
 
-struct Interpreter<'a> {
-    process: &'a mut Process,
-    program: &'a BytecodeProgram,
-    heap: &'a mut Heap,
+pub(crate) struct Interpreter<'a> {
+    pub(crate) process: &'a mut Process,
+    pub(crate) program: &'a BytecodeProgram,
+    pub(crate) heap: &'a mut Heap,
     globals: &'a mut Vec<GlobalSlot>,
-    nullary_ctors: &'a NullaryCtorCache,
-    bools: &'a BoolCache,
-    inactive_processes: &'a Arena<Process>,
+    pub(crate) nullary_ctors: &'a mut NullaryCtorCache,
+    pub(crate) bools: &'a mut BoolCache,
+    inactive_processes: &'a mut Arena<Process>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -161,6 +161,10 @@ impl Process {
 
 impl Runtime {
     fn new(program: BytecodeProgram) -> Self {
+        Self::new_with_heap(program, Heap::default())
+    }
+
+    fn new_with_heap(program: BytecodeProgram, heap: Heap) -> Self {
         let max_tag = program
             .constructor_arities
             .iter()
@@ -177,7 +181,7 @@ impl Runtime {
             .collect();
         let mut runtime = Self {
             program,
-            heap: Heap::default(),
+            heap,
             globals,
             nullary_ctors: NullaryCtorCache::new(max_tag),
             bools: BoolCache {
@@ -189,6 +193,17 @@ impl Runtime {
         };
         runtime.init_nullary();
         runtime
+    }
+
+    #[cfg(test)]
+    fn new_with_collection_limits_for_test(
+        program: BytecodeProgram,
+        nursery_slot_count: usize,
+        next_major_at: usize,
+    ) -> Self {
+        let mut heap = Heap::default();
+        heap.set_collection_limits_for_test(nursery_slot_count, next_major_at);
+        Self::new_with_heap(program, heap)
     }
 
     fn allocate_process(&mut self) -> ProcessId {
@@ -540,7 +555,7 @@ impl EvalResult {
         };
 
         match self.heap.get(id) {
-            HeapObject::Str { bytes } => Some(self.heap.str_value(*bytes)),
+            HeapObject::Str { bytes } => Some(self.heap.str_value(id, *bytes)),
             _ => None,
         }
     }

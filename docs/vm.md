@@ -2,7 +2,7 @@
 
 This document records the runtime contracts that later VM work must preserve.
 Task I3 establishes the object-layout and relocation contract before task I4
-changes the collector. Task I9 will expand this into the complete VM guide.
+changes the collector. Task I10 will expand this into the complete VM guide.
 
 ## Generational heap layout
 
@@ -190,9 +190,12 @@ objects may point from young to old, which needs no barrier.
   owner and are owned by that object alone.
 - Major collection operates after nursery evacuation and reuses mark-sweep for
   old slots; I4 does not compact the old generation.
-- `SOLVEIG_GC_STRESS=1` uses the same collector at a low fixed threshold, while
-  `SOLVEIG_GC_THRESHOLD=1` remains the deliberate collect-at-every-allocation
-  debugging mode.
+- `SOLVEIG_GC_STRESS=1` uses low fixed nursery and major thresholds.
+  `SOLVEIG_GC_THRESHOLD=1` deliberately runs a minor collection at every
+  allocation safe point; it does not force a whole-old-heap major collection
+  after every promotion. Normal major collection starts after 32,768
+  promotions and then uses an adaptive threshold based on the surviving old
+  generation.
 
 These invariants preserve precise rooting and deterministic behavior while
 containing all representation knowledge inside `solveig-vm`'s heap and GC

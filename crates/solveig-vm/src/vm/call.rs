@@ -200,6 +200,9 @@ impl Interpreter<'_> {
         }
 
         let prefix_len = bound.total_len();
+        let Some(owner) = bound.owner else {
+            solveig_base::ice!("non-empty bound prefix has no owning heap object");
+        };
 
         for i in (0..arg_count).rev() {
             let value = self.stack_value_at(self.frame_base + i);
@@ -210,11 +213,12 @@ impl Interpreter<'_> {
         let (heap, stack) = (&*self.heap, &mut self.process.stack);
 
         if !bound.captures.is_empty() {
-            heap.copy_payload_to_stack(bound.captures, stack, frame_base);
+            heap.copy_payload_to_stack(owner, bound.captures, stack, frame_base);
         }
 
         if !bound.applied_args.is_empty() {
             heap.copy_payload_to_stack(
+                owner,
                 bound.applied_args,
                 stack,
                 frame_base + bound.captures.len(),
@@ -316,7 +320,7 @@ impl Interpreter<'_> {
         match callee {
             Value::CtorFn { tag, arity } => {
                 self.maybe_gc();
-                Some(self.apply_constructor(tag, arity, PayloadStore::empty(), arg_count))
+                Some(self.apply_constructor(None, tag, arity, PayloadStore::empty(), arg_count))
             }
 
             Value::FunctionRef { chunk, arity } => {
@@ -345,6 +349,13 @@ impl Interpreter<'_> {
             Value::Obj(id) => {
                 let checkpoint = self.temporary_roots.len();
                 self.temporary_roots.push(Value::Obj(id));
+                self.maybe_gc();
+                let Some(rooted_callee) = self.temporary_roots.get(checkpoint).copied() else {
+                    solveig_base::ice!("rooted heap callee disappeared");
+                };
+                let Value::Obj(id) = rooted_callee else {
+                    solveig_base::ice!("heap callee root changed value kind during collection");
+                };
                 let result = self.invoke_heap_object(program, mode, id, arg_count);
                 self.temporary_roots.truncate(checkpoint);
                 result
@@ -381,6 +392,7 @@ impl Interpreter<'_> {
                         mode,
                         chunk,
                         BoundPrefix {
+                            owner: Some(id),
                             captures,
                             applied_args: PayloadStore::empty(),
                         },
@@ -388,9 +400,8 @@ impl Interpreter<'_> {
                     );
                     None
                 } else if arg_count < arity {
-                    self.maybe_gc();
                     let applied_args = self.pop_payload(arg_count);
-                    let captures = self.heap.clone_payload(captures);
+                    let captures = self.heap.clone_payload(id, captures);
 
                     Some(self.alloc_heap(HeapObject::PartialApp {
                         chunk,
@@ -421,6 +432,7 @@ impl Interpreter<'_> {
                         mode,
                         chunk,
                         BoundPrefix {
+                            owner: Some(id),
                             captures,
                             applied_args,
                         },
@@ -428,9 +440,9 @@ impl Interpreter<'_> {
                     );
                     None
                 } else if total < arity {
-                    self.maybe_gc();
-                    let captures = self.heap.clone_payload(captures);
+                    let captures = self.heap.clone_payload(id, captures);
                     let applied_args = self.heap.alloc_concat_payload_and_stack_tail(
+                        Some(id),
                         applied_args,
                         &mut self.process.stack,
                         arg_count,
@@ -450,7 +462,7 @@ impl Interpreter<'_> {
                 tag,
                 arity,
                 applied_args,
-            } => Some(self.apply_constructor(*tag, *arity, *applied_args, arg_count)),
+            } => Some(self.apply_constructor(Some(id), *tag, *arity, *applied_args, arg_count)),
 
             HeapObject::Data0 { tag }
             | HeapObject::Data1 { tag, .. }
@@ -466,18 +478,20 @@ impl Interpreter<'_> {
             HeapObject::IoAction(_) => {
                 solveig_base::ice!("IO action reached callable-object invocation");
             }
+            HeapObject::Forwarded(_) => {
+                solveig_base::ice!("forwarding entry reached callable-object invocation");
+            }
         }
     }
 
     pub(super) fn apply_constructor(
         &mut self,
+        owner: Option<ObjId>,
         tag: u16,
         arity: u16,
         existing: PayloadRef,
         n_new: usize,
     ) -> Value {
-        self.maybe_gc();
-
         let total = existing.len() + n_new;
 
         if total == arity as usize {
@@ -505,6 +519,7 @@ impl Interpreter<'_> {
             }
 
             let fields = self.heap.alloc_concat_payload_and_stack_tail(
+                owner,
                 existing,
                 &mut self.process.stack,
                 n_new,
@@ -512,6 +527,7 @@ impl Interpreter<'_> {
             self.alloc_heap(HeapObject::DataN { tag, fields })
         } else if total < arity as usize {
             let applied_args = self.heap.alloc_concat_payload_and_stack_tail(
+                owner,
                 existing,
                 &mut self.process.stack,
                 n_new,
@@ -529,7 +545,6 @@ impl Interpreter<'_> {
 
     pub(super) fn call_builtin(
         &mut self,
-        program: &BytecodeProgram,
         id: solveig_ast::ast::BuiltinId,
         arg_count: usize,
     ) -> Result<Value, RuntimeError> {
@@ -557,13 +572,7 @@ impl Interpreter<'_> {
             .get(args_start..)
             .expect("ICE: builtin argument slice out of bounds")
             .to_vec();
-        let mut ctx = VmCtx::new(
-            self.heap,
-            &program.constructor_arities,
-            self.nullary_ctors,
-            self.bools.true_val,
-            self.bools.false_val,
-        );
+        let mut ctx = VmCtx::new(self);
         let result = (builtin.run)(&mut ctx, &args)?;
         self.stack.truncate(args_start);
 
@@ -610,10 +619,7 @@ impl Interpreter<'_> {
             }
 
             Continuation::PublishGlobalThenHalt { global_index } => {
-                let Some(global_slot) = self.globals.get_mut(global_index) else {
-                    solveig_base::ice!("global publish index {global_index} out of bounds");
-                };
-                *global_slot = GlobalSlot::Evaluated(result);
+                self.publish_global(global_index, result);
                 Some(result)
             }
 
@@ -623,10 +629,7 @@ impl Interpreter<'_> {
                 pc,
                 frame_base,
             } => {
-                let Some(global_slot) = self.globals.get_mut(global_index) else {
-                    solveig_base::ice!("global publish index {global_index} out of bounds");
-                };
-                *global_slot = GlobalSlot::Evaluated(result);
+                self.publish_global(global_index, result);
                 self.chunk = chunk;
                 self.pc = pc;
                 self.frame_base = frame_base;
@@ -638,6 +641,16 @@ impl Interpreter<'_> {
                 solveig_base::ice!("IO continuation reached bytecode return handling")
             }
         }
+    }
+
+    /// The sole mutable publication site in the I4 write-barrier inventory.
+    /// Globals are scanned as roots on every minor collection, so publication
+    /// needs no remembered-set insertion while remaining collector-visible.
+    fn publish_global(&mut self, global_index: usize, result: Value) {
+        let Some(global_slot) = self.globals.get_mut(global_index) else {
+            solveig_base::ice!("global publish index {global_index} out of bounds");
+        };
+        *global_slot = GlobalSlot::Evaluated(result);
     }
 }
 

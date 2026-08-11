@@ -3,7 +3,10 @@
 
 use super::*;
 use crate::bytecode::Instr;
-use solveig_ast::ast::{BinOp, CtorId, CtorRuntimeRole, PRIM_TYS};
+use solveig_ast::ast::{
+    BUILTIN_CHARS_TO_STRING, BUILTIN_STRING_TO_CHARS, BinOp, BuiltinId, CtorId, CtorRuntimeRole,
+    PRIM_TYS,
+};
 use solveig_lower::closure_ir::{CCExpr, CCFunction, CCGlobalDef};
 use solveig_lower::{LowerCaseArm, LowerPattern};
 use std::rc::Rc;
@@ -90,6 +93,26 @@ fn partial_application_applies_remaining_arguments() {
 
 #[test]
 fn gc_preserves_list_across_build_and_fold() {
+    assert_eq!(run_main(&list_build_and_sum_program(40_000)), "800020000");
+}
+
+#[test]
+fn generational_gc_runs_many_minors_and_a_major() {
+    let bytecode = lower_to_bytecode(&list_build_and_sum_program(200));
+    let entry = bytecode
+        .global_index_by_name("main")
+        .expect("generational GC fixture should contain main");
+    let mut runtime = Runtime::new_with_collection_limits_for_test(bytecode, 8, 16);
+
+    let (_, outcome) = evaluate_entry(&mut runtime, entry);
+
+    assert_eq!(outcome, StepOutcome::Finished(Value::Int(20_100)));
+    assert!(runtime.heap.minor_collections >= 20);
+    assert!(runtime.heap.major_collections >= 1);
+    assert!(runtime.heap.nursery.len() < runtime.heap.nursery_slot_count);
+}
+
+fn list_build_and_sum_program(count: i64) -> CCProgram {
     let build = function(
         0,
         "build",
@@ -123,19 +146,92 @@ fn gc_preserves_list_across_build_and_fold() {
         ),
     );
 
-    let program = program(
+    program(
         vec![global(
             "main",
             let_in(
-                call_known(0, vec![int(40_000), pack(NIL_TAG, 0, Vec::new())]),
+                call_known(0, vec![int(count), pack(NIL_TAG, 0, Vec::new())]),
                 call_known(1, vec![local(0), int(0)]),
             ),
         )],
         vec![build, fold_sum],
         &[("Nil", NIL_TAG, 0), ("Cons", CONS_TAG, 2)],
+    )
+}
+
+#[test]
+fn gc_reclaims_short_lived_objects() {
+    let churn = function(
+        0,
+        "churn",
+        1,
+        if_then_else(
+            bin(BinOp::Equal, local(0), int(0)),
+            int(42),
+            let_in(
+                pack(CONS_TAG, 2, vec![local(0), pack(NIL_TAG, 0, Vec::new())]),
+                call_known(0, vec![bin(BinOp::Minus, local(1), int(1))]),
+            ),
+        ),
     );
 
-    assert_eq!(run_main(&program), "800020000");
+    let program = program(
+        vec![global("main", call_known(0, vec![int(500_000)]))],
+        vec![churn],
+        &[("Nil", NIL_TAG, 0), ("Cons", CONS_TAG, 2)],
+    );
+
+    assert_eq!(run_main(&program), "42");
+}
+
+#[test]
+fn bulk_builtin_allocation_keeps_roots_relocatable() {
+    let input = "copying-gc".repeat(100);
+    let round_trip = builtin(
+        BUILTIN_CHARS_TO_STRING,
+        vec![builtin(
+            BUILTIN_STRING_TO_CHARS,
+            vec![expr(CCExpr::StrConst(0))],
+        )],
+    );
+    let mut program = program_with_ctors(
+        vec![global("main", round_trip)],
+        Vec::new(),
+        &[
+            ctor_spec(
+                CtorId(300),
+                CtorRuntimeRole::PreludeListNil,
+                "prelude.List.Nil",
+                "Nil",
+                NIL_TAG,
+                0,
+            ),
+            ctor_spec(
+                CtorId(301),
+                CtorRuntimeRole::PreludeListCons,
+                "prelude.List.Cons",
+                "Cons",
+                CONS_TAG,
+                2,
+            ),
+        ],
+    );
+    program.string_constants.push(input.clone());
+
+    let bytecode = lower_to_bytecode(&program);
+    let entry = bytecode
+        .global_index_by_name("main")
+        .expect("bulk builtin fixture should contain main");
+    let mut runtime = Runtime::new_with_collection_limits_for_test(bytecode, 8, 16);
+    let (_, outcome) = evaluate_entry(&mut runtime, entry);
+    let StepOutcome::Finished(Value::Obj(id)) = outcome else {
+        solveig_base::ice!("bulk builtin fixture did not return a heap string");
+    };
+    let HeapObject::Str { bytes } = runtime.heap.get(id) else {
+        solveig_base::ice!("bulk builtin fixture returned a non-string heap object");
+    };
+    assert_eq!(runtime.heap.str_value(id, *bytes), input);
+    assert!(runtime.heap.minor_collections > 100);
 }
 
 #[test]
@@ -280,33 +376,23 @@ fn runtime_step_finishes_and_records_process_status() {
 fn gc_traces_roots_in_every_inactive_process() {
     let program = program(vec![global("main", int(0))], Vec::new(), &[]);
     let mut runtime = Runtime::new(lower_to_bytecode(&program));
-    let rooted = runtime.heap.alloc_str("rooted");
-    let unrooted = runtime.heap.alloc_str("unrooted");
-    let Value::Obj(rooted_id) = rooted else {
-        solveig_base::ice!("heap string allocation did not return an object id");
-    };
+    let rooted = runtime.alloc_str_for_test("rooted");
+    let process = runtime.allocate_process();
+    runtime.processes[process].status = ProcStatus::Finished(rooted);
+    let unrooted = runtime.alloc_str_for_test("unrooted");
     let Value::Obj(unrooted_id) = unrooted else {
         solveig_base::ice!("heap string allocation did not return an object id");
     };
-    let process = runtime.allocate_process();
-    runtime.processes[process].status = ProcStatus::Finished(rooted);
 
     runtime.collect_all_process_roots_for_test();
 
-    assert!(
-        runtime
-            .heap
-            .objects
-            .get(rooted_id.0 as usize)
-            .is_some_and(Option::is_some)
-    );
-    assert!(
-        runtime
-            .heap
-            .objects
-            .get(unrooted_id.0 as usize)
-            .is_some_and(Option::is_none)
-    );
+    let ProcStatus::Finished(Value::Obj(promoted_id)) = runtime.processes[process].status else {
+        solveig_base::ice!("finished process root was not rewritten to an object id");
+    };
+    assert!(runtime.heap.is_live(promoted_id));
+    assert!(!runtime.heap.is_nursery_id(promoted_id));
+    assert!(!runtime.heap.is_live(unrooted_id));
+    assert!(runtime.heap.nursery.is_empty());
 }
 
 fn run_main(program: &CCProgram) -> String {
@@ -489,6 +575,10 @@ fn call(callee: Rc<CCExpr>, args: Vec<Rc<CCExpr>>) -> Rc<CCExpr> {
 
 fn call_known(func: usize, args: Vec<Rc<CCExpr>>) -> Rc<CCExpr> {
     expr(CCExpr::CallKnown { func, args })
+}
+
+fn builtin(id: BuiltinId, args: Vec<Rc<CCExpr>>) -> Rc<CCExpr> {
+    expr(CCExpr::CallBuiltin { id, args })
 }
 
 fn let_in(binder: Rc<CCExpr>, body: Rc<CCExpr>) -> Rc<CCExpr> {

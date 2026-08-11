@@ -136,22 +136,15 @@ impl Interpreter<'_> {
                 }
                 IoAction::GetArgs => {
                     let checkpoint = self.temporary_roots.len();
-                    let mut arg_values = Vec::with_capacity(io.args.len());
                     for arg in io.args {
                         self.maybe_gc();
                         let value = self.heap.alloc_str(arg);
-                        arg_values.push(value);
                         self.temporary_roots.push(value);
                     }
 
-                    let mut ctx = VmCtx::new(
-                        self.heap,
-                        &program.constructor_arities,
-                        self.nullary_ctors,
-                        self.bools.true_val,
-                        self.bools.false_val,
-                    );
-                    let value = ctx.alloc_list_from_values(&arg_values, "getArgs");
+                    let mut ctx = VmCtx::new(self);
+                    let value =
+                        ctx.alloc_list_from_root_range(checkpoint, io.args.len(), "getArgs");
                     self.temporary_roots.truncate(checkpoint);
                     let value = value?;
                     if let Some(value) = self.resume_io_value(program, value)? {
@@ -255,7 +248,7 @@ impl Interpreter<'_> {
     ) -> Result<String, RuntimeError> {
         match value {
             Value::Obj(id) => match self.heap.get(id) {
-                HeapObject::Str { bytes } => Ok(self.heap.str_value(*bytes).to_string()),
+                HeapObject::Str { bytes } => Ok(self.heap.str_value(id, *bytes).to_string()),
                 _ => Err(RuntimeError::builtin(format!("{context} expected String"))),
             },
             _ => Err(RuntimeError::builtin(format!("{context} expected String"))),

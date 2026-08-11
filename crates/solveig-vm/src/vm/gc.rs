@@ -1,96 +1,56 @@
-//! VM garbage collection marking and heap accounting.
-//! Allocation paths use this module to reclaim unreachable runtime objects.
+//! Generational garbage collection and the VM's single root enumeration.
 //!
-//! `Roots` is the single root-set definition for the runtime: every active and
-//! inactive process, evaluated globals, nullary-constructor cache, and Bool
-//! cache. Any future field that can hold a `Value` across an allocation point
-//! must be added here.
+//! `Roots` covers every active and inactive process, evaluated globals,
+//! nullary-constructor cache, and Bool cache. Any future field that can hold a
+//! `Value` across an allocation point must be added here.
 
 use super::*;
-use crate::heap::{Heap, HeapObject, IoAction, PayloadRef, PayloadStore};
+use crate::heap::{Heap, HeapObject, IoAction, PayloadRef};
 use crate::values::{BoolCache, Continuation, GlobalSlot, NullaryCtorCache, ObjId, Value};
 use solveig_ast::ast::{CtorId, PRIM_TYS};
 
-#[inline]
-fn mark_value(mark_bits: &mut [bool], value: Value, worklist: &mut Vec<ObjId>) {
-    if let Value::Obj(id) = value {
-        mark_bit(mark_bits, id, worklist);
-    }
-}
-
-#[inline]
-fn mark_bit(mark_bits: &mut [bool], id: ObjId, worklist: &mut Vec<ObjId>) {
-    let idx = id.0 as usize;
-    if let Some(marked) = mark_bits.get_mut(idx)
-        && !*marked
-    {
-        *marked = true;
-        worklist.push(id);
-    }
-}
-
-#[inline]
-fn mark_payload(
-    payloads: &PayloadStore,
-    mark_bits: &mut [bool],
-    span: &PayloadRef,
-    worklist: &mut Vec<ObjId>,
-) {
-    for &v in payloads.as_slice(*span) {
-        if let Value::Obj(id) = v {
-            mark_bit(mark_bits, id, worklist);
-        }
-    }
-}
-
 pub(super) struct Roots<'a> {
-    active_process: Option<&'a Process>,
-    inactive_processes: &'a Arena<Process>,
-    globals: &'a [GlobalSlot],
-    nullary_ctors: &'a NullaryCtorCache,
-    bools: &'a BoolCache,
+    active_process: Option<&'a mut Process>,
+    inactive_processes: &'a mut Arena<Process>,
+    globals: &'a mut [GlobalSlot],
+    nullary_ctors: &'a mut NullaryCtorCache,
+    bools: &'a mut BoolCache,
 }
 
-impl<'a> Roots<'a> {
-    fn mark(&self, mark_bits: &mut [bool], worklist: &mut Vec<ObjId>) {
-        if let Some(process) = self.active_process {
-            Self::mark_process(process, mark_bits, worklist);
+impl Roots<'_> {
+    fn visit_values_mut(&mut self, mut visit: impl FnMut(&mut Value)) {
+        if let Some(process) = self.active_process.as_deref_mut() {
+            Self::visit_process_values_mut(process, &mut visit);
         }
-        for process in self.inactive_processes.values() {
-            Self::mark_process(process, mark_bits, worklist);
+        for (_, process) in self.inactive_processes.iter_mut() {
+            Self::visit_process_values_mut(process, &mut visit);
         }
 
-        for slot in self.globals {
+        for slot in &mut *self.globals {
             if let GlobalSlot::Evaluated(value) = slot {
-                mark_value(mark_bits, *value, worklist);
+                visit(value);
             }
         }
-
-        for value in self.nullary_ctors.tags.iter().flatten() {
-            mark_value(mark_bits, *value, worklist);
+        for value in self.nullary_ctors.tags.iter_mut().flatten() {
+            visit(value);
         }
-
-        mark_value(mark_bits, self.bools.true_val, worklist);
-        mark_value(mark_bits, self.bools.false_val, worklist);
+        visit(&mut self.bools.true_val);
+        visit(&mut self.bools.false_val);
     }
 
-    fn mark_process(process: &Process, mark_bits: &mut [bool], worklist: &mut Vec<ObjId>) {
-        Self::mark_values(mark_bits, &process.stack, worklist);
-        Self::mark_values(mark_bits, &process.binding_buffer, worklist);
-        Self::mark_values(mark_bits, &process.temporary_roots, worklist);
-        if let ProcStatus::Finished(value) = process.status {
-            mark_value(mark_bits, value, worklist);
+    fn visit_process_values_mut(process: &mut Process, visit: &mut impl FnMut(&mut Value)) {
+        process.stack.iter_mut().for_each(&mut *visit);
+        process.binding_buffer.iter_mut().for_each(&mut *visit);
+        process.temporary_roots.iter_mut().for_each(&mut *visit);
+        if let ProcStatus::Finished(value) = &mut process.status {
+            visit(value);
         }
-
-        if let Some(value) = process.io_current {
-            mark_value(mark_bits, value, worklist);
+        if let Some(value) = &mut process.io_current {
+            visit(value);
         }
-
-        for frame in &process.continuations {
+        for frame in &mut process.continuations {
             match frame {
-                Continuation::IoBind(continuation) => {
-                    mark_value(mark_bits, *continuation, worklist);
-                }
+                Continuation::IoBind(continuation) => visit(continuation),
                 Continuation::Halt
                 | Continuation::CallerFrame { .. }
                 | Continuation::PublishGlobalThenHalt { .. }
@@ -99,82 +59,14 @@ impl<'a> Roots<'a> {
         }
     }
 
-    fn mark_values(mark_bits: &mut [bool], values: &[Value], worklist: &mut Vec<ObjId>) {
-        for &value in values {
-            mark_value(mark_bits, value, worklist);
-        }
-    }
-
     #[cfg(debug_assertions)]
-    fn assert_reachable_live(&self, heap: &Heap) {
-        let mut seen = vec![false; heap.objects.len()];
+    fn assert_reachable_live(&mut self, heap: &Heap) {
+        let mut seen = vec![false; heap.old.len()];
         let mut worklist = Vec::new();
-
-        if let Some(process) = self.active_process {
-            Self::assert_process_live(process, heap, &mut seen, &mut worklist);
-        }
-        for process in self.inactive_processes.values() {
-            Self::assert_process_live(process, heap, &mut seen, &mut worklist);
-        }
-
-        for slot in self.globals {
-            if let GlobalSlot::Evaluated(value) = slot {
-                assert_value_live(heap, *value, &mut seen, &mut worklist);
-            }
-        }
-
-        for value in self.nullary_ctors.tags.iter().flatten() {
-            assert_value_live(heap, *value, &mut seen, &mut worklist);
-        }
-
-        assert_value_live(heap, self.bools.true_val, &mut seen, &mut worklist);
-        assert_value_live(heap, self.bools.false_val, &mut seen, &mut worklist);
+        self.visit_values_mut(|value| assert_value_live(heap, *value, &mut seen, &mut worklist));
 
         while let Some(id) = worklist.pop() {
             assert_object_children_live(heap, id, &mut seen, &mut worklist);
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    fn assert_process_live(
-        process: &Process,
-        heap: &Heap,
-        seen: &mut [bool],
-        worklist: &mut Vec<ObjId>,
-    ) {
-        Self::assert_values_live(heap, &process.stack, seen, worklist);
-        Self::assert_values_live(heap, &process.binding_buffer, seen, worklist);
-        Self::assert_values_live(heap, &process.temporary_roots, seen, worklist);
-        if let ProcStatus::Finished(value) = process.status {
-            assert_value_live(heap, value, seen, worklist);
-        }
-
-        if let Some(value) = process.io_current {
-            assert_value_live(heap, value, seen, worklist);
-        }
-
-        for frame in &process.continuations {
-            match frame {
-                Continuation::IoBind(continuation) => {
-                    assert_value_live(heap, *continuation, seen, worklist);
-                }
-                Continuation::Halt
-                | Continuation::CallerFrame { .. }
-                | Continuation::PublishGlobalThenHalt { .. }
-                | Continuation::PublishGlobalThenResume { .. } => {}
-            }
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    fn assert_values_live(
-        heap: &Heap,
-        values: &[Value],
-        seen: &mut [bool],
-        worklist: &mut Vec<ObjId>,
-    ) {
-        for &value in values {
-            assert_value_live(heap, value, seen, worklist);
         }
     }
 }
@@ -185,18 +77,18 @@ impl Interpreter<'_> {
         self.heap.alloc(obj)
     }
 
-    pub(super) fn maybe_gc(&mut self) {
-        // AOSA's GHC RTS chapter treats allocation checks as safe points; the
-        // stress knob makes that check fail at a low fixed allocation threshold.
+    pub(crate) fn maybe_gc(&mut self) {
+        // The AOSA GHC runtime chapter identifies allocation-limit checks as
+        // safe points. I6 can force this same check by zeroing the limit.
         if self.heap.should_collect() {
-            let roots = Roots {
+            let mut roots = Roots {
                 active_process: Some(self.process),
                 inactive_processes: self.inactive_processes,
                 globals: self.globals,
                 nullary_ctors: self.nullary_ctors,
                 bools: self.bools,
             };
-            collect_garbage(self.heap, &roots);
+            collect_garbage(self.heap, &mut roots);
         }
     }
 }
@@ -213,14 +105,14 @@ impl Runtime {
             }
 
             if self.heap.should_collect() {
-                let roots = Roots {
+                let mut roots = Roots {
                     active_process: None,
-                    inactive_processes: &self.processes,
-                    globals: &self.globals,
-                    nullary_ctors: &self.nullary_ctors,
-                    bools: &self.bools,
+                    inactive_processes: &mut self.processes,
+                    globals: &mut self.globals,
+                    nullary_ctors: &mut self.nullary_ctors,
+                    bools: &mut self.bools,
                 };
-                collect_garbage(&mut self.heap, &roots);
+                collect_garbage(&mut self.heap, &mut roots);
             }
 
             let value = self.heap.alloc(HeapObject::Data0 { tag });
@@ -236,141 +128,372 @@ impl Runtime {
 
 #[cfg(test)]
 impl Runtime {
+    pub(super) fn alloc_str_for_test(&mut self, value: &str) -> Value {
+        if self.heap.should_collect() {
+            let mut roots = Roots {
+                active_process: None,
+                inactive_processes: &mut self.processes,
+                globals: &mut self.globals,
+                nullary_ctors: &mut self.nullary_ctors,
+                bools: &mut self.bools,
+            };
+            collect_garbage(&mut self.heap, &mut roots);
+        }
+        self.heap.alloc_str(value)
+    }
+
     pub(super) fn collect_all_process_roots_for_test(&mut self) {
-        let roots = Roots {
+        let mut roots = Roots {
             active_process: None,
-            inactive_processes: &self.processes,
-            globals: &self.globals,
-            nullary_ctors: &self.nullary_ctors,
-            bools: &self.bools,
+            inactive_processes: &mut self.processes,
+            globals: &mut self.globals,
+            nullary_ctors: &mut self.nullary_ctors,
+            bools: &mut self.bools,
         };
-        collect_garbage(&mut self.heap, &roots);
+        collect_garbage(&mut self.heap, &mut roots);
     }
 }
 
-fn collect_garbage(heap: &mut Heap, roots: &Roots<'_>) {
-    let mut worklist: Vec<ObjId> = Vec::new();
-
-    roots.mark(&mut heap.mark_bits, &mut worklist);
-
-    while let Some(id) = worklist.pop() {
-        mark_object_children(
-            &heap.objects,
-            &heap.payloads,
-            &mut heap.mark_bits,
-            id,
-            &mut worklist,
-        );
-    }
-
-    heap.payloads.bucket1.clear();
-    heap.payloads.bucket2.clear();
-    heap.payloads.bucket3.clear();
-    heap.payloads.free.clear();
-    heap.free_list.clear();
-
-    let mut live = 0usize;
-    for idx in 0..heap.objects.len() {
-        let dead = {
-            let Some(object_slot) = heap.objects.get_mut(idx) else {
-                solveig_base::ice!("GC sweep object index out of bounds");
-            };
-            if object_slot.is_none() {
-                None
-            } else {
-                let marked = heap
-                    .mark_bits
-                    .get_mut(idx)
-                    .expect("ICE: GC mark bit index out of bounds");
-                if *marked {
-                    *marked = false;
-                    live += 1;
-                    None
-                } else {
-                    object_slot.take()
-                }
-            }
-        };
-
-        if let Some(dead) = dead {
-            heap.free_object_payloads(&dead);
-            heap.free_list.push(
-                u32::try_from(idx)
-                    .unwrap_or_else(|_| solveig_base::ice!("heap free-list index overflow")),
-            );
-        }
+fn collect_garbage(heap: &mut Heap, roots: &mut Roots<'_>) {
+    collect_minor(heap, roots);
+    if heap.should_collect_major() {
+        collect_major(heap, roots);
     }
 
     #[cfg(debug_assertions)]
     roots.assert_reachable_live(heap);
-
-    heap.reset_collection_accounting(live);
 }
 
-enum Children {
-    None,
-    One(PayloadRef),
-    Two(PayloadRef, PayloadRef),
+/// Copies nursery survivors using forwarding entries in their vacated slots.
+///
+/// This is the Cheney-style copying discipline from Jones, Hosking, and Moss,
+/// *The Garbage Collection Handbook*, ch. 4, organized as Appel's
+/// bump-allocated generational nursery. The explicit worklist keeps traversal
+/// off the native Rust stack.
+fn collect_minor(heap: &mut Heap, roots: &mut Roots<'_>) {
+    let mut worklist = Vec::new();
+    let mut promoted = 0usize;
+
+    roots.visit_values_mut(|value| {
+        evacuate_value(heap, value, &mut worklist, &mut promoted);
+    });
+
+    while let Some(id) = worklist.pop() {
+        rewrite_promoted_object(heap, id, &mut worklist, &mut promoted);
+    }
+
+    heap.finish_minor_collection(promoted);
 }
 
-fn mark_object_children(
-    objects: &[Option<HeapObject>],
-    payloads: &PayloadStore,
-    mark_bits: &mut [bool],
+fn evacuate_value(
+    heap: &mut Heap,
+    value: &mut Value,
+    worklist: &mut Vec<ObjId>,
+    promoted: &mut usize,
+) {
+    let Value::Obj(id) = value else {
+        return;
+    };
+    if !heap.is_nursery_id(*id) {
+        return;
+    }
+
+    let nursery_index = id.0 as usize;
+    let object = *heap
+        .nursery
+        .get(nursery_index)
+        .unwrap_or_else(|| solveig_base::ice!("GC encountered dangling nursery ref {}", id.0));
+    if let HeapObject::Forwarded(destination) = object {
+        *id = destination;
+        return;
+    }
+
+    let promoted_object = copy_object_side_payloads(heap, object);
+    let destination = heap.alloc_old(promoted_object);
+    *heap
+        .nursery
+        .get_mut(nursery_index)
+        .expect("ICE: evacuated nursery slot disappeared") = HeapObject::Forwarded(destination);
+    *id = destination;
+    worklist.push(destination);
+    *promoted += 1;
+}
+
+fn copy_object_side_payloads(heap: &mut Heap, object: HeapObject) -> HeapObject {
+    match object {
+        HeapObject::Closure { chunk, captures } => HeapObject::Closure {
+            chunk,
+            captures: heap.promote_payload(captures),
+        },
+        HeapObject::PartialApp {
+            chunk,
+            captures,
+            applied_args,
+        } => HeapObject::PartialApp {
+            chunk,
+            captures: heap.promote_payload(captures),
+            applied_args: heap.promote_payload(applied_args),
+        },
+        HeapObject::PartialCtor {
+            tag,
+            arity,
+            applied_args,
+        } => HeapObject::PartialCtor {
+            tag,
+            arity,
+            applied_args: heap.promote_payload(applied_args),
+        },
+        HeapObject::DataN { tag, fields } => HeapObject::DataN {
+            tag,
+            fields: heap.promote_payload(fields),
+        },
+        HeapObject::Str { bytes } => HeapObject::Str {
+            bytes: heap.promote_bytes(bytes),
+        },
+        HeapObject::Data0 { .. }
+        | HeapObject::Data1 { .. }
+        | HeapObject::Data2 { .. }
+        | HeapObject::IoAction(_) => object,
+        HeapObject::Forwarded(_) => {
+            solveig_base::ice!("forwarding entry copied as a nursery survivor");
+        }
+    }
+}
+
+fn rewrite_promoted_object(
+    heap: &mut Heap,
     id: ObjId,
     worklist: &mut Vec<ObjId>,
+    promoted: &mut usize,
 ) {
-    let children = match objects.get(id.0 as usize).and_then(Option::as_ref) {
-        Some(HeapObject::Closure { captures, .. }) => Children::One(*captures),
-        Some(HeapObject::PartialApp {
+    let old_index = heap.old_index(id);
+    let Some(mut object) = heap.old.get(old_index).and_then(|slot| *slot) else {
+        solveig_base::ice!("promoted object {} disappeared before scanning", id.0);
+    };
+
+    match &mut object {
+        HeapObject::Closure { captures, .. }
+        | HeapObject::PartialCtor {
+            applied_args: captures,
+            ..
+        }
+        | HeapObject::DataN {
+            fields: captures, ..
+        } => rewrite_old_payload(heap, *captures, worklist, promoted),
+        HeapObject::PartialApp {
             captures,
             applied_args,
             ..
-        }) => Children::Two(*captures, *applied_args),
-        Some(HeapObject::PartialCtor { applied_args, .. }) => Children::One(*applied_args),
-        Some(HeapObject::DataN { fields, .. }) => Children::One(*fields),
-        Some(HeapObject::Data0 { .. }) | Some(HeapObject::Str { .. }) | None => Children::None,
-        Some(HeapObject::Data1 { field, .. }) => {
-            mark_value(mark_bits, *field, worklist);
-            Children::None
+        } => {
+            rewrite_old_payload(heap, *captures, worklist, promoted);
+            rewrite_old_payload(heap, *applied_args, worklist, promoted);
         }
-        Some(HeapObject::Data2 { field0, field1, .. }) => {
-            mark_value(mark_bits, *field0, worklist);
-            mark_value(mark_bits, *field1, worklist);
-            Children::None
+        HeapObject::Data1 { field, .. } => {
+            evacuate_value(heap, field, worklist, promoted);
         }
-        Some(HeapObject::IoAction(action)) => {
-            match action {
-                IoAction::Pure(value) | IoAction::Print { text: value, .. } => {
-                    mark_value(mark_bits, *value, worklist);
-                }
-                IoAction::Bind {
-                    action,
-                    continuation,
-                } => {
-                    mark_value(mark_bits, *action, worklist);
-                    mark_value(mark_bits, *continuation, worklist);
-                }
-                IoAction::ReadLine | IoAction::GetArgs => {}
-                IoAction::ReadFile { path } => {
-                    mark_value(mark_bits, *path, worklist);
-                }
-                IoAction::WriteFile { path, contents, .. } => {
-                    mark_value(mark_bits, *path, worklist);
-                    mark_value(mark_bits, *contents, worklist);
-                }
-            }
-            Children::None
+        HeapObject::Data2 { field0, field1, .. } => {
+            evacuate_value(heap, field0, worklist, promoted);
+            evacuate_value(heap, field1, worklist, promoted);
         }
-    };
+        HeapObject::IoAction(action) => {
+            rewrite_io_action(heap, action, worklist, promoted);
+        }
+        HeapObject::Data0 { .. } | HeapObject::Str { .. } => {}
+        HeapObject::Forwarded(_) => {
+            solveig_base::ice!("forwarding entry reached promoted-object scan");
+        }
+    }
 
-    match children {
-        Children::None => {}
-        Children::One(span) => mark_payload(payloads, mark_bits, &span, worklist),
-        Children::Two(a, b) => {
-            mark_payload(payloads, mark_bits, &a, worklist);
-            mark_payload(payloads, mark_bits, &b, worklist);
+    *heap
+        .old
+        .get_mut(old_index)
+        .expect("ICE: promoted old object slot disappeared") = Some(object);
+}
+
+fn rewrite_old_payload(
+    heap: &mut Heap,
+    span: PayloadRef,
+    worklist: &mut Vec<ObjId>,
+    promoted: &mut usize,
+) {
+    for index in span.start..span.end {
+        let mut value = heap.payloads.old_value(index);
+        evacuate_value(heap, &mut value, worklist, promoted);
+        heap.payloads.set_old_value(index, value);
+    }
+}
+
+fn rewrite_io_action(
+    heap: &mut Heap,
+    action: &mut IoAction,
+    worklist: &mut Vec<ObjId>,
+    promoted: &mut usize,
+) {
+    match action {
+        IoAction::Pure(value) | IoAction::Print { text: value, .. } => {
+            evacuate_value(heap, value, worklist, promoted);
         }
+        IoAction::Bind {
+            action,
+            continuation,
+        } => {
+            evacuate_value(heap, action, worklist, promoted);
+            evacuate_value(heap, continuation, worklist, promoted);
+        }
+        IoAction::ReadFile { path } => {
+            evacuate_value(heap, path, worklist, promoted);
+        }
+        IoAction::WriteFile { path, contents, .. } => {
+            evacuate_value(heap, path, worklist, promoted);
+            evacuate_value(heap, contents, worklist, promoted);
+        }
+        IoAction::ReadLine | IoAction::GetArgs => {}
+    }
+}
+
+/// Reuses the pre-I4 mark-sweep collector for non-moving old-generation slots.
+fn collect_major(heap: &mut Heap, roots: &mut Roots<'_>) {
+    let nursery_slot_count = heap.nursery_slot_count;
+    let mut worklist = Vec::new();
+    roots.visit_values_mut(|value| {
+        mark_old_value(
+            nursery_slot_count,
+            &mut heap.mark_bits,
+            &heap.old,
+            *value,
+            &mut worklist,
+        );
+    });
+
+    while let Some(id) = worklist.pop() {
+        mark_old_object_children(heap, id, &mut worklist);
+    }
+
+    heap.prepare_major_collection();
+    let mut live = 0usize;
+    for index in 0..heap.old.len() {
+        let dead = {
+            let marked = heap
+                .mark_bits
+                .get_mut(index)
+                .expect("ICE: major GC mark-bit index out of bounds");
+            if *marked {
+                *marked = false;
+                live += 1;
+                None
+            } else {
+                heap.old
+                    .get_mut(index)
+                    .expect("ICE: major GC object index out of bounds")
+                    .take()
+            }
+        };
+
+        if let Some(dead) = dead {
+            heap.free_old_object_payloads(&dead);
+        }
+        if heap.old.get(index).is_some_and(Option::is_none) {
+            heap.free_list.push(
+                u32::try_from(index)
+                    .unwrap_or_else(|_| solveig_base::ice!("old free-list index overflow")),
+            );
+        }
+    }
+    heap.finish_major_collection(live);
+}
+
+fn mark_old_value(
+    nursery_slot_count: usize,
+    mark_bits: &mut [bool],
+    old: &[Option<HeapObject>],
+    value: Value,
+    worklist: &mut Vec<ObjId>,
+) {
+    let Value::Obj(id) = value else {
+        return;
+    };
+    let Some(index) = (id.0 as usize).checked_sub(nursery_slot_count) else {
+        solveig_base::ice!("nursery reference survived minor collection: {}", id.0);
+    };
+    if !old.get(index).is_some_and(Option::is_some) {
+        solveig_base::ice!("major GC root references freed object {}", id.0);
+    }
+    let marked = mark_bits
+        .get_mut(index)
+        .expect("ICE: major GC mark index out of bounds");
+    if !*marked {
+        *marked = true;
+        worklist.push(id);
+    }
+}
+
+fn mark_old_object_children(heap: &mut Heap, id: ObjId, worklist: &mut Vec<ObjId>) {
+    let object = *heap.get(id);
+    match object {
+        HeapObject::Closure { captures, .. }
+        | HeapObject::PartialCtor {
+            applied_args: captures,
+            ..
+        }
+        | HeapObject::DataN {
+            fields: captures, ..
+        } => mark_old_payload(heap, captures, worklist),
+        HeapObject::PartialApp {
+            captures,
+            applied_args,
+            ..
+        } => {
+            mark_old_payload(heap, captures, worklist);
+            mark_old_payload(heap, applied_args, worklist);
+        }
+        HeapObject::Data1 { field, .. } => mark_old_child(heap, field, worklist),
+        HeapObject::Data2 { field0, field1, .. } => {
+            mark_old_child(heap, field0, worklist);
+            mark_old_child(heap, field1, worklist);
+        }
+        HeapObject::IoAction(action) => mark_old_io_action(heap, action, worklist),
+        HeapObject::Data0 { .. } | HeapObject::Str { .. } => {}
+        HeapObject::Forwarded(_) => {
+            solveig_base::ice!("forwarding entry reached old-generation marking");
+        }
+    }
+}
+
+fn mark_old_payload(heap: &mut Heap, span: PayloadRef, worklist: &mut Vec<ObjId>) {
+    for index in span.start..span.end {
+        let value = heap.payloads.old_value(index);
+        mark_old_child(heap, value, worklist);
+    }
+}
+
+fn mark_old_child(heap: &mut Heap, value: Value, worklist: &mut Vec<ObjId>) {
+    mark_old_value(
+        heap.nursery_slot_count,
+        &mut heap.mark_bits,
+        &heap.old,
+        value,
+        worklist,
+    );
+}
+
+fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjId>) {
+    match action {
+        IoAction::Pure(value) | IoAction::Print { text: value, .. } => {
+            mark_old_child(heap, value, worklist);
+        }
+        IoAction::Bind {
+            action,
+            continuation,
+        } => {
+            mark_old_child(heap, action, worklist);
+            mark_old_child(heap, continuation, worklist);
+        }
+        IoAction::ReadFile { path } => mark_old_child(heap, path, worklist),
+        IoAction::WriteFile { path, contents, .. } => {
+            mark_old_child(heap, path, worklist);
+            mark_old_child(heap, contents, worklist);
+        }
+        IoAction::ReadLine | IoAction::GetArgs => {}
     }
 }
 
@@ -383,13 +506,18 @@ fn assert_value_live(heap: &Heap, value: Value, seen: &mut [bool], worklist: &mu
 
 #[cfg(debug_assertions)]
 fn assert_object_live(heap: &Heap, id: ObjId, seen: &mut [bool], worklist: &mut Vec<ObjId>) {
-    let idx = id.0 as usize;
-    if !heap.objects.get(idx).is_some_and(Option::is_some) {
+    if !heap.is_live(id) {
         solveig_base::ice!("GC root set references freed object {}", id.0);
+    }
+    if heap.is_nursery_id(id) {
+        solveig_base::ice!(
+            "GC root set retains nursery object {} after collection",
+            id.0
+        );
     }
 
     let seen_slot = seen
-        .get_mut(idx)
+        .get_mut(heap.old_index(id))
         .expect("ICE: GC seen index out of bounds for live object");
     if !*seen_slot {
         *seen_slot = true;
@@ -404,31 +532,24 @@ fn assert_object_children_live(
     seen: &mut [bool],
     worklist: &mut Vec<ObjId>,
 ) {
-    let Some(object) = heap.objects.get(id.0 as usize).and_then(|slot| *slot) else {
-        solveig_base::ice!("GC reachable object {} was freed", id.0);
-    };
-
-    match object {
-        HeapObject::Closure { captures, .. } => {
-            assert_payload_live(heap, captures, seen, worklist);
+    match *heap.get(id) {
+        HeapObject::Closure { captures, .. }
+        | HeapObject::PartialCtor {
+            applied_args: captures,
+            ..
         }
+        | HeapObject::DataN {
+            fields: captures, ..
+        } => assert_payload_live(heap, id, captures, seen, worklist),
         HeapObject::PartialApp {
             captures,
             applied_args,
             ..
         } => {
-            assert_payload_live(heap, captures, seen, worklist);
-            assert_payload_live(heap, applied_args, seen, worklist);
+            assert_payload_live(heap, id, captures, seen, worklist);
+            assert_payload_live(heap, id, applied_args, seen, worklist);
         }
-        HeapObject::PartialCtor { applied_args, .. } => {
-            assert_payload_live(heap, applied_args, seen, worklist);
-        }
-        HeapObject::DataN { fields, .. } => {
-            assert_payload_live(heap, fields, seen, worklist);
-        }
-        HeapObject::Data1 { field, .. } => {
-            assert_value_live(heap, field, seen, worklist);
-        }
+        HeapObject::Data1 { field, .. } => assert_value_live(heap, field, seen, worklist),
         HeapObject::Data2 { field0, field1, .. } => {
             assert_value_live(heap, field0, seen, worklist);
             assert_value_live(heap, field1, seen, worklist);
@@ -444,9 +565,7 @@ fn assert_object_children_live(
                 assert_value_live(heap, action, seen, worklist);
                 assert_value_live(heap, continuation, seen, worklist);
             }
-            IoAction::ReadFile { path } => {
-                assert_value_live(heap, path, seen, worklist);
-            }
+            IoAction::ReadFile { path } => assert_value_live(heap, path, seen, worklist),
             IoAction::WriteFile { path, contents, .. } => {
                 assert_value_live(heap, path, seen, worklist);
                 assert_value_live(heap, contents, seen, worklist);
@@ -454,17 +573,21 @@ fn assert_object_children_live(
             IoAction::ReadLine | IoAction::GetArgs => {}
         },
         HeapObject::Data0 { .. } | HeapObject::Str { .. } => {}
+        HeapObject::Forwarded(_) => {
+            solveig_base::ice!("forwarding entry reached debug heap walk");
+        }
     }
 }
 
 #[cfg(debug_assertions)]
 fn assert_payload_live(
     heap: &Heap,
+    owner: ObjId,
     span: PayloadRef,
     seen: &mut [bool],
     worklist: &mut Vec<ObjId>,
 ) {
-    for &value in heap.payloads.as_slice(span) {
+    for &value in heap.payload_slice(owner, span) {
         assert_value_live(heap, value, seen, worklist);
     }
 }

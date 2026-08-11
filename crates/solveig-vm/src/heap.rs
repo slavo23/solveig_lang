@@ -3,9 +3,9 @@
 
 use crate::values::{ObjId, Value};
 
-const DEFAULT_GC_INITIAL_THRESHOLD: usize = 32_768;
-const DEFAULT_GC_LIVE_FLOOR: usize = 65_536;
-const DEFAULT_GC_STRESS_THRESHOLD: usize = 256;
+const DEFAULT_NURSERY_SLOTS: usize = 32_768;
+const DEFAULT_MAJOR_LIVE_FLOOR: usize = 65_536;
+const DEFAULT_GC_STRESS_SLOTS: usize = 256;
 
 #[derive(Debug, Clone, Copy)]
 pub enum HeapObject {
@@ -43,7 +43,11 @@ pub enum HeapObject {
         bytes: ByteRef,
     },
     IoAction(IoAction),
+    /// A nursery slot that has been evacuated during the current minor GC.
+    Forwarded(ObjId),
 }
+
+const _: () = assert!(std::mem::size_of::<HeapObject>() == 48);
 
 #[derive(Debug, Clone, Copy)]
 pub enum IoAction {
@@ -70,33 +74,41 @@ pub enum IoAction {
 
 #[derive(Debug)]
 pub struct Heap {
-    pub objects: Vec<Option<HeapObject>>,
-    pub mark_bits: Vec<bool>,
-    pub free_list: Vec<u32>,
-    pub payloads: PayloadStore,
-    pub bytes: ByteStore,
-    pub allocations_since_gc: usize,
-    pub next_gc_at: usize,
-    pub gc_stress: bool,
-    pub gc_threshold_override: Option<usize>,
+    pub(crate) nursery: Vec<HeapObject>,
+    pub(crate) old: Vec<Option<HeapObject>>,
+    pub(crate) mark_bits: Vec<bool>,
+    pub(crate) free_list: Vec<u32>,
+    pub(crate) payloads: PayloadStore,
+    pub(crate) bytes: ByteStore,
+    pub(crate) nursery_slot_count: usize,
+    pub(crate) allocation_limit: usize,
+    pub(crate) promoted_since_major: usize,
+    pub(crate) next_major_at: usize,
+    pub(crate) gc_stress: bool,
+    pub(crate) minor_collections: usize,
+    pub(crate) major_collections: usize,
 }
 
 impl Default for Heap {
     fn default() -> Self {
         let gc_stress = gc_stress_enabled();
         let gc_threshold_override = gc_threshold_override();
-        let next_gc_at = initial_gc_threshold(gc_stress, gc_threshold_override);
+        let nursery_slot_count = initial_collection_threshold(gc_stress, gc_threshold_override);
 
         Self {
-            objects: Vec::new(),
+            nursery: Vec::with_capacity(nursery_slot_count),
+            old: Vec::new(),
             mark_bits: Vec::new(),
             free_list: Vec::new(),
             payloads: PayloadStore::default(),
             bytes: ByteStore::default(),
-            allocations_since_gc: 0,
-            next_gc_at,
+            nursery_slot_count,
+            allocation_limit: nursery_slot_count,
+            promoted_since_major: 0,
+            next_major_at: initial_major_threshold(gc_stress),
             gc_stress,
-            gc_threshold_override,
+            minor_collections: 0,
+            major_collections: 0,
         }
     }
 }
@@ -104,54 +116,96 @@ impl Default for Heap {
 impl Heap {
     #[inline]
     pub fn should_collect(&self) -> bool {
-        self.allocations_since_gc >= self.next_gc_at
+        self.nursery.len() >= self.allocation_limit
     }
 
-    pub fn reset_collection_accounting(&mut self, live: usize) {
-        self.allocations_since_gc = 0;
-        self.next_gc_at =
-            next_gc_threshold_after_collection(self.gc_stress, self.gc_threshold_override, live);
+    #[inline]
+    pub(crate) fn should_collect_major(&self) -> bool {
+        self.promoted_since_major >= self.next_major_at
+    }
+
+    #[inline]
+    pub(crate) fn is_nursery_id(&self, id: ObjId) -> bool {
+        (id.0 as usize) < self.nursery_slot_count
+    }
+
+    #[inline]
+    pub(crate) fn old_index(&self, id: ObjId) -> usize {
+        (id.0 as usize)
+            .checked_sub(self.nursery_slot_count)
+            .unwrap_or_else(|| solveig_base::ice!("nursery object id used as an old object id"))
     }
 
     #[inline]
     pub fn get(&self, id: ObjId) -> &HeapObject {
-        let idx = id.0 as usize;
-        debug_assert!(
-            self.objects.get(idx).is_some_and(Option::is_some),
-            "dangling heap ref {}",
-            id.0
-        );
-        // SAFETY: Value::Obj is only constructed from ids returned by Heap::alloc,
-        // and the debug assertion above checks that the slot is still live.
-        let slot = unsafe { self.objects.get_unchecked(idx) };
-        // SAFETY: The same invariant proves the live slot contains an object.
-        unsafe { slot.as_ref().unwrap_unchecked() }
+        let object = if self.is_nursery_id(id) {
+            self.nursery
+                .get(id.0 as usize)
+                .unwrap_or_else(|| solveig_base::ice!("dangling nursery heap ref {}", id.0))
+        } else {
+            self.old
+                .get(self.old_index(id))
+                .and_then(Option::as_ref)
+                .unwrap_or_else(|| solveig_base::ice!("dangling old-generation heap ref {}", id.0))
+        };
+
+        if matches!(object, HeapObject::Forwarded(_)) {
+            solveig_base::ice!(
+                "forwarding entry escaped minor collection for object {}",
+                id.0
+            );
+        }
+        object
     }
 
     #[inline]
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
-        self.allocations_since_gc += 1;
+        if self.nursery.len() >= self.nursery_slot_count {
+            solveig_base::ice!("nursery allocation bypassed its allocation-limit safe point");
+        }
+        if matches!(obj, HeapObject::Forwarded(_)) {
+            solveig_base::ice!("normal allocation attempted to publish a forwarding entry");
+        }
 
-        if let Some(id) = self.free_list.pop() {
-            let idx = id as usize;
+        let id = ObjId(
+            u32::try_from(self.nursery.len())
+                .unwrap_or_else(|_| solveig_base::ice!("nursery object id overflow")),
+        );
+        self.nursery.push(obj);
+        Value::Obj(id)
+    }
+
+    pub(crate) fn alloc_old(&mut self, obj: HeapObject) -> ObjId {
+        if matches!(obj, HeapObject::Forwarded(_)) {
+            solveig_base::ice!("old generation cannot contain a forwarding entry");
+        }
+
+        let old_index = if let Some(index) = self.free_list.pop() {
+            let index = index as usize;
             *self
-                .objects
-                .get_mut(idx)
-                .expect("ICE: heap free list object index out of bounds") = Some(obj);
+                .old
+                .get_mut(index)
+                .expect("ICE: old-generation free-list index out of bounds") = Some(obj);
             *self
                 .mark_bits
-                .get_mut(idx)
-                .expect("ICE: heap free list mark-bit index out of bounds") = false;
-            Value::Obj(ObjId(id))
+                .get_mut(index)
+                .expect("ICE: old-generation mark-bit index out of bounds") = false;
+            index
         } else {
-            let id = ObjId(
-                u32::try_from(self.objects.len())
-                    .unwrap_or_else(|_| solveig_base::ice!("heap object id overflow")),
-            );
-            self.objects.push(Some(obj));
+            let index = self.old.len();
+            self.old.push(Some(obj));
             self.mark_bits.push(false);
-            Value::Obj(id)
-        }
+            index
+        };
+
+        let raw = self
+            .nursery_slot_count
+            .checked_add(old_index)
+            .unwrap_or_else(|| solveig_base::ice!("old-generation object id overflow"));
+        ObjId(
+            u32::try_from(raw)
+                .unwrap_or_else(|_| solveig_base::ice!("old-generation object id overflow")),
+        )
     }
 
     #[inline(always)]
@@ -163,18 +217,30 @@ impl Heap {
         })
     }
 
-    pub fn clone_payload(&mut self, span: PayloadRef) -> PayloadRef {
-        self.payloads.alloc_clone(span)
+    pub fn clone_payload(&mut self, owner: ObjId, span: PayloadRef) -> PayloadRef {
+        let owner_is_nursery = self.is_nursery_id(owner);
+        self.payloads.alloc_nursery_clone(owner_is_nursery, span)
     }
 
     #[inline]
     pub fn payload_len(&self, span: &PayloadRef) -> usize {
-        PayloadStore::len(span)
+        span.len()
     }
 
     #[inline]
-    pub fn copy_payload_to_stack(&self, span: PayloadRef, stack: &mut [Value], dst_start: usize) {
-        let src = self.payloads.as_slice(span);
+    pub fn payload_slice(&self, owner: ObjId, span: PayloadRef) -> &[Value] {
+        self.payloads.as_slice(self.is_nursery_id(owner), span)
+    }
+
+    #[inline]
+    pub fn copy_payload_to_stack(
+        &self,
+        owner: ObjId,
+        span: PayloadRef,
+        stack: &mut [Value],
+        dst_start: usize,
+    ) {
+        let src = self.payload_slice(owner, span);
         let dst_end = dst_start + src.len();
         stack
             .get_mut(dst_start..dst_end)
@@ -188,47 +254,112 @@ impl Heap {
         stack: &mut Vec<Value>,
         n: usize,
     ) -> PayloadRef {
-        self.payloads.alloc_from_stack_tail(stack, n)
+        self.payloads.alloc_nursery_from_stack_tail(stack, n)
     }
 
     pub fn alloc_concat_payload_and_stack_tail(
         &mut self,
+        owner: Option<ObjId>,
         prefix: PayloadRef,
         stack: &mut Vec<Value>,
         suffix_len: usize,
     ) -> PayloadRef {
+        let owner_is_nursery = owner.map(|id| self.is_nursery_id(id));
         self.payloads
-            .alloc_concat_from_payload_and_stack_tail(prefix, stack, suffix_len)
+            .alloc_nursery_concat(owner_is_nursery, prefix, stack, suffix_len)
     }
 
-    pub fn free_object_payloads(&mut self, obj: &HeapObject) {
+    pub(crate) fn promote_payload(&mut self, span: PayloadRef) -> PayloadRef {
+        self.payloads.copy_nursery_to_old(span)
+    }
+
+    pub(crate) fn promote_bytes(&mut self, span: ByteRef) -> ByteRef {
+        self.bytes.copy_nursery_to_old(span)
+    }
+
+    pub(crate) fn free_old_object_payloads(&mut self, obj: &HeapObject) {
         match obj {
-            HeapObject::Closure { captures, .. } => self.payloads.free_span(*captures),
+            HeapObject::Closure { captures, .. } => self.payloads.free_old_span(*captures),
             HeapObject::PartialApp {
                 captures,
                 applied_args,
                 ..
             } => {
-                self.payloads.free_span(*captures);
-                self.payloads.free_span(*applied_args);
+                self.payloads.free_old_span(*captures);
+                self.payloads.free_old_span(*applied_args);
             }
-            HeapObject::PartialCtor { applied_args, .. } => self.payloads.free_span(*applied_args),
-            HeapObject::DataN { fields, .. } => self.payloads.free_span(*fields),
-            HeapObject::Str { bytes } => self.bytes.free_span(*bytes),
+            HeapObject::PartialCtor { applied_args, .. } => {
+                self.payloads.free_old_span(*applied_args);
+            }
+            HeapObject::DataN { fields, .. } => self.payloads.free_old_span(*fields),
+            HeapObject::Str { bytes } => self.bytes.free_old_span(*bytes),
             HeapObject::Data0 { .. }
             | HeapObject::Data1 { .. }
             | HeapObject::Data2 { .. }
             | HeapObject::IoAction(_) => {}
+            HeapObject::Forwarded(_) => {
+                solveig_base::ice!("forwarding entry reached old-generation payload freeing");
+            }
         }
     }
 
     pub fn alloc_str(&mut self, value: &str) -> Value {
-        let bytes = self.bytes.alloc(value.as_bytes());
+        let bytes = self.bytes.alloc_nursery(value.as_bytes());
         self.alloc(HeapObject::Str { bytes })
     }
 
-    pub fn str_value(&self, bytes: ByteRef) -> &str {
-        self.bytes.as_str(bytes)
+    pub fn str_value(&self, owner: ObjId, bytes: ByteRef) -> &str {
+        self.bytes.as_str(self.is_nursery_id(owner), bytes)
+    }
+
+    pub(crate) fn finish_minor_collection(&mut self, promoted: usize) {
+        self.nursery.clear();
+        self.payloads.clear_nursery();
+        self.bytes.clear_nursery();
+        self.allocation_limit = self.nursery_slot_count;
+        self.promoted_since_major = self
+            .promoted_since_major
+            .checked_add(promoted)
+            .unwrap_or_else(|| solveig_base::ice!("minor collection promotion count overflow"));
+        self.minor_collections += 1;
+    }
+
+    pub(crate) fn prepare_major_collection(&mut self) {
+        self.free_list.clear();
+    }
+
+    pub(crate) fn finish_major_collection(&mut self, live: usize) {
+        self.promoted_since_major = 0;
+        self.next_major_at = next_major_threshold_after_collection(self.gc_stress, live);
+        self.major_collections += 1;
+    }
+
+    #[cfg(debug_assertions)]
+    pub(crate) fn is_live(&self, id: ObjId) -> bool {
+        if self.is_nursery_id(id) {
+            self.nursery
+                .get(id.0 as usize)
+                .is_some_and(|object| !matches!(object, HeapObject::Forwarded(_)))
+        } else {
+            self.old
+                .get(self.old_index(id))
+                .is_some_and(Option::is_some)
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_collection_limits_for_test(
+        &mut self,
+        nursery_slot_count: usize,
+        next_major_at: usize,
+    ) {
+        if !self.nursery.is_empty() || !self.old.is_empty() {
+            solveig_base::ice!("test collection limits changed after heap allocation");
+        }
+        self.nursery_slot_count = nursery_slot_count;
+        self.allocation_limit = nursery_slot_count;
+        self.next_major_at = next_major_at;
+        self.nursery = Vec::with_capacity(nursery_slot_count);
     }
 }
 
@@ -245,24 +376,28 @@ fn gc_threshold_override() -> Option<usize> {
         .filter(|threshold| *threshold > 0)
 }
 
-fn initial_gc_threshold(gc_stress: bool, gc_threshold_override: Option<usize>) -> usize {
+fn initial_collection_threshold(gc_stress: bool, gc_threshold_override: Option<usize>) -> usize {
     gc_threshold_override.unwrap_or(if gc_stress {
-        DEFAULT_GC_STRESS_THRESHOLD
+        DEFAULT_GC_STRESS_SLOTS
     } else {
-        DEFAULT_GC_INITIAL_THRESHOLD
+        DEFAULT_NURSERY_SLOTS
     })
 }
 
-fn next_gc_threshold_after_collection(
-    gc_stress: bool,
-    gc_threshold_override: Option<usize>,
-    live: usize,
-) -> usize {
-    gc_threshold_override.unwrap_or(if gc_stress {
-        DEFAULT_GC_STRESS_THRESHOLD
+fn initial_major_threshold(gc_stress: bool) -> usize {
+    if gc_stress {
+        DEFAULT_GC_STRESS_SLOTS
     } else {
-        live.max(DEFAULT_GC_LIVE_FLOOR) * 4
-    })
+        DEFAULT_NURSERY_SLOTS
+    }
+}
+
+fn next_major_threshold_after_collection(gc_stress: bool, live: usize) -> usize {
+    if gc_stress {
+        DEFAULT_GC_STRESS_SLOTS
+    } else {
+        live.max(DEFAULT_MAJOR_LIVE_FLOOR) * 4
+    }
 }
 
 #[cfg(test)]
@@ -272,23 +407,24 @@ mod tests {
     #[test]
     fn gc_stress_uses_low_fixed_threshold_by_default() {
         assert_eq!(
-            initial_gc_threshold(true, None),
-            DEFAULT_GC_STRESS_THRESHOLD
+            initial_collection_threshold(true, None),
+            DEFAULT_GC_STRESS_SLOTS
         );
         assert_eq!(
-            next_gc_threshold_after_collection(true, None, 100_000),
-            DEFAULT_GC_STRESS_THRESHOLD
+            next_major_threshold_after_collection(true, 100_000),
+            DEFAULT_GC_STRESS_SLOTS
         );
     }
 
     #[test]
-    fn explicit_gc_threshold_overrides_stress_and_adaptive_thresholds() {
-        assert_eq!(initial_gc_threshold(true, Some(1)), 1);
-        assert_eq!(initial_gc_threshold(false, Some(512)), 512);
-        assert_eq!(next_gc_threshold_after_collection(true, Some(1), 100), 1);
+    fn explicit_gc_threshold_overrides_the_nursery_only() {
+        assert_eq!(initial_collection_threshold(true, Some(1)), 1);
+        assert_eq!(initial_collection_threshold(false, Some(512)), 512);
+        assert_eq!(initial_major_threshold(true), DEFAULT_GC_STRESS_SLOTS);
+        assert_eq!(initial_major_threshold(false), DEFAULT_NURSERY_SLOTS);
         assert_eq!(
-            next_gc_threshold_after_collection(false, Some(512), 100_000),
-            512
+            next_major_threshold_after_collection(false, 100_000),
+            400_000
         );
     }
 }
@@ -313,12 +449,14 @@ impl PayloadRef {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct BoundPrefix {
+    pub owner: Option<ObjId>,
     pub captures: PayloadRef,
     pub applied_args: PayloadRef,
 }
 
 impl BoundPrefix {
     pub const EMPTY: Self = Self {
+        owner: None,
         captures: PayloadRef { start: 0, end: 0 },
         applied_args: PayloadRef { start: 0, end: 0 },
     };
@@ -336,11 +474,219 @@ impl BoundPrefix {
 
 #[derive(Debug, Default)]
 pub struct PayloadStore {
-    pub values: Vec<Value>,
-    pub free: Vec<PayloadRef>,
-    pub bucket1: Vec<usize>,
-    pub bucket2: Vec<usize>,
-    pub bucket3: Vec<usize>,
+    nursery_values: Vec<Value>,
+    old_values: Vec<Value>,
+    old_free: Vec<PayloadRef>,
+    old_bucket1: Vec<usize>,
+    old_bucket2: Vec<usize>,
+    old_bucket3: Vec<usize>,
+}
+
+impl PayloadStore {
+    #[inline]
+    pub fn empty() -> PayloadRef {
+        PayloadRef { start: 0, end: 0 }
+    }
+
+    #[inline]
+    pub(crate) fn as_slice(&self, nursery: bool, span: PayloadRef) -> &[Value] {
+        let values = if nursery {
+            &self.nursery_values
+        } else {
+            &self.old_values
+        };
+        values
+            .get(span.start..span.end)
+            .expect("ICE: payload store span out of bounds")
+    }
+
+    #[inline]
+    pub(crate) fn old_value(&self, index: usize) -> Value {
+        *self
+            .old_values
+            .get(index)
+            .expect("ICE: old payload value index out of bounds")
+    }
+
+    #[inline]
+    pub(crate) fn set_old_value(&mut self, index: usize, value: Value) {
+        *self
+            .old_values
+            .get_mut(index)
+            .expect("ICE: old payload value index out of bounds") = value;
+    }
+
+    fn reserve_nursery_span(&mut self, len: usize) -> PayloadRef {
+        if len == 0 {
+            return Self::empty();
+        }
+        let start = self.nursery_values.len();
+        self.nursery_values.resize(start + len, Value::Unit);
+        PayloadRef {
+            start,
+            end: start + len,
+        }
+    }
+
+    fn take_old_free_span(&mut self, len: usize) -> Option<PayloadRef> {
+        let index = self.old_free.iter().position(|span| span.len() >= len)?;
+        let span = *self.old_free.get(index)?;
+        if span.len() == len {
+            self.old_free.swap_remove(index);
+            Some(span)
+        } else {
+            let result = PayloadRef {
+                start: span.start,
+                end: span.start + len,
+            };
+            *self.old_free.get_mut(index)? = PayloadRef {
+                start: span.start + len,
+                end: span.end,
+            };
+            Some(result)
+        }
+    }
+
+    fn reserve_old_span(&mut self, len: usize) -> PayloadRef {
+        if len == 0 {
+            return Self::empty();
+        }
+
+        let start = match len {
+            1 => self.old_bucket1.pop(),
+            2 => self.old_bucket2.pop(),
+            3 => self.old_bucket3.pop(),
+            _ => None,
+        };
+        if let Some(start) = start {
+            return PayloadRef {
+                start,
+                end: start + len,
+            };
+        }
+        if let Some(span) = self.take_old_free_span(len) {
+            return span;
+        }
+
+        let start = self.old_values.len();
+        self.old_values.resize(start + len, Value::Unit);
+        PayloadRef {
+            start,
+            end: start + len,
+        }
+    }
+
+    pub(crate) fn alloc_nursery_from_stack_tail(
+        &mut self,
+        stack: &mut Vec<Value>,
+        len: usize,
+    ) -> PayloadRef {
+        if len == 0 {
+            return Self::empty();
+        }
+        let stack_start = stack.len() - len;
+        let span = self.reserve_nursery_span(len);
+        let source = stack
+            .get(stack_start..)
+            .expect("ICE: stack payload source out of bounds");
+        self.nursery_values
+            .get_mut(span.start..span.end)
+            .expect("ICE: nursery payload destination out of bounds")
+            .copy_from_slice(source);
+        stack.truncate(stack_start);
+        span
+    }
+
+    pub(crate) fn alloc_nursery_clone(
+        &mut self,
+        source_is_nursery: bool,
+        source: PayloadRef,
+    ) -> PayloadRef {
+        if source.is_empty() {
+            return Self::empty();
+        }
+        let values = self.as_slice(source_is_nursery, source).to_vec();
+        let destination = self.reserve_nursery_span(values.len());
+        self.nursery_values
+            .get_mut(destination.start..destination.end)
+            .expect("ICE: nursery payload clone destination out of bounds")
+            .copy_from_slice(&values);
+        destination
+    }
+
+    pub(crate) fn alloc_nursery_concat(
+        &mut self,
+        source_is_nursery: Option<bool>,
+        prefix: PayloadRef,
+        stack: &mut Vec<Value>,
+        suffix_len: usize,
+    ) -> PayloadRef {
+        let prefix_values = if prefix.is_empty() {
+            Vec::new()
+        } else {
+            let Some(source_is_nursery) = source_is_nursery else {
+                solveig_base::ice!("non-empty payload prefix has no owning object");
+            };
+            self.as_slice(source_is_nursery, prefix).to_vec()
+        };
+        let total = prefix_values.len() + suffix_len;
+        if total == 0 {
+            return Self::empty();
+        }
+
+        let stack_start = stack.len() - suffix_len;
+        let suffix = stack
+            .get(stack_start..)
+            .expect("ICE: stack suffix source out of bounds")
+            .to_vec();
+        let destination = self.reserve_nursery_span(total);
+        let values = self
+            .nursery_values
+            .get_mut(destination.start..destination.end)
+            .expect("ICE: nursery payload concat destination out of bounds");
+        let split = prefix_values.len();
+        values
+            .get_mut(..split)
+            .expect("ICE: nursery payload prefix destination out of bounds")
+            .copy_from_slice(&prefix_values);
+        values
+            .get_mut(split..)
+            .expect("ICE: nursery payload suffix destination out of bounds")
+            .copy_from_slice(&suffix);
+        stack.truncate(stack_start);
+        destination
+    }
+
+    pub(crate) fn copy_nursery_to_old(&mut self, source: PayloadRef) -> PayloadRef {
+        if source.is_empty() {
+            return Self::empty();
+        }
+        let values = self
+            .nursery_values
+            .get(source.start..source.end)
+            .expect("ICE: promoted nursery payload span out of bounds")
+            .to_vec();
+        let destination = self.reserve_old_span(values.len());
+        self.old_values
+            .get_mut(destination.start..destination.end)
+            .expect("ICE: promoted old payload span out of bounds")
+            .copy_from_slice(&values);
+        destination
+    }
+
+    pub(crate) fn free_old_span(&mut self, span: PayloadRef) {
+        match span.len() {
+            0 => {}
+            1 => self.old_bucket1.push(span.start),
+            2 => self.old_bucket2.push(span.start),
+            3 => self.old_bucket3.push(span.start),
+            _ => self.old_free.push(span),
+        }
+    }
+
+    pub(crate) fn clear_nursery(&mut self) {
+        self.nursery_values.clear();
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -363,227 +709,114 @@ impl ByteRef {
 
 #[derive(Debug, Default)]
 pub struct ByteStore {
-    bytes: Vec<u8>,
-    free: Vec<ByteRef>,
+    nursery_bytes: Vec<u8>,
+    old_bytes: Vec<u8>,
+    old_free: Vec<ByteRef>,
 }
 
 impl ByteStore {
     #[inline]
-    pub fn empty() -> ByteRef {
+    fn empty() -> ByteRef {
         ByteRef { start: 0, end: 0 }
     }
 
     #[inline]
-    fn as_slice(&self, span: ByteRef) -> &[u8] {
-        self.bytes
+    fn as_slice(&self, nursery: bool, span: ByteRef) -> &[u8] {
+        let bytes = if nursery {
+            &self.nursery_bytes
+        } else {
+            &self.old_bytes
+        };
+        bytes
             .get(span.start..span.end)
             .expect("ICE: byte store span out of bounds")
     }
 
     #[inline]
-    pub fn as_str(&self, span: ByteRef) -> &str {
-        std::str::from_utf8(self.as_slice(span))
+    fn as_str(&self, nursery: bool, span: ByteRef) -> &str {
+        std::str::from_utf8(self.as_slice(nursery, span))
             .expect("ICE: Solveig heap string bytes must be valid UTF-8")
     }
 
-    fn take_free_span(&mut self, len: usize) -> Option<ByteRef> {
-        let idx = self.free.iter().position(|r| r.len() >= len)?;
-        let span = *self.free.get(idx)?;
-
-        if span.len() == len {
-            self.free.swap_remove(idx);
-            Some(span)
-        } else {
-            let out = ByteRef {
-                start: span.start,
-                end: span.start + len,
-            };
-            *self.free.get_mut(idx)? = ByteRef {
-                start: span.start + len,
-                end: span.end,
-            };
-            Some(out)
-        }
-    }
-
-    fn reserve_span(&mut self, len: usize) -> ByteRef {
+    fn reserve_nursery_span(&mut self, len: usize) -> ByteRef {
         if len == 0 {
             return Self::empty();
         }
-
-        if let Some(span) = self.take_free_span(len) {
-            return span;
-        }
-
-        let start = self.bytes.len();
-        self.bytes.resize(start + len, 0);
+        let start = self.nursery_bytes.len();
+        self.nursery_bytes.resize(start + len, 0);
         ByteRef {
             start,
             end: start + len,
         }
     }
 
-    pub fn alloc(&mut self, bytes: &[u8]) -> ByteRef {
-        let span = self.reserve_span(bytes.len());
-
-        if !span.is_empty() {
-            self.bytes
-                .get_mut(span.start..span.end)
-                .expect("ICE: byte store allocation span out of bounds")
-                .copy_from_slice(bytes);
-        }
-
-        span
-    }
-
-    pub fn free_span(&mut self, span: ByteRef) {
-        if !span.is_empty() {
-            self.free.push(span);
-        }
-    }
-}
-
-impl PayloadStore {
-    #[inline]
-    pub fn empty() -> PayloadRef {
-        PayloadRef { start: 0, end: 0 }
-    }
-
-    #[inline]
-    pub fn len(span: &PayloadRef) -> usize {
-        span.end - span.start
-    }
-
-    #[inline]
-    pub fn as_slice(&self, span: PayloadRef) -> &[Value] {
-        self.values
-            .get(span.start..span.end)
-            .expect("ICE: payload store span out of bounds")
-    }
-
-    pub fn take_free_span(&mut self, len: usize) -> Option<PayloadRef> {
-        let idx = self.free.iter().position(|r| Self::len(r) >= len)?;
-        let span = *self.free.get(idx)?;
-        if Self::len(&span) == len {
-            self.free.swap_remove(idx);
+    fn take_old_free_span(&mut self, len: usize) -> Option<ByteRef> {
+        let index = self.old_free.iter().position(|span| span.len() >= len)?;
+        let span = *self.old_free.get(index)?;
+        if span.len() == len {
+            self.old_free.swap_remove(index);
             Some(span)
         } else {
-            let out = PayloadRef {
+            let result = ByteRef {
                 start: span.start,
                 end: span.start + len,
             };
-            *self.free.get_mut(idx)? = PayloadRef {
+            *self.old_free.get_mut(index)? = ByteRef {
                 start: span.start + len,
                 end: span.end,
             };
-            Some(out)
+            Some(result)
         }
     }
 
-    pub fn reserve_span(&mut self, len: usize) -> PayloadRef {
+    fn reserve_old_span(&mut self, len: usize) -> ByteRef {
         if len == 0 {
             return Self::empty();
         }
-
-        let start = match len {
-            1 => self.bucket1.pop(),
-            2 => self.bucket2.pop(),
-            3 => self.bucket3.pop(),
-            _ => None,
-        };
-
-        if let Some(start) = start {
-            return PayloadRef {
-                start,
-                end: start + len,
-            };
-        }
-
-        if let Some(span) = self.take_free_span(len) {
+        if let Some(span) = self.take_old_free_span(len) {
             return span;
         }
-
-        let start = self.values.len();
-        self.values.resize(start + len, Value::Unit);
-        PayloadRef {
+        let start = self.old_bytes.len();
+        self.old_bytes.resize(start + len, 0);
+        ByteRef {
             start,
             end: start + len,
         }
     }
 
-    pub fn alloc_from_stack_tail(&mut self, stack: &mut Vec<Value>, n: usize) -> PayloadRef {
-        if n == 0 {
-            return Self::empty();
-        }
-
-        let stack_start = stack.len() - n;
-        let span = self.reserve_span(n);
-        let src = stack
-            .get(stack_start..)
-            .expect("ICE: stack payload source out of bounds");
-        self.values
+    fn alloc_nursery(&mut self, bytes: &[u8]) -> ByteRef {
+        let span = self.reserve_nursery_span(bytes.len());
+        self.nursery_bytes
             .get_mut(span.start..span.end)
-            .expect("ICE: payload store allocation span out of bounds")
-            .copy_from_slice(src);
-        stack.truncate(stack_start);
+            .expect("ICE: nursery byte allocation span out of bounds")
+            .copy_from_slice(bytes);
         span
     }
 
-    pub fn alloc_clone(&mut self, src: PayloadRef) -> PayloadRef {
-        let len = Self::len(&src);
-        if len == 0 {
+    fn copy_nursery_to_old(&mut self, source: ByteRef) -> ByteRef {
+        if source.is_empty() {
             return Self::empty();
         }
-
-        let dst = self.reserve_span(len);
-        self.values.copy_within(src.start..src.end, dst.start);
-        dst
+        let bytes = self
+            .nursery_bytes
+            .get(source.start..source.end)
+            .expect("ICE: promoted nursery byte span out of bounds")
+            .to_vec();
+        let destination = self.reserve_old_span(bytes.len());
+        self.old_bytes
+            .get_mut(destination.start..destination.end)
+            .expect("ICE: promoted old byte span out of bounds")
+            .copy_from_slice(&bytes);
+        destination
     }
 
-    pub fn alloc_concat_from_payload_and_stack_tail(
-        &mut self,
-        prefix: PayloadRef,
-        stack: &mut Vec<Value>,
-        suffix_len: usize,
-    ) -> PayloadRef {
-        let prefix_len = Self::len(&prefix);
-        let total = prefix_len + suffix_len;
-
-        if total == 0 {
-            return Self::empty();
+    fn free_old_span(&mut self, span: ByteRef) {
+        if !span.is_empty() {
+            self.old_free.push(span);
         }
-
-        let dst = self.reserve_span(total);
-
-        if prefix_len > 0 {
-            self.values.copy_within(prefix.start..prefix.end, dst.start);
-        }
-
-        if suffix_len > 0 {
-            let stack_start = stack.len() - suffix_len;
-            let dst_start = dst.start + prefix_len;
-            let dst_end = dst_start + suffix_len;
-            let src = stack
-                .get(stack_start..)
-                .expect("ICE: stack suffix source out of bounds");
-            self.values
-                .get_mut(dst_start..dst_end)
-                .expect("ICE: payload concat destination out of bounds")
-                .copy_from_slice(src);
-            stack.truncate(stack_start);
-        }
-
-        dst
     }
 
-    pub fn free_span(&mut self, span: PayloadRef) {
-        let len = Self::len(&span);
-        match len {
-            0 => {}
-            1 => self.bucket1.push(span.start),
-            2 => self.bucket2.push(span.start),
-            3 => self.bucket3.push(span.start),
-            _ => self.free.push(span),
-        }
+    fn clear_nursery(&mut self) {
+        self.nursery_bytes.clear();
     }
 }
