@@ -1,0 +1,199 @@
+# Solveig VM
+
+This document records the runtime contracts that later VM work must preserve.
+Task I3 establishes the object-layout and relocation contract before task I4
+changes the collector. Task I9 will expand this into the complete VM guide.
+
+## Generational heap layout
+
+The heap uses fixed-size, index-addressed object slots. It does not expose raw
+pointers and the collector is written entirely in safe Rust.
+
+The object arena is split into two ranges:
+
+- Nursery ids are in `0..nursery_slot_count`. The nursery is a
+  `Vec<HeapObject>` with capacity `nursery_slot_count`; its length is the bump
+  index. Allocation checks the limit, then pushes one object.
+- Old-generation ids start at `nursery_slot_count`. Subtracting that base gives
+  an index into a `Vec<Option<HeapObject>>`; major collection reuses vacant old
+  slots through a free list.
+
+The range boundary belongs to `Heap`; `ObjId` remains one opaque `u32` index.
+No generation tag or other data is packed into its bits. Code outside the heap
+must ask the heap to resolve an id rather than depending on either range.
+
+The nursery slot count is fixed when a heap is created. A minor collection
+clears the nursery only after it has rewritten all reachable references. Old
+objects do not move during I4: major collection remains mark-sweep, without
+compaction.
+
+### Measured layout
+
+The I3 baseline was measured on `aarch64-apple-darwin` with:
+
+```text
+RUSTC_BOOTSTRAP=1 cargo rustc -p solveig-vm --lib -- -Zprint-type-sizes
+```
+
+| Type or variant | Size |
+|---|---:|
+| `HeapObject` | 48 bytes, alignment 8 |
+| `Option<HeapObject>` | 48 bytes |
+| `IoAction` | 40 bytes, alignment 8 |
+| `Value` | 16 bytes, alignment 8 |
+| `ObjId` | 4 bytes, alignment 4 |
+| `PayloadRef` / `ByteRef` | 16 bytes each, alignment 8 |
+| `HeapObject::PartialApp` payload plus discriminant | 46 bytes |
+| `HeapObject::IoAction` payload plus discriminant | 46 bytes |
+| `HeapObject::Data2` payload plus discriminant | 38 bytes |
+
+`PartialApp` and `IoAction`, not `Data2`, currently determine the 48-byte
+uniform slot size. Adding `Forwarded(ObjId)` does not widen it. Nursery sizing
+must nevertheless use `size_of::<HeapObject>()`; these measurements describe
+the current target and are not a portable constant.
+
+The representation intentionally keeps `Data0`, `Data1`, and `Data2` fields in
+the object slot. `DataN`, `Closure`, `PartialApp`, and `PartialCtor` keep their
+variable-length values in `PayloadStore`. `Str` keeps its UTF-8 bytes in
+`ByteStore`. The inline cases therefore take one object lookup; the side-store
+cases take a second lookup. Changing that split requires Phase O profile data.
+
+## Forwarding and minor collection
+
+`HeapObject` gains a `Forwarded(ObjId)` variant. A forwarding entry is valid
+only while a minor collection is running and only in a vacated nursery slot.
+Normal object lookup must treat observing one as an internal invariant failure.
+The old generation must never contain a forwarding entry after collection.
+
+When the allocation limit fails, minor collection proceeds as follows:
+
+1. Visit every root mutably. For each nursery `ObjId`, copy its object into an
+   old-generation slot, replace the nursery slot with `Forwarded(new_id)`,
+   rewrite the root, and enqueue the promoted object. If the nursery slot is
+   already forwarded, reuse its recorded destination.
+2. Drain the promoted-object worklist. Rewrite every direct `Value` field and
+   every value in a copied payload by the same evacuation operation. This
+   transitively promotes the reachable nursery graph. Young-to-old edges need
+   no special treatment.
+3. Scan the remembered set described below. It is empty for today's immutable
+   heap objects, but the collector boundary must support it before channels add
+   mutable heap state.
+4. After no nursery reference remains in roots, promoted objects, or remembered
+   old objects, clear the nursery object, payload, and byte arenas together.
+5. If the old-generation threshold is also due, run the existing mark-sweep
+   major collection now, while the nursery is empty.
+
+The forwarding variant is preferred over a parallel map because object state
+and forwarding state cannot diverge. A second path reaching the same survivor
+always sees the forwarding entry and copies neither the object nor its side
+payload twice. This is the standard forwarding-pointer copying algorithm from
+Jones, Hosking, and Moss, *The Garbage Collection Handbook*, chapter 4; the
+generational organization follows Appel, “Simple generational garbage
+collection and fast allocation” (1989).
+
+## `ObjId` lifetime
+
+> An `ObjId` identifies a slot in the current heap epoch, not a stable object
+> identity. Any allocation is a possible collection point. Caching an `ObjId`
+> or a `Value::Obj` across a possible allocation without putting it in `Roots`
+> is a correctness bug.
+
+Minor collection rewrites every live nursery id to its new old-generation id.
+The cleared nursery indices are reused by the next epoch, so a stale nursery id
+can silently name an unrelated new object rather than merely becoming invalid.
+Old-generation ids happen not to move in I4, but callers must not specialize
+their behavior around that fact. Equality and hashing of `ObjId` are meaningful
+only inside a non-allocating epoch. Long-lived runtime identity uses its own
+typed ids, such as `ProcessId`; it never uses an object location.
+
+Collector entry is an allocation safe point. Before entering it, interpreter
+temporaries that contain `Value`s must have been published into the active
+`Process` or its `temporary_roots`. The one `Roots` implementation then rewrites
+all of these locations:
+
+- the active process and every inactive process: value stack, binding buffer,
+  temporary roots, finished result, current IO action, and `IoBind`
+  continuations;
+- every `GlobalSlot::Evaluated` value;
+- every nullary-constructor-cache value and both Boolean cache values.
+
+`Roots` must expose mutable traversal for relocation and remain the sole root
+enumeration used by minor collection, major collection, and the debug
+post-collection heap walk. Adding any field that can retain a `Value` across an
+allocation requires adding it there in the same change. Publishing a local copy
+into `temporary_roots` does not rewrite the local itself: after a possible
+collection, code must reload the value from its rewritten root slot before
+using it. No allocation path, including builtins that allocate more than one
+object, may bypass this safe-point and reload discipline.
+
+## Payload and byte arenas
+
+`PayloadStore` and `ByteStore` are generational too. Each owns a bump-appended
+nursery arena and a reclaiming old arena. A non-empty `PayloadRef` or `ByteRef`
+is owned by exactly one heap object, as required already by major collection's
+per-object freeing. Empty spans are the only shared spans.
+
+Side-store references remain ranges rather than independent object identities.
+Their generation is the generation of their owning heap object; a bare side
+reference is not self-describing. Heap APIs that read a span must therefore
+retain or receive the owning object's location. A side reference copied into a
+Rust local is valid only until the next possible allocation.
+
+Object construction appends the side payload first and publishes its nursery
+object immediately afterward, with no collection point between those actions.
+When an object is promoted, the collector copies each of its non-empty payload
+spans into the corresponding old arena and rewrites the promoted header to the
+new range. `PayloadStore` values are evacuated while being copied; `ByteStore`
+bytes are copied exactly. Once all survivor headers refer to old spans, all
+three nursery arenas can be reset in constant time. Major collection continues
+to return the old spans of dead objects to their old-arena free lists.
+
+Keeping the stores generational is mandatory: resetting only object slots would
+leave side payloads growing without bound, while resetting side stores without
+rewriting promoted headers would create dangling ranges.
+
+## Write-barrier inventory — any task adding mutation must add its barrier here
+
+A remembered-set barrier is required whenever a mutable old heap object can be
+made to reference a nursery object. Missing an entry from this inventory is a
+collector correctness bug; chapter 9 of *The Garbage Collection Handbook* is
+the reference for the barrier and remembered-set discipline.
+
+The I3/I4 inventory is:
+
+- Ordinary heap objects are immutable after publication. Their remembered-set
+  mutation sites are therefore empty.
+- Publishing a thunk result changes `GlobalSlot` from `Evaluating` to
+  `Evaluated(Value)`. Globals are scanned on every minor collection as roots,
+  so this site needs no remembered-set insertion today, but publication must
+  remain a single audited operation and is part of the barrier inventory.
+- Process stacks, process status, continuations, constructor caches, and Boolean
+  caches are roots rather than old heap objects. Their mutable `Value` slots are
+  rewritten by `Roots` and do not enter the remembered set.
+- Phase J's channel state is the first planned mutable heap object. J1 must add
+  its mutation operations here and insert an old channel into the remembered
+  set whenever it receives a nursery value.
+
+Promotion itself cannot create an old-to-young edge because the collector
+evacuates all children before completing the minor collection. New immutable
+objects may point from young to old, which needs no barrier.
+
+## Collector invariants for I4
+
+- Allocation and collection use indices and checked `Vec` access; the collector
+  contains no raw pointers or `unsafe` blocks.
+- Outside minor collection, every live `ObjId` resolves to an ordinary object,
+  and no `Forwarded` variant is observable.
+- After minor collection, no root, old object field, or old payload value points
+  into the nursery ranges.
+- A live object's non-empty side spans exist in the same generation as their
+  owner and are owned by that object alone.
+- Major collection operates after nursery evacuation and reuses mark-sweep for
+  old slots; I4 does not compact the old generation.
+- `SOLVEIG_GC_STRESS=1` uses the same collector at a low fixed threshold, while
+  `SOLVEIG_GC_THRESHOLD=1` remains the deliberate collect-at-every-allocation
+  debugging mode.
+
+These invariants preserve precise rooting and deterministic behavior while
+containing all representation knowledge inside `solveig-vm`'s heap and GC
+modules.
