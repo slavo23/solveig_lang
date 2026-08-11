@@ -88,7 +88,10 @@ impl Parser<'_> {
                 parser.expect_ident_span()?;
             }
 
-            parser.expect(&Token::Eq)?;
+            if !parser.at(&Token::Eq) {
+                return Ok(());
+            }
+            parser.advance();
 
             loop {
                 if parser.at(&Token::Pipe) {

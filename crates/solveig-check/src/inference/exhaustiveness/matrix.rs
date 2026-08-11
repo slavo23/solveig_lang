@@ -33,12 +33,8 @@ impl ExhaustivenessChecker<'_> {
         vector: &[Pat],
         types: &[Ty],
     ) -> Option<Vec<Witness>> {
-        if matrix.is_empty() {
-            return Some(vec![Witness::Wild; vector.len()]);
-        }
-
         if vector.is_empty() {
-            return None;
+            return matrix.is_empty().then(Vec::new);
         }
 
         let (first_pat, vector_tail) = vector.split_first()?;

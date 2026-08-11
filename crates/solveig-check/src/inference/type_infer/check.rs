@@ -119,6 +119,10 @@ impl TypeChecker<'_> {
                 Ok((gamma, elaborated))
             }
 
+            (TermExpr::Case(scrutinee, arms), _) if arms.is_empty() => {
+                self.solve_empty_case_checking(ctx, scrutinee, span, expected_type)
+            }
+
             (TermExpr::Hole, _) => {
                 self.report_hole(&ctx, span.clone(), expected_type);
                 let elaborated = elab_node(TermExpr::Hole, span, expected_type.clone());

@@ -28,6 +28,12 @@ fn check_case_table_driven_witnesses() {
             expected_missing: vec![],
         },
         ExhaustivenessCase {
+            name: "bool_empty",
+            scrutinee_type: bool_ty(),
+            patterns: vec![],
+            expected_missing: vec!["True", "False"],
+        },
+        ExhaustivenessCase {
             name: "bool_missing_false",
             scrutinee_type: bool_ty(),
             patterns: vec![con("True", vec![])],
@@ -72,6 +78,12 @@ fn check_case_table_driven_witnesses() {
             name: "wildcard_first_covers_all",
             scrutinee_type: maybe_ty(bool_ty()),
             patterns: vec![wild(), con("Nothing", vec![]), con("Just", vec![wild()])],
+            expected_missing: vec![],
+        },
+        ExhaustivenessCase {
+            name: "empty_type_needs_no_arms",
+            scrutinee_type: never_ty(),
+            patterns: vec![],
             expected_missing: vec![],
         },
     ];
@@ -311,6 +323,13 @@ fn test_constructor_fixtures() -> TestConstructorFixtures {
 
     let data_defs = vec![
         DataDefinition {
+            name: "Never".to_string(),
+            short_name: "Never".to_string(),
+            ty_params: Vec::new(),
+            tycon_kind: Kind::Star,
+            constructors: Vec::new(),
+        },
+        DataDefinition {
             name: "Bool".to_string(),
             short_name: "Bool".to_string(),
             ty_params: Vec::new(),
@@ -504,6 +523,10 @@ fn int_ty() -> Ty {
     tycon("Int")
 }
 
+fn never_ty() -> Ty {
+    tycon("Never")
+}
+
 fn unary_kind() -> Kind {
     Kind::make_arrow(Kind::Star, Kind::Star)
 }
@@ -535,6 +558,7 @@ fn tycon_id(name: &str) -> TyConId {
         "Maybe" => TyConId(100),
         "List" => TyConId(101),
         "Pair" => TyConId(102),
+        "Never" => TyConId(103),
         other => solveig_base::ice!("unknown test type constructor `{other}`"),
     }
 }

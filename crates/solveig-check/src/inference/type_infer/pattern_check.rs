@@ -144,6 +144,42 @@ impl TypeChecker<'_> {
         Ok((theta, elaborated, final_type))
     }
 
+    fn solve_empty_case_checking(
+        &mut self,
+        ctx: Context,
+        scrutinee: &TermExprNode<Span>,
+        span: Span,
+        expected_type: &Ty,
+    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>)> {
+        let (gamma, elaborated_scrutinee, scrutinee_type) =
+            self.solve_inference(ctx, scrutinee)?;
+        let scrutinee_type = self.zonk_type(&gamma.apply(&scrutinee_type));
+
+        let diagnostics = exhaustiveness::check_case(
+            self.file,
+            self.tables.tycon_table,
+            self.tables.ctor_table,
+            self.pretty_tables(),
+            &scrutinee_type,
+            &[],
+            span.clone(),
+        );
+        self.warnings.extend(diagnostics.warnings);
+
+        if let Some(error) = diagnostics.error {
+            return Err(error);
+        }
+
+        let result_type = gamma.apply(expected_type);
+        let elaborated = elab_node(
+            TermExpr::Case(Box::new(elaborated_scrutinee), Vec::new()),
+            span,
+            result_type,
+        );
+
+        Ok((gamma, elaborated))
+    }
+
     fn solve_match_inference(
         &mut self,
         ctx: Context,

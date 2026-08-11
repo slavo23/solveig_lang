@@ -90,3 +90,19 @@ fn function_definition_pattern_parameters_stay_separate() {
     assert!(matches!(params[0].0, SurfacePattern::Lit(_)));
     assert!(matches!(params[1].0, SurfacePattern::Var(_)));
 }
+
+#[test]
+fn constructor_less_data_definition_lowers_with_no_constructors() {
+    let parsed = lower_test_source("data Never\n");
+    let SurfaceDefinition::DataDef {
+        ty_params,
+        constructors,
+        ..
+    } = &parsed.defs[0].0
+    else {
+        panic!("expected a data definition");
+    };
+
+    assert!(ty_params.is_empty());
+    assert!(constructors.is_empty());
+}
