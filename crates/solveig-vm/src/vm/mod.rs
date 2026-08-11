@@ -4,7 +4,7 @@
 use crate::bytecode::{BytecodeProgram, lower_to_bytecode};
 use crate::display::DisplayValue;
 use crate::heap::{Heap, HeapObject};
-use crate::values::{BoolCache, Continuation, GlobalSlot, NullaryCtorCache, Value};
+use crate::values::{BoolCache, Continuation, NullaryCtorCache, Value};
 use la_arena::{Arena, Idx, RawIdx};
 use solveig_ast::ast::CtorRuntimeInfo;
 use solveig_lower::closure_ir::CCProgram;
@@ -54,6 +54,18 @@ pub struct Runtime {
     run_queue: VecDeque<ProcessId>,
 }
 
+enum GlobalSlot {
+    Thunk {
+        chunk: usize,
+    },
+    Evaluating {
+        owner: ProcessId,
+        waiters: Vec<ProcessId>,
+    },
+    Evaluated(Value),
+    Failed(RuntimeError),
+}
+
 /// Describes whether a process may run or why it has stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcStatus {
@@ -79,6 +91,12 @@ pub struct RequestId(u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GlobalIndex(usize);
 
+enum GlobalEval {
+    Evaluated(Value),
+    Entered,
+    Blocked,
+}
+
 /// Reports why one interpreter step returned to its scheduler.
 ///
 /// This mirrors GHC's scheduler return reasons; see the AOSA GHC runtime
@@ -99,6 +117,7 @@ pub(crate) struct Interpreter<'a> {
     pub(crate) nullary_ctors: &'a mut NullaryCtorCache,
     pub(crate) bools: &'a mut BoolCache,
     inactive_processes: &'a mut Arena<Process>,
+    run_queue: &'a mut VecDeque<ProcessId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -227,6 +246,52 @@ impl Runtime {
         self.processes[id] = process;
     }
 
+    fn record_process_outcome(&mut self, process: &mut Process, outcome: &StepOutcome) {
+        process.record_outcome(outcome);
+        if let StepOutcome::Failed(error) = outcome {
+            self.fail_owned_blackholes(process, error);
+            process.io_current = None;
+            process.continuations.clear();
+        }
+    }
+
+    fn fail_owned_blackholes(&mut self, owner: &Process, error: &RuntimeError) {
+        let mut owners = vec![(owner.id, owned_globals(owner))];
+
+        while let Some((owner_id, globals)) = owners.pop() {
+            for global_index in globals {
+                let Some(slot) = self.globals.get_mut(global_index.0) else {
+                    solveig_base::ice!("failed process owns an out-of-bounds global blackhole");
+                };
+                let waiters = match slot {
+                    GlobalSlot::Evaluating { owner, waiters } if *owner == owner_id => {
+                        std::mem::take(waiters)
+                    }
+                    GlobalSlot::Evaluating { .. }
+                    | GlobalSlot::Thunk { .. }
+                    | GlobalSlot::Evaluated(_)
+                    | GlobalSlot::Failed(_) => {
+                        solveig_base::ice!("failed process lost ownership of its global blackhole")
+                    }
+                };
+                *slot = GlobalSlot::Failed(error.clone());
+
+                for waiter_id in waiters {
+                    let waiter = &mut self.processes[waiter_id];
+                    if waiter.status != ProcStatus::Blocked(BlockReason::Blackhole(global_index)) {
+                        solveig_base::ice!(
+                            "global blackhole waiter has a mismatched process status"
+                        );
+                    }
+                    owners.push((waiter_id, owned_globals(waiter)));
+                    waiter.io_current = None;
+                    waiter.continuations.clear();
+                    waiter.status = ProcStatus::Failed(error.clone());
+                }
+            }
+        }
+    }
+
     fn into_eval_result(self, root: Value) -> EvalResult {
         EvalResult {
             root,
@@ -245,7 +310,7 @@ impl<'a> Interpreter<'a> {
             nullary_ctors,
             bools,
             processes,
-            run_queue: _,
+            run_queue,
         } = runtime;
         Self {
             process,
@@ -255,6 +320,7 @@ impl<'a> Interpreter<'a> {
             nullary_ctors,
             bools,
             inactive_processes: processes,
+            run_queue,
         }
     }
 }
@@ -281,8 +347,11 @@ fn run(runtime: &mut Runtime, process: &mut Process) -> StepOutcome {
         let program = interpreter.program;
         interpreter.dispatch(program)
     };
-    let outcome = StepOutcome::from(result);
-    process.record_outcome(&outcome);
+    let outcome = match result {
+        Ok(value) => StepOutcome::Finished(value),
+        Err(outcome) => outcome,
+    };
+    runtime.record_process_outcome(process, &outcome);
     outcome
 }
 
@@ -310,15 +379,20 @@ fn evaluate_entry(runtime: &mut Runtime, entry: usize) -> (ProcessId, StepOutcom
         )
     };
     let outcome = match started {
-        Ok(Some(value)) => {
+        Ok(GlobalEval::Evaluated(value)) => {
             let outcome = StepOutcome::Finished(value);
-            process.record_outcome(&outcome);
+            runtime.record_process_outcome(&mut process, &outcome);
             outcome
         }
-        Ok(None) => run(runtime, &mut process),
+        Ok(GlobalEval::Entered) => run(runtime, &mut process),
+        Ok(GlobalEval::Blocked) => {
+            let outcome = StepOutcome::Blocked;
+            runtime.record_process_outcome(&mut process, &outcome);
+            outcome
+        }
         Err(error) => {
             let outcome = StepOutcome::Failed(error);
-            process.record_outcome(&outcome);
+            runtime.record_process_outcome(&mut process, &outcome);
             outcome
         }
     };
@@ -339,19 +413,33 @@ fn perform_process_io(
         let program = interpreter.program;
         interpreter.perform_io(program, action, io)
     };
-    let outcome = StepOutcome::from(result);
-    process.record_outcome(&outcome);
+    let outcome = match result {
+        Ok(value) => StepOutcome::Finished(value),
+        Err(outcome) => outcome,
+    };
+    runtime.record_process_outcome(&mut process, &outcome);
     runtime.restore_process(process);
     outcome
 }
 
-impl From<Result<Value, RuntimeError>> for StepOutcome {
-    fn from(result: Result<Value, RuntimeError>) -> Self {
-        match result {
-            Ok(value) => Self::Finished(value),
-            Err(error) => Self::Failed(error),
-        }
+impl From<RuntimeError> for StepOutcome {
+    fn from(error: RuntimeError) -> Self {
+        Self::Failed(error)
     }
+}
+
+fn owned_globals(process: &Process) -> Vec<GlobalIndex> {
+    process
+        .continuations
+        .iter()
+        .filter_map(|continuation| match continuation {
+            Continuation::PublishGlobalThenHalt { global_index }
+            | Continuation::PublishGlobalThenResume { global_index, .. } => {
+                Some(GlobalIndex(*global_index))
+            }
+            Continuation::Halt | Continuation::CallerFrame { .. } | Continuation::IoBind(_) => None,
+        })
+        .collect()
 }
 
 fn outcome_value(outcome: StepOutcome) -> Result<Value, RuntimeError> {

@@ -166,7 +166,7 @@ impl Interpreter<'_> {
         self.pc = else_pc as usize;
     }
 
-    pub(super) fn dispatch(&mut self, program: &BytecodeProgram) -> Result<Value, RuntimeError> {
+    pub(super) fn dispatch(&mut self, program: &BytecodeProgram) -> Result<Value, StepOutcome> {
         let mut code = &program.chunk(self.chunk).code;
         loop {
             // SAFETY: The bytecode emitter and jump patching only produce PCs
@@ -198,7 +198,18 @@ impl Interpreter<'_> {
                     self.store(slot, val);
                 }
                 Instr::LoadGlobal(index) => {
-                    self.push_global_or_start_eval(program, index as usize)?;
+                    let index = index as usize;
+                    let continuation = Continuation::PublishGlobalThenResume {
+                        global_index: index,
+                        chunk: self.chunk,
+                        pc: self.pc,
+                        frame_base: self.frame_base,
+                    };
+                    match self.start_global_eval(program, index, continuation)? {
+                        GlobalEval::Evaluated(value) => self.push(value),
+                        GlobalEval::Entered => {}
+                        GlobalEval::Blocked => return Err(StepOutcome::Blocked),
+                    }
                     code = &program.chunk(self.chunk).code;
                 }
                 Instr::PushCtorFn { tag, arity } => {
@@ -357,7 +368,7 @@ impl Interpreter<'_> {
                         .expect("ICE: bytecode match instruction references missing table");
                     self.dispatch_match(program, &table.arms, scrutinee, table.else_target);
                 }
-                Instr::Trap(code) => return Err(RuntimeError::trap(code)),
+                Instr::Trap(code) => return Err(RuntimeError::trap(code).into()),
             }
         }
     }

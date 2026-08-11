@@ -164,9 +164,10 @@ The I3/I4 inventory is:
 - Ordinary heap objects are immutable after publication. Their remembered-set
   mutation sites are therefore empty.
 - Publishing a thunk result changes `GlobalSlot` from `Evaluating` to
-  `Evaluated(Value)`. Globals are scanned on every minor collection as roots,
-  so this site needs no remembered-set insertion today, but publication must
-  remain a single audited operation and is part of the barrier inventory.
+  `Evaluated(Value)` and wakes its blackhole waiters. Globals are scanned on
+  every minor collection as roots, so this site needs no remembered-set
+  insertion today, but publication must remain a single audited operation and
+  is part of the barrier inventory. Publishing failure stores no heap value.
 - Process stacks, process status, continuations, constructor caches, and Boolean
   caches are roots rather than old heap objects. Their mutable `Value` slots are
   rewritten by `Roots` and do not enter the remembered set.
@@ -177,6 +178,31 @@ The I3/I4 inventory is:
 Promotion itself cannot create an old-to-young edge because the collector
 evacuates all children before completing the minor collection. New immutable
 objects may point from young to old, which needs no barrier.
+
+## Global thunk blackholes
+
+A process that starts evaluating a global claims its slot eagerly as
+`Evaluating { owner, waiters }`. This follows the eager-blackholing protocol in
+Marlow, Peyton Jones, and Singh, “Runtime Support for Multicore Haskell” (ICFP
+2009), sections 8 and 8.1.
+
+- The owner reaching the same slot again is a genuine global cycle and fails
+  with `RuntimeError`.
+- A different process reaching the slot becomes
+  `Blocked(Blackhole(GlobalIndex))` and remains parked at its `LoadGlobal`
+  continuation point.
+- Successful publication changes the slot to `Evaluated(Value)`, pushes that
+  value onto every waiter’s stack, and places the waiters back on the FIFO run
+  queue.
+- Owner failure changes every global it was evaluating to `Failed(error)` and
+  transfers the same failure to all waiters. This propagation is transitive:
+  if a failed waiter owned an outer global, that blackhole and its waiters fail
+  too. Later attempts to force the global observe the cached failure rather
+  than retrying or blocking forever.
+
+The process continuation stack is the ownership record: each live
+`PublishGlobalThen*` frame identifies one global the process must either
+publish or fail. There is no second per-process blackhole stack.
 
 ## Collector invariants for I4
 

@@ -5,7 +5,7 @@ use super::*;
 use crate::builtins::{self, VmCtx};
 use crate::bytecode::{BytecodeProgram, ChunkKind};
 use crate::heap::{BoundPrefix, HeapObject, PayloadRef, PayloadStore};
-use crate::values::{Continuation, GlobalSlot, ObjId, Value};
+use crate::values::{Continuation, ObjId, Value};
 
 impl Interpreter<'_> {
     #[inline(always)]
@@ -95,53 +95,48 @@ impl Interpreter<'_> {
         self.continuations.push(continuation);
     }
 
+    /// Claims a thunk eagerly and parks a process that reaches another
+    /// process's claim.
+    ///
+    /// This follows Marlow, Peyton Jones, and Singh, "Runtime Support for
+    /// Multicore Haskell" (ICFP 2009), sections 8 and 8.1: the evaluating
+    /// owner publishes once, while colliding processes wait for that update.
     pub(super) fn start_global_eval(
         &mut self,
         program: &BytecodeProgram,
         index: usize,
         continuation: Continuation,
-    ) -> Result<Option<Value>, RuntimeError> {
-        let Some(global_slot) = self.globals.get(index) else {
+    ) -> Result<GlobalEval, RuntimeError> {
+        let process_id = self.process.id;
+        let Some(global_slot) = self.globals.get_mut(index) else {
             solveig_base::ice!("global index {index} out of bounds");
         };
         let thunk_chunk = match global_slot {
-            GlobalSlot::Evaluated(val) => return Ok(Some(*val)),
-            GlobalSlot::Evaluating => {
+            GlobalSlot::Evaluated(value) => return Ok(GlobalEval::Evaluated(*value)),
+            GlobalSlot::Failed(error) => return Err(error.clone()),
+            GlobalSlot::Evaluating { owner, .. } if *owner == process_id => {
                 let name = program
                     .globals
                     .get(index)
                     .map_or("<unknown>", |global| global.name.as_str());
                 return Err(RuntimeError::cyclic_global(name));
             }
+            GlobalSlot::Evaluating { waiters, .. } => {
+                waiters.push(process_id);
+                self.process.status =
+                    ProcStatus::Blocked(BlockReason::Blackhole(GlobalIndex(index)));
+                return Ok(GlobalEval::Blocked);
+            }
             GlobalSlot::Thunk { chunk } => *chunk,
         };
 
-        *self
-            .globals
-            .get_mut(index)
-            .expect("ICE: global slot index was checked above") = GlobalSlot::Evaluating;
+        *global_slot = GlobalSlot::Evaluating {
+            owner: process_id,
+            waiters: Vec::new(),
+        };
         self.continuations.push(continuation);
         self.enter_thunk(program, thunk_chunk);
-        Ok(None)
-    }
-
-    pub(super) fn push_global_or_start_eval(
-        &mut self,
-        program: &BytecodeProgram,
-        index: usize,
-    ) -> Result<(), RuntimeError> {
-        let continuation = Continuation::PublishGlobalThenResume {
-            global_index: index,
-            chunk: self.chunk,
-            pc: self.pc,
-            frame_base: self.frame_base,
-        };
-
-        if let Some(val) = self.start_global_eval(program, index, continuation)? {
-            self.push(val);
-        }
-
-        Ok(())
+        Ok(GlobalEval::Entered)
     }
 
     pub(super) fn enter_thunk(&mut self, program: &BytecodeProgram, chunk_id: usize) {
@@ -584,7 +579,7 @@ impl Interpreter<'_> {
         program: &BytecodeProgram,
         callee: Value,
         args: &[Value],
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<Value, StepOutcome> {
         for arg in args {
             self.push(*arg);
         }
@@ -650,7 +645,29 @@ impl Interpreter<'_> {
         let Some(global_slot) = self.globals.get_mut(global_index) else {
             solveig_base::ice!("global publish index {global_index} out of bounds");
         };
+        let waiters = match global_slot {
+            GlobalSlot::Evaluating { owner, waiters } if *owner == self.process.id => {
+                std::mem::take(waiters)
+            }
+            GlobalSlot::Evaluating { .. }
+            | GlobalSlot::Thunk { .. }
+            | GlobalSlot::Evaluated(_)
+            | GlobalSlot::Failed(_) => {
+                solveig_base::ice!("global result published by a process that does not own it")
+            }
+        };
         *global_slot = GlobalSlot::Evaluated(result);
+
+        let global_index = GlobalIndex(global_index);
+        for waiter_id in waiters {
+            let waiter = &mut self.inactive_processes[waiter_id];
+            if waiter.status != ProcStatus::Blocked(BlockReason::Blackhole(global_index)) {
+                solveig_base::ice!("global blackhole waiter has a mismatched process status");
+            }
+            waiter.stack.push(result);
+            waiter.status = ProcStatus::Runnable;
+            self.run_queue.push_back(waiter_id);
+        }
     }
 }
 

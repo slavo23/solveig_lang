@@ -87,13 +87,6 @@ impl Hash for Value {
     }
 }
 
-#[derive(Clone)]
-pub enum GlobalSlot {
-    Evaluated(Value),
-    Thunk { chunk: usize },
-    Evaluating,
-}
-
 #[derive(Clone, Copy)]
 pub enum Continuation {
     Halt,

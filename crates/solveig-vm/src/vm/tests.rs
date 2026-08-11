@@ -251,6 +251,166 @@ fn global_thunks_resume_dependency_order() {
 }
 
 #[test]
+fn blackhole_waiters_resume_with_the_published_value() {
+    let program = program(
+        vec![
+            global("shared", int(42)),
+            global("first_waiter", bin(BinOp::Plus, global_ref(0), int(1))),
+            global("second_waiter", bin(BinOp::Plus, global_ref(0), int(2))),
+        ],
+        Vec::new(),
+        &[],
+    );
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let owner_id = runtime.allocate_process();
+    let first_waiter_id = runtime.allocate_process();
+    let second_waiter_id = runtime.allocate_process();
+    runtime.run_queue.clear();
+    start_process_global(&mut runtime, owner_id, 0);
+    start_process_global(&mut runtime, first_waiter_id, 1);
+    start_process_global(&mut runtime, second_waiter_id, 2);
+
+    assert_eq!(
+        run_process(&mut runtime, first_waiter_id),
+        StepOutcome::Blocked
+    );
+    assert_eq!(
+        run_process(&mut runtime, second_waiter_id),
+        StepOutcome::Blocked
+    );
+    assert_eq!(
+        runtime.processes[first_waiter_id].status,
+        ProcStatus::Blocked(BlockReason::Blackhole(GlobalIndex(0)))
+    );
+    assert_eq!(
+        runtime.processes[second_waiter_id].status,
+        ProcStatus::Blocked(BlockReason::Blackhole(GlobalIndex(0)))
+    );
+
+    let owner_outcome = run_process(&mut runtime, owner_id);
+
+    assert_eq!(owner_outcome, StepOutcome::Finished(Value::Int(42)));
+    assert_eq!(
+        runtime.processes[first_waiter_id].status,
+        ProcStatus::Runnable
+    );
+    assert_eq!(
+        runtime.processes[second_waiter_id].status,
+        ProcStatus::Runnable
+    );
+    assert_eq!(
+        runtime.processes[first_waiter_id].stack.last(),
+        Some(&Value::Int(42))
+    );
+    assert_eq!(
+        runtime.processes[second_waiter_id].stack.last(),
+        Some(&Value::Int(42))
+    );
+    assert_eq!(runtime.run_queue.pop_front(), Some(first_waiter_id));
+    assert_eq!(runtime.run_queue.pop_front(), Some(second_waiter_id));
+
+    assert_eq!(
+        run_process(&mut runtime, first_waiter_id),
+        StepOutcome::Finished(Value::Int(43))
+    );
+    assert_eq!(
+        run_process(&mut runtime, second_waiter_id),
+        StepOutcome::Finished(Value::Int(44))
+    );
+    assert!(matches!(
+        runtime.globals.get(1),
+        Some(GlobalSlot::Evaluated(Value::Int(43)))
+    ));
+    assert!(matches!(
+        runtime.globals.get(2),
+        Some(GlobalSlot::Evaluated(Value::Int(44)))
+    ));
+}
+
+#[test]
+fn blackhole_owner_failure_reaches_waiters_and_their_owned_globals() {
+    let program = program(
+        vec![
+            global("failing", case(int(0), Vec::new())),
+            global("waiter", global_ref(0)),
+        ],
+        Vec::new(),
+        &[],
+    );
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let owner_id = runtime.allocate_process();
+    let waiter_id = runtime.allocate_process();
+    runtime.run_queue.clear();
+    start_process_global(&mut runtime, owner_id, 0);
+    start_process_global(&mut runtime, waiter_id, 1);
+
+    assert_eq!(run_process(&mut runtime, waiter_id), StepOutcome::Blocked);
+
+    let owner_outcome = run_process(&mut runtime, owner_id);
+    let StepOutcome::Failed(error) = owner_outcome else {
+        solveig_base::ice!("blackhole owner fixture did not fail");
+    };
+
+    assert_eq!(
+        runtime.processes[waiter_id].status,
+        ProcStatus::Failed(error.clone())
+    );
+    assert!(matches!(
+        runtime.globals.first(),
+        Some(GlobalSlot::Failed(global_error)) if global_error == &error
+    ));
+    assert!(matches!(
+        runtime.globals.get(1),
+        Some(GlobalSlot::Failed(global_error)) if global_error == &error
+    ));
+    assert!(runtime.run_queue.is_empty());
+}
+
+#[test]
+fn global_owner_reentry_is_a_cycle_not_a_waiter() {
+    let program = program(vec![global("loop", global_ref(0))], Vec::new(), &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+
+    let (id, outcome) = evaluate_entry(&mut runtime, 0);
+
+    let StepOutcome::Failed(error) = outcome else {
+        solveig_base::ice!("cyclic global fixture did not fail");
+    };
+    assert_eq!(error, RuntimeError::cyclic_global("loop"));
+    assert_eq!(
+        runtime.processes[id].status,
+        ProcStatus::Failed(error.clone())
+    );
+    assert!(matches!(
+        runtime.globals.first(),
+        Some(GlobalSlot::Failed(global_error)) if global_error == &error
+    ));
+}
+
+fn start_process_global(runtime: &mut Runtime, process_id: ProcessId, global_index: usize) {
+    let mut process = runtime.take_process(process_id);
+    process.status = ProcStatus::Running;
+    let started = {
+        let mut interpreter = Interpreter::new(runtime, &mut process);
+        let program = interpreter.program;
+        interpreter.start_global_eval(
+            program,
+            global_index,
+            Continuation::PublishGlobalThenHalt { global_index },
+        )
+    };
+    assert!(matches!(started, Ok(GlobalEval::Entered)));
+    runtime.restore_process(process);
+}
+
+fn run_process(runtime: &mut Runtime, process_id: ProcessId) -> StepOutcome {
+    let mut process = runtime.take_process(process_id);
+    let outcome = run(runtime, &mut process);
+    runtime.restore_process(process);
+    outcome
+}
+
+#[test]
 fn trap_returns_runtime_error() {
     let program = program(
         vec![global("main", case(int(0), Vec::new()))],

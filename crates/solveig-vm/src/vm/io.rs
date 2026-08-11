@@ -78,7 +78,7 @@ impl Interpreter<'_> {
         program: &BytecodeProgram,
         action: Value,
         io: &mut IoRuntime<'_>,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<Value, StepOutcome> {
         if self.io_current.is_some() || !self.continuations.is_empty() {
             solveig_base::ice!("IO machine entered while already active");
         }
@@ -86,8 +86,10 @@ impl Interpreter<'_> {
         self.io_current = Some(action);
         let result = self.perform_io_loop(program, io);
 
-        self.io_current = None;
-        self.continuations.clear();
+        if result.is_ok() {
+            self.io_current = None;
+            self.continuations.clear();
+        }
         result
     }
 
@@ -95,7 +97,7 @@ impl Interpreter<'_> {
         &mut self,
         program: &BytecodeProgram,
         io: &mut IoRuntime<'_>,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<Value, StepOutcome> {
         // Awkward Squad section 2 gives IO bind the sequencing contract; AOSA's
         // GHC RTS chapter keeps resumable runtime state explicit at safe points.
         loop {
@@ -207,7 +209,7 @@ impl Interpreter<'_> {
         &mut self,
         program: &BytecodeProgram,
         value: Value,
-    ) -> Result<Option<Value>, RuntimeError> {
+    ) -> Result<Option<Value>, StepOutcome> {
         let Some(frame) = self.continuations.pop() else {
             return Ok(Some(value));
         };

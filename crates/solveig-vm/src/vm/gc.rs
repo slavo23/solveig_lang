@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::heap::{Heap, HeapObject, IoAction, PayloadRef};
-use crate::values::{BoolCache, Continuation, GlobalSlot, NullaryCtorCache, ObjId, Value};
+use crate::values::{BoolCache, Continuation, NullaryCtorCache, ObjId, Value};
 use solveig_ast::ast::{CtorId, PRIM_TYS};
 
 pub(super) struct Roots<'a> {
@@ -27,8 +27,11 @@ impl Roots<'_> {
         }
 
         for slot in &mut *self.globals {
-            if let GlobalSlot::Evaluated(value) = slot {
-                visit(value);
+            match slot {
+                GlobalSlot::Evaluated(value) => visit(value),
+                GlobalSlot::Thunk { .. }
+                | GlobalSlot::Evaluating { .. }
+                | GlobalSlot::Failed(_) => {}
             }
         }
         for value in self.nullary_ctors.tags.iter_mut().flatten() {
