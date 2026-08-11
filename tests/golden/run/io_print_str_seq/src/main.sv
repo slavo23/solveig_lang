@@ -1,4 +1,4 @@
-main : IO ()
+main : IO () ()
 main =
     do
         printStr "alpha"

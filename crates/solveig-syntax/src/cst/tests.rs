@@ -58,7 +58,7 @@ fn lexing_many_identifiers_does_not_touch_session_interner() {
 
 #[test]
 fn cst_reconstructs_text_and_supports_navigation() {
-    let source = "main : IO ()\nmain = do\n    -- retain\n    printLine \"ok\"\n";
+    let source = "main : IO () ()\nmain = do\n    -- retain\n    printLine \"ok\"\n";
     let parsed = parse_test_source(source);
     let tree = &parsed.cst;
 
@@ -121,7 +121,7 @@ fn cst_retains_error_node_diagnostics() {
 
 #[test]
 fn cst_parent_links_match_child_edges() {
-    let parsed = parse_test_source("main : IO ()\nmain = pure ()\n");
+    let parsed = parse_test_source("main : IO () ()\nmain = pure ()\n");
     let tree = &parsed.cst;
     let mut seen_tokens = vec![false; tree.tokens().len()];
 
@@ -159,7 +159,7 @@ fn cst_node_spans_exclude_leading_trivia() {
 
 #[test]
 fn cst_places_leading_trivia_at_surrounding_parent_level() {
-    let source = "main : IO ()\nmain = pure ()\n";
+    let source = "main : IO () ()\nmain = pure ()\n";
     let parsed = parse_test_source(source);
     let tree = &parsed.cst;
 

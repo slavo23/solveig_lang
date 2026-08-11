@@ -259,6 +259,37 @@ fn io_callback_yields_and_resumes_through_the_same_safe_point() {
 }
 
 #[test]
+fn typed_io_failure_survives_collection_and_skips_bind_continuations() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let process = runtime.allocate_process();
+    assert_eq!(runtime.run_queue.pop_front(), Some(process));
+    let error = runtime.alloc_str_for_test("typed failure");
+    let failure = runtime
+        .heap
+        .alloc(HeapObject::IoAction(IoAction::Fail(error)));
+    let action = runtime.heap.alloc(HeapObject::IoAction(IoAction::Bind {
+        action: failure,
+        continuation: Value::Int(99),
+    }));
+    runtime.processes[process].io_current = Some(action);
+    runtime.collect_all_process_roots_for_test();
+
+    let outcome = perform_process_io(&mut runtime, process, Value::Unit);
+
+    let StepOutcome::Finished(Value::Obj(id)) = outcome else {
+        solveig_base::ice!("typed IO failure did not finish as an inert failure action");
+    };
+    let HeapObject::IoAction(IoAction::Fail(Value::Obj(error))) = runtime.heap.get(id) else {
+        solveig_base::ice!("typed IO failure lost its error value");
+    };
+    let HeapObject::Str { bytes } = runtime.heap.get(*error) else {
+        solveig_base::ice!("typed IO failure error was not a string");
+    };
+    assert_eq!(runtime.heap.str_value(*error, *bytes), "typed failure");
+}
+
+#[test]
 fn scheduler_waits_for_worker_io_and_wakes_the_blocked_process() {
     let program = program(vec![global("main", int(0))], vec![], &[]);
     let bytecode = lower_to_bytecode(&program);

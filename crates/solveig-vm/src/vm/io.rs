@@ -56,6 +56,7 @@ impl Interpreter<'_> {
                         return Ok(value);
                     }
                 }
+                IoAction::Fail(_) => return Ok(current),
                 IoAction::Bind {
                     action,
                     continuation,

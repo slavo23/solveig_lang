@@ -1285,7 +1285,7 @@ fn hover_covers_direct_prelude_imported_references() {
         (
             "getArgs = prelude.prim.getArgs",
             "prelude.prim.getArgs",
-            "getArgs : IO [String]",
+            "getArgs : forall e. IO e [String]",
         ),
         (
             "    apply fs xs = concat (map (fun f => map f xs) fs)",
@@ -1356,15 +1356,15 @@ fn hover_audits_quiz_game_sensitive_tokens() {
         " 74:35  `QuizCard` => QuizCard : String -> String -> QuizCard\n",
         " 74:44  `question` => question : String\n",
         " 74:53  `answer` => answer : String\n",
-        " 90:1   `askCards` => askCards : [QuizCard] -> IO [Pair QuizCard String]\n",
+        " 90:1   `askCards` => askCards : [QuizCard] -> IO () [Pair QuizCard String]\n",
         " 90:10  `cards` => cards : [QuizCard]\n",
         " 90:16  `=` => <none>\n",
         " 90:18  `mapM` => mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]\n",
-        " 90:23  `askCard` => askCard : QuizCard -> IO (Pair QuizCard String)\n",
+        " 90:23  `askCard` => askCard : QuizCard -> IO () (Pair QuizCard String)\n",
         " 90:31  `cards` => cards : [QuizCard]\n",
         "136:9   `responses` => responses : [Pair QuizCard String]\n",
         "136:19  `<-` => <none>\n",
-        "136:22  `askCards` => askCards : [QuizCard] -> IO [Pair QuizCard String]\n",
+        "136:22  `askCards` => askCards : [QuizCard] -> IO () [Pair QuizCard String]\n",
         "136:31  `cards` => cards : [QuizCard]\n",
     );
 

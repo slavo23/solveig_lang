@@ -68,8 +68,10 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     );
     let char_list = Ty::make_app(list.clone(), char_ty.clone());
     let string_list = Ty::make_app(list, string.clone());
+    let e_id = names.fresh_tyvar("e");
     let a_id = names.fresh_tyvar("a");
     let b_id = names.fresh_tyvar("b");
+    let e = Ty::TyVar(e_id);
     let a = Ty::TyVar(a_id);
     let b = Ty::TyVar(b_id);
 
@@ -300,65 +302,96 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "pureIO",
             BUILTIN_PURE_IO,
             1,
-            poly_arr(&[a_id], std::slice::from_ref(&a), io_of(a.clone())),
+            poly_arr(
+                &[e_id, a_id],
+                std::slice::from_ref(&a),
+                io_of(e.clone(), a.clone()),
+            ),
         ),
         prim_spec(
             "bindIO",
             BUILTIN_BIND_IO,
             2,
             poly_arr(
-                &[a_id, b_id],
-                &[io_of(a.clone()), Ty::make_arr(a.clone(), io_of(b.clone()))],
-                io_of(b),
+                &[e_id, a_id, b_id],
+                &[
+                    io_of(e.clone(), a.clone()),
+                    Ty::make_arr(a.clone(), io_of(e.clone(), b.clone())),
+                ],
+                io_of(e.clone(), b),
             ),
         ),
         prim_spec(
             "printLine",
             BUILTIN_PRINT_LINE,
             1,
-            unary(string.clone(), io_of(Ty::TyUnit)),
+            poly_arr(
+                &[e_id],
+                std::slice::from_ref(&string),
+                io_of(e.clone(), Ty::TyUnit),
+            ),
         ),
         prim_spec(
             "printStr",
             BUILTIN_PRINT_STR,
             1,
-            unary(string.clone(), io_of(Ty::TyUnit)),
+            poly_arr(
+                &[e_id],
+                std::slice::from_ref(&string),
+                io_of(e.clone(), Ty::TyUnit),
+            ),
         ),
         prim_spec(
             "readLine",
             BUILTIN_READ_LINE,
             0,
-            Scheme::mono(io_of(string.clone())),
+            poly(&[e_id], io_of(e.clone(), string.clone())),
         ),
         prim_spec(
             "getArgs",
             BUILTIN_GET_ARGS,
             0,
-            Scheme::mono(io_of(string_list)),
+            poly(&[e_id], io_of(e.clone(), string_list)),
         ),
         prim_spec(
             "readFile",
             BUILTIN_READ_FILE,
             1,
-            unary(string.clone(), io_of(string.clone())),
+            poly_arr(
+                &[e_id],
+                std::slice::from_ref(&string),
+                io_of(e.clone(), string.clone()),
+            ),
         ),
         prim_spec(
             "writeFile",
             BUILTIN_WRITE_FILE,
             2,
-            arr(&[string.clone(), string.clone()], io_of(Ty::TyUnit)),
+            poly_arr(
+                &[e_id],
+                &[string.clone(), string.clone()],
+                io_of(e.clone(), Ty::TyUnit),
+            ),
         ),
         prim_spec(
             "appendFile",
             BUILTIN_APPEND_FILE,
             2,
-            arr(&[string.clone(), string], io_of(Ty::TyUnit)),
+            poly_arr(
+                &[e_id],
+                &[string.clone(), string],
+                io_of(e.clone(), Ty::TyUnit),
+            ),
         ),
         prim_spec(
             "spawn",
             BUILTIN_SPAWN,
             1,
-            unary(io_of(Ty::TyUnit), io_of(thread_id)),
+            poly_arr(
+                &[e_id],
+                &[io_of(e.clone(), Ty::TyUnit)],
+                io_of(e, thread_id),
+            ),
         ),
     ]
 }
@@ -412,6 +445,6 @@ fn poly(vars: &[TyVarId], ty: Ty) -> Scheme {
     }
 }
 
-fn io_of(value: Ty) -> Ty {
-    Ty::make_app(Ty::make_con_id(PRIM_TYS.io), value)
+fn io_of(error: Ty, value: Ty) -> Ty {
+    Ty::make_app(Ty::make_app(Ty::make_con_id(PRIM_TYS.io), error), value)
 }

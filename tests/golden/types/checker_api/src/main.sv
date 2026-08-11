@@ -34,7 +34,7 @@ charId x = x
 stringId : String -> String
 stringId x = x
 
-ioIntId : IO Int -> IO Int
+ioIntId : forall e. IO e Int -> IO e Int
 ioIntId x = x
 
 sumViaFoldr : [Int] -> Int

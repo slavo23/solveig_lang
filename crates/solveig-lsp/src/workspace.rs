@@ -1343,7 +1343,7 @@ main = count [1, 2, 3]
             (
                 "getArgs = prelude.prim.getArgs",
                 "prelude.prim.getArgs",
-                "getArgs : IO [String]",
+                "getArgs : forall e. IO e [String]",
             ),
             (
                 "apply fs xs = concat (map (fun f => map f xs) fs)",

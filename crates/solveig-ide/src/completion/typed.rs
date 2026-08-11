@@ -231,7 +231,7 @@ fn seed_completion_primitive_tycons(session: &Session, tycon_table: &mut TyConTa
             PRIM_TYS.io,
             "prelude.builtins.IO",
             "IO",
-            Kind::make_arrow(Kind::Star, Kind::Star),
+            Kind::make_arrow(Kind::Star, Kind::make_arrow(Kind::Star, Kind::Star)),
         ),
     ];
 

@@ -339,6 +339,7 @@ fn rewrite_io_action(
 ) {
     match action {
         IoAction::Pure(value)
+        | IoAction::Fail(value)
         | IoAction::Print { text: value, .. }
         | IoAction::Spawn { action: value } => {
             evacuate_value(heap, value, worklist, promoted);
@@ -489,6 +490,7 @@ fn mark_old_child(heap: &mut Heap, value: Value, worklist: &mut Vec<ObjId>) {
 fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjId>) {
     match action {
         IoAction::Pure(value)
+        | IoAction::Fail(value)
         | IoAction::Print { text: value, .. }
         | IoAction::Spawn { action: value } => {
             mark_old_child(heap, value, worklist);
@@ -568,6 +570,7 @@ fn assert_object_children_live(
         }
         HeapObject::IoAction(action) => match action {
             IoAction::Pure(value)
+            | IoAction::Fail(value)
             | IoAction::Print { text: value, .. }
             | IoAction::Spawn { action: value } => {
                 assert_value_live(heap, value, seen, worklist);

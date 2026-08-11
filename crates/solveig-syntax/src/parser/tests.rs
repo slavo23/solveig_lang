@@ -37,7 +37,7 @@ fn error_event_is_inside_error_node(events: &[Event]) -> bool {
 
 #[test]
 fn parser_emits_balanced_events_over_full_token_stream() {
-    let source = "main : IO ()\nmain = do\n    printLine \"ok\"\n";
+    let source = "main : IO () ()\nmain = do\n    printLine \"ok\"\n";
     let (tokens, events) = parse_test_events(source);
 
     assert_eq!(event_balance(&events), 0);

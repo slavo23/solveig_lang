@@ -7,7 +7,7 @@ main.charId : Char -> Char
 main.compose : forall a b c. (b -> c) -> (a -> b) -> a -> c
 main.constLocal : forall a b. a -> b -> a
 main.floatId : Float -> Float
-main.ioIntId : IO Int -> IO Int
+main.ioIntId : forall e. IO e Int -> IO e Int
 main.lessInt : Bool
 main.lessViaOrd : forall a. Ord a => a -> a -> Bool
 main.letUnderQualified : forall a. Eq a => a -> Bool
@@ -31,20 +31,20 @@ main.useRank2 : (forall a. a -> a) -> Int
 main.useRank2Eq : (forall a. Eq a => a -> a -> Bool) -> Bool
 main.wrapNotEqInt : Bool
 prelude.builtins.and : Bool -> Bool -> Bool
-prelude.builtins.appendFile : String -> String -> IO ()
+prelude.builtins.appendFile : forall e. String -> String -> IO e ()
 prelude.builtins.appendString : String -> String -> String
-prelude.builtins.bindIO : forall a b. IO a -> (a -> IO b) -> IO b
+prelude.builtins.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 prelude.builtins.even : Int -> Bool
 prelude.builtins.not : Bool -> Bool
 prelude.builtins.odd : Int -> Bool
 prelude.builtins.or : Bool -> Bool -> Bool
-prelude.builtins.printLine : String -> IO ()
-prelude.builtins.printStr : String -> IO ()
-prelude.builtins.pureIO : forall a. a -> IO a
-prelude.builtins.readFile : String -> IO String
-prelude.builtins.readLine : IO String
-prelude.builtins.spawn : IO () -> IO ThreadId
-prelude.builtins.writeFile : String -> String -> IO ()
+prelude.builtins.printLine : forall e. String -> IO e ()
+prelude.builtins.printStr : forall e. String -> IO e ()
+prelude.builtins.pureIO : forall e a. a -> IO e a
+prelude.builtins.readFile : forall e. String -> IO e String
+prelude.builtins.readLine : forall e. IO e String
+prelude.builtins.spawn : forall e. IO e () -> IO e ThreadId
+prelude.builtins.writeFile : forall e. String -> String -> IO e ()
 prelude.list.++ : forall a. [a] -> [a] -> [a]
 prelude.list.append : forall a. [a] -> [a] -> [a]
 prelude.list.concat : forall a. [[a]] -> [a]
@@ -56,8 +56,8 @@ prelude.list.range : Int -> Int -> Bool -> [Int]
 prelude.list.rangeDown : Int -> Int -> [Int] -> [Int]
 prelude.list.reverse : forall a. [a] -> [a]
 prelude.list.reverseGo : forall a. [a] -> [a] -> [a]
-prelude.prim.appendFile : String -> String -> IO ()
-prelude.prim.bindIO : forall a b. IO a -> (a -> IO b) -> IO b
+prelude.prim.appendFile : forall e. String -> String -> IO e ()
+prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 prelude.prim.charCompare : Char -> Char -> Ordering
 prelude.prim.charEq : Char -> Char -> Bool
 prelude.prim.charToString : Char -> String
@@ -74,7 +74,7 @@ prelude.prim.floatNeg : Float -> Float
 prelude.prim.floatSub : Float -> Float -> Float
 prelude.prim.floatToInt : Float -> Int
 prelude.prim.floatToString : Float -> String
-prelude.prim.getArgs : IO [String]
+prelude.prim.getArgs : forall e. IO e [String]
 prelude.prim.intAdd : Int -> Int -> Int
 prelude.prim.intCompare : Int -> Int -> Ordering
 prelude.prim.intDiv : Int -> Int -> Int
@@ -89,12 +89,12 @@ prelude.prim.intNeg : Int -> Int
 prelude.prim.intSub : Int -> Int -> Int
 prelude.prim.intToFloat : Int -> Float
 prelude.prim.intToString : Int -> String
-prelude.prim.printLine : String -> IO ()
-prelude.prim.printStr : String -> IO ()
-prelude.prim.pureIO : forall a. a -> IO a
-prelude.prim.readFile : String -> IO String
-prelude.prim.readLine : IO String
-prelude.prim.spawn : IO () -> IO ThreadId
+prelude.prim.printLine : forall e. String -> IO e ()
+prelude.prim.printStr : forall e. String -> IO e ()
+prelude.prim.pureIO : forall e a. a -> IO e a
+prelude.prim.readFile : forall e. String -> IO e String
+prelude.prim.readLine : forall e. IO e String
+prelude.prim.spawn : forall e. IO e () -> IO e ThreadId
 prelude.prim.stringAppend : String -> String -> String
 prelude.prim.stringCharAt : String -> Int -> Maybe Char
 prelude.prim.stringCompare : String -> String -> Ordering
@@ -102,7 +102,7 @@ prelude.prim.stringEq : String -> String -> Bool
 prelude.prim.stringLength : String -> Int
 prelude.prim.stringSlice : String -> Int -> Int -> String
 prelude.prim.stringToChars : String -> [Char]
-prelude.prim.writeFile : String -> String -> IO ()
+prelude.prim.writeFile : forall e. String -> String -> IO e ()
 prelude.typeclasses.applyLeft : forall f a b. Applicative f => f a -> f b -> f a
 prelude.typeclasses.applyRight : forall f a b. Applicative f => f a -> f b -> f b
 prelude.typeclasses.clampOrd : forall a. Ord a => a -> a -> a -> a
@@ -110,21 +110,21 @@ prelude.typeclasses.composeK : forall m a b c. Monad m => (a -> m b) -> (b -> m 
 prelude.typeclasses.div : Int -> Int -> Int
 prelude.typeclasses.eq : forall a. Eq a => a -> a -> Bool
 prelude.typeclasses.filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
-prelude.typeclasses.getArgs : IO [String]
+prelude.typeclasses.getArgs : forall e. IO e [String]
 prelude.typeclasses.greater : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.greaterEq : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.join : forall m a. Monad m => m (m a) -> m a
 prelude.typeclasses.less : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.lessEq : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.liftA2 : forall f a b c. Applicative f => (a -> b -> c) -> f a -> f b -> f c
-prelude.typeclasses.mapIO_ : forall a. (a -> IO ()) -> [a] -> IO ()
+prelude.typeclasses.mapIO_ : forall e a. (a -> IO e ()) -> [a] -> IO e ()
 prelude.typeclasses.mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]
 prelude.typeclasses.maxOrd : forall a. Ord a => a -> a -> a
 prelude.typeclasses.mconcat : forall a. Monoid a => [a] -> a
 prelude.typeclasses.minOrd : forall a. Ord a => a -> a -> a
 prelude.typeclasses.mod : Int -> Int -> Int
 prelude.typeclasses.notEq : forall a. Eq a => a -> a -> Bool
-prelude.typeclasses.seqIO : forall a b. IO a -> IO b -> IO b
+prelude.typeclasses.seqIO : forall e a b. IO e a -> IO e b -> IO e b
 prelude.typeclasses.sequence : forall m a. Monad m => [m a] -> m [a]
 prelude.typeclasses.showCharPayload : Char -> String
 prelude.typeclasses.showListItems : forall a. Show a => [a] -> String

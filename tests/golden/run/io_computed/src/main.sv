@@ -6,5 +6,5 @@ sumList xs =
         [] => 0
         | y :: ys => y + sumList ys
 
-main : IO ()
+main : IO () ()
 main = printLine (intToString (sumList [1, 2, 3, 4]))

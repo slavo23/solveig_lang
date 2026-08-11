@@ -189,12 +189,17 @@ process lifecycle while its outer loop interprets `IoAction` values.
 ## IO actions and sequencing
 
 `IoAction` is data, not an eagerly performed host effect. Its variants are
-`Pure`, `Bind`, terminal print/read, `GetArgs`, `Spawn`, and file read/write.
+`Pure`, typed `Fail`, `Bind`, terminal print/read, `GetArgs`, `Spawn`, and file
+read/write.
 The IO loop keeps the current action in `Process::io_current` and pushes
 `IoBind` when descending through `Bind`. When an action yields a value, the
 loop pops the saved continuation, applies it through bytecode, and treats the
 result as the next action. This is the operational IO sequencing model from
 Peyton Jones, “Tackling the Awkward Squad,” section 2.
+
+When the loop reaches `Fail`, it returns that inert failure action and clears
+the pending bind frames without invoking them. Typed failure therefore
+short-circuits sequencing without using `RuntimeError` or defect unwinding.
 
 Worker-backed actions park the process. Their completion is plain Rust data in
 `io_result`; it becomes a `Value`, including any heap allocation for returned
@@ -462,11 +467,11 @@ The scheduler transition for each `StepOutcome` is fixed:
 | `Finished(value)` | Retain the finished value as a GC root. Main completion returns it and ends scheduling; a non-main process remains finished and is otherwise ignored. |
 | `Failed(error)` | Fail any globals owned by the process and clear its resumable state. Main failure returns the error; non-main failure is written to stderr. |
 
-`spawn : IO () -> IO ThreadId` constructs an inert IO action. Performing that
-action allocates a process, puts its child action in the process root set, and
-appends it to the FIFO run queue. `ThreadId` is an opaque primitive type: its
-runtime payload identifies the process arena entry, but the language exposes no
-numeric operations or representation conversion for it.
+`spawn : forall e. IO e () -> IO e ThreadId` constructs an inert IO action.
+Performing that action allocates a process, puts its child action in the process
+root set, and appends it to the FIFO run queue. `ThreadId` is an opaque
+primitive type: its runtime payload identifies the process arena entry, but the
+language exposes no numeric operations or representation conversion for it.
 
 Program lifetime is owned by the main process:
 

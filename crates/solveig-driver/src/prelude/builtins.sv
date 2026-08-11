@@ -20,39 +20,39 @@ data Pair a b =
     MkPair a b;
 
 -- | Creates an IO action that immediately returns a value.
-pureIO : forall a. a -> IO a;
+pureIO : forall e a. a -> IO e a;
 pureIO value = prelude.prim.pureIO value;
 
 -- | Sequences an IO action and passes its result to a continuation.
-bindIO : forall a b. IO a -> (a -> IO b) -> IO b;
+bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b;
 bindIO action continuation = prelude.prim.bindIO action continuation;
 
 -- | Writes text followed by a newline.
-printLine : String -> IO ();
+printLine : forall e. String -> IO e ();
 printLine text = prelude.prim.printLine text;
 
 -- | Writes text without adding a newline.
-printStr : String -> IO ();
+printStr : forall e. String -> IO e ();
 printStr text = prelude.prim.printStr text;
 
 -- | Reads one line of input.
-readLine : IO String;
+readLine : forall e. IO e String;
 readLine = prelude.prim.readLine;
 
 -- | Reads a file as text.
-readFile : String -> IO String;
+readFile : forall e. String -> IO e String;
 readFile path = prelude.prim.readFile path;
 
 -- | Writes text to a file, replacing its previous contents.
-writeFile : String -> String -> IO ();
+writeFile : forall e. String -> String -> IO e ();
 writeFile path contents = prelude.prim.writeFile path contents;
 
 -- | Appends text to the end of a file.
-appendFile : String -> String -> IO ();
+appendFile : forall e. String -> String -> IO e ();
 appendFile path contents = prelude.prim.appendFile path contents;
 
 -- | Starts an IO action in a new lightweight thread.
-spawn : IO () -> IO ThreadId;
+spawn : forall e. IO e () -> IO e ThreadId;
 spawn action = prelude.prim.spawn action;
 
 -- | Concatenates two strings.

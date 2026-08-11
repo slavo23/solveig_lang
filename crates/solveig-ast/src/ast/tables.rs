@@ -61,7 +61,7 @@ pub fn compiler_primitive_tycon_infos(names: &mut Names) -> Vec<(TyConId, TyConI
             PRIM_TYS.io,
             COMPILER_IO_NAME,
             "IO",
-            Kind::make_arrow(Kind::Star, Kind::Star),
+            Kind::make_arrow(Kind::Star, Kind::make_arrow(Kind::Star, Kind::Star)),
         ),
         compiler_primitive_tycon_info(
             names,
@@ -79,7 +79,10 @@ pub fn compiler_primitive_tycon_kinds() -> FxHashMap<TyConId, Kind> {
         (PRIM_TYS.float, Kind::Star),
         (PRIM_TYS.char, Kind::Star),
         (PRIM_TYS.string, Kind::Star),
-        (PRIM_TYS.io, Kind::make_arrow(Kind::Star, Kind::Star)),
+        (
+            PRIM_TYS.io,
+            Kind::make_arrow(Kind::Star, Kind::make_arrow(Kind::Star, Kind::Star)),
+        ),
         (PRIM_TYS.thread_id, Kind::Star),
     ])
 }

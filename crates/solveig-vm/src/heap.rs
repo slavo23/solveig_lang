@@ -52,6 +52,7 @@ const _: () = assert!(std::mem::size_of::<HeapObject>() == 48);
 #[derive(Debug, Clone, Copy)]
 pub enum IoAction {
     Pure(Value),
+    Fail(Value),
     Bind {
         action: Value,
         continuation: Value,

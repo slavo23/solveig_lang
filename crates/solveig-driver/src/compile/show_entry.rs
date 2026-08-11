@@ -10,8 +10,10 @@ pub(super) fn entry_returns_io(module: &CheckedModule, names: &Names, entry_name
 fn scheme_returns_io(scheme: &Scheme) -> bool {
     let (_, _, ty) = scheme.ty.peel_scheme_like();
     matches!(
-        ty,
-        Ty::TyApp(func, _) if matches!(*func, Ty::TyCon(id) if id == PRIM_TYS.io)
+        &ty,
+        Ty::TyApp(func, _)
+            if matches!(func.as_ref(), Ty::TyApp(io, _)
+                if matches!(io.as_ref(), Ty::TyCon(id) if *id == PRIM_TYS.io))
     )
 }
 

@@ -277,7 +277,7 @@ instance Functor (Pair e) where
         case pair of
             MkPair e x => MkPair e (f x)
 
-instance Functor IO where
+instance Functor (IO e) where
     fmap f action =
         prelude.builtins.bindIO action (fun value =>
             prelude.builtins.pureIO (f value))
@@ -314,7 +314,7 @@ instance Applicative List where
 
     apply fs xs = concat (map (fun f => map f xs) fs)
 
-instance Applicative IO where
+instance Applicative (IO e) where
     pure value = prelude.builtins.pureIO value
 
     apply actionF actionX =
@@ -372,19 +372,19 @@ instance Monad Maybe where
 instance Monad List where
     bind xs f = concat (map f xs)
 
-instance Monad IO where
+instance Monad (IO e) where
     bind action f = prelude.builtins.bindIO action f
 
 -- | Reads the command-line arguments passed to the program.
-getArgs : IO [String]
+getArgs : forall e. IO e [String]
 getArgs = prelude.prim.getArgs
 
 -- | Runs two IO actions and keeps the result of the second.
-seqIO : forall a b. IO a -> IO b -> IO b
+seqIO : forall e a b. IO e a -> IO e b -> IO e b
 seqIO left right = thenM left right
 
 -- | Runs an IO action for every element of a list and discards the results.
-mapIO_ : forall a. (a -> IO ()) -> [a] -> IO ()
+mapIO_ : forall e a. (a -> IO e ()) -> [a] -> IO e ()
 mapIO_ f [] = prelude.builtins.pureIO ()
 mapIO_ f (y :: ys) = do
     f y

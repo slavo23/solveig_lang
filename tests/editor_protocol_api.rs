@@ -282,7 +282,7 @@ consed tail = 1 :: tail
 helpText : String
 helpText = "help"
 
-main : IO ()
+main : IO () ()
 main =
     do
         printStr helpText
@@ -358,7 +358,7 @@ main =
         "helpText",
     );
     assert!(
-        do_label.contains("printStr : String -> IO ()"),
+        do_label.contains("printStr : forall e. String -> IO e ()"),
         "{do_label}"
     );
     assert!(!do_label.contains("thenM"));

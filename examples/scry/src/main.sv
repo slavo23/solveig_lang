@@ -28,13 +28,13 @@ answerQuery : [Clause] -> Goal -> String
 answerQuery clauses goal =
     renderResults (varsInGoal goal) (solveQuery clauses goal)
 
-handleQuery : [Clause] -> String -> IO ()
+handleQuery : [Clause] -> String -> IO () ()
 handleQuery clauses line =
     case parseQuery line of
         Nothing => printLine "Could not parse query. Try :help."
         | Just goal => printStr (answerQuery clauses goal)
 
-repl : [Clause] -> IO ()
+repl : [Clause] -> IO () ()
 repl clauses =
     do
         printStr "scry> "
@@ -56,7 +56,7 @@ repl clauses =
                 handleQuery clauses line
                 repl clauses
 
-main : IO ()
+main : IO () ()
 main =
     do
         contents <- readFile "knowledge.scry"
