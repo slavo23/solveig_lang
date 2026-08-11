@@ -79,11 +79,14 @@ impl Interpreter<'_> {
         action: Value,
         io: &mut IoRuntime<'_>,
     ) -> Result<Value, StepOutcome> {
-        if self.io_current.is_some() || !self.continuations.is_empty() {
-            solveig_base::ice!("IO machine entered while already active");
+        if self.io_current.is_none() {
+            if self.continuations.is_empty() {
+                self.io_current = Some(action);
+            } else {
+                self.io_current = Some(self.dispatch(program)?);
+            }
         }
 
-        self.io_current = Some(action);
         let result = self.perform_io_loop(program, io);
 
         if result.is_ok() {
@@ -130,7 +133,7 @@ impl Interpreter<'_> {
                 }
                 IoAction::ReadLine => {
                     let line = io.read_line()?;
-                    self.maybe_gc();
+                    self.safe_point();
                     let value = self.heap.alloc_str(&line);
                     if let Some(value) = self.resume_io_value(program, value)? {
                         return Ok(value);
@@ -139,7 +142,7 @@ impl Interpreter<'_> {
                 IoAction::GetArgs => {
                     let checkpoint = self.temporary_roots.len();
                     for arg in io.args {
-                        self.maybe_gc();
+                        self.safe_point();
                         let value = self.heap.alloc_str(arg);
                         self.temporary_roots.push(value);
                     }
@@ -162,7 +165,7 @@ impl Interpreter<'_> {
                             resolved.display()
                         ))
                     })?;
-                    self.maybe_gc();
+                    self.safe_point();
                     let value = self.heap.alloc_str(&contents);
                     if let Some(value) = self.resume_io_value(program, value)? {
                         return Ok(value);
@@ -216,6 +219,7 @@ impl Interpreter<'_> {
 
         match frame {
             Continuation::IoBind(continuation) => {
+                self.io_current = None;
                 let next = self.call_value_for_result(program, continuation, &[value])?;
                 self.io_current = Some(next);
                 Ok(None)

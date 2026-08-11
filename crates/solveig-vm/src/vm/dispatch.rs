@@ -180,7 +180,7 @@ impl Interpreter<'_> {
                 Instr::PushFloat(n) => self.push(Value::Float(n)),
                 Instr::PushChar(ch) => self.push(Value::Char(ch)),
                 Instr::PushStr(index) => {
-                    self.maybe_gc();
+                    self.safe_point();
                     let value = program
                         .string_constants
                         .get(index as usize)
@@ -223,7 +223,7 @@ impl Interpreter<'_> {
                     chunk,
                     capture_count,
                 } => {
-                    self.maybe_gc();
+                    self.safe_point();
                     let captures = self.pop_payload(capture_count as usize);
                     let val = self.alloc_heap(HeapObject::Closure {
                         chunk: chunk as usize,
@@ -262,6 +262,7 @@ impl Interpreter<'_> {
                     self.push(result);
                 }
                 Instr::CallBuiltin { id, arg_count } => {
+                    self.safe_point();
                     let result = self.call_builtin(id, arg_count as usize)?;
                     self.push(result);
                 }
@@ -273,7 +274,7 @@ impl Interpreter<'_> {
                     if arity == 0 {
                         self.push(self.nullary_ctors.get(tag));
                     } else if field_count == 2 {
-                        self.maybe_gc();
+                        self.safe_point();
                         let b = self.pop();
                         let a = self.pop();
                         let val = self.heap.alloc(HeapObject::Data2 {
@@ -283,12 +284,12 @@ impl Interpreter<'_> {
                         });
                         self.push(val);
                     } else if field_count == 1 {
-                        self.maybe_gc();
+                        self.safe_point();
                         let a = self.pop();
                         let val = self.heap.alloc(HeapObject::Data1 { tag, field: a });
                         self.push(val);
                     } else {
-                        self.maybe_gc();
+                        self.safe_point();
                         let fields = self.pop_payload(field_count as usize);
                         let val = self.alloc_heap(HeapObject::DataN { tag, fields });
                         self.push(val);
@@ -296,6 +297,7 @@ impl Interpreter<'_> {
                 }
 
                 Instr::CallN { arg_count } => {
+                    self.safe_point();
                     let n = arg_count as usize;
                     let callee = self.take_callee_under_args(n);
 
@@ -307,6 +309,7 @@ impl Interpreter<'_> {
                 }
 
                 Instr::CallKnown { chunk, arg_count } => {
+                    self.safe_point();
                     let chunk_id = chunk as usize;
                     let n = arg_count as usize;
 
@@ -319,6 +322,7 @@ impl Interpreter<'_> {
                     code = &program.chunk(self.chunk).code;
                 }
                 Instr::TailCallN { arg_count } => {
+                    self.safe_point();
                     let n = arg_count as usize;
                     let callee = self.take_callee_under_args(n);
 
@@ -331,6 +335,7 @@ impl Interpreter<'_> {
                     code = &program.chunk(self.chunk).code;
                 }
                 Instr::TailCallKnown { chunk, arg_count } => {
+                    self.safe_point();
                     let chunk_id = chunk as usize;
                     let n = arg_count as usize;
 
@@ -352,10 +357,18 @@ impl Interpreter<'_> {
 
                     code = &program.chunk(self.chunk).code;
                 }
-                Instr::Jump(target) => self.pc = target as usize,
+                Instr::Jump(target) => {
+                    if (target as usize) < self.pc {
+                        self.safe_point();
+                    }
+                    self.pc = target as usize;
+                }
                 Instr::JumpIfFalse(target) => {
                     let cond = self.pop();
                     if cond == self.bools.false_val {
+                        if (target as usize) < self.pc {
+                            self.safe_point();
+                        }
                         self.pc = target as usize;
                     }
                 }
@@ -369,6 +382,10 @@ impl Interpreter<'_> {
                     self.dispatch_match(program, &table.arms, scrutinee, table.else_target);
                 }
                 Instr::Trap(code) => return Err(RuntimeError::trap(code).into()),
+            }
+
+            if self.reductions_left == 0 {
+                return Err(StepOutcome::Yielded);
             }
         }
     }

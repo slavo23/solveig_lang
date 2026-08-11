@@ -23,6 +23,7 @@ mod tests;
 
 use io::IoRuntime;
 
+const DEFAULT_REDUCTIONS: u32 = 4_096;
 /// Identifies one process in a runtime's process arena.
 pub type ProcessId = Idx<Process>;
 
@@ -32,13 +33,11 @@ pub struct Process {
     chunk: usize,
     pc: usize,
     frame_base: usize,
-
     stack: Vec<Value>,
     continuations: Vec<Continuation>,
     binding_buffer: Vec<Value>,
     pub(crate) temporary_roots: Vec<Value>,
     io_current: Option<Value>,
-
     status: ProcStatus,
     reductions_left: u32,
 }
@@ -52,6 +51,7 @@ pub struct Runtime {
     bools: BoolCache,
     processes: Arena<Process>,
     run_queue: VecDeque<ProcessId>,
+    reduction_budget: u32,
 }
 
 enum GlobalSlot {
@@ -65,7 +65,6 @@ enum GlobalSlot {
     Evaluated(Value),
     Failed(RuntimeError),
 }
-
 /// Describes whether a process may run or why it has stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcStatus {
@@ -128,7 +127,7 @@ enum InvokeMode {
 }
 
 impl Process {
-    fn new(id: ProcessId) -> Self {
+    fn new(id: ProcessId, reduction_budget: u32) -> Self {
         Self {
             id,
             chunk: 0,
@@ -140,7 +139,7 @@ impl Process {
             temporary_roots: Vec::with_capacity(8),
             io_current: None,
             status: ProcStatus::Runnable,
-            reductions_left: u32::MAX,
+            reductions_left: reduction_budget,
         }
     }
 
@@ -180,10 +179,18 @@ impl Process {
 
 impl Runtime {
     fn new(program: BytecodeProgram) -> Self {
-        Self::new_with_heap(program, Heap::default())
+        Self::new_with_heap_and_reduction_budget(
+            program,
+            Heap::default(),
+            reduction_budget_from_env(),
+        )
     }
 
-    fn new_with_heap(program: BytecodeProgram, heap: Heap) -> Self {
+    fn new_with_heap_and_reduction_budget(
+        program: BytecodeProgram,
+        heap: Heap,
+        reduction_budget: u32,
+    ) -> Self {
         let max_tag = program
             .constructor_arities
             .iter()
@@ -209,6 +216,7 @@ impl Runtime {
             },
             processes: Arena::new(),
             run_queue: VecDeque::new(),
+            reduction_budget,
         };
         runtime.init_nullary();
         runtime
@@ -222,14 +230,16 @@ impl Runtime {
     ) -> Self {
         let mut heap = Heap::default();
         heap.set_collection_limits_for_test(nursery_slot_count, next_major_at);
-        Self::new_with_heap(program, heap)
+        Self::new_with_heap_and_reduction_budget(program, heap, reduction_budget_from_env())
     }
 
     fn allocate_process(&mut self) -> ProcessId {
         let raw = u32::try_from(self.processes.len())
             .unwrap_or_else(|_| solveig_base::ice!("process arena exhausted u32 identities"));
         let id = ProcessId::from_raw(RawIdx::from(raw));
-        let allocated = self.processes.alloc(Process::new(id));
+        let allocated = self
+            .processes
+            .alloc(Process::new(id, self.reduction_budget));
         if allocated != id {
             solveig_base::ice!("process arena returned a non-sequential identity");
         }
@@ -248,10 +258,14 @@ impl Runtime {
 
     fn record_process_outcome(&mut self, process: &mut Process, outcome: &StepOutcome) {
         process.record_outcome(outcome);
-        if let StepOutcome::Failed(error) = outcome {
-            self.fail_owned_blackholes(process, error);
-            process.io_current = None;
-            process.continuations.clear();
+        match outcome {
+            StepOutcome::Yielded => self.run_queue.push_back(process.id),
+            StepOutcome::Failed(error) => {
+                self.fail_owned_blackholes(process, error);
+                process.io_current = None;
+                process.continuations.clear();
+            }
+            StepOutcome::Blocked | StepOutcome::Finished(_) => {}
         }
     }
 
@@ -311,6 +325,7 @@ impl<'a> Interpreter<'a> {
             bools,
             processes,
             run_queue,
+            reduction_budget: _,
         } = runtime;
         Self {
             process,
@@ -340,7 +355,9 @@ impl DerefMut for Interpreter<'_> {
 }
 
 fn run(runtime: &mut Runtime, process: &mut Process) -> StepOutcome {
-    debug_assert!(process.reductions_left > 0);
+    if process.reductions_left == 0 {
+        process.reductions_left = runtime.reduction_budget;
+    }
     process.status = ProcStatus::Running;
     let result = {
         let mut interpreter = Interpreter::new(runtime, process);
@@ -384,7 +401,18 @@ fn evaluate_entry(runtime: &mut Runtime, entry: usize) -> (ProcessId, StepOutcom
             runtime.record_process_outcome(&mut process, &outcome);
             outcome
         }
-        Ok(GlobalEval::Entered) => run(runtime, &mut process),
+        Ok(GlobalEval::Entered) => loop {
+            let outcome = run(runtime, &mut process);
+            if outcome != StepOutcome::Yielded {
+                break outcome;
+            }
+            let Some(queued) = runtime.run_queue.pop_front() else {
+                solveig_base::ice!("yielded process was not returned to the run queue");
+            };
+            if queued != id {
+                solveig_base::ice!("single-process evaluation lost FIFO run-queue order");
+            }
+        },
         Ok(GlobalEval::Blocked) => {
             let outcome = StepOutcome::Blocked;
             runtime.record_process_outcome(&mut process, &outcome);
@@ -407,6 +435,9 @@ fn perform_process_io(
     io: &mut IoRuntime<'_>,
 ) -> StepOutcome {
     let mut process = runtime.take_process(id);
+    if process.reductions_left == 0 {
+        process.reductions_left = runtime.reduction_budget;
+    }
     process.status = ProcStatus::Running;
     let result = {
         let mut interpreter = Interpreter::new(runtime, &mut process);
@@ -450,6 +481,14 @@ fn outcome_value(outcome: StepOutcome) -> Result<Value, RuntimeError> {
             solveig_base::ice!("single-process execution stopped before producing a value")
         }
     }
+}
+
+fn reduction_budget_from_env() -> u32 {
+    std::env::var("SOLVEIG_REDUCTIONS")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .filter(|budget| *budget > 0)
+        .unwrap_or(DEFAULT_REDUCTIONS)
 }
 
 pub struct EvalResult {
@@ -614,7 +653,18 @@ impl Machine {
         let mut io = IoRuntime::new(stdin, stdout, args, cwd);
         let (id, outcome) = evaluate_entry(&mut runtime, entry);
         let action = outcome_value(outcome)?;
-        let root = outcome_value(perform_process_io(&mut runtime, id, action, &mut io))?;
+        let root = loop {
+            let outcome = perform_process_io(&mut runtime, id, action, &mut io);
+            if outcome != StepOutcome::Yielded {
+                break outcome_value(outcome)?;
+            }
+            let Some(queued) = runtime.run_queue.pop_front() else {
+                solveig_base::ice!("yielded IO process was not returned to the run queue");
+            };
+            if queued != id {
+                solveig_base::ice!("single-process IO lost FIFO run-queue order");
+            }
+        };
 
         Ok(runtime.into_eval_result(root))
     }

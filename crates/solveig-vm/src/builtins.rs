@@ -144,7 +144,7 @@ impl<'context, 'runtime> VmCtx<'context, 'runtime> {
         self.interpreter.process.temporary_roots.push(nil);
 
         for offset in (0..value_count).rev() {
-            self.interpreter.maybe_gc();
+            self.interpreter.safe_point();
             let value = *self
                 .interpreter
                 .process

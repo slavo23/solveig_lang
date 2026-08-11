@@ -273,7 +273,7 @@ impl Interpreter<'_> {
 
                 Some(Value::FunctionRef { chunk, arity })
             } else {
-                self.maybe_gc();
+                self.safe_point();
                 let applied_args = self.pop_payload(arg_count);
 
                 Some(self.alloc_heap(HeapObject::PartialApp {
@@ -314,7 +314,6 @@ impl Interpreter<'_> {
     ) -> Option<Value> {
         match callee {
             Value::CtorFn { tag, arity } => {
-                self.maybe_gc();
                 Some(self.apply_constructor(None, tag, arity, PayloadStore::empty(), arg_count))
             }
 
@@ -326,7 +325,7 @@ impl Interpreter<'_> {
                     self.enter_known_function(program, mode, chunk_id, arg_count);
                     None
                 } else if arg_count < arity {
-                    self.maybe_gc();
+                    self.safe_point();
                     let applied_args = self.pop_payload(arg_count);
 
                     Some(self.alloc_heap(HeapObject::PartialApp {
@@ -344,7 +343,7 @@ impl Interpreter<'_> {
             Value::Obj(id) => {
                 let checkpoint = self.temporary_roots.len();
                 self.temporary_roots.push(Value::Obj(id));
-                self.maybe_gc();
+                self.safe_point();
                 let Some(rooted_callee) = self.temporary_roots.get(checkpoint).copied() else {
                     solveig_base::ice!("rooted heap callee disappeared");
                 };
@@ -487,6 +486,7 @@ impl Interpreter<'_> {
         existing: PayloadRef,
         n_new: usize,
     ) -> Value {
+        self.safe_point();
         let total = existing.len() + n_new;
 
         if total == arity as usize {
@@ -557,8 +557,6 @@ impl Interpreter<'_> {
             )));
         }
 
-        self.maybe_gc();
-
         let Some(args_start) = self.stack.len().checked_sub(arg_count) else {
             solveig_base::ice!("builtin call stack underflow");
         };
@@ -584,8 +582,17 @@ impl Interpreter<'_> {
             self.push(*arg);
         }
 
+        let checkpoint = self.temporary_roots.len();
+        self.temporary_roots.push(callee);
+        self.safe_point();
+        let Some(callee) = self.temporary_roots.get(checkpoint).copied() else {
+            solveig_base::ice!("rooted callback callee disappeared at a safe point");
+        };
+        self.temporary_roots.truncate(checkpoint);
+
         match self.invoke_value(program, InvokeMode::HaltCall, callee, args.len()) {
             Some(value) => Ok(value),
+            None if self.reductions_left == 0 => Err(StepOutcome::Yielded),
             None => self.dispatch(program),
         }
     }

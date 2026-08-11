@@ -80,9 +80,14 @@ impl Interpreter<'_> {
         self.heap.alloc(obj)
     }
 
-    pub(crate) fn maybe_gc(&mut self) {
-        // The AOSA GHC runtime chapter identifies allocation-limit checks as
-        // safe points. I6 can force this same check by zeroing the limit.
+    /// Reaches the VM's sole suspension boundary and performs pending GC work.
+    ///
+    /// Following Marlow and Peyton Jones's AOSA GHC runtime chapter, execution
+    /// can stop only where the VM stack, registers, and heap roots are tidy.
+    pub(crate) fn safe_point(&mut self) {
+        if self.reductions_left > 0 {
+            self.reductions_left -= 1;
+        }
         if self.heap.should_collect() {
             let mut roots = Roots {
                 active_process: Some(self.process),

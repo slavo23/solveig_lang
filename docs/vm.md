@@ -204,6 +204,42 @@ The process continuation stack is the ownership record: each live
 `PublishGlobalThen*` frame identifies one global the process must either
 publish or fail. There is no second per-process blackhole stack.
 
+## Safe points and preemption
+
+`Interpreter::safe_point` is the only runtime boundary that consumes a
+process reduction and admits GC. Calls, taken backward jumps, and allocation
+paths all reach this function. Interruption delivery and debugger stops must
+extend this function in their later phases instead of adding another polling
+path.
+
+The reduction that exhausts a quantum is allowed to finish its current
+bytecode instruction before `run` returns `StepOutcome::Yielded`. Consequently
+the saved program counter always identifies the next instruction, heap results
+have been published into a root, and call/return continuations are complete.
+Native builtins remain atomic scheduler operations; builtins that allocate in
+a loop still reach the same safe point for every allocation, but return to the
+scheduler only after the builtin has restored its rooted temporary state.
+Resuming a yielded process replenishes its budget and continues from the saved
+state. IO callback evaluation uses the same path and retains its pending
+`IoBind` state across a yield.
+
+The default quantum is 4,096 reductions. On the five-million-call tail-loop
+fixture, budgets of 4,096, 65,536, and `u32::MAX` each completed in 1.54 seconds
+of test time on the I6 development machine; a budget of 256 also took 1.54
+seconds but incurred more scheduler-boundary traffic. The smallest candidate
+with no measured interpreter penalty was selected to keep preemption latency
+bounded without optimizing against noise. `SOLVEIG_REDUCTIONS=<positive u32>`
+overrides it; zero, malformed, and out-of-range values fall back to the default.
+
+The run queue is a strict `VecDeque` FIFO, and every yielded process rejoins at
+the back. This is the deterministic policy used by tests. Setting
+`SOLVEIG_SCHED_DETERMINISTIC=1` explicitly pins that contract; I6 has no
+alternative scheduler policy, so the setting is intentionally idempotent until
+I7 adds the complete scheduling loop. This follows the AOSA GHC runtime
+chapter's rule that lightweight-thread context switches occur only where VM
+state is tidy, while adding explicit call and backward-jump points so a pure
+non-allocating loop cannot starve the run queue.
+
 ## Collector invariants for I4
 
 - Allocation and collection use indices and checked `Vec` access; the collector

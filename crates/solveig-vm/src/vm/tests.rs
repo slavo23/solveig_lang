@@ -4,8 +4,8 @@
 use super::*;
 use crate::bytecode::Instr;
 use solveig_ast::ast::{
-    BUILTIN_CHARS_TO_STRING, BUILTIN_STRING_TO_CHARS, BinOp, BuiltinId, CtorId, CtorRuntimeRole,
-    PRIM_TYS,
+    BUILTIN_BIND_IO, BUILTIN_CHARS_TO_STRING, BUILTIN_PURE_IO, BUILTIN_STRING_TO_CHARS, BinOp,
+    BuiltinId, CtorId, CtorRuntimeRole, PRIM_TYS,
 };
 use solveig_lower::closure_ir::{CCExpr, CCFunction, CCGlobalDef};
 use solveig_lower::{LowerCaseArm, LowerPattern};
@@ -68,6 +68,167 @@ fn tail_recursive_countdown_uses_bounded_vm_stack() {
     );
 
     assert_eq!(run_main(&program), "5000000");
+}
+
+#[test]
+fn call_safe_points_yield_and_resume_with_consistent_process_state() {
+    let countdown = function(
+        0,
+        "countdown",
+        2,
+        if_then_else(
+            bin(BinOp::Equal, local(1), int(0)),
+            local(0),
+            call_known(
+                0,
+                vec![
+                    bin(BinOp::Minus, local(1), int(1)),
+                    bin(BinOp::Plus, local(0), int(1)),
+                ],
+            ),
+        ),
+    );
+    let program = program(
+        vec![global("main", call_known(0, vec![int(4), int(0)]))],
+        vec![countdown],
+        &[],
+    );
+    let mut runtime = runtime_with_reduction_budget(lower_to_bytecode(&program), 1);
+    let process_id = runtime.allocate_process();
+    runtime.run_queue.clear();
+    start_process_global(&mut runtime, process_id, 0);
+
+    let mut yields = 0;
+    let result = loop {
+        match run_process(&mut runtime, process_id) {
+            StepOutcome::Yielded => {
+                yields += 1;
+                assert_eq!(runtime.processes[process_id].status, ProcStatus::Runnable);
+                assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
+            }
+            StepOutcome::Finished(value) => break value,
+            StepOutcome::Blocked | StepOutcome::Failed(_) => {
+                solveig_base::ice!("countdown process did not remain runnable")
+            }
+        }
+    };
+
+    assert_eq!(result, Value::Int(4));
+    assert_eq!(yields, 5);
+}
+
+#[test]
+fn allocation_safe_point_yields_after_publishing_the_allocated_root() {
+    let program = program(
+        vec![global("main", pack(CONS_TAG, 2, vec![int(1), int(2)]))],
+        Vec::new(),
+        &[("Cons", CONS_TAG, 2)],
+    );
+    let mut runtime = runtime_with_reduction_budget(lower_to_bytecode(&program), 1);
+    let process_id = runtime.allocate_process();
+    runtime.run_queue.clear();
+    start_process_global(&mut runtime, process_id, 0);
+
+    let outcome = run_process(&mut runtime, process_id);
+
+    assert_eq!(outcome, StepOutcome::Yielded);
+    assert!(matches!(
+        runtime.processes[process_id].stack.last(),
+        Some(Value::Obj(_))
+    ));
+    assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
+    assert!(matches!(
+        run_process(&mut runtime, process_id),
+        StepOutcome::Finished(Value::Obj(_))
+    ));
+}
+
+#[test]
+fn backward_jump_safe_point_restarts_at_the_branch_target() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut bytecode = lower_to_bytecode(&program);
+    let chunk = bytecode.globals[0].chunk;
+    bytecode.chunks[chunk].code = vec![Instr::Jump(0)];
+    let mut runtime = runtime_with_reduction_budget(bytecode, 1);
+    let process_id = runtime.allocate_process();
+    runtime.run_queue.clear();
+    start_process_global(&mut runtime, process_id, 0);
+
+    assert_eq!(run_process(&mut runtime, process_id), StepOutcome::Yielded);
+    assert_eq!(runtime.processes[process_id].pc, 0);
+    assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
+    assert_eq!(run_process(&mut runtime, process_id), StepOutcome::Yielded);
+    assert_eq!(runtime.processes[process_id].pc, 0);
+}
+
+#[test]
+fn yielded_processes_rejoin_the_fifo_run_queue() {
+    let countdown = function(0, "identity", 1, local(0));
+    let program = program(
+        vec![
+            global("first", call_known(0, vec![int(1)])),
+            global("second", call_known(0, vec![int(2)])),
+        ],
+        vec![countdown],
+        &[],
+    );
+    let mut runtime = runtime_with_reduction_budget(lower_to_bytecode(&program), 1);
+    let first = runtime.allocate_process();
+    let second = runtime.allocate_process();
+    runtime.run_queue.clear();
+    start_process_global(&mut runtime, first, 0);
+    start_process_global(&mut runtime, second, 1);
+
+    assert_eq!(run_process(&mut runtime, first), StepOutcome::Yielded);
+    assert_eq!(run_process(&mut runtime, second), StepOutcome::Yielded);
+
+    assert_eq!(runtime.run_queue.pop_front(), Some(first));
+    assert_eq!(runtime.run_queue.pop_front(), Some(second));
+}
+
+#[test]
+fn io_callback_yields_and_resumes_through_the_same_safe_point() {
+    let continuation = function(
+        0,
+        "continuation",
+        1,
+        builtin(BUILTIN_PURE_IO, vec![bin(BinOp::Plus, local(0), int(1))]),
+    );
+    let action = builtin(
+        BUILTIN_BIND_IO,
+        vec![builtin(BUILTIN_PURE_IO, vec![int(41)]), function_ref(0, 1)],
+    );
+    let program = program(vec![global("main", action)], vec![continuation], &[]);
+    let bytecode = lower_to_bytecode(&program);
+    let entry = bytecode
+        .global_index_by_name("main")
+        .expect("IO safe-point fixture should contain main");
+    let mut runtime = runtime_with_reduction_budget(bytecode, 1);
+    let (process_id, outcome) = evaluate_entry(&mut runtime, entry);
+    let StepOutcome::Finished(action) = outcome else {
+        solveig_base::ice!("IO safe-point fixture did not produce an action");
+    };
+    let mut stdin = Cursor::new(Vec::<u8>::new());
+    let mut stdout = Vec::new();
+    let args = Vec::new();
+    let mut io = IoRuntime::new(&mut stdin, &mut stdout, &args, Path::new("."));
+
+    let mut yields = 0;
+    let result = loop {
+        match perform_process_io(&mut runtime, process_id, action, &mut io) {
+            StepOutcome::Yielded => {
+                yields += 1;
+                assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
+            }
+            StepOutcome::Finished(value) => break value,
+            StepOutcome::Blocked | StepOutcome::Failed(_) => {
+                solveig_base::ice!("IO callback did not remain resumable")
+            }
+        }
+    };
+
+    assert_eq!(result, Value::Int(42));
+    assert!(yields >= 2);
 }
 
 #[test]
@@ -403,6 +564,10 @@ fn start_process_global(runtime: &mut Runtime, process_id: ProcessId, global_ind
     runtime.restore_process(process);
 }
 
+fn runtime_with_reduction_budget(program: BytecodeProgram, reduction_budget: u32) -> Runtime {
+    Runtime::new_with_heap_and_reduction_budget(program, Heap::default(), reduction_budget)
+}
+
 fn run_process(runtime: &mut Runtime, process_id: ProcessId) -> StepOutcome {
     let mut process = runtime.take_process(process_id);
     let outcome = run(runtime, &mut process);
@@ -735,6 +900,10 @@ fn call(callee: Rc<CCExpr>, args: Vec<Rc<CCExpr>>) -> Rc<CCExpr> {
 
 fn call_known(func: usize, args: Vec<Rc<CCExpr>>) -> Rc<CCExpr> {
     expr(CCExpr::CallKnown { func, args })
+}
+
+fn function_ref(func: usize, arity: usize) -> Rc<CCExpr> {
+    expr(CCExpr::FunctionRef { func, arity })
 }
 
 fn builtin(id: BuiltinId, args: Vec<Rc<CCExpr>>) -> Rc<CCExpr> {
