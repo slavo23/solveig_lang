@@ -406,6 +406,85 @@ fn hover_on_second_map_constructor_lambda_hole_shows_fill_suggestions() {
 }
 
 #[test]
+fn hover_covers_top_level_equation_patterns_and_bodies() {
+    let project_root = temp_root("equation_group_hovers");
+    let file = project_root.join("src/main.sv");
+    let source = r#"data Card = Blank | Face Int
+
+score : Card -> Int -> Int
+score (Face n) 0 = n
+score _ total = total
+
+main = score (Face 3) 0
+"#;
+    write_source(&file, source);
+
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation
+        .check(true)
+        .expect("equation hover fixture should check");
+
+    assert!(
+        result.success(),
+        "equation hover diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let constructor_start = offset_in_line(source, "score (Face n) 0 = n", "Face");
+    let constructor = compilation
+        .hover_info(&file, constructor_start)
+        .expect("pattern constructor should hover");
+    assert_eq!(constructor.signature(), "Face : Int -> Card");
+    assert_eq!(constructor.span(), constructor_start..constructor_start + 4);
+
+    let pattern_binder_start = offset_in_line(source, "score (Face n) 0 = n", "n)");
+    let pattern_binder = compilation
+        .hover_info(&file, pattern_binder_start)
+        .expect("pattern binder should hover");
+    assert_eq!(pattern_binder.signature(), "n : Int");
+    assert_eq!(
+        pattern_binder.span(),
+        pattern_binder_start..pattern_binder_start + 1
+    );
+
+    let body_binder_start = offset_in_line_last(source, "score (Face n) 0 = n", "n");
+    let body_binder = compilation
+        .hover_info(&file, body_binder_start)
+        .expect("body reference to pattern binder should hover");
+    assert_eq!(body_binder.signature(), "n : Int");
+    assert_eq!(body_binder.span(), body_binder_start..body_binder_start + 1);
+
+    let wildcard_start = offset_in_line(source, "score _ total = total", "_");
+    let wildcard = compilation
+        .hover_info(&file, wildcard_start)
+        .expect("equation wildcard should hover");
+    assert_eq!(wildcard.signature(), "_ : Card");
+    assert_eq!(wildcard.span(), wildcard_start..wildcard_start + 1);
+
+    let later_pattern_binder_start = offset_in_line(source, "score _ total = total", "total");
+    let later_pattern_binder = compilation
+        .hover_info(&file, later_pattern_binder_start)
+        .expect("later equation binder should hover");
+    assert_eq!(later_pattern_binder.signature(), "total : Int");
+    assert_eq!(
+        later_pattern_binder.span(),
+        later_pattern_binder_start..later_pattern_binder_start + "total".len()
+    );
+
+    let later_body_binder_start = offset_in_line_last(source, "score _ total = total", "total");
+    let later_body_binder = compilation
+        .hover_info(&file, later_body_binder_start)
+        .expect("later equation body reference should hover");
+    assert_eq!(later_body_binder.signature(), "total : Int");
+    assert_eq!(
+        later_body_binder.span(),
+        later_body_binder_start..later_body_binder_start + "total".len()
+    );
+
+    drop(project_root);
+}
+
+#[test]
 fn hole_diagnostics_and_hovers_survive_incremental_recheck() {
     let project_root = fixture_root("examples/smoke_suite");
     let file = project_root.join("src/main.sv");

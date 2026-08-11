@@ -134,17 +134,24 @@ impl<'a> Resolver<'a> {
         PatternNode::new(node, span)
     }
     fn collect_surface_pattern_binders(
+        &mut self,
         pat: &SpannedWrapper<SurfacePattern>,
+        cx: &ModuleContext,
         out: &mut FxHashSet<Symbol>,
     ) {
         match &pat.0 {
             SurfacePattern::Var(name) => {
-                out.insert(*name);
+                if !out.insert(*name) {
+                    self.errors.push(ResolveError::RepeatedPatternVariable {
+                        span: self.file_span(cx, pat.1),
+                        name: *name,
+                    });
+                }
             }
             SurfacePattern::Lit(_) | SurfacePattern::Wild => {}
             SurfacePattern::Con(_, args) => {
                 for arg in args {
-                    Self::collect_surface_pattern_binders(arg, out);
+                    self.collect_surface_pattern_binders(arg, cx, out);
                 }
             }
         }
@@ -158,8 +165,11 @@ impl<'a> Resolver<'a> {
     ) -> CaseArmNode<Span> {
         let pattern = self.resolve_surface_pattern_in_module(&sf.0.pattern, cx);
 
+        let mut pattern_bound_terms = FxHashSet::default();
+        self.collect_surface_pattern_binders(&sf.0.pattern, cx, &mut pattern_bound_terms);
+
         let mut arm_bound_terms = bound_terms.clone();
-        Self::collect_surface_pattern_binders(&sf.0.pattern, &mut arm_bound_terms);
+        arm_bound_terms.extend(pattern_bound_terms);
 
         CaseArmNode::new(
             CaseArm {

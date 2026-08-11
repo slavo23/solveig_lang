@@ -148,7 +148,7 @@ pub enum SurfaceDefinition {
     FunDef {
         name: Spanned<Symbol>,
         body: Spanned<SurfaceExpr>,
-        params: Vec<Spanned<Symbol>>,
+        params: Vec<Spanned<SurfacePattern>>,
         docs: Option<DocComment>,
     },
     SigDef {

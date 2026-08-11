@@ -6,8 +6,8 @@ use std::rc::Rc;
 
 use solveig_ast::ast::{
     BuiltinDefinition, CaseArm, ClassId, CtorId, CtorRuntimeInfo, DefId, Ev, EvVarId,
-    InstanceDefinition, Literal, Names, Pattern, PatternNode, ResolvedModule, StrLitId, TermExpr,
-    TermExprNode, VarRef, runtime_ctor_role,
+    InstanceDefinition, Literal, MatchArmNode, Names, Pattern, PatternNode, ResolvedModule,
+    StrLitId, TermExpr, TermExprNode, VarRef, runtime_ctor_role,
 };
 
 use super::dicts::{DictLayout, DictLayouts, instance_global_name};
@@ -38,25 +38,52 @@ struct LowerConstructorInfo {
     arity: u16,
 }
 
+#[derive(Clone, Debug)]
+struct LowerMatchBinding {
+    name: String,
+    source: String,
+}
+
+#[derive(Clone, Debug)]
+struct LowerMatchRow<A, P> {
+    patterns: Vec<PatternNode<P>>,
+    body: TermExprNode<A, P>,
+    bindings: Vec<LowerMatchBinding>,
+}
+
+#[derive(Clone, Debug)]
+enum LowerMatchHead {
+    Constructor(CtorId),
+    Literal(Literal),
+}
+
 impl LowerCtx {
     fn resolve_var(&self, var: &VarRef) -> Rc<IRExpr> {
         let name = self.names.var_display_name(var);
+        if let Some(bound) = self.resolve_bound_term_name(&name) {
+            return bound;
+        }
 
-        for (depth, binding) in self.scope.iter().rev().enumerate() {
-            if matches!(binding, Binding::Term(bound_name) if bound_name == &name) {
-                return Rc::new(IRExpr::BVar(depth));
-            }
-        }
         if let Some(&global_index) = self.globals.get(&name) {
-            return Rc::new(IRExpr::FVar(global_index));
-        }
-        if let Some(info) = self.constructor_named(&name) {
-            return Rc::new(IRExpr::Con {
+            Rc::new(IRExpr::FVar(global_index))
+        } else if let Some(info) = self.constructor_named(&name) {
+            Rc::new(IRExpr::Con {
                 tag: info.tag,
                 arity: info.arity,
-            });
+            })
+        } else {
+            solveig_base::ice!("unbound variable during lowering: {name}");
         }
-        solveig_base::ice!("unbound variable during lowering: {name}");
+    }
+
+    fn resolve_bound_term_name(&self, name: &str) -> Option<Rc<IRExpr>> {
+        for (depth, binding) in self.scope.iter().rev().enumerate() {
+            if matches!(binding, Binding::Term(bound_name) if bound_name == name) {
+                return Some(Rc::new(IRExpr::BVar(depth)));
+            }
+        }
+
+        None
     }
 
     fn resolve_ev_var(&self, evvar: EvVarId) -> Rc<IRExpr> {
@@ -133,7 +160,7 @@ impl LowerCtx {
     }
 }
 
-fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr> {
+fn lower_expr<A: Clone, P: Clone>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr> {
     match &expr.node {
         TermExpr::Unit => Rc::new(IRExpr::Unit),
         TermExpr::Var(name) => ctx.resolve_var(name),
@@ -189,6 +216,7 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
                 arms: lowered_arms,
             })
         }
+        TermExpr::Match(scrutinees, arms) => lower_match_expr(ctx, scrutinees, arms),
 
         TermExpr::IfThenElse(cond, then_branch, else_branch) => {
             let lowered_cond = lower_expr(ctx, cond);
@@ -213,6 +241,325 @@ fn lower_expr<A, P>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr>
     }
 }
 
+fn lower_match_expr<A: Clone, P: Clone>(
+    ctx: &mut LowerCtx,
+    scrutinees: &[TermExprNode<A, P>],
+    arms: &[MatchArmNode<A, P>],
+) -> Rc<IRExpr> {
+    if scrutinees.is_empty() {
+        solveig_base::ice!("empty multi-pattern match reached lowering");
+    }
+
+    let columns = (0..scrutinees.len())
+        .map(|index| format!("$matchValue{index}"))
+        .collect::<Vec<_>>();
+    let mut lowered_scrutinees = Vec::with_capacity(scrutinees.len());
+
+    for (column, scrutinee) in columns.iter().zip(scrutinees) {
+        lowered_scrutinees.push(lower_expr(ctx, scrutinee));
+        ctx.push_term(column);
+    }
+
+    let rows = arms
+        .iter()
+        .map(|arm| LowerMatchRow {
+            patterns: arm.node.patterns.clone(),
+            body: arm.node.expr.clone(),
+            bindings: Vec::new(),
+        })
+        .collect::<Vec<_>>();
+    let mut next_field = 0usize;
+    let mut body = lower_match_columns(ctx, &columns, rows, &mut next_field);
+
+    for _ in &columns {
+        ctx.pop();
+    }
+
+    for scrutinee in lowered_scrutinees.into_iter().rev() {
+        body = Rc::new(IRExpr::Let(scrutinee, body));
+    }
+
+    body
+}
+
+fn lower_match_columns<A: Clone, P: Clone>(
+    ctx: &mut LowerCtx,
+    columns: &[String],
+    rows: Vec<LowerMatchRow<A, P>>,
+    next_field: &mut usize,
+) -> Rc<IRExpr> {
+    if rows.is_empty() {
+        solveig_base::ice!("empty match branch reached lowering");
+    }
+
+    let Some((column, rest_columns)) = columns.split_first() else {
+        return lower_match_row_body(
+            ctx,
+            rows.first().expect("ICE: non-empty rows checked above"),
+        );
+    };
+
+    let has_explicit_head = rows.iter().any(|row| {
+        row.patterns
+            .first()
+            .is_some_and(|pattern| match_head(pattern).is_some())
+    });
+
+    if !has_explicit_head {
+        let rows = rows
+            .into_iter()
+            .map(|row| lower_match_default_row(row, column))
+            .collect::<Vec<_>>();
+        return lower_match_columns(ctx, rest_columns, rows, next_field);
+    }
+
+    let scrutinee = ctx
+        .resolve_bound_term_name(column)
+        .unwrap_or_else(|| solveig_base::ice!("match column `{column}` was not bound"));
+    let heads = match_heads_in_order(&rows);
+    let mut case_arms = Vec::new();
+
+    for head in heads {
+        let field_count = match_head_field_count(&head, &rows);
+        let field_names = fresh_match_field_names(next_field, field_count);
+        let pattern = lower_match_head_pattern(ctx, &head, field_count);
+
+        for field_name in &field_names {
+            ctx.push_term(field_name);
+        }
+
+        let mut next_columns = field_names.clone();
+        next_columns.extend_from_slice(rest_columns);
+        let branch_rows = rows
+            .iter()
+            .cloned()
+            .filter_map(|row| lower_match_head_row(row, &head, field_count, column))
+            .collect::<Vec<_>>();
+        let body = lower_match_columns(ctx, &next_columns, branch_rows, next_field);
+
+        for _ in &field_names {
+            ctx.pop();
+        }
+
+        case_arms.push(LowerCaseArm { pattern, body });
+    }
+
+    let default_rows = rows
+        .into_iter()
+        .filter_map(|row| lower_match_irrefutable_row(row, column))
+        .collect::<Vec<_>>();
+
+    if !default_rows.is_empty() {
+        let body = lower_match_columns(ctx, rest_columns, default_rows, next_field);
+        case_arms.push(LowerCaseArm {
+            pattern: LowerPattern::Wild,
+            body,
+        });
+    }
+
+    Rc::new(IRExpr::Case {
+        scrutinee,
+        arms: case_arms,
+    })
+}
+
+fn lower_match_row_body<A: Clone, P: Clone>(
+    ctx: &mut LowerCtx,
+    row: &LowerMatchRow<A, P>,
+) -> Rc<IRExpr> {
+    let mut lowered_binders = Vec::with_capacity(row.bindings.len());
+
+    for binding in &row.bindings {
+        lowered_binders.push(
+            ctx.resolve_bound_term_name(&binding.source)
+                .unwrap_or_else(|| {
+                    solveig_base::ice!("match binding source `{}` was not bound", binding.source)
+                }),
+        );
+        ctx.push_term(&binding.name);
+    }
+
+    let mut body = lower_expr(ctx, &row.body);
+
+    for _ in &row.bindings {
+        ctx.pop();
+    }
+
+    for binder in lowered_binders.into_iter().rev() {
+        body = Rc::new(IRExpr::Let(binder, body));
+    }
+
+    body
+}
+
+fn match_heads_in_order<A, P>(rows: &[LowerMatchRow<A, P>]) -> Vec<LowerMatchHead> {
+    let mut heads = Vec::new();
+
+    for row in rows {
+        let Some(pattern) = row.patterns.first() else {
+            continue;
+        };
+        let Some(head) = match_head(pattern) else {
+            continue;
+        };
+
+        if !heads.iter().any(|seen| match_heads_equal(seen, &head)) {
+            heads.push(head);
+        }
+    }
+
+    heads
+}
+
+fn match_head<P>(pattern: &PatternNode<P>) -> Option<LowerMatchHead> {
+    match &pattern.node {
+        Pattern::Con(id, _) => Some(LowerMatchHead::Constructor(*id)),
+        Pattern::Lit(lit) => Some(LowerMatchHead::Literal(lit.clone())),
+        Pattern::Var(_) | Pattern::Wild => None,
+    }
+}
+
+fn match_head_field_count<A, P>(head: &LowerMatchHead, rows: &[LowerMatchRow<A, P>]) -> usize {
+    rows.iter()
+        .filter_map(|row| row.patterns.first())
+        .find_map(|pattern| match &pattern.node {
+            Pattern::Con(id, args)
+                if matches!(head, LowerMatchHead::Constructor(head_id) if id == head_id) =>
+            {
+                Some(args.len())
+            }
+            Pattern::Lit(lit) if matches!(head, LowerMatchHead::Literal(head_lit) if literals_equal(lit, head_lit)) => {
+                Some(0)
+            }
+            _ => None,
+        })
+        .unwrap_or_else(|| solveig_base::ice!("match head had no source pattern"))
+}
+
+fn lower_match_head_pattern(
+    ctx: &LowerCtx,
+    head: &LowerMatchHead,
+    field_count: usize,
+) -> LowerPattern {
+    match head {
+        LowerMatchHead::Constructor(id) => {
+            let info = ctx.constructors.get(id).unwrap_or_else(|| {
+                solveig_base::ice!(
+                    "unknown constructor in match pattern during lowering: {}",
+                    ctx.constructor_name_for_error(*id)
+                )
+            });
+            LowerPattern::Con(info.tag, vec![LowerPattern::Var; field_count])
+        }
+        LowerMatchHead::Literal(lit) => LowerPattern::Lit(lit.clone()),
+    }
+}
+
+fn lower_match_default_row<A, P: Clone>(
+    mut row: LowerMatchRow<A, P>,
+    column: &str,
+) -> LowerMatchRow<A, P> {
+    let first = row
+        .patterns
+        .first()
+        .cloned()
+        .unwrap_or_else(|| solveig_base::ice!("match row missing pattern"));
+    row.patterns.remove(0);
+    add_irrefutable_binding(&mut row, first, column);
+    row
+}
+
+fn lower_match_irrefutable_row<A, P: Clone>(
+    row: LowerMatchRow<A, P>,
+    column: &str,
+) -> Option<LowerMatchRow<A, P>> {
+    row.patterns
+        .first()
+        .is_some_and(|pattern| matches!(pattern.node, Pattern::Var(_) | Pattern::Wild))
+        .then(|| lower_match_default_row(row, column))
+}
+
+fn lower_match_head_row<A, P: Clone>(
+    mut row: LowerMatchRow<A, P>,
+    head: &LowerMatchHead,
+    field_count: usize,
+    column: &str,
+) -> Option<LowerMatchRow<A, P>> {
+    let first = row.patterns.first().cloned()?;
+    row.patterns.remove(0);
+
+    match first.node {
+        Pattern::Con(id, args) if matches!(head, LowerMatchHead::Constructor(head_id) if id == *head_id) =>
+        {
+            let mut patterns = args;
+            patterns.extend(row.patterns);
+            row.patterns = patterns;
+            Some(row)
+        }
+        Pattern::Lit(lit) if matches!(head, LowerMatchHead::Literal(head_lit) if literals_equal(&lit, head_lit)) => {
+            Some(row)
+        }
+        Pattern::Var(_) | Pattern::Wild => {
+            let first_anno = first.anno;
+            add_irrefutable_binding(
+                &mut row,
+                PatternNode::new(first.node, first_anno.clone()),
+                column,
+            );
+            let mut patterns = vec![PatternNode::new(Pattern::Wild, first_anno); field_count];
+            patterns.extend(row.patterns);
+            row.patterns = patterns;
+            Some(row)
+        }
+        _ => None,
+    }
+}
+
+fn add_irrefutable_binding<A, P>(
+    row: &mut LowerMatchRow<A, P>,
+    pattern: PatternNode<P>,
+    column: &str,
+) {
+    if let Pattern::Var(name) = pattern.node {
+        row.bindings.push(LowerMatchBinding {
+            name,
+            source: column.to_string(),
+        });
+    }
+}
+
+fn fresh_match_field_names(next_field: &mut usize, count: usize) -> Vec<String> {
+    (0..count)
+        .map(|_| {
+            let name = format!("$matchField{}", *next_field);
+            *next_field = next_field
+                .checked_add(1)
+                .expect("ICE: match field name counter overflowed");
+            name
+        })
+        .collect()
+}
+
+fn match_heads_equal(left: &LowerMatchHead, right: &LowerMatchHead) -> bool {
+    match (left, right) {
+        (LowerMatchHead::Constructor(left), LowerMatchHead::Constructor(right)) => left == right,
+        (LowerMatchHead::Literal(left), LowerMatchHead::Literal(right)) => {
+            literals_equal(left, right)
+        }
+        _ => false,
+    }
+}
+
+fn literals_equal(left: &Literal, right: &Literal) -> bool {
+    match (left, right) {
+        (Literal::Int(left), Literal::Int(right)) => left == right,
+        (Literal::Float(left), Literal::Float(right)) => left.to_bits() == right.to_bits(),
+        (Literal::Char(left), Literal::Char(right)) => left == right,
+        (Literal::Str(left), Literal::Str(right)) => left == right,
+        _ => false,
+    }
+}
+
 fn lower_builtin_global(def: &BuiltinDefinition) -> IRGlobalDef {
     let args = (0..def.arity)
         .map(|index| Rc::new(IRExpr::BVar(def.arity - index - 1)))
@@ -229,7 +576,11 @@ fn lower_builtin_global(def: &BuiltinDefinition) -> IRGlobalDef {
     }
 }
 
-fn lower_ev_app<A, P>(ctx: &mut LowerCtx, inner: &TermExprNode<A, P>, ev: &Ev) -> Rc<IRExpr> {
+fn lower_ev_app<A: Clone, P: Clone>(
+    ctx: &mut LowerCtx,
+    inner: &TermExprNode<A, P>,
+    ev: &Ev,
+) -> Rc<IRExpr> {
     if let Some(method_id) = global_method_ref(inner)
         && let Some((class_id, field_index)) = ctx.dicts.method_field(method_id)
     {
@@ -349,7 +700,10 @@ fn build_dict_value(layout: &DictLayout, fields: Vec<Rc<IRExpr>>) -> Rc<IRExpr> 
     )
 }
 
-fn lower_case_arm<A, P>(ctx: &mut LowerCtx, arm: &CaseArm<A, P>) -> LowerCaseArm<IRExpr> {
+fn lower_case_arm<A: Clone, P: Clone>(
+    ctx: &mut LowerCtx,
+    arm: &CaseArm<A, P>,
+) -> LowerCaseArm<IRExpr> {
     let ir_pattern = lower_pattern(ctx, &arm.pattern);
     ctx.push_pattern_binders(&arm.pattern);
     let lowered_body = lower_expr(ctx, &arm.expr);
@@ -381,7 +735,7 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> LowerPattern {
     }
 }
 
-fn lower_instance_dict_global<A, P>(
+fn lower_instance_dict_global<A: Clone, P: Clone>(
     ctx: &mut LowerCtx,
     inst: &InstanceDefinition<A, P>,
 ) -> IRGlobalDef {
@@ -512,7 +866,7 @@ fn next_synthetic_constructor_base(
     (next_ctor, next_tag)
 }
 
-pub fn lower_module<A, P>(module: &ResolvedModule<A, P>, names: &Names) -> IRProgram {
+pub fn lower_module<A: Clone, P: Clone>(module: &ResolvedModule<A, P>, names: &Names) -> IRProgram {
     let constructors = build_constructor_table(module, names);
     let (next_ctor_id, next_tag) = next_synthetic_constructor_base(&constructors);
     let dicts = DictLayouts::build(module, next_ctor_id, next_tag);

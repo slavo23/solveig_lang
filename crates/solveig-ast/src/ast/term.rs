@@ -50,6 +50,7 @@ impl<T, A> ExprNode<T, A> {
 pub type TermExprNode<A, P = A> = ExprNode<TermExpr<A, P>, A>;
 pub type PatternNode<A> = ExprNode<Pattern<A>, A>;
 pub type CaseArmNode<A, P = A> = ExprNode<CaseArm<A, P>, P>;
+pub type MatchArmNode<A, P = A> = ExprNode<MatchArm<A, P>, P>;
 
 impl<A, P> ExprNode<TermExpr<A, P>, A> {
     pub fn map_anno<B, Q, FE, FP>(
@@ -96,6 +97,15 @@ impl<A, P> ExprNode<TermExpr<A, P>, A> {
             TermExpr::Con(id) => TermExpr::Con(id),
             TermExpr::Case(scrutinee, arms) => TermExpr::Case(
                 Box::new(scrutinee.map_anno(expr_anno, pattern_anno)),
+                arms.into_iter()
+                    .map(|arm| arm.map_anno(expr_anno, pattern_anno))
+                    .collect(),
+            ),
+            TermExpr::Match(scrutinees, arms) => TermExpr::Match(
+                scrutinees
+                    .into_iter()
+                    .map(|scrutinee| scrutinee.map_anno(expr_anno, pattern_anno))
+                    .collect(),
                 arms.into_iter()
                     .map(|arm| arm.map_anno(expr_anno, pattern_anno))
                     .collect(),
@@ -155,6 +165,31 @@ impl<A, P> ExprNode<CaseArm<A, P>, P> {
     }
 }
 
+impl<A, P> ExprNode<MatchArm<A, P>, P> {
+    pub fn map_anno<B, Q, FE, FP>(
+        self,
+        expr_anno: &mut FE,
+        pattern_anno: &mut FP,
+    ) -> ExprNode<MatchArm<B, Q>, Q>
+    where
+        FE: FnMut(A) -> B,
+        FP: FnMut(P) -> Q,
+    {
+        let anno = pattern_anno(self.anno);
+        let node = MatchArm {
+            patterns: self
+                .node
+                .patterns
+                .into_iter()
+                .map(|pattern| pattern.map_anno(pattern_anno))
+                .collect(),
+            expr: self.node.expr.map_anno(expr_anno, pattern_anno),
+        };
+
+        ExprNode::new(node, anno)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Literal {
     Int(i64),
@@ -198,6 +233,7 @@ pub enum TermExpr<A, P = A> {
     Anno(Box<TermExprNode<A, P>>, Ty),
     Con(CtorId),
     Case(Box<TermExprNode<A, P>>, Vec<CaseArmNode<A, P>>),
+    Match(Vec<TermExprNode<A, P>>, Vec<MatchArmNode<A, P>>),
     IfThenElse(
         Box<TermExprNode<A, P>>,
         Box<TermExprNode<A, P>>,
@@ -217,6 +253,12 @@ pub enum Pattern<A> {
 #[derive(Clone, Debug)]
 pub struct CaseArm<A, P = A> {
     pub pattern: PatternNode<P>,
+    pub expr: TermExprNode<A, P>,
+}
+
+#[derive(Clone, Debug)]
+pub struct MatchArm<A, P = A> {
+    pub patterns: Vec<PatternNode<P>>,
     pub expr: TermExprNode<A, P>,
 }
 

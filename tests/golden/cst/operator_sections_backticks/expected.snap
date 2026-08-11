@@ -19,9 +19,11 @@ Module @0..166
     FunctionDef @16..31
       Ident @16..19 line=2 col=0 text="mix"
       Whitespace @19..20 line=2 col=3 text=" "
-      Ident @20..21 line=2 col=4 text="x"
+      NamePath @20..21
+        Ident @20..21 line=2 col=4 text="x"
       Whitespace @21..22 line=2 col=5 text=" "
-      Ident @22..23 line=2 col=6 text="y"
+      NamePath @22..23
+        Ident @22..23 line=2 col=6 text="y"
       Whitespace @23..24 line=2 col=7 text=" "
       Eq @24..25 line=2 col=8 text="="
       Whitespace @25..26 line=2 col=9 text=" "

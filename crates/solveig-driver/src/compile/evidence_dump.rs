@@ -99,6 +99,14 @@ fn collect_evidence_lines(
                 collect_evidence_lines(&arm.node.expr, tables, out);
             }
         }
+        TermExpr::Match(scrutinees, arms) => {
+            for scrutinee in scrutinees {
+                collect_evidence_lines(scrutinee, tables, out);
+            }
+            for arm in arms {
+                collect_evidence_lines(&arm.node.expr, tables, out);
+            }
+        }
         TermExpr::IfThenElse(cond, then_branch, else_branch) => {
             collect_evidence_lines(cond, tables, out);
             collect_evidence_lines(then_branch, tables, out);

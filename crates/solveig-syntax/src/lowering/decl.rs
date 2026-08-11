@@ -38,10 +38,8 @@ impl CstToAst<'_> {
                     index += 1;
                     break;
                 }
-                NodeOrToken::Token(token)
-                    if matches!(self.cst.token(token).kind, Token::Ident | Token::Underscore) =>
-                {
-                    params.push(self.binder_span_from_token(token, node));
+                NodeOrToken::Node(pattern) if self.node_is_pattern_like(pattern) => {
+                    params.push(self.lower_pattern(pattern)?);
                     index += 1;
                 }
                 _ => index += 1,

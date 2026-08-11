@@ -13,6 +13,14 @@ struct LocalHoverContext<'a> {
     ctor_table: &'a CtorTable,
 }
 
+#[derive(Clone, Copy)]
+struct InlayGroupContext<'a> {
+    session: &'a Session,
+    source: &'a str,
+    parsed: &'a ParsedModule,
+    tables: PrettyTables<'a>,
+}
+
 pub(super) fn project_inlay_hints(
     session: &Session,
     project: &Project,
@@ -146,11 +154,16 @@ fn collect_module_inlay_hints(
         .map(|def| (def.id, def))
         .collect::<FxHashMap<_, _>>();
 
-    for defn in &parsed.defs {
-        let SurfaceDefinition::FunDef {
-            name, body, params, ..
-        } = &defn.0
-        else {
+    let function_groups = function_equation_group_indices(parsed).unwrap_or_default();
+
+    for group in function_groups {
+        let Some(first_index) = group.first().copied() else {
+            continue;
+        };
+        let Some(first_def) = parsed.defs.get(first_index) else {
+            continue;
+        };
+        let SurfaceDefinition::FunDef { name, params, .. } = &first_def.0 else {
             continue;
         };
         let def_id = DefId {
@@ -160,15 +173,6 @@ fn collect_module_inlay_hints(
         let Some(checked_def) = checked_defs.get(&def_id).copied() else {
             continue;
         };
-        let checked_body = collect_function_param_hints(
-            session,
-            parsed.file,
-            params,
-            &checked_def.body,
-            tables,
-            out,
-        )
-        .unwrap_or_else(|| checked_body_without_function_params(&checked_def.body, params.len()));
 
         if !signatures.contains(&name.0)
             && let Some(scheme) = checked.func_schemes.get(&def_id)
@@ -176,8 +180,18 @@ fn collect_module_inlay_hints(
             push_inferred_signature_hint(parsed.file, name, scheme, tables, out);
         }
 
-        collect_expr_inlay_hints(session, parsed.file, body, checked_body, tables, out);
-        collect_textual_let_hints(parsed.file, source, checked_body, tables, out);
+        collect_function_group_inlay_hints(
+            InlayGroupContext {
+                session,
+                source,
+                parsed,
+                tables,
+            },
+            &group,
+            params.len(),
+            checked_def,
+            out,
+        );
     }
 
     let mut checked_instances = checked.instance_defs.iter();
@@ -241,11 +255,16 @@ fn collect_module_local_hovers(
         .map(|def| (def.id, def))
         .collect::<FxHashMap<_, _>>();
 
-    for defn in &parsed.defs {
-        let SurfaceDefinition::FunDef {
-            name, body, params, ..
-        } = &defn.0
-        else {
+    let function_groups = function_equation_group_indices(parsed).unwrap_or_default();
+
+    for group in function_groups {
+        let Some(first_index) = group.first().copied() else {
+            continue;
+        };
+        let Some(first_def) = parsed.defs.get(first_index) else {
+            continue;
+        };
+        let SurfaceDefinition::FunDef { name, params, .. } = &first_def.0 else {
             continue;
         };
         let def_id = DefId {
@@ -255,23 +274,7 @@ fn collect_module_local_hovers(
         let Some(checked_def) = checked_defs.get(&def_id).copied() else {
             continue;
         };
-        let mut param_facts = Vec::new();
-        let checked_body = collect_function_param_hovers(
-            session,
-            file,
-            params,
-            &checked_def.body,
-            tables,
-            &mut param_facts,
-            out,
-        )
-        .unwrap_or_else(|| checked_body_without_function_params(&checked_def.body, params.len()));
-
-        for (symbol, name, ty) in &param_facts {
-            push_expr_reference_hovers(file, body, *symbol, name, ty, tables, out);
-        }
-
-        collect_expr_local_hovers(cx, body, checked_body, out);
+        collect_function_group_local_hovers(cx, parsed, &group, params.len(), checked_def, out);
     }
 
     let mut checked_instances = checked.instance_defs.iter();
@@ -342,6 +345,81 @@ fn push_inferred_signature_hint(
         SourceInlayHintKind::Type,
         SourceInlayHintCategory::InferredSignature,
     ));
+}
+
+fn collect_function_group_inlay_hints(
+    cx: InlayGroupContext<'_>,
+    group: &[usize],
+    param_count: usize,
+    checked_def: &TermDefinition<TcMetadata, Range<usize>>,
+    out: &mut Vec<SourceInlayHint>,
+) {
+    let checked_body = checked_body_without_function_params(&checked_def.body, param_count);
+
+    if group.len() == 1
+        && let Some(first_index) = group.first().copied()
+        && let Some(defn) = cx.parsed.defs.get(first_index)
+        && let SurfaceDefinition::FunDef { body, params, .. } = &defn.0
+        && let Some(checked_body) = simple_variable_params(params).and_then(|simple_params| {
+            collect_function_param_hints(
+                cx.session,
+                cx.parsed.file,
+                &simple_params,
+                &checked_def.body,
+                cx.tables,
+                out,
+            )
+        })
+    {
+        collect_expr_inlay_hints(
+            cx.session,
+            cx.parsed.file,
+            body,
+            checked_body,
+            cx.tables,
+            out,
+        );
+        collect_textual_let_hints(cx.parsed.file, cx.source, checked_body, cx.tables, out);
+        return;
+    }
+
+    let TermExpr::Match(_, arms) = &checked_body.node else {
+        return;
+    };
+
+    for (def_index, checked_arm) in group.iter().zip(arms) {
+        let Some(defn) = cx.parsed.defs.get(*def_index) else {
+            continue;
+        };
+        let SurfaceDefinition::FunDef { body, .. } = &defn.0 else {
+            continue;
+        };
+        collect_expr_inlay_hints(
+            cx.session,
+            cx.parsed.file,
+            body,
+            &checked_arm.node.expr,
+            cx.tables,
+            out,
+        );
+        collect_textual_let_hints(
+            cx.parsed.file,
+            cx.source,
+            &checked_arm.node.expr,
+            cx.tables,
+            out,
+        );
+    }
+}
+
+fn simple_variable_params(params: &[Spanned<SurfacePattern>]) -> Option<Vec<Spanned<Symbol>>> {
+    params
+        .iter()
+        .map(|param| match param {
+            (SurfacePattern::Var(symbol), span, cst_id) => Some((*symbol, *span, *cst_id)),
+            _ => None,
+        })
+        .collect()
 }
 
 fn collect_function_param_hints<'a>(
@@ -489,6 +567,83 @@ fn collect_expr_inlay_hints(
             collect_expr_inlay_hints(session, file, surface_rhs, checked_rhs, tables, out);
         }
         _ => {}
+    }
+}
+
+fn collect_function_group_local_hovers(
+    cx: LocalHoverContext<'_>,
+    parsed: &ParsedModule,
+    group: &[usize],
+    param_count: usize,
+    checked_def: &TermDefinition<TcMetadata, Range<usize>>,
+    out: &mut Vec<HoverInfo>,
+) {
+    let checked_body = checked_body_without_function_params(&checked_def.body, param_count);
+
+    if group.len() == 1
+        && let Some(first_index) = group.first().copied()
+        && let Some(defn) = parsed.defs.get(first_index)
+        && let SurfaceDefinition::FunDef { body, params, .. } = &defn.0
+    {
+        let mut param_facts = Vec::new();
+        if let Some(checked_body) = simple_variable_params(params).and_then(|simple_params| {
+            collect_function_param_hovers(
+                cx.session,
+                cx.file,
+                &simple_params,
+                &checked_def.body,
+                cx.tables,
+                &mut param_facts,
+                out,
+            )
+        }) {
+            for (symbol, name, ty) in &param_facts {
+                push_expr_reference_hovers(cx.file, body, *symbol, name, ty, cx.tables, out);
+            }
+            collect_expr_local_hovers(cx, body, checked_body, out);
+            return;
+        }
+    }
+
+    let TermExpr::Match(scrutinees, arms) = &checked_body.node else {
+        return;
+    };
+
+    for (def_index, checked_arm) in group.iter().zip(arms) {
+        let Some(defn) = parsed.defs.get(*def_index) else {
+            continue;
+        };
+        let SurfaceDefinition::FunDef { params, body, .. } = &defn.0 else {
+            continue;
+        };
+
+        let mut pattern_facts = Vec::new();
+        {
+            let mut sink = PatternLocalHoverSink {
+                binder_facts: &mut pattern_facts,
+                out,
+            };
+            for ((surface_param, checked_pattern), checked_scrutinee) in params
+                .iter()
+                .zip(&checked_arm.node.patterns)
+                .zip(scrutinees)
+            {
+                collect_pattern_local_hovers(
+                    cx.file,
+                    surface_param,
+                    checked_pattern,
+                    &checked_scrutinee.anno.inferred_type,
+                    cx.tables,
+                    cx.ctor_table,
+                    &mut sink,
+                );
+            }
+        }
+
+        for (symbol, name, ty) in &pattern_facts {
+            push_expr_reference_hovers(cx.file, body, *symbol, name, ty, cx.tables, out);
+        }
+        collect_expr_local_hovers(cx, body, &checked_arm.node.expr, out);
     }
 }
 
@@ -1046,6 +1201,14 @@ fn collect_textual_let_hints(
         }
         TermExpr::Case(scrutinee, arms) => {
             collect_textual_let_hints(file, source, scrutinee, tables, out);
+            for arm in arms {
+                collect_textual_let_hints(file, source, &arm.node.expr, tables, out);
+            }
+        }
+        TermExpr::Match(scrutinees, arms) => {
+            for scrutinee in scrutinees {
+                collect_textual_let_hints(file, source, scrutinee, tables, out);
+            }
             for arm in arms {
                 collect_textual_let_hints(file, source, &arm.node.expr, tables, out);
             }

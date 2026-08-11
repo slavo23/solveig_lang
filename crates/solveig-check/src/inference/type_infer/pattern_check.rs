@@ -143,6 +143,110 @@ impl TypeChecker<'_> {
 
         Ok((theta, elaborated, final_type))
     }
+
+    fn solve_match_inference(
+        &mut self,
+        ctx: Context,
+        scrutinees: &[TermExprNode<Span>],
+        arms: &[MatchArmNode<Span>],
+        span: Span,
+    ) -> TcResult<(Context, TermExprNode<TcMetadata, Span>, Ty)> {
+        if arms.is_empty() {
+            return Err(TypeError::EmptyCaseExpression {
+                span: self.get_file_span(span),
+            });
+        }
+
+        let mut gamma = ctx;
+        let mut elaborated_scrutinees = Vec::with_capacity(scrutinees.len());
+        let mut scrutinee_types = Vec::with_capacity(scrutinees.len());
+
+        for scrutinee in scrutinees {
+            let (next_ctx, elaborated_scrutinee, scrutinee_type) =
+                self.solve_inference(gamma, scrutinee)?;
+            gamma = next_ctx;
+            scrutinee_types.push(gamma.apply(&scrutinee_type));
+            elaborated_scrutinees.push(elaborated_scrutinee);
+        }
+
+        let result_evar = self.fresh_evar_id();
+        let result_type = Self::evar_type(result_evar);
+        let mut theta = gamma.add_entry(ContextEntry::ExVar(result_evar, Kind::Star));
+
+        let mut elaborated_arms = Vec::with_capacity(arms.len());
+
+        for (arm_index, arm) in arms.iter().enumerate() {
+            let arm_marker = ContextEntry::Marker {
+                var_name: format!("match_arm#{arm_index}"),
+            };
+
+            let mut arm_ctx = theta.clone().add_entry(arm_marker.clone());
+            let mut bindings = Vec::new();
+
+            for (pattern, scrutinee_type) in arm.node.patterns.iter().zip(scrutinee_types.iter()) {
+                let scrutinee_in_arm = arm_ctx.apply(scrutinee_type);
+                let (next_ctx, pattern_bindings) =
+                    self.check_pattern(arm_ctx, pattern, &scrutinee_in_arm)?;
+                arm_ctx = next_ctx;
+                bindings.extend(pattern_bindings);
+            }
+
+            let body_ctx = self.add_pattern_bindings(arm_ctx, &bindings);
+            let arm_result_type = body_ctx.apply(&result_type);
+
+            let (omega, elaborated_body) =
+                self.solve_checking(body_ctx, &arm.node.expr, &arm_result_type)?;
+
+            if !omega.has_unsolved_evar_id(result_evar) && !omega.has_solved_evar_id(result_evar) {
+                return Err(TypeError::MissingCaseResultExistential {
+                    span: self.get_file_span(arm.node.expr.anno.clone()),
+                    evar: solveig_ast::ast::evar_display_name(result_evar),
+                    arm_index,
+                });
+            }
+
+            theta = omega.until(&arm_marker);
+
+            elaborated_arms.push(MatchArmNode::new(
+                MatchArm {
+                    patterns: arm.node.patterns.clone(),
+                    expr: elaborated_body,
+                },
+                arm.anno.clone(),
+            ));
+        }
+
+        let scrutinee_types_for_exhaustiveness = scrutinee_types
+            .iter()
+            .map(|ty| self.zonk_type(&theta.apply(ty)))
+            .collect::<Vec<_>>();
+
+        let match_diagnostics = exhaustiveness::check_match(
+            self.file,
+            self.tables.tycon_table,
+            self.tables.ctor_table,
+            self.pretty_tables(),
+            &scrutinee_types_for_exhaustiveness,
+            arms,
+            span.clone(),
+        );
+
+        self.warnings.extend(match_diagnostics.warnings);
+
+        if let Some(error) = match_diagnostics.error {
+            return Err(error);
+        }
+
+        let final_type = theta.apply(&result_type);
+        let elaborated = elab_node(
+            TermExpr::Match(elaborated_scrutinees, elaborated_arms),
+            span,
+            final_type.clone(),
+        );
+
+        Ok((theta, elaborated, final_type))
+    }
+
     fn check_pattern(
         &mut self,
         ctx: Context,

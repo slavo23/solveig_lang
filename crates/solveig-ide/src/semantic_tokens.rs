@@ -298,7 +298,7 @@ fn push_local_binders(
     for definition in definitions {
         match &definition.0 {
             SurfaceDefinition::FunDef { params, body, .. } => {
-                push_value_params(params, file, out);
+                push_function_params(params, file, out);
                 push_expr_binders(body, file, out);
             }
             SurfaceDefinition::SigDef { ty, .. } => push_type_binders(ty, file, out),
@@ -489,6 +489,16 @@ fn push_predicate_type_binders(
 fn push_value_params(params: &[Spanned<Symbol>], file: FileId, out: &mut Vec<SourceSemanticToken>) {
     for param in params {
         push_param(*param, file, out);
+    }
+}
+
+fn push_function_params(
+    params: &[Spanned<SurfacePattern>],
+    file: FileId,
+    out: &mut Vec<SourceSemanticToken>,
+) {
+    for param in params {
+        push_pattern_binders(param, file, out);
     }
 }
 

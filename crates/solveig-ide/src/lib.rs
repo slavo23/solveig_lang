@@ -5,8 +5,9 @@
 use solveig_ast::ast::{
     ClassDefinition, ClassId, ClassInfo, ClassTable, CtorId, CtorTable, DataDefinition, DefId,
     InstanceDefinition, Kind, ModuleId, Names, PRELUDE_LIST_NAME, PRIM_TYS, Pattern, PatternNode,
-    Predicate, Pretty, PrettyTables, Scheme, TermExpr, TermExprNode, Ty, TyConDefinition, TyConId,
-    TyConInfo, TyConTable, TyVarId, VarRef, compiler_bool_data_definition,
+    Predicate, Pretty, PrettyTables, Scheme, TermDefinition, TermExpr, TermExprNode, Ty,
+    TyConDefinition, TyConId, TyConInfo, TyConTable, TyVarId, VarRef,
+    compiler_bool_data_definition,
 };
 use solveig_base::{
     FileId, FileSpan, FxHashMap, FxHashSet, PositionEncoding, Session, SourceFile, SourceMap,
@@ -21,7 +22,7 @@ use solveig_driver::{
 use solveig_resolve::project::{
     EffectiveImport, ModuleApi, ModuleFile, ParsedProject, Project, ResolveError, ResolveNameKind,
     SharedModuleApi, SharedTypedModuleApi, TypeAlias, TypedModuleApi, build_module_api,
-    effective_imports,
+    effective_imports, function_equation_group_indices,
 };
 use solveig_syntax::ast::{
     ClassMethod, DocComment, ImportDecl, ImportSpec, ModuleName, ParsedModule, Spanned,

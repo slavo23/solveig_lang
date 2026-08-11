@@ -1,4 +1,4 @@
-use solveig_base::FxHashMap;
+use solveig_base::{FxHashMap, FxHashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -17,6 +17,7 @@ use solveig_syntax::ast::{
 
 mod api_build;
 mod diagnostics;
+mod equations;
 mod graph;
 mod imports;
 mod module_api;
@@ -25,6 +26,7 @@ mod tests;
 
 pub use api_build::*;
 pub use diagnostics::*;
+pub use equations::function_equation_group_indices;
 pub use graph::*;
 pub use imports::*;
 pub(crate) use module_api::local_def_id;

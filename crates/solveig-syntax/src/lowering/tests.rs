@@ -53,3 +53,40 @@ trailing = 2 -- ^ Attached trailing docs.
         Some("Attached trailing docs.")
     );
 }
+
+#[test]
+fn function_definitions_lower_pattern_parameters() {
+    let parsed = lower_test_source("score (Face n) _ = n\n");
+    let SurfaceDefinition::FunDef { params, .. } = &parsed.defs[0].0 else {
+        panic!("expected function definition");
+    };
+
+    assert_eq!(params.len(), 2);
+    assert!(matches!(
+        &params[0].0,
+        SurfacePattern::Con(name, args)
+            if name.0.segments.len() == 1
+                && args.len() == 1
+                && matches!(args[0].0, SurfacePattern::Var(_))
+    ));
+    assert!(matches!(params[1].0, SurfacePattern::Wild));
+}
+
+#[test]
+fn function_definition_pattern_parameters_stay_separate() {
+    let parsed = lower_test_source("score _ total = total\ncount 0 x = x\n");
+
+    let SurfaceDefinition::FunDef { params, .. } = &parsed.defs[0].0 else {
+        panic!("expected first definition to be a function");
+    };
+    assert_eq!(params.len(), 2);
+    assert!(matches!(params[0].0, SurfacePattern::Wild));
+    assert!(matches!(params[1].0, SurfacePattern::Var(_)));
+
+    let SurfaceDefinition::FunDef { params, .. } = &parsed.defs[1].0 else {
+        panic!("expected second definition to be a function");
+    };
+    assert_eq!(params.len(), 2);
+    assert!(matches!(params[0].0, SurfacePattern::Lit(_)));
+    assert!(matches!(params[1].0, SurfacePattern::Var(_)));
+}

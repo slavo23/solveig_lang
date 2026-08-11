@@ -38,6 +38,11 @@ pub fn build_module_api(
     parsed: &ParsedModule,
 ) -> Result<ModuleApi, ResolveError> {
     let mut api = ModuleApi::default();
+    let function_groups = function_equation_group_indices(parsed)?;
+    let function_group_starts = function_groups
+        .iter()
+        .filter_map(|group| group.first().copied())
+        .collect::<FxHashSet<_>>();
     let mut term_defs = FxHashMap::<Symbol, FileSpan>::default();
     let mut term_sigs = FxHashMap::<Symbol, FileSpan>::default();
     let mut types = FxHashMap::<Symbol, FileSpan>::default();
@@ -46,9 +51,13 @@ pub fn build_module_api(
     let mut classes = FxHashMap::<Symbol, FileSpan>::default();
     let mut fixity_defs = FxHashMap::<Symbol, FileSpan>::default();
 
-    for def in &parsed.defs {
+    for (def_index, def) in parsed.defs.iter().enumerate() {
         match &def.0 {
             SurfaceDefinition::FunDef { name, docs, .. } => {
+                if !function_group_starts.contains(&def_index) {
+                    continue;
+                }
+
                 check_duplicate(
                     &mut term_defs,
                     parsed.file,

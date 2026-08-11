@@ -14,8 +14,8 @@ impl Parser<'_> {
                 return Ok(());
             }
 
-            while matches!(parser.current_kind(), Token::Ident | Token::Underscore) {
-                parser.expect_binder_span()?;
+            while parser.is_pattern_arg_start() {
+                parser.parse_pattern_arg()?;
             }
 
             parser.expect(&Token::Eq)?;

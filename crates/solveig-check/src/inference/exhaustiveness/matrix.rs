@@ -344,3 +344,35 @@ pub(super) fn unreachable_pattern_warnings(
 
     warnings
 }
+
+pub(super) fn unreachable_match_warnings(
+    file: FileId,
+    checker: &ExhaustivenessChecker<'_>,
+    matrix: &[Vec<Pat>],
+    types: &[Ty],
+    arms: &[MatchArmNode<Span>],
+) -> Vec<TypeError> {
+    let mut warnings = Vec::new();
+
+    for (index, row) in matrix.iter().enumerate() {
+        if checker
+            .useful(
+                matrix
+                    .get(..index)
+                    .expect("ICE: unreachable match matrix prefix out of bounds"),
+                row,
+                types,
+            )
+            .is_none()
+        {
+            let arm = arms
+                .get(index)
+                .expect("ICE: pattern matrix row without corresponding match arm");
+            warnings.push(TypeError::UnreachablePattern {
+                span: FileSpan::new(file, SourceSpan::from_usize_range(arm.anno.clone())),
+            });
+        }
+    }
+
+    warnings
+}

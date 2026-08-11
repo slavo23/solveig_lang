@@ -65,25 +65,15 @@ odd n = not (even n);
 
 -- | Flips a boolean value.
 not : Bool -> Bool;
-not b = 
-    case b of
-        True => False 
-        | False => True;
+not True = False;
+not False = True;
 
 -- | Returns True only when both inputs are True.
 and : Bool -> Bool -> Bool;
-and a b = 
-    case MkPair a b of
-          MkPair True True => True
-        | MkPair False True => False
-        | MkPair True False => False
-        | MkPair False False => False;
+and True True = True;
+and _ _ = False;
 
 -- | Returns True when at least one input is True.
 or : Bool -> Bool -> Bool;
-or a b = 
-    case MkPair a b of
-          MkPair True True => True
-        | MkPair False True => True
-        | MkPair True False => True
-        | MkPair False False => False;
+or False False = False;
+or _ _ = True;

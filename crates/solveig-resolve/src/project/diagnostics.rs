@@ -57,6 +57,22 @@ pub enum ResolveError {
         kind: ResolveNameKind,
         name: Symbol,
     },
+    EquationArityMismatch {
+        span: FileSpan,
+        previous: FileSpan,
+        name: Symbol,
+        expected: usize,
+        actual: usize,
+    },
+    NonContiguousEquationGroup {
+        span: FileSpan,
+        previous: FileSpan,
+        name: Symbol,
+    },
+    RepeatedPatternVariable {
+        span: FileSpan,
+        name: Symbol,
+    },
     ClassArity {
         span: FileSpan,
         class_name: String,
@@ -195,6 +211,61 @@ impl ResolveError {
 
                 diagnostic
             }
+            Self::EquationArityMismatch {
+                span,
+                previous,
+                name,
+                expected,
+                actual,
+            } => Diagnostic::error(
+                "RES0015",
+                format!(
+                    "equations for `{}` have different numbers of arguments",
+                    session.str(*name)
+                ),
+            )
+            .with_label(Label::primary(
+                *span,
+                format!(
+                    "this equation has {actual} argument{}, but the earlier equation has {expected}",
+                    plural(*actual)
+                ),
+            ))
+            .with_label(Label::secondary(
+                *previous,
+                format!("earlier equation for `{}` is here", session.str(*name)),
+            )),
+            Self::NonContiguousEquationGroup {
+                span,
+                previous,
+                name,
+            } => Diagnostic::error(
+                "RES0016",
+                format!("equations for `{}` must be adjacent", session.str(*name)),
+            )
+            .with_label(Label::primary(
+                *span,
+                "this equation is separated from the earlier equations",
+            ))
+            .with_label(Label::secondary(
+                *previous,
+                format!("earlier equation for `{}` starts here", session.str(*name)),
+            ))
+            .with_notes(vec![
+                "move all equations for the same function next to each other".to_string(),
+            ]),
+            Self::RepeatedPatternVariable { span, name } => Diagnostic::error(
+                "RES0017",
+                format!("pattern variable `{}` appears more than once", session.str(*name)),
+            )
+            .with_label(Label::primary(
+                *span,
+                "this variable is already bound earlier in the same pattern group",
+            ))
+            .with_notes(vec![
+                "use distinct variable names and compare them in the body if equality is required"
+                    .to_string(),
+            ]),
             Self::ClassArity {
                 span,
                 class_name,

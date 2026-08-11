@@ -275,8 +275,12 @@ fn push_surface_local_candidates(
     for defn in &module_file.parsed.defs {
         match &defn.0 {
             SurfaceDefinition::FunDef { params, body, .. } => {
+                let mut binders = Vec::new();
                 for param in params {
-                    push_local_candidate(session, module_file.parsed.file, param.0, body.1, out);
+                    collect_pattern_binders(param, &mut binders);
+                }
+                for binder in binders {
+                    push_local_candidate(session, module_file.parsed.file, binder, body.1, out);
                 }
                 collect_surface_expr_locals(session, module_file.parsed.file, body, out);
             }

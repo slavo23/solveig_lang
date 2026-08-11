@@ -345,13 +345,11 @@ composeK f g x = do
 
 -- | Maps a function that returns monadic results over a list.
 mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]
-mapM f xs =
-    case xs of
-        [] => pure []
-        | y :: ys => do
-            z <- f y
-            zs <- mapM f ys
-            pure (z :: zs)
+mapM f [] = pure []
+mapM f (y :: ys) = do
+    z <- f y
+    zs <- mapM f ys
+    pure (z :: zs)
 
 -- | Turns a list of monadic computations into one computation producing a list.
 sequence : forall m a. Monad m => [m a] -> m [a]
@@ -359,13 +357,11 @@ sequence xs = mapM (fun x => x) xs
 
 -- | Filters a list with a predicate that returns monadic results.
 filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
-filterM p xs =
-    case xs of
-        [] => pure []
-        | y :: ys => do
-            keep <- p y
-            zs <- filterM p ys
-            if keep then pure (y :: zs) else pure zs
+filterM p [] = pure []
+filterM p (y :: ys) = do
+    keep <- p y
+    zs <- filterM p ys
+    if keep then pure (y :: zs) else pure zs
 
 instance Monad Maybe where
     bind mx f =
@@ -389,12 +385,10 @@ seqIO left right = thenM left right
 
 -- | Runs an IO action for every element of a list and discards the results.
 mapIO_ : forall a. (a -> IO ()) -> [a] -> IO ()
-mapIO_ f xs =
-    case xs of
-        [] => prelude.builtins.pureIO ()
-        | y :: ys => do
-            f y
-            mapIO_ f ys
+mapIO_ f [] = prelude.builtins.pureIO ()
+mapIO_ f (y :: ys) = do
+    f y
+    mapIO_ f ys
 
 -- | Values that can be rendered as text.
 class Show a where
@@ -422,20 +416,14 @@ showStringPayload c =
 
 -- | Renders the characters inside a string literal.
 showStringChars : [Char] -> String
-showStringChars chars =
-    case chars of
-        [] => ""
-        | c :: rest => stringAppend (showStringPayload c) (showStringChars rest)
+showStringChars [] = ""
+showStringChars (c :: rest) = stringAppend (showStringPayload c) (showStringChars rest)
 
 -- | Renders the comma-separated contents of a list.
 showListItems : forall a. Show a => [a] -> String
-showListItems xs =
-    case xs of
-        [] => ""
-        | y :: ys =>
-            case ys of
-                [] => show y
-                | _ :: _ => stringAppend (show y) (stringAppend ", " (showListItems ys))
+showListItems [] = ""
+showListItems (y :: []) = show y
+showListItems (y :: ys) = stringAppend (show y) (stringAppend ", " (showListItems ys))
 
 instance Show Int where
     show value = intToString value

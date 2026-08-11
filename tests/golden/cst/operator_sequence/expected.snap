@@ -49,9 +49,11 @@ Module @0..99
       Operator @53..56 line=4 col=1 text="<+>"
       RParen @56..57 line=4 col=4 text=")"
       Whitespace @57..58 line=4 col=5 text=" "
-      Ident @58..59 line=4 col=6 text="x"
+      NamePath @58..59
+        Ident @58..59 line=4 col=6 text="x"
       Whitespace @59..60 line=4 col=7 text=" "
-      Ident @60..61 line=4 col=8 text="y"
+      NamePath @60..61
+        Ident @60..61 line=4 col=8 text="y"
       Whitespace @61..62 line=4 col=9 text=" "
       Eq @62..63 line=4 col=10 text="="
       Whitespace @63..64 line=4 col=11 text=" "

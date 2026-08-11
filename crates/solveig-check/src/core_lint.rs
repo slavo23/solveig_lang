@@ -7,8 +7,8 @@ use std::ops::Range;
 
 use solveig_ast::ast::{
     CaseArmNode, ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Ev, EvVarId,
-    InstanceDefinition, InstanceId, Kind, ModuleId, Names, Pattern, PatternNode, Predicate, Scheme,
-    TermExpr, TermExprNode, Ty, TyConTable, TyVarId, VarRef,
+    InstanceDefinition, InstanceId, Kind, MatchArmNode, ModuleId, Names, Pattern, PatternNode,
+    Predicate, Scheme, TermExpr, TermExprNode, Ty, TyConTable, TyVarId, VarRef,
 };
 use solveig_base::{Diagnostic, Label};
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -311,6 +311,14 @@ impl CoreLinter<'_> {
                     self.lint_case_arm(arm);
                 }
             }
+            TermExpr::Match(scrutinees, arms) => {
+                for scrutinee in scrutinees {
+                    self.lint_expr(scrutinee);
+                }
+                for arm in arms {
+                    self.lint_match_arm(arm);
+                }
+            }
             TermExpr::IfThenElse(cond, then_branch, else_branch) => {
                 self.lint_expr(cond);
                 self.lint_expr(then_branch);
@@ -325,6 +333,13 @@ impl CoreLinter<'_> {
 
     fn lint_case_arm(&mut self, arm: &CaseArmNode<TcMetadata, Range<usize>>) {
         self.lint_pattern(&arm.node.pattern);
+        self.lint_expr(&arm.node.expr);
+    }
+
+    fn lint_match_arm(&mut self, arm: &MatchArmNode<TcMetadata, Range<usize>>) {
+        for pattern in &arm.node.patterns {
+            self.lint_pattern(pattern);
+        }
         self.lint_expr(&arm.node.expr);
     }
 
@@ -751,6 +766,7 @@ fn expr_requires_source_span(node: &TermExpr<TcMetadata, Range<usize>>) -> bool 
             | TermExpr::Hole
             | TermExpr::Abs(_, _, _)
             | TermExpr::Case(_, _)
+            | TermExpr::Match(_, _)
             | TermExpr::IfThenElse(_, _, _)
             | TermExpr::Let(_, _, _)
     )

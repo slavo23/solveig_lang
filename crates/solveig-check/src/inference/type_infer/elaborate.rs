@@ -210,6 +210,23 @@ impl TypeChecker<'_> {
                     })
                     .collect(),
             ),
+            TermExpr::Match(scrutinees, arms) => TermExpr::Match(
+                scrutinees
+                    .iter()
+                    .map(|scrutinee| self.zonk_expr(scrutinee))
+                    .collect(),
+                arms.iter()
+                    .map(|arm| {
+                        MatchArmNode::new(
+                            MatchArm {
+                                patterns: arm.node.patterns.clone(),
+                                expr: self.zonk_expr(&arm.node.expr),
+                            },
+                            arm.anno.clone(),
+                        )
+                    })
+                    .collect(),
+            ),
             TermExpr::IfThenElse(cond, then_branch, else_branch) => TermExpr::IfThenElse(
                 Box::new(self.zonk_expr(cond)),
                 Box::new(self.zonk_expr(then_branch)),

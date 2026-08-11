@@ -464,6 +464,22 @@ fn collect_typed_expr_locals(
                 collect_typed_expr_locals(file, &arm.node.expr, tables, out);
             }
         }
+        TermExpr::Match(scrutinees, arms) => {
+            for scrutinee in scrutinees {
+                collect_typed_expr_locals(file, scrutinee, tables, out);
+            }
+            for arm in arms {
+                for pattern in &arm.node.patterns {
+                    collect_typed_pattern_locals(
+                        file,
+                        pattern,
+                        Span::from_usize_range(arm.node.expr.anno.span.clone()),
+                        out,
+                    );
+                }
+                collect_typed_expr_locals(file, &arm.node.expr, tables, out);
+            }
+        }
         TermExpr::IfThenElse(cond, then_branch, else_branch) => {
             collect_typed_expr_locals(file, cond, tables, out);
             collect_typed_expr_locals(file, then_branch, tables, out);

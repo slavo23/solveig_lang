@@ -8,10 +8,10 @@ use std::ops::Range;
 use solveig_ast::ast::{
     BuiltinDefinition, COMPILER_PRELUDE_BUILTINS_MODULE, CaseArm, CaseArmNode, ClassDefinition,
     ClassId, ClassMethodDef, ConstructorDef, CtorId, DataDefinition, DefId, InstanceDefinition,
-    InstanceMethodDef, Kind, KindMetaId, Literal, ModuleId, Names, PRIM_TYS, Pattern, PatternNode,
-    Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId,
-    TyVarId, VarRef, compiler_bool_constructor_types, compiler_bool_data_definition,
-    compiler_primitive_tycon_kinds, prelude_list_cons_ctor_id,
+    InstanceMethodDef, Kind, KindMetaId, Literal, MatchArm, MatchArmNode, ModuleId, Names,
+    PRIM_TYS, Pattern, PatternNode, Predicate, ResolvedModule, Scheme, TermDefinition, TermExpr,
+    TermExprNode, Ty, TyConId, TyVarId, VarRef, compiler_bool_constructor_types,
+    compiler_bool_data_definition, compiler_primitive_tycon_kinds, prelude_list_cons_ctor_id,
 };
 use solveig_base::{FileSpan, Session, Span as SourceSpan, Symbol};
 use solveig_check::data_kind_infer::{
@@ -26,7 +26,10 @@ use solveig_syntax::ast::{
 };
 use solveig_syntax::fixity::{FixityError, resolve_op_seq};
 
-use crate::project::{ModuleContext, ModuleTable, ResolveError, ResolveNameKind, TypeAlias};
+use crate::project::{
+    ModuleContext, ModuleTable, ResolveError, ResolveNameKind, TypeAlias,
+    function_equation_group_indices,
+};
 
 type Span = Range<usize>;
 

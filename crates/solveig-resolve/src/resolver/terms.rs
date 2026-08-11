@@ -570,6 +570,19 @@ impl<'a> Resolver<'a> {
             _ => None,
         }
     }
+    fn simple_variable_params(
+        &self,
+        params: &[SpannedWrapper<SurfacePattern>],
+    ) -> Option<Vec<SpannedWrapper<Symbol>>> {
+        params
+            .iter()
+            .map(|param| match param {
+                (SurfacePattern::Var(name), span, cst_id) => Some((*name, *span, *cst_id)),
+                _ => None,
+            })
+            .collect()
+    }
+
     fn wrap_function_body_without_signature_in_module(
         &mut self,
         body: &SpannedWrapper<SurfaceExpr>,
@@ -599,6 +612,38 @@ impl<'a> Resolver<'a> {
 
         body_node
     }
+    fn signature_param_annotations(
+        &mut self,
+        sig: &Scheme,
+        param_count: usize,
+        name: SpannedWrapper<Symbol>,
+        cx: &ModuleContext,
+    ) -> Vec<Option<Ty>> {
+        let mut remaining = &sig.ty;
+        let mut annotations = Vec::with_capacity(param_count);
+        let mut reported_arity = false;
+
+        for _ in 0..param_count {
+            let Some((arg_ty, ret_ty)) = self.peel_arrow(remaining) else {
+                if !reported_arity {
+                    self.errors.push(ResolveError::SignatureArity {
+                        span: self.file_span(cx, name.1),
+                        name: name.0,
+                        params: param_count,
+                    });
+                    reported_arity = true;
+                }
+                annotations.push(None);
+                continue;
+            };
+
+            annotations.push(Some(arg_ty.clone()));
+            remaining = ret_ty;
+        }
+
+        annotations
+    }
+
     fn wrap_function_body_with_signature_in_module(
         &mut self,
         sig: &Scheme,
@@ -617,26 +662,15 @@ impl<'a> Resolver<'a> {
 
         let mut body_node = self.resolve_surface_expr_in_module(body, cx, local, &bound_terms);
 
-        let mut remaining = &sig.ty;
-        let mut annos: Vec<(String, Ty)> = Vec::new();
+        let annos = self.signature_param_annotations(sig, params.len(), name, cx);
 
-        for param in params {
-            let Some((arg_ty, ret_ty)) = self.peel_arrow(remaining) else {
-                self.errors.push(ResolveError::SignatureArity {
-                    span: self.file_span(cx, name.1),
-                    name: name.0,
-                    params: params.len(),
-                });
-                break;
-            };
-
-            annos.push((self.symbol_text(param.0), arg_ty.clone()));
-            remaining = ret_ty;
-        }
-
-        for (param_name, param_ty) in annos.into_iter().rev() {
+        for (param, param_ty) in params.iter().zip(annos).rev() {
             body_node = TermExprNode::new(
-                TermExpr::Abs(param_name, Some(param_ty), Box::new(body_node)),
+                TermExpr::Abs(
+                    self.symbol_text(param.0),
+                    param_ty,
+                    Box::new(body_node),
+                ),
                 span.clone(),
             );
         }
@@ -654,6 +688,143 @@ impl<'a> Resolver<'a> {
 
         body_node
     }
+    fn resolve_equation_group_body(
+        &mut self,
+        defs: &[&SpannedWrapper<SurfaceDefinition>],
+        sig: Option<&Scheme>,
+        name: SpannedWrapper<Symbol>,
+        cx: &ModuleContext,
+        local: &LocalResolverEnv,
+    ) -> TermExprNode<Span> {
+        let first_def = defs
+            .first()
+            .expect("ICE: equation group must have a first definition");
+        let last_def = defs
+            .last()
+            .expect("ICE: equation group must have a last definition");
+        let group_source_span = SourceSpan::new(first_def.1.start, last_def.1.end);
+        let group_span = to_core_span(group_source_span);
+
+        let SurfaceDefinition::FunDef { params, .. } = &first_def.0 else {
+            solveig_base::ice!("equation group contained a non-function definition");
+        };
+
+        if defs.len() == 1 {
+            let mut pattern_bound_terms = FxHashSet::default();
+            for param in params {
+                self.collect_surface_pattern_binders(param, cx, &mut pattern_bound_terms);
+            }
+        }
+
+        if defs.len() == 1
+            && let Some(simple_params) = self.simple_variable_params(params)
+        {
+            return match sig {
+                Some(sig) => self.wrap_function_body_with_signature_in_module(
+                    sig,
+                    function_body(first_def),
+                    &simple_params,
+                    name,
+                    cx,
+                    local,
+                ),
+                None => self.wrap_function_body_without_signature_in_module(
+                    function_body(first_def),
+                    &simple_params,
+                    cx,
+                    local,
+                ),
+            };
+        }
+
+        let param_count = params.len();
+        let param_annotations = sig.map_or_else(
+            || vec![None; param_count],
+            |sig| self.signature_param_annotations(sig, param_count, name, cx),
+        );
+        let match_params = (0..param_count)
+            .map(|index| {
+                let param_name = format!("$match{index}");
+                let param_symbol = self.names.symbol(&param_name);
+                (param_name, param_symbol)
+            })
+            .collect::<Vec<_>>();
+
+        let scrutinees = match_params
+            .iter()
+            .map(|(param_name, param_symbol)| {
+                self.names.register_symbol(*param_symbol, param_name);
+                TermExprNode::new(
+                    TermExpr::Var(VarRef::Local(*param_symbol)),
+                    group_span.clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let mut arms = Vec::with_capacity(defs.len());
+
+        for def in defs {
+            let SurfaceDefinition::FunDef {
+                params,
+                body,
+                ..
+            } = &def.0
+            else {
+                solveig_base::ice!("equation group contained a non-function definition");
+            };
+
+            let mut pattern_bound_terms = FxHashSet::default();
+            for param in params {
+                self.collect_surface_pattern_binders(param, cx, &mut pattern_bound_terms);
+            }
+
+            let mut body_bound_terms = FxHashSet::default();
+            body_bound_terms.extend(pattern_bound_terms);
+            let patterns = params
+                .iter()
+                .map(|param| self.resolve_surface_pattern_in_module(param, cx))
+                .collect::<Vec<_>>();
+            let resolved_body =
+                self.resolve_surface_expr_in_module(body, cx, local, &body_bound_terms);
+            let pattern_span = equation_pattern_span(name.1, params, def.1);
+
+            arms.push(MatchArmNode::new(
+                MatchArm {
+                    patterns,
+                    expr: resolved_body,
+                },
+                to_core_span(pattern_span),
+            ));
+        }
+
+        let mut body_node = TermExprNode::new(
+            TermExpr::Match(scrutinees, arms),
+            group_span.clone(),
+        );
+
+        for ((param_name, _), param_ty) in match_params.into_iter().zip(param_annotations).rev() {
+            body_node = TermExprNode::new(
+                TermExpr::Abs(param_name, param_ty, Box::new(body_node)),
+                group_span.clone(),
+            );
+        }
+
+        if let Some(sig) = sig {
+            for (quant_name, quant_kind) in sig.quantifiers.clone().into_iter().rev() {
+                body_node = TermExprNode::new(
+                    TermExpr::TyAbs(
+                        self.names.tyvar_display_name(quant_name),
+                        quant_kind,
+                        Box::new(body_node),
+                    ),
+                    group_span.clone(),
+                );
+            }
+        }
+
+        body_node
+    }
+
     fn resolve_function_defs(
         &mut self,
         _module_name: &ModuleName,
@@ -662,46 +833,80 @@ impl<'a> Resolver<'a> {
         local: &LocalResolverEnv,
         func_schemes: &FxHashMap<DefId, Scheme>,
     ) -> Vec<TermDefinition<Span>> {
-        parsed
-            .defs
-            .iter()
-            .filter_map(|defn| match &defn.0 {
-                SurfaceDefinition::FunDef {
-                    name: spanned_name,
-                    body,
-                    params,
-                    ..
-                } => {
-                    let (name, _span, _) = spanned_name;
-                    let fn_id = self.local_def_id(cx, *name);
-                    let fn_name = self.qualified_def_name(fn_id);
-                    let sig = func_schemes.get(&fn_id).cloned();
+        let groups = match function_equation_group_indices(parsed) {
+            Ok(groups) => groups,
+            Err(error) => {
+                self.errors.push(error);
+                return Vec::new();
+            }
+        };
 
-                    let wrapped = match &sig {
-                        Some(sig) => self.wrap_function_body_with_signature_in_module(
-                            sig,
-                            body,
-                            params,
-                            *spanned_name,
-                            cx,
-                            local,
-                        ),
-                        None => self.wrap_function_body_without_signature_in_module(
-                            body, params, cx, local,
-                        ),
-                    };
-
-                    Some(TermDefinition {
-                        id: fn_id,
-                        name: fn_name,
-                        short_name: self.symbol_text(*name),
-                        signature: sig,
-                        body: wrapped,
+        groups
+            .into_iter()
+            .map(|group| {
+                let defs = group
+                    .iter()
+                    .map(|index| {
+                        parsed
+                            .defs
+                            .get(*index)
+                            .expect("ICE: equation group index out of bounds")
                     })
-                }
+                    .collect::<Vec<_>>();
+                let first_def = defs
+                    .first()
+                    .expect("ICE: equation group must have a first definition");
+                let SurfaceDefinition::FunDef {
+                    name: spanned_name,
+                    ..
+                } = &first_def.0
+                else {
+                    solveig_base::ice!("equation group contained a non-function definition");
+                };
+                let (name, _span, _) = spanned_name;
+                let fn_id = self.local_def_id(cx, *name);
+                let fn_name = self.qualified_def_name(fn_id);
+                let sig = func_schemes.get(&fn_id).cloned();
+                let body = self.resolve_equation_group_body(
+                    &defs,
+                    sig.as_ref(),
+                    *spanned_name,
+                    cx,
+                    local,
+                );
 
-                _ => None,
+                TermDefinition {
+                    id: fn_id,
+                    name: fn_name,
+                    short_name: self.symbol_text(*name),
+                    signature: sig,
+                    body,
+                }
             })
             .collect()
+    }
+}
+
+fn function_body(def: &SpannedWrapper<SurfaceDefinition>) -> &SpannedWrapper<SurfaceExpr> {
+    let SurfaceDefinition::FunDef { body, .. } = &def.0 else {
+        solveig_base::ice!("expected function definition");
+    };
+    body
+}
+
+fn equation_pattern_span(
+    name_span: SourceSpan,
+    params: &[SpannedWrapper<SurfacePattern>],
+    def_span: SourceSpan,
+) -> SourceSpan {
+    let start = params
+        .first()
+        .map_or(name_span.start, |param| param.1.start);
+    let end = params.last().map_or(name_span.end, |param| param.1.end);
+
+    if start < end {
+        SourceSpan::new(start, end)
+    } else {
+        def_span
     }
 }

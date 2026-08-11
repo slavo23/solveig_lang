@@ -255,6 +255,10 @@ impl TypeChecker<'_> {
                 self.solve_case_inference(ctx, scrutinee, arms, span)
             }
 
+            TermExpr::Match(scrutinees, arms) => {
+                self.solve_match_inference(ctx, scrutinees, arms, span)
+            }
+
             TermExpr::IfThenElse(cond, then_branch, else_branch) => {
                 let bool_type = self.bool_type();
                 let (gamma, elaborated_cond) = self.solve_checking(ctx, cond, &bool_type)?;

@@ -210,7 +210,12 @@ impl PositionIndex {
     fn mark_definition_ast_nodes(&mut self, definition: &Spanned<SurfaceDefinition>) {
         self.mark_ast_node(definition.2);
         match &definition.0 {
-            SurfaceDefinition::FunDef { body, .. } => self.mark_expr_ast_nodes(body),
+            SurfaceDefinition::FunDef { params, body, .. } => {
+                for param in params {
+                    self.mark_pattern_ast_nodes(param);
+                }
+                self.mark_expr_ast_nodes(body);
+            }
             SurfaceDefinition::SigDef { ty, .. } | SurfaceDefinition::TypeAliasDef { ty, .. } => {
                 self.mark_type_ast_nodes(ty);
             }
@@ -713,11 +718,16 @@ fn collect_module_position_facts(
         .map(|def| (def.id, def))
         .collect::<FxHashMap<_, _>>();
 
-    for definition in &parsed.defs {
-        let SurfaceDefinition::FunDef {
-            name, body, params, ..
-        } = &definition.0
-        else {
+    let function_groups = function_equation_group_indices(parsed).unwrap_or_default();
+
+    for group in function_groups {
+        let Some(first_index) = group.first().copied() else {
+            continue;
+        };
+        let Some(first_def) = parsed.defs.get(first_index) else {
+            continue;
+        };
+        let SurfaceDefinition::FunDef { name, params, .. } = &first_def.0 else {
             continue;
         };
         let def_id = DefId {
@@ -727,16 +737,7 @@ fn collect_module_position_facts(
         let Some(checked_def) = checked_defs.get(&def_id).copied() else {
             continue;
         };
-        let checked_body = checked_body_without_function_params(&checked_def.body, params.len());
-        collect_expr_position_facts(
-            body,
-            checked_body,
-            cx.snapshot,
-            cx.docs,
-            cx.ctor_table,
-            cx.tables,
-            index,
-        );
+        collect_function_group_position_facts(parsed, &group, params.len(), checked_def, cx, index);
     }
 
     let mut checked_instances = checked.instance_defs.iter();
@@ -771,6 +772,57 @@ fn collect_module_position_facts(
                 index,
             );
         }
+    }
+}
+
+fn collect_function_group_position_facts(
+    parsed: &ParsedModule,
+    group: &[usize],
+    param_count: usize,
+    checked_def: &TermDefinition<TcMetadata, Range<usize>>,
+    cx: PositionFactContext<'_>,
+    index: &mut PositionIndex,
+) {
+    let checked_body = checked_body_without_function_params(&checked_def.body, param_count);
+
+    if group.len() == 1
+        && !matches!(checked_body.node, TermExpr::Match(_, _))
+        && let Some(first_index) = group.first().copied()
+        && let Some(defn) = parsed.defs.get(first_index)
+        && let SurfaceDefinition::FunDef { body, .. } = &defn.0
+    {
+        collect_expr_position_facts(
+            body,
+            checked_body,
+            cx.snapshot,
+            cx.docs,
+            cx.ctor_table,
+            cx.tables,
+            index,
+        );
+        return;
+    }
+
+    let TermExpr::Match(_, arms) = &checked_body.node else {
+        return;
+    };
+
+    for (def_index, checked_arm) in group.iter().zip(arms) {
+        let Some(defn) = parsed.defs.get(*def_index) else {
+            continue;
+        };
+        let SurfaceDefinition::FunDef { body, .. } = &defn.0 else {
+            continue;
+        };
+        collect_expr_position_facts(
+            body,
+            &checked_arm.node.expr,
+            cx.snapshot,
+            cx.docs,
+            cx.ctor_table,
+            cx.tables,
+            index,
+        );
     }
 }
 
@@ -1204,6 +1256,13 @@ fn checked_subexpr_for_exact_span(
                     .find_map(|arm| checked_subexpr_for_exact_span(&arm.node.expr, span))
             })
         }
+        TermExpr::Match(scrutinees, arms) => scrutinees
+            .iter()
+            .find_map(|scrutinee| checked_subexpr_for_exact_span(scrutinee, span))
+            .or_else(|| {
+                arms.iter()
+                    .find_map(|arm| checked_subexpr_for_exact_span(&arm.node.expr, span))
+            }),
         TermExpr::IfThenElse(cond, then_branch, else_branch) => {
             checked_subexpr_for_exact_span(cond, span)
                 .or_else(|| checked_subexpr_for_exact_span(then_branch, span))

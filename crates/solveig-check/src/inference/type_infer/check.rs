@@ -323,6 +323,23 @@ fn substitute_generalized_expr(
                 })
                 .collect(),
         ),
+        TermExpr::Match(scrutinees, arms) => TermExpr::Match(
+            scrutinees
+                .into_iter()
+                .map(|scrutinee| substitute_generalized_expr(scrutinee, subst))
+                .collect(),
+            arms.into_iter()
+                .map(|arm| {
+                    MatchArmNode::new(
+                        MatchArm {
+                            patterns: arm.node.patterns,
+                            expr: substitute_generalized_expr(arm.node.expr, subst),
+                        },
+                        arm.anno,
+                    )
+                })
+                .collect(),
+        ),
         TermExpr::IfThenElse(cond, then_branch, else_branch) => TermExpr::IfThenElse(
             Box::new(substitute_generalized_expr(*cond, subst)),
             Box::new(substitute_generalized_expr(*then_branch, subst)),
@@ -399,6 +416,14 @@ fn collect_function_deps<A, P>(
         }
         TermExpr::Case(scrutinee, arms) => {
             collect_function_deps(scrutinee, local_indices, out);
+            for arm in arms {
+                collect_function_deps(&arm.node.expr, local_indices, out);
+            }
+        }
+        TermExpr::Match(scrutinees, arms) => {
+            for scrutinee in scrutinees {
+                collect_function_deps(scrutinee, local_indices, out);
+            }
             for arm in arms {
                 collect_function_deps(&arm.node.expr, local_indices, out);
             }
