@@ -1,11 +1,12 @@
 //! Runtime IO action representation and execution.
-//! Builtin IO values are interpreted here against files, stdin, stdout, and args.
+//! The current action stays in one register while suspended binds share the VM's
+//! continuation stack. Builtin actions operate on files, stdin, stdout, and args.
 
 use super::*;
 use crate::builtins::VmCtx;
 use crate::bytecode::BytecodeProgram;
 use crate::heap::{HeapObject, IoAction};
-use crate::values::{IoFrame, Value};
+use crate::values::{Continuation, Value};
 use std::fs::{self, OpenOptions};
 use std::io::{BufRead, Write};
 use std::path::{Path, PathBuf};
@@ -78,7 +79,7 @@ impl Vm {
         action: Value,
         io: &mut IoRuntime<'_>,
     ) -> Result<Value, RuntimeError> {
-        if self.io_current.is_some() || !self.io_stack.is_empty() {
+        if self.io_current.is_some() || !self.continuations.is_empty() {
             solveig_base::ice!("IO machine entered while already active");
         }
 
@@ -86,7 +87,7 @@ impl Vm {
         let result = self.perform_io_loop(program, io);
 
         self.io_current = None;
-        self.io_stack.clear();
+        self.continuations.clear();
         result
     }
 
@@ -112,7 +113,7 @@ impl Vm {
                     action,
                     continuation,
                 } => {
-                    self.io_stack.push(IoFrame::Bind(continuation));
+                    self.continuations.push(Continuation::IoBind(continuation));
                     self.io_current = Some(action);
                 }
                 IoAction::Print { text, newline } => {
@@ -214,18 +215,21 @@ impl Vm {
         program: &BytecodeProgram,
         value: Value,
     ) -> Result<Option<Value>, RuntimeError> {
-        let Some(frame) = self.io_stack.last().copied() else {
+        let Some(frame) = self.continuations.pop() else {
             return Ok(Some(value));
         };
 
         match frame {
-            IoFrame::Bind(continuation) => {
+            Continuation::IoBind(continuation) => {
                 let next = self.call_value_for_result(program, continuation, &[value])?;
-                self.io_stack
-                    .pop()
-                    .expect("ICE: IO continuation frame disappeared during resume");
                 self.io_current = Some(next);
                 Ok(None)
+            }
+            Continuation::Halt
+            | Continuation::CallerFrame { .. }
+            | Continuation::PublishGlobalThenHalt { .. }
+            | Continuation::PublishGlobalThenResume { .. } => {
+                solveig_base::ice!("non-IO continuation reached the IO machine")
             }
         }
     }

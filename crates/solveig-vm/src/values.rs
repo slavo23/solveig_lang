@@ -111,12 +111,12 @@ pub enum Continuation {
         pc: usize,
         frame_base: usize,
     },
+    /// Applies this function to the value produced by the IO action below it.
+    IoBind(Value),
 }
 
-#[derive(Clone, Copy)]
-pub enum IoFrame {
-    Bind(Value),
-}
+// The pre-I1 layout measured 40 bytes; IO frames must not widen this hot type.
+const _: () = assert!(std::mem::size_of::<Continuation>() <= 40);
 
 pub struct BoolCache {
     pub true_val: Value,

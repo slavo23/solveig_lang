@@ -4,7 +4,7 @@
 use crate::bytecode::{BytecodeProgram, lower_to_bytecode};
 use crate::display::DisplayValue;
 use crate::heap::{Heap, HeapObject};
-use crate::values::{BoolCache, Continuation, GlobalSlot, IoFrame, NullaryCtorCache, Value};
+use crate::values::{BoolCache, Continuation, GlobalSlot, NullaryCtorCache, Value};
 use solveig_ast::ast::CtorRuntimeInfo;
 use solveig_lower::closure_ir::CCProgram;
 use std::fmt;
@@ -30,7 +30,6 @@ struct Vm {
     binding_buffer: Vec<Value>,
     temporary_roots: Vec<Value>,
     io_current: Option<Value>,
-    io_stack: Vec<IoFrame>,
 
     heap: Heap,
     globals: Vec<GlobalSlot>,
@@ -63,7 +62,6 @@ impl Vm {
             binding_buffer: Vec::with_capacity(8),
             temporary_roots: Vec::with_capacity(8),
             io_current: None,
-            io_stack: Vec::with_capacity(512),
             heap: Heap::default(),
             globals: program
                 .globals

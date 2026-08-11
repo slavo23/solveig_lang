@@ -643,6 +643,10 @@ impl Vm {
                 self.push(result);
                 None
             }
+
+            Continuation::IoBind(_) => {
+                solveig_base::ice!("IO continuation reached bytecode return handling")
+            }
         }
     }
 }
