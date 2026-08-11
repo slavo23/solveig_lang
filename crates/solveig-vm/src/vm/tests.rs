@@ -8,6 +8,7 @@ use solveig_ast::ast::{
     BUILTIN_BIND_IO, BUILTIN_CHARS_TO_STRING, BUILTIN_PURE_IO, BUILTIN_STRING_TO_CHARS, BinOp,
     BuiltinId, CtorId, CtorRuntimeRole, PRIM_TYS,
 };
+use solveig_base::{FileId, FileSpan, Span};
 use solveig_lower::closure_ir::{CCExpr, CCFunction, CCGlobalDef};
 use solveig_lower::{LowerCaseArm, LowerPattern};
 use std::rc::Rc;
@@ -20,6 +21,25 @@ const PRELUDE_NIL_TAG: u16 = 4;
 const PRELUDE_CONS_TAG: u16 = 5;
 const PRELUDE_PAIR_TAG: u16 = 6;
 const USER_PAIR_TAG: u16 = 7;
+
+#[test]
+fn bytecode_offsets_retain_nested_source_locations() {
+    let outer = FileSpan::new(FileId(7), Span::new(10, 19));
+    let left = FileSpan::new(FileId(7), Span::new(10, 12));
+    let right = FileSpan::new(FileId(7), Span::new(17, 19));
+    let body = located(
+        outer,
+        bin(BinOp::Plus, located(left, int(1)), located(right, int(2))),
+    );
+    let bytecode = lower_to_bytecode(&program(vec![global("main", body)], Vec::new(), &[]));
+    let chunk = bytecode.chunk(bytecode.globals[0].chunk);
+
+    assert_eq!(chunk.source_spans.len(), chunk.code.len());
+    assert_eq!(chunk.source_span(0), Some(left));
+    assert_eq!(chunk.source_span(1), Some(right));
+    assert_eq!(chunk.source_span(2), Some(outer));
+    assert_eq!(chunk.source_span(3), None);
+}
 
 #[test]
 fn tail_recursive_countdown_uses_bounded_vm_stack() {
@@ -100,11 +120,20 @@ fn call_safe_points_yield_and_resume_with_consistent_process_state() {
     start_process_global(&mut runtime, process_id, 0);
 
     let mut yields = 0;
+    let mut observed_caller_frame = false;
     let result = loop {
         match run_process(&mut runtime, process_id) {
             StepOutcome::Yielded => {
                 yields += 1;
-                assert_eq!(runtime.processes[process_id].status, ProcStatus::Runnable);
+                let process = &runtime.processes[process_id];
+                assert_eq!(process.status, ProcStatus::Runnable);
+                let frames = process.frames().collect::<Vec<_>>();
+                assert!(!frames.is_empty());
+                observed_caller_frame |= frames.len() > 1;
+                for frame in frames {
+                    assert!(frame.pc <= runtime.program.chunk(frame.chunk).code.len());
+                    assert!(frame.frame_base <= process.stack.len());
+                }
                 assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
             }
             StepOutcome::Finished(value) => break value,
@@ -116,6 +145,7 @@ fn call_safe_points_yield_and_resume_with_consistent_process_state() {
 
     assert_eq!(result, Value::Int(4));
     assert_eq!(yields, 5);
+    assert!(observed_caller_frame);
 }
 
 #[test]
@@ -150,6 +180,7 @@ fn backward_jump_safe_point_restarts_at_the_branch_target() {
     let mut bytecode = lower_to_bytecode(&program);
     let chunk = bytecode.globals[0].chunk;
     bytecode.chunks[chunk].code = vec![Instr::Jump(0)];
+    bytecode.chunks[chunk].source_spans = vec![None];
     let mut runtime = runtime_with_reduction_budget(bytecode, 1);
     let process_id = runtime.allocate_process();
     runtime.run_queue.clear();
@@ -1019,6 +1050,10 @@ fn global(name: &str, body: Rc<CCExpr>) -> CCGlobalDef {
 
 fn expr(expr: CCExpr) -> Rc<CCExpr> {
     Rc::new(expr)
+}
+
+fn located(source: FileSpan, inner: Rc<CCExpr>) -> Rc<CCExpr> {
+    expr(CCExpr::Located(source, inner))
 }
 
 fn int(n: i64) -> Rc<CCExpr> {

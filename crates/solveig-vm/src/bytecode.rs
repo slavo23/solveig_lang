@@ -2,7 +2,7 @@
 //! The VM executes chunks produced here from lowered Solveig programs.
 
 use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, Literal, StrLitId, UnOp};
-use solveig_base::FxHashMap;
+use solveig_base::{FileSpan, FxHashMap};
 use std::collections::BTreeSet;
 use std::path::Path;
 use std::rc::Rc;
@@ -86,7 +86,16 @@ pub struct Chunk {
     pub kind: ChunkKind,
     pub slot_count: u16,
     pub code: Vec<Instr>,
+    /// Source location for each bytecode offset; synthetic instructions use `None`.
+    pub source_spans: Vec<Option<FileSpan>>,
     pub match_tables: Vec<MatchTable>,
+}
+
+impl Chunk {
+    /// Returns the source location associated with a bytecode offset.
+    pub fn source_span(&self, pc: usize) -> Option<FileSpan> {
+        self.source_spans.get(pc).copied().flatten()
+    }
 }
 
 #[derive(Debug, Clone)]

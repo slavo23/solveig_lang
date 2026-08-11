@@ -1,10 +1,12 @@
 use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, UnOp};
+use solveig_base::FileSpan;
 use std::rc::Rc;
 
 use super::patterns::LowerCaseArm;
 
 #[derive(Debug, Clone)]
 pub enum IRExpr {
+    Located(FileSpan, Rc<IRExpr>),
     Unit,
     BVar(usize),
     FVar(usize),

@@ -2,12 +2,14 @@
 //! Bytecode generation consumes these terms after lambda lifting and capture analysis.
 
 use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, UnOp};
+use solveig_base::FileSpan;
 use std::rc::Rc;
 
 use super::patterns::LowerCaseArm;
 
 #[derive(Debug, Clone)]
 pub enum CCExpr {
+    Located(FileSpan, Rc<CCExpr>),
     Unit,
     Int(i64),
     Float(f64),

@@ -240,6 +240,11 @@ chapter's rule that lightweight-thread context switches occur only where VM
 state is tidy, while adding explicit call and backward-jump points so a pure
 non-allocating loop cannot starve the run queue.
 
+Every yielded process also retains a walkable bytecode frame stack, and every
+chunk keeps its bytecode-offset source table in all builds. The exact hooks,
+resume-PC convention, tail-call limitation, and work still required for a DAP
+are specified in [debugging-hooks.md](debugging-hooks.md).
+
 ## Scheduler, `spawn`, and program lifetime
 
 Solveig runs lightweight processes on one OS thread. The scheduler removes the

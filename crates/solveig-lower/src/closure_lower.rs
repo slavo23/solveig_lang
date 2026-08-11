@@ -121,10 +121,13 @@ impl ClosureLowerer {
 
             return CCGlobalDef {
                 name: global.name.clone(),
-                body: Rc::new(CCExpr::FunctionRef {
-                    func: info.func_id,
-                    arity: info.arity,
-                }),
+                body: with_source(
+                    source_location(&global.body),
+                    Rc::new(CCExpr::FunctionRef {
+                        func: info.func_id,
+                        arity: info.arity,
+                    }),
+                ),
             };
         }
 
@@ -221,6 +224,9 @@ impl<'a> ExprLowerer<'a> {
 
     fn lower_expr(&mut self, expr: &Rc<IRExpr>) -> Rc<CCExpr> {
         match expr.as_ref() {
+            IRExpr::Located(source, inner) => {
+                Rc::new(CCExpr::Located(*source, self.lower_expr(inner)))
+            }
             IRExpr::Unit => Rc::new(CCExpr::Unit),
             IRExpr::Int(n) => Rc::new(CCExpr::Int(*n)),
             IRExpr::Float(n) => Rc::new(CCExpr::Float(*n)),
@@ -319,8 +325,9 @@ impl<'a> ExprLowerer<'a> {
 
     fn lower_application(&mut self, expr: &Rc<IRExpr>) -> Rc<CCExpr> {
         let (head, args) = collect_application_spine(expr);
+        let head_expr = strip_locations(&head);
 
-        if let IRExpr::Con { tag, arity } = head.as_ref()
+        if let IRExpr::Con { tag, arity } = head_expr.as_ref()
             && args.len() == *arity as usize
         {
             let lowered_fields = args.iter().map(|arg| self.lower_expr(arg)).collect();
@@ -332,7 +339,7 @@ impl<'a> ExprLowerer<'a> {
             });
         }
 
-        if let IRExpr::FVar(global_index) = head.as_ref()
+        if let IRExpr::FVar(global_index) = head_expr.as_ref()
             && let Some(info) = self.state.known_global_func(*global_index)
         {
             if args.len() <= info.arity {
@@ -487,7 +494,8 @@ fn collect_application_spine(expr: &Rc<IRExpr>) -> (Rc<IRExpr>, Vec<Rc<IRExpr>>)
     let mut head = expr.clone();
 
     loop {
-        match head.as_ref() {
+        let inspected = strip_locations(&head);
+        match inspected.as_ref() {
             IRExpr::App(func, arg) => {
                 args.push(arg.clone());
                 head = func.clone();
@@ -505,12 +513,76 @@ fn collect_lambda_chain(expr: &Rc<IRExpr>) -> (usize, Rc<IRExpr>) {
     let mut body = expr.clone();
 
     loop {
-        match body.as_ref() {
+        let inspected = strip_locations(&body);
+        match inspected.as_ref() {
             IRExpr::Abs(inner) => {
                 arity += 1;
                 body = inner.clone();
             }
             _ => return (arity, body),
         }
+    }
+}
+
+fn strip_locations(expr: &Rc<IRExpr>) -> Rc<IRExpr> {
+    let mut current = expr.clone();
+    while let IRExpr::Located(_, inner) = current.as_ref() {
+        current = inner.clone();
+    }
+    current
+}
+
+fn source_location(expr: &Rc<IRExpr>) -> Option<solveig_base::FileSpan> {
+    match expr.as_ref() {
+        IRExpr::Located(source, _) => Some(*source),
+        _ => None,
+    }
+}
+
+fn with_source(source: Option<solveig_base::FileSpan>, expr: Rc<CCExpr>) -> Rc<CCExpr> {
+    source.map_or(expr.clone(), |source| {
+        Rc::new(CCExpr::Located(source, expr))
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use solveig_base::{FileId, FileSpan, Span};
+
+    use super::*;
+
+    #[test]
+    fn source_locations_survive_top_level_lambda_lifting() {
+        let lambda_source = FileSpan::new(FileId(2), Span::new(4, 15));
+        let body_source = FileSpan::new(FileId(2), Span::new(12, 15));
+        let program = IRProgram {
+            globals: vec![IRGlobalDef {
+                name: "identity".to_string(),
+                body: Rc::new(IRExpr::Located(
+                    lambda_source,
+                    Rc::new(IRExpr::Abs(Rc::new(IRExpr::Located(
+                        body_source,
+                        Rc::new(IRExpr::BVar(0)),
+                    )))),
+                )),
+            }],
+            constructor_arities: Vec::new(),
+            string_constants: Vec::new(),
+            string_literals: Vec::new(),
+        };
+
+        let lowered = lower_to_closure_ir(&program);
+
+        assert!(matches!(
+            lowered.globals[0].body.as_ref(),
+            CCExpr::Located(source, inner)
+                if *source == lambda_source
+                    && matches!(inner.as_ref(), CCExpr::FunctionRef { .. })
+        ));
+        assert!(matches!(
+            lowered.functions[0].body.as_ref(),
+            CCExpr::Located(source, inner)
+                if *source == body_source && matches!(inner.as_ref(), CCExpr::Local(0))
+        ));
     }
 }

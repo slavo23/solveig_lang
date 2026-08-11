@@ -1,13 +1,13 @@
 //! Lowering from checked terms into VM-oriented core syntax.
 //! This pass assigns globals, lowers constructors, and prepares IO primitives.
 
-use solveig_base::FxHashMap;
+use solveig_base::{FileSpan, FxHashMap};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
     BuiltinDefinition, CaseArm, ClassId, CtorId, CtorRuntimeInfo, DefId, Ev, EvVarId,
-    InstanceDefinition, Literal, MatchArmNode, Names, Pattern, PatternNode, ResolvedModule,
-    StrLitId, TermExpr, TermExprNode, VarRef, runtime_ctor_role,
+    InstanceDefinition, Literal, MatchArmNode, ModuleId, Names, Pattern, PatternNode,
+    ResolvedModule, StrLitId, TermExpr, TermExprNode, VarRef, runtime_ctor_role,
 };
 
 use super::dicts::{DictLayout, DictLayouts, instance_global_name};
@@ -160,8 +160,15 @@ impl LowerCtx {
     }
 }
 
-fn lower_expr<A: Clone, P: Clone>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>) -> Rc<IRExpr> {
-    match &expr.node {
+fn lower_expr<A: Clone, P: Clone, S>(
+    ctx: &mut LowerCtx,
+    expr: &TermExprNode<A, P>,
+    source_span: &S,
+) -> Rc<IRExpr>
+where
+    S: Fn(&A) -> Option<FileSpan>,
+{
+    let lowered = match &expr.node {
         TermExpr::Unit => Rc::new(IRExpr::Unit),
         TermExpr::Var(name) => ctx.resolve_var(name),
         TermExpr::Lit(lit) => match lit {
@@ -185,43 +192,43 @@ fn lower_expr<A: Clone, P: Clone>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>)
 
         TermExpr::Abs(param, _, body) => {
             ctx.push_term(param);
-            let lowered_body = lower_expr(ctx, body);
+            let lowered_body = lower_expr(ctx, body, source_span);
             ctx.pop();
             Rc::new(IRExpr::Abs(lowered_body))
         }
 
         TermExpr::App(func, arg) => {
-            let lowered_func = lower_expr(ctx, func);
-            let lowered_arg = lower_expr(ctx, arg);
+            let lowered_func = lower_expr(ctx, func, source_span);
+            let lowered_arg = lower_expr(ctx, arg, source_span);
             Rc::new(IRExpr::App(lowered_func, lowered_arg))
         }
 
-        TermExpr::TyAbs(_, _, body) => lower_expr(ctx, body),
-        TermExpr::TyApp(inner, _) | TermExpr::Anno(inner, _) => lower_expr(ctx, inner),
+        TermExpr::TyAbs(_, _, body) => lower_expr(ctx, body, source_span),
+        TermExpr::TyApp(inner, _) | TermExpr::Anno(inner, _) => lower_expr(ctx, inner, source_span),
         TermExpr::EvAbs(evvar, _, body) => {
             ctx.push_evidence(*evvar);
-            let lowered_body = lower_expr(ctx, body);
+            let lowered_body = lower_expr(ctx, body, source_span);
             ctx.pop();
             Rc::new(IRExpr::Abs(lowered_body))
         }
-        TermExpr::EvApp(inner, ev) => lower_ev_app(ctx, inner, ev),
+        TermExpr::EvApp(inner, ev) => lower_ev_app(ctx, inner, ev, source_span),
         TermExpr::Case(scrutinee, arms) => {
-            let lowered_scrutinee = lower_expr(ctx, scrutinee);
+            let lowered_scrutinee = lower_expr(ctx, scrutinee, source_span);
             let lowered_arms = arms
                 .iter()
-                .map(|arm_node| lower_case_arm(ctx, &arm_node.node))
+                .map(|arm_node| lower_case_arm(ctx, &arm_node.node, source_span))
                 .collect();
             Rc::new(IRExpr::Case {
                 scrutinee: lowered_scrutinee,
                 arms: lowered_arms,
             })
         }
-        TermExpr::Match(scrutinees, arms) => lower_match_expr(ctx, scrutinees, arms),
+        TermExpr::Match(scrutinees, arms) => lower_match_expr(ctx, scrutinees, arms, source_span),
 
         TermExpr::IfThenElse(cond, then_branch, else_branch) => {
-            let lowered_cond = lower_expr(ctx, cond);
-            let lowered_then = lower_expr(ctx, then_branch);
-            let lowered_else = lower_expr(ctx, else_branch);
+            let lowered_cond = lower_expr(ctx, cond, source_span);
+            let lowered_then = lower_expr(ctx, then_branch, source_span);
+            let lowered_else = lower_expr(ctx, else_branch, source_span);
             Rc::new(IRExpr::IfThenElse {
                 cond: lowered_cond,
                 then_br: lowered_then,
@@ -229,23 +236,29 @@ fn lower_expr<A: Clone, P: Clone>(ctx: &mut LowerCtx, expr: &TermExprNode<A, P>)
             })
         }
         TermExpr::Let(name, binder, in_expr) => {
-            let lowered_binder = lower_expr(ctx, binder);
+            let lowered_binder = lower_expr(ctx, binder, source_span);
 
             ctx.push_term(name);
-            let lowered_in_expr = lower_expr(ctx, in_expr);
+            let lowered_in_expr = lower_expr(ctx, in_expr, source_span);
             ctx.pop();
 
             Rc::new(IRExpr::Let(lowered_binder, lowered_in_expr))
         }
         TermExpr::Hole => solveig_base::ice!("driver allowed a typed hole to reach lowering"),
-    }
+    };
+
+    with_source(source_span(&expr.anno), lowered)
 }
 
-fn lower_match_expr<A: Clone, P: Clone>(
+fn lower_match_expr<A: Clone, P: Clone, S>(
     ctx: &mut LowerCtx,
     scrutinees: &[TermExprNode<A, P>],
     arms: &[MatchArmNode<A, P>],
-) -> Rc<IRExpr> {
+    source_span: &S,
+) -> Rc<IRExpr>
+where
+    S: Fn(&A) -> Option<FileSpan>,
+{
     if scrutinees.is_empty() {
         solveig_base::ice!("empty multi-pattern match reached lowering");
     }
@@ -256,7 +269,7 @@ fn lower_match_expr<A: Clone, P: Clone>(
     let mut lowered_scrutinees = Vec::with_capacity(scrutinees.len());
 
     for (column, scrutinee) in columns.iter().zip(scrutinees) {
-        lowered_scrutinees.push(lower_expr(ctx, scrutinee));
+        lowered_scrutinees.push(lower_expr(ctx, scrutinee, source_span));
         ctx.push_term(column);
     }
 
@@ -269,7 +282,7 @@ fn lower_match_expr<A: Clone, P: Clone>(
         })
         .collect::<Vec<_>>();
     let mut next_field = 0usize;
-    let mut body = lower_match_columns(ctx, &columns, rows, &mut next_field);
+    let mut body = lower_match_columns(ctx, &columns, rows, &mut next_field, source_span);
 
     for _ in &columns {
         ctx.pop();
@@ -282,12 +295,16 @@ fn lower_match_expr<A: Clone, P: Clone>(
     body
 }
 
-fn lower_match_columns<A: Clone, P: Clone>(
+fn lower_match_columns<A: Clone, P: Clone, S>(
     ctx: &mut LowerCtx,
     columns: &[String],
     rows: Vec<LowerMatchRow<A, P>>,
     next_field: &mut usize,
-) -> Rc<IRExpr> {
+    source_span: &S,
+) -> Rc<IRExpr>
+where
+    S: Fn(&A) -> Option<FileSpan>,
+{
     if rows.is_empty() {
         solveig_base::ice!("empty match branch reached lowering");
     }
@@ -296,6 +313,7 @@ fn lower_match_columns<A: Clone, P: Clone>(
         return lower_match_row_body(
             ctx,
             rows.first().expect("ICE: non-empty rows checked above"),
+            source_span,
         );
     };
 
@@ -310,7 +328,7 @@ fn lower_match_columns<A: Clone, P: Clone>(
             .into_iter()
             .map(|row| lower_match_default_row(row, column))
             .collect::<Vec<_>>();
-        return lower_match_columns(ctx, rest_columns, rows, next_field);
+        return lower_match_columns(ctx, rest_columns, rows, next_field, source_span);
     }
 
     let scrutinee = ctx
@@ -335,7 +353,7 @@ fn lower_match_columns<A: Clone, P: Clone>(
             .cloned()
             .filter_map(|row| lower_match_head_row(row, &head, field_count, column))
             .collect::<Vec<_>>();
-        let body = lower_match_columns(ctx, &next_columns, branch_rows, next_field);
+        let body = lower_match_columns(ctx, &next_columns, branch_rows, next_field, source_span);
 
         for _ in &field_names {
             ctx.pop();
@@ -350,7 +368,7 @@ fn lower_match_columns<A: Clone, P: Clone>(
         .collect::<Vec<_>>();
 
     if !default_rows.is_empty() {
-        let body = lower_match_columns(ctx, rest_columns, default_rows, next_field);
+        let body = lower_match_columns(ctx, rest_columns, default_rows, next_field, source_span);
         case_arms.push(LowerCaseArm {
             pattern: LowerPattern::Wild,
             body,
@@ -363,10 +381,14 @@ fn lower_match_columns<A: Clone, P: Clone>(
     })
 }
 
-fn lower_match_row_body<A: Clone, P: Clone>(
+fn lower_match_row_body<A: Clone, P: Clone, S>(
     ctx: &mut LowerCtx,
     row: &LowerMatchRow<A, P>,
-) -> Rc<IRExpr> {
+    source_span: &S,
+) -> Rc<IRExpr>
+where
+    S: Fn(&A) -> Option<FileSpan>,
+{
     let mut lowered_binders = Vec::with_capacity(row.bindings.len());
 
     for binding in &row.bindings {
@@ -379,7 +401,7 @@ fn lower_match_row_body<A: Clone, P: Clone>(
         ctx.push_term(&binding.name);
     }
 
-    let mut body = lower_expr(ctx, &row.body);
+    let mut body = lower_expr(ctx, &row.body, source_span);
 
     for _ in &row.bindings {
         ctx.pop();
@@ -560,6 +582,12 @@ fn literals_equal(left: &Literal, right: &Literal) -> bool {
     }
 }
 
+fn with_source(source: Option<FileSpan>, expr: Rc<IRExpr>) -> Rc<IRExpr> {
+    source.map_or(expr.clone(), |source| {
+        Rc::new(IRExpr::Located(source, expr))
+    })
+}
+
 fn lower_builtin_global(def: &BuiltinDefinition) -> IRGlobalDef {
     let args = (0..def.arity)
         .map(|index| Rc::new(IRExpr::BVar(def.arity - index - 1)))
@@ -576,11 +604,15 @@ fn lower_builtin_global(def: &BuiltinDefinition) -> IRGlobalDef {
     }
 }
 
-fn lower_ev_app<A: Clone, P: Clone>(
+fn lower_ev_app<A: Clone, P: Clone, S>(
     ctx: &mut LowerCtx,
     inner: &TermExprNode<A, P>,
     ev: &Ev,
-) -> Rc<IRExpr> {
+    source_span: &S,
+) -> Rc<IRExpr>
+where
+    S: Fn(&A) -> Option<FileSpan>,
+{
     if let Some(method_id) = global_method_ref(inner)
         && let Some((class_id, field_index)) = ctx.dicts.method_field(method_id)
     {
@@ -588,7 +620,7 @@ fn lower_ev_app<A: Clone, P: Clone>(
         return project_dict_field(ctx, class_id, dict, field_index);
     }
 
-    let lowered_func = lower_expr(ctx, inner);
+    let lowered_func = lower_expr(ctx, inner, source_span);
     let lowered_ev = lower_ev(ctx, ev);
     Rc::new(IRExpr::App(lowered_func, lowered_ev))
 }
@@ -700,13 +732,17 @@ fn build_dict_value(layout: &DictLayout, fields: Vec<Rc<IRExpr>>) -> Rc<IRExpr> 
     )
 }
 
-fn lower_case_arm<A: Clone, P: Clone>(
+fn lower_case_arm<A: Clone, P: Clone, S>(
     ctx: &mut LowerCtx,
     arm: &CaseArm<A, P>,
-) -> LowerCaseArm<IRExpr> {
+    source_span: &S,
+) -> LowerCaseArm<IRExpr>
+where
+    S: Fn(&A) -> Option<FileSpan>,
+{
     let ir_pattern = lower_pattern(ctx, &arm.pattern);
     ctx.push_pattern_binders(&arm.pattern);
-    let lowered_body = lower_expr(ctx, &arm.expr);
+    let lowered_body = lower_expr(ctx, &arm.expr, source_span);
     ctx.pop_pattern_binders(&arm.pattern);
     LowerCaseArm {
         pattern: ir_pattern,
@@ -735,10 +771,14 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> LowerPattern {
     }
 }
 
-fn lower_instance_dict_global<A: Clone, P: Clone>(
+fn lower_instance_dict_global<A: Clone, P: Clone, S>(
     ctx: &mut LowerCtx,
     inst: &InstanceDefinition<A, P>,
-) -> IRGlobalDef {
+    source_span: &S,
+) -> IRGlobalDef
+where
+    S: Fn(&A) -> Option<FileSpan>,
+{
     let layout = ctx
         .dicts
         .class(inst.head.class_id)
@@ -788,7 +828,7 @@ fn lower_instance_dict_global<A: Clone, P: Clone>(
                 )
             });
 
-        let mut field = lower_expr(ctx, &impl_method.body);
+        let mut field = lower_expr(ctx, &impl_method.body, source_span);
         for evvar in &inst.context_evidence {
             field = Rc::new(IRExpr::App(field, ctx.resolve_ev_var(*evvar)));
         }
@@ -866,7 +906,14 @@ fn next_synthetic_constructor_base(
     (next_ctor, next_tag)
 }
 
-pub fn lower_module<A: Clone, P: Clone>(module: &ResolvedModule<A, P>, names: &Names) -> IRProgram {
+pub fn lower_module<A: Clone, P: Clone, S>(
+    module: &ResolvedModule<A, P>,
+    names: &Names,
+    source_span: S,
+) -> IRProgram
+where
+    S: Fn(ModuleId, &A) -> Option<FileSpan>,
+{
     let constructors = build_constructor_table(module, names);
     let (next_ctor_id, next_tag) = next_synthetic_constructor_base(&constructors);
     let dicts = DictLayouts::build(module, next_ctor_id, next_tag);
@@ -897,7 +944,8 @@ pub fn lower_module<A: Clone, P: Clone>(module: &ResolvedModule<A, P>, names: &N
         .func_defs
         .iter()
         .map(|func_def| {
-            let lowered_body = lower_expr(&mut ctx, &func_def.body);
+            let source_span = |anno: &A| source_span(func_def.id.module, anno);
+            let lowered_body = lower_expr(&mut ctx, &func_def.body, &source_span);
             IRGlobalDef {
                 name: func_def.name.clone(),
                 body: lowered_body,
@@ -907,12 +955,10 @@ pub fn lower_module<A: Clone, P: Clone>(module: &ResolvedModule<A, P>, names: &N
 
     ir_globals.extend(module.builtin_defs.iter().map(lower_builtin_global));
 
-    ir_globals.extend(
-        module
-            .instance_defs
-            .iter()
-            .map(|inst| lower_instance_dict_global(&mut ctx, inst)),
-    );
+    ir_globals.extend(module.instance_defs.iter().map(|inst| {
+        let source_span = |anno: &A| source_span(inst.def_module, anno);
+        lower_instance_dict_global(&mut ctx, inst, &source_span)
+    }));
 
     let mut constructor_arities = constructors
         .iter()
@@ -941,6 +987,7 @@ mod tests {
         ClassDefinition, ClassMethodDef, ClassTable, InstanceId, InstanceMethodDef, ModuleId,
         Names, Predicate, Scheme, TermDefinition, Ty, TyConTable, VarRef,
     };
+    use solveig_base::{FileId, Span};
 
     use super::*;
 
@@ -1013,7 +1060,8 @@ mod tests {
             }],
         };
 
-        let ir = lower_module(&module, &names);
+        let expected_source = FileSpan::new(FileId(3), Span::new(20, 24));
+        let ir = lower_module(&module, &names, |_, _| Some(expected_source));
 
         assert_eq!(ir.globals.len(), 2);
         let dict_tag = ir
@@ -1023,7 +1071,12 @@ mod tests {
             .expect("dictionary constructor should be registered")
             .tag;
 
-        match ir.globals[0].body.as_ref() {
+        let IRExpr::Located(source, body) = ir.globals[0].body.as_ref() else {
+            solveig_base::ice!("expected source-located lowered expression")
+        };
+        assert_eq!(*source, expected_source);
+
+        match body.as_ref() {
             IRExpr::Case { scrutinee, arms } => {
                 assert!(matches!(scrutinee.as_ref(), IRExpr::FVar(1)));
                 assert_eq!(arms.len(), 1);

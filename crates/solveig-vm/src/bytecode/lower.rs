@@ -102,6 +102,11 @@ impl BytecodeLowerer {
 
     fn compile_tail_expr(&self, builder: &mut ChunkBuilder, env: &LocalEnv, expr: &Rc<CCExpr>) {
         match expr.as_ref() {
+            CCExpr::Located(source, inner) => {
+                let previous = builder.set_source(Some(*source));
+                self.compile_tail_expr(builder, env, inner);
+                builder.set_source(previous);
+            }
             CCExpr::Call { callee, args } => {
                 self.compile_expr(builder, env, callee);
 
@@ -209,6 +214,11 @@ impl BytecodeLowerer {
 
     fn compile_expr(&self, builder: &mut ChunkBuilder, env: &LocalEnv, expr: &Rc<CCExpr>) {
         match expr.as_ref() {
+            CCExpr::Located(source, inner) => {
+                let previous = builder.set_source(Some(*source));
+                self.compile_expr(builder, env, inner);
+                builder.set_source(previous);
+            }
             CCExpr::Unit => builder.emit(Instr::PushUnit),
             CCExpr::Int(n) => builder.emit(Instr::PushInt(*n)),
             CCExpr::Float(n) => builder.emit(Instr::PushFloat(*n)),
@@ -430,6 +440,8 @@ struct ChunkBuilder {
     name: String,
     kind: ChunkKind,
     code: Vec<Instr>,
+    source_spans: Vec<Option<FileSpan>>,
+    current_source: Option<FileSpan>,
 
     next_slot: u16,
     max_slot_exclusive: u16,
@@ -443,6 +455,8 @@ impl ChunkBuilder {
             name,
             kind: ChunkKind::GlobalThunk,
             code: Vec::new(),
+            source_spans: Vec::new(),
+            current_source: None,
             match_tables: Vec::new(),
             next_slot: 0,
             max_slot_exclusive: 0,
@@ -462,6 +476,8 @@ impl ChunkBuilder {
                 arity,
             },
             code: Vec::new(),
+            source_spans: Vec::new(),
+            current_source: None,
             match_tables: Vec::new(),
             next_slot,
             max_slot_exclusive: next_slot,
@@ -470,6 +486,11 @@ impl ChunkBuilder {
 
     fn emit(&mut self, instr: Instr) {
         self.code.push(instr);
+        self.source_spans.push(self.current_source);
+    }
+
+    fn set_source(&mut self, source: Option<FileSpan>) -> Option<FileSpan> {
+        std::mem::replace(&mut self.current_source, source)
     }
 
     fn current_pc(&self) -> u32 {
@@ -478,7 +499,7 @@ impl ChunkBuilder {
 
     fn emit_placeholder_jump(&mut self) -> usize {
         let pos = self.code.len();
-        self.code.push(Instr::Jump(u32::MAX));
+        self.emit(Instr::Jump(u32::MAX));
         pos
     }
 
@@ -495,7 +516,7 @@ impl ChunkBuilder {
 
     fn emit_placeholder_jump_if_false(&mut self) -> usize {
         let pos = self.code.len();
-        self.code.push(Instr::JumpIfFalse(u32::MAX));
+        self.emit(Instr::JumpIfFalse(u32::MAX));
         pos
     }
 
@@ -518,7 +539,7 @@ impl ChunkBuilder {
         });
         let table_idx_u16 = u16::try_from(table_idx)
             .unwrap_or_else(|_| solveig_base::ice!("match table index {table_idx} does not fit in u16"));
-        self.code.push(Instr::Match(table_idx_u16));
+        self.emit(Instr::Match(table_idx_u16));
         table_idx
     }
 
@@ -544,12 +565,18 @@ impl ChunkBuilder {
     }
 
     fn finish(self) -> Chunk {
+        assert_eq!(
+            self.code.len(),
+            self.source_spans.len(),
+            "ICE: bytecode source table must contain one entry per instruction"
+        );
         Chunk {
             id: self.id,
             name: self.name,
             kind: self.kind,
             slot_count: self.max_slot_exclusive,
             code: self.code,
+            source_spans: self.source_spans,
             match_tables: self.match_tables,
         }
     }

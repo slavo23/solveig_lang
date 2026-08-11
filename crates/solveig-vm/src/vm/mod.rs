@@ -50,6 +50,14 @@ pub struct Process {
     reductions_left: u32,
 }
 
+/// A resumable bytecode frame exposed in current-to-oldest-caller order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ProcessFrame {
+    pub chunk: usize,
+    pub pc: usize,
+    pub frame_base: usize,
+}
+
 /// Shared state that outlives every individual interpreter step.
 pub struct Runtime {
     program: BytecodeProgram,
@@ -187,6 +195,38 @@ impl Process {
             StepOutcome::Finished(value) => ProcStatus::Finished(*value),
             StepOutcome::Failed(error) => ProcStatus::Failed(error.clone()),
         };
+    }
+
+    /// Walks the suspended process's active bytecode frames without mutating it.
+    pub fn frames(&self) -> impl Iterator<Item = ProcessFrame> + '_ {
+        let current = ProcessFrame {
+            chunk: self.chunk,
+            pc: self.pc,
+            frame_base: self.frame_base,
+        };
+
+        std::iter::once(current).chain(self.continuations.iter().rev().filter_map(|continuation| {
+            match continuation {
+                Continuation::CallerFrame {
+                    chunk,
+                    pc,
+                    frame_base,
+                }
+                | Continuation::PublishGlobalThenResume {
+                    chunk,
+                    pc,
+                    frame_base,
+                    ..
+                } => Some(ProcessFrame {
+                    chunk: *chunk,
+                    pc: *pc,
+                    frame_base: *frame_base,
+                }),
+                Continuation::Halt
+                | Continuation::PublishGlobalThenHalt { .. }
+                | Continuation::IoBind(_) => None,
+            }
+        }))
     }
 }
 

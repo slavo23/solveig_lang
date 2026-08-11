@@ -503,7 +503,18 @@ impl Compilation {
             }
         }
 
-        let ir = lower_module(&merged, &checked_project.names);
+        let ir = lower_module(&merged, &checked_project.names, |module, metadata| {
+            checked_project
+                .module_files
+                .get(&module)
+                .copied()
+                .map(|file| {
+                    solveig_base::FileSpan::new(
+                        file,
+                        solveig_base::Span::from_usize_range(metadata.span.clone()),
+                    )
+                })
+        });
         let cc = lower_to_closure_ir(&ir);
 
         if options.dump_bytecode {
