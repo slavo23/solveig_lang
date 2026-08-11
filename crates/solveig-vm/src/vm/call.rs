@@ -639,7 +639,10 @@ impl Interpreter<'_> {
                 None
             }
 
-            Continuation::IoBind(_) => {
+            Continuation::IoBind(_)
+            | Continuation::IoCatch(_)
+            | Continuation::IoFinally(_)
+            | Continuation::IoRestore(_) => {
                 solveig_base::ice!("IO continuation reached bytecode return handling")
             }
         }

@@ -109,6 +109,12 @@ pub enum Continuation {
     },
     /// Applies this function to the value produced by the IO action below it.
     IoBind(Value),
+    /// Handles a typed failure produced by the IO action below it.
+    IoCatch(Value),
+    /// Runs this cleanup action after the IO action below it finishes.
+    IoFinally(Value),
+    /// Restores a saved success or typed failure after cleanup succeeds.
+    IoRestore(Value),
 }
 
 // The pre-I1 layout measured 40 bytes; IO frames must not widen this hot type.

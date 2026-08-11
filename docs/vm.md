@@ -133,7 +133,8 @@ Every `Process` owns exactly one `Vec<Continuation>`. It is heterogeneous by
 design: bytecode return, thunk publication, and IO sequencing are all “what to
 do with the next produced value.” There is no `IoFrame`, `io_stack`, exception
 stack, or second caller stack. The current IO action is one `io_current`
-register; suspended IO binds live in the continuation stack.
+register; suspended IO binds, typed-error handlers, and cleanup scopes live in
+the continuation stack.
 
 | Continuation | Meaning on completion |
 |---|---|
@@ -142,17 +143,18 @@ register; suspended IO binds live in the continuation stack.
 | `PublishGlobalThenHalt { global_index }` | Publish the owned global thunk, wake waiters, and finish evaluation. |
 | `PublishGlobalThenResume { global_index, chunk, pc, frame_base }` | Publish the thunk, restore the forcing caller, and push the value. |
 | `IoBind(continuation)` | Apply the saved Solveig continuation to the completed IO result and continue with the returned action. |
+| `IoCatch(handler)` | Handle the next typed failure below this frame; successful values pass through it. |
+| `IoFinally(cleanup)` | Run cleanup after the action below finishes with a value or typed failure. |
+| `IoRestore(outcome)` | Resume the saved success or typed failure after cleanup succeeds. |
 
 The enum is guarded at 40 bytes because `PublishGlobalThenResume` already sets
-its hot-path size; `IoBind(Value)` must not widen it. GC traces the `Value`
-inside every `IoBind`. Global-owner failure walks the same stack to find
+its hot-path size; the IO frames must not widen it. GC traces the `Value`
+inside every IO frame. Global-owner failure walks the same stack to find
 publication frames, so a second blackhole-ownership structure is forbidden.
 
 The bytecode return path must see only bytecode/global continuations, and the
-IO resume path must see only `IoBind` frames. The fixed `Halt` boundary bridges
-callback execution back into the IO loop. Future error handlers and scope
-cleanup must extend this one ordered stack rather than coordinate parallel
-depth counters.
+IO resume path must see only IO frames. The fixed `Halt` boundary bridges
+callback execution back into the IO loop.
 
 ## `Runtime`, `Process`, and interpreter ownership
 
@@ -189,17 +191,21 @@ process lifecycle while its outer loop interprets `IoAction` values.
 ## IO actions and sequencing
 
 `IoAction` is data, not an eagerly performed host effect. Its variants are
-`Pure`, typed `Fail`, `Bind`, terminal print/read, `GetArgs`, `Spawn`, and file
-read/write.
-The IO loop keeps the current action in `Process::io_current` and pushes
-`IoBind` when descending through `Bind`. When an action yields a value, the
-loop pops the saved continuation, applies it through bytecode, and treats the
-result as the next action. This is the operational IO sequencing model from
-Peyton Jones, “Tackling the Awkward Squad,” section 2.
+`Pure`, typed `Fail`, `Bind`, `Catch`, `Finally`, terminal print/read,
+`GetArgs`, `Spawn`, and file read/write. The IO loop keeps the current action
+in `Process::io_current` and pushes the matching IO continuation when
+descending through a compound action. When an action yields a value, the loop
+pops the saved continuation, applies it through bytecode when required, and
+treats the result as the next action. This is the operational IO sequencing
+model from Peyton Jones, “Tackling the Awkward Squad,” section 2.
 
-When the loop reaches `Fail`, it returns that inert failure action and clears
-the pending bind frames without invoking them. Typed failure therefore
-short-circuits sequencing without using `RuntimeError` or defect unwinding.
+When the loop reaches `Fail`, it discards bind frames until it finds
+`IoCatch`, runs `IoFinally` cleanup on the way out, or returns the inert failure
+at the process boundary. Typed failure therefore short-circuits sequencing
+without using `RuntimeError` or defect unwinding. If cleanup succeeds,
+`IoRestore` resumes the saved success or typed failure; a cleanup failure
+replaces the saved outcome. An unhandled typed error becomes a reported
+process failure only after it escapes this IO machinery.
 
 Worker-backed actions park the process. Their completion is plain Rust data in
 `io_result`; it becomes a `Value`, including any heap allocation for returned
@@ -314,8 +320,8 @@ temporaries that contain `Value`s must have been published into the active
 all of these locations:
 
 - the active process and every inactive process: value stack, binding buffer,
-  temporary roots, finished result, current IO action, and `IoBind`
-  continuations;
+  temporary roots, finished result, current IO action, and every value-bearing
+  IO continuation;
 - every `GlobalSlot::Evaluated` value;
 - every nullary-constructor-cache value and both Boolean cache values.
 
@@ -467,7 +473,8 @@ The scheduler transition for each `StepOutcome` is fixed:
 | `Finished(value)` | Retain the finished value as a GC root. Main completion returns it and ends scheduling; a non-main process remains finished and is otherwise ignored. |
 | `Failed(error)` | Fail any globals owned by the process and clear its resumable state. Main failure returns the error; non-main failure is written to stderr. |
 
-`spawn : forall e. IO e () -> IO e ThreadId` constructs an inert IO action.
+`spawn : forall childError e. IO childError () -> IO e ThreadId` constructs an
+inert IO action.
 Performing that action allocates a process, puts its child action in the process
 root set, and appends it to the FIFO run queue. `ThreadId` is an opaque
 primitive type: its runtime payload identifies the process arena entry, but the
@@ -506,7 +513,9 @@ state transition:
 4. The scheduler drains completions, verifies that request and block reason
    match, stores the plain result on the process, and returns it to the FIFO
    run queue. That process converts text into a heap string at its next
-   allocation safe point on the scheduler thread.
+   allocation safe point on the scheduler thread. A host error becomes the
+   matching closed `IOError` constructor and an inert `Fail` action there; it
+   does not enter the VM defect channel.
 
 Completed request-table slots are reused only after their completion has been
 consumed, so a `RequestId` identifies at most one outstanding operation. The
@@ -539,7 +548,7 @@ owner decision.
 - The VM remains the only execution target and remains a stack machine using
   eval/apply. Do not add ANF, a register VM, native code, or a second evaluator.
 - A process has one value stack and one heterogeneous continuation stack.
-  Returns, global publication, IO bind, future error scopes, interruption, and
+  Returns, global publication, IO bind/error/cleanup scopes, interruption, and
   debugger frame walking must agree on that order. Do not add a parallel
   control stack.
 - Interpreter and IO loops must not recurse on the native stack in proportion

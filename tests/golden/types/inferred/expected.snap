@@ -1,5 +1,6 @@
 ---
 source: tests/snapshot_support.rs
+assertion_line: 11
 expression: actual
 ---
 main.containsLeft : forall a. Eq a => a -> [a] -> Bool
@@ -8,20 +9,26 @@ main.double : forall a. Num a => a -> a
 main.lessAndSame : forall a. Ord a => a -> a -> Bool
 main.main : Int
 prelude.builtins.and : Bool -> Bool -> Bool
-prelude.builtins.appendFile : forall e. String -> String -> IO e ()
+prelude.builtins.appendFile : String -> String -> IO IOError ()
 prelude.builtins.appendString : String -> String -> String
 prelude.builtins.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
+prelude.builtins.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
+prelude.builtins.catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.builtins.even : Int -> Bool
+prelude.builtins.failIO : forall e a. e -> IO e a
+prelude.builtins.finally : forall e a b. IO e a -> IO e b -> IO e a
+prelude.builtins.mapError : forall e f a. (e -> f) -> IO e a -> IO f a
 prelude.builtins.not : Bool -> Bool
 prelude.builtins.odd : Int -> Bool
 prelude.builtins.or : Bool -> Bool -> Bool
-prelude.builtins.printLine : forall e. String -> IO e ()
-prelude.builtins.printStr : forall e. String -> IO e ()
+prelude.builtins.orElse : forall e f a. IO e a -> IO f a -> IO f a
+prelude.builtins.printLine : String -> IO IOError ()
+prelude.builtins.printStr : String -> IO IOError ()
 prelude.builtins.pureIO : forall e a. a -> IO e a
-prelude.builtins.readFile : forall e. String -> IO e String
-prelude.builtins.readLine : forall e. IO e String
-prelude.builtins.spawn : forall e. IO e () -> IO e ThreadId
-prelude.builtins.writeFile : forall e. String -> String -> IO e ()
+prelude.builtins.readFile : String -> IO IOError String
+prelude.builtins.readLine : IO IOError String
+prelude.builtins.spawn : forall childError e. IO childError () -> IO e ThreadId
+prelude.builtins.writeFile : String -> String -> IO IOError ()
 prelude.list.++ : forall a. [a] -> [a] -> [a]
 prelude.list.append : forall a. [a] -> [a] -> [a]
 prelude.list.concat : forall a. [[a]] -> [a]
@@ -33,12 +40,15 @@ prelude.list.range : Int -> Int -> Bool -> [Int]
 prelude.list.rangeDown : Int -> Int -> [Int] -> [Int]
 prelude.list.reverse : forall a. [a] -> [a]
 prelude.list.reverseGo : forall a. [a] -> [a] -> [a]
-prelude.prim.appendFile : forall e. String -> String -> IO e ()
+prelude.prim.appendFile : String -> String -> IO IOError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
+prelude.prim.catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.prim.charCompare : Char -> Char -> Ordering
 prelude.prim.charEq : Char -> Char -> Bool
 prelude.prim.charToString : Char -> String
 prelude.prim.charsToString : [Char] -> String
+prelude.prim.failIO : forall e a. e -> IO e a
+prelude.prim.finallyIO : forall e a b. IO e a -> IO e b -> IO e a
 prelude.prim.floatAdd : Float -> Float -> Float
 prelude.prim.floatDiv : Float -> Float -> Float
 prelude.prim.floatEq : Float -> Float -> Bool
@@ -66,12 +76,12 @@ prelude.prim.intNeg : Int -> Int
 prelude.prim.intSub : Int -> Int -> Int
 prelude.prim.intToFloat : Int -> Float
 prelude.prim.intToString : Int -> String
-prelude.prim.printLine : forall e. String -> IO e ()
-prelude.prim.printStr : forall e. String -> IO e ()
+prelude.prim.printLine : String -> IO IOError ()
+prelude.prim.printStr : String -> IO IOError ()
 prelude.prim.pureIO : forall e a. a -> IO e a
-prelude.prim.readFile : forall e. String -> IO e String
-prelude.prim.readLine : forall e. IO e String
-prelude.prim.spawn : forall e. IO e () -> IO e ThreadId
+prelude.prim.readFile : String -> IO IOError String
+prelude.prim.readLine : IO IOError String
+prelude.prim.spawn : forall e f. IO e () -> IO f ThreadId
 prelude.prim.stringAppend : String -> String -> String
 prelude.prim.stringCharAt : String -> Int -> Maybe Char
 prelude.prim.stringCompare : String -> String -> Ordering
@@ -79,7 +89,7 @@ prelude.prim.stringEq : String -> String -> Bool
 prelude.prim.stringLength : String -> Int
 prelude.prim.stringSlice : String -> Int -> Int -> String
 prelude.prim.stringToChars : String -> [Char]
-prelude.prim.writeFile : forall e. String -> String -> IO e ()
+prelude.prim.writeFile : String -> String -> IO IOError ()
 prelude.typeclasses.applyLeft : forall f a b. Applicative f => f a -> f b -> f a
 prelude.typeclasses.applyRight : forall f a b. Applicative f => f a -> f b -> f b
 prelude.typeclasses.clampOrd : forall a. Ord a => a -> a -> a -> a

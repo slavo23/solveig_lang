@@ -156,7 +156,7 @@ solveig --project-root my-project -- first second third
 Inside Solveig, program args are available through:
 
 ```solveig
-getArgs : IO [String]
+getArgs : forall e. IO e [String]
 ```
 
 Start the language server:
@@ -342,7 +342,7 @@ Solveig currently supports:
 - list syntax: `[]`, `::`, and `[1, 2, 3]`
 - `Eq`, `Ord`, `Num`, `Fractional`, `Functor`, `Applicative`, `Monad`, and `Show`
 - value display through `Show`
-- monadic `IO`
+- typed monadic `IO e a` with the `Task a = IO IOError a` application alias
 - indentation-sensitive `do` notation over the generic `Monad` class
 - terminal input/output
 - program args through `getArgs`
@@ -393,7 +393,7 @@ main = map (fun x => x * x) [1, 2, 3, 4]
 IO:
 
 ```solveig
-main : IO ()
+main : Task ()
 main = do
     printStr "name> "
     name <- readLine
@@ -403,7 +403,7 @@ main = do
 Text files:
 
 ```solveig
-main : IO ()
+main : Task ()
 main = do
     contents <- readFile "input.txt"
     writeFile "copy.txt" contents

@@ -4,6 +4,7 @@
 use super::*;
 use crate::bytecode::Instr;
 use crate::heap::IoAction;
+use crate::vm::io_worker::IoFailure;
 use solveig_ast::ast::{
     BUILTIN_BIND_IO, BUILTIN_CHARS_TO_STRING, BUILTIN_PURE_IO, BUILTIN_STRING_TO_CHARS, BinOp,
     BuiltinId, CtorId, CtorRuntimeRole, PRIM_TYS,
@@ -287,6 +288,124 @@ fn typed_io_failure_survives_collection_and_skips_bind_continuations() {
         solveig_base::ice!("typed IO failure error was not a string");
     };
     assert_eq!(runtime.heap.str_value(*error, *bytes), "typed failure");
+}
+
+#[test]
+fn host_io_failure_becomes_the_matching_typed_error_constructor() {
+    const STDOUT_ERROR_TAG: u16 = 2;
+    const STDIN_ERROR_TAG: u16 = 3;
+    let program = program_with_ctors(
+        vec![global("main", int(0))],
+        Vec::new(),
+        &[
+            ctor_spec(
+                CtorId(300),
+                CtorRuntimeRole::PreludeIoErrorStdout,
+                "prelude.builtins.StdoutError",
+                "StdoutError",
+                STDOUT_ERROR_TAG,
+                1,
+            ),
+            ctor_spec(
+                CtorId(301),
+                CtorRuntimeRole::PreludeIoErrorStdin,
+                "prelude.builtins.StdinError",
+                "StdinError",
+                STDIN_ERROR_TAG,
+                1,
+            ),
+        ],
+    );
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let process_id = runtime.allocate_process();
+    assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
+    let mut process = runtime.take_process(process_id);
+    let action = Interpreter::new(&mut runtime, &mut process)
+        .alloc_io_failure_action(IoFailure::Print(std::io::Error::other("closed")))
+        .expect("stdout failure should become a typed IO action");
+    runtime.restore_process(process);
+
+    let Value::Obj(action) = action else {
+        solveig_base::ice!("typed stdout failure was not heap allocated");
+    };
+    let HeapObject::IoAction(IoAction::Fail(Value::Obj(error))) = runtime.heap.get(action) else {
+        solveig_base::ice!("stdout failure did not become a failed IO action");
+    };
+    let HeapObject::Data1 { tag, field } = runtime.heap.get(*error) else {
+        solveig_base::ice!("stdout failure did not use its unary IOError constructor");
+    };
+    assert_eq!(*tag, STDOUT_ERROR_TAG);
+    let Value::Obj(message) = field else {
+        solveig_base::ice!("stdout error message was not a heap string");
+    };
+    let HeapObject::Str { bytes } = runtime.heap.get(*message) else {
+        solveig_base::ice!("stdout error message was not represented as String");
+    };
+    assert_eq!(runtime.heap.str_value(*message, *bytes), "closed");
+
+    let mut process = runtime.take_process(process_id);
+    let action = Interpreter::new(&mut runtime, &mut process)
+        .alloc_io_failure_action(IoFailure::ReadLine(std::io::Error::other("unreadable")))
+        .expect("stdin failure should become a typed IO action");
+    runtime.restore_process(process);
+    let Value::Obj(action) = action else {
+        solveig_base::ice!("typed stdin failure was not heap allocated");
+    };
+    let HeapObject::IoAction(IoAction::Fail(Value::Obj(error))) = runtime.heap.get(action) else {
+        solveig_base::ice!("stdin failure did not become a failed IO action");
+    };
+    let HeapObject::Data1 { tag, .. } = runtime.heap.get(*error) else {
+        solveig_base::ice!("stdin failure did not use its unary IOError constructor");
+    };
+    assert_eq!(*tag, STDIN_ERROR_TAG);
+}
+
+#[test]
+fn typed_io_handler_frames_keep_their_values_live() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let process = runtime.allocate_process();
+    assert_eq!(runtime.run_queue.pop_front(), Some(process));
+    let caught = runtime.alloc_str_for_test("catch");
+    let cleanup = runtime.alloc_str_for_test("finally");
+    let restored = runtime.alloc_str_for_test("restore");
+    runtime.processes[process].continuations.extend([
+        Continuation::IoCatch(caught),
+        Continuation::IoFinally(cleanup),
+        Continuation::IoRestore(restored),
+    ]);
+
+    runtime.collect_all_process_roots_for_test();
+
+    let values = runtime.processes[process]
+        .continuations
+        .iter()
+        .map(|continuation| match continuation {
+            Continuation::IoCatch(value)
+            | Continuation::IoFinally(value)
+            | Continuation::IoRestore(value) => *value,
+            Continuation::Halt
+            | Continuation::CallerFrame { .. }
+            | Continuation::PublishGlobalThenHalt { .. }
+            | Continuation::PublishGlobalThenResume { .. }
+            | Continuation::IoBind(_) => {
+                solveig_base::ice!("typed IO root test found an unrelated continuation")
+            }
+        })
+        .collect::<Vec<_>>();
+    let strings = values
+        .iter()
+        .map(|value| {
+            let Value::Obj(id) = value else {
+                solveig_base::ice!("typed IO continuation payload was not heap allocated");
+            };
+            let HeapObject::Str { bytes } = runtime.heap.get(*id) else {
+                solveig_base::ice!("typed IO continuation payload was not a string");
+            };
+            runtime.heap.str_value(*id, *bytes)
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(strings, ["catch", "finally", "restore"]);
 }
 
 #[test]

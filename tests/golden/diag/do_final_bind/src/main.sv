@@ -1,3 +1,3 @@
-main : IO () ()
+main : Task ()
 main = do
     name <- readLine

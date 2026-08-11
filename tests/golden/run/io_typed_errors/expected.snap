@@ -1,0 +1,18 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+cleanup-success
+value=7
+cleanup-failure
+caught-failure
+write-file-error
+use resource
+release resource
+caught-bracket
+mapped-error
+fallback
+bind-skipped
+read-file-error
+write-file-error
+append-file-error

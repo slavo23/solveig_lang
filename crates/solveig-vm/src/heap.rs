@@ -57,6 +57,14 @@ pub enum IoAction {
         action: Value,
         continuation: Value,
     },
+    Catch {
+        action: Value,
+        handler: Value,
+    },
+    Finally {
+        action: Value,
+        cleanup: Value,
+    },
     Print {
         text: Value,
         newline: bool,

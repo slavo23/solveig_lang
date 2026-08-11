@@ -1,6 +1,7 @@
 //! Deterministic single-threaded scheduling for lightweight Solveig processes.
 
 use super::*;
+use crate::heap::IoAction;
 
 pub(super) fn run(runtime: &mut Runtime, process: &mut Process) -> StepOutcome {
     if process.reductions_left == 0 {
@@ -137,14 +138,40 @@ pub(super) fn schedule_io(
 
         let outcome = perform_process_io(runtime, id, Value::Unit);
         match outcome {
-            StepOutcome::Finished(value) if id == main => return Ok(value),
-            StepOutcome::Yielded | StepOutcome::Blocked | StepOutcome::Finished(_) => {}
+            StepOutcome::Finished(value) => {
+                if let Some(error) = unhandled_io_error(runtime, value) {
+                    if id == main {
+                        return Err(error);
+                    }
+                    report_thread_failure(stderr, id.into_raw().into_u32(), &error)?;
+                } else if id == main {
+                    return Ok(value);
+                }
+            }
+            StepOutcome::Yielded | StepOutcome::Blocked => {}
             StepOutcome::Failed(error) if id == main => return Err(error),
             StepOutcome::Failed(error) => {
                 report_thread_failure(stderr, id.into_raw().into_u32(), &error)?;
             }
         }
     }
+}
+
+fn unhandled_io_error(runtime: &Runtime, value: Value) -> Option<RuntimeError> {
+    let Value::Obj(id) = value else {
+        return None;
+    };
+    let HeapObject::IoAction(IoAction::Fail(error)) = runtime.heap.get(id) else {
+        return None;
+    };
+    let error = DisplayValue {
+        root: *error,
+        heap: &runtime.heap,
+        arities: &runtime.program.constructor_arities,
+    };
+    Some(RuntimeError::builtin(format!(
+        "unhandled IO error: {error}"
+    )))
 }
 
 /// Selects the next process without spinning when only worker IO can make

@@ -1,4 +1,4 @@
-main : IO () ()
+main : Task ()
 main = do
     args <- getArgs
     mapIO_ printLine args

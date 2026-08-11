@@ -19,13 +19,14 @@ Int
 Float
 Char
 String
-IO a
+IO e a
 Bool
 ()
 ```
 
 `Int` is a signed 64-bit integer. `Float` is an IEEE-754 `f64`. `String` is
-immutable UTF-8 text. `IO a` is an abstract monadic action.
+immutable UTF-8 text. `IO e a` is an abstract monadic action that may fail with
+`e` or succeed with `a`.
 
 ## `prelude.builtins`
 
@@ -35,6 +36,14 @@ immutable UTF-8 text. `IO a` is an abstract monadic action.
 data Maybe a = Just a | Nothing
 data Either a b = Left a | Right b
 data Pair a b = MkPair a b
+data Never
+data IOError =
+    StdoutError String
+  | StdinError String
+  | ReadFileError String String
+  | WriteFileError String String
+  | AppendFileError String String
+type Task a = IO IOError a
 ```
 
 `Bool` is compiler-defined and exported as:
@@ -47,14 +56,20 @@ False : Bool
 ### IO
 
 ```solveig
-pureIO : forall a. a -> IO a
-bindIO : forall a b. IO a -> (a -> IO b) -> IO b
-printLine : String -> IO ()
-printStr : String -> IO ()
-readLine : IO String
-readFile : String -> IO String
-writeFile : String -> String -> IO ()
-appendFile : String -> String -> IO ()
+pureIO : forall e a. a -> IO e a
+bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
+failIO : forall e a. e -> IO e a
+catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a
+mapError : forall e f a. (e -> f) -> IO e a -> IO f a
+orElse : forall e f a. IO e a -> IO f a -> IO f a
+finally : forall e a b. IO e a -> IO e b -> IO e a
+bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
+printLine : String -> Task ()
+printStr : String -> Task ()
+readLine : Task String
+readFile : String -> Task String
+writeFile : String -> String -> Task ()
+appendFile : String -> String -> Task ()
 ```
 
 `printLine` writes a trailing newline. `printStr` does not, and the CLI flushes
@@ -63,12 +78,16 @@ after each print so prompts appear before `readLine`.
 `readLine` returns a line without the trailing newline. At EOF it returns `""`.
 
 `readFile`, `writeFile`, and `appendFile` are whole-file UTF-8 text operations.
-Relative paths are resolved against the Solveig project root.
+Relative paths are resolved against the Solveig project root. Their host
+failures are ordinary `IOError` values and can be handled with `catchError`.
+`finally` runs cleanup after success or typed failure; `bracket` installs that
+cleanup after acquisition. Defect and interruption cleanup are completed by
+Phases P4 and J2, respectively.
 
 Example:
 
 ```solveig
-main : IO ()
+main : Task ()
 main = do
     printStr "name> "
     name <- readLine
@@ -225,7 +244,7 @@ sequence : forall m a. Monad m => [m a] -> m [a]
 filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
 ```
 
-Instances are provided for `Maybe`, `List`, and `IO` where appropriate.
+Instances are provided for `Maybe`, `List`, and `IO e` where appropriate.
 Solveig's `do` notation desugars through this generic `Monad` class. A bind
 statement `x <- action` uses `bind`, an ordinary expression statement before
 the final line uses `thenM`, and the final statement is returned directly.
@@ -233,7 +252,7 @@ the final line uses `thenM`, and the final statement is returned directly.
 Example:
 
 ```solveig
-readTwo : IO [String]
+readTwo : Task [String]
 readTwo = mapM
     (fun prompt => do
         printStr prompt
@@ -244,9 +263,9 @@ readTwo = mapM
 ### IO Helpers
 
 ```solveig
-getArgs : IO [String]
-seqIO : forall a b. IO a -> IO b -> IO b
-mapIO_ : forall a. (a -> IO ()) -> [a] -> IO ()
+getArgs : forall e. IO e [String]
+seqIO : forall e a b. IO e a -> IO e b -> IO e b
+mapIO_ : forall e a. (a -> IO e ()) -> [a] -> IO e ()
 ```
 
 `seqIO left right` runs `left`, discards its result, then runs `right`.
@@ -256,7 +275,7 @@ mapIO_ : forall a. (a -> IO ()) -> [a] -> IO ()
 Example:
 
 ```solveig
-main : IO ()
+main : Task ()
 main = do
     args <- getArgs
     mapIO_ printLine args
@@ -366,15 +385,18 @@ charsToString : [Char] -> String
 charEq : Char -> Char -> Bool
 charCompare : Char -> Char -> Ordering
 
-pureIO : forall a. a -> IO a
-bindIO : forall a b. IO a -> (a -> IO b) -> IO b
-printLine : String -> IO ()
-printStr : String -> IO ()
-readLine : IO String
-getArgs : IO [String]
-readFile : String -> IO String
-writeFile : String -> String -> IO ()
-appendFile : String -> String -> IO ()
+pureIO : forall e a. a -> IO e a
+bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
+failIO : forall e a. e -> IO e a
+catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
+finallyIO : forall e a b. IO e a -> IO e b -> IO e a
+printLine : String -> IO IOError ()
+printStr : String -> IO IOError ()
+readLine : IO IOError String
+getArgs : forall e. IO e [String]
+readFile : String -> IO IOError String
+writeFile : String -> String -> IO IOError ()
+appendFile : String -> String -> IO IOError ()
 ```
 
 Primitive Int add/sub/mul/neg wrap on `i64` overflow. `intDiv` and `intMod`

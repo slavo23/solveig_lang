@@ -4,18 +4,18 @@
 use std::cmp::Ordering;
 
 use solveig_ast::ast::{
-    BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ,
-    BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING, BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV,
-    BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT,
-    BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB, BUILTIN_FLOAT_TO_INT,
-    BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE,
-    BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE,
-    BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB,
-    BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR,
-    BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_SPAWN, BUILTIN_STRING_APPEND,
-    BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
-    BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo,
-    CtorRuntimeRole,
+    BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_CATCH_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ,
+    BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING, BUILTIN_FAIL_IO, BUILTIN_FINALLY_IO,
+    BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT,
+    BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB,
+    BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD,
+    BUILTIN_INT_COMPARE, BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT,
+    BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG,
+    BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_PRINT_LINE,
+    BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_SPAWN,
+    BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
+    BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE,
+    BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
 };
 
 use crate::heap::{HeapObject, IoAction};
@@ -101,7 +101,7 @@ impl<'context, 'runtime> VmCtx<'context, 'runtime> {
         })
     }
 
-    fn alloc_data1_ctor(
+    pub(crate) fn alloc_data1_ctor(
         &mut self,
         role: CtorRuntimeRole,
         field: Value,
@@ -112,6 +112,21 @@ impl<'context, 'runtime> VmCtx<'context, 'runtime> {
             .interpreter
             .heap
             .alloc(HeapObject::Data1 { tag, field }))
+    }
+
+    pub(crate) fn alloc_data2_ctor(
+        &mut self,
+        role: CtorRuntimeRole,
+        field0: Value,
+        field1: Value,
+        builtin: &str,
+    ) -> Result<Value, RuntimeError> {
+        let tag = self.ctor_tag_with_arity(role, 2, builtin)?;
+        Ok(self.interpreter.heap.alloc(HeapObject::Data2 {
+            tag,
+            field0,
+            field1,
+        }))
     }
 
     pub(crate) fn alloc_list_from_values(
@@ -235,6 +250,9 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_CHARS_TO_STRING, "charsToString", 1, chars_to_string),
     builtin!(BUILTIN_PURE_IO, "pureIO", 1, pure_io),
     builtin!(BUILTIN_BIND_IO, "bindIO", 2, bind_io),
+    builtin!(BUILTIN_FAIL_IO, "failIO", 1, fail_io),
+    builtin!(BUILTIN_CATCH_IO, "catchIO", 2, catch_io),
+    builtin!(BUILTIN_FINALLY_IO, "finallyIO", 2, finally_io),
     builtin!(BUILTIN_PRINT_LINE, "printLine", 1, print_line),
     builtin!(BUILTIN_PRINT_STR, "printStr", 1, print_str),
     builtin!(BUILTIN_READ_LINE, "readLine", 0, read_line),
@@ -509,6 +527,23 @@ fn bind_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeErro
         action,
         continuation,
     }))
+}
+
+fn fail_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let error = expect_value(args, 0, "failIO")?;
+    Ok(ctx.alloc_io_action(IoAction::Fail(error)))
+}
+
+fn catch_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let action = expect_value(args, 0, "catchIO")?;
+    let handler = expect_value(args, 1, "catchIO")?;
+    Ok(ctx.alloc_io_action(IoAction::Catch { action, handler }))
+}
+
+fn finally_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let action = expect_value(args, 0, "finallyIO")?;
+    let cleanup = expect_value(args, 1, "finallyIO")?;
+    Ok(ctx.alloc_io_action(IoAction::Finally { action, cleanup }))
 }
 
 fn print_line(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {

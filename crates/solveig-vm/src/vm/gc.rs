@@ -53,7 +53,10 @@ impl Roots<'_> {
         }
         for frame in &mut process.continuations {
             match frame {
-                Continuation::IoBind(continuation) => visit(continuation),
+                Continuation::IoBind(value)
+                | Continuation::IoCatch(value)
+                | Continuation::IoFinally(value)
+                | Continuation::IoRestore(value) => visit(value),
                 Continuation::Halt
                 | Continuation::CallerFrame { .. }
                 | Continuation::PublishGlobalThenHalt { .. }
@@ -347,6 +350,14 @@ fn rewrite_io_action(
         IoAction::Bind {
             action,
             continuation,
+        }
+        | IoAction::Catch {
+            action,
+            handler: continuation,
+        }
+        | IoAction::Finally {
+            action,
+            cleanup: continuation,
         } => {
             evacuate_value(heap, action, worklist, promoted);
             evacuate_value(heap, continuation, worklist, promoted);
@@ -498,6 +509,14 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
         IoAction::Bind {
             action,
             continuation,
+        }
+        | IoAction::Catch {
+            action,
+            handler: continuation,
+        }
+        | IoAction::Finally {
+            action,
+            cleanup: continuation,
         } => {
             mark_old_child(heap, action, worklist);
             mark_old_child(heap, continuation, worklist);
@@ -578,6 +597,14 @@ fn assert_object_children_live(
             IoAction::Bind {
                 action,
                 continuation,
+            }
+            | IoAction::Catch {
+                action,
+                handler: continuation,
+            }
+            | IoAction::Finally {
+                action,
+                cleanup: continuation,
             } => {
                 assert_value_live(heap, action, seen, worklist);
                 assert_value_live(heap, continuation, seen, worklist);

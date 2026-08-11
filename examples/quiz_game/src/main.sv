@@ -76,7 +76,7 @@ parseCard line =
 parseQuiz : String -> [QuizCard]
 parseQuiz contents = map parseCard (splitLines contents)
 
-askCard : QuizCard -> IO () (Pair QuizCard String)
+askCard : QuizCard -> Task (Pair QuizCard String)
 askCard card =
     case card of
         QuizCard question expected =>
@@ -86,7 +86,7 @@ askCard card =
                 answer <- readLine
                 pure (MkPair card answer)
 
-askCards : [QuizCard] -> IO () [Pair QuizCard String]
+askCards : [QuizCard] -> Task [Pair QuizCard String]
 askCards cards = mapM askCard cards
 
 scoreResponse : Pair QuizCard String -> State Int ()
@@ -127,7 +127,7 @@ summaryLine score total =
 withNewline : String -> String
 withNewline text = appendString text "\n"
 
-main : IO () ()
+main : Task ()
 main =
     do
         contents <- readFile "questions.txt"

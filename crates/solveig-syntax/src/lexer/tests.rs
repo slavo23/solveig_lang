@@ -18,7 +18,7 @@ fn reconstruct(tokens: &[PosToken], source: &str) -> String {
 
 #[test]
 fn trivia_tokens_reconstruct_source_and_parser_view_skips_them() {
-    let source = "main : IO () ()\nmain = do\n    -- keep me\n\n    printLine \"x\"\n";
+    let source = "main : Task ()\nmain = do\n    -- keep me\n\n    printLine \"x\"\n";
     let tokens = lex_test_source(source);
 
     assert_eq!(reconstruct(&tokens, source), source);

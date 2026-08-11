@@ -224,7 +224,10 @@ impl Process {
                 }),
                 Continuation::Halt
                 | Continuation::PublishGlobalThenHalt { .. }
-                | Continuation::IoBind(_) => None,
+                | Continuation::IoBind(_)
+                | Continuation::IoCatch(_)
+                | Continuation::IoFinally(_)
+                | Continuation::IoRestore(_) => None,
             }
         }))
     }
@@ -458,7 +461,12 @@ fn owned_globals(process: &Process) -> Vec<GlobalIndex> {
             | Continuation::PublishGlobalThenResume { global_index, .. } => {
                 Some(GlobalIndex(*global_index))
             }
-            Continuation::Halt | Continuation::CallerFrame { .. } | Continuation::IoBind(_) => None,
+            Continuation::Halt
+            | Continuation::CallerFrame { .. }
+            | Continuation::IoBind(_)
+            | Continuation::IoCatch(_)
+            | Continuation::IoFinally(_)
+            | Continuation::IoRestore(_) => None,
         })
         .collect()
 }

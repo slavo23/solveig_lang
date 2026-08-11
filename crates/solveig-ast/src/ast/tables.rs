@@ -134,6 +134,10 @@ pub fn prelude_maybe_nothing_ctor_id(names: &mut Names) -> CtorId {
     names.ctor_id(PRELUDE_MAYBE_NOTHING_NAME)
 }
 
+pub fn prelude_io_error_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_IO_ERROR_NAME)
+}
+
 pub fn prelude_list_tycon_id(names: &mut Names) -> TyConId {
     names.tycon_id(PRELUDE_LIST_NAME)
 }
@@ -176,6 +180,11 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         PRELUDE_ORDERING_LT_NAME => CtorRuntimeRole::PreludeOrderingLt,
         PRELUDE_ORDERING_EQ_NAME => CtorRuntimeRole::PreludeOrderingEq,
         PRELUDE_ORDERING_GT_NAME => CtorRuntimeRole::PreludeOrderingGt,
+        PRELUDE_IO_ERROR_STDOUT_NAME => CtorRuntimeRole::PreludeIoErrorStdout,
+        PRELUDE_IO_ERROR_STDIN_NAME => CtorRuntimeRole::PreludeIoErrorStdin,
+        PRELUDE_IO_ERROR_READ_FILE_NAME => CtorRuntimeRole::PreludeIoErrorReadFile,
+        PRELUDE_IO_ERROR_WRITE_FILE_NAME => CtorRuntimeRole::PreludeIoErrorWriteFile,
+        PRELUDE_IO_ERROR_APPEND_FILE_NAME => CtorRuntimeRole::PreludeIoErrorAppendFile,
         _ => CtorRuntimeRole::Ordinary,
     }
 }
@@ -396,6 +405,11 @@ pub enum CtorRuntimeRole {
     PreludeOrderingLt,
     PreludeOrderingEq,
     PreludeOrderingGt,
+    PreludeIoErrorStdout,
+    PreludeIoErrorStdin,
+    PreludeIoErrorReadFile,
+    PreludeIoErrorWriteFile,
+    PreludeIoErrorAppendFile,
 }
 
 #[derive(Clone, Debug, PartialEq)]

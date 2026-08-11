@@ -1,2 +1,2 @@
-main : IO () ()
+main : Task ()
 main = printLine "hello, Solveig"

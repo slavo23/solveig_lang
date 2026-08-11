@@ -9,7 +9,7 @@ fn lower_test_source(source: &str) -> ParsedModule {
 
 #[test]
 fn lowered_ast_nodes_point_into_cst_arena() {
-    let parsed = lower_test_source("main : IO () ()\nmain = do\n    printLine \"ok\"\n");
+    let parsed = lower_test_source("main : Task ()\nmain = do\n    printLine \"ok\"\n");
     let signature = &parsed.defs[0];
     let main_function = &parsed.defs[1];
 

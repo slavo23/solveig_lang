@@ -122,7 +122,7 @@ fn io_streams_prompt_readline_and_program_args() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "io_streams",
-        r#"main : IO () ()
+        r#"main : Task ()
 main = do
     printStr "name> "
     name <- readLine
@@ -163,7 +163,7 @@ fn io_bind_chain_allocates_under_gc_stress() {
     let project_root = write_temp_project(
         "io_gc_stress",
         &format!(
-            r#"repeat : Int -> IO () ()
+            r#"repeat : Int -> Task ()
 repeat n =
     if n == 0 then pureIO ()
     else do
@@ -171,7 +171,7 @@ repeat n =
         printStr (appendString line "")
         repeat (n - 1)
 
-main : IO () ()
+main : Task ()
 main = repeat {STEPS}
 "#
         ),
@@ -298,7 +298,7 @@ fn file_io_reads_writes_and_appends_project_relative_text() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "file_io",
-        r#"main : IO () ()
+        r#"main : Task ()
 main = do
     writeFile "score.txt" "seed\n"
     appendFile "score.txt" "extra\n"
@@ -323,7 +323,7 @@ fn cli_passes_program_args_after_separator() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "cli_args",
-        r#"main : IO () ()
+        r#"main : Task ()
 main = do
     args <- getArgs
     mapIO_ printLine args

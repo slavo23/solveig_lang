@@ -379,19 +379,20 @@ main = (a <+> b) <*> c
 
 ## 12. Do Notation And Monadic IO
 
-An executable IO program has `main : IO ()` or, more generally, `main : IO a`.
-IO programs print explicitly; Solveig does not print the returned value of an
-IO `main`.
+An executable IO program conventionally has `main : Task ()`, where
+`Task a` is the alias `IO IOError a`. The first type parameter is the typed
+error channel and the second is the success value. IO programs print
+explicitly; Solveig does not print the returned value of an IO `main`.
 
 ```solveig
-main : IO ()
+main : Task ()
 main = printLine "hello from IO"
 ```
 
 Sequence actions with `do`:
 
 ```solveig
-main : IO ()
+main : Task ()
 main = do
     printStr "name> "
     name <- readLine
@@ -423,7 +424,7 @@ solveig --project-root hello
 Pass program args after `--`:
 
 ```solveig
-main : IO ()
+main : Task ()
 main = do
     args <- getArgs
     mapIO_ printLine args
@@ -438,15 +439,15 @@ solveig --project-root args-demo -- first second
 Text file IO is in the Prelude:
 
 ```solveig
-readFile : String -> IO String
-writeFile : String -> String -> IO ()
-appendFile : String -> String -> IO ()
+readFile : String -> Task String
+writeFile : String -> String -> Task ()
+appendFile : String -> String -> Task ()
 ```
 
 Relative paths are resolved against the project root.
 
 ```solveig
-main : IO ()
+main : Task ()
 main = do
     contents <- readFile "input.txt"
     printLine contents

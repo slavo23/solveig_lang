@@ -1,4 +1,4 @@
-main : IO () ()
+main : Task ()
 main = do
     printLine "first"
     name <- readLine
