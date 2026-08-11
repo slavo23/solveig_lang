@@ -72,7 +72,7 @@ impl<'a> IoRuntime<'a> {
     }
 }
 
-impl Vm {
+impl Interpreter<'_> {
     pub(super) fn perform_io(
         &mut self,
         program: &BytecodeProgram,
@@ -145,9 +145,9 @@ impl Vm {
                     }
 
                     let mut ctx = VmCtx::new(
-                        &mut self.heap,
+                        self.heap,
                         &program.constructor_arities,
-                        &self.nullary_ctors,
+                        self.nullary_ctors,
                         self.bools.true_val,
                         self.bools.false_val,
                     );

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+la-arena.workspace = true
 solveig-ast = { path = "../solveig-ast" }
 solveig-base = { path = "../solveig-base" }
 solveig-lower = { path = "../solveig-lower" }

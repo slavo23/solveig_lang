@@ -1,11 +1,10 @@
 //! VM garbage collection marking and heap accounting.
 //! Allocation paths use this module to reclaim unreachable runtime objects.
 //!
-//! `Roots` is the single root-set definition for the current VM: the value
-//! stack, pattern binding buffer, short-lived temporary roots, evaluated
-//! globals, nullary-constructor cache, Bool cache, current IO action, and the
-//! continuation stack. Any future VM field that can hold a `Value` across an
-//! allocation point must be added to `Roots`.
+//! `Roots` is the single root-set definition for the runtime: every active and
+//! inactive process, evaluated globals, nullary-constructor cache, and Bool
+//! cache. Any future field that can hold a `Value` across an allocation point
+//! must be added here.
 
 use super::*;
 use crate::heap::{Heap, HeapObject, IoAction, PayloadRef, PayloadStore};
@@ -45,11 +44,8 @@ fn mark_payload(
 }
 
 pub(super) struct Roots<'a> {
-    stack: &'a [Value],
-    binding_buffer: &'a [Value],
-    temporary_roots: &'a [Value],
-    io_current: Option<Value>,
-    continuations: &'a [Continuation],
+    active_process: Option<&'a Process>,
+    inactive_processes: &'a Arena<Process>,
     globals: &'a [GlobalSlot],
     nullary_ctors: &'a NullaryCtorCache,
     bools: &'a BoolCache,
@@ -57,10 +53,12 @@ pub(super) struct Roots<'a> {
 
 impl<'a> Roots<'a> {
     fn mark(&self, mark_bits: &mut [bool], worklist: &mut Vec<ObjId>) {
-        self.mark_values(mark_bits, self.stack, worklist);
-        self.mark_values(mark_bits, self.binding_buffer, worklist);
-        self.mark_values(mark_bits, self.temporary_roots, worklist);
-        self.mark_control(mark_bits, worklist);
+        if let Some(process) = self.active_process {
+            Self::mark_process(process, mark_bits, worklist);
+        }
+        for process in self.inactive_processes.values() {
+            Self::mark_process(process, mark_bits, worklist);
+        }
 
         for slot in self.globals {
             if let GlobalSlot::Evaluated(value) = slot {
@@ -76,12 +74,19 @@ impl<'a> Roots<'a> {
         mark_value(mark_bits, self.bools.false_val, worklist);
     }
 
-    fn mark_control(&self, mark_bits: &mut [bool], worklist: &mut Vec<ObjId>) {
-        if let Some(value) = self.io_current {
+    fn mark_process(process: &Process, mark_bits: &mut [bool], worklist: &mut Vec<ObjId>) {
+        Self::mark_values(mark_bits, &process.stack, worklist);
+        Self::mark_values(mark_bits, &process.binding_buffer, worklist);
+        Self::mark_values(mark_bits, &process.temporary_roots, worklist);
+        if let ProcStatus::Finished(value) = process.status {
             mark_value(mark_bits, value, worklist);
         }
 
-        for frame in self.continuations {
+        if let Some(value) = process.io_current {
+            mark_value(mark_bits, value, worklist);
+        }
+
+        for frame in &process.continuations {
             match frame {
                 Continuation::IoBind(continuation) => {
                     mark_value(mark_bits, *continuation, worklist);
@@ -94,7 +99,7 @@ impl<'a> Roots<'a> {
         }
     }
 
-    fn mark_values(&self, mark_bits: &mut [bool], values: &[Value], worklist: &mut Vec<ObjId>) {
+    fn mark_values(mark_bits: &mut [bool], values: &[Value], worklist: &mut Vec<ObjId>) {
         for &value in values {
             mark_value(mark_bits, value, worklist);
         }
@@ -105,10 +110,12 @@ impl<'a> Roots<'a> {
         let mut seen = vec![false; heap.objects.len()];
         let mut worklist = Vec::new();
 
-        self.assert_values_live(heap, self.stack, &mut seen, &mut worklist);
-        self.assert_values_live(heap, self.binding_buffer, &mut seen, &mut worklist);
-        self.assert_values_live(heap, self.temporary_roots, &mut seen, &mut worklist);
-        self.assert_control_live(heap, &mut seen, &mut worklist);
+        if let Some(process) = self.active_process {
+            Self::assert_process_live(process, heap, &mut seen, &mut worklist);
+        }
+        for process in self.inactive_processes.values() {
+            Self::assert_process_live(process, heap, &mut seen, &mut worklist);
+        }
 
         for slot in self.globals {
             if let GlobalSlot::Evaluated(value) = slot {
@@ -129,12 +136,24 @@ impl<'a> Roots<'a> {
     }
 
     #[cfg(debug_assertions)]
-    fn assert_control_live(&self, heap: &Heap, seen: &mut [bool], worklist: &mut Vec<ObjId>) {
-        if let Some(value) = self.io_current {
+    fn assert_process_live(
+        process: &Process,
+        heap: &Heap,
+        seen: &mut [bool],
+        worklist: &mut Vec<ObjId>,
+    ) {
+        Self::assert_values_live(heap, &process.stack, seen, worklist);
+        Self::assert_values_live(heap, &process.binding_buffer, seen, worklist);
+        Self::assert_values_live(heap, &process.temporary_roots, seen, worklist);
+        if let ProcStatus::Finished(value) = process.status {
             assert_value_live(heap, value, seen, worklist);
         }
 
-        for frame in self.continuations {
+        if let Some(value) = process.io_current {
+            assert_value_live(heap, value, seen, worklist);
+        }
+
+        for frame in &process.continuations {
             match frame {
                 Continuation::IoBind(continuation) => {
                     assert_value_live(heap, *continuation, seen, worklist);
@@ -149,7 +168,6 @@ impl<'a> Roots<'a> {
 
     #[cfg(debug_assertions)]
     fn assert_values_live(
-        &self,
         heap: &Heap,
         values: &[Value],
         seen: &mut [bool],
@@ -161,22 +179,7 @@ impl<'a> Roots<'a> {
     }
 }
 
-impl Vm {
-    pub(super) fn init_nullary(&mut self, arities: &[CtorRuntimeInfo]) {
-        for info in arities {
-            if info.arity == 0 {
-                self.maybe_gc();
-                let val = self.alloc_heap(HeapObject::Data0 { tag: info.tag });
-                self.nullary_ctors.set(info.tag, val);
-            }
-        }
-
-        let true_tag = find_ctor_tag(arities, PRIM_TYS.true_ctor);
-        let false_tag = find_ctor_tag(arities, PRIM_TYS.false_ctor);
-        self.bools.true_val = self.nullary_ctors.get(true_tag);
-        self.bools.false_val = self.nullary_ctors.get(false_tag);
-    }
-
+impl Interpreter<'_> {
     #[inline]
     pub(super) fn alloc_heap(&mut self, obj: HeapObject) -> Value {
         self.heap.alloc(obj)
@@ -186,91 +189,122 @@ impl Vm {
         // AOSA's GHC RTS chapter treats allocation checks as safe points; the
         // stress knob makes that check fail at a low fixed allocation threshold.
         if self.heap.should_collect() {
-            self.collect_garbage();
+            let roots = Roots {
+                active_process: Some(self.process),
+                inactive_processes: self.inactive_processes,
+                globals: self.globals,
+                nullary_ctors: self.nullary_ctors,
+                bools: self.bools,
+            };
+            collect_garbage(self.heap, &roots);
         }
     }
+}
 
-    pub(super) fn collect_garbage(&mut self) {
-        let mut worklist: Vec<ObjId> = Vec::new();
+impl Runtime {
+    pub(super) fn init_nullary(&mut self) {
+        for index in 0..self.program.constructor_arities.len() {
+            let Some(info) = self.program.constructor_arities.get(index) else {
+                solveig_base::ice!("constructor metadata index disappeared during initialization");
+            };
+            let (arity, tag) = (info.arity, info.tag);
+            if arity != 0 {
+                continue;
+            }
+
+            if self.heap.should_collect() {
+                let roots = Roots {
+                    active_process: None,
+                    inactive_processes: &self.processes,
+                    globals: &self.globals,
+                    nullary_ctors: &self.nullary_ctors,
+                    bools: &self.bools,
+                };
+                collect_garbage(&mut self.heap, &roots);
+            }
+
+            let value = self.heap.alloc(HeapObject::Data0 { tag });
+            self.nullary_ctors.set(tag, value);
+        }
+
+        let true_tag = find_ctor_tag(&self.program.constructor_arities, PRIM_TYS.true_ctor);
+        let false_tag = find_ctor_tag(&self.program.constructor_arities, PRIM_TYS.false_ctor);
+        self.bools.true_val = self.nullary_ctors.get(true_tag);
+        self.bools.false_val = self.nullary_ctors.get(false_tag);
+    }
+}
+
+#[cfg(test)]
+impl Runtime {
+    pub(super) fn collect_all_process_roots_for_test(&mut self) {
         let roots = Roots {
-            stack: &self.stack,
-            binding_buffer: &self.binding_buffer,
-            temporary_roots: &self.temporary_roots,
-            io_current: self.io_current,
-            continuations: &self.continuations,
+            active_process: None,
+            inactive_processes: &self.processes,
             globals: &self.globals,
             nullary_ctors: &self.nullary_ctors,
             bools: &self.bools,
         };
+        collect_garbage(&mut self.heap, &roots);
+    }
+}
 
-        roots.mark(&mut self.heap.mark_bits, &mut worklist);
+fn collect_garbage(heap: &mut Heap, roots: &Roots<'_>) {
+    let mut worklist: Vec<ObjId> = Vec::new();
 
-        while let Some(id) = worklist.pop() {
-            mark_object_children(
-                &self.heap.objects,
-                &self.heap.payloads,
-                &mut self.heap.mark_bits,
-                id,
-                &mut worklist,
-            );
-        }
+    roots.mark(&mut heap.mark_bits, &mut worklist);
 
-        self.heap.payloads.bucket1.clear();
-        self.heap.payloads.bucket2.clear();
-        self.heap.payloads.bucket3.clear();
-        self.heap.payloads.free.clear();
-        self.heap.free_list.clear();
+    while let Some(id) = worklist.pop() {
+        mark_object_children(
+            &heap.objects,
+            &heap.payloads,
+            &mut heap.mark_bits,
+            id,
+            &mut worklist,
+        );
+    }
 
-        let mut live = 0usize;
-        for idx in 0..self.heap.objects.len() {
-            let dead = {
-                let Some(object_slot) = self.heap.objects.get_mut(idx) else {
-                    solveig_base::ice!("GC sweep object index out of bounds");
-                };
-                if object_slot.is_none() {
+    heap.payloads.bucket1.clear();
+    heap.payloads.bucket2.clear();
+    heap.payloads.bucket3.clear();
+    heap.payloads.free.clear();
+    heap.free_list.clear();
+
+    let mut live = 0usize;
+    for idx in 0..heap.objects.len() {
+        let dead = {
+            let Some(object_slot) = heap.objects.get_mut(idx) else {
+                solveig_base::ice!("GC sweep object index out of bounds");
+            };
+            if object_slot.is_none() {
+                None
+            } else {
+                let marked = heap
+                    .mark_bits
+                    .get_mut(idx)
+                    .expect("ICE: GC mark bit index out of bounds");
+                if *marked {
+                    *marked = false;
+                    live += 1;
                     None
                 } else {
-                    let marked = self
-                        .heap
-                        .mark_bits
-                        .get_mut(idx)
-                        .expect("ICE: GC mark bit index out of bounds");
-                    if *marked {
-                        *marked = false;
-                        live += 1;
-                        None
-                    } else {
-                        object_slot.take()
-                    }
+                    object_slot.take()
                 }
-            };
-
-            if let Some(dead) = dead {
-                self.heap.free_object_payloads(&dead);
-                self.heap.free_list.push(
-                    u32::try_from(idx)
-                        .unwrap_or_else(|_| solveig_base::ice!("heap free-list index overflow")),
-                );
             }
-        }
+        };
 
-        #[cfg(debug_assertions)]
-        {
-            let roots = Roots {
-                stack: &self.stack,
-                binding_buffer: &self.binding_buffer,
-                temporary_roots: &self.temporary_roots,
-                io_current: self.io_current,
-                continuations: &self.continuations,
-                globals: &self.globals,
-                nullary_ctors: &self.nullary_ctors,
-                bools: &self.bools,
-            };
-            roots.assert_reachable_live(&self.heap);
+        if let Some(dead) = dead {
+            heap.free_object_payloads(&dead);
+            heap.free_list.push(
+                u32::try_from(idx)
+                    .unwrap_or_else(|_| solveig_base::ice!("heap free-list index overflow")),
+            );
         }
-
-        self.heap.reset_collection_accounting(live);
     }
+
+    #[cfg(debug_assertions)]
+    roots.assert_reachable_live(heap);
+
+    heap.reset_collection_accounting(live);
 }
 
 enum Children {

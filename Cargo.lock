@@ -929,6 +929,7 @@ dependencies = [
 name = "solveig-vm"
 version = "0.1.0"
 dependencies = [
+ "la-arena",
  "solveig-ast",
  "solveig-base",
  "solveig-lower",

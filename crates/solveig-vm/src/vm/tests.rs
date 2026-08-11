@@ -64,7 +64,7 @@ fn tail_recursive_countdown_uses_bounded_vm_stack() {
         "countdown should not keep a caller continuation for the recursive call"
     );
 
-    assert_eq!(run(&program), "5000000");
+    assert_eq!(run_main(&program), "5000000");
 }
 
 #[test]
@@ -85,7 +85,7 @@ fn partial_application_applies_remaining_arguments() {
         &[],
     );
 
-    assert_eq!(run(&program), "42");
+    assert_eq!(run_main(&program), "42");
 }
 
 #[test]
@@ -135,7 +135,7 @@ fn gc_preserves_list_across_build_and_fold() {
         &[("Nil", NIL_TAG, 0), ("Cons", CONS_TAG, 2)],
     );
 
-    assert_eq!(run(&program), "800020000");
+    assert_eq!(run_main(&program), "800020000");
 }
 
 #[test]
@@ -151,7 +151,7 @@ fn global_thunks_resume_dependency_order() {
         &[],
     );
 
-    assert_eq!(run(&program), "31");
+    assert_eq!(run_main(&program), "31");
 }
 
 #[test]
@@ -184,7 +184,7 @@ fn bool_cache_uses_ctor_ids_not_names() {
         "DefinitelyFalse",
     );
 
-    assert_eq!(run(&program), "42");
+    assert_eq!(run_main(&program), "42");
 }
 
 #[test]
@@ -253,10 +253,63 @@ fn display_does_not_tuple_user_pair_by_name() {
         )],
     );
 
-    assert_eq!(run(&program), "MkPair 1 2");
+    assert_eq!(run_main(&program), "MkPair 1 2");
 }
 
-fn run(program: &CCProgram) -> String {
+#[test]
+fn runtime_step_finishes_and_records_process_status() {
+    let program = program(vec![global("main", int(42))], Vec::new(), &[]);
+    let bytecode = lower_to_bytecode(&program);
+    let entry = bytecode
+        .global_index_by_name("main")
+        .expect("runtime step fixture should contain main");
+    let mut runtime = Runtime::new(bytecode);
+
+    let (id, outcome) = evaluate_entry(&mut runtime, entry);
+
+    assert_eq!(outcome, StepOutcome::Finished(Value::Int(42)));
+    assert_eq!(runtime.processes[id].id, id);
+    assert_eq!(
+        runtime.processes[id].status,
+        ProcStatus::Finished(Value::Int(42))
+    );
+    assert!(runtime.run_queue.is_empty());
+}
+
+#[test]
+fn gc_traces_roots_in_every_inactive_process() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let rooted = runtime.heap.alloc_str("rooted");
+    let unrooted = runtime.heap.alloc_str("unrooted");
+    let Value::Obj(rooted_id) = rooted else {
+        solveig_base::ice!("heap string allocation did not return an object id");
+    };
+    let Value::Obj(unrooted_id) = unrooted else {
+        solveig_base::ice!("heap string allocation did not return an object id");
+    };
+    let process = runtime.allocate_process();
+    runtime.processes[process].status = ProcStatus::Finished(rooted);
+
+    runtime.collect_all_process_roots_for_test();
+
+    assert!(
+        runtime
+            .heap
+            .objects
+            .get(rooted_id.0 as usize)
+            .is_some_and(Option::is_some)
+    );
+    assert!(
+        runtime
+            .heap
+            .objects
+            .get(unrooted_id.0 as usize)
+            .is_some_and(Option::is_none)
+    );
+}
+
+fn run_main(program: &CCProgram) -> String {
     run_entry(program, "main")
 }
 

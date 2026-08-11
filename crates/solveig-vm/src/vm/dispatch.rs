@@ -9,7 +9,7 @@ use crate::values::Value;
 use solveig_ast::ast::Literal;
 use solveig_lower::LowerPattern;
 
-impl Vm {
+impl Interpreter<'_> {
     pub(super) fn dispatch_match(
         &mut self,
         program: &BytecodeProgram,
@@ -29,10 +29,10 @@ impl Vm {
 
                     if match_pattern(
                         program,
-                        &self.heap,
+                        &*self.heap,
                         &arm.pattern,
                         scrutinee,
-                        &mut self.binding_buffer,
+                        &mut self.process.binding_buffer,
                     ) {
                         debug_assert!(arm.bind_slots.is_empty());
                         self.pc = arm.target as usize;
@@ -115,10 +115,10 @@ impl Vm {
                                     continue;
                                 }
 
-                                self.binding_buffer.clear();
+                                self.process.binding_buffer.clear();
                                 for (sub, &field) in subs.iter().zip(fields.iter()) {
                                     if matches!(sub, LowerPattern::Var) {
-                                        self.binding_buffer.push(field);
+                                        self.process.binding_buffer.push(field);
                                     }
                                 }
 
@@ -144,10 +144,10 @@ impl Vm {
                     self.binding_buffer.clear();
                     if match_pattern(
                         program,
-                        &self.heap,
+                        &*self.heap,
                         &arm.pattern,
                         scrutinee,
-                        &mut self.binding_buffer,
+                        &mut self.process.binding_buffer,
                     ) {
                         for (index, &slot) in arm.bind_slots.iter().enumerate() {
                             let value = *self

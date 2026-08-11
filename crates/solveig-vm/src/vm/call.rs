@@ -7,7 +7,7 @@ use crate::bytecode::{BytecodeProgram, ChunkKind};
 use crate::heap::{BoundPrefix, HeapObject, PayloadRef, PayloadStore};
 use crate::values::{Continuation, GlobalSlot, ObjId, Value};
 
-impl Vm {
+impl Interpreter<'_> {
     #[inline(always)]
     pub(super) fn push(&mut self, val: Value) {
         self.stack.push(val);
@@ -32,7 +32,8 @@ impl Vm {
 
     #[inline]
     pub(super) fn pop_payload(&mut self, n: usize) -> PayloadRef {
-        self.heap.alloc_payload_from_stack_tail(&mut self.stack, n)
+        self.heap
+            .alloc_payload_from_stack_tail(&mut self.process.stack, n)
     }
 
     #[inline]
@@ -53,12 +54,11 @@ impl Vm {
 
     #[inline(always)]
     pub(super) fn store(&mut self, slot: u16, val: Value) {
+        let index = self.frame_base + slot as usize;
         // SAFETY: `ensure_slots` sizes the current frame before execution, and
         // bytecode local slots are allocated by ChunkBuilder for that frame.
         unsafe {
-            *self
-                .stack
-                .get_unchecked_mut(self.frame_base + slot as usize) = val;
+            *self.stack.get_unchecked_mut(index) = val;
         }
     }
 
@@ -87,11 +87,12 @@ impl Vm {
 
     #[inline]
     pub(super) fn push_caller_continuation(&mut self) {
-        self.continuations.push(Continuation::CallerFrame {
+        let continuation = Continuation::CallerFrame {
             chunk: self.chunk,
             pc: self.pc,
             frame_base: self.frame_base,
-        });
+        };
+        self.continuations.push(continuation);
     }
 
     pub(super) fn start_global_eval(
@@ -124,23 +125,6 @@ impl Vm {
         Ok(None)
     }
 
-    pub(super) fn eval_global(
-        &mut self,
-        program: &BytecodeProgram,
-        index: usize,
-    ) -> Result<Value, RuntimeError> {
-        match self.start_global_eval(
-            program,
-            index,
-            Continuation::PublishGlobalThenHalt {
-                global_index: index,
-            },
-        )? {
-            Some(val) => Ok(val),
-            None => self.dispatch(program),
-        }
-    }
-
     pub(super) fn push_global_or_start_eval(
         &mut self,
         program: &BytecodeProgram,
@@ -165,8 +149,8 @@ impl Vm {
         self.chunk = chunk_id;
         self.pc = 0;
         self.frame_base = self.stack.len();
-        self.stack
-            .resize(self.frame_base + meta.slot_count as usize, Value::Unit);
+        let frame_end = self.frame_base + meta.slot_count as usize;
+        self.stack.resize(frame_end, Value::Unit);
     }
 
     #[inline(always)]
@@ -199,7 +183,8 @@ impl Vm {
                     }
                 }
 
-                self.stack.truncate(self.frame_base + arg_count);
+                let frame_end = self.frame_base + arg_count;
+                self.stack.truncate(frame_end);
                 self.chunk = chunk_id;
                 self.pc = 0;
             }
@@ -222,7 +207,7 @@ impl Vm {
         }
 
         let frame_base = self.frame_base;
-        let (heap, stack) = (&self.heap, &mut self.stack);
+        let (heap, stack) = (&*self.heap, &mut self.process.stack);
 
         if !bound.captures.is_empty() {
             heap.copy_payload_to_stack(bound.captures, stack, frame_base);
@@ -447,7 +432,7 @@ impl Vm {
                     let captures = self.heap.clone_payload(captures);
                     let applied_args = self.heap.alloc_concat_payload_and_stack_tail(
                         applied_args,
-                        &mut self.stack,
+                        &mut self.process.stack,
                         arg_count,
                     );
 
@@ -519,14 +504,18 @@ impl Vm {
                 };
             }
 
-            let fields =
-                self.heap
-                    .alloc_concat_payload_and_stack_tail(existing, &mut self.stack, n_new);
+            let fields = self.heap.alloc_concat_payload_and_stack_tail(
+                existing,
+                &mut self.process.stack,
+                n_new,
+            );
             self.alloc_heap(HeapObject::DataN { tag, fields })
         } else if total < arity as usize {
-            let applied_args =
-                self.heap
-                    .alloc_concat_payload_and_stack_tail(existing, &mut self.stack, n_new);
+            let applied_args = self.heap.alloc_concat_payload_and_stack_tail(
+                existing,
+                &mut self.process.stack,
+                n_new,
+            );
 
             self.alloc_heap(HeapObject::PartialCtor {
                 tag,
@@ -569,9 +558,9 @@ impl Vm {
             .expect("ICE: builtin argument slice out of bounds")
             .to_vec();
         let mut ctx = VmCtx::new(
-            &mut self.heap,
+            self.heap,
             &program.constructor_arities,
-            &self.nullary_ctors,
+            self.nullary_ctors,
             self.bools.true_val,
             self.bools.false_val,
         );
@@ -598,7 +587,8 @@ impl Vm {
     }
 
     pub(super) fn resume_after_return(&mut self, result: Value) -> Option<Value> {
-        self.stack.truncate(self.frame_base);
+        let frame_base = self.frame_base;
+        self.stack.truncate(frame_base);
 
         let Some(continuation) = self.continuations.pop() else {
             solveig_base::ice!("return with empty continuation stack");
