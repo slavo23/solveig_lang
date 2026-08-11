@@ -173,17 +173,18 @@ pub(super) fn inferred_signature_code_actions(
             continue;
         };
         let function_name = session.str(name.0).to_string();
+        let source_name = source_signature::pretty_source_value_name(&function_name);
         let signature = source_signature::pretty_source_scheme(scheme, tables);
         let insertion = Span::new(defn.1.start, defn.1.start);
 
         out.push(
             SourceCodeAction::new(
-                format!("Add type signature for `{function_name}`"),
+                format!("Add type signature for `{source_name}`"),
                 FileSpan::new(parsed.file, name.1),
                 vec![SourceTextEdit::new(
                     parsed.file,
                     insertion,
-                    format!("{function_name} : {signature}\n"),
+                    format!("{source_name} : {signature}\n"),
                 )],
             )
             .with_category(SourceCodeActionCategory::InferredSignature),

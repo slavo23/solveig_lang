@@ -37,6 +37,11 @@ append : forall a. [a] -> [a] -> [a]
 append [] ys = ys
 append (z :: zs) ys = z :: append zs ys
 
+infixr 5 (++)
+
+(++) : forall a. [a] -> [a] -> [a]
+(++) = append
+
 -- | Reverses the order of the elements in a list.
 reverse : forall a. [a] -> [a]
 reverse xs =

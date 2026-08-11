@@ -518,3 +518,46 @@ main = triple 1 2 3
 
     drop(project_root);
 }
+
+#[test]
+fn inferred_signature_action_parenthesizes_operator_definitions() {
+    let project_root = temp_root("operator_signature");
+    let source_path = project_root.join("scratch.sv");
+    let source = r#"infixr 5 (++)
+
+(++) = append
+
+main : [Int]
+main = [1] ++ [2]
+"#;
+    write_source(&source_path, source);
+    let mut compilation = Compilation::for_source_file(&source_path);
+
+    let result = compilation.check(true).expect("check should finish");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let actions = compilation.code_actions_at_range(
+        &source_path,
+        SourcePosition::new(2, 0),
+        SourcePosition::new(2, 4),
+        PositionEncoding::Utf16,
+    );
+    let action = action_named(&actions, "Add type signature for `(++)`");
+    assert_eq!(
+        action.category(),
+        SourceCodeActionCategory::InferredSignature
+    );
+    let fixed = apply_action(source, action);
+
+    assert!(
+        fixed.contains("\n(++) : forall a. [a] -> [a] -> [a]\n(++) = append"),
+        "{fixed}"
+    );
+    assert!(!fixed.contains("\n++ :"), "{fixed}");
+
+    compilation.set_overlay(&source_path, fixed);
+    let result = compilation.check(true).expect("fixed check should finish");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    drop(project_root);
+}

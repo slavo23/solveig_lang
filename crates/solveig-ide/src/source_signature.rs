@@ -18,6 +18,14 @@ pub(super) fn pretty_source_ty(ty: &Ty, tables: PrettyTables<'_>) -> String {
     printer.ty(ty, PRECEDENCE_LOOSE)
 }
 
+pub(super) fn pretty_source_value_name(name: &str) -> String {
+    if is_source_value_identifier(name) {
+        name.to_string()
+    } else {
+        format!("({name})")
+    }
+}
+
 struct SourceSignaturePrinter<'a> {
     tables: PrettyTables<'a>,
     tyvars: FxHashMap<TyVarId, String>,
@@ -268,6 +276,16 @@ fn is_source_tyvar_name(name: &str) -> bool {
     };
 
     first.is_ascii_lowercase()
+        && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '\'')
+}
+
+fn is_source_value_identifier(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+
+    (first.is_ascii_lowercase() || first == '_')
         && chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_' || ch == '\'')
 }
 

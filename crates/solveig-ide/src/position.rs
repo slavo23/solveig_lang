@@ -458,9 +458,14 @@ impl PositionIndex {
     }
 
     fn insert_definition(&mut self, span: FileSpan, def_id: DefId) {
-        if span.file == self.file {
-            self.definitions
-                .insert(span.span, DefTarget { span, def_id });
+        if span.file != self.file {
+            return;
+        }
+
+        let target = DefTarget { span, def_id };
+        self.definitions.insert(span.span, target);
+        for token_span in self.definition_token_spans(span.span) {
+            self.definitions.entry(token_span).or_insert(target);
         }
     }
 
@@ -506,6 +511,14 @@ impl PositionIndex {
     }
 
     fn reference_token_spans(&self, span: Span) -> Vec<Span> {
+        self.token_spans_inside_name_span(span, false)
+    }
+
+    fn definition_token_spans(&self, span: Span) -> Vec<Span> {
+        self.token_spans_inside_name_span(span, true)
+    }
+
+    fn token_spans_inside_name_span(&self, span: Span, include_delimiters: bool) -> Vec<Span> {
         let tokens = self
             .cst
             .tokens()
@@ -531,7 +544,10 @@ impl PositionIndex {
 
         tokens
             .into_iter()
-            .filter(|token| token_is_semantic_reference(token.kind))
+            .filter(|token| {
+                token_is_semantic_reference(token.kind)
+                    || (include_delimiters && matches!(token.kind, Token::LParen | Token::RParen))
+            })
             .filter_map(|token| {
                 let token_span = Span::from_usize_range(token.start()..token.end());
                 (!token_span.is_empty()).then_some(token_span)
@@ -1473,7 +1489,11 @@ fn token_is_semantic_reference(token: Token) -> bool {
 }
 
 fn token_allowed_in_reference_span(token: Token) -> bool {
-    token_is_semantic_reference(token) || matches!(token, Token::Dot | Token::Backtick)
+    token_is_semantic_reference(token)
+        || matches!(
+            token,
+            Token::Dot | Token::Backtick | Token::LParen | Token::RParen
+        )
 }
 
 fn span_contains_span(parent: Span, child: Span) -> bool {

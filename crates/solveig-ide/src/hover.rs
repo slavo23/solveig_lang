@@ -264,7 +264,7 @@ fn term_signature(
 
     Some(format!(
         "{} : {}",
-        short_def_name(&artifacts.names, def_id),
+        source_signature::pretty_source_value_name(&short_def_name(&artifacts.names, def_id)),
         source_signature::pretty_source_scheme(scheme, pretty_tables)
     ))
 }
@@ -330,7 +330,7 @@ fn class_method_signature(
                     .unwrap_or_else(|| {
                         format!(
                             "{} : {}",
-                            method.short_name,
+                            source_signature::pretty_source_value_name(&method.short_name),
                             source_signature::pretty_source_scheme(&method.scheme, pretty_tables)
                         )
                     });

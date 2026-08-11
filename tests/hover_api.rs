@@ -148,6 +148,57 @@ fn hover_returns_checked_expression_types_after_run() {
 }
 
 #[test]
+fn hover_covers_parenthesized_operator_definitions_and_references() {
+    let project_root = temp_root("operator_hovers");
+    let file = project_root.join("scratch.sv");
+    let source = r#"infixr 5 (++)
+
+(++) = append
+
+main : [Int]
+main = [1] ++ [2]
+"#;
+    write_source(&file, source);
+
+    let mut compilation = Compilation::for_source_file(&file);
+    let result = compilation.check(true).expect("check should finish");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let expected = "(++) : forall a. [a] -> [a] -> [a]";
+    let definition_open = offset_in_line(source, "(++) = append", "(");
+    let definition_open_hover = compilation
+        .hover_info(&file, definition_open)
+        .expect("operator definition opening paren should hover");
+    assert_eq!(definition_open_hover.signature(), expected);
+    assert_eq!(
+        definition_open_hover.span(),
+        definition_open..definition_open + "(++)".len()
+    );
+
+    let definition_operator = offset_in_line(source, "(++) = append", "++");
+    let definition_operator_hover = compilation
+        .hover_info(&file, definition_operator)
+        .expect("operator definition token should hover");
+    assert_eq!(definition_operator_hover.signature(), expected);
+    assert_eq!(
+        definition_operator_hover.span(),
+        definition_open..definition_open + "(++)".len()
+    );
+
+    let reference_operator = offset_in_line(source, "main = [1] ++ [2]", "++");
+    let reference_hover = compilation
+        .hover_info(&file, reference_operator)
+        .expect("operator reference should hover");
+    assert_eq!(reference_hover.signature(), expected);
+    assert_eq!(
+        reference_hover.span(),
+        reference_operator..reference_operator + "++".len()
+    );
+
+    drop(project_root);
+}
+
+#[test]
 fn hover_preserves_long_source_type_variable_names() {
     let project_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/types/checker_api");
     let file = project_root.join("src/main.sv");
