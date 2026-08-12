@@ -15,10 +15,12 @@ mod snapshot_support;
 
 #[test]
 fn golden_run_cases() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/run");
+    let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let root = manifest_root.join("tests/golden/run");
     let update = env::var("UPDATE_GOLDEN").is_ok_and(|value| value == "1");
 
     let mut cases = golden_cases(&root);
+    cases.push(manifest_root.join("examples/concurrent_downloader"));
     cases.sort();
 
     assert!(

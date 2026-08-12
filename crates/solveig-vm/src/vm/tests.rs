@@ -1207,13 +1207,18 @@ fn bytes_to_string_preserves_invalid_utf8_as_a_result_error() {
             ),
         ],
     );
-    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let mut runtime =
+        Runtime::new_with_collection_limits_for_test(lower_to_bytecode(&program), 1, 16);
     let process_id = runtime.allocate_process();
     runtime.run_queue.clear();
-    let invalid = runtime.heap.alloc_bytes(&[0xff, 0xfe]);
     let mut process = runtime.take_process(process_id);
     let result = {
         let mut interpreter = Interpreter::new(&mut runtime, &mut process);
+        interpreter.safe_point();
+        let invalid = interpreter.heap.alloc_bytes(&[0xff, 0xfe]);
+        interpreter.process.temporary_roots.push(invalid);
+        interpreter.safe_point();
+        let invalid = interpreter.process.temporary_roots[0];
         let builtin = crate::builtins::lookup(BUILTIN_BYTES_TO_STRING)
             .expect("bytesToString builtin should be registered");
         (builtin.run)(&mut VmCtx::new(&mut interpreter), &[invalid])
@@ -1238,6 +1243,57 @@ fn bytes_to_string_preserves_invalid_utf8_as_a_result_error() {
             field: Value::Obj(_)
         }
     ));
+}
+
+#[test]
+fn bytes_to_string_roots_valid_text_across_its_result_allocation() {
+    const RESULT_OK_TAG: u16 = 20;
+
+    let program = program_with_ctors(
+        vec![global("main", int(0))],
+        Vec::new(),
+        &[ctor_spec(
+            CtorId(200),
+            CtorRuntimeRole::PreludeResultOk,
+            "prelude.builtins.Ok",
+            "Ok",
+            RESULT_OK_TAG,
+            1,
+        )],
+    );
+    let mut runtime =
+        Runtime::new_with_collection_limits_for_test(lower_to_bytecode(&program), 1, 16);
+    let process_id = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let mut process = runtime.take_process(process_id);
+    let result = {
+        let mut interpreter = Interpreter::new(&mut runtime, &mut process);
+        interpreter.safe_point();
+        let bytes = interpreter.heap.alloc_bytes(b"safe point");
+        interpreter.process.temporary_roots.push(bytes);
+        interpreter.safe_point();
+        let bytes = interpreter.process.temporary_roots[0];
+        let builtin = crate::builtins::lookup(BUILTIN_BYTES_TO_STRING)
+            .expect("bytesToString builtin should be registered");
+        (builtin.run)(&mut VmCtx::new(&mut interpreter), &[bytes])
+            .expect("valid UTF-8 should be a Result value")
+    };
+    runtime.restore_process(process);
+
+    let Value::Obj(result_id) = result else {
+        solveig_base::ice!("bytesToString success was not heap allocated")
+    };
+    let HeapObject::Data1 {
+        tag: RESULT_OK_TAG,
+        field: Value::Obj(text_id),
+    } = *runtime.heap.get(result_id)
+    else {
+        solveig_base::ice!("bytesToString did not return Ok")
+    };
+    let HeapObject::Str { bytes } = runtime.heap.get(text_id) else {
+        solveig_base::ice!("bytesToString Ok did not contain text")
+    };
+    assert_eq!(runtime.heap.str_value(text_id, *bytes), "safe point");
 }
 
 #[test]

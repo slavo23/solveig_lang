@@ -125,6 +125,12 @@ Run the Scry mini rule engine:
 solveig --project-root examples/scry < examples/scry/sample-input.txt
 ```
 
+Run the hermetic concurrent HTTP downloader:
+
+```bash
+solveig --project-root examples/concurrent_downloader
+```
+
 ## Command Line
 
 The CLI runs a Solveig project by pointing at a project root:
@@ -150,6 +156,7 @@ Examples:
 solveig --project-root examples/smoke_suite
 solveig --project-root examples/smoke_suite --dump-bytecode
 solveig --project-root examples/quiz_game
+solveig --project-root examples/concurrent_downloader
 solveig --project-root my-project -- first second third
 ```
 
@@ -457,6 +464,9 @@ See [docs/diagnostics.md](docs/diagnostics.md) for the full code index.
   scores answers, writes `last-score.txt`, and appends `score-history.txt`.
 - `examples/scry` is a mini S-expression rule engine with facts, rules,
   recursive queries, file IO, and an interactive prompt.
+- `examples/concurrent_downloader` fetches several HTTP resources through a
+  bounded-channel worker pool from its own loopback server, reports progress,
+  and recovers a typed request failure.
 - `tests/golden/run/` contains small executable regression cases.
 - `tests/golden/diag/` contains diagnostic regression cases.
 

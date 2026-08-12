@@ -1,0 +1,10 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+downloader starting
+completed 1/4
+completed 2/4
+completed 3/4
+completed 4/4
+summary: 3 succeeded, 1 failed, 18 bytes
