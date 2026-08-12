@@ -291,6 +291,35 @@ fn typed_io_failure_survives_collection_and_skips_bind_continuations() {
 }
 
 #[test]
+fn raised_defect_value_survives_collection() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let process = runtime.allocate_process();
+    assert_eq!(runtime.run_queue.pop_front(), Some(process));
+    let defect = runtime.alloc_str_for_test("captured defect");
+    let action = runtime
+        .heap
+        .alloc(HeapObject::IoAction(IoAction::RaiseDefect { defect }));
+    runtime.processes[process].io_current = Some(action);
+
+    runtime.collect_all_process_roots_for_test();
+
+    let Some(Value::Obj(action)) = runtime.processes[process].io_current else {
+        solveig_base::ice!("raised defect IO action was not retained as a process root");
+    };
+    let HeapObject::IoAction(IoAction::RaiseDefect {
+        defect: Value::Obj(defect),
+    }) = runtime.heap.get(action)
+    else {
+        solveig_base::ice!("raised defect IO action lost its defect value");
+    };
+    let HeapObject::Str { bytes } = runtime.heap.get(*defect) else {
+        solveig_base::ice!("raised defect payload was not a string");
+    };
+    assert_eq!(runtime.heap.str_value(*defect, *bytes), "captured defect");
+}
+
+#[test]
 fn host_io_failure_becomes_the_matching_typed_error_constructor() {
     const STDOUT_ERROR_TAG: u16 = 2;
     const STDIN_ERROR_TAG: u16 = 3;
@@ -1312,6 +1341,7 @@ fn scheduler_completes_ten_thousand_threads() {
         .alloc(HeapObject::IoAction(IoAction::Pure(Value::Unit)));
 
     let mut main_process = runtime.take_process(main);
+    main_process.mask_depth = 2;
     {
         let mut interpreter = Interpreter::new(&mut runtime, &mut main_process);
         for expected_id in 1..=THREADS {
@@ -1324,6 +1354,10 @@ fn scheduler_completes_ten_thousand_threads() {
         }
     }
     runtime.restore_process(main_process);
+
+    for (_, process) in runtime.processes.iter().skip(1) {
+        assert_eq!(process.mask_depth, 2);
+    }
 
     let mut stderr = Vec::new();
 

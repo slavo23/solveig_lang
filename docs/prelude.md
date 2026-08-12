@@ -75,6 +75,10 @@ mapError : forall e f a. (e -> f) -> IO e a -> IO f a
 orElse : forall e f a. IO e a -> IO f a -> IO f a
 finally : forall e a b. IO e a -> IO e b -> IO e a
 bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
+withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
+race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
+concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
+timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 printLine : String -> Task ()
 printStr : String -> Task ()
 readLine : Task String
@@ -106,6 +110,16 @@ The action runs with the caller's interruption state restored and cleanup runs
 masked. `bracket` masks acquisition and cleanup while restoring the prior state
 for resource use, closing the cancellation window between acquisition and
 cleanup installation. A cleanup failure replaces the saved outcome.
+
+`withThread` scopes a spawned child to its body. When the body succeeds, fails,
+defects, or is interrupted, the child is interrupted and its cleanup finishes
+before the scope exits. `race` returns the first result and cancels the loser;
+`concurrently` returns both results and cancels the remaining action as soon as
+one fails. Both propagate the winning typed error or defect without changing
+its constructor. `timeout milliseconds action` returns `Nothing` after the
+deadline or `Just value` when the action finishes first. These combinators use
+private channels in Prelude code; a child never outlives the scope that created
+it.
 
 `killThread` requests asynchronous interruption and returns immediately.
 Delivery occurs at the target's next VM safe point; killing an already finished
@@ -439,6 +453,7 @@ failIO : forall e a. e -> IO e a
 error : forall a. String -> a
 catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
+raiseDefectIO : forall e a. Defect -> IO e a
 finallyIO : forall e a b. IO e a -> IO e b -> IO e a
 printLine : String -> IO IOError ()
 printStr : String -> IO IOError ()
@@ -459,6 +474,10 @@ recv : forall a. Chan a -> IO IOError a
 tryRecv : forall a. Chan a -> IO IOError (Maybe a)
 closeChan : forall a. Chan a -> IO IOError ()
 ```
+
+`raiseDefectIO` is a low-level operation reserved for Prelude composition. User
+code should normally raise `Error` with `error` or let the originating defect
+propagate without catching it.
 
 Primitive Int add/sub/mul/neg wrap on `i64` overflow. `intDiv` and `intMod`
 raise `DivisionByZero` defects for a zero divisor. String indexing and slicing

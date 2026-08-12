@@ -176,7 +176,7 @@ action and cleanup pair.
 ## Interruption
 
 Interruption cancels work because another computation requested it: for
-example, `killThread`, a future timeout, or the losing side of a future race.
+example, `killThread`, `timeout`, or the losing side of `race`.
 It is delivered only at VM safe points so runtime state remains valid. It is
 not an `IOError`, is not converted to `Defect`, and will not be caught by
 `catchError` or `catchDefect`.
@@ -189,6 +189,13 @@ Cleanup entered because of interruption runs masked; a second interruption may
 still stop cleanup if it reaches an interruptible blocking operation. Solveig
 does not expose an uninterruptible mask because `bracket` does not require one
 and permanently unkillable waits would be a worse default.
+
+Structured combinators propagate a child's typed error with its original error
+type and re-raise an observed defect with its original `Defect` constructor.
+Cancellation of a race loser or timed-out action remains interruption, not a
+typed error. Scope cleanup waits for the cancelled child to finish unwinding,
+so no child survives its `withThread`, `race`, `concurrently`, or `timeout`
+scope.
 
 ## Pattern-match failures are compile-time errors
 

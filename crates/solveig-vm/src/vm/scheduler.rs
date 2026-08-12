@@ -103,11 +103,15 @@ pub(super) fn perform_process_io(
 
 impl Interpreter<'_> {
     pub(super) fn spawn_io_process(&mut self, action: Value) -> Value {
+        // Marlow et al., "Asynchronous Exceptions in Haskell" (PLDI 2001),
+        // section 8: a forked computation inherits the parent's masked state,
+        // allowing library code to install cleanup before explicitly unmasking.
         let id = allocate_process_in(
             self.inactive_processes,
             self.run_queue,
             self.reduction_budget,
             Some(action),
+            self.mask_depth,
         );
         Value::ThreadId(id.into_raw().into_u32())
     }

@@ -427,6 +427,7 @@ fn rewrite_io_action(
     match action {
         IoAction::Pure(value)
         | IoAction::Fail(value)
+        | IoAction::RaiseDefect { defect: value }
         | IoAction::Print { text: value, .. }
         | IoAction::Spawn { action: value }
         | IoAction::KillThread { thread: value }
@@ -606,6 +607,7 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
     match action {
         IoAction::Pure(value)
         | IoAction::Fail(value)
+        | IoAction::RaiseDefect { defect: value }
         | IoAction::Print { text: value, .. }
         | IoAction::Spawn { action: value }
         | IoAction::KillThread { thread: value }
@@ -711,6 +713,7 @@ fn assert_object_children_live(
         HeapObject::IoAction(action) => match action {
             IoAction::Pure(value)
             | IoAction::Fail(value)
+            | IoAction::RaiseDefect { defect: value }
             | IoAction::Print { text: value, .. }
             | IoAction::Spawn { action: value }
             | IoAction::KillThread { thread: value }

@@ -11,6 +11,7 @@ prelude.builtins.bracket : forall e resource cleanup a. IO e resource -> (resour
 prelude.builtins.catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.builtins.catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.builtins.closeChan : forall a. Chan a -> IO IOError ()
+prelude.builtins.concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
 prelude.builtins.error : forall a. String -> a
 prelude.builtins.even : Int -> Bool
 prelude.builtins.failIO : forall e a. e -> IO e a
@@ -27,13 +28,16 @@ prelude.builtins.orElse : forall e f a. IO e a -> IO f a -> IO f a
 prelude.builtins.printLine : String -> IO IOError ()
 prelude.builtins.printStr : String -> IO IOError ()
 prelude.builtins.pureIO : forall e a. a -> IO e a
+prelude.builtins.race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
 prelude.builtins.readFile : String -> IO IOError String
 prelude.builtins.readLine : IO IOError String
 prelude.builtins.recv : forall a. Chan a -> IO IOError a
 prelude.builtins.send : forall a. Chan a -> a -> IO IOError ()
 prelude.builtins.sleep : Int -> IO IOError ()
 prelude.builtins.spawn : forall childError e. IO childError () -> IO e ThreadId
+prelude.builtins.timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 prelude.builtins.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
+prelude.builtins.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
 prelude.builtins.writeFile : String -> String -> IO IOError ()
 prelude.list.++ : forall a. [a] -> [a] -> [a]
 prelude.list.append : forall a. [a] -> [a] -> [a]
@@ -98,6 +102,7 @@ prelude.prim.newChan : forall e a. IO e (Chan a)
 prelude.prim.printLine : String -> IO IOError ()
 prelude.prim.printStr : String -> IO IOError ()
 prelude.prim.pureIO : forall e a. a -> IO e a
+prelude.prim.raiseDefectIO : forall e a. Defect -> IO e a
 prelude.prim.readFile : String -> IO IOError String
 prelude.prim.readLine : IO IOError String
 prelude.prim.recv : forall a. Chan a -> IO IOError a

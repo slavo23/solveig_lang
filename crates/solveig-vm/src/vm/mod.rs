@@ -388,6 +388,7 @@ impl Runtime {
             &mut self.run_queue,
             self.reduction_budget,
             None,
+            0,
         )
     }
 
@@ -510,12 +511,14 @@ fn allocate_process_in(
     run_queue: &mut VecDeque<ProcessId>,
     reduction_budget: u32,
     io_action: Option<Value>,
+    mask_depth: u32,
 ) -> ProcessId {
     let raw = u32::try_from(processes.len())
         .unwrap_or_else(|_| solveig_base::ice!("process arena exhausted u32 identities"));
     let id = ProcessId::from_raw(RawIdx::from(raw));
     let mut process = Process::new(id, reduction_budget);
     process.io_current = io_action;
+    process.mask_depth = mask_depth;
     let allocated = processes.alloc(process);
     if allocated != id {
         solveig_base::ice!("process arena returned a non-sequential identity");

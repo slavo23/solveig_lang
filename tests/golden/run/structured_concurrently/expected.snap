@@ -1,0 +1,7 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+slow-cleaned
+failed=WorkFailed
+pair=7,ok

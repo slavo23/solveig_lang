@@ -1,0 +1,8 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+body
+child-cleaned
+after-scope
+interrupted-scope-cleaned

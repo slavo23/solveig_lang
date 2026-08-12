@@ -378,8 +378,18 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
                 &[e_id, a_id],
                 &[
                     io_of(e.clone(), a.clone()),
-                    Ty::make_arr(defect, io_of(e.clone(), a.clone())),
+                    Ty::make_arr(defect.clone(), io_of(e.clone(), a.clone())),
                 ],
+                io_of(e.clone(), a.clone()),
+            ),
+        ),
+        prim_spec(
+            "raiseDefectIO",
+            BUILTIN_RAISE_DEFECT_IO,
+            1,
+            poly_arr(
+                &[e_id, a_id],
+                std::slice::from_ref(&defect),
                 io_of(e.clone(), a.clone()),
             ),
         ),

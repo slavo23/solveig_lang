@@ -1,0 +1,8 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+slow-cleaned
+right=fast
+error-loser-cleaned
+race-error=ChannelClosed

@@ -14,11 +14,12 @@ use solveig_ast::ast::{
     BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG,
     BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_KILL_THREAD,
     BUILTIN_MASK_IO, BUILTIN_NEW_BOUNDED_CHAN, BUILTIN_NEW_CHAN, BUILTIN_PRINT_LINE,
-    BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_RECV_CHAN,
-    BUILTIN_RESTORE_MASK_IO, BUILTIN_SEND_CHAN, BUILTIN_SLEEP, BUILTIN_SPAWN,
-    BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
-    BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN,
-    BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
+    BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_RAISE_DEFECT_IO, BUILTIN_READ_FILE,
+    BUILTIN_READ_LINE, BUILTIN_RECV_CHAN, BUILTIN_RESTORE_MASK_IO, BUILTIN_SEND_CHAN,
+    BUILTIN_SLEEP, BUILTIN_SPAWN, BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT,
+    BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE,
+    BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo,
+    CtorRuntimeRole,
 };
 
 use crate::heap::{HeapObject, IoAction};
@@ -262,6 +263,7 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_FINALLY_IO, "finallyIO", 2, finally_io),
     builtin!(BUILTIN_ERROR, "error", 1, raise_error),
     builtin!(BUILTIN_CATCH_DEFECT_IO, "catchDefectIO", 2, catch_defect_io),
+    builtin!(BUILTIN_RAISE_DEFECT_IO, "raiseDefectIO", 1, raise_defect_io),
     builtin!(BUILTIN_PRINT_LINE, "printLine", 1, print_line),
     builtin!(BUILTIN_PRINT_STR, "printStr", 1, print_str),
     builtin!(BUILTIN_READ_LINE, "readLine", 0, read_line),
@@ -573,6 +575,11 @@ fn catch_defect_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, Run
     let action = expect_value(args, 0, "catchDefectIO")?;
     let handler = expect_value(args, 1, "catchDefectIO")?;
     Ok(ctx.alloc_io_action(IoAction::CatchDefect { action, handler }))
+}
+
+fn raise_defect_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let defect = expect_value(args, 0, "raiseDefectIO")?;
+    Ok(ctx.alloc_io_action(IoAction::RaiseDefect { defect }))
 }
 
 fn finally_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {

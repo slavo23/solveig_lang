@@ -1,0 +1,4 @@
+Error=boom
+DivisionByZero
+StackExhausted
+HeapExhausted

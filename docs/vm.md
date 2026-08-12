@@ -227,11 +227,18 @@ errors never enter this path, and an uncaught defect becomes a process failure
 at the scheduler boundary, so a spawned defect terminates and reports only its
 own thread.
 
+The private `RaiseDefect` IO action resumes this same unwind from an already
+materialized Prelude `Defect` value. Structured concurrency workers use it to
+transport a child's exact defect through a private channel and re-raise it in
+the parent; it is not a second exception mechanism.
+
 Worker-backed actions park the process. Their completion is plain Rust data in
 `io_result`; it becomes a `Value`, including any heap allocation for returned
 text, only after the scheduler wakes that process. `Spawn` is not a host worker
 operation: it allocates a new green process whose `io_current` roots the child
-action and appends it to the FIFO run queue.
+action and appends it to the FIFO run queue. The child inherits the parent's
+mask depth so Prelude code can install cleanup before explicitly restoring the
+child action's interruption state.
 
 ## Generational heap layout
 

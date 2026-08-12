@@ -67,6 +67,9 @@ pub enum IoAction {
         action: Value,
         handler: Value,
     },
+    RaiseDefect {
+        defect: Value,
+    },
     Finally {
         action: Value,
         cleanup: Value,

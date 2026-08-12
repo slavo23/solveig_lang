@@ -1,0 +1,4 @@
+slow-cleaned
+right=fast
+error-loser-cleaned
+race-error=ChannelClosed

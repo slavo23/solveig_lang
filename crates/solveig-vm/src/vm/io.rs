@@ -133,6 +133,10 @@ impl Interpreter<'_> {
                         .push(Continuation::IoCatchDefect(handler));
                     self.io_current = Some(action);
                 }
+                IoAction::RaiseDefect { defect } => {
+                    let recover_heap = self.defect_requires_heap_recovery(defect);
+                    self.resume_io_defect_value(program, defect, recover_heap, None)?;
+                }
                 IoAction::Finally { action, cleanup } => {
                     self.continuations.push(Continuation::IoFinally(cleanup));
                     self.io_current = Some(action);
@@ -584,6 +588,29 @@ impl Interpreter<'_> {
             .expect("ICE: defect recovery root disappeared during collection");
         self.temporary_roots.truncate(checkpoint);
         value
+    }
+
+    fn defect_requires_heap_recovery(&self, defect: Value) -> bool {
+        let Value::Obj(id) = defect else {
+            return false;
+        };
+        let tag = match self.heap.get(id) {
+            HeapObject::Data0 { tag }
+            | HeapObject::Data1 { tag, .. }
+            | HeapObject::Data2 { tag, .. }
+            | HeapObject::DataN { tag, .. } => *tag,
+            HeapObject::Closure { .. }
+            | HeapObject::PartialApp { .. }
+            | HeapObject::PartialCtor { .. }
+            | HeapObject::Str { .. }
+            | HeapObject::Chan(_)
+            | HeapObject::IoAction(_)
+            | HeapObject::Forwarded(_) => return false,
+        };
+        self.program
+            .constructor_arities
+            .iter()
+            .any(|info| info.tag == tag && info.role == CtorRuntimeRole::PreludeDefectHeapExhausted)
     }
 
     fn alloc_defect(&mut self, defect: DefectKind) -> Result<Value, RuntimeError> {

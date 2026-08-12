@@ -1,0 +1,8 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+Error=boom
+DivisionByZero
+StackExhausted
+HeapExhausted
