@@ -119,6 +119,13 @@ pub enum Continuation {
     IoRestore(Value),
     /// Resumes unwinding a saved defect after cleanup succeeds.
     IoRestoreDefect(Value),
+    /// Restores a scoped interruption mask depth after an IO action finishes.
+    IoRestoreMask(u32),
+    /// Resumes interruption unwinding after masked cleanup succeeds.
+    IoRestoreInterruption {
+        interruption: crate::vm::Interruption,
+        mask_depth: u32,
+    },
 }
 
 // The pre-I1 layout measured 40 bytes; IO frames must not widen this hot type.

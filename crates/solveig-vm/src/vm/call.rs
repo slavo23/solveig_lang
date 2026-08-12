@@ -647,7 +647,9 @@ impl Interpreter<'_> {
             | Continuation::IoCatchDefect(_)
             | Continuation::IoFinally(_)
             | Continuation::IoRestore(_)
-            | Continuation::IoRestoreDefect(_) => {
+            | Continuation::IoRestoreDefect(_)
+            | Continuation::IoRestoreMask(_)
+            | Continuation::IoRestoreInterruption { .. } => {
                 solveig_base::ice!("IO continuation reached bytecode return handling")
             }
         }

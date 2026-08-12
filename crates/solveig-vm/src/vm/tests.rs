@@ -138,7 +138,7 @@ fn call_safe_points_yield_and_resume_with_consistent_process_state() {
                 assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
             }
             StepOutcome::Finished(value) => break value,
-            StepOutcome::Blocked | StepOutcome::Failed(_) => {
+            StepOutcome::Blocked | StepOutcome::Failed(_) | StepOutcome::Interrupted(_) => {
                 solveig_base::ice!("countdown process did not remain runnable")
             }
         }
@@ -249,7 +249,7 @@ fn io_callback_yields_and_resumes_through_the_same_safe_point() {
                 assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
             }
             StepOutcome::Finished(value) => break value,
-            StepOutcome::Blocked | StepOutcome::Failed(_) => {
+            StepOutcome::Blocked | StepOutcome::Failed(_) | StepOutcome::Interrupted(_) => {
                 solveig_base::ice!("IO callback did not remain resumable")
             }
         }
@@ -394,7 +394,9 @@ fn typed_io_handler_frames_keep_their_values_live() {
             | Continuation::CallerFrame { .. }
             | Continuation::PublishGlobalThenHalt { .. }
             | Continuation::PublishGlobalThenResume { .. }
-            | Continuation::IoBind(_) => {
+            | Continuation::IoBind(_)
+            | Continuation::IoRestoreMask(_)
+            | Continuation::IoRestoreInterruption { .. } => {
                 solveig_base::ice!("typed IO root test found an unrelated continuation")
             }
         })
@@ -505,6 +507,91 @@ fn scheduler_runs_another_process_while_worker_io_is_blocked() {
             .send(())
             .expect("blocked test reader should still be connected");
     });
+}
+
+#[test]
+fn interruption_cancels_a_blocked_worker_io_registration() {
+    struct GatedRead {
+        release: Option<std::sync::mpsc::Receiver<()>>,
+        contents: Cursor<Vec<u8>>,
+    }
+
+    impl std::io::Read for GatedRead {
+        fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+            if let Some(release) = self.release.take() {
+                release.recv().map_err(|disconnected| {
+                    std::io::Error::other(format!("read gate disconnected: {disconnected}"))
+                })?;
+            }
+            std::io::Read::read(&mut self.contents, buffer)
+        }
+    }
+
+    let program = program(vec![global("main", int(0))], vec![], &[]);
+    let bytecode = lower_to_bytecode(&program);
+    let (release_tx, release_rx) = std::sync::mpsc::channel();
+    let mut input = std::io::BufReader::new(GatedRead {
+        release: Some(release_rx),
+        contents: Cursor::new(b"discarded\n".to_vec()),
+    });
+    let mut output = Vec::new();
+    let input = Mutex::new(&mut input as &mut (dyn BufRead + Send));
+    let output = Mutex::new(&mut output as &mut (dyn Write + Send));
+
+    thread::scope(|scope| {
+        let io = IoSubsystem::start(scope, &input, &output, &[], Path::new("."))
+            .expect("IO workers should start");
+        let mut runtime = Runtime::new_with_io(bytecode, io);
+        let blocked = runtime.allocate_process();
+        assert_eq!(runtime.run_queue.pop_front(), Some(blocked));
+        let request = runtime
+            .io
+            .issue(blocked, io_worker::IoRequest::ReadLine)
+            .expect("readLine request should enter the worker pool");
+        runtime.processes[blocked].status = ProcStatus::Blocked(BlockReason::Io(request));
+
+        let killer = runtime.allocate_process();
+        assert_eq!(runtime.run_queue.pop_front(), Some(killer));
+        let mut killer_process = runtime.take_process(killer);
+        {
+            let mut interpreter = Interpreter::new(&mut runtime, &mut killer_process);
+            interpreter
+                .interrupt_thread(Value::ThreadId(blocked.into_raw().into_u32()))
+                .expect("valid thread interruption should succeed");
+        }
+        runtime.restore_process(killer_process);
+        assert!(!runtime.io.has_wakeable_request());
+        assert_eq!(runtime.run_queue.pop_front(), Some(blocked));
+        assert_eq!(
+            perform_process_io(&mut runtime, blocked, Value::Unit),
+            StepOutcome::Interrupted(Interruption::Killed)
+        );
+
+        release_tx
+            .send(())
+            .expect("blocked test reader should still be connected");
+        let error = scheduler::next_runnable(&mut runtime)
+            .expect_err("a cancelled completion must not wake its former process");
+        assert_eq!(error.message, "all threads are blocked forever");
+    });
+}
+
+#[test]
+fn nested_interruption_masks_restore_one_depth_at_a_time() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let process = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let mut process = runtime.take_process(process);
+
+    {
+        let mut interpreter = Interpreter::new(&mut runtime, &mut process);
+        assert_eq!(interpreter.enter_mask(), Ok(0));
+        assert_eq!(interpreter.enter_mask(), Ok(1));
+        assert_eq!(interpreter.mask_depth, 2);
+        assert_eq!(interpreter.enter_restore_mask(), Ok(2));
+        assert_eq!(interpreter.mask_depth, 1);
+    }
 }
 
 #[test]
@@ -776,6 +863,44 @@ fn blackhole_waiters_resume_with_the_published_value() {
         runtime.globals.get(2),
         Some(GlobalSlot::Evaluated(Value::Int(44)))
     ));
+}
+
+#[test]
+fn interrupted_global_owner_restores_thunk_and_retries_waiters() {
+    let program = program(
+        vec![global("shared", int(42)), global("waiter", global_ref(0))],
+        Vec::new(),
+        &[],
+    );
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let owner = runtime.allocate_process();
+    let waiter = runtime.allocate_process();
+    runtime.run_queue.clear();
+    start_process_global(&mut runtime, owner, 0);
+    start_process_global(&mut runtime, waiter, 1);
+    assert_eq!(run_process(&mut runtime, waiter), StepOutcome::Blocked);
+    let retry_pc = runtime.processes[waiter].pc;
+
+    let mut owner_process = runtime.take_process(owner);
+    let outcome = {
+        let mut interpreter = Interpreter::new(&mut runtime, &mut owner_process);
+        let program = interpreter.program;
+        interpreter.resume_io_interruption(program, Interruption::Killed)
+    };
+    runtime.restore_process(owner_process);
+
+    assert_eq!(outcome, Err(StepOutcome::Interrupted(Interruption::Killed)));
+    assert!(matches!(
+        runtime.globals.first(),
+        Some(GlobalSlot::Thunk { .. })
+    ));
+    assert_eq!(runtime.processes[waiter].status, ProcStatus::Runnable);
+    assert_eq!(runtime.processes[waiter].pc + 1, retry_pc);
+    assert_eq!(runtime.run_queue.pop_front(), Some(waiter));
+    assert_eq!(
+        run_process(&mut runtime, waiter),
+        StepOutcome::Finished(Value::Int(42))
+    );
 }
 
 #[test]

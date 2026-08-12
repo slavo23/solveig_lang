@@ -69,7 +69,8 @@ impl Roots<'_> {
             ProcStatus::Runnable
             | ProcStatus::Running
             | ProcStatus::Blocked(BlockReason::Io(_) | BlockReason::Blackhole(_))
-            | ProcStatus::Failed(_) => {}
+            | ProcStatus::Failed(_)
+            | ProcStatus::Interrupted(_) => {}
         }
         if let Some(value) = &mut process.io_current {
             visit(value);
@@ -88,7 +89,9 @@ impl Roots<'_> {
                 Continuation::Halt
                 | Continuation::CallerFrame { .. }
                 | Continuation::PublishGlobalThenHalt { .. }
-                | Continuation::PublishGlobalThenResume { .. } => {}
+                | Continuation::PublishGlobalThenResume { .. }
+                | Continuation::IoRestoreMask(_)
+                | Continuation::IoRestoreInterruption { .. } => {}
             }
         }
     }
@@ -423,7 +426,10 @@ fn rewrite_io_action(
         IoAction::Pure(value)
         | IoAction::Fail(value)
         | IoAction::Print { text: value, .. }
-        | IoAction::Spawn { action: value } => {
+        | IoAction::Spawn { action: value }
+        | IoAction::KillThread { thread: value }
+        | IoAction::Mask { action: value }
+        | IoAction::RestoreMask { action: value } => {
             evacuate_value(heap, value, worklist, promoted);
         }
         IoAction::Bind {
@@ -596,7 +602,10 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
         IoAction::Pure(value)
         | IoAction::Fail(value)
         | IoAction::Print { text: value, .. }
-        | IoAction::Spawn { action: value } => {
+        | IoAction::Spawn { action: value }
+        | IoAction::KillThread { thread: value }
+        | IoAction::Mask { action: value }
+        | IoAction::RestoreMask { action: value } => {
             mark_old_child(heap, value, worklist);
         }
         IoAction::Bind {
@@ -695,7 +704,10 @@ fn assert_object_children_live(
             IoAction::Pure(value)
             | IoAction::Fail(value)
             | IoAction::Print { text: value, .. }
-            | IoAction::Spawn { action: value } => {
+            | IoAction::Spawn { action: value }
+            | IoAction::KillThread { thread: value }
+            | IoAction::Mask { action: value }
+            | IoAction::RestoreMask { action: value } => {
                 assert_value_live(heap, value, seen, worklist);
             }
             IoAction::Bind {

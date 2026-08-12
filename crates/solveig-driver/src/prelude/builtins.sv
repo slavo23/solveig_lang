@@ -86,12 +86,20 @@ orElse action fallback = catchError action (fun error => fallback);
 
 -- | Runs cleanup after an action succeeds or raises a typed error.
 finally : forall e a b. IO e a -> IO e b -> IO e a;
-finally action cleanup = prelude.prim.finallyIO action cleanup;
+finally action cleanup =
+    prelude.prim.maskIO
+        (prelude.prim.finallyIO
+            (prelude.prim.restoreMaskIO action)
+            cleanup);
 
 -- | Acquires a resource and releases it after its use action finishes.
 bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a;
 bracket acquire release use =
-    bindIO acquire (fun resource => finally (use resource) (release resource));
+    mask
+        (bindIO acquire (fun resource =>
+            prelude.prim.finallyIO
+                (prelude.prim.restoreMaskIO (use resource))
+                (release resource)));
 
 -- | Writes text followed by a newline.
 printLine : String -> Task ();
@@ -120,6 +128,14 @@ appendFile path contents = prelude.prim.appendFile path contents;
 -- | Starts an IO action in a new lightweight thread.
 spawn : forall childError e. IO childError () -> IO e ThreadId;
 spawn action = prelude.prim.spawn action;
+
+-- | Requests interruption of a lightweight thread.
+killThread : ThreadId -> Task ();
+killThread thread = prelude.prim.killThread thread;
+
+-- | Defers interruption while an action runs, except while it is blocked.
+mask : forall e a. IO e a -> IO e a;
+mask action = prelude.prim.maskIO action;
 
 -- | Creates an unbounded typed channel.
 newChan : forall e a. IO e (Chan a);

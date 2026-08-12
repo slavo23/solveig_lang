@@ -167,25 +167,28 @@ Here `release resource` runs before `reportDefect`. If cleanup itself returns a
 typed error or raises a defect, that cleanup failure replaces the saved
 outcome. This prevents a failed release from being hidden.
 
-Interruption-safe installation needs masking so cancellation cannot land
-between acquisition and installing the cleanup frame. Phase J2 adds that
-mechanism together with thread cancellation. Until then, `finally` and
-`bracket` provide their completed guarantees for success, typed failure, and
-defects, but no public interruption API exists yet.
+Interruption-safe installation uses masking so cancellation cannot land between
+acquisition and installing the cleanup frame. `bracket` masks acquisition and
+cleanup, restores the caller's interruption state for the use action, and runs
+release while unwinding an interruption. `finally` applies the same rule to an
+action and cleanup pair.
 
 ## Interruption
 
 Interruption cancels work because another computation requested it: for
-example, a future `killThread`, a timeout, or the losing side of a race. It is
-delivered only at VM safe points so runtime state remains valid. It is not an
-`IOError`, is not converted to `Defect`, and will not be caught by
+example, `killThread`, a future timeout, or the losing side of a future race.
+It is delivered only at VM safe points so runtime state remains valid. It is
+not an `IOError`, is not converted to `Defect`, and will not be caught by
 `catchError` or `catchDefect`.
 
-Phase J defines the public interruption and structured-concurrency operations.
-Its masking rule will defer delivery while a cleanup scope is installed or
-executed, then restore the previous masking state. Code should use `bracket`
-rather than inventing an acquire/use/release sequence so that the same source
-program gains the full interruption guarantee when that machinery lands.
+`mask action` defers delivery while `action` is runnable, then restores the
+previous nesting depth and delivers any pending request. A channel or worker-IO
+operation that must actually wait remains interruptible even inside `mask`.
+This makes acquisition atomic without making indefinite waits unkillable.
+Cleanup entered because of interruption runs masked; a second interruption may
+still stop cleanup if it reaches an interruptible blocking operation. Solveig
+does not expose an uninterruptible mask because `bracket` does not require one
+and permanently unkillable waits would be a worse default.
 
 ## Pattern-match failures are compile-time errors
 

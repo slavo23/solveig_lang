@@ -395,3 +395,6 @@ pub const BUILTIN_SEND_CHAN: BuiltinId = BuiltinId(54);
 pub const BUILTIN_RECV_CHAN: BuiltinId = BuiltinId(55);
 pub const BUILTIN_TRY_RECV_CHAN: BuiltinId = BuiltinId(56);
 pub const BUILTIN_CLOSE_CHAN: BuiltinId = BuiltinId(57);
+pub const BUILTIN_KILL_THREAD: BuiltinId = BuiltinId(58);
+pub const BUILTIN_MASK_IO: BuiltinId = BuiltinId(59);
+pub const BUILTIN_RESTORE_MASK_IO: BuiltinId = BuiltinId(60);

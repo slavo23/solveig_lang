@@ -147,9 +147,11 @@ the continuation stack.
 | `IoBind(continuation)` | Apply the saved Solveig continuation to the completed IO result and continue with the returned action. |
 | `IoCatch(handler)` | Handle the next typed failure below this frame; successful values pass through it. |
 | `IoCatchDefect(handler)` | Handle a defect raised while executing the action below this installed scope. |
-| `IoFinally(cleanup)` | Run cleanup after the action below finishes with a value or typed failure. |
+| `IoFinally(cleanup)` | Run cleanup after the action below finishes with a value, typed failure, defect, or interruption. |
 | `IoRestore(outcome)` | Resume the saved success or typed failure after cleanup succeeds. |
 | `IoRestoreDefect(defect)` | Resume defect unwinding after cleanup succeeds. |
+| `IoRestoreMask(depth)` | Restore the previous scoped interruption-mask depth. |
+| `IoRestoreInterruption { interruption, mask_depth }` | Restore masking and continue interruption unwind after cleanup succeeds. |
 
 The enum is guarded at 40 bytes because `PublishGlobalThenResume` already sets
 its hot-path size; the IO frames must not widen it. GC traces the `Value`
@@ -175,8 +177,9 @@ callback execution back into the IO loop.
 its typed `ProcessId`, current chunk/PC/frame base, value stack, continuation
 stack, pattern binding buffer, temporary roots, current IO action, pending
 plain worker or channel result, status, and remaining reduction count. `ProcStatus` is
-`Runnable`, `Running`, `Blocked(reason)`, `Finished(value)`, or
-`Failed(error)`. Current block reasons are a worker `RequestId`, a global
+`Runnable`, `Running`, `Blocked(reason)`, `Finished(value)`, `Failed(error)`,
+or `Interrupted(reason)`. A process also retains one pending interruption flag
+and a nested mask-depth counter. Current block reasons are a worker `RequestId`, a global
 `GlobalIndex`, and a channel `ChanId`; later resources must extend this typed
 enum rather than encode meaning in integers.
 
@@ -189,7 +192,7 @@ short-lived split-borrow view; it owns no state.
 The free function `run(&mut Runtime, &mut Process) -> StepOutcome` replenishes
 an exhausted budget, marks the process running, executes the dispatch loop,
 and records the explicit scheduler return reason. `StepOutcome` is `Yielded`,
-`Blocked`, `Finished(Value)`, or `Failed(RuntimeError)`, following the return
+`Blocked`, `Finished(Value)`, `Failed(RuntimeError)`, or `Interrupted`, following the return
 reason discipline in GHC's scheduler. The IO path uses the same outcome and
 process lifecycle while its outer loop interprets `IoAction` values.
 
@@ -197,7 +200,8 @@ process lifecycle while its outer loop interprets `IoAction` values.
 
 `IoAction` is data, not an eagerly performed host effect. Its variants are
 `Pure`, typed `Fail`, `Bind`, `Catch`, `CatchDefect`, `Finally`, terminal
-print/read, `GetArgs`, `Spawn`, channel operations, and file read/write. The IO loop keeps the
+print/read, `GetArgs`, `Spawn`, `KillThread`, scoped mask operations, channel
+operations, and file read/write. The IO loop keeps the
 current action in `Process::io_current` and pushes the matching IO continuation
 when descending through a compound action. When an action yields a value, the loop
 pops the saved continuation, applies it through bytecode when required, and
@@ -425,18 +429,23 @@ Marlow, Peyton Jones, and Singh, “Runtime Support for Multicore Haskell” (IC
   if a failed waiter owned an outer global, that blackhole and its waiters fail
   too. Later attempts to force the global observe the cached failure rather
   than retrying or blocking forever.
+- Owner interruption restores each claimed slot to its original thunk and
+  wakes waiters at their `LoadGlobal` instruction so one can retry. Unlike a
+  deterministic defect, interruption must not be memoized.
 
 The process continuation stack is the ownership record: each live
 `PublishGlobalThen*` frame identifies one global the process must either
-publish or fail. There is no second per-process blackhole stack.
+publish, fail, or restore after interruption. There is no second per-process
+blackhole stack.
 
 ## Safe points and preemption
 
 `Interpreter::safe_point` is the only runtime boundary that consumes a
 process reduction and admits GC. Calls, taken backward jumps, and allocation
-paths all reach this function. Interruption delivery and debugger stops must
-extend this function in their later phases instead of adding another polling
-path.
+paths all reach this function. Exhausting its reduction budget returns to the
+scheduler; interruption is checked before that same suspended process resumes,
+so no second polling cadence exists. The IO machine also checks pending
+delivery before each action and when a masked operation is about to park.
 
 The reduction that exhausts a quantum is allowed to finish its current
 bytecode instruction before `run` returns `StepOutcome::Yielded`. Consequently
@@ -490,6 +499,7 @@ The scheduler transition for each `StepOutcome` is fixed:
 | `Blocked` | Retain the process as `Blocked(reason)` and leave it out of the run queue until the matching resource wakes it. |
 | `Finished(value)` | Retain the finished value as a GC root. Main completion returns it and ends scheduling; a non-main process remains finished and is otherwise ignored. |
 | `Failed(error)` | Fail any globals owned by the process and clear its resumable state. Main failure returns the error; non-main failure is written to stderr. |
+| `Interrupted` | Revert interrupted global evaluations, run installed cleanup while unwinding, clear resumable state, and retire the process without reporting cancellation as an error. |
 
 `spawn : forall childError e. IO childError () -> IO e ThreadId` constructs an
 inert IO action.
@@ -513,6 +523,39 @@ Program lifetime is owned by the main process:
 The ordering contract remains deterministic FIFO. `SOLVEIG_REDUCTIONS` fixes
 the quantum used by every process, and `SOLVEIG_SCHED_DETERMINISTIC=1` pins the
 policy explicitly for tests. Scheduling never uses sleeps or elapsed time.
+
+## Interruption and masking
+
+`killThread : ThreadId -> Task ()` constructs an inert request. Performing it
+sets the target process's single pending `Interruption::Killed` flag and returns
+without waiting for delivery. A finished, failed, interrupted, or unknown
+identity is a successful no-op. A runnable target accepts the request when it
+next resumes at the existing safe-point cadence. This follows Marlow, Peyton
+Jones, Moran, and Reppy, “Asynchronous Exceptions in Haskell” (PLDI 2001),
+sections 5.2–5.3 and 8.
+
+`mask` is scoped and nestable. Entering it increments `Process::mask_depth`;
+an `IoRestoreMask` frame restores the previous depth on success, typed failure,
+defect, or interruption. While the depth is non-zero, ordinary safe-point
+delivery is deferred. Reaching zero delivers a pending request before the next
+action continues.
+
+The paper's interruptible-operation rule still applies inside a mask. A channel
+or worker operation that can complete immediately does so atomically. If it
+must park, a pending interruption wins; if it is already parked, `killThread`
+removes its channel waiter or cancels its request-table registration and wakes
+it to unwind. The host call itself cannot be forcibly stopped, but its eventual
+plain-Rust completion is discarded and cannot wake or mutate the retired
+process. Timer waits join this cancellation path when J3 introduces them.
+
+`finally` and `bracket` are Prelude compositions over private mask-state IO
+actions. Their protected body runs with the prior state restored; cleanup runs
+masked. Interruption unwinding ignores typed-error and defect handlers, executes
+each installed `IoFinally`, and resumes the saved interruption after cleanup
+succeeds. A cleanup typed failure or defect replaces the interruption, matching
+the existing cleanup-precedence rule. No uninterruptible mask is exposed: the
+first interruption cannot land in runnable cleanup, while a later request may
+still stop cleanup at an indefinitely blocking operation.
 
 ## Typed channels
 
@@ -557,6 +600,10 @@ state transition:
    allocation safe point on the scheduler thread. A host error becomes the
    matching closed `IOError` constructor and an inert `Fail` action there; it
    does not enter the VM defect channel.
+
+If interruption cancels a blocked request, its request-table entry becomes a
+cancelled tombstone until the worker returns. Completion frees that entry and
+is discarded; only a still-owned request can wake a process.
 
 The VM enforces managed process-stack and heap-object ceilings. The defaults
 are intentionally above the million-bind regression; tests and embedders may
@@ -651,9 +698,9 @@ owner decision.
 
 ### Scheduling, blocking, and stopping
 
-- `Interpreter::safe_point` is the sole reduction/GC/stop polling boundary.
-  Calls, taken backward jumps, and allocations use it; interruption and
-  debugger work must extend it rather than add another definition.
+- `Interpreter::safe_point` is the sole reduction/GC suspension boundary.
+  Calls, taken backward jumps, and allocations use it; interruption is
+  observed when the suspended process resumes, not by a second bytecode poll.
 - The saved state returned as `Yielded` is complete and rooted, and its PC is a
   resume offset. A yielded process returns to the back of the strict FIFO run
   queue.
@@ -661,7 +708,8 @@ owner decision.
   fixed reduction budget and exact FIFO order.
 - A blocked process records one typed `BlockReason`. IO completion must match
   its `RequestId`; global wakeup must match its `GlobalIndex`; channel wakeup
-  must match its `ChanId`.
+  must match its `ChanId`. Interruption removes or cancels the corresponding
+  scheduler registration before making the process runnable.
 - An empty run queue waits only when an outstanding external completion can
   make progress. Otherwise the runtime reports deadlock instead of spinning.
 - Main completion terminates program scheduling. Non-main failure is reported

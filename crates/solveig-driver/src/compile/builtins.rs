@@ -444,7 +444,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             poly_arr(
                 &[e_id, f_id],
                 &[io_of(e.clone(), Ty::TyUnit)],
-                io_of(f, thread_id),
+                io_of(f, thread_id.clone()),
             ),
         ),
         prim_spec(
@@ -460,7 +460,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             poly_arr(
                 &[e_id, a_id],
                 std::slice::from_ref(&int),
-                io_of(e, chan_a.clone()),
+                io_of(e.clone(), chan_a.clone()),
             ),
         ),
         prim_spec(
@@ -500,8 +500,30 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             poly_arr(
                 std::slice::from_ref(&a_id),
                 std::slice::from_ref(&chan_a),
-                io_of(io_error, Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
+        ),
+        prim_spec(
+            "killThread",
+            BUILTIN_KILL_THREAD,
+            1,
+            unary(thread_id, io_of(io_error, Ty::TyUnit)),
+        ),
+        prim_spec(
+            "maskIO",
+            BUILTIN_MASK_IO,
+            1,
+            poly_arr(
+                &[e_id, a_id],
+                &[io_of(e.clone(), a.clone())],
+                io_of(e.clone(), a.clone()),
+            ),
+        ),
+        prim_spec(
+            "restoreMaskIO",
+            BUILTIN_RESTORE_MASK_IO,
+            1,
+            poly_arr(&[e_id, a_id], &[io_of(e.clone(), a.clone())], io_of(e, a)),
         ),
     ]
 }

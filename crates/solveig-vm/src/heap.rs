@@ -96,6 +96,15 @@ pub enum IoAction {
     CloseChan {
         channel: Value,
     },
+    KillThread {
+        thread: Value,
+    },
+    Mask {
+        action: Value,
+    },
+    RestoreMask {
+        action: Value,
+    },
     ReadFile {
         path: Value,
     },

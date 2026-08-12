@@ -21,6 +21,7 @@ mod call;
 mod channel;
 mod dispatch;
 mod gc;
+mod interruption;
 mod io;
 mod io_worker;
 mod scheduler;
@@ -52,6 +53,8 @@ pub struct Process {
     io_result: Option<IoResult>,
     channel_result: Option<ChannelResult>,
     pending_defect: Option<RuntimeError>,
+    interrupted: Option<Interruption>,
+    mask_depth: u32,
     status: ProcStatus,
     reductions_left: u32,
 }
@@ -103,6 +106,12 @@ enum ChannelResult {
     Value(Value),
     Closed,
 }
+
+/// Identifies the asynchronous reason a process must unwind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Interruption {
+    Killed,
+}
 /// Describes whether a process may run or why it has stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcStatus {
@@ -111,6 +120,7 @@ pub enum ProcStatus {
     Blocked(BlockReason),
     Finished(Value),
     Failed(RuntimeError),
+    Interrupted(Interruption),
 }
 
 /// Describes the resource that prevents a process from running.
@@ -145,6 +155,7 @@ pub enum StepOutcome {
     Blocked,
     Finished(Value),
     Failed(RuntimeError),
+    Interrupted(Interruption),
 }
 
 pub(crate) struct Interpreter<'a> {
@@ -185,6 +196,8 @@ impl Process {
             io_result: None,
             channel_result: None,
             pending_defect: None,
+            interrupted: None,
+            mask_depth: 0,
             status: ProcStatus::Runnable,
             reductions_left: reduction_budget,
         }
@@ -204,6 +217,8 @@ impl Process {
             io_result: None,
             channel_result: None,
             pending_defect: None,
+            interrupted: None,
+            mask_depth: 0,
             status: ProcStatus::Running,
             reductions_left: 0,
         }
@@ -217,12 +232,14 @@ impl Process {
                 ProcStatus::Runnable
                 | ProcStatus::Running
                 | ProcStatus::Finished(_)
-                | ProcStatus::Failed(_) => {
+                | ProcStatus::Failed(_)
+                | ProcStatus::Interrupted(_) => {
                     solveig_base::ice!("blocked step returned without a block reason")
                 }
             },
             StepOutcome::Finished(value) => ProcStatus::Finished(*value),
             StepOutcome::Failed(error) => ProcStatus::Failed(error.clone()),
+            StepOutcome::Interrupted(interruption) => ProcStatus::Interrupted(*interruption),
         };
     }
 
@@ -258,7 +275,9 @@ impl Process {
                 | Continuation::IoCatchDefect(_)
                 | Continuation::IoFinally(_)
                 | Continuation::IoRestore(_)
-                | Continuation::IoRestoreDefect(_) => None,
+                | Continuation::IoRestoreDefect(_)
+                | Continuation::IoRestoreMask(_)
+                | Continuation::IoRestoreInterruption { .. } => None,
             }
         }))
     }
@@ -366,6 +385,12 @@ impl Runtime {
                 self.fail_owned_blackholes(process, error);
                 process.io_current = None;
                 process.io_result = None;
+                process.continuations.clear();
+            }
+            StepOutcome::Interrupted(_) => {
+                process.io_current = None;
+                process.io_result = None;
+                process.channel_result = None;
                 process.continuations.clear();
             }
             StepOutcome::Blocked | StepOutcome::Finished(_) => {}
@@ -508,7 +533,9 @@ fn owned_globals(process: &Process) -> Vec<GlobalIndex> {
             | Continuation::IoCatchDefect(_)
             | Continuation::IoFinally(_)
             | Continuation::IoRestore(_)
-            | Continuation::IoRestoreDefect(_) => None,
+            | Continuation::IoRestoreDefect(_)
+            | Continuation::IoRestoreMask(_)
+            | Continuation::IoRestoreInterruption { .. } => None,
         })
         .collect()
 }
@@ -517,6 +544,9 @@ fn outcome_value(outcome: StepOutcome) -> Result<Value, RuntimeError> {
     match outcome {
         StepOutcome::Finished(value) => Ok(value),
         StepOutcome::Failed(error) => Err(error),
+        StepOutcome::Interrupted(_) => Err(RuntimeError::builtin(
+            "main thread was interrupted".to_string(),
+        )),
         StepOutcome::Yielded | StepOutcome::Blocked => {
             solveig_base::ice!("single-process execution stopped before producing a value")
         }

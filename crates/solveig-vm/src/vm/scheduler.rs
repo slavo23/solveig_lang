@@ -153,6 +153,13 @@ pub(super) fn schedule_io(
             StepOutcome::Failed(error) => {
                 report_thread_failure(stderr, id.into_raw().into_u32(), &error)?;
             }
+            StepOutcome::Interrupted(_) => {
+                if id == main {
+                    return Err(RuntimeError::builtin(
+                        "main thread was interrupted".to_string(),
+                    ));
+                }
+            }
         }
     }
 }
@@ -186,9 +193,10 @@ pub(super) fn next_runnable(runtime: &mut Runtime) -> Result<ProcessId, RuntimeE
         if let Some(id) = runtime.run_queue.pop_front() {
             return Ok(id);
         }
-        if runtime.io.has_pending() {
-            let completion = runtime.io.wait_completion()?;
-            wake_io_process(runtime, completion);
+        if runtime.io.has_wakeable_request() {
+            if let Some(completion) = runtime.io.wait_completion()? {
+                wake_io_process(runtime, completion);
+            }
             continue;
         }
         return Err(RuntimeError::builtin(

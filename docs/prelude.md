@@ -82,6 +82,8 @@ readFile : String -> Task String
 writeFile : String -> String -> Task ()
 appendFile : String -> String -> Task ()
 spawn : forall childError e. IO childError () -> IO e ThreadId
+killThread : ThreadId -> Task ()
+mask : forall e a. IO e a -> IO e a
 newChan : forall e a. IO e (Chan a)
 newBoundedChan : forall e a. Int -> IO e (Chan a)
 send : forall a. Chan a -> a -> Task ()
@@ -98,10 +100,18 @@ after each print so prompts appear before `readLine`.
 `readFile`, `writeFile`, and `appendFile` are whole-file UTF-8 text operations.
 Relative paths are resolved against the Solveig project root. Their host
 failures are ordinary `IOError` values and can be handled with `catchError`.
-`finally` runs cleanup after success or typed failure; `bracket` installs that
-cleanup after acquisition. Defects raised while executing the installed action
-unwind through the same cleanup frame and may be handled only by
-`catchDefect`; interruption cleanup is completed by Phase J2.
+`finally` runs cleanup after success, typed failure, a defect, or interruption.
+The action runs with the caller's interruption state restored and cleanup runs
+masked. `bracket` masks acquisition and cleanup while restoring the prior state
+for resource use, closing the cancellation window between acquisition and
+cleanup installation. A cleanup failure replaces the saved outcome.
+
+`killThread` requests asynchronous interruption and returns immediately.
+Delivery occurs at the target's next VM safe point; killing an already finished
+or unknown thread succeeds. `mask` defers delivery while its action remains
+runnable. Operations that actually block on a channel or host IO remain
+interruptible, so masked code cannot become permanently unkillable. Nested
+masks restore one depth at a time.
 
 `error` raises `Error`; integer division and modulo by zero raise
 `DivisionByZero`. The VM's managed stack and heap-object ceilings raise

@@ -52,10 +52,16 @@ struct IoCompletion {
     result: IoResult,
 }
 
+#[derive(Clone, Copy)]
+enum RequestOwner {
+    Process(ProcessId),
+    Cancelled,
+}
+
 pub(super) struct IoSubsystem {
     workers: Vec<mpsc::Sender<IoWork>>,
     completions: mpsc::Receiver<IoCompletion>,
-    requests: Vec<Option<ProcessId>>,
+    requests: Vec<Option<RequestOwner>>,
     free_requests: Vec<u32>,
     next_worker: usize,
     args: Vec<String>,
@@ -136,7 +142,7 @@ impl IoSubsystem {
             let Some(slot) = self.requests.get_mut(raw as usize) else {
                 solveig_base::ice!("free IO request id was outside the request table");
             };
-            if slot.replace(process).is_some() {
+            if slot.replace(RequestOwner::Process(process)).is_some() {
                 solveig_base::ice!("free IO request id was still in use");
             }
             RequestId(raw)
@@ -144,7 +150,7 @@ impl IoSubsystem {
             let raw = u32::try_from(self.requests.len()).map_err(|_too_many_requests| {
                 RuntimeError::builtin("IO request table exhausted".to_string())
             })?;
-            self.requests.push(Some(process));
+            self.requests.push(Some(RequestOwner::Process(process)));
             RequestId(raw)
         };
         let Some(worker) = self.workers.get(worker_index) else {
@@ -168,27 +174,53 @@ impl IoSubsystem {
     pub(super) fn try_completion(
         &mut self,
     ) -> Result<Option<(RequestId, ProcessId, IoResult)>, RuntimeError> {
-        match self.completions.try_recv() {
-            Ok(completion) => self.finish_completion(completion).map(Some),
-            Err(mpsc::TryRecvError::Empty) => Ok(None),
-            Err(mpsc::TryRecvError::Disconnected) if !self.has_pending() => Ok(None),
-            Err(mpsc::TryRecvError::Disconnected) => Err(RuntimeError::builtin(
-                "IO completion queue stopped with pending requests".to_string(),
-            )),
+        loop {
+            match self.completions.try_recv() {
+                Ok(completion) => {
+                    if let Some(completion) = self.finish_completion(completion)? {
+                        return Ok(Some(completion));
+                    }
+                }
+                Err(mpsc::TryRecvError::Empty) => return Ok(None),
+                Err(mpsc::TryRecvError::Disconnected) if !self.has_wakeable_request() => {
+                    return Ok(None);
+                }
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    return Err(RuntimeError::builtin(
+                        "IO completion queue stopped with pending requests".to_string(),
+                    ));
+                }
+            }
         }
     }
 
     pub(super) fn wait_completion(
         &mut self,
-    ) -> Result<(RequestId, ProcessId, IoResult), RuntimeError> {
+    ) -> Result<Option<(RequestId, ProcessId, IoResult)>, RuntimeError> {
         let completion = self.completions.recv().map_err(|_disconnected| {
             RuntimeError::builtin("IO completion queue stopped with pending requests".to_string())
         })?;
         self.finish_completion(completion)
     }
 
-    pub(super) fn has_pending(&self) -> bool {
-        self.requests.iter().any(Option::is_some)
+    pub(super) fn cancel(&mut self, id: RequestId, process: ProcessId) {
+        let Some(slot) = self.requests.get_mut(id.0 as usize) else {
+            solveig_base::ice!("cancelled IO request was outside the request table");
+        };
+        match slot {
+            Some(RequestOwner::Process(owner)) if *owner == process => {
+                *slot = Some(RequestOwner::Cancelled);
+            }
+            Some(RequestOwner::Process(_)) | Some(RequestOwner::Cancelled) | None => {
+                solveig_base::ice!("cancelled IO request did not belong to the blocked process")
+            }
+        }
+    }
+
+    pub(super) fn has_wakeable_request(&self) -> bool {
+        self.requests
+            .iter()
+            .any(|request| matches!(request, Some(RequestOwner::Process(_))))
     }
 
     pub(super) fn args(&self) -> &[String] {
@@ -207,15 +239,18 @@ impl IoSubsystem {
     fn finish_completion(
         &mut self,
         completion: IoCompletion,
-    ) -> Result<(RequestId, ProcessId, IoResult), RuntimeError> {
+    ) -> Result<Option<(RequestId, ProcessId, IoResult)>, RuntimeError> {
         let Some(slot) = self.requests.get_mut(completion.id.0 as usize) else {
             solveig_base::ice!("IO completion referenced an unknown request");
         };
-        let Some(process) = slot.take() else {
+        let Some(owner) = slot.take() else {
             solveig_base::ice!("IO request completed more than once");
         };
         self.free_requests.push(completion.id.0);
-        Ok((completion.id, process, completion.result))
+        Ok(match owner {
+            RequestOwner::Process(process) => Some((completion.id, process, completion.result)),
+            RequestOwner::Cancelled => None,
+        })
     }
 }
 

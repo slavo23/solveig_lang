@@ -12,9 +12,10 @@ use solveig_ast::ast::{
     BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD,
     BUILTIN_INT_COMPARE, BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT,
     BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG,
-    BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_NEW_BOUNDED_CHAN,
-    BUILTIN_NEW_CHAN, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_FILE,
-    BUILTIN_READ_LINE, BUILTIN_RECV_CHAN, BUILTIN_SEND_CHAN, BUILTIN_SPAWN, BUILTIN_STRING_APPEND,
+    BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_KILL_THREAD,
+    BUILTIN_MASK_IO, BUILTIN_NEW_BOUNDED_CHAN, BUILTIN_NEW_CHAN, BUILTIN_PRINT_LINE,
+    BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_RECV_CHAN,
+    BUILTIN_RESTORE_MASK_IO, BUILTIN_SEND_CHAN, BUILTIN_SPAWN, BUILTIN_STRING_APPEND,
     BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
     BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE,
     BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
@@ -280,6 +281,9 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_RECV_CHAN, "recv", 1, recv_chan),
     builtin!(BUILTIN_TRY_RECV_CHAN, "tryRecv", 1, try_recv_chan),
     builtin!(BUILTIN_CLOSE_CHAN, "closeChan", 1, close_chan),
+    builtin!(BUILTIN_KILL_THREAD, "killThread", 1, kill_thread),
+    builtin!(BUILTIN_MASK_IO, "maskIO", 1, mask_io),
+    builtin!(BUILTIN_RESTORE_MASK_IO, "restoreMaskIO", 1, restore_mask_io),
 ];
 
 // D3 primitive semantics:
@@ -660,6 +664,21 @@ fn try_recv_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, Runti
 fn close_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let channel = expect_value(args, 0, "closeChan")?;
     Ok(ctx.alloc_io_action(IoAction::CloseChan { channel }))
+}
+
+fn kill_thread(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let thread = expect_value(args, 0, "killThread")?;
+    Ok(ctx.alloc_io_action(IoAction::KillThread { thread }))
+}
+
+fn mask_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let action = expect_value(args, 0, "maskIO")?;
+    Ok(ctx.alloc_io_action(IoAction::Mask { action }))
+}
+
+fn restore_mask_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let action = expect_value(args, 0, "restoreMaskIO")?;
+    Ok(ctx.alloc_io_action(IoAction::RestoreMask { action }))
 }
 
 fn ordering_value(

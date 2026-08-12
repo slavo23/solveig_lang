@@ -157,6 +157,32 @@ impl Interpreter<'_> {
         }
     }
 
+    pub(super) fn remove_channel_waiter(&mut self, id: ChanId, process: ProcessId) {
+        let Some(waiters) = self.channel_waiters.get_mut(&id) else {
+            solveig_base::ice!("blocked channel process had no scheduler waiter queue")
+        };
+        let sender = waiters
+            .senders
+            .iter()
+            .position(|(sender, _)| *sender == process);
+        let receiver = waiters
+            .receivers
+            .iter()
+            .position(|receiver| *receiver == process);
+        match (sender, receiver) {
+            (Some(index), None) => {
+                waiters.senders.remove(index);
+            }
+            (None, Some(index)) => {
+                waiters.receivers.remove(index);
+            }
+            (Some(_), Some(_)) | (None, None) => {
+                solveig_base::ice!("blocked process did not have exactly one channel wait entry")
+            }
+        }
+        self.remove_empty_waiters(id);
+    }
+
     fn wake_channel_process(&mut self, process_id: ProcessId, id: ChanId, result: ChannelResult) {
         let process = &mut self.inactive_processes[process_id];
         if process.status != ProcStatus::Blocked(BlockReason::Chan(id)) {

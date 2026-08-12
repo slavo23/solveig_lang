@@ -19,7 +19,9 @@ prelude.builtins.error : forall a. String -> a
 prelude.builtins.even : Int -> Bool
 prelude.builtins.failIO : forall e a. e -> IO e a
 prelude.builtins.finally : forall e a b. IO e a -> IO e b -> IO e a
+prelude.builtins.killThread : ThreadId -> IO IOError ()
 prelude.builtins.mapError : forall e f a. (e -> f) -> IO e a -> IO f a
+prelude.builtins.mask : forall e a. IO e a -> IO e a
 prelude.builtins.newBoundedChan : forall e a. Int -> IO e (Chan a)
 prelude.builtins.newChan : forall e a. IO e (Chan a)
 prelude.builtins.not : Bool -> Bool
@@ -92,6 +94,8 @@ prelude.prim.intNeg : Int -> Int
 prelude.prim.intSub : Int -> Int -> Int
 prelude.prim.intToFloat : Int -> Float
 prelude.prim.intToString : Int -> String
+prelude.prim.killThread : ThreadId -> IO IOError ()
+prelude.prim.maskIO : forall e a. IO e a -> IO e a
 prelude.prim.newBoundedChan : forall e a. Int -> IO e (Chan a)
 prelude.prim.newChan : forall e a. IO e (Chan a)
 prelude.prim.printLine : String -> IO IOError ()
@@ -100,6 +104,7 @@ prelude.prim.pureIO : forall e a. a -> IO e a
 prelude.prim.readFile : String -> IO IOError String
 prelude.prim.readLine : IO IOError String
 prelude.prim.recv : forall a. Chan a -> IO IOError a
+prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
 prelude.prim.send : forall a. Chan a -> a -> IO IOError ()
 prelude.prim.spawn : forall e f. IO e () -> IO f ThreadId
 prelude.prim.stringAppend : String -> String -> String

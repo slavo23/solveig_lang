@@ -1,0 +1,6 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+spinner-cleaned
+spinner-killed

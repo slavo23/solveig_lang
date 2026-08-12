@@ -18,6 +18,8 @@ impl Interpreter<'_> {
         program: &BytecodeProgram,
         action: Value,
     ) -> Result<Value, StepOutcome> {
+        self.deliver_pending_interruption(program)?;
+
         if let Some(error) = self.pending_defect.take() {
             self.resume_io_defect(program, error)?;
         }
@@ -87,6 +89,7 @@ impl Interpreter<'_> {
         // Awkward Squad section 2 gives IO bind the sequencing contract; AOSA's
         // GHC RTS chapter keeps resumable runtime state explicit at safe points.
         loop {
+            self.deliver_pending_interruption(program)?;
             if let Some(error) = self.resource_defect() {
                 self.resume_io_defect(program, error)?;
                 continue;
@@ -131,9 +134,17 @@ impl Interpreter<'_> {
                     if newline {
                         text.push('\n');
                     }
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
                     return self.block_on_io(IoRequest::Print(text));
                 }
                 IoAction::ReadLine => {
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
                     return self.block_on_io(IoRequest::ReadLine);
                 }
                 IoAction::GetArgs => {
@@ -189,7 +200,16 @@ impl Interpreter<'_> {
                         ChannelOutcome::Closed => {
                             self.io_current = Some(self.alloc_channel_closed_action()?);
                         }
-                        ChannelOutcome::Blocked => return Err(StepOutcome::Blocked),
+                        ChannelOutcome::Blocked => {
+                            if let Some(interruption) = self.accept_pending_interruption_at_block()
+                            {
+                                self.remove_channel_waiter(id, self.id);
+                                self.status = ProcStatus::Running;
+                                self.resume_io_interruption(program, interruption)?;
+                            } else {
+                                return Err(StepOutcome::Blocked);
+                            }
+                        }
                         ChannelOutcome::Empty => {
                             solveig_base::ice!("send returned the receive-only empty outcome")
                         }
@@ -206,7 +226,16 @@ impl Interpreter<'_> {
                         ChannelOutcome::Closed => {
                             self.io_current = Some(self.alloc_channel_closed_action()?);
                         }
-                        ChannelOutcome::Blocked => return Err(StepOutcome::Blocked),
+                        ChannelOutcome::Blocked => {
+                            if let Some(interruption) = self.accept_pending_interruption_at_block()
+                            {
+                                self.remove_channel_waiter(id, self.id);
+                                self.status = ProcStatus::Running;
+                                self.resume_io_interruption(program, interruption)?;
+                            } else {
+                                return Err(StepOutcome::Blocked);
+                            }
+                        }
                         ChannelOutcome::Empty => {
                             solveig_base::ice!("blocking recv returned an empty outcome")
                         }
@@ -244,9 +273,32 @@ impl Interpreter<'_> {
                         }
                     }
                 }
+                IoAction::KillThread { thread } => {
+                    self.interrupt_thread(thread)?;
+                    self.deliver_pending_interruption(program)?;
+                    if let Some(value) = self.resume_io_value(program, Value::Unit)? {
+                        return Ok(value);
+                    }
+                }
+                IoAction::Mask { action } => {
+                    let previous = self.enter_mask()?;
+                    self.continuations
+                        .push(Continuation::IoRestoreMask(previous));
+                    self.io_current = Some(action);
+                }
+                IoAction::RestoreMask { action } => {
+                    let previous = self.enter_restore_mask()?;
+                    self.continuations
+                        .push(Continuation::IoRestoreMask(previous));
+                    self.io_current = Some(action);
+                }
                 IoAction::ReadFile { path } => {
                     let path = self.expect_string_value(path, "readFile")?;
                     let resolved = self.io.resolve_path(&path);
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
                     return self.block_on_io(IoRequest::ReadFile(resolved));
                 }
                 IoAction::WriteFile {
@@ -258,6 +310,10 @@ impl Interpreter<'_> {
                     let path = self.expect_string_value(path, builtin)?;
                     let contents = self.expect_string_value(contents, builtin)?;
                     let resolved = self.io.resolve_path(&path);
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
                     return self.block_on_io(IoRequest::WriteFile {
                         path: resolved,
                         contents,
@@ -311,6 +367,22 @@ impl Interpreter<'_> {
                     self.resume_io_defect_value(program, defect, false, None)?;
                     return Ok(None);
                 }
+                Continuation::IoRestoreMask(mask_depth) => {
+                    self.mask_depth = mask_depth;
+                    self.io_current = None;
+                    self.deliver_pending_interruption(program)?;
+                    if self.io_current.is_some() {
+                        return Ok(None);
+                    }
+                }
+                Continuation::IoRestoreInterruption {
+                    interruption,
+                    mask_depth,
+                } => {
+                    self.mask_depth = mask_depth;
+                    self.resume_io_interruption(program, interruption)?;
+                    return Ok(None);
+                }
                 Continuation::Halt
                 | Continuation::CallerFrame { .. }
                 | Continuation::PublishGlobalThenHalt { .. }
@@ -352,6 +424,10 @@ impl Interpreter<'_> {
                     self.continuations.push(Continuation::IoRestore(action));
                     self.io_current = Some(cleanup);
                     return Ok(None);
+                }
+                Continuation::IoRestoreMask(mask_depth)
+                | Continuation::IoRestoreInterruption { mask_depth, .. } => {
+                    self.mask_depth = mask_depth;
                 }
                 Continuation::Halt
                 | Continuation::CallerFrame { .. }
@@ -435,6 +511,10 @@ impl Interpreter<'_> {
                     let cleanup = self.root_across_defect_recovery(cleanup, recover_heap);
                     self.io_current = Some(cleanup);
                     return Ok(());
+                }
+                Continuation::IoRestoreMask(mask_depth)
+                | Continuation::IoRestoreInterruption { mask_depth, .. } => {
+                    self.mask_depth = mask_depth;
                 }
                 Continuation::IoCatchDefect(handler) => {
                     let checkpoint = self.temporary_roots.len();
