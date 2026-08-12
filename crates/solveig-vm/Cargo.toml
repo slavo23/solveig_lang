@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 la-arena.workspace = true
+mio = { version = "1.2.2", features = ["net", "os-poll"] }
 solveig-ast = { path = "../solveig-ast" }
 solveig-base = { path = "../solveig-base" }
 solveig-lower = { path = "../solveig-lower" }

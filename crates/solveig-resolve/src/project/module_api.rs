@@ -496,6 +496,10 @@ fn compiler_type_doc(name: &str) -> Option<&'static str> {
         "String" => "Text represented as a sequence of characters.",
         "IO" => "An effectful action that produces a value when run by the program entry point.",
         "Bool" => "A truth value, either True or False.",
+        "ThreadId" => "An opaque identity for one lightweight thread.",
+        "Chan" => "A typed FIFO channel shared by lightweight threads.",
+        "Bytes" => "An immutable sequence of arbitrary bytes.",
+        "Socket" => "An opaque identity for an explicitly managed TCP resource.",
         _ => return None,
     })
 }
@@ -551,6 +555,18 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "charCompare" => "Compares two characters by their ordering.",
         "stringToChars" => "Breaks a string into a list of characters.",
         "charsToString" => "Builds a string from a list of characters.",
+        "stringToBytes" => "Encodes a string as UTF-8 bytes.",
+        "bytesToString" => "Decodes UTF-8 bytes or returns InvalidUtf8.",
+        "bytesLength" => "Returns the number of bytes.",
+        "bytesIndex" => "Returns the byte at an index when it exists.",
+        "bytesSlice" => "Takes a byte slice from a starting index and length.",
+        "bytesAppend" => "Concatenates two byte strings.",
+        "connect" => "Opens a TCP connection to an IP address or localhost.",
+        "listen" => "Binds a loopback TCP listener and returns its actual port.",
+        "accept" => "Accepts the next connection from a TCP listener.",
+        "sendBytes" => "Sends an entire byte string on a connected TCP socket.",
+        "recvBytes" => "Receives up to a requested number of bytes from a TCP socket.",
+        "closeSocket" => "Explicitly closes a TCP listener or connection.",
         "pureIO" => "Creates an IO action that immediately returns a value.",
         "bindIO" => "Sequences an IO action and passes its result to the next action.",
         "error" => "Raises a defect from pure code.",
@@ -581,7 +597,7 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
     })
 }
 
-fn compiler_type_entries() -> [(&'static str, TyConId); 8] {
+fn compiler_type_entries() -> [(&'static str, TyConId); 10] {
     [
         ("Int", PRIM_TYS.int),
         ("Float", PRIM_TYS.float),
@@ -591,6 +607,8 @@ fn compiler_type_entries() -> [(&'static str, TyConId); 8] {
         ("Bool", PRIM_TYS.bool),
         ("ThreadId", PRIM_TYS.thread_id),
         ("Chan", PRIM_TYS.chan),
+        ("Bytes", PRIM_TYS.bytes),
+        ("Socket", PRIM_TYS.socket),
     ]
 }
 

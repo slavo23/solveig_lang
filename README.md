@@ -349,6 +349,7 @@ Solveig currently supports:
 - project-relative UTF-8 text file IO
 - typed FIFO channels, interruption, scoped masking, lightweight timers, and
   structured `withThread`/`race`/`concurrently`/`timeout` combinators
+- immutable byte strings and readiness-driven loopback TCP sockets
 - structured diagnostics with stable codes
 - typed holes with LSP diagnostics and quick-fix fill suggestions
 

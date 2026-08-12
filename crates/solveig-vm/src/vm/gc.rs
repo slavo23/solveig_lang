@@ -338,6 +338,9 @@ fn copy_object_side_payloads(heap: &mut Heap, object: HeapObject) -> HeapObject 
         HeapObject::Str { bytes } => HeapObject::Str {
             bytes: heap.promote_bytes(bytes),
         },
+        HeapObject::Bytes { bytes } => HeapObject::Bytes {
+            bytes: heap.promote_bytes(bytes),
+        },
         HeapObject::Chan(mut channel) => {
             channel.queue = heap.promote_payload(channel.queue);
             HeapObject::Chan(channel)
@@ -393,7 +396,7 @@ fn rewrite_promoted_object(
         HeapObject::Chan(channel) => {
             rewrite_old_payload(heap, channel.queue, worklist, promoted);
         }
-        HeapObject::Data0 { .. } | HeapObject::Str { .. } => {}
+        HeapObject::Data0 { .. } | HeapObject::Str { .. } | HeapObject::Bytes { .. } => {}
         HeapObject::Forwarded(_) => {
             solveig_base::ice!("forwarding entry reached promoted-object scan");
         }
@@ -432,7 +435,11 @@ fn rewrite_io_action(
         | IoAction::Spawn { action: value }
         | IoAction::KillThread { thread: value }
         | IoAction::Mask { action: value }
-        | IoAction::RestoreMask { action: value } => {
+        | IoAction::RestoreMask { action: value }
+        | IoAction::Connect { host: value, .. }
+        | IoAction::Accept { socket: value }
+        | IoAction::RecvBytes { socket: value, .. }
+        | IoAction::CloseSocket { socket: value } => {
             evacuate_value(heap, value, worklist, promoted);
         }
         IoAction::Bind {
@@ -465,6 +472,10 @@ fn rewrite_io_action(
             evacuate_value(heap, channel, worklist, promoted);
             evacuate_value(heap, value, worklist, promoted);
         }
+        IoAction::SendBytes { socket, bytes } => {
+            evacuate_value(heap, socket, worklist, promoted);
+            evacuate_value(heap, bytes, worklist, promoted);
+        }
         IoAction::Recv { channel }
         | IoAction::TryRecv { channel }
         | IoAction::CloseChan { channel } => {
@@ -473,7 +484,8 @@ fn rewrite_io_action(
         IoAction::ReadLine
         | IoAction::GetArgs
         | IoAction::NewChan { .. }
-        | IoAction::Sleep { .. } => {}
+        | IoAction::Sleep { .. }
+        | IoAction::Listen { .. } => {}
     }
 }
 
@@ -579,7 +591,7 @@ fn mark_old_object_children(heap: &mut Heap, id: ObjId, worklist: &mut Vec<ObjId
         }
         HeapObject::IoAction(action) => mark_old_io_action(heap, action, worklist),
         HeapObject::Chan(channel) => mark_old_payload(heap, channel.queue, worklist),
-        HeapObject::Data0 { .. } | HeapObject::Str { .. } => {}
+        HeapObject::Data0 { .. } | HeapObject::Str { .. } | HeapObject::Bytes { .. } => {}
         HeapObject::Forwarded(_) => {
             solveig_base::ice!("forwarding entry reached old-generation marking");
         }
@@ -612,7 +624,11 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
         | IoAction::Spawn { action: value }
         | IoAction::KillThread { thread: value }
         | IoAction::Mask { action: value }
-        | IoAction::RestoreMask { action: value } => {
+        | IoAction::RestoreMask { action: value }
+        | IoAction::Connect { host: value, .. }
+        | IoAction::Accept { socket: value }
+        | IoAction::RecvBytes { socket: value, .. }
+        | IoAction::CloseSocket { socket: value } => {
             mark_old_child(heap, value, worklist);
         }
         IoAction::Bind {
@@ -643,13 +659,18 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
             mark_old_child(heap, channel, worklist);
             mark_old_child(heap, value, worklist);
         }
+        IoAction::SendBytes { socket, bytes } => {
+            mark_old_child(heap, socket, worklist);
+            mark_old_child(heap, bytes, worklist);
+        }
         IoAction::Recv { channel }
         | IoAction::TryRecv { channel }
         | IoAction::CloseChan { channel } => mark_old_child(heap, channel, worklist),
         IoAction::ReadLine
         | IoAction::GetArgs
         | IoAction::NewChan { .. }
-        | IoAction::Sleep { .. } => {}
+        | IoAction::Sleep { .. }
+        | IoAction::Listen { .. } => {}
     }
 }
 
@@ -718,7 +739,11 @@ fn assert_object_children_live(
             | IoAction::Spawn { action: value }
             | IoAction::KillThread { thread: value }
             | IoAction::Mask { action: value }
-            | IoAction::RestoreMask { action: value } => {
+            | IoAction::RestoreMask { action: value }
+            | IoAction::Connect { host: value, .. }
+            | IoAction::Accept { socket: value }
+            | IoAction::RecvBytes { socket: value, .. }
+            | IoAction::CloseSocket { socket: value } => {
                 assert_value_live(heap, value, seen, worklist);
             }
             IoAction::Bind {
@@ -749,6 +774,10 @@ fn assert_object_children_live(
                 assert_value_live(heap, channel, seen, worklist);
                 assert_value_live(heap, value, seen, worklist);
             }
+            IoAction::SendBytes { socket, bytes } => {
+                assert_value_live(heap, socket, seen, worklist);
+                assert_value_live(heap, bytes, seen, worklist);
+            }
             IoAction::Recv { channel }
             | IoAction::TryRecv { channel }
             | IoAction::CloseChan { channel } => {
@@ -757,12 +786,13 @@ fn assert_object_children_live(
             IoAction::ReadLine
             | IoAction::GetArgs
             | IoAction::NewChan { .. }
-            | IoAction::Sleep { .. } => {}
+            | IoAction::Sleep { .. }
+            | IoAction::Listen { .. } => {}
         },
         HeapObject::Chan(channel) => {
             assert_payload_live(heap, id, channel.queue, seen, worklist);
         }
-        HeapObject::Data0 { .. } | HeapObject::Str { .. } => {}
+        HeapObject::Data0 { .. } | HeapObject::Str { .. } | HeapObject::Bytes { .. } => {}
         HeapObject::Forwarded(_) => {
             solveig_base::ice!("forwarding entry reached debug heap walk");
         }

@@ -10,6 +10,8 @@ use std::sync::{Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
+use super::socket::{SocketRequest, SocketSubsystem};
+
 const IO_WORKER_COUNT: usize = 4;
 
 pub(super) enum IoRequest {
@@ -21,11 +23,31 @@ pub(super) enum IoRequest {
         contents: String,
         append: bool,
     },
+    Connect {
+        host: String,
+        port: i64,
+    },
+    Listen {
+        port: i64,
+    },
+    Accept(SocketId),
+    SendBytes {
+        socket: SocketId,
+        bytes: Vec<u8>,
+    },
+    RecvBytes {
+        socket: SocketId,
+        maximum: i64,
+    },
+    CloseSocket(SocketId),
 }
 
 pub(super) enum IoResult {
     Unit,
     Text(String),
+    Bytes(Vec<u8>),
+    Socket(SocketId),
+    Listener { socket: SocketId, port: u16 },
     Failed(IoFailure),
 }
 
@@ -41,6 +63,19 @@ pub(super) enum IoFailure {
         append: bool,
         source: io::Error,
     },
+    Connect {
+        host: String,
+        port: i64,
+        source: io::Error,
+    },
+    Listen {
+        port: i64,
+        source: io::Error,
+    },
+    Accept(io::Error),
+    Send(io::Error),
+    Recv(io::Error),
+    CloseSocket(io::Error),
 }
 
 struct IoWork {
@@ -48,9 +83,9 @@ struct IoWork {
     request: IoRequest,
 }
 
-struct IoCompletion {
-    id: RequestId,
-    result: IoResult,
+pub(super) struct IoCompletion {
+    pub(super) id: RequestId,
+    pub(super) result: IoResult,
 }
 
 #[derive(Clone, Copy)]
@@ -61,6 +96,7 @@ enum RequestOwner {
 
 pub(super) struct IoSubsystem {
     workers: Vec<mpsc::Sender<IoWork>>,
+    sockets: SocketSubsystem,
     completions: mpsc::Receiver<IoCompletion>,
     requests: Vec<Option<RequestOwner>>,
     free_requests: Vec<u32>,
@@ -74,6 +110,7 @@ impl IoSubsystem {
         let (_completion_tx, completions) = mpsc::channel();
         Self {
             workers: Vec::new(),
+            sockets: SocketSubsystem::inactive(),
             completions,
             requests: Vec::new(),
             free_requests: Vec::new(),
@@ -91,6 +128,9 @@ impl IoSubsystem {
         cwd: &Path,
     ) -> Result<Self, RuntimeError> {
         let (completion_tx, completions) = mpsc::channel();
+        let sockets = SocketSubsystem::start(scope, completion_tx.clone()).map_err(|error| {
+            RuntimeError::builtin(format!("failed to start socket event loop: {error}"))
+        })?;
         let mut workers = Vec::with_capacity(IO_WORKER_COUNT);
 
         for worker_index in 0..IO_WORKER_COUNT {
@@ -111,6 +151,7 @@ impl IoSubsystem {
 
         Ok(Self {
             workers,
+            sockets,
             completions,
             requests: Vec::new(),
             free_requests: Vec::new(),
@@ -134,7 +175,14 @@ impl IoSubsystem {
             // A single FIFO worker preserves the program-visible order of
             // operations on the shared terminal streams. File requests can
             // still run concurrently on the rest of the pool.
-            IoRequest::Print(_) | IoRequest::ReadLine => 0,
+            IoRequest::Print(_)
+            | IoRequest::ReadLine
+            | IoRequest::Connect { .. }
+            | IoRequest::Listen { .. }
+            | IoRequest::Accept(_)
+            | IoRequest::SendBytes { .. }
+            | IoRequest::RecvBytes { .. }
+            | IoRequest::CloseSocket(_) => 0,
             IoRequest::ReadFile(_) | IoRequest::WriteFile { .. } => {
                 1 + self.next_worker % (self.workers.len().saturating_sub(1))
             }
@@ -154,20 +202,40 @@ impl IoSubsystem {
             self.requests.push(Some(RequestOwner::Process(process)));
             RequestId(raw)
         };
-        let Some(worker) = self.workers.get(worker_index) else {
-            solveig_base::ice!("IO request routing selected an absent worker");
-        };
         self.next_worker = self.next_worker.wrapping_add(1);
 
-        if worker.send(IoWork { id, request }).is_err() {
+        let issued = match request {
+            IoRequest::Connect { host, port } => self
+                .sockets
+                .issue(id, SocketRequest::Connect { host, port }),
+            IoRequest::Listen { port } => self.sockets.issue(id, SocketRequest::Listen { port }),
+            IoRequest::Accept(socket) => self.sockets.issue(id, SocketRequest::Accept(socket)),
+            IoRequest::SendBytes { socket, bytes } => self
+                .sockets
+                .issue(id, SocketRequest::Send { socket, bytes }),
+            IoRequest::RecvBytes { socket, maximum } => self
+                .sockets
+                .issue(id, SocketRequest::Recv { socket, maximum }),
+            IoRequest::CloseSocket(socket) => self.sockets.issue(id, SocketRequest::Close(socket)),
+            request => {
+                let Some(worker) = self.workers.get(worker_index) else {
+                    solveig_base::ice!("IO request routing selected an absent worker");
+                };
+                worker
+                    .send(IoWork { id, request })
+                    .map_err(|_disconnected| {
+                        RuntimeError::builtin("IO worker pool stopped unexpectedly".to_string())
+                    })
+            }
+        };
+
+        if let Err(error) = issued {
             let Some(slot) = self.requests.get_mut(id.0 as usize) else {
                 solveig_base::ice!("failed IO request vanished from the request table");
             };
             *slot = None;
             self.free_requests.push(id.0);
-            return Err(RuntimeError::builtin(
-                "IO worker pool stopped unexpectedly".to_string(),
-            ));
+            return Err(error);
         }
         Ok(id)
     }
@@ -218,18 +286,20 @@ impl IoSubsystem {
         }
     }
 
-    pub(super) fn cancel(&mut self, id: RequestId, process: ProcessId) {
+    pub(super) fn cancel(&mut self, id: RequestId, process: ProcessId) -> Result<(), RuntimeError> {
         let Some(slot) = self.requests.get_mut(id.0 as usize) else {
             solveig_base::ice!("cancelled IO request was outside the request table");
         };
         match slot {
             Some(RequestOwner::Process(owner)) if *owner == process => {
                 *slot = Some(RequestOwner::Cancelled);
+                self.sockets.cancel(id)?;
             }
             Some(RequestOwner::Process(_)) | Some(RequestOwner::Cancelled) | None => {
                 solveig_base::ice!("cancelled IO request did not belong to the blocked process")
             }
         }
+        Ok(())
     }
 
     pub(super) fn has_wakeable_request(&self) -> bool {
@@ -306,6 +376,14 @@ fn perform_request(
             contents,
             append,
         } => perform_write_file(path, &contents, append),
+        IoRequest::Connect { .. }
+        | IoRequest::Listen { .. }
+        | IoRequest::Accept(_)
+        | IoRequest::SendBytes { .. }
+        | IoRequest::RecvBytes { .. }
+        | IoRequest::CloseSocket(_) => {
+            solveig_base::ice!("socket request reached the blocking worker pool")
+        }
     }
 }
 

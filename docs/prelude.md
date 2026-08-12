@@ -39,6 +39,7 @@ between typed errors, defects, interruption, and VM infrastructure failures.
 data Maybe a = Just a | Nothing
 data Either a b = Left a | Right b
 data Pair a b = MkPair a b
+data Result e a = Ok a | Err e
 data Never
 data IOError =
     StdoutError String
@@ -47,6 +48,13 @@ data IOError =
   | WriteFileError String String
   | AppendFileError String String
   | ChannelClosed
+  | InvalidUtf8 String
+  | ConnectError String
+  | ListenError String
+  | AcceptError String
+  | SendError String
+  | RecvError String
+  | CloseSocketError String
 data Defect =
     Error String
   | DivisionByZero
@@ -95,6 +103,18 @@ send : forall a. Chan a -> a -> Task ()
 recv : forall a. Chan a -> Task a
 tryRecv : forall a. Chan a -> Task (Maybe a)
 closeChan : forall a. Chan a -> Task ()
+stringToBytes : String -> Bytes
+bytesToString : Bytes -> Result IOError String
+bytesLength : Bytes -> Int
+bytesIndex : Bytes -> Int -> Maybe Int
+bytesSlice : Bytes -> Int -> Int -> Bytes
+bytesAppend : Bytes -> Bytes -> Bytes
+connect : String -> Int -> Task Socket
+listen : Int -> Task (Pair Socket Int)
+accept : Socket -> Task Socket
+sendBytes : Socket -> Bytes -> Task ()
+recvBytes : Socket -> Int -> Task Bytes
+closeSocket : Socket -> Task ()
 ```
 
 `printLine` writes a trailing newline. `printStr` does not, and the CLI flushes
@@ -103,6 +123,18 @@ after each print so prompts appear before `readLine`.
 `readLine` returns a line without the trailing newline. At EOF it returns `""`.
 
 `readFile`, `writeFile`, and `appendFile` are whole-file UTF-8 text operations.
+
+`Bytes` is immutable arbitrary byte data, distinct from UTF-8 `String`.
+`stringToBytes` encodes UTF-8; `bytesToString` returns `Err (InvalidUtf8 ...)`
+instead of replacing invalid input. Byte indices are zero-based, out-of-range
+indexing returns `Nothing`, and slicing clamps negative and oversized bounds.
+
+`listen` binds an IPv4 loopback listener. Port zero asks the OS to choose a
+free port, returned with the listener as `MkPair listener actualPort`.
+`connect` accepts an IP literal or `localhost`; DNS is not part of J5.
+`sendBytes` completes only after the full buffer is sent. `recvBytes` returns
+at most its non-negative maximum and returns empty bytes at EOF. Sockets are
+closed only by explicit, idempotent `closeSocket`; GC does not close them.
 Relative paths are resolved against the Solveig project root. Their host
 failures are ordinary `IOError` values and can be handled with `catchError`.
 `finally` runs cleanup after success, typed failure, a defect, or interruption.

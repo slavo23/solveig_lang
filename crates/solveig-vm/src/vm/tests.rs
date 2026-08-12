@@ -2,12 +2,13 @@
 //! These cases cover bytecode dispatch, closures, thunks, constructors, and IO.
 
 use super::*;
+use crate::builtins::VmCtx;
 use crate::bytecode::Instr;
 use crate::heap::{Chan, ChanId, IoAction, PayloadStore};
 use crate::vm::io_worker::IoFailure;
 use solveig_ast::ast::{
-    BUILTIN_BIND_IO, BUILTIN_CHARS_TO_STRING, BUILTIN_PURE_IO, BUILTIN_STRING_TO_CHARS, BinOp,
-    BuiltinId, CtorId, CtorRuntimeRole, PRIM_TYS,
+    BUILTIN_BIND_IO, BUILTIN_BYTES_TO_STRING, BUILTIN_CHARS_TO_STRING, BUILTIN_PURE_IO,
+    BUILTIN_STRING_TO_CHARS, BinOp, BuiltinId, CtorId, CtorRuntimeRole, PRIM_TYS,
 };
 use solveig_base::{FileId, FileSpan, Span};
 use solveig_lower::closure_ir::{CCExpr, CCFunction, CCGlobalDef};
@@ -1177,6 +1178,66 @@ fn display_does_not_tuple_user_pair_by_name() {
     );
 
     assert_eq!(run_main(&program), "MkPair 1 2");
+}
+
+#[test]
+fn bytes_to_string_preserves_invalid_utf8_as_a_result_error() {
+    const INVALID_UTF8_TAG: u16 = 20;
+    const RESULT_ERR_TAG: u16 = 21;
+
+    let program = program_with_ctors(
+        vec![global("main", int(0))],
+        Vec::new(),
+        &[
+            ctor_spec(
+                CtorId(200),
+                CtorRuntimeRole::PreludeIoErrorInvalidUtf8,
+                "prelude.builtins.InvalidUtf8",
+                "InvalidUtf8",
+                INVALID_UTF8_TAG,
+                1,
+            ),
+            ctor_spec(
+                CtorId(201),
+                CtorRuntimeRole::PreludeResultErr,
+                "prelude.builtins.Err",
+                "Err",
+                RESULT_ERR_TAG,
+                1,
+            ),
+        ],
+    );
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    let process_id = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let invalid = runtime.heap.alloc_bytes(&[0xff, 0xfe]);
+    let mut process = runtime.take_process(process_id);
+    let result = {
+        let mut interpreter = Interpreter::new(&mut runtime, &mut process);
+        let builtin = crate::builtins::lookup(BUILTIN_BYTES_TO_STRING)
+            .expect("bytesToString builtin should be registered");
+        (builtin.run)(&mut VmCtx::new(&mut interpreter), &[invalid])
+            .expect("invalid UTF-8 should be a Result value")
+    };
+    runtime.restore_process(process);
+
+    let Value::Obj(result_id) = result else {
+        solveig_base::ice!("bytesToString error was not heap allocated")
+    };
+    let HeapObject::Data1 {
+        tag: RESULT_ERR_TAG,
+        field: Value::Obj(error_id),
+    } = *runtime.heap.get(result_id)
+    else {
+        solveig_base::ice!("bytesToString did not return Err")
+    };
+    assert!(matches!(
+        runtime.heap.get(error_id),
+        HeapObject::Data1 {
+            tag: INVALID_UTF8_TAG,
+            field: Value::Obj(_)
+        }
+    ));
 }
 
 #[test]

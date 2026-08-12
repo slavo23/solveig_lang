@@ -43,6 +43,9 @@ pub enum HeapObject {
     Str {
         bytes: ByteRef,
     },
+    Bytes {
+        bytes: ByteRef,
+    },
     Chan(Chan),
     IoAction(IoAction),
     /// A nursery slot that has been evacuated during the current minor GC.
@@ -110,6 +113,27 @@ pub enum IoAction {
     },
     Sleep {
         milliseconds: i64,
+    },
+    Connect {
+        host: Value,
+        port: i64,
+    },
+    Listen {
+        port: i64,
+    },
+    Accept {
+        socket: Value,
+    },
+    SendBytes {
+        socket: Value,
+        bytes: Value,
+    },
+    RecvBytes {
+        socket: Value,
+        maximum: i64,
+    },
+    CloseSocket {
+        socket: Value,
     },
     ReadFile {
         path: Value,
@@ -300,6 +324,7 @@ impl Heap {
             | HeapObject::Data2 { .. }
             | HeapObject::DataN { .. }
             | HeapObject::Str { .. }
+            | HeapObject::Bytes { .. }
             | HeapObject::IoAction(_) => None,
             HeapObject::Forwarded(_) => {
                 solveig_base::ice!("forwarding entry escaped minor collection")
@@ -453,7 +478,9 @@ impl Heap {
             }
             HeapObject::DataN { fields, .. } => self.payloads.free_old_span(*fields),
             HeapObject::Chan(channel) => self.payloads.free_old_span(channel.queue),
-            HeapObject::Str { bytes } => self.bytes.free_old_span(*bytes),
+            HeapObject::Str { bytes } | HeapObject::Bytes { bytes } => {
+                self.bytes.free_old_span(*bytes);
+            }
             HeapObject::Data0 { .. }
             | HeapObject::Data1 { .. }
             | HeapObject::Data2 { .. }
@@ -471,6 +498,15 @@ impl Heap {
 
     pub fn str_value(&self, owner: ObjId, bytes: ByteRef) -> &str {
         self.bytes.as_str(self.is_nursery_id(owner), bytes)
+    }
+
+    pub fn alloc_bytes(&mut self, value: &[u8]) -> Value {
+        let bytes = self.bytes.alloc_nursery(value);
+        self.alloc(HeapObject::Bytes { bytes })
+    }
+
+    pub fn bytes_value(&self, owner: ObjId, bytes: ByteRef) -> &[u8] {
+        self.bytes.as_slice(self.is_nursery_id(owner), bytes)
     }
 
     pub(crate) fn finish_minor_collection(&mut self, promoted: usize) {

@@ -4,22 +4,24 @@
 use std::cmp::Ordering;
 
 use solveig_ast::ast::{
-    BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_CATCH_DEFECT_IO, BUILTIN_CATCH_IO,
-    BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING,
-    BUILTIN_CLOSE_CHAN, BUILTIN_ERROR, BUILTIN_FAIL_IO, BUILTIN_FINALLY_IO, BUILTIN_FLOAT_ADD,
+    BUILTIN_ACCEPT, BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_BYTES_APPEND,
+    BUILTIN_BYTES_INDEX, BUILTIN_BYTES_LENGTH, BUILTIN_BYTES_SLICE, BUILTIN_BYTES_TO_STRING,
+    BUILTIN_CATCH_DEFECT_IO, BUILTIN_CATCH_IO, BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ,
+    BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING, BUILTIN_CLOSE_CHAN, BUILTIN_CLOSE_SOCKET,
+    BUILTIN_CONNECT, BUILTIN_ERROR, BUILTIN_FAIL_IO, BUILTIN_FINALLY_IO, BUILTIN_FLOAT_ADD,
     BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE,
     BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB,
     BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD,
     BUILTIN_INT_COMPARE, BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT,
     BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG,
     BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_KILL_THREAD,
-    BUILTIN_MASK_IO, BUILTIN_NEW_BOUNDED_CHAN, BUILTIN_NEW_CHAN, BUILTIN_PRINT_LINE,
-    BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_RAISE_DEFECT_IO, BUILTIN_READ_FILE,
-    BUILTIN_READ_LINE, BUILTIN_RECV_CHAN, BUILTIN_RESTORE_MASK_IO, BUILTIN_SEND_CHAN,
-    BUILTIN_SLEEP, BUILTIN_SPAWN, BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT,
-    BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE,
-    BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo,
-    CtorRuntimeRole,
+    BUILTIN_LISTEN, BUILTIN_MASK_IO, BUILTIN_NEW_BOUNDED_CHAN, BUILTIN_NEW_CHAN,
+    BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_RAISE_DEFECT_IO,
+    BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_RECV_BYTES, BUILTIN_RECV_CHAN,
+    BUILTIN_RESTORE_MASK_IO, BUILTIN_SEND_BYTES, BUILTIN_SEND_CHAN, BUILTIN_SLEEP, BUILTIN_SPAWN,
+    BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
+    BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_BYTES, BUILTIN_STRING_TO_CHARS,
+    BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
 };
 
 use crate::heap::{HeapObject, IoAction};
@@ -57,6 +59,10 @@ impl<'context, 'runtime> VmCtx<'context, 'runtime> {
 
     fn alloc_str(&mut self, value: &str) -> Value {
         self.interpreter.heap.alloc_str(value)
+    }
+
+    fn alloc_bytes(&mut self, value: &[u8]) -> Value {
+        self.interpreter.heap.alloc_bytes(value)
     }
 
     fn alloc_io_action(&mut self, action: IoAction) -> Value {
@@ -256,6 +262,18 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_CHAR_COMPARE, "charCompare", 2, char_compare),
     builtin!(BUILTIN_STRING_TO_CHARS, "stringToChars", 1, string_to_chars),
     builtin!(BUILTIN_CHARS_TO_STRING, "charsToString", 1, chars_to_string),
+    builtin!(BUILTIN_STRING_TO_BYTES, "stringToBytes", 1, string_to_bytes),
+    builtin!(BUILTIN_BYTES_TO_STRING, "bytesToString", 1, bytes_to_string),
+    builtin!(BUILTIN_BYTES_LENGTH, "bytesLength", 1, bytes_length),
+    builtin!(BUILTIN_BYTES_INDEX, "bytesIndex", 2, bytes_index),
+    builtin!(BUILTIN_BYTES_SLICE, "bytesSlice", 3, bytes_slice),
+    builtin!(BUILTIN_BYTES_APPEND, "bytesAppend", 2, bytes_append),
+    builtin!(BUILTIN_CONNECT, "connect", 2, connect),
+    builtin!(BUILTIN_LISTEN, "listen", 1, listen),
+    builtin!(BUILTIN_ACCEPT, "accept", 1, accept),
+    builtin!(BUILTIN_SEND_BYTES, "sendBytes", 2, send_bytes),
+    builtin!(BUILTIN_RECV_BYTES, "recvBytes", 2, recv_bytes),
+    builtin!(BUILTIN_CLOSE_SOCKET, "closeSocket", 1, close_socket),
     builtin!(BUILTIN_PURE_IO, "pureIO", 1, pure_io),
     builtin!(BUILTIN_BIND_IO, "bindIO", 2, bind_io),
     builtin!(BUILTIN_FAIL_IO, "failIO", 1, fail_io),
@@ -541,6 +559,104 @@ fn chars_to_string(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, Run
     Ok(ctx.alloc_str(&string))
 }
 
+fn string_to_bytes(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let value = expect_string_owned(ctx, args, 0, "stringToBytes")?;
+    Ok(ctx.alloc_bytes(value.as_bytes()))
+}
+
+fn bytes_to_string(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let value = expect_bytes_owned(ctx, args, 0, "bytesToString")?;
+    match String::from_utf8(value) {
+        Ok(text) => {
+            let text = ctx.alloc_str(&text);
+            ctx.alloc_data1_ctor(CtorRuntimeRole::PreludeResultOk, text, "bytesToString")
+        }
+        Err(error) => {
+            let message = ctx.alloc_str(&error.to_string());
+            let invalid = ctx.alloc_data1_ctor(
+                CtorRuntimeRole::PreludeIoErrorInvalidUtf8,
+                message,
+                "bytesToString",
+            )?;
+            ctx.alloc_data1_ctor(CtorRuntimeRole::PreludeResultErr, invalid, "bytesToString")
+        }
+    }
+}
+
+fn bytes_length(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let value = expect_bytes_owned(ctx, args, 0, "bytesLength")?;
+    let length = i64::try_from(value.len())
+        .map_err(|_range| RuntimeError::builtin("bytesLength exceeds Int range".to_string()))?;
+    Ok(Value::Int(length))
+}
+
+fn bytes_index(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let value = expect_bytes_owned(ctx, args, 0, "bytesIndex")?;
+    let index = expect_int(args, 1, "bytesIndex")?;
+    let byte = usize::try_from(index)
+        .ok()
+        .and_then(|index| value.get(index))
+        .copied()
+        .map(|byte| Value::Int(i64::from(byte)));
+    match byte {
+        Some(byte) => ctx.alloc_data1_ctor(CtorRuntimeRole::PreludeMaybeJust, byte, "bytesIndex"),
+        None => ctx.nullary_ctor(CtorRuntimeRole::PreludeMaybeNothing, "bytesIndex"),
+    }
+}
+
+fn bytes_slice(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let value = expect_bytes_owned(ctx, args, 0, "bytesSlice")?;
+    let start = expect_int(args, 1, "bytesSlice")?;
+    let length = expect_int(args, 2, "bytesSlice")?;
+    let start = usize::try_from(start).unwrap_or(0).min(value.len());
+    let length = usize::try_from(length).unwrap_or(0);
+    let end = start.saturating_add(length).min(value.len());
+    let Some(slice) = value.get(start..end) else {
+        solveig_base::ice!("clamped byte slice was outside its source")
+    };
+    Ok(ctx.alloc_bytes(slice))
+}
+
+fn bytes_append(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let mut left = expect_bytes_owned(ctx, args, 0, "bytesAppend")?;
+    let right = expect_bytes_owned(ctx, args, 1, "bytesAppend")?;
+    left.extend_from_slice(&right);
+    Ok(ctx.alloc_bytes(&left))
+}
+
+fn connect(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let host = expect_value(args, 0, "connect")?;
+    let port = expect_int(args, 1, "connect")?;
+    Ok(ctx.alloc_io_action(IoAction::Connect { host, port }))
+}
+
+fn listen(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let port = expect_int(args, 0, "listen")?;
+    Ok(ctx.alloc_io_action(IoAction::Listen { port }))
+}
+
+fn accept(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let socket = expect_value(args, 0, "accept")?;
+    Ok(ctx.alloc_io_action(IoAction::Accept { socket }))
+}
+
+fn send_bytes(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let socket = expect_value(args, 0, "sendBytes")?;
+    let bytes = expect_value(args, 1, "sendBytes")?;
+    Ok(ctx.alloc_io_action(IoAction::SendBytes { socket, bytes }))
+}
+
+fn recv_bytes(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let socket = expect_value(args, 0, "recvBytes")?;
+    let maximum = expect_int(args, 1, "recvBytes")?;
+    Ok(ctx.alloc_io_action(IoAction::RecvBytes { socket, maximum }))
+}
+
+fn close_socket(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let socket = expect_value(args, 0, "closeSocket")?;
+    Ok(ctx.alloc_io_action(IoAction::CloseSocket { socket }))
+}
+
 fn pure_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let value = expect_value(args, 0, "pureIO")?;
     Ok(ctx.alloc_io_action(IoAction::Pure(value)))
@@ -783,6 +899,26 @@ fn expect_string_owned(
             index + 1
         ))),
     }
+}
+
+fn expect_bytes_owned(
+    ctx: &VmCtx<'_, '_>,
+    args: &[Value],
+    index: usize,
+    builtin: &str,
+) -> Result<Vec<u8>, RuntimeError> {
+    let value = expect_value(args, index, builtin)?;
+    let Value::Obj(id) = value else {
+        return Err(RuntimeError::builtin(format!(
+            "{builtin} expects Bytes argument {index}"
+        )));
+    };
+    let HeapObject::Bytes { bytes } = ctx.interpreter.heap.get(id) else {
+        return Err(RuntimeError::builtin(format!(
+            "{builtin} expects Bytes argument {index}"
+        )));
+    };
+    Ok(ctx.interpreter.heap.bytes_value(id, *bytes).to_vec())
 }
 
 fn expect_char_list(

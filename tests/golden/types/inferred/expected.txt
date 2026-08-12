@@ -3,20 +3,29 @@ main.containsRight : forall a. Eq a => a -> [a] -> Bool
 main.double : forall a. Num a => a -> a
 main.lessAndSame : forall a. Ord a => a -> a -> Bool
 main.main : Int
+prelude.builtins.accept : Socket -> IO IOError Socket
 prelude.builtins.and : Bool -> Bool -> Bool
 prelude.builtins.appendFile : String -> String -> IO IOError ()
 prelude.builtins.appendString : String -> String -> String
 prelude.builtins.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 prelude.builtins.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
+prelude.builtins.bytesAppend : Bytes -> Bytes -> Bytes
+prelude.builtins.bytesIndex : Bytes -> Int -> Maybe Int
+prelude.builtins.bytesLength : Bytes -> Int
+prelude.builtins.bytesSlice : Bytes -> Int -> Int -> Bytes
+prelude.builtins.bytesToString : Bytes -> Result IOError String
 prelude.builtins.catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.builtins.catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.builtins.closeChan : forall a. Chan a -> IO IOError ()
+prelude.builtins.closeSocket : Socket -> IO IOError ()
 prelude.builtins.concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
+prelude.builtins.connect : String -> Int -> IO IOError Socket
 prelude.builtins.error : forall a. String -> a
 prelude.builtins.even : Int -> Bool
 prelude.builtins.failIO : forall e a. e -> IO e a
 prelude.builtins.finally : forall e a b. IO e a -> IO e b -> IO e a
 prelude.builtins.killThread : ThreadId -> IO IOError ()
+prelude.builtins.listen : Int -> IO IOError (Pair Socket Int)
 prelude.builtins.mapError : forall e f a. (e -> f) -> IO e a -> IO f a
 prelude.builtins.mask : forall e a. IO e a -> IO e a
 prelude.builtins.newBoundedChan : forall e a. Int -> IO e (Chan a)
@@ -32,9 +41,12 @@ prelude.builtins.race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
 prelude.builtins.readFile : String -> IO IOError String
 prelude.builtins.readLine : IO IOError String
 prelude.builtins.recv : forall a. Chan a -> IO IOError a
+prelude.builtins.recvBytes : Socket -> Int -> IO IOError Bytes
 prelude.builtins.send : forall a. Chan a -> a -> IO IOError ()
+prelude.builtins.sendBytes : Socket -> Bytes -> IO IOError ()
 prelude.builtins.sleep : Int -> IO IOError ()
 prelude.builtins.spawn : forall childError e. IO childError () -> IO e ThreadId
+prelude.builtins.stringToBytes : String -> Bytes
 prelude.builtins.timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 prelude.builtins.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
 prelude.builtins.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
@@ -56,8 +68,14 @@ prelude.list.take : forall a. Int -> [a] -> [a]
 prelude.list.takeWhile : forall a. (a -> Bool) -> [a] -> [a]
 prelude.list.zip : forall a b. [a] -> [b] -> [Pair a b]
 prelude.list.zipWith : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c]
+prelude.prim.accept : Socket -> IO IOError Socket
 prelude.prim.appendFile : String -> String -> IO IOError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
+prelude.prim.bytesAppend : Bytes -> Bytes -> Bytes
+prelude.prim.bytesIndex : Bytes -> Int -> Maybe Int
+prelude.prim.bytesLength : Bytes -> Int
+prelude.prim.bytesSlice : Bytes -> Int -> Int -> Bytes
+prelude.prim.bytesToString : Bytes -> Result IOError String
 prelude.prim.catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.prim.catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.prim.charCompare : Char -> Char -> Ordering
@@ -65,6 +83,8 @@ prelude.prim.charEq : Char -> Char -> Bool
 prelude.prim.charToString : Char -> String
 prelude.prim.charsToString : [Char] -> String
 prelude.prim.closeChan : forall a. Chan a -> IO IOError ()
+prelude.prim.closeSocket : Socket -> IO IOError ()
+prelude.prim.connect : String -> Int -> IO IOError Socket
 prelude.prim.error : forall a. String -> a
 prelude.prim.failIO : forall e a. e -> IO e a
 prelude.prim.finallyIO : forall e a b. IO e a -> IO e b -> IO e a
@@ -96,6 +116,7 @@ prelude.prim.intSub : Int -> Int -> Int
 prelude.prim.intToFloat : Int -> Float
 prelude.prim.intToString : Int -> String
 prelude.prim.killThread : ThreadId -> IO IOError ()
+prelude.prim.listen : Int -> IO IOError (Pair Socket Int)
 prelude.prim.maskIO : forall e a. IO e a -> IO e a
 prelude.prim.newBoundedChan : forall e a. Int -> IO e (Chan a)
 prelude.prim.newChan : forall e a. IO e (Chan a)
@@ -106,8 +127,10 @@ prelude.prim.raiseDefectIO : forall e a. Defect -> IO e a
 prelude.prim.readFile : String -> IO IOError String
 prelude.prim.readLine : IO IOError String
 prelude.prim.recv : forall a. Chan a -> IO IOError a
+prelude.prim.recvBytes : Socket -> Int -> IO IOError Bytes
 prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
 prelude.prim.send : forall a. Chan a -> a -> IO IOError ()
+prelude.prim.sendBytes : Socket -> Bytes -> IO IOError ()
 prelude.prim.sleep : Int -> IO IOError ()
 prelude.prim.spawn : forall e f. IO e () -> IO f ThreadId
 prelude.prim.stringAppend : String -> String -> String
@@ -116,6 +139,7 @@ prelude.prim.stringCompare : String -> String -> Ordering
 prelude.prim.stringEq : String -> String -> Bool
 prelude.prim.stringLength : String -> Int
 prelude.prim.stringSlice : String -> Int -> Int -> String
+prelude.prim.stringToBytes : String -> Bytes
 prelude.prim.stringToChars : String -> [Char]
 prelude.prim.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
 prelude.prim.writeFile : String -> String -> IO IOError ()

@@ -14,6 +14,13 @@ data Either a b =
   | -- | Holds a value from the right side.
     Right b
 
+-- | A successful value or an expected failure.
+data Result e a =
+    -- | Holds a successful value.
+    Ok a
+  | -- | Holds an expected failure.
+    Err e
+
 -- | A pair of two values.
 data Pair a b =
     -- | Builds a pair from its first and second values.
@@ -36,6 +43,20 @@ data IOError =
     AppendFileError String String
   | -- | A channel operation cannot continue because the channel is closed.
     ChannelClosed
+  | -- | A byte string is not valid UTF-8 text.
+    InvalidUtf8 String
+  | -- | Opening a TCP connection failed.
+    ConnectError String
+  | -- | Binding a TCP listener failed.
+    ListenError String
+  | -- | Accepting a TCP connection failed.
+    AcceptError String
+  | -- | Sending bytes on a TCP connection failed.
+    SendError String
+  | -- | Receiving bytes from a TCP connection failed.
+    RecvError String
+  | -- | Closing a TCP resource failed.
+    CloseSocketError String
 
 -- | A defect raised by pure evaluation or a managed runtime limit.
 data Defect =
@@ -348,6 +369,54 @@ tryRecv channel = prelude.prim.tryRecv channel;
 -- | Closes a channel and wakes its blocked senders and receivers.
 closeChan : forall a. Chan a -> Task ();
 closeChan channel = prelude.prim.closeChan channel;
+
+-- | Encodes text as UTF-8 bytes.
+stringToBytes : String -> Bytes;
+stringToBytes text = prelude.prim.stringToBytes text;
+
+-- | Decodes UTF-8 bytes without replacing invalid input.
+bytesToString : Bytes -> Result IOError String;
+bytesToString bytes = prelude.prim.bytesToString bytes;
+
+-- | Returns the number of bytes.
+bytesLength : Bytes -> Int;
+bytesLength bytes = prelude.prim.bytesLength bytes;
+
+-- | Returns the byte at an index when it exists.
+bytesIndex : Bytes -> Int -> Maybe Int;
+bytesIndex bytes index = prelude.prim.bytesIndex bytes index;
+
+-- | Takes bytes from a starting index for a requested length.
+bytesSlice : Bytes -> Int -> Int -> Bytes;
+bytesSlice bytes start length = prelude.prim.bytesSlice bytes start length;
+
+-- | Concatenates two byte strings.
+bytesAppend : Bytes -> Bytes -> Bytes;
+bytesAppend left right = prelude.prim.bytesAppend left right;
+
+-- | Opens a TCP connection to an IP address or localhost.
+connect : String -> Int -> Task Socket;
+connect host port = prelude.prim.connect host port;
+
+-- | Binds a loopback TCP listener and returns its actual port.
+listen : Int -> Task (Pair Socket Int);
+listen port = prelude.prim.listen port;
+
+-- | Accepts the next connection from a TCP listener.
+accept : Socket -> Task Socket;
+accept socket = prelude.prim.accept socket;
+
+-- | Sends an entire byte string on a connected TCP socket.
+sendBytes : Socket -> Bytes -> Task ();
+sendBytes socket bytes = prelude.prim.sendBytes socket bytes;
+
+-- | Receives at most the requested number of bytes, returning empty at EOF.
+recvBytes : Socket -> Int -> Task Bytes;
+recvBytes socket maximum = prelude.prim.recvBytes socket maximum;
+
+-- | Explicitly closes a TCP listener or connection.
+closeSocket : Socket -> Task ();
+closeSocket socket = prelude.prim.closeSocket socket;
 
 -- | Concatenates two strings.
 appendString : String -> String -> String;

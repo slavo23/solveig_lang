@@ -25,6 +25,7 @@ mod interruption;
 mod io;
 mod io_worker;
 mod scheduler;
+mod socket;
 #[cfg(test)]
 mod tests;
 mod timer;
@@ -140,6 +141,10 @@ pub enum BlockReason {
 /// Identifies one request submitted to the runtime IO subsystem.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RequestId(u32);
+
+/// Identifies one explicitly managed TCP resource in the runtime side table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct SocketId(u32);
 
 /// Identifies one global slot in the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

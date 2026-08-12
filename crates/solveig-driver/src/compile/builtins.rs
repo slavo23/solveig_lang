@@ -58,8 +58,10 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let float = Ty::make_con_id(PRIM_TYS.float);
     let char_ty = Ty::make_con_id(PRIM_TYS.char);
     let string = Ty::make_con_id(PRIM_TYS.string);
+    let bytes = Ty::make_con_id(PRIM_TYS.bytes);
     let bool_ty = Ty::make_con_id(PRIM_TYS.bool);
     let thread_id = Ty::make_con_id(PRIM_TYS.thread_id);
+    let socket = Ty::make_con_id(PRIM_TYS.socket);
     let defect = Ty::make_con_id(prelude_defect_tycon_id(names));
     let io_error = Ty::make_con_id(prelude_io_error_tycon_id(names));
     let ordering = Ty::make_con_id(prelude_ordering_tycon_id(names));
@@ -80,6 +82,21 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let b = Ty::TyVar(b_id);
     let chan_a = Ty::make_app(Ty::make_con_id(PRIM_TYS.chan), a.clone());
     let maybe_a = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), a.clone());
+    let maybe_int = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), int.clone());
+    let result_io_string = Ty::make_app(
+        Ty::make_app(
+            Ty::make_con_id(prelude_result_tycon_id(names)),
+            io_error.clone(),
+        ),
+        string.clone(),
+    );
+    let listener_result = Ty::make_app(
+        Ty::make_app(
+            Ty::make_con_id(prelude_pair_tycon_id(names)),
+            socket.clone(),
+        ),
+        int.clone(),
+    );
 
     vec![
         prim_spec(
@@ -303,6 +320,87 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             BUILTIN_CHARS_TO_STRING,
             1,
             unary(char_list, string.clone()),
+        ),
+        prim_spec(
+            "stringToBytes",
+            BUILTIN_STRING_TO_BYTES,
+            1,
+            unary(string.clone(), bytes.clone()),
+        ),
+        prim_spec(
+            "bytesToString",
+            BUILTIN_BYTES_TO_STRING,
+            1,
+            unary(bytes.clone(), result_io_string),
+        ),
+        prim_spec(
+            "bytesLength",
+            BUILTIN_BYTES_LENGTH,
+            1,
+            unary(bytes.clone(), int.clone()),
+        ),
+        prim_spec(
+            "bytesIndex",
+            BUILTIN_BYTES_INDEX,
+            2,
+            arr(&[bytes.clone(), int.clone()], maybe_int),
+        ),
+        prim_spec(
+            "bytesSlice",
+            BUILTIN_BYTES_SLICE,
+            3,
+            ternary(bytes.clone(), int.clone(), int.clone(), bytes.clone()),
+        ),
+        prim_spec(
+            "bytesAppend",
+            BUILTIN_BYTES_APPEND,
+            2,
+            binary(bytes, Ty::make_con_id(PRIM_TYS.bytes)),
+        ),
+        prim_spec(
+            "connect",
+            BUILTIN_CONNECT,
+            2,
+            arr(
+                &[string.clone(), int.clone()],
+                io_of(io_error.clone(), socket.clone()),
+            ),
+        ),
+        prim_spec(
+            "listen",
+            BUILTIN_LISTEN,
+            1,
+            unary(int.clone(), io_of(io_error.clone(), listener_result)),
+        ),
+        prim_spec(
+            "accept",
+            BUILTIN_ACCEPT,
+            1,
+            unary(socket.clone(), io_of(io_error.clone(), socket.clone())),
+        ),
+        prim_spec(
+            "sendBytes",
+            BUILTIN_SEND_BYTES,
+            2,
+            arr(
+                &[socket.clone(), Ty::make_con_id(PRIM_TYS.bytes)],
+                io_of(io_error.clone(), Ty::TyUnit),
+            ),
+        ),
+        prim_spec(
+            "recvBytes",
+            BUILTIN_RECV_BYTES,
+            2,
+            arr(
+                &[socket.clone(), int.clone()],
+                io_of(io_error.clone(), Ty::make_con_id(PRIM_TYS.bytes)),
+            ),
+        ),
+        prim_spec(
+            "closeSocket",
+            BUILTIN_CLOSE_SOCKET,
+            1,
+            unary(socket, io_of(io_error.clone(), Ty::TyUnit)),
         ),
         prim_spec(
             "pureIO",

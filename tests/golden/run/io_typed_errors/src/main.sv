@@ -15,6 +15,13 @@ reportMapped error =
         | WriteFileError _ _ => printLine "unexpected-write"
         | AppendFileError _ _ => printLine "unexpected-append"
         | ChannelClosed => printLine "unexpected-channel"
+        | InvalidUtf8 _ => printLine "unexpected-utf8"
+        | ConnectError _ => printLine "unexpected-connect"
+        | ListenError _ => printLine "unexpected-listen"
+        | AcceptError _ => printLine "unexpected-accept"
+        | SendError _ => printLine "unexpected-send"
+        | RecvError _ => printLine "unexpected-recv"
+        | CloseSocketError _ => printLine "unexpected-close-socket"
 
 reportRead : IOError -> Task ()
 reportRead error =
@@ -25,6 +32,13 @@ reportRead error =
         | WriteFileError _ _ => printLine "unexpected-write"
         | AppendFileError _ _ => printLine "unexpected-append"
         | ChannelClosed => printLine "unexpected-channel"
+        | InvalidUtf8 _ => printLine "unexpected-utf8"
+        | ConnectError _ => printLine "unexpected-connect"
+        | ListenError _ => printLine "unexpected-listen"
+        | AcceptError _ => printLine "unexpected-accept"
+        | SendError _ => printLine "unexpected-send"
+        | RecvError _ => printLine "unexpected-recv"
+        | CloseSocketError _ => printLine "unexpected-close-socket"
 
 reportWrite : IOError -> Task ()
 reportWrite error =
@@ -35,6 +49,13 @@ reportWrite error =
         | ReadFileError _ _ => printLine "unexpected-read"
         | AppendFileError _ _ => printLine "unexpected-append"
         | ChannelClosed => printLine "unexpected-channel"
+        | InvalidUtf8 _ => printLine "unexpected-utf8"
+        | ConnectError _ => printLine "unexpected-connect"
+        | ListenError _ => printLine "unexpected-listen"
+        | AcceptError _ => printLine "unexpected-accept"
+        | SendError _ => printLine "unexpected-send"
+        | RecvError _ => printLine "unexpected-recv"
+        | CloseSocketError _ => printLine "unexpected-close-socket"
 
 reportAppend : IOError -> Task ()
 reportAppend error =
@@ -45,6 +66,13 @@ reportAppend error =
         | ReadFileError _ _ => printLine "unexpected-read"
         | WriteFileError _ _ => printLine "unexpected-write"
         | ChannelClosed => printLine "unexpected-channel"
+        | InvalidUtf8 _ => printLine "unexpected-utf8"
+        | ConnectError _ => printLine "unexpected-connect"
+        | ListenError _ => printLine "unexpected-listen"
+        | AcceptError _ => printLine "unexpected-accept"
+        | SendError _ => printLine "unexpected-send"
+        | RecvError _ => printLine "unexpected-recv"
+        | CloseSocketError _ => printLine "unexpected-close-socket"
 
 releaseResource : String -> Task ()
 releaseResource name = printLine (appendString "release " name)

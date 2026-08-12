@@ -469,6 +469,10 @@ impl Interpreter<'_> {
                 solveig_base::ice!("heap string reached callable-object invocation");
             }
 
+            HeapObject::Bytes { .. } => {
+                solveig_base::ice!("heap bytes reached callable-object invocation");
+            }
+
             HeapObject::IoAction(_) => {
                 solveig_base::ice!("IO action reached callable-object invocation");
             }

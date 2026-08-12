@@ -17,6 +17,8 @@ pub struct PrimTys {
     pub bool: TyConId,
     pub thread_id: TyConId,
     pub chan: TyConId,
+    pub bytes: TyConId,
+    pub socket: TyConId,
     pub true_ctor: CtorId,
     pub false_ctor: CtorId,
 }
@@ -30,6 +32,8 @@ pub const PRIM_TYS: PrimTys = PrimTys {
     bool: TyConId(5),
     thread_id: TyConId(6),
     chan: TyConId(7),
+    bytes: TyConId(8),
+    socket: TyConId(9),
     true_ctor: CtorId(0),
     false_ctor: CtorId(1),
 };
@@ -79,6 +83,20 @@ pub fn compiler_primitive_tycon_infos(names: &mut Names) -> Vec<(TyConId, TyConI
             "Chan",
             Kind::make_arrow(Kind::Star, Kind::Star),
         ),
+        compiler_primitive_tycon_info(
+            names,
+            PRIM_TYS.bytes,
+            COMPILER_BYTES_NAME,
+            "Bytes",
+            Kind::Star,
+        ),
+        compiler_primitive_tycon_info(
+            names,
+            PRIM_TYS.socket,
+            COMPILER_SOCKET_NAME,
+            "Socket",
+            Kind::Star,
+        ),
     ]
 }
 
@@ -94,6 +112,8 @@ pub fn compiler_primitive_tycon_kinds() -> FxHashMap<TyConId, Kind> {
         ),
         (PRIM_TYS.thread_id, Kind::Star),
         (PRIM_TYS.chan, Kind::make_arrow(Kind::Star, Kind::Star)),
+        (PRIM_TYS.bytes, Kind::Star),
+        (PRIM_TYS.socket, Kind::Star),
     ])
 }
 
@@ -148,6 +168,10 @@ pub fn prelude_io_error_tycon_id(names: &mut Names) -> TyConId {
     names.tycon_id(PRELUDE_IO_ERROR_NAME)
 }
 
+pub fn prelude_result_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_RESULT_NAME)
+}
+
 pub fn prelude_defect_tycon_id(names: &mut Names) -> TyConId {
     names.tycon_id(PRELUDE_DEFECT_NAME)
 }
@@ -166,6 +190,10 @@ pub fn prelude_list_cons_ctor_id(names: &mut Names) -> CtorId {
 
 pub fn prelude_pair_mkpair_ctor_id(names: &mut Names) -> CtorId {
     names.ctor_id(PRELUDE_PAIR_MKPAIR_NAME)
+}
+
+pub fn prelude_pair_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_PAIR_NAME)
 }
 
 pub fn prelude_ordering_tycon_id(names: &mut Names) -> TyConId {
@@ -200,6 +228,15 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         PRELUDE_IO_ERROR_WRITE_FILE_NAME => CtorRuntimeRole::PreludeIoErrorWriteFile,
         PRELUDE_IO_ERROR_APPEND_FILE_NAME => CtorRuntimeRole::PreludeIoErrorAppendFile,
         PRELUDE_IO_ERROR_CHANNEL_CLOSED_NAME => CtorRuntimeRole::PreludeIoErrorChannelClosed,
+        PRELUDE_IO_ERROR_INVALID_UTF8_NAME => CtorRuntimeRole::PreludeIoErrorInvalidUtf8,
+        PRELUDE_IO_ERROR_CONNECT_NAME => CtorRuntimeRole::PreludeIoErrorConnect,
+        PRELUDE_IO_ERROR_LISTEN_NAME => CtorRuntimeRole::PreludeIoErrorListen,
+        PRELUDE_IO_ERROR_ACCEPT_NAME => CtorRuntimeRole::PreludeIoErrorAccept,
+        PRELUDE_IO_ERROR_SEND_NAME => CtorRuntimeRole::PreludeIoErrorSend,
+        PRELUDE_IO_ERROR_RECV_NAME => CtorRuntimeRole::PreludeIoErrorRecv,
+        PRELUDE_IO_ERROR_CLOSE_SOCKET_NAME => CtorRuntimeRole::PreludeIoErrorCloseSocket,
+        PRELUDE_RESULT_OK_NAME => CtorRuntimeRole::PreludeResultOk,
+        PRELUDE_RESULT_ERR_NAME => CtorRuntimeRole::PreludeResultErr,
         PRELUDE_DEFECT_ERROR_NAME => CtorRuntimeRole::PreludeDefectError,
         PRELUDE_DEFECT_DIVISION_BY_ZERO_NAME => CtorRuntimeRole::PreludeDefectDivisionByZero,
         PRELUDE_DEFECT_STACK_EXHAUSTED_NAME => CtorRuntimeRole::PreludeDefectStackExhausted,
@@ -430,6 +467,15 @@ pub enum CtorRuntimeRole {
     PreludeIoErrorWriteFile,
     PreludeIoErrorAppendFile,
     PreludeIoErrorChannelClosed,
+    PreludeIoErrorInvalidUtf8,
+    PreludeIoErrorConnect,
+    PreludeIoErrorListen,
+    PreludeIoErrorAccept,
+    PreludeIoErrorSend,
+    PreludeIoErrorRecv,
+    PreludeIoErrorCloseSocket,
+    PreludeResultOk,
+    PreludeResultErr,
     PreludeDefectError,
     PreludeDefectDivisionByZero,
     PreludeDefectStackExhausted,

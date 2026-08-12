@@ -35,6 +35,13 @@ data IOError =
   | WriteFileError String String
   | AppendFileError String String
   | ChannelClosed
+  | InvalidUtf8 String
+  | ConnectError String
+  | ListenError String
+  | AcceptError String
+  | SendError String
+  | RecvError String
+  | CloseSocketError String
 ```
 
 A typed failure short-circuits `bind`: later actions in the same sequence do

@@ -33,6 +33,13 @@ reportError ioError =
         | ReadFileError path message => printLine "unexpected read error"
         | WriteFileError path message => printLine "unexpected write error"
         | AppendFileError path message => printLine "unexpected append error"
+        | InvalidUtf8 message => printLine "unexpected UTF-8 error"
+        | ConnectError message => printLine "unexpected connect error"
+        | ListenError message => printLine "unexpected listen error"
+        | AcceptError message => printLine "unexpected accept error"
+        | SendError message => printLine "unexpected send error"
+        | RecvError message => printLine "unexpected recv error"
+        | CloseSocketError message => printLine "unexpected close socket error"
 
 main : Task ()
 main = do

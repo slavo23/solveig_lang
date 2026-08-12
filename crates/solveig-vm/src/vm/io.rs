@@ -64,6 +64,33 @@ impl Interpreter<'_> {
                         return Ok(value);
                     }
                 }
+                IoResult::Bytes(bytes) => {
+                    self.safe_point();
+                    let value = self.heap.alloc_bytes(&bytes);
+                    if let Some(value) = self.resume_io_value(program, value)? {
+                        self.continuations.clear();
+                        return Ok(value);
+                    }
+                }
+                IoResult::Socket(socket) => {
+                    if let Some(value) = self.resume_io_value(program, Value::SocketId(socket.0))? {
+                        self.continuations.clear();
+                        return Ok(value);
+                    }
+                }
+                IoResult::Listener { socket, port } => {
+                    self.safe_point();
+                    let value = VmCtx::new(self).alloc_data2_ctor(
+                        CtorRuntimeRole::PreludePair,
+                        Value::SocketId(socket.0),
+                        Value::Int(i64::from(port)),
+                        "listen",
+                    )?;
+                    if let Some(value) = self.resume_io_value(program, value)? {
+                        self.continuations.clear();
+                        return Ok(value);
+                    }
+                }
                 IoResult::Failed(failure) => {
                     self.io_current = Some(self.alloc_io_failure_action(failure)?);
                 }
@@ -321,6 +348,54 @@ impl Interpreter<'_> {
                     let deadline = self.timers.register(self.id, milliseconds);
                     self.status = ProcStatus::Blocked(BlockReason::Timer(deadline));
                     return Err(StepOutcome::Blocked);
+                }
+                IoAction::Connect { host, port } => {
+                    let host = self.expect_string_value(host, "connect")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::Connect { host, port });
+                }
+                IoAction::Listen { port } => {
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::Listen { port });
+                }
+                IoAction::Accept { socket } => {
+                    let socket = self.expect_socket_id(socket, "accept")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::Accept(socket));
+                }
+                IoAction::SendBytes { socket, bytes } => {
+                    let socket = self.expect_socket_id(socket, "sendBytes")?;
+                    let bytes = self.expect_bytes_value(bytes, "sendBytes")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::SendBytes { socket, bytes });
+                }
+                IoAction::RecvBytes { socket, maximum } => {
+                    let socket = self.expect_socket_id(socket, "recvBytes")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::RecvBytes { socket, maximum });
+                }
+                IoAction::CloseSocket { socket } => {
+                    let socket = self.expect_socket_id(socket, "closeSocket")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::CloseSocket(socket));
                 }
                 IoAction::ReadFile { path } => {
                     let path = self.expect_string_value(path, "readFile")?;
@@ -603,6 +678,7 @@ impl Interpreter<'_> {
             | HeapObject::PartialApp { .. }
             | HeapObject::PartialCtor { .. }
             | HeapObject::Str { .. }
+            | HeapObject::Bytes { .. }
             | HeapObject::Chan(_)
             | HeapObject::IoAction(_)
             | HeapObject::Forwarded(_) => return false,
@@ -767,6 +843,36 @@ impl Interpreter<'_> {
                     builtin,
                 )
             }
+            IoFailure::Connect { host, port, source } => self.alloc_string_ctor(
+                CtorRuntimeRole::PreludeIoErrorConnect,
+                &format!("{host}:{port}: {source}"),
+                "connect",
+            ),
+            IoFailure::Listen { port, source } => self.alloc_string_ctor(
+                CtorRuntimeRole::PreludeIoErrorListen,
+                &format!("port {port}: {source}"),
+                "listen",
+            ),
+            IoFailure::Accept(error) => self.alloc_string_ctor(
+                CtorRuntimeRole::PreludeIoErrorAccept,
+                &error.to_string(),
+                "accept",
+            ),
+            IoFailure::Send(error) => self.alloc_string_ctor(
+                CtorRuntimeRole::PreludeIoErrorSend,
+                &error.to_string(),
+                "sendBytes",
+            ),
+            IoFailure::Recv(error) => self.alloc_string_ctor(
+                CtorRuntimeRole::PreludeIoErrorRecv,
+                &error.to_string(),
+                "recvBytes",
+            ),
+            IoFailure::CloseSocket(error) => self.alloc_string_ctor(
+                CtorRuntimeRole::PreludeIoErrorCloseSocket,
+                &error.to_string(),
+                "closeSocket",
+            ),
         }
     }
 
@@ -843,6 +949,23 @@ impl Interpreter<'_> {
                 _ => Err(RuntimeError::builtin(format!("{context} expected String"))),
             },
             _ => Err(RuntimeError::builtin(format!("{context} expected String"))),
+        }
+    }
+
+    fn expect_bytes_value(&self, value: Value, context: &str) -> Result<Vec<u8>, RuntimeError> {
+        match value {
+            Value::Obj(id) => match self.heap.get(id) {
+                HeapObject::Bytes { bytes } => Ok(self.heap.bytes_value(id, *bytes).to_vec()),
+                _ => Err(RuntimeError::builtin(format!("{context} expected Bytes"))),
+            },
+            _ => Err(RuntimeError::builtin(format!("{context} expected Bytes"))),
+        }
+    }
+
+    fn expect_socket_id(&self, value: Value, context: &str) -> Result<SocketId, RuntimeError> {
+        match value {
+            Value::SocketId(id) => Ok(SocketId(id)),
+            _ => Err(RuntimeError::builtin(format!("{context} expected Socket"))),
         }
     }
 }

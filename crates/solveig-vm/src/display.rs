@@ -32,6 +32,7 @@ impl DisplayValue<'_> {
             Value::Float(n) => n.to_string(),
             Value::Char(ch) => format!("'{}'", escape_char_literal(ch)),
             Value::ThreadId(id) => format!("<thread {id}>"),
+            Value::SocketId(id) => format!("<socket {id}>"),
             Value::CtorFn { tag, .. } => {
                 format!("<ctor {}>", tag_name(self.arities, tag))
             }
@@ -83,6 +84,9 @@ impl DisplayValue<'_> {
                         "\"{}\"",
                         escape_string_literal(self.heap.str_value(id, *bytes))
                     )
+                }
+                HeapObject::Bytes { bytes } => {
+                    format!("<bytes {}>", bytes.len())
                 }
                 HeapObject::IoAction(_) => "<io>".into(),
                 HeapObject::Chan(_) => "<channel>".into(),

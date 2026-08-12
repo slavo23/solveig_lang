@@ -72,6 +72,7 @@ or callable with bound state:
 | `Data0`, `Data1`, `Data2`, `DataN` | Saturated algebraic data, with zero to two fields inline and larger payloads in `PayloadStore`. |
 | `Str` | Immutable UTF-8 bytes in `ByteStore`. |
 | `Chan` | Mutable FIFO channel state: side-payload queue, optional positive capacity, and closed flag. |
+| `Bytes` | Immutable arbitrary bytes in the existing byte arena; unlike `Str`, the payload need not be UTF-8. |
 | `IoAction` | Inert IO syntax interpreted only by the IO machine. |
 | `Forwarded` | Temporary nursery forwarding entry, observable only while minor collection runs. |
 
@@ -615,17 +616,18 @@ their channel keys and parked sender values are roots rewritten by collection.
 ## Blocking IO workers
 
 Blocking host IO does not run on the scheduler thread. `Runtime` owns an
-`IoSubsystem` with four scoped OS workers, a typed request table, and one
-multi-producer/single-consumer completion channel. Performing `printLine`,
+`IoSubsystem` with four scoped OS workers, one readiness-driven socket thread,
+a typed request table, and one multi-producer/single-consumer completion channel. Performing `printLine`,
 `printStr`, `readLine`, `readFile`, `writeFile`, or `appendFile` follows this
 state transition:
 
 1. The scheduler thread resolves every VM operand to owned Rust data and
    submits an `IoRequest` associated with the current `ProcessId`.
 2. The process records `Blocked(Io(RequestId))` and leaves the run queue.
-3. A worker performs the host call and returns only `String`, unit, or a
-   contextual `io::Error`. Workers never hold `Value`, `ObjId`, heap roots, or
-   any other VM reference.
+3. A worker or the socket event loop performs the host operation and returns
+   only owned text/bytes, a `SocketId`, unit, or a contextual `io::Error`.
+   Host threads never hold `Value`, `ObjId`, heap roots, or any other VM
+   reference.
 4. The scheduler drains completions, verifies that request and block reason
    match, stores the plain result on the process, and returns it to the FIFO
    run queue. That process converts text into a heap string at its next
@@ -634,8 +636,9 @@ state transition:
    does not enter the VM defect channel.
 
 If interruption cancels a blocked request, its request-table entry becomes a
-cancelled tombstone until the worker returns. Completion frees that entry and
-is discarded; only a still-owned request can wake a process.
+cancelled tombstone. A blocking worker completion eventually frees it; the
+socket loop instead removes the exact readiness registration and immediately
+acknowledges cancellation. Only a still-owned request can wake a process.
 
 The VM enforces managed process-stack and heap-object ceilings. The defaults
 are intentionally above the million-bind regression; tests and embedders may
@@ -655,6 +658,18 @@ round-robin across the other three workers and may finish in a different order;
 each completion wakes only its requesting process. Stream references are
 borrowed by scoped workers and protected by `Mutex` because multiple worker
 threads exist, but the mutex does not protect compiler or VM heap state.
+
+TCP resources live only in the socket thread's monotonic side table keyed by
+`SocketId`. A Solveig `Socket` value is the typed id, never an OS descriptor or
+a heap slot, so copying collection cannot move or duplicate the resource.
+`mio::Poll` registers interest only while an accept, connect, send, or receive
+is pending. Readiness is treated as a hint: operations drain until
+`WouldBlock`, partial writes retain their owned buffer and offset, and
+spurious connect readiness is checked with `take_error` and `peer_addr`.
+All socket completions enter the same request table and scheduler wakeup path
+as blocking IO. Explicit close removes the side-table entry and wakes any
+outstanding operations with their specific typed error; ids are not reused,
+so a stale closed `Socket` cannot alias a later OS resource.
 
 Every scheduler iteration first drains ready completions. If the run queue is
 empty while IO requests remain, it blocks on the completion receiver rather
