@@ -563,11 +563,17 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "writeFile" => "Writes text to a file, replacing its previous contents.",
         "appendFile" => "Appends text to the end of a file.",
         "spawn" => "Starts an IO action in a new lightweight thread.",
+        "newChan" => "Creates an unbounded typed channel.",
+        "newBoundedChan" => "Creates a typed channel with a positive capacity.",
+        "send" => "Sends a value through a typed channel.",
+        "recv" => "Receives the oldest value from a typed channel.",
+        "tryRecv" => "Receives a channel value without blocking.",
+        "closeChan" => "Closes a typed channel.",
         _ => return None,
     })
 }
 
-fn compiler_type_entries() -> [(&'static str, TyConId); 7] {
+fn compiler_type_entries() -> [(&'static str, TyConId); 8] {
     [
         ("Int", PRIM_TYS.int),
         ("Float", PRIM_TYS.float),
@@ -576,6 +582,7 @@ fn compiler_type_entries() -> [(&'static str, TyConId); 7] {
         ("IO", PRIM_TYS.io),
         ("Bool", PRIM_TYS.bool),
         ("ThreadId", PRIM_TYS.thread_id),
+        ("Chan", PRIM_TYS.chan),
     ]
 }
 

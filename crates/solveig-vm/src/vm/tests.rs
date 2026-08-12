@@ -3,7 +3,7 @@
 
 use super::*;
 use crate::bytecode::Instr;
-use crate::heap::IoAction;
+use crate::heap::{Chan, ChanId, IoAction, PayloadStore};
 use crate::vm::io_worker::IoFailure;
 use solveig_ast::ast::{
     BUILTIN_BIND_IO, BUILTIN_CHARS_TO_STRING, BUILTIN_PURE_IO, BUILTIN_STRING_TO_CHARS, BinOp,
@@ -1013,6 +1013,112 @@ fn gc_traces_roots_in_every_inactive_process() {
     assert!(!runtime.heap.is_nursery_id(promoted_id));
     assert!(!runtime.heap.is_live(unrooted_id));
     assert!(runtime.heap.nursery.is_empty());
+}
+
+#[test]
+fn channel_write_barrier_preserves_fifo_values_across_minor_collections() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime =
+        Runtime::new_with_collection_limits_for_test(lower_to_bytecode(&program), 8, 64);
+    let root_process = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let channel = runtime.heap.alloc(HeapObject::Chan(Chan {
+        queue: PayloadStore::empty(),
+        capacity: None,
+        closed: false,
+    }));
+    runtime.processes[root_process]
+        .temporary_roots
+        .push(channel);
+    runtime.collect_all_process_roots_for_test();
+
+    for index in 0..50 {
+        let value = runtime.alloc_str_for_test(&format!("message-{index}"));
+        let Value::Obj(channel) = runtime.processes[root_process].temporary_roots[0] else {
+            solveig_base::ice!("channel root changed value kind during collection")
+        };
+        runtime.heap.push_channel(ChanId(channel), value);
+    }
+
+    runtime.collect_all_process_roots_for_test();
+    let Value::Obj(channel) = runtime.processes[root_process].temporary_roots[0] else {
+        solveig_base::ice!("channel root changed value kind during collection")
+    };
+    let channel = ChanId(channel);
+
+    for index in 0..50 {
+        let Some(Value::Obj(value)) = runtime.heap.pop_channel(channel) else {
+            solveig_base::ice!("channel lost a queued string during collection")
+        };
+        let HeapObject::Str { bytes } = runtime.heap.get(value) else {
+            solveig_base::ice!("channel queue returned a non-string value")
+        };
+        assert_eq!(
+            runtime.heap.str_value(value, *bytes),
+            format!("message-{index}")
+        );
+    }
+    assert!(runtime.heap.pop_channel(channel).is_none());
+    assert!(runtime.heap.minor_collections >= 2);
+}
+
+#[test]
+fn gc_traces_a_parked_channel_sender_value() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime =
+        Runtime::new_with_collection_limits_for_test(lower_to_bytecode(&program), 8, 64);
+    let root_process = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let channel = runtime.heap.alloc(HeapObject::Chan(Chan {
+        queue: PayloadStore::empty(),
+        capacity: Some(1),
+        closed: false,
+    }));
+    runtime.processes[root_process]
+        .temporary_roots
+        .push(channel);
+    runtime.collect_all_process_roots_for_test();
+    let Value::Obj(channel) = runtime.processes[root_process].temporary_roots[0] else {
+        solveig_base::ice!("channel root changed value kind during collection")
+    };
+    let channel = ChanId(channel);
+    runtime.heap.push_channel(channel, Value::Int(1));
+
+    let pending = runtime.alloc_str_for_test("parked");
+    let sender = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let mut sender_process = runtime.take_process(sender);
+    {
+        let mut interpreter = Interpreter::new(&mut runtime, &mut sender_process);
+        assert!(matches!(
+            interpreter.send_channel(channel, pending),
+            super::channel::ChannelOutcome::Blocked
+        ));
+    }
+    runtime.restore_process(sender_process);
+
+    runtime.collect_all_process_roots_for_test();
+
+    let receiver = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let mut receiver_process = runtime.take_process(receiver);
+    {
+        let mut interpreter = Interpreter::new(&mut runtime, &mut receiver_process);
+        assert!(matches!(
+            interpreter.recv_channel(channel, false),
+            super::channel::ChannelOutcome::Ready(Value::Int(1))
+        ));
+    }
+    runtime.restore_process(receiver_process);
+
+    let Some(Value::Obj(value)) = runtime.heap.pop_channel(channel) else {
+        solveig_base::ice!("parked sender value was not admitted to the channel")
+    };
+    let HeapObject::Str { bytes } = runtime.heap.get(value) else {
+        solveig_base::ice!("parked sender resumed with a non-string value")
+    };
+    assert_eq!(runtime.heap.str_value(value, *bytes), "parked");
+    assert_eq!(runtime.processes[sender].status, ProcStatus::Runnable);
 }
 
 #[test]

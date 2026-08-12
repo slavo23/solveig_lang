@@ -78,6 +78,8 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let f = Ty::TyVar(f_id);
     let a = Ty::TyVar(a_id);
     let b = Ty::TyVar(b_id);
+    let chan_a = Ty::make_app(Ty::make_con_id(PRIM_TYS.chan), a.clone());
+    let maybe_a = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), a.clone());
 
     vec![
         prim_spec(
@@ -264,7 +266,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "stringCharAt",
             BUILTIN_STRING_CHAR_AT,
             2,
-            arr(&[string.clone(), int], maybe_char),
+            arr(&[string.clone(), int.clone()], maybe_char),
         ),
         prim_spec(
             "stringEq",
@@ -430,13 +432,76 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "appendFile",
             BUILTIN_APPEND_FILE,
             2,
-            arr(&[string.clone(), string], io_of(io_error, Ty::TyUnit)),
+            arr(
+                &[string.clone(), string],
+                io_of(io_error.clone(), Ty::TyUnit),
+            ),
         ),
         prim_spec(
             "spawn",
             BUILTIN_SPAWN,
             1,
-            poly_arr(&[e_id, f_id], &[io_of(e, Ty::TyUnit)], io_of(f, thread_id)),
+            poly_arr(
+                &[e_id, f_id],
+                &[io_of(e.clone(), Ty::TyUnit)],
+                io_of(f, thread_id),
+            ),
+        ),
+        prim_spec(
+            "newChan",
+            BUILTIN_NEW_CHAN,
+            0,
+            poly(&[e_id, a_id], io_of(e.clone(), chan_a.clone())),
+        ),
+        prim_spec(
+            "newBoundedChan",
+            BUILTIN_NEW_BOUNDED_CHAN,
+            1,
+            poly_arr(
+                &[e_id, a_id],
+                std::slice::from_ref(&int),
+                io_of(e, chan_a.clone()),
+            ),
+        ),
+        prim_spec(
+            "send",
+            BUILTIN_SEND_CHAN,
+            2,
+            poly_arr(
+                std::slice::from_ref(&a_id),
+                &[chan_a.clone(), a.clone()],
+                io_of(io_error.clone(), Ty::TyUnit),
+            ),
+        ),
+        prim_spec(
+            "recv",
+            BUILTIN_RECV_CHAN,
+            1,
+            poly_arr(
+                std::slice::from_ref(&a_id),
+                std::slice::from_ref(&chan_a),
+                io_of(io_error.clone(), a.clone()),
+            ),
+        ),
+        prim_spec(
+            "tryRecv",
+            BUILTIN_TRY_RECV_CHAN,
+            1,
+            poly_arr(
+                std::slice::from_ref(&a_id),
+                std::slice::from_ref(&chan_a),
+                io_of(io_error.clone(), maybe_a),
+            ),
+        ),
+        prim_spec(
+            "closeChan",
+            BUILTIN_CLOSE_CHAN,
+            1,
+            poly_arr(
+                std::slice::from_ref(&a_id),
+                std::slice::from_ref(&chan_a),
+                io_of(io_error, Ty::TyUnit),
+            ),
         ),
     ]
 }

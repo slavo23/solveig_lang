@@ -1,0 +1,9 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+7
+recv-closed
+0
+send-closed
+try-closed

@@ -71,6 +71,7 @@ or callable with bound state:
 | `PartialCtor` | Constructor tag/arity plus already-applied fields. |
 | `Data0`, `Data1`, `Data2`, `DataN` | Saturated algebraic data, with zero to two fields inline and larger payloads in `PayloadStore`. |
 | `Str` | Immutable UTF-8 bytes in `ByteStore`. |
+| `Chan` | Mutable FIFO channel state: side-payload queue, optional positive capacity, and closed flag. |
 | `IoAction` | Inert IO syntax interpreted only by the IO machine. |
 | `Forwarded` | Temporary nursery forwarding entry, observable only while minor collection runs. |
 
@@ -167,16 +168,17 @@ callback execution back into the IO loop.
 - the single heap and global thunk table;
 - initialized nullary-constructor and Boolean caches;
 - the process arena and FIFO run queue;
+- scheduler-owned FIFO channel sender and receiver wait queues;
 - the scheduler-facing IO subsystem and reduction budget.
 
 `Process` owns one green thread's mutable execution state and no heap memory:
 its typed `ProcessId`, current chunk/PC/frame base, value stack, continuation
 stack, pattern binding buffer, temporary roots, current IO action, pending
-plain worker result, status, and remaining reduction count. `ProcStatus` is
+plain worker or channel result, status, and remaining reduction count. `ProcStatus` is
 `Runnable`, `Running`, `Blocked(reason)`, `Finished(value)`, or
-`Failed(error)`. Current block reasons are a worker `RequestId` and a global
-`GlobalIndex`; later resources must extend this typed enum rather than encode
-meaning in integers.
+`Failed(error)`. Current block reasons are a worker `RequestId`, a global
+`GlobalIndex`, and a channel `ChanId`; later resources must extend this typed
+enum rather than encode meaning in integers.
 
 The scheduler removes an active process from the arena for the duration of a
 step and leaves a placeholder at its id. This gives the interpreter an ordinary
@@ -195,7 +197,7 @@ process lifecycle while its outer loop interprets `IoAction` values.
 
 `IoAction` is data, not an eagerly performed host effect. Its variants are
 `Pure`, typed `Fail`, `Bind`, `Catch`, `CatchDefect`, `Finally`, terminal
-print/read, `GetArgs`, `Spawn`, and file read/write. The IO loop keeps the
+print/read, `GetArgs`, `Spawn`, channel operations, and file read/write. The IO loop keeps the
 current action in `Process::io_current` and pushes the matching IO continuation
 when descending through a compound action. When an action yields a value, the loop
 pops the saved continuation, applies it through bytecode when required, and
@@ -296,9 +298,9 @@ When the allocation limit fails, minor collection proceeds as follows:
    every value in a copied payload by the same evacuation operation. This
    transitively promotes the reachable nursery graph. Young-to-old edges need
    no special treatment.
-3. Scan the remembered set described below. It is empty for today's immutable
-   heap objects, but the collector boundary must support it before channels add
-   mutable heap state.
+3. Scan every old channel in the remembered set, evacuate nursery values in its
+   queue, rewrite those payload entries, and clear the set for the next nursery
+   epoch.
 4. After no nursery reference remains in roots, promoted objects, or remembered
    old objects, clear the nursery object, payload, and byte arenas together.
 5. If the old-generation threshold is also due, run the existing mark-sweep
@@ -333,8 +335,9 @@ temporaries that contain `Value`s must have been published into the active
 all of these locations:
 
 - the active process and every inactive process: value stack, binding buffer,
-  temporary roots, finished result, current IO action, and every value-bearing
-  IO continuation;
+  temporary roots, finished result, current IO action, pending channel result,
+  channel block reason, and every value-bearing IO continuation;
+- scheduler channel-waiter map keys and every parked sender value;
 - every `GlobalSlot::Evaluated` value;
 - every nullary-constructor-cache value and both Boolean cache values.
 
@@ -392,9 +395,11 @@ The Phase I inventory is:
 - Process stacks, process status, continuations, constructor caches, and Boolean
   caches are roots rather than old heap objects. Their mutable `Value` slots are
   rewritten by `Roots` and do not enter the remembered set.
-- Phase J's channel state is the first planned mutable heap object. J1 must add
-  its mutation operations here and insert an old channel into the remembered
-  set whenever it receives a nursery value.
+- `Heap::push_channel` is the sole channel queue publication site. It replaces
+  the channel's side-payload range and inserts the channel into
+  `remembered_channels` whenever an old channel receives a nursery object.
+  Direct handoff to a waiting receiver and parked sender values live in roots,
+  not in an old heap object, so they require no remembered-set entry.
 
 Promotion itself cannot create an old-to-young edge because the collector
 evacuates all children before completing the minor collection. New immutable
@@ -508,6 +513,29 @@ Program lifetime is owned by the main process:
 The ordering contract remains deterministic FIFO. `SOLVEIG_REDUCTIONS` fixes
 the quantum used by every process, and `SOLVEIG_SCHED_DETERMINISTIC=1` pins the
 policy explicitly for tests. Scheduling never uses sleeps or elapsed time.
+
+## Typed channels
+
+`Chan a` is a compiler-known abstract type whose values point to mutable
+`Chan` heap objects. `newChan` creates an unbounded queue;
+`newBoundedChan` requires a capacity from 1 through `u32::MAX`, raising an
+`Error` defect for an invalid capacity. The constructors quantify their typed
+error parameter so they compose contextually with any `IO e`, following the
+same rule as `pureIO` and the successful parent side of `spawn`.
+
+`send` hands a value directly to the oldest waiting receiver, appends it to the
+FIFO queue when capacity permits, or parks the sender when a bounded queue is
+full. `recv` removes the oldest queued value or parks the receiver while an
+open queue is empty. Removing a value from a full bounded channel admits and
+wakes the oldest parked sender. `tryRecv` performs the same dequeue without
+parking and returns `Nothing` only for an open empty channel.
+
+`closeChan` is idempotent and retains values already queued. Once those values
+are drained, `recv` and `tryRecv` fail with `ChannelClosed`; `send` fails with
+the same typed `IOError` immediately. Closing wakes every parked sender and
+receiver with that failure. Sender and receiver waiter queues are independently
+FIFO, as are queued values. Wait queues live in `Runtime`, not the heap object:
+their channel keys and parked sender values are roots rewritten by collection.
 
 ## Blocking IO workers
 
@@ -632,7 +660,8 @@ owner decision.
 - Scheduler decisions never depend on sleeps or wall-clock timing. Tests use a
   fixed reduction budget and exact FIFO order.
 - A blocked process records one typed `BlockReason`. IO completion must match
-  its `RequestId`; global wakeup must match its `GlobalIndex`.
+  its `RequestId`; global wakeup must match its `GlobalIndex`; channel wakeup
+  must match its `ChanId`.
 - An empty run queue waits only when an outstanding external completion can
   make progress. Otherwise the runtime reports deadlock instead of spinning.
 - Main completion terminates program scheduling. Non-main failure is reported

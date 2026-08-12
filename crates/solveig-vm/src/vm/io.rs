@@ -3,6 +3,7 @@
 //! continuation stack. Blocking actions park the process until an IO worker
 //! returns plain Rust data for scheduler-thread conversion.
 
+use super::channel::{ChannelOutcome, bounded_channel_capacity};
 use super::io_worker::{IoFailure, IoRequest, IoResult};
 use super::*;
 use crate::builtins::VmCtx;
@@ -19,6 +20,21 @@ impl Interpreter<'_> {
     ) -> Result<Value, StepOutcome> {
         if let Some(error) = self.pending_defect.take() {
             self.resume_io_defect(program, error)?;
+        }
+
+        if let Some(result) = self.channel_result.take() {
+            self.io_current = None;
+            match result {
+                ChannelResult::Value(value) => {
+                    if let Some(value) = self.resume_io_value(program, value)? {
+                        self.continuations.clear();
+                        return Ok(value);
+                    }
+                }
+                ChannelResult::Closed => {
+                    self.io_current = Some(self.alloc_channel_closed_action()?);
+                }
+            }
         }
 
         if let Some(result) = self.io_result.take() {
@@ -144,6 +160,88 @@ impl Interpreter<'_> {
                     let thread_id = self.spawn_io_process(action);
                     if let Some(value) = self.resume_io_value(program, thread_id)? {
                         return Ok(value);
+                    }
+                }
+                IoAction::NewChan { capacity } => {
+                    let capacity = match capacity {
+                        Some(capacity) => match bounded_channel_capacity(capacity) {
+                            Ok(capacity) => Some(capacity),
+                            Err(error) => {
+                                self.resume_io_defect(program, error)?;
+                                continue;
+                            }
+                        },
+                        None => None,
+                    };
+                    let channel = self.alloc_channel(capacity);
+                    if let Some(value) = self.resume_io_value(program, channel)? {
+                        return Ok(value);
+                    }
+                }
+                IoAction::Send { channel, value } => {
+                    let id = self.expect_channel_id(channel, "send")?;
+                    match self.send_channel(id, value) {
+                        ChannelOutcome::Ready(value) => {
+                            if let Some(value) = self.resume_io_value(program, value)? {
+                                return Ok(value);
+                            }
+                        }
+                        ChannelOutcome::Closed => {
+                            self.io_current = Some(self.alloc_channel_closed_action()?);
+                        }
+                        ChannelOutcome::Blocked => return Err(StepOutcome::Blocked),
+                        ChannelOutcome::Empty => {
+                            solveig_base::ice!("send returned the receive-only empty outcome")
+                        }
+                    }
+                }
+                IoAction::Recv { channel } => {
+                    let id = self.expect_channel_id(channel, "recv")?;
+                    match self.recv_channel(id, true) {
+                        ChannelOutcome::Ready(value) => {
+                            if let Some(value) = self.resume_io_value(program, value)? {
+                                return Ok(value);
+                            }
+                        }
+                        ChannelOutcome::Closed => {
+                            self.io_current = Some(self.alloc_channel_closed_action()?);
+                        }
+                        ChannelOutcome::Blocked => return Err(StepOutcome::Blocked),
+                        ChannelOutcome::Empty => {
+                            solveig_base::ice!("blocking recv returned an empty outcome")
+                        }
+                    }
+                }
+                IoAction::TryRecv { channel } => {
+                    let id = self.expect_channel_id(channel, "tryRecv")?;
+                    let value = match self.recv_channel(id, false) {
+                        ChannelOutcome::Ready(value) => self.alloc_maybe_value(Some(value))?,
+                        ChannelOutcome::Empty => self.alloc_maybe_value(None)?,
+                        ChannelOutcome::Closed => {
+                            self.io_current = Some(self.alloc_channel_closed_action()?);
+                            continue;
+                        }
+                        ChannelOutcome::Blocked => {
+                            solveig_base::ice!("tryRecv blocked")
+                        }
+                    };
+                    if let Some(value) = self.resume_io_value(program, value)? {
+                        return Ok(value);
+                    }
+                }
+                IoAction::CloseChan { channel } => {
+                    let id = self.expect_channel_id(channel, "closeChan")?;
+                    match self.close_channel_value(id) {
+                        ChannelOutcome::Ready(value) => {
+                            if let Some(value) = self.resume_io_value(program, value)? {
+                                return Ok(value);
+                            }
+                        }
+                        ChannelOutcome::Empty
+                        | ChannelOutcome::Closed
+                        | ChannelOutcome::Blocked => {
+                            solveig_base::ice!("closeChan returned an impossible outcome")
+                        }
                     }
                 }
                 IoAction::ReadFile { path } => {
@@ -459,6 +557,18 @@ impl Interpreter<'_> {
         failure: IoFailure,
     ) -> Result<Value, RuntimeError> {
         let error = self.alloc_io_error(failure)?;
+        self.alloc_typed_failure_action(error)
+    }
+
+    fn alloc_channel_closed_action(&mut self) -> Result<Value, RuntimeError> {
+        let error = VmCtx::new(self).nullary_ctor(
+            CtorRuntimeRole::PreludeIoErrorChannelClosed,
+            "channel operation",
+        )?;
+        self.alloc_typed_failure_action(error)
+    }
+
+    fn alloc_typed_failure_action(&mut self, error: Value) -> Result<Value, RuntimeError> {
         let root = self.temporary_roots.len();
         self.temporary_roots.push(error);
         self.safe_point();
@@ -469,6 +579,24 @@ impl Interpreter<'_> {
         let action = self.heap.alloc(HeapObject::IoAction(IoAction::Fail(error)));
         self.temporary_roots.truncate(root);
         Ok(action)
+    }
+
+    fn alloc_maybe_value(&mut self, value: Option<Value>) -> Result<Value, RuntimeError> {
+        let Some(value) = value else {
+            return VmCtx::new(self).nullary_ctor(CtorRuntimeRole::PreludeMaybeNothing, "tryRecv");
+        };
+
+        let root = self.temporary_roots.len();
+        self.temporary_roots.push(value);
+        self.safe_point();
+        let value = *self
+            .temporary_roots
+            .get(root)
+            .expect("ICE: tryRecv value root disappeared during allocation");
+        let result =
+            VmCtx::new(self).alloc_data1_ctor(CtorRuntimeRole::PreludeMaybeJust, value, "tryRecv");
+        self.temporary_roots.truncate(root);
+        result
     }
 
     fn alloc_io_error(&mut self, failure: IoFailure) -> Result<Value, RuntimeError> {

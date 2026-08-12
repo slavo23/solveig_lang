@@ -2,6 +2,7 @@
 //! Garbage collection and runtime allocation share this ownership boundary.
 
 use crate::values::{ObjId, Value};
+use solveig_base::FxHashSet;
 
 const DEFAULT_NURSERY_SLOTS: usize = 32_768;
 const DEFAULT_MAJOR_LIVE_FLOOR: usize = 65_536;
@@ -42,6 +43,7 @@ pub enum HeapObject {
     Str {
         bytes: ByteRef,
     },
+    Chan(Chan),
     IoAction(IoAction),
     /// A nursery slot that has been evacuated during the current minor GC.
     Forwarded(ObjId),
@@ -78,6 +80,22 @@ pub enum IoAction {
     Spawn {
         action: Value,
     },
+    NewChan {
+        capacity: Option<i64>,
+    },
+    Send {
+        channel: Value,
+        value: Value,
+    },
+    Recv {
+        channel: Value,
+    },
+    TryRecv {
+        channel: Value,
+    },
+    CloseChan {
+        channel: Value,
+    },
     ReadFile {
         path: Value,
     },
@@ -86,6 +104,18 @@ pub enum IoAction {
         contents: Value,
         append: bool,
     },
+}
+
+/// Identifies a channel heap object while it is registered with the scheduler.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChanId(pub ObjId);
+
+/// Stores the mutable heap-owned state of one typed channel.
+#[derive(Debug, Clone, Copy)]
+pub struct Chan {
+    pub queue: PayloadRef,
+    pub capacity: Option<u32>,
+    pub closed: bool,
 }
 
 #[derive(Debug)]
@@ -103,6 +133,7 @@ pub struct Heap {
     pub(crate) gc_stress: bool,
     pub(crate) minor_collections: usize,
     pub(crate) major_collections: usize,
+    pub(crate) remembered_channels: FxHashSet<ChanId>,
 }
 
 impl Default for Heap {
@@ -125,6 +156,7 @@ impl Default for Heap {
             gc_stress,
             minor_collections: 0,
             major_collections: 0,
+            remembered_channels: FxHashSet::default(),
         }
     }
 }
@@ -178,6 +210,20 @@ impl Heap {
         object
     }
 
+    fn get_mut(&mut self, id: ObjId) -> &mut HeapObject {
+        if self.is_nursery_id(id) {
+            self.nursery
+                .get_mut(id.0 as usize)
+                .unwrap_or_else(|| solveig_base::ice!("dangling nursery heap ref {}", id.0))
+        } else {
+            let index = self.old_index(id);
+            self.old
+                .get_mut(index)
+                .and_then(Option::as_mut)
+                .unwrap_or_else(|| solveig_base::ice!("dangling old-generation heap ref {}", id.0))
+        }
+    }
+
     #[inline]
     pub fn alloc(&mut self, obj: HeapObject) -> Value {
         if self.nursery.len() >= self.nursery_slot_count {
@@ -226,6 +272,85 @@ impl Heap {
             u32::try_from(raw)
                 .unwrap_or_else(|_| solveig_base::ice!("old-generation object id overflow")),
         )
+    }
+
+    pub(crate) fn channel(&self, id: ChanId) -> Option<Chan> {
+        match self.get(id.0) {
+            HeapObject::Chan(channel) => Some(*channel),
+            HeapObject::Closure { .. }
+            | HeapObject::PartialApp { .. }
+            | HeapObject::PartialCtor { .. }
+            | HeapObject::Data0 { .. }
+            | HeapObject::Data1 { .. }
+            | HeapObject::Data2 { .. }
+            | HeapObject::DataN { .. }
+            | HeapObject::Str { .. }
+            | HeapObject::IoAction(_) => None,
+            HeapObject::Forwarded(_) => {
+                solveig_base::ice!("forwarding entry escaped minor collection")
+            }
+        }
+    }
+
+    /// Appends to a channel queue and records any old-to-young edge.
+    ///
+    /// The remembered-set rule follows Jones, Hosking, and Moss, *The Garbage
+    /// Collection Handbook*, chapter 9: every mutation that installs a nursery
+    /// reference in an old object must publish that old object to the collector.
+    pub(crate) fn push_channel(&mut self, id: ChanId, value: Value) {
+        let Some(mut channel) = self.channel(id) else {
+            solveig_base::ice!("validated channel identity no longer names a channel")
+        };
+        let owner_is_nursery = self.is_nursery_id(id.0);
+        let mut values = self
+            .payloads
+            .as_slice(owner_is_nursery, channel.queue)
+            .to_vec();
+        values.push(value);
+
+        let next = if owner_is_nursery {
+            self.payloads.alloc_nursery_from_values(&values)
+        } else {
+            let next = self.payloads.alloc_old_from_values(&values);
+            self.payloads.free_old_span(channel.queue);
+            if matches!(value, Value::Obj(child) if self.is_nursery_id(child)) {
+                self.remembered_channels.insert(id);
+            }
+            next
+        };
+        channel.queue = next;
+        *self.get_mut(id.0) = HeapObject::Chan(channel);
+    }
+
+    pub(crate) fn pop_channel(&mut self, id: ChanId) -> Option<Value> {
+        let mut channel = self.channel(id)?;
+        let owner_is_nursery = self.is_nursery_id(id.0);
+        let value = self
+            .payloads
+            .as_slice(owner_is_nursery, channel.queue)
+            .first()
+            .copied()?;
+        let consumed = PayloadRef {
+            start: channel.queue.start,
+            end: channel.queue.start + 1,
+        };
+        channel.queue.start += 1;
+        if channel.queue.is_empty() {
+            channel.queue = PayloadStore::empty();
+        }
+        if !owner_is_nursery {
+            self.payloads.free_old_span(consumed);
+        }
+        *self.get_mut(id.0) = HeapObject::Chan(channel);
+        Some(value)
+    }
+
+    pub(crate) fn close_channel(&mut self, id: ChanId) {
+        let Some(mut channel) = self.channel(id) else {
+            solveig_base::ice!("validated channel identity no longer names a channel")
+        };
+        channel.closed = true;
+        *self.get_mut(id.0) = HeapObject::Chan(channel);
     }
 
     #[inline(always)]
@@ -312,6 +437,7 @@ impl Heap {
                 self.payloads.free_old_span(*applied_args);
             }
             HeapObject::DataN { fields, .. } => self.payloads.free_old_span(*fields),
+            HeapObject::Chan(channel) => self.payloads.free_old_span(channel.queue),
             HeapObject::Str { bytes } => self.bytes.free_old_span(*bytes),
             HeapObject::Data0 { .. }
             | HeapObject::Data1 { .. }
@@ -706,6 +832,24 @@ impl PayloadStore {
 
     pub(crate) fn clear_nursery(&mut self) {
         self.nursery_values.clear();
+    }
+
+    fn alloc_nursery_from_values(&mut self, values: &[Value]) -> PayloadRef {
+        let span = self.reserve_nursery_span(values.len());
+        self.nursery_values
+            .get_mut(span.start..span.end)
+            .expect("ICE: nursery payload destination out of bounds")
+            .copy_from_slice(values);
+        span
+    }
+
+    fn alloc_old_from_values(&mut self, values: &[Value]) -> PayloadRef {
+        let span = self.reserve_old_span(values.len());
+        self.old_values
+            .get_mut(span.start..span.end)
+            .expect("ICE: old payload destination out of bounds")
+            .copy_from_slice(values);
+        span
     }
 }
 

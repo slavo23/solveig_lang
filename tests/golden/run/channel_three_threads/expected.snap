@@ -1,0 +1,7 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+A1
+B2
+C3

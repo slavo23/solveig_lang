@@ -3,10 +3,11 @@
 
 use crate::bytecode::{BytecodeProgram, lower_to_bytecode};
 use crate::display::DisplayValue;
-use crate::heap::{Heap, HeapObject};
+use crate::heap::{ChanId, Heap, HeapObject};
 use crate::values::{BoolCache, Continuation, NullaryCtorCache, Value};
 use la_arena::{Arena, Idx, RawIdx};
 use solveig_ast::ast::CtorRuntimeInfo;
+use solveig_base::FxHashMap;
 use solveig_lower::closure_ir::CCProgram;
 use std::collections::VecDeque;
 use std::fmt;
@@ -17,6 +18,7 @@ use std::sync::Mutex;
 use std::thread;
 
 mod call;
+mod channel;
 mod dispatch;
 mod gc;
 mod io;
@@ -48,6 +50,7 @@ pub struct Process {
     pub(crate) temporary_roots: Vec<Value>,
     io_current: Option<Value>,
     io_result: Option<IoResult>,
+    channel_result: Option<ChannelResult>,
     pending_defect: Option<RuntimeError>,
     status: ProcStatus,
     reductions_left: u32,
@@ -71,6 +74,7 @@ pub struct Runtime {
     processes: Arena<Process>,
     run_queue: VecDeque<ProcessId>,
     io: IoSubsystem,
+    channel_waiters: FxHashMap<ChanId, ChannelWaiters>,
     reduction_budget: u32,
     stack_limit: usize,
     heap_limit: usize,
@@ -87,6 +91,18 @@ enum GlobalSlot {
     Evaluated(Value),
     Failed(RuntimeError),
 }
+
+#[derive(Default)]
+struct ChannelWaiters {
+    senders: VecDeque<(ProcessId, Value)>,
+    receivers: VecDeque<ProcessId>,
+}
+
+#[derive(Clone, Copy)]
+enum ChannelResult {
+    Value(Value),
+    Closed,
+}
 /// Describes whether a process may run or why it has stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcStatus {
@@ -102,6 +118,7 @@ pub enum ProcStatus {
 pub enum BlockReason {
     Io(RequestId),
     Blackhole(GlobalIndex),
+    Chan(ChanId),
 }
 
 /// Identifies one request submitted to the runtime IO subsystem.
@@ -140,6 +157,7 @@ pub(crate) struct Interpreter<'a> {
     inactive_processes: &'a mut Arena<Process>,
     run_queue: &'a mut VecDeque<ProcessId>,
     io: &'a mut IoSubsystem,
+    channel_waiters: &'a mut FxHashMap<ChanId, ChannelWaiters>,
     reduction_budget: u32,
     stack_limit: usize,
     heap_limit: usize,
@@ -165,6 +183,7 @@ impl Process {
             temporary_roots: Vec::with_capacity(8),
             io_current: None,
             io_result: None,
+            channel_result: None,
             pending_defect: None,
             status: ProcStatus::Runnable,
             reductions_left: reduction_budget,
@@ -183,6 +202,7 @@ impl Process {
             temporary_roots: Vec::new(),
             io_current: None,
             io_result: None,
+            channel_result: None,
             pending_defect: None,
             status: ProcStatus::Running,
             reductions_left: 0,
@@ -295,6 +315,7 @@ impl Runtime {
             processes: Arena::new(),
             run_queue: VecDeque::new(),
             io,
+            channel_waiters: FxHashMap::default(),
             reduction_budget,
             stack_limit: runtime_limit_from_env("SOLVEIG_STACK_LIMIT", DEFAULT_STACK_LIMIT),
             heap_limit: runtime_limit_from_env("SOLVEIG_HEAP_LIMIT", DEFAULT_HEAP_LIMIT),
@@ -409,6 +430,7 @@ impl<'a> Interpreter<'a> {
             processes,
             run_queue,
             io,
+            channel_waiters,
             reduction_budget,
             stack_limit,
             heap_limit,
@@ -423,6 +445,7 @@ impl<'a> Interpreter<'a> {
             inactive_processes: processes,
             run_queue,
             io,
+            channel_waiters,
             reduction_budget: *reduction_budget,
             stack_limit: *stack_limit,
             heap_limit: *heap_limit,

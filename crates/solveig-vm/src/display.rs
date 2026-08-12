@@ -85,6 +85,7 @@ impl DisplayValue<'_> {
                     )
                 }
                 HeapObject::IoAction(_) => "<io>".into(),
+                HeapObject::Chan(_) => "<channel>".into(),
                 HeapObject::Forwarded(_) => {
                     solveig_base::ice!("forwarding entry reached value display")
                 }

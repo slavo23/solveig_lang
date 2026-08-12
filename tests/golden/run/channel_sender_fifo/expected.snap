@@ -1,0 +1,8 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+0
+1
+2
+3

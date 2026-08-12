@@ -46,6 +46,7 @@ data IOError =
   | ReadFileError String String
   | WriteFileError String String
   | AppendFileError String String
+  | ChannelClosed
 data Defect =
     Error String
   | DivisionByZero
@@ -80,6 +81,13 @@ readLine : Task String
 readFile : String -> Task String
 writeFile : String -> String -> Task ()
 appendFile : String -> String -> Task ()
+spawn : forall childError e. IO childError () -> IO e ThreadId
+newChan : forall e a. IO e (Chan a)
+newBoundedChan : forall e a. Int -> IO e (Chan a)
+send : forall a. Chan a -> a -> Task ()
+recv : forall a. Chan a -> Task a
+tryRecv : forall a. Chan a -> Task (Maybe a)
+closeChan : forall a. Chan a -> Task ()
 ```
 
 `printLine` writes a trailing newline. `printStr` does not, and the CLI flushes
@@ -100,6 +108,12 @@ unwind through the same cleanup frame and may be handled only by
 `StackExhausted` and `HeapExhausted`. Because Solveig is strict, the protected
 action must be constructed before `catchDefect` installs its scope; pure work
 that should be protected belongs inside an executed IO callback.
+
+Channels are typed FIFO queues shared by lightweight threads. Unbounded sends
+enqueue immediately; bounded sends block when the queue is full. Receives block
+only while an open queue is empty, and `tryRecv` returns `Nothing` in that
+state. Closing preserves queued values, then raises `ChannelClosed` from
+further receives and sends. Waiting senders and receivers are resumed FIFO.
 
 Example:
 
@@ -416,6 +430,13 @@ getArgs : forall e. IO e [String]
 readFile : String -> IO IOError String
 writeFile : String -> String -> IO IOError ()
 appendFile : String -> String -> IO IOError ()
+spawn : forall childError e. IO childError () -> IO e ThreadId
+newChan : forall e a. IO e (Chan a)
+newBoundedChan : forall e a. Int -> IO e (Chan a)
+send : forall a. Chan a -> a -> IO IOError ()
+recv : forall a. Chan a -> IO IOError a
+tryRecv : forall a. Chan a -> IO IOError (Maybe a)
+closeChan : forall a. Chan a -> IO IOError ()
 ```
 
 Primitive Int add/sub/mul/neg wrap on `i64` overflow. `intDiv` and `intMod`

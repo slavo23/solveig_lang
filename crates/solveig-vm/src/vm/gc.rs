@@ -5,7 +5,7 @@
 //! `Value` across an allocation point must be added here.
 
 use super::*;
-use crate::heap::{Heap, HeapObject, IoAction, PayloadRef};
+use crate::heap::{ChanId, Heap, HeapObject, IoAction, PayloadRef};
 use crate::values::{BoolCache, Continuation, NullaryCtorCache, ObjId, Value};
 use solveig_ast::ast::{CtorId, PRIM_TYS};
 
@@ -15,6 +15,7 @@ pub(super) struct Roots<'a> {
     globals: &'a mut [GlobalSlot],
     nullary_ctors: &'a mut NullaryCtorCache,
     bools: &'a mut BoolCache,
+    channel_waiters: &'a mut FxHashMap<ChanId, ChannelWaiters>,
 }
 
 impl Roots<'_> {
@@ -39,16 +40,41 @@ impl Roots<'_> {
         }
         visit(&mut self.bools.true_val);
         visit(&mut self.bools.false_val);
+
+        let waiters = std::mem::take(self.channel_waiters);
+        for (mut channel, mut channel_waiters) in waiters {
+            Self::visit_channel_id_mut(&mut channel, &mut visit);
+            for (_, value) in &mut channel_waiters.senders {
+                visit(value);
+            }
+            if self
+                .channel_waiters
+                .insert(channel, channel_waiters)
+                .is_some()
+            {
+                solveig_base::ice!("GC rewrote two channel waiter keys to one identity")
+            }
+        }
     }
 
     fn visit_process_values_mut(process: &mut Process, visit: &mut impl FnMut(&mut Value)) {
         process.stack.iter_mut().for_each(&mut *visit);
         process.binding_buffer.iter_mut().for_each(&mut *visit);
         process.temporary_roots.iter_mut().for_each(&mut *visit);
-        if let ProcStatus::Finished(value) = &mut process.status {
-            visit(value);
+        match &mut process.status {
+            ProcStatus::Blocked(BlockReason::Chan(channel)) => {
+                Self::visit_channel_id_mut(channel, visit);
+            }
+            ProcStatus::Finished(value) => visit(value),
+            ProcStatus::Runnable
+            | ProcStatus::Running
+            | ProcStatus::Blocked(BlockReason::Io(_) | BlockReason::Blackhole(_))
+            | ProcStatus::Failed(_) => {}
         }
         if let Some(value) = &mut process.io_current {
+            visit(value);
+        }
+        if let Some(ChannelResult::Value(value)) = &mut process.channel_result {
             visit(value);
         }
         for frame in &mut process.continuations {
@@ -65,6 +91,15 @@ impl Roots<'_> {
                 | Continuation::PublishGlobalThenResume { .. } => {}
             }
         }
+    }
+
+    fn visit_channel_id_mut(channel: &mut ChanId, visit: &mut impl FnMut(&mut Value)) {
+        let mut value = Value::Obj(channel.0);
+        visit(&mut value);
+        let Value::Obj(id) = value else {
+            solveig_base::ice!("GC changed a channel object root into a non-object value")
+        };
+        channel.0 = id;
     }
 
     #[cfg(debug_assertions)]
@@ -100,6 +135,7 @@ impl Interpreter<'_> {
                 globals: self.globals,
                 nullary_ctors: self.nullary_ctors,
                 bools: self.bools,
+                channel_waiters: self.channel_waiters,
             };
             collect_garbage(self.heap, &mut roots);
         }
@@ -112,6 +148,7 @@ impl Interpreter<'_> {
             globals: self.globals,
             nullary_ctors: self.nullary_ctors,
             bools: self.bools,
+            channel_waiters: self.channel_waiters,
         };
         collect_minor(self.heap, &mut roots);
         collect_major(self.heap, &mut roots);
@@ -139,6 +176,7 @@ impl Runtime {
                     globals: &mut self.globals,
                     nullary_ctors: &mut self.nullary_ctors,
                     bools: &mut self.bools,
+                    channel_waiters: &mut self.channel_waiters,
                 };
                 collect_garbage(&mut self.heap, &mut roots);
             }
@@ -164,6 +202,7 @@ impl Runtime {
                 globals: &mut self.globals,
                 nullary_ctors: &mut self.nullary_ctors,
                 bools: &mut self.bools,
+                channel_waiters: &mut self.channel_waiters,
             };
             collect_garbage(&mut self.heap, &mut roots);
         }
@@ -177,6 +216,7 @@ impl Runtime {
             globals: &mut self.globals,
             nullary_ctors: &mut self.nullary_ctors,
             bools: &mut self.bools,
+            channel_waiters: &mut self.channel_waiters,
         };
         collect_garbage(&mut self.heap, &mut roots);
     }
@@ -205,6 +245,21 @@ fn collect_minor(heap: &mut Heap, roots: &mut Roots<'_>) {
     roots.visit_values_mut(|value| {
         evacuate_value(heap, value, &mut worklist, &mut promoted);
     });
+
+    while let Some(id) = worklist.pop() {
+        rewrite_promoted_object(heap, id, &mut worklist, &mut promoted);
+    }
+
+    let remembered = std::mem::take(&mut heap.remembered_channels);
+    for id in remembered {
+        if heap.is_nursery_id(id.0) {
+            solveig_base::ice!("remembered set contained a nursery channel")
+        }
+        let Some(channel) = heap.channel(id) else {
+            solveig_base::ice!("remembered channel identity no longer names a channel")
+        };
+        rewrite_old_payload(heap, channel.queue, &mut worklist, &mut promoted);
+    }
 
     while let Some(id) = worklist.pop() {
         rewrite_promoted_object(heap, id, &mut worklist, &mut promoted);
@@ -278,6 +333,10 @@ fn copy_object_side_payloads(heap: &mut Heap, object: HeapObject) -> HeapObject 
         HeapObject::Str { bytes } => HeapObject::Str {
             bytes: heap.promote_bytes(bytes),
         },
+        HeapObject::Chan(mut channel) => {
+            channel.queue = heap.promote_payload(channel.queue);
+            HeapObject::Chan(channel)
+        }
         HeapObject::Data0 { .. }
         | HeapObject::Data1 { .. }
         | HeapObject::Data2 { .. }
@@ -325,6 +384,9 @@ fn rewrite_promoted_object(
         }
         HeapObject::IoAction(action) => {
             rewrite_io_action(heap, action, worklist, promoted);
+        }
+        HeapObject::Chan(channel) => {
+            rewrite_old_payload(heap, channel.queue, worklist, promoted);
         }
         HeapObject::Data0 { .. } | HeapObject::Str { .. } => {}
         HeapObject::Forwarded(_) => {
@@ -390,7 +452,16 @@ fn rewrite_io_action(
             evacuate_value(heap, path, worklist, promoted);
             evacuate_value(heap, contents, worklist, promoted);
         }
-        IoAction::ReadLine | IoAction::GetArgs => {}
+        IoAction::Send { channel, value } => {
+            evacuate_value(heap, channel, worklist, promoted);
+            evacuate_value(heap, value, worklist, promoted);
+        }
+        IoAction::Recv { channel }
+        | IoAction::TryRecv { channel }
+        | IoAction::CloseChan { channel } => {
+            evacuate_value(heap, channel, worklist, promoted);
+        }
+        IoAction::ReadLine | IoAction::GetArgs | IoAction::NewChan { .. } => {}
     }
 }
 
@@ -495,6 +566,7 @@ fn mark_old_object_children(heap: &mut Heap, id: ObjId, worklist: &mut Vec<ObjId
             mark_old_child(heap, field1, worklist);
         }
         HeapObject::IoAction(action) => mark_old_io_action(heap, action, worklist),
+        HeapObject::Chan(channel) => mark_old_payload(heap, channel.queue, worklist),
         HeapObject::Data0 { .. } | HeapObject::Str { .. } => {}
         HeapObject::Forwarded(_) => {
             solveig_base::ice!("forwarding entry reached old-generation marking");
@@ -551,7 +623,14 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
             mark_old_child(heap, path, worklist);
             mark_old_child(heap, contents, worklist);
         }
-        IoAction::ReadLine | IoAction::GetArgs => {}
+        IoAction::Send { channel, value } => {
+            mark_old_child(heap, channel, worklist);
+            mark_old_child(heap, value, worklist);
+        }
+        IoAction::Recv { channel }
+        | IoAction::TryRecv { channel }
+        | IoAction::CloseChan { channel } => mark_old_child(heap, channel, worklist),
+        IoAction::ReadLine | IoAction::GetArgs | IoAction::NewChan { .. } => {}
     }
 }
 
@@ -643,8 +722,20 @@ fn assert_object_children_live(
                 assert_value_live(heap, path, seen, worklist);
                 assert_value_live(heap, contents, seen, worklist);
             }
-            IoAction::ReadLine | IoAction::GetArgs => {}
+            IoAction::Send { channel, value } => {
+                assert_value_live(heap, channel, seen, worklist);
+                assert_value_live(heap, value, seen, worklist);
+            }
+            IoAction::Recv { channel }
+            | IoAction::TryRecv { channel }
+            | IoAction::CloseChan { channel } => {
+                assert_value_live(heap, channel, seen, worklist);
+            }
+            IoAction::ReadLine | IoAction::GetArgs | IoAction::NewChan { .. } => {}
         },
+        HeapObject::Chan(channel) => {
+            assert_payload_live(heap, id, channel.queue, seen, worklist);
+        }
         HeapObject::Data0 { .. } | HeapObject::Str { .. } => {}
         HeapObject::Forwarded(_) => {
             solveig_base::ice!("forwarding entry reached debug heap walk");

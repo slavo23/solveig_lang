@@ -14,6 +14,7 @@ reportMapped error =
         | ReadFileError _ _ => printLine "unexpected-read"
         | WriteFileError _ _ => printLine "unexpected-write"
         | AppendFileError _ _ => printLine "unexpected-append"
+        | ChannelClosed => printLine "unexpected-channel"
 
 reportRead : IOError -> Task ()
 reportRead error =
@@ -23,6 +24,7 @@ reportRead error =
         | StdinError _ => printLine "unexpected-stdin"
         | WriteFileError _ _ => printLine "unexpected-write"
         | AppendFileError _ _ => printLine "unexpected-append"
+        | ChannelClosed => printLine "unexpected-channel"
 
 reportWrite : IOError -> Task ()
 reportWrite error =
@@ -32,6 +34,7 @@ reportWrite error =
         | StdinError _ => printLine "unexpected-stdin"
         | ReadFileError _ _ => printLine "unexpected-read"
         | AppendFileError _ _ => printLine "unexpected-append"
+        | ChannelClosed => printLine "unexpected-channel"
 
 reportAppend : IOError -> Task ()
 reportAppend error =
@@ -41,6 +44,7 @@ reportAppend error =
         | StdinError _ => printLine "unexpected-stdin"
         | ReadFileError _ _ => printLine "unexpected-read"
         | WriteFileError _ _ => printLine "unexpected-write"
+        | ChannelClosed => printLine "unexpected-channel"
 
 releaseResource : String -> Task ()
 releaseResource name = printLine (appendString "release " name)

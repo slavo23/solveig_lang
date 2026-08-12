@@ -472,6 +472,9 @@ impl Interpreter<'_> {
             HeapObject::IoAction(_) => {
                 solveig_base::ice!("IO action reached callable-object invocation");
             }
+            HeapObject::Chan(_) => {
+                solveig_base::ice!("channel reached callable-object invocation");
+            }
             HeapObject::Forwarded(_) => {
                 solveig_base::ice!("forwarding entry reached callable-object invocation");
             }

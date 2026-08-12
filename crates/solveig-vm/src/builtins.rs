@@ -6,17 +6,18 @@ use std::cmp::Ordering;
 use solveig_ast::ast::{
     BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_CATCH_DEFECT_IO, BUILTIN_CATCH_IO,
     BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_STRING, BUILTIN_CHARS_TO_STRING,
-    BUILTIN_ERROR, BUILTIN_FAIL_IO, BUILTIN_FINALLY_IO, BUILTIN_FLOAT_ADD, BUILTIN_FLOAT_DIV,
-    BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE, BUILTIN_FLOAT_LT,
-    BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB, BUILTIN_FLOAT_TO_INT,
-    BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD, BUILTIN_INT_COMPARE,
-    BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE,
-    BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB,
-    BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR,
-    BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_SPAWN, BUILTIN_STRING_APPEND,
+    BUILTIN_CLOSE_CHAN, BUILTIN_ERROR, BUILTIN_FAIL_IO, BUILTIN_FINALLY_IO, BUILTIN_FLOAT_ADD,
+    BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE,
+    BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB,
+    BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD,
+    BUILTIN_INT_COMPARE, BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT,
+    BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG,
+    BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_NEW_BOUNDED_CHAN,
+    BUILTIN_NEW_CHAN, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_FILE,
+    BUILTIN_READ_LINE, BUILTIN_RECV_CHAN, BUILTIN_SEND_CHAN, BUILTIN_SPAWN, BUILTIN_STRING_APPEND,
     BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
-    BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo,
-    CtorRuntimeRole,
+    BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE,
+    BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
 };
 
 use crate::heap::{HeapObject, IoAction};
@@ -268,6 +269,17 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_WRITE_FILE, "writeFile", 2, write_file),
     builtin!(BUILTIN_APPEND_FILE, "appendFile", 2, append_file),
     builtin!(BUILTIN_SPAWN, "spawn", 1, spawn),
+    builtin!(BUILTIN_NEW_CHAN, "newChan", 0, new_chan),
+    builtin!(
+        BUILTIN_NEW_BOUNDED_CHAN,
+        "newBoundedChan",
+        1,
+        new_bounded_chan
+    ),
+    builtin!(BUILTIN_SEND_CHAN, "send", 2, send_chan),
+    builtin!(BUILTIN_RECV_CHAN, "recv", 1, recv_chan),
+    builtin!(BUILTIN_TRY_RECV_CHAN, "tryRecv", 1, try_recv_chan),
+    builtin!(BUILTIN_CLOSE_CHAN, "closeChan", 1, close_chan),
 ];
 
 // D3 primitive semantics:
@@ -616,6 +628,38 @@ fn append_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, Runtime
 fn spawn(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let action = expect_value(args, 0, "spawn")?;
     Ok(ctx.alloc_io_action(IoAction::Spawn { action }))
+}
+
+fn new_chan(ctx: &mut VmCtx<'_, '_>, _args: &[Value]) -> Result<Value, RuntimeError> {
+    Ok(ctx.alloc_io_action(IoAction::NewChan { capacity: None }))
+}
+
+fn new_bounded_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let capacity = expect_int(args, 0, "newBoundedChan")?;
+    Ok(ctx.alloc_io_action(IoAction::NewChan {
+        capacity: Some(capacity),
+    }))
+}
+
+fn send_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let channel = expect_value(args, 0, "send")?;
+    let value = expect_value(args, 1, "send")?;
+    Ok(ctx.alloc_io_action(IoAction::Send { channel, value }))
+}
+
+fn recv_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let channel = expect_value(args, 0, "recv")?;
+    Ok(ctx.alloc_io_action(IoAction::Recv { channel }))
+}
+
+fn try_recv_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let channel = expect_value(args, 0, "tryRecv")?;
+    Ok(ctx.alloc_io_action(IoAction::TryRecv { channel }))
+}
+
+fn close_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let channel = expect_value(args, 0, "closeChan")?;
+    Ok(ctx.alloc_io_action(IoAction::CloseChan { channel }))
 }
 
 fn ordering_value(

@@ -16,6 +16,7 @@ pub struct PrimTys {
     pub io: TyConId,
     pub bool: TyConId,
     pub thread_id: TyConId,
+    pub chan: TyConId,
     pub true_ctor: CtorId,
     pub false_ctor: CtorId,
 }
@@ -28,6 +29,7 @@ pub const PRIM_TYS: PrimTys = PrimTys {
     io: TyConId(4),
     bool: TyConId(5),
     thread_id: TyConId(6),
+    chan: TyConId(7),
     true_ctor: CtorId(0),
     false_ctor: CtorId(1),
 };
@@ -70,6 +72,13 @@ pub fn compiler_primitive_tycon_infos(names: &mut Names) -> Vec<(TyConId, TyConI
             "ThreadId",
             Kind::Star,
         ),
+        compiler_primitive_tycon_info(
+            names,
+            PRIM_TYS.chan,
+            COMPILER_CHAN_NAME,
+            "Chan",
+            Kind::make_arrow(Kind::Star, Kind::Star),
+        ),
     ]
 }
 
@@ -84,6 +93,7 @@ pub fn compiler_primitive_tycon_kinds() -> FxHashMap<TyConId, Kind> {
             Kind::make_arrow(Kind::Star, Kind::make_arrow(Kind::Star, Kind::Star)),
         ),
         (PRIM_TYS.thread_id, Kind::Star),
+        (PRIM_TYS.chan, Kind::make_arrow(Kind::Star, Kind::Star)),
     ])
 }
 
@@ -189,6 +199,7 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         PRELUDE_IO_ERROR_READ_FILE_NAME => CtorRuntimeRole::PreludeIoErrorReadFile,
         PRELUDE_IO_ERROR_WRITE_FILE_NAME => CtorRuntimeRole::PreludeIoErrorWriteFile,
         PRELUDE_IO_ERROR_APPEND_FILE_NAME => CtorRuntimeRole::PreludeIoErrorAppendFile,
+        PRELUDE_IO_ERROR_CHANNEL_CLOSED_NAME => CtorRuntimeRole::PreludeIoErrorChannelClosed,
         PRELUDE_DEFECT_ERROR_NAME => CtorRuntimeRole::PreludeDefectError,
         PRELUDE_DEFECT_DIVISION_BY_ZERO_NAME => CtorRuntimeRole::PreludeDefectDivisionByZero,
         PRELUDE_DEFECT_STACK_EXHAUSTED_NAME => CtorRuntimeRole::PreludeDefectStackExhausted,
@@ -418,6 +429,7 @@ pub enum CtorRuntimeRole {
     PreludeIoErrorReadFile,
     PreludeIoErrorWriteFile,
     PreludeIoErrorAppendFile,
+    PreludeIoErrorChannelClosed,
     PreludeDefectError,
     PreludeDefectDivisionByZero,
     PreludeDefectStackExhausted,

@@ -34,6 +34,7 @@ data IOError =
   | ReadFileError String String
   | WriteFileError String String
   | AppendFileError String String
+  | ChannelClosed
 ```
 
 A typed failure short-circuits `bind`: later actions in the same sequence do
@@ -54,6 +55,7 @@ reportIOError ioError =
             printLine (appendString path (appendString ": " message))
         | AppendFileError path message =>
             printLine (appendString path (appendString ": " message))
+        | ChannelClosed => printLine "channel closed"
 
 printSettings : Task ()
 printSettings = do
