@@ -83,6 +83,7 @@ writeFile : String -> String -> Task ()
 appendFile : String -> String -> Task ()
 spawn : forall childError e. IO childError () -> IO e ThreadId
 killThread : ThreadId -> Task ()
+sleep : Int -> Task ()
 mask : forall e a. IO e a -> IO e a
 newChan : forall e a. IO e (Chan a)
 newBoundedChan : forall e a. Int -> IO e (Chan a)
@@ -112,6 +113,12 @@ or unknown thread succeeds. `mask` defers delivery while its action remains
 runnable. Operations that actually block on a channel or host IO remain
 interruptible, so masked code cannot become permanently unkillable. Nested
 masks restore one depth at a time.
+
+`sleep milliseconds` parks only the current lightweight thread. Non-positive
+durations complete immediately. Normal execution uses monotonic elapsed time;
+deterministic execution advances virtual time when no process is runnable, so
+concurrency tests do not wait on or assert against the wall clock. A sleeping
+thread remains interruptible, including inside `mask`.
 
 `error` raises `Error`; integer division and modulo by zero raise
 `DivisionByZero`. The VM's managed stack and heap-object ceilings raise
@@ -441,6 +448,10 @@ readFile : String -> IO IOError String
 writeFile : String -> String -> IO IOError ()
 appendFile : String -> String -> IO IOError ()
 spawn : forall childError e. IO childError () -> IO e ThreadId
+killThread : ThreadId -> IO IOError ()
+sleep : Int -> IO IOError ()
+maskIO : forall e a. IO e a -> IO e a
+restoreMaskIO : forall e a. IO e a -> IO e a
 newChan : forall e a. IO e (Chan a)
 newBoundedChan : forall e a. Int -> IO e (Chan a)
 send : forall a. Chan a -> a -> IO IOError ()

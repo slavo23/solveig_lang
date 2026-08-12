@@ -171,17 +171,18 @@ callback execution back into the IO loop.
 - initialized nullary-constructor and Boolean caches;
 - the process arena and FIFO run queue;
 - scheduler-owned FIFO channel sender and receiver wait queues;
+- the scheduler-owned timer queue and monotonic clock;
 - the scheduler-facing IO subsystem and reduction budget.
 
 `Process` owns one green thread's mutable execution state and no heap memory:
 its typed `ProcessId`, current chunk/PC/frame base, value stack, continuation
 stack, pattern binding buffer, temporary roots, current IO action, pending
-plain worker or channel result, status, and remaining reduction count. `ProcStatus` is
+plain worker, channel, or timer result, status, and remaining reduction count. `ProcStatus` is
 `Runnable`, `Running`, `Blocked(reason)`, `Finished(value)`, `Failed(error)`,
 or `Interrupted(reason)`. A process also retains one pending interruption flag
-and a nested mask-depth counter. Current block reasons are a worker `RequestId`, a global
-`GlobalIndex`, and a channel `ChanId`; later resources must extend this typed
-enum rather than encode meaning in integers.
+and a nested mask-depth counter. Current block reasons are a worker `RequestId`,
+a global `GlobalIndex`, a channel `ChanId`, and a timer `Deadline`; later
+resources must extend this typed enum rather than encode meaning in integers.
 
 The scheduler removes an active process from the arena for the duration of a
 step and leaves a placeholder at its id. This gives the interpreter an ordinary
@@ -200,8 +201,8 @@ process lifecycle while its outer loop interprets `IoAction` values.
 
 `IoAction` is data, not an eagerly performed host effect. Its variants are
 `Pure`, typed `Fail`, `Bind`, `Catch`, `CatchDefect`, `Finally`, terminal
-print/read, `GetArgs`, `Spawn`, `KillThread`, scoped mask operations, channel
-operations, and file read/write. The IO loop keeps the
+print/read, `GetArgs`, `Spawn`, `KillThread`, `Sleep`, scoped mask operations,
+channel operations, and file read/write. The IO loop keeps the
 current action in `Process::io_current` and pushes the matching IO continuation
 when descending through a compound action. When an action yields a value, the loop
 pops the saved continuation, applies it through bytecode when required, and
@@ -521,8 +522,9 @@ Program lifetime is owned by the main process:
   running the program. The failure does not propagate to main.
 
 The ordering contract remains deterministic FIFO. `SOLVEIG_REDUCTIONS` fixes
-the quantum used by every process, and `SOLVEIG_SCHED_DETERMINISTIC=1` pins the
-policy explicitly for tests. Scheduling never uses sleeps or elapsed time.
+the quantum used by every process, and `SOLVEIG_SCHED_DETERMINISTIC=1` selects
+virtual time for tests. Normal execution reads only monotonic elapsed time;
+deterministic scheduling never reads or waits for wall-clock time.
 
 ## Interruption and masking
 
@@ -546,7 +548,8 @@ must park, a pending interruption wins; if it is already parked, `killThread`
 removes its channel waiter or cancels its request-table registration and wakes
 it to unwind. The host call itself cannot be forcibly stopped, but its eventual
 plain-Rust completion is discarded and cannot wake or mutate the retired
-process. Timer waits join this cancellation path when J3 introduces them.
+process. Timer waits use the same cancellation path: interruption removes the
+exact scheduler registration before waking the target to unwind.
 
 `finally` and `bracket` are Prelude compositions over private mask-state IO
 actions. Their protected body runs with the prior state restored; cleanup runs
@@ -556,6 +559,28 @@ succeeds. A cleanup typed failure or defect replaces the interruption, matching
 the existing cleanup-precedence rule. No uninterruptible mask is exposed: the
 first interruption cannot land in runnable cleanup, while a later request may
 still stop cleanup at an indefinitely blocking operation.
+
+## Timers and virtual time
+
+`sleep : Int -> Task ()` is an inert action. Performing a positive duration
+registers the current process in the scheduler-owned `TimerQueue` and parks it
+as `Blocked(Timer(deadline))`; non-positive durations complete immediately.
+`Deadline` is a monotonic millisecond instant local to one runtime, not a wall
+clock timestamp. Entries are ordered by deadline and then `ProcessId`, giving
+simultaneous wakeups deterministic process-creation order.
+
+Normal execution derives deadlines from `Instant` and, with no runnable
+process, waits on the IO completion receiver only until the earliest deadline.
+`std::sync::mpsc::Receiver::recv_timeout` supplies that two-way wait, so the VM
+does not need a selection dependency. If no worker request can wake a process,
+the scheduler waits directly until the deadline.
+
+Captured execution and `SOLVEIG_SCHED_DETERMINISTIC=1` use a logical clock.
+When the run queue is empty, the clock jumps to the earliest registered
+deadline and wakes every timer now due. Tests therefore exercise ordering,
+masking, cleanup, and cancellation without host sleeps or elapsed-time
+assertions. This preserves invariant I9 while using the same timer queue and
+process transitions as real execution.
 
 ## Typed channels
 
@@ -704,12 +729,14 @@ owner decision.
 - The saved state returned as `Yielded` is complete and rooted, and its PC is a
   resume offset. A yielded process returns to the back of the strict FIFO run
   queue.
-- Scheduler decisions never depend on sleeps or wall-clock timing. Tests use a
-  fixed reduction budget and exact FIFO order.
+- Deterministic scheduler decisions never depend on sleeps or wall-clock
+  timing. Tests use virtual time, a fixed reduction budget, and exact FIFO
+  order.
 - A blocked process records one typed `BlockReason`. IO completion must match
   its `RequestId`; global wakeup must match its `GlobalIndex`; channel wakeup
-  must match its `ChanId`. Interruption removes or cancels the corresponding
-  scheduler registration before making the process runnable.
+  must match its `ChanId`; timer wakeup must match its `Deadline`.
+  Interruption removes or cancels the corresponding scheduler registration
+  before making the process runnable.
 - An empty run queue waits only when an outstanding external completion can
   make progress. Otherwise the runtime reports deadlock instead of spinning.
 - Main completion terminates program scheduling. Non-main failure is reported

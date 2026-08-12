@@ -595,6 +595,58 @@ fn nested_interruption_masks_restore_one_depth_at_a_time() {
 }
 
 #[test]
+fn virtual_timers_wake_in_deadline_order_without_host_waiting() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    runtime.timers = TimerQueue::virtual_time();
+    let late = runtime.allocate_process();
+    let early = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let late_deadline = runtime.timers.register(late, 30);
+    let early_deadline = runtime.timers.register(early, 10);
+    runtime.processes[late].status = ProcStatus::Blocked(BlockReason::Timer(late_deadline));
+    runtime.processes[early].status = ProcStatus::Blocked(BlockReason::Timer(early_deadline));
+
+    assert_eq!(scheduler::next_runnable(&mut runtime), Ok(early));
+    assert_eq!(runtime.processes[early].timer_result, Some(early_deadline));
+    assert_eq!(scheduler::next_runnable(&mut runtime), Ok(late));
+    assert_eq!(runtime.processes[late].timer_result, Some(late_deadline));
+}
+
+#[test]
+fn timer_cancellation_removes_the_exact_registration() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    runtime.timers = TimerQueue::virtual_time();
+    let process = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let deadline = runtime.timers.register(process, 10);
+    runtime.processes[process].status = ProcStatus::Blocked(BlockReason::Timer(deadline));
+
+    runtime.timers.cancel(process, deadline);
+
+    assert!(!runtime.timers.advance_virtual_to_next());
+}
+
+#[test]
+fn simultaneous_virtual_timers_wake_in_process_order() {
+    let program = program(vec![global("main", int(0))], Vec::new(), &[]);
+    let mut runtime = Runtime::new(lower_to_bytecode(&program));
+    runtime.timers = TimerQueue::virtual_time();
+    let first = runtime.allocate_process();
+    let second = runtime.allocate_process();
+    runtime.run_queue.clear();
+    let first_deadline = runtime.timers.register(first, 10);
+    let second_deadline = runtime.timers.register(second, 10);
+    assert_eq!(first_deadline, second_deadline);
+    runtime.processes[first].status = ProcStatus::Blocked(BlockReason::Timer(first_deadline));
+    runtime.processes[second].status = ProcStatus::Blocked(BlockReason::Timer(second_deadline));
+
+    assert_eq!(scheduler::next_runnable(&mut runtime), Ok(first));
+    assert_eq!(scheduler::next_runnable(&mut runtime), Ok(second));
+}
+
+#[test]
 fn scheduler_reports_deadlock_when_no_process_can_make_progress() {
     let program = program(vec![global("main", int(0))], vec![], &[]);
     let mut runtime = Runtime::new(lower_to_bytecode(&program));
@@ -985,6 +1037,7 @@ fn runtime_with_reduction_budget(program: BytecodeProgram, reduction_budget: u32
         Heap::default(),
         reduction_budget,
         IoSubsystem::inactive(),
+        TimerQueue::real_time(),
     )
 }
 

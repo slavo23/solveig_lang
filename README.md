@@ -347,7 +347,7 @@ Solveig currently supports:
 - terminal input/output
 - program args through `getArgs`
 - project-relative UTF-8 text file IO
-- typed FIFO channels with bounded backpressure, interruption, and scoped masking
+- typed FIFO channels, interruption, scoped masking, and lightweight timers
 - structured diagnostics with stable codes
 - typed holes with LSP diagnostics and quick-fix fill suggestions
 

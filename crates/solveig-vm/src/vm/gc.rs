@@ -68,7 +68,9 @@ impl Roots<'_> {
             ProcStatus::Finished(value) => visit(value),
             ProcStatus::Runnable
             | ProcStatus::Running
-            | ProcStatus::Blocked(BlockReason::Io(_) | BlockReason::Blackhole(_))
+            | ProcStatus::Blocked(
+                BlockReason::Io(_) | BlockReason::Blackhole(_) | BlockReason::Timer(_),
+            )
             | ProcStatus::Failed(_)
             | ProcStatus::Interrupted(_) => {}
         }
@@ -467,7 +469,10 @@ fn rewrite_io_action(
         | IoAction::CloseChan { channel } => {
             evacuate_value(heap, channel, worklist, promoted);
         }
-        IoAction::ReadLine | IoAction::GetArgs | IoAction::NewChan { .. } => {}
+        IoAction::ReadLine
+        | IoAction::GetArgs
+        | IoAction::NewChan { .. }
+        | IoAction::Sleep { .. } => {}
     }
 }
 
@@ -639,7 +644,10 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
         IoAction::Recv { channel }
         | IoAction::TryRecv { channel }
         | IoAction::CloseChan { channel } => mark_old_child(heap, channel, worklist),
-        IoAction::ReadLine | IoAction::GetArgs | IoAction::NewChan { .. } => {}
+        IoAction::ReadLine
+        | IoAction::GetArgs
+        | IoAction::NewChan { .. }
+        | IoAction::Sleep { .. } => {}
     }
 }
 
@@ -743,7 +751,10 @@ fn assert_object_children_live(
             | IoAction::CloseChan { channel } => {
                 assert_value_live(heap, channel, seen, worklist);
             }
-            IoAction::ReadLine | IoAction::GetArgs | IoAction::NewChan { .. } => {}
+            IoAction::ReadLine
+            | IoAction::GetArgs
+            | IoAction::NewChan { .. }
+            | IoAction::Sleep { .. } => {}
         },
         HeapObject::Chan(channel) => {
             assert_payload_live(heap, id, channel.queue, seen, worklist);

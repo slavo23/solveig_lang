@@ -8,6 +8,7 @@ use std::io::{self, BufRead, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
 use std::thread;
+use std::time::Duration;
 
 const IO_WORKER_COUNT: usize = 4;
 
@@ -201,6 +202,20 @@ impl IoSubsystem {
             RuntimeError::builtin("IO completion queue stopped with pending requests".to_string())
         })?;
         self.finish_completion(completion)
+    }
+
+    pub(super) fn wait_completion_timeout(
+        &mut self,
+        timeout: Duration,
+    ) -> Result<Option<(RequestId, ProcessId, IoResult)>, RuntimeError> {
+        match self.completions.recv_timeout(timeout) {
+            Ok(completion) => self.finish_completion(completion),
+            Err(mpsc::RecvTimeoutError::Timeout) => Ok(None),
+            Err(mpsc::RecvTimeoutError::Disconnected) if !self.has_wakeable_request() => Ok(None),
+            Err(mpsc::RecvTimeoutError::Disconnected) => Err(RuntimeError::builtin(
+                "IO completion queue stopped with pending requests".to_string(),
+            )),
+        }
     }
 
     pub(super) fn cancel(&mut self, id: RequestId, process: ProcessId) {

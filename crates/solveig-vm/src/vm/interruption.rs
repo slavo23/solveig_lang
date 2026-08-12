@@ -39,6 +39,7 @@ impl Interpreter<'_> {
                     BlockReason::Chan(channel) => self.remove_channel_waiter(channel, target),
                     BlockReason::Io(request) => self.io.cancel(request, target),
                     BlockReason::Blackhole(global) => self.remove_blackhole_waiter(global, target),
+                    BlockReason::Timer(deadline) => self.timers.cancel(target, deadline),
                 }
                 let process = &mut self.inactive_processes[target];
                 process.interrupted.get_or_insert(Interruption::Killed);

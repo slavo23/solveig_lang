@@ -105,6 +105,9 @@ pub enum IoAction {
     RestoreMask {
         action: Value,
     },
+    Sleep {
+        milliseconds: i64,
+    },
     ReadFile {
         path: Value,
     },

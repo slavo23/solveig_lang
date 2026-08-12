@@ -54,6 +54,7 @@ prelude.builtins.readFile : String -> IO IOError String
 prelude.builtins.readLine : IO IOError String
 prelude.builtins.recv : forall a. Chan a -> IO IOError a
 prelude.builtins.send : forall a. Chan a -> a -> IO IOError ()
+prelude.builtins.sleep : Int -> IO IOError ()
 prelude.builtins.spawn : forall childError e. IO childError () -> IO e ThreadId
 prelude.builtins.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
 prelude.builtins.writeFile : String -> String -> IO IOError ()
@@ -125,6 +126,7 @@ prelude.prim.readLine : IO IOError String
 prelude.prim.recv : forall a. Chan a -> IO IOError a
 prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
 prelude.prim.send : forall a. Chan a -> a -> IO IOError ()
+prelude.prim.sleep : Int -> IO IOError ()
 prelude.prim.spawn : forall e f. IO e () -> IO f ThreadId
 prelude.prim.stringAppend : String -> String -> String
 prelude.prim.stringCharAt : String -> Int -> Maybe Char

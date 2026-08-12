@@ -507,7 +507,13 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "killThread",
             BUILTIN_KILL_THREAD,
             1,
-            unary(thread_id, io_of(io_error, Ty::TyUnit)),
+            unary(thread_id, io_of(io_error.clone(), Ty::TyUnit)),
+        ),
+        prim_spec(
+            "sleep",
+            BUILTIN_SLEEP,
+            1,
+            unary(int, io_of(io_error, Ty::TyUnit)),
         ),
         prim_spec(
             "maskIO",

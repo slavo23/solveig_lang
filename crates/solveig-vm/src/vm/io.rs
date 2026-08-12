@@ -39,6 +39,14 @@ impl Interpreter<'_> {
             }
         }
 
+        if self.timer_result.take().is_some() {
+            self.io_current = None;
+            if let Some(value) = self.resume_io_value(program, Value::Unit)? {
+                self.continuations.clear();
+                return Ok(value);
+            }
+        }
+
         if let Some(result) = self.io_result.take() {
             self.io_current = None;
             match result {
@@ -291,6 +299,24 @@ impl Interpreter<'_> {
                     self.continuations
                         .push(Continuation::IoRestoreMask(previous));
                     self.io_current = Some(action);
+                }
+                IoAction::Sleep { milliseconds } => {
+                    if milliseconds <= 0 {
+                        if let Some(value) = self.resume_io_value(program, Value::Unit)? {
+                            return Ok(value);
+                        }
+                        continue;
+                    }
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    let Ok(milliseconds) = u64::try_from(milliseconds) else {
+                        solveig_base::ice!("positive sleep duration did not fit u64")
+                    };
+                    let deadline = self.timers.register(self.id, milliseconds);
+                    self.status = ProcStatus::Blocked(BlockReason::Timer(deadline));
+                    return Err(StepOutcome::Blocked);
                 }
                 IoAction::ReadFile { path } => {
                     let path = self.expect_string_value(path, "readFile")?;

@@ -27,11 +27,14 @@ mod io_worker;
 mod scheduler;
 #[cfg(test)]
 mod tests;
+mod timer;
 
 use io_worker::{IoResult, IoSubsystem};
 use scheduler::evaluate_entry;
 #[cfg(test)]
 use scheduler::{perform_process_io, run};
+pub use timer::Deadline;
+use timer::TimerQueue;
 
 const DEFAULT_REDUCTIONS: u32 = 4_096;
 const DEFAULT_STACK_LIMIT: usize = 16_777_216;
@@ -52,6 +55,7 @@ pub struct Process {
     io_current: Option<Value>,
     io_result: Option<IoResult>,
     channel_result: Option<ChannelResult>,
+    timer_result: Option<Deadline>,
     pending_defect: Option<RuntimeError>,
     interrupted: Option<Interruption>,
     mask_depth: u32,
@@ -78,6 +82,7 @@ pub struct Runtime {
     run_queue: VecDeque<ProcessId>,
     io: IoSubsystem,
     channel_waiters: FxHashMap<ChanId, ChannelWaiters>,
+    timers: TimerQueue,
     reduction_budget: u32,
     stack_limit: usize,
     heap_limit: usize,
@@ -129,6 +134,7 @@ pub enum BlockReason {
     Io(RequestId),
     Blackhole(GlobalIndex),
     Chan(ChanId),
+    Timer(Deadline),
 }
 
 /// Identifies one request submitted to the runtime IO subsystem.
@@ -169,6 +175,7 @@ pub(crate) struct Interpreter<'a> {
     run_queue: &'a mut VecDeque<ProcessId>,
     io: &'a mut IoSubsystem,
     channel_waiters: &'a mut FxHashMap<ChanId, ChannelWaiters>,
+    timers: &'a mut TimerQueue,
     reduction_budget: u32,
     stack_limit: usize,
     heap_limit: usize,
@@ -195,6 +202,7 @@ impl Process {
             io_current: None,
             io_result: None,
             channel_result: None,
+            timer_result: None,
             pending_defect: None,
             interrupted: None,
             mask_depth: 0,
@@ -216,6 +224,7 @@ impl Process {
             io_current: None,
             io_result: None,
             channel_result: None,
+            timer_result: None,
             pending_defect: None,
             interrupted: None,
             mask_depth: 0,
@@ -290,15 +299,26 @@ impl Runtime {
             Heap::default(),
             reduction_budget_from_env(),
             IoSubsystem::inactive(),
+            TimerQueue::real_time(),
         )
     }
 
+    #[cfg(test)]
     fn new_with_io(program: BytecodeProgram, io: IoSubsystem) -> Self {
+        Self::new_with_io_and_timers(program, io, TimerQueue::real_time())
+    }
+
+    fn new_with_io_and_timers(
+        program: BytecodeProgram,
+        io: IoSubsystem,
+        timers: TimerQueue,
+    ) -> Self {
         Self::new_with_heap_and_reduction_budget(
             program,
             Heap::default(),
             reduction_budget_from_env(),
             io,
+            timers,
         )
     }
 
@@ -307,6 +327,7 @@ impl Runtime {
         heap: Heap,
         reduction_budget: u32,
         io: IoSubsystem,
+        timers: TimerQueue,
     ) -> Self {
         let max_tag = program
             .constructor_arities
@@ -335,6 +356,7 @@ impl Runtime {
             run_queue: VecDeque::new(),
             io,
             channel_waiters: FxHashMap::default(),
+            timers,
             reduction_budget,
             stack_limit: runtime_limit_from_env("SOLVEIG_STACK_LIMIT", DEFAULT_STACK_LIMIT),
             heap_limit: runtime_limit_from_env("SOLVEIG_HEAP_LIMIT", DEFAULT_HEAP_LIMIT),
@@ -356,6 +378,7 @@ impl Runtime {
             heap,
             reduction_budget_from_env(),
             IoSubsystem::inactive(),
+            TimerQueue::real_time(),
         )
     }
 
@@ -385,12 +408,14 @@ impl Runtime {
                 self.fail_owned_blackholes(process, error);
                 process.io_current = None;
                 process.io_result = None;
+                process.timer_result = None;
                 process.continuations.clear();
             }
             StepOutcome::Interrupted(_) => {
                 process.io_current = None;
                 process.io_result = None;
                 process.channel_result = None;
+                process.timer_result = None;
                 process.continuations.clear();
             }
             StepOutcome::Blocked | StepOutcome::Finished(_) => {}
@@ -456,6 +481,7 @@ impl<'a> Interpreter<'a> {
             run_queue,
             io,
             channel_waiters,
+            timers,
             reduction_budget,
             stack_limit,
             heap_limit,
@@ -471,6 +497,7 @@ impl<'a> Interpreter<'a> {
             run_queue,
             io,
             channel_waiters,
+            timers,
             reduction_budget: *reduction_budget,
             stack_limit: *stack_limit,
             heap_limit: *heap_limit,
@@ -559,6 +586,14 @@ fn reduction_budget_from_env() -> u32 {
         .and_then(|value| value.parse().ok())
         .filter(|budget| *budget > 0)
         .unwrap_or(DEFAULT_REDUCTIONS)
+}
+
+fn timer_queue_from_env() -> TimerQueue {
+    if std::env::var("SOLVEIG_SCHED_DETERMINISTIC").is_ok_and(|value| value == "1") {
+        TimerQueue::virtual_time()
+    } else {
+        TimerQueue::real_time()
+    }
 }
 
 fn runtime_limit_from_env(name: &str, default: usize) -> usize {
@@ -724,8 +759,8 @@ impl Machine {
             &mut input,
             &mut stdout,
             &mut stderr,
-            args,
-            cwd,
+            (args, cwd),
+            TimerQueue::virtual_time(),
         )?;
         let stdout = String::from_utf8(stdout).map_err(|err| {
             RuntimeError::builtin(format!("captured IO output was not valid UTF-8: {err}"))
@@ -760,8 +795,8 @@ impl Machine {
             stdin,
             stdout,
             &mut stderr,
-            args,
-            cwd,
+            (args, cwd),
+            timer_queue_from_env(),
         )
     }
 
@@ -781,8 +816,8 @@ impl Machine {
             stdin,
             stdout,
             &mut stderr,
-            args,
-            cwd,
+            (args, cwd),
+            timer_queue_from_env(),
         )
     }
 
@@ -792,8 +827,8 @@ impl Machine {
         stdin: &mut (dyn BufRead + Send),
         stdout: &mut (dyn Write + Send),
         stderr: &mut dyn Write,
-        args: &[String],
-        cwd: &Path,
+        io_context: (&[String], &Path),
+        timers: TimerQueue,
     ) -> Result<EvalResult, RuntimeError> {
         let Some(entry) = program.global_index_by_name(entry_name) else {
             return Err(RuntimeError {
@@ -805,9 +840,10 @@ impl Machine {
 
         let stdin = Mutex::new(stdin);
         let stdout = Mutex::new(stdout);
+        let (args, cwd) = io_context;
         thread::scope(|scope| {
             let io = IoSubsystem::start(scope, &stdin, &stdout, args, cwd)?;
-            let mut runtime = Runtime::new_with_io(program, io);
+            let mut runtime = Runtime::new_with_io_and_timers(program, io, timers);
             let (id, outcome) = evaluate_entry(&mut runtime, entry);
             let action = outcome_value(outcome)?;
             let root = scheduler::schedule_io(&mut runtime, id, action, stderr)?;

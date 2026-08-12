@@ -15,10 +15,10 @@ use solveig_ast::ast::{
     BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_KILL_THREAD,
     BUILTIN_MASK_IO, BUILTIN_NEW_BOUNDED_CHAN, BUILTIN_NEW_CHAN, BUILTIN_PRINT_LINE,
     BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_RECV_CHAN,
-    BUILTIN_RESTORE_MASK_IO, BUILTIN_SEND_CHAN, BUILTIN_SPAWN, BUILTIN_STRING_APPEND,
-    BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
-    BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE,
-    BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
+    BUILTIN_RESTORE_MASK_IO, BUILTIN_SEND_CHAN, BUILTIN_SLEEP, BUILTIN_SPAWN,
+    BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
+    BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN,
+    BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
 };
 
 use crate::heap::{HeapObject, IoAction};
@@ -284,6 +284,7 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_KILL_THREAD, "killThread", 1, kill_thread),
     builtin!(BUILTIN_MASK_IO, "maskIO", 1, mask_io),
     builtin!(BUILTIN_RESTORE_MASK_IO, "restoreMaskIO", 1, restore_mask_io),
+    builtin!(BUILTIN_SLEEP, "sleep", 1, sleep),
 ];
 
 // D3 primitive semantics:
@@ -679,6 +680,11 @@ fn mask_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeErro
 fn restore_mask_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let action = expect_value(args, 0, "restoreMaskIO")?;
     Ok(ctx.alloc_io_action(IoAction::RestoreMask { action }))
+}
+
+fn sleep(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let milliseconds = expect_int(args, 0, "sleep")?;
+    Ok(ctx.alloc_io_action(IoAction::Sleep { milliseconds }))
 }
 
 fn ordering_value(

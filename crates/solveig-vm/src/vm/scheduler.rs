@@ -181,18 +181,36 @@ fn unhandled_io_error(runtime: &Runtime, value: Value) -> Option<RuntimeError> {
     )))
 }
 
-/// Selects the next process without spinning when only worker IO can make
-/// progress. This follows GHC's scheduler rule: wait for external completion
-/// when one exists, otherwise report that all remaining threads are blocked.
+/// Selects the next process without spinning when only external work remains.
+/// This follows the return-reason loop in GHC's `rts/Schedule.c`: due timers
+/// wake blocked processes, and a real-time scheduler waits until either an IO
+/// completion or its earliest monotonic deadline.
 pub(super) fn next_runnable(runtime: &mut Runtime) -> Result<ProcessId, RuntimeError> {
     loop {
         while let Some(completion) = runtime.io.try_completion()? {
             wake_io_process(runtime, completion);
         }
+        wake_due_timers(runtime);
 
         if let Some(id) = runtime.run_queue.pop_front() {
             return Ok(id);
         }
+
+        if runtime.timers.advance_virtual_to_next() {
+            continue;
+        }
+
+        if let Some(wait) = runtime.timers.wait_until_next() {
+            if runtime.io.has_wakeable_request() {
+                if let Some(completion) = runtime.io.wait_completion_timeout(wait)? {
+                    wake_io_process(runtime, completion);
+                }
+            } else {
+                std::thread::sleep(wait);
+            }
+            continue;
+        }
+
         if runtime.io.has_wakeable_request() {
             if let Some(completion) = runtime.io.wait_completion()? {
                 wake_io_process(runtime, completion);
@@ -202,6 +220,20 @@ pub(super) fn next_runnable(runtime: &mut Runtime) -> Result<ProcessId, RuntimeE
         return Err(RuntimeError::builtin(
             "all threads are blocked forever".to_string(),
         ));
+    }
+}
+
+fn wake_due_timers(runtime: &mut Runtime) {
+    while let Some((deadline, process_id)) = runtime.timers.pop_due() {
+        let process = &mut runtime.processes[process_id];
+        if process.status != ProcStatus::Blocked(BlockReason::Timer(deadline)) {
+            solveig_base::ice!("timer registration did not match its blocked process")
+        }
+        if process.timer_result.replace(deadline).is_some() {
+            solveig_base::ice!("timer wakeup overwrote an unconsumed result")
+        }
+        process.status = ProcStatus::Runnable;
+        runtime.run_queue.push_back(process_id);
     }
 }
 

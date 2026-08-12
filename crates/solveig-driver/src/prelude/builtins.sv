@@ -133,6 +133,10 @@ spawn action = prelude.prim.spawn action;
 killThread : ThreadId -> Task ();
 killThread thread = prelude.prim.killThread thread;
 
+-- | Suspends the current thread for at least the requested milliseconds.
+sleep : Int -> Task ();
+sleep milliseconds = prelude.prim.sleep milliseconds;
+
 -- | Defers interruption while an action runs, except while it is blocked.
 mask : forall e a. IO e a -> IO e a;
 mask action = prelude.prim.maskIO action;

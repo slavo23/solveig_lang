@@ -570,6 +570,7 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "tryRecv" => "Receives a channel value without blocking.",
         "closeChan" => "Closes a typed channel.",
         "killThread" => "Requests interruption of a lightweight thread.",
+        "sleep" => "Suspends the current lightweight thread for a duration.",
         "maskIO" => "Defers interruption while an IO action is runnable.",
         "restoreMaskIO" => "Temporarily restores the enclosing interruption state.",
         _ => return None,
