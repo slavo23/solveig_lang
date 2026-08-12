@@ -52,6 +52,8 @@ prelude.builtins.writeFile : String -> String -> IO IOError ()
 prelude.list.++ : forall a. [a] -> [a] -> [a]
 prelude.list.append : forall a. [a] -> [a] -> [a]
 prelude.list.concat : forall a. [[a]] -> [a]
+prelude.list.drop : forall a. Int -> [a] -> [a]
+prelude.list.dropWhile : forall a. (a -> Bool) -> [a] -> [a]
 prelude.list.filter : forall a. (a -> Bool) -> [a] -> [a]
 prelude.list.foldl : forall a b. (b -> a -> b) -> b -> [a] -> b
 prelude.list.foldr : forall a b. (a -> b -> b) -> b -> [a] -> b
@@ -60,6 +62,10 @@ prelude.list.range : Int -> Int -> Bool -> [Int]
 prelude.list.rangeDown : Int -> Int -> [Int] -> [Int]
 prelude.list.reverse : forall a. [a] -> [a]
 prelude.list.reverseGo : forall a. [a] -> [a] -> [a]
+prelude.list.take : forall a. Int -> [a] -> [a]
+prelude.list.takeWhile : forall a. (a -> Bool) -> [a] -> [a]
+prelude.list.zip : forall a b. [a] -> [b] -> [Pair a b]
+prelude.list.zipWith : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c]
 prelude.prim.appendFile : String -> String -> IO IOError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 prelude.prim.catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a

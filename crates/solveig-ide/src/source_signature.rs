@@ -18,6 +18,32 @@ pub(super) fn pretty_source_ty(ty: &Ty, tables: PrettyTables<'_>) -> String {
     printer.ty(ty, PRECEDENCE_LOOSE)
 }
 
+pub(super) fn pretty_source_type_alias(
+    name: &str,
+    alias: &TypeAlias,
+    tables: PrettyTables<'_>,
+) -> String {
+    let mut printer = SourceSignaturePrinter::new(tables);
+    let params = alias
+        .params
+        .iter()
+        .map(|param| (*param, Kind::Star))
+        .collect::<Vec<_>>();
+    printer.bind_quantifiers(&params, &[]);
+    let params = alias
+        .params
+        .iter()
+        .map(|param| printer.tyvar_name(*param))
+        .collect::<Vec<_>>();
+    let head = if params.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name} {}", params.join(" "))
+    };
+
+    format!("type {head} = {}", printer.ty(&alias.ty, PRECEDENCE_LOOSE))
+}
+
 pub(super) fn pretty_source_value_name(name: &str) -> String {
     if is_source_value_identifier(name) {
         name.to_string()

@@ -244,6 +244,7 @@ fn def_signature(
     class_method_signature(artifacts, pretty_tables, def_id)
         .or_else(|| term_signature(artifacts, pretty_tables, def_id))
         .or_else(|| constructor_signature(artifacts, pretty_tables, def_id))
+        .or_else(|| type_alias_signature(artifacts, pretty_tables, def_id))
         .or_else(|| tycon_signature(artifacts, def_id))
         .or_else(|| class_signature(artifacts, pretty_tables, def_id))
 }
@@ -283,6 +284,19 @@ fn constructor_signature(
         "{} : {}",
         artifacts.names.symbol_display_name(info.short_name),
         source_signature::pretty_source_ty(&info.full_type, pretty_tables)
+    ))
+}
+
+fn type_alias_signature(
+    artifacts: &CompilationArtifacts,
+    pretty_tables: PrettyTables<'_>,
+    def_id: DefId,
+) -> Option<String> {
+    let (name, alias) = artifacts.type_aliases.get(&def_id)?;
+    Some(source_signature::pretty_source_type_alias(
+        name,
+        alias,
+        pretty_tables,
     ))
 }
 

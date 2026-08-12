@@ -4,6 +4,7 @@ use crate::symbol_artifacts::collect_source_symbols;
 pub(super) struct RetainedIdeArtifacts {
     pub(super) docs: FxHashMap<DefId, DocComment>,
     pub(super) source_signatures: FxHashMap<DefId, String>,
+    pub(super) type_aliases: FxHashMap<DefId, (String, TypeAlias)>,
     pub(super) source_type_var_hovers: Vec<HoverInfo>,
     pub(super) declaration_spans: Vec<(FileSpan, DefId)>,
     pub(super) module_display_names: FxHashMap<ModuleId, String>,
@@ -23,10 +24,19 @@ pub(super) fn collect_retained_ide_artifacts(
         .values()
         .flat_map(|api| api.docs.iter().map(|(id, doc)| (*id, doc.clone())))
         .collect();
+    let type_aliases = typed_apis
+        .values()
+        .flat_map(|api| {
+            api.type_aliases
+                .iter()
+                .map(|(id, alias)| (*id, (session.str(id.name).to_string(), alias.clone())))
+        })
+        .collect();
 
     RetainedIdeArtifacts {
         docs,
         source_signatures: collect_hover_source_signatures(session, project),
+        type_aliases,
         source_type_var_hovers: collect_source_type_var_hovers(session, names, project, typed_apis),
         declaration_spans: collect_hover_declaration_spans(project),
         module_display_names: collect_hover_module_display_names(session, project),

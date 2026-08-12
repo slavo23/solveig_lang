@@ -894,3 +894,55 @@ main = answer
     server.shutdown(()).await.expect("shutdown should succeed");
     drop(project_root);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn text_document_hover_renders_prelude_type_alias() {
+    let project_root = temp_root("server_type_alias_hover");
+    let source = project_root.join("scratch.sv");
+    let text = "main : Task ()\nmain = pureIO ()\n";
+    write_source(&source, text);
+    let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+    let root_uri =
+        Url::from_directory_path(&project_root).expect("test root should become a file URI");
+    let mut server = LspServer::new(ClientSocket::new_closed());
+
+    server
+        .initialize(initialize_params(root_uri))
+        .await
+        .expect("initialize should succeed");
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
+
+    let hover = server
+        .hover(HoverParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(0, 7),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("hover request should succeed")
+        .expect("Task alias should have LSP hover");
+
+    let range = hover.range.expect("Task hover should carry a range");
+    let markdown = hover_markup_value(hover);
+    assert!(markdown.contains("```solveig\ntype Task a = IO IOError a\n```"));
+    assert!(markdown.contains("An IO action using the built-in error vocabulary."));
+    assert!(markdown.contains("Defined in `prelude.builtins`"));
+    assert_eq!(range, Range::new(Position::new(0, 7), Position::new(0, 11)));
+
+    server.shutdown(()).await.expect("shutdown should succeed");
+    drop(project_root);
+}

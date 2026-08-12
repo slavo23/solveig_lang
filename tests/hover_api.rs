@@ -148,6 +148,38 @@ fn hover_returns_checked_expression_types_after_run() {
 }
 
 #[test]
+fn hover_renders_prelude_type_alias_at_reference() {
+    let project_root = fixture_root("tests/golden/run/io_hello");
+    let file = project_root.join("src/main.sv");
+    let source = fs::read_to_string(&file).expect("IO fixture source should be readable");
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation.check(true).expect("IO fixture should check");
+
+    assert!(
+        result.success(),
+        "IO fixture diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let hover = compilation
+        .hover_info(&file, offset_in_line(&source, "main : Task ()", "Task"))
+        .expect("Task alias reference should have hover");
+
+    assert_eq!(hover.signature(), "type Task a = IO IOError a");
+    assert_eq!(
+        hover.documentation(),
+        Some("An IO action using the built-in error vocabulary.")
+    );
+    assert!(
+        hover
+            .provenance()
+            .is_some_and(|provenance| provenance.contains("prelude.builtins")),
+        "Task hover should include Prelude provenance: {hover:#?}"
+    );
+    assert_eq!(hover.span(), 7..11);
+}
+
+#[test]
 fn hover_covers_parenthesized_operator_definitions_and_references() {
     let project_root = temp_root("operator_hovers");
     let file = project_root.join("scratch.sv");
