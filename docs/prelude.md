@@ -28,6 +28,9 @@ Bool
 immutable UTF-8 text. `IO e a` is an abstract monadic action that may fail with
 `e` or succeed with `a`.
 
+See [Errors, Defects, and Interruption](errors.md) for the semantic distinction
+between typed errors, defects, interruption, and VM infrastructure failures.
+
 ## `prelude.builtins`
 
 ### Data Types

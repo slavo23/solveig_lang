@@ -463,6 +463,9 @@ solveig --project-root examples/quiz_game
 It reads `questions.txt`, prompts for answers, prints a score, writes
 `last-score.txt`, and appends `score-history.txt`.
 
+See [errors.md](errors.md) before designing recovery or resource cleanup. It
+explains typed `IOError` values, defects, and the interruption contract.
+
 ## 14. Diagnostics
 
 Diagnostics include stable phase-prefixed codes such as `PAR0001`, `RES0003`,
@@ -482,6 +485,7 @@ See [diagnostics.md](diagnostics.md) for the full code index.
 ## 15. Where To Go Next
 
 - Read [prelude.md](prelude.md) for signatures and Prelude examples.
+- Read [errors.md](errors.md) for failure channels and cleanup rules.
 - Browse `tests/golden/run/` for small executable programs.
 - Browse `examples/smoke_suite` for larger algorithm examples.
 - Browse `examples/quiz_game` for practical IO and a local `State` monad.

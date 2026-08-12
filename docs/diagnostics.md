@@ -9,7 +9,9 @@ Solveig diagnostics are grouped by compiler phase:
 
 Runtime errors are currently rendered as `runtime error: ...` without a
 diagnostic code. Project loading errors, such as a missing `src/main.sv`, are
-also plain text today.
+also plain text today. [Errors, Defects, and Interruption](errors.md) explains
+which program failures are typed values, which unwind as defects, and which
+runtime failures are not catchable by program code.
 
 ## Parser
 
