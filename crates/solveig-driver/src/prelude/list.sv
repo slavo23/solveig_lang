@@ -37,6 +37,35 @@ append : forall a. [a] -> [a] -> [a]
 append [] ys = ys
 append (z :: zs) ys = z :: append zs ys
 
+-- | Takes n elements from the beginning of the list
+take : forall a. Int -> [a] -> [a]
+take 0 _ = []
+take _ [] = []
+take i (x :: xs) = x :: take (intSub i 1) xs
+
+-- | Takes elements from the list while the predicate is true
+takeWhile : forall a. (a -> Bool) -> [a] -> [a]
+takeWhile _ [] = []
+takeWhile f (x :: xs) = if f x then x :: takeWhile f xs else []
+
+-- | Drops elements from the list while the predicate is true
+dropWhile : forall a. (a -> Bool) -> [a] -> [a]
+dropWhile _ [] = []
+dropWhile f (x :: xs) = if f x then dropWhile f xs else x :: xs
+
+zipWith : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c]
+zipWith f (x :: xs) (y :: ys) = f x y :: zipWith f xs ys
+zipWith f _ _ = []
+
+zip : forall a b. [a] -> [b] -> [Pair a b]
+zip = zipWith MkPair 
+
+-- | Drops n elements from the beginning of the list
+drop : forall a. Int -> [a] -> [a]
+drop 0 xs = xs
+drop _ [] = []
+drop i (x :: xs) = drop (intSub i 1) xs
+
 infixr 5 (++)
 
 (++) : forall a. [a] -> [a] -> [a]
