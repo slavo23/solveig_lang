@@ -74,6 +74,12 @@ fn module_set(modules: &[String]) -> BTreeSet<String> {
         .collect()
 }
 
+fn has_module(modules: &BTreeSet<String>, suffix: &str) -> bool {
+    modules
+        .iter()
+        .any(|module| module == suffix || module.ends_with(&format!(".{suffix}")))
+}
+
 fn expected_modules<const N: usize>(modules: [&str; N]) -> BTreeSet<String> {
     modules.into_iter().map(str::to_string).collect()
 }
@@ -261,8 +267,8 @@ answer = 41
 
     assert!(result.success(), "project marker check should succeed");
     let fresh = module_set(result.freshly_checked_modules());
-    assert!(fresh.contains("main"));
-    assert!(fresh.contains("a"));
+    assert!(has_module(&fresh, "main"));
+    assert!(has_module(&fresh, "a"));
 
     drop(project_root);
 }
@@ -273,7 +279,7 @@ fn manifest_entry_module_selects_the_project_entry_file() {
     write_source(
         &project_root.join("solveig.toml"),
         r#"[package]
-name = "entry-test"
+name = "entry_test"
 version = "0.1.0"
 
 [language]
@@ -295,10 +301,123 @@ main = 42
     assert!(result.success(), "manifest entry module should succeed");
     assert_eq!(
         module_set(result.freshly_checked_modules()),
-        expected_modules(["app.cli"])
+        expected_modules(["entry_test.app.cli"])
     );
 
     drop(project_root);
+}
+
+#[test]
+fn path_dependency_modules_are_importable_and_survive_local_edits() {
+    let container = temp_project_root("path_dependency");
+    let app = container.join("app");
+    let library = container.join("library");
+    write_source(
+        &app.join("solveig.toml"),
+        r#"[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+library = { path = "../library" }
+
+[language]
+entry = "main"
+"#,
+    );
+    write_source(
+        &library.join("solveig.toml"),
+        r#"[package]
+name = "library"
+version = "0.1.0"
+
+[language]
+entry = "core"
+"#,
+    );
+    write_source(
+        &app.join("src/main.sv"),
+        r#"import library.core(answer)
+
+main : Int
+main = answer
+"#,
+    );
+    write_source(
+        &library.join("src/core.sv"),
+        r#"answer : Int
+answer = 41
+"#,
+    );
+
+    let mut compilation = Compilation::new(&app);
+    let initial = compilation
+        .check(true)
+        .expect("initial package check should run");
+    assert!(initial.success(), "path dependency should be importable");
+    assert!(
+        initial
+            .freshly_checked_modules()
+            .iter()
+            .any(|module| module == "library.core")
+    );
+    let snapshot = compilation
+        .snapshot()
+        .expect("successful package check should retain a snapshot");
+    let dependency_name = snapshot
+        .project
+        .modules
+        .keys()
+        .find(|module| module.as_string(compilation.session()) == "library.core")
+        .expect("dependency module should be retained");
+    let dependency_file = &snapshot.project.modules[dependency_name];
+    let dependency_id = snapshot
+        .project
+        .module_table
+        .id(dependency_name)
+        .expect("dependency module should have an id");
+    assert_eq!(
+        snapshot.project.module_table.package(dependency_id),
+        dependency_file.package
+    );
+    assert_eq!(
+        snapshot.apis[dependency_name].package,
+        dependency_file.package
+    );
+    assert_eq!(
+        snapshot.typed_apis[dependency_name].package,
+        dependency_file.package
+    );
+
+    write_source(
+        &app.join("src/main.sv"),
+        r#"import library.core(answer)
+
+main : Int
+main = answer + 1
+"#,
+    );
+    let edited = compilation
+        .check(true)
+        .expect("edited package check should run");
+
+    assert!(edited.success(), "edited local package should still check");
+    assert!(
+        edited
+            .reused_modules()
+            .iter()
+            .any(|module| module == "library.core"),
+        "unchanged dependency package should be reused: {:#?}",
+        edited.reused_modules()
+    );
+    assert!(
+        edited
+            .freshly_checked_modules()
+            .iter()
+            .any(|module| module == "app.main")
+    );
+
+    drop(container);
 }
 
 #[test]

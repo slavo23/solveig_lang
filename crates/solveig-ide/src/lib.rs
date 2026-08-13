@@ -15,10 +15,8 @@ use solveig_base::{
 };
 use solveig_check::inference::holes::HoleInfo;
 use solveig_check::inference::type_infer::{CheckedModule, TcMetadata};
-use solveig_driver::{
-    Compilation, CompilationSnapshot, SourceProvider, is_compiler_prelude_module,
-    module_name_from_file,
-};
+use solveig_driver::{Compilation, CompilationSnapshot, SourceProvider, module_name_from_file};
+use solveig_package::{PackageId, PackageKind};
 use solveig_resolve::project::{
     EffectiveImport, ModuleApi, ModuleFile, ParsedProject, Project, ResolveError, ResolveNameKind,
     SharedModuleApi, SharedTypedModuleApi, TypeAlias, TypedModuleApi, build_module_api,
@@ -182,6 +180,7 @@ pub(crate) struct CompilationArtifacts {
     pub(crate) resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
     pub(crate) declaration_spans: Vec<(FileSpan, DefId)>,
     pub(crate) module_display_names: FxHashMap<ModuleId, String>,
+    pub(crate) module_package_kinds: FxHashMap<ModuleId, PackageKind>,
     pub(crate) module_paths: FxHashMap<ModuleId, PathBuf>,
     pub(crate) module_imports: Vec<(FileSpan, ModuleId)>,
     pub(crate) local_hovers: Vec<HoverInfo>,
@@ -299,6 +298,7 @@ fn build_artifacts_for_snapshot(
         resolutions,
         declaration_spans: retained.declaration_spans,
         module_display_names: retained.module_display_names,
+        module_package_kinds: retained.module_package_kinds,
         module_paths: retained.module_paths,
         module_imports: retained.module_imports,
         local_hovers,
@@ -319,13 +319,12 @@ pub(crate) fn source_code_actions_for_snapshot(
     let mut out = Vec::new();
 
     for group in &snapshot.resolve_errors {
-        let parsed = snapshot.parsed.get(session, &group.module);
         out.extend(resolve_code_actions(
             session,
             &snapshot.source_root,
             source_provider,
             &group.module,
-            parsed,
+            &snapshot.project,
             &snapshot.apis,
             &group.errors,
         ));
@@ -419,7 +418,8 @@ fn build_completion_candidates_for_snapshot(
         let Some(local_typed_api) = snapshot.typed_apis.get(module_name) else {
             continue;
         };
-        let imports = effective_imports(session, module_name, &parsed.imports, parsed.file);
+        let imports =
+            effective_imports(&snapshot.project, module_name, &parsed.imports, parsed.file);
         candidates.extend(completion::typed_module_completion_candidates(
             completion::TypedModuleCompletionInput {
                 session,
@@ -557,6 +557,7 @@ fn hash_snapshot_core(snapshot: &CompilationSnapshot, hasher: &mut DefaultHasher
 }
 
 fn hash_module_file(module_file: &ModuleFile, hasher: &mut DefaultHasher) {
+    module_file.package.hash(hasher);
     module_file.path.hash(hasher);
     module_file.source_hash.hash(hasher);
     module_file.parsed.file.0.hash(hasher);

@@ -6,14 +6,27 @@ use super::*;
 #[derive(Debug, Clone)]
 pub struct ModuleTable {
     names: Vec<ModuleName>,
+    packages: Vec<PackageId>,
     ids: FxHashMap<ModuleName, ModuleId>,
 }
 
 impl ModuleTable {
-    pub fn new<'a>(session: &Session, modules: impl IntoIterator<Item = &'a ModuleName>) -> Self {
-        let mut names = modules.into_iter().cloned().collect::<Vec<_>>();
-        names.sort_by_key(|module| module.as_string(session));
-        names.dedup();
+    pub fn new(
+        session: &Session,
+        modules: impl IntoIterator<Item = (ModuleName, PackageId)>,
+    ) -> Self {
+        let mut entries = modules.into_iter().collect::<Vec<_>>();
+        entries.sort_by_key(|(module, _)| module.as_string(session));
+        entries.dedup_by(|(left, _), (right, _)| left == right);
+
+        let names = entries
+            .iter()
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        let packages = entries
+            .iter()
+            .map(|(_, package)| *package)
+            .collect::<Vec<_>>();
 
         let ids = names
             .iter()
@@ -26,7 +39,11 @@ impl ModuleTable {
             })
             .collect();
 
-        Self { names, ids }
+        Self {
+            names,
+            packages,
+            ids,
+        }
     }
 
     pub fn id(&self, module: &ModuleName) -> Option<ModuleId> {
@@ -37,6 +54,17 @@ impl ModuleTable {
         self.names
             .get(id.0 as usize)
             .expect("ICE: ModuleId not present in ModuleTable")
+    }
+
+    pub fn package(&self, id: ModuleId) -> PackageId {
+        *self
+            .packages
+            .get(id.0 as usize)
+            .expect("ICE: ModuleId package not present in ModuleTable")
+    }
+
+    pub fn package_for_name(&self, module: &ModuleName) -> Option<PackageId> {
+        self.id(module).map(|id| self.package(id))
     }
 
     pub fn def_path(&self, def: DefId) -> DefPath<'_> {
@@ -66,8 +94,9 @@ impl DefPath<'_> {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct ModuleApi {
+    pub package: PackageId,
     pub terms: FxHashMap<Symbol, DefId>,
     pub types: FxHashMap<Symbol, DefId>,
     pub type_aliases: FxHashMap<Symbol, DefId>,
@@ -79,6 +108,20 @@ pub struct ModuleApi {
     pub class_methods: FxHashMap<Symbol, Vec<Symbol>>,
 }
 impl ModuleApi {
+    pub fn new(package: PackageId) -> Self {
+        Self {
+            package,
+            terms: FxHashMap::default(),
+            types: FxHashMap::default(),
+            type_aliases: FxHashMap::default(),
+            constructors: FxHashMap::default(),
+            classes: FxHashMap::default(),
+            fixities: FxHashMap::default(),
+            docs: FxHashMap::default(),
+            class_methods: FxHashMap::default(),
+        }
+    }
+
     fn include_doc(&self, out: &mut Self, def_id: DefId) {
         if let Some(doc) = self.docs.get(&def_id) {
             out.docs.insert(def_id, doc.clone());
@@ -98,7 +141,7 @@ impl ModuleApi {
             ImportSpec::All => self.clone(),
 
             ImportSpec::Only(names) => {
-                let mut out = Self::default();
+                let mut out = Self::new(self.package);
 
                 for name in names {
                     if let Some(sym) = self.terms.get(name) {
@@ -165,8 +208,9 @@ pub struct TypeAlias {
     pub span: FileSpan,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TypedModuleApi {
+    pub package: PackageId,
     pub term_schemes: FxHashMap<DefId, solveig_ast::ast::Scheme>,
     pub type_kinds: FxHashMap<DefId, Kind>,
     pub type_ids: FxHashMap<DefId, solveig_ast::ast::TyConId>,
@@ -187,6 +231,24 @@ pub struct TypedModuleApi {
 }
 
 impl TypedModuleApi {
+    pub fn new(package: PackageId) -> Self {
+        Self {
+            package,
+            term_schemes: FxHashMap::default(),
+            type_kinds: FxHashMap::default(),
+            type_ids: FxHashMap::default(),
+            type_aliases: FxHashMap::default(),
+            constructor_types: FxHashMap::default(),
+            constructor_ids: FxHashMap::default(),
+            class_defs: FxHashMap::default(),
+            docs: FxHashMap::default(),
+            tycon_table: TyConTable::new(),
+            ctor_table: CtorTable::new(),
+            class_table: ClassTable::new(),
+            instance_defs: Vec::new(),
+        }
+    }
+
     fn include_doc(&self, out: &mut Self, def_id: DefId) {
         if let Some(doc) = self.docs.get(&def_id) {
             out.docs.insert(def_id, doc.clone());
@@ -239,12 +301,10 @@ impl TypedModuleApi {
             ImportSpec::All => self.clone(),
 
             ImportSpec::Only(names) => {
-                let mut out = Self {
-                    tycon_table: self.tycon_table.clone(),
-                    ctor_table: self.ctor_table.clone(),
-                    class_table: self.class_table.clone(),
-                    ..Self::default()
-                };
+                let mut out = Self::new(self.package);
+                out.tycon_table = self.tycon_table.clone();
+                out.ctor_table = self.ctor_table.clone();
+                out.class_table = self.class_table.clone();
 
                 for name in names {
                     for (sym, scheme) in &self.term_schemes {

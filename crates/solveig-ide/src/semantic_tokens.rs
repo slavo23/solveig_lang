@@ -588,10 +588,7 @@ fn declaration_modifiers(kind: SourceSemanticTokenKind) -> SourceSemanticTokenMo
 }
 
 fn is_default_library_def(artifacts: &CompilationArtifacts, def_id: &DefId) -> bool {
-    artifacts
-        .module_display_names
-        .get(&def_id.module)
-        .is_some_and(|module| module.starts_with("prelude."))
+    artifacts.module_package_kinds.get(&def_id.module) == Some(&PackageKind::Implicit)
 }
 
 fn is_operator_source_span(source_file: &SourceFile, span: Span) -> bool {

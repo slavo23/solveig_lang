@@ -8,27 +8,8 @@ pub struct EffectiveImport {
     pub span: FileSpan,
 }
 
-pub fn is_prelude_module(session: &Session, module: &ModuleName) -> bool {
-    module.as_string(session).starts_with("prelude.")
-}
-
-fn implicit_prelude_modules(session: &Session, module: &ModuleName) -> Vec<ModuleName> {
-    if is_prelude_module(session, module) {
-        vec![]
-    } else {
-        vec![
-            ModuleName(vec![session.intern("prelude"), session.intern("builtins")]),
-            ModuleName(vec![session.intern("prelude"), session.intern("list")]),
-            ModuleName(vec![
-                session.intern("prelude"),
-                session.intern("typeclasses"),
-            ]),
-        ]
-    }
-}
-
 pub fn effective_imports(
-    session: &Session,
+    project: &Project,
     module: &ModuleName,
     explicit: &[ImportDecl],
     file: FileId,
@@ -43,10 +24,19 @@ pub fn effective_imports(
         })
         .collect::<Vec<_>>();
 
-    for implicit in implicit_prelude_modules(session, module) {
+    let imports_implicit_package = project
+        .module_package(module)
+        .and_then(|package| project.package_kind(package))
+        != Some(PackageKind::Implicit);
+
+    if !imports_implicit_package {
+        return out;
+    }
+
+    for implicit in project.implicit_modules() {
         out.push(EffectiveImport {
             alias: implicit.default_alias(),
-            module: implicit,
+            module: implicit.clone(),
             spec: ImportSpec::All,
             span: FileSpan::new(file, Span::new(0, 0)),
         });

@@ -293,7 +293,7 @@ fn million_step_io_loop_runs_on_small_native_stack() {
 }
 
 #[test]
-fn repeated_checks_reuse_compiler_prelude_cache() {
+fn repeated_checks_reuse_implicit_package_cache() {
     let project_root = write_temp_project("prelude_cache", "main = ()\n");
     let mut compilation = Compilation::new(&project_root);
     let prelude_root = solveig_driver::compiler_library_location()
@@ -315,19 +315,24 @@ fn repeated_checks_reuse_compiler_prelude_cache() {
         .filter(|file| file.path.starts_with(&prelude_root))
         .count();
 
-    assert!(
-        compilation
-            .check(true)
-            .expect("second check should run")
-            .success(),
-        "second check should succeed"
-    );
+    let reused_implicit_package = {
+        let result = compilation.check(true).expect("second check should run");
+        assert!(result.success(), "second check should succeed");
+        result
+            .reused_modules()
+            .iter()
+            .any(|module| module == "prelude.list")
+    };
     let second_prelude_files = compilation
         .source_map()
         .files()
         .iter()
         .filter(|file| file.path.starts_with(&prelude_root))
         .count();
+    assert!(
+        reused_implicit_package,
+        "unchanged implicit package modules should be reused"
+    );
 
     assert!(first_prelude_files > 0, "Prelude files should be loaded");
     assert_eq!(

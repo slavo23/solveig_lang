@@ -58,10 +58,15 @@ pub(super) fn resolve_code_actions(
     source_root: &Path,
     source_provider: &SourceProvider,
     current_module: &ModuleName,
-    parsed: &ParsedModule,
+    project: &Project,
     apis: &FxHashMap<ModuleName, SharedModuleApi>,
     errors: &[ResolveError],
 ) -> Vec<SourceCodeAction> {
+    let parsed = &project
+        .modules
+        .get(current_module)
+        .unwrap_or_else(|| solveig_base::ice!("resolve errors referenced an unknown module"))
+        .parsed;
     let mut out = Vec::new();
 
     for error in errors {
@@ -76,7 +81,7 @@ pub(super) fn resolve_code_actions(
         let mut candidates = apis
             .iter()
             .filter(|(module_name, _)| *module_name != current_module)
-            .filter(|(module_name, _)| !is_compiler_prelude_module(session, module_name))
+            .filter(|(_, api)| project.package_kind(api.package) == Some(PackageKind::Local))
             .filter(|(_, api)| api_exports_name(api, name_symbol, *kind))
             .collect::<Vec<_>>();
         candidates.sort_by_key(|(module_name, _)| module_name.as_string(session));
@@ -317,7 +322,7 @@ fn scanned_module_exports_name(
     .unwrap_or_else(|| session.add_file(file.to_path_buf(), source.clone()));
     let parsed = solveig_syntax::lowering::parse_source(session, file_id, &source);
 
-    let api = build_module_api(ModuleId(0), &parsed).ok()?;
+    let api = build_module_api(PackageId(0), ModuleId(0), &parsed).ok()?;
     api_exports_name_text(session, &api, name, kind).then(|| module_name.as_string(session))
 }
 

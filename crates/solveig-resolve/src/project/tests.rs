@@ -16,7 +16,8 @@ fn module_table_renders_def_paths_from_ids() {
     let session = Session::new();
     let sample = ModuleName(vec![session.intern("sample")]);
     let helper = ModuleName(vec![session.intern("sample"), session.intern("helper")]);
-    let modules = ModuleTable::new(&session, [&sample, &helper]);
+    let package = PackageId(0);
+    let modules = ModuleTable::new(&session, [(sample, package), (helper.clone(), package)]);
     let helper_id = modules
         .id(&helper)
         .expect("ICE: test module table must contain helper");
@@ -29,6 +30,7 @@ fn module_table_renders_def_paths_from_ids() {
         modules.def_path(value).render(&session),
         "sample.helper.value"
     );
+    assert_eq!(modules.package(helper_id), package);
 }
 
 #[test]
@@ -96,6 +98,7 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
         func_defs: Vec::new(),
     };
 
+    let module_api = ModuleApi::new(PackageId(0));
     let api = build_typed_module_api(
         &session,
         &names,
@@ -103,12 +106,13 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
         &module_name,
         &checked,
         FxHashMap::default(),
-        FxHashMap::default(),
+        &module_api,
     );
     let type_def = super::local_def_id(module_id, session.intern("Widget"));
     let ctor_def = super::local_def_id(module_id, session.intern("MkWidget"));
 
     assert_eq!(api.type_ids.get(&type_def), Some(&tycon_id));
+    assert_eq!(api.package, PackageId(0));
     assert_eq!(api.constructor_ids.get(&ctor_def), Some(&ctor_id));
     assert_eq!(api.type_name(&names, type_def).as_deref(), Some(type_name));
 
@@ -169,7 +173,9 @@ class Describe a where
     let file = session.add_file("<test>", source);
     let parsed = parse_source(&session, file, source);
     let module_id = ModuleId(1);
-    let api = build_module_api(module_id, &parsed).expect("ICE: test API must build");
+    let package = PackageId(3);
+    let api = build_module_api(package, module_id, &parsed).expect("ICE: test API must build");
+    assert_eq!(api.package, package);
     let documented_increment = session.intern("documentedIncrement");
     let trailing_value = session.intern("trailingValue");
     let documented = session.intern("Documented");

@@ -312,7 +312,7 @@ fn extend_completion_display_tables(
 }
 
 fn api_from_typed_api(typed_api: &TypedModuleApi) -> ModuleApi {
-    let mut api = ModuleApi::default();
+    let mut api = ModuleApi::new(typed_api.package);
 
     for def_id in typed_api.term_schemes.keys() {
         api.terms.insert(def_id.name, *def_id);

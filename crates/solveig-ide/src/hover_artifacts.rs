@@ -8,6 +8,7 @@ pub(super) struct RetainedIdeArtifacts {
     pub(super) source_type_var_hovers: Vec<HoverInfo>,
     pub(super) declaration_spans: Vec<(FileSpan, DefId)>,
     pub(super) module_display_names: FxHashMap<ModuleId, String>,
+    pub(super) module_package_kinds: FxHashMap<ModuleId, PackageKind>,
     pub(super) module_paths: FxHashMap<ModuleId, PathBuf>,
     pub(super) module_imports: Vec<(FileSpan, ModuleId)>,
     pub(super) import_name_resolutions: Vec<(ModuleId, FileSpan, DefId)>,
@@ -40,6 +41,16 @@ pub(super) fn collect_retained_ide_artifacts(
         source_type_var_hovers: collect_source_type_var_hovers(session, names, project, typed_apis),
         declaration_spans: collect_hover_declaration_spans(project),
         module_display_names: collect_hover_module_display_names(session, project),
+        module_package_kinds: project
+            .modules
+            .iter()
+            .filter_map(|(name, file)| {
+                Some((
+                    project.module_table.id(name)?,
+                    project.package_kind(file.package)?,
+                ))
+            })
+            .collect(),
         module_paths: collect_hover_module_paths(project),
         module_imports: collect_hover_module_imports(project),
         import_name_resolutions: collect_hover_import_name_resolutions(project, typed_apis),

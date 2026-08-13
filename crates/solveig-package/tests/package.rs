@@ -63,6 +63,22 @@ entry = "app.main"
 }
 
 #[test]
+fn package_name_must_be_a_module_segment() {
+    let source = r#"[package]
+name = "not-valid"
+version = "0.1.0"
+
+[language]
+entry = "main"
+"#;
+
+    let error = Manifest::parse(source).expect_err("invalid package name should fail");
+
+    assert!(error.to_string().contains("package.name"));
+    assert!(error.to_string().contains("module segment"));
+}
+
+#[test]
 fn cyclic_path_dependency_is_reported() {
     let directory = TempDir::new().expect("temporary directory should be creatable");
     let root = utf8_path(&directory);
@@ -150,6 +166,50 @@ entry = "library.core"
     assert_eq!(local.modules.len(), 1);
     assert_eq!(dependency.kind, PackageKind::Dependency);
     assert_eq!(dependency.name, "library");
+}
+
+#[test]
+fn duplicate_package_names_are_rejected() {
+    let directory = TempDir::new().expect("temporary directory should be creatable");
+    let root = utf8_path(&directory);
+    let app = root.join("app");
+    let first = root.join("first");
+    let second = root.join("second");
+    for package in [&app, &first, &second] {
+        fs::create_dir_all(package.join("src"))
+            .expect("package source directory should be creatable");
+    }
+    write_manifest(
+        &app,
+        r#"[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+first = { path = "../first" }
+second = { path = "../second" }
+
+[language]
+entry = "main"
+"#,
+    );
+    for package in [&first, &second] {
+        write_manifest(
+            package,
+            r#"[package]
+name = "shared"
+version = "0.1.0"
+
+[language]
+entry = "core"
+"#,
+        );
+    }
+
+    let error = PackageGraph::load(&app).expect_err("package-name collision should fail");
+
+    assert!(matches!(error, PackageError::PackageNameCollision { .. }));
+    assert!(error.to_string().contains("shared"));
 }
 
 #[test]

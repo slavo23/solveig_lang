@@ -11,6 +11,7 @@ use solveig_ast::ast::{
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
+use solveig_package::{PackageId, PackageKind};
 use solveig_syntax::ast::{
     DocComment, Fixity, ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition,
 };

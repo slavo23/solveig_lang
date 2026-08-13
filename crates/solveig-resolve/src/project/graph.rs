@@ -16,6 +16,7 @@ pub struct ModuleContext {
 
 #[derive(Debug, Clone)]
 pub struct ModuleFile {
+    pub package: PackageId,
     pub name: ModuleName,
     pub path: PathBuf,
     pub source_hash: u64,
@@ -27,6 +28,49 @@ pub struct ModuleFile {
 pub struct Project {
     pub modules: FxHashMap<ModuleName, ModuleFile>,
     pub module_table: ModuleTable,
+    package_kinds: FxHashMap<PackageId, PackageKind>,
+    implicit_modules: Vec<ModuleName>,
+    entry_module: ModuleName,
+}
+
+impl Project {
+    pub fn new(
+        session: &Session,
+        modules: FxHashMap<ModuleName, ModuleFile>,
+        package_kinds: FxHashMap<PackageId, PackageKind>,
+        implicit_modules: Vec<ModuleName>,
+        entry_module: ModuleName,
+    ) -> Self {
+        let module_table = ModuleTable::new(
+            session,
+            modules
+                .values()
+                .map(|module| (module.name.clone(), module.package)),
+        );
+        Self {
+            modules,
+            module_table,
+            package_kinds,
+            implicit_modules,
+            entry_module,
+        }
+    }
+
+    pub fn package_kind(&self, package: PackageId) -> Option<PackageKind> {
+        self.package_kinds.get(&package).copied()
+    }
+
+    pub fn module_package(&self, module: &ModuleName) -> Option<PackageId> {
+        self.module_table.package_for_name(module)
+    }
+
+    pub fn implicit_modules(&self) -> &[ModuleName] {
+        &self.implicit_modules
+    }
+
+    pub fn entry_module(&self) -> &ModuleName {
+        &self.entry_module
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -71,7 +115,7 @@ pub fn build_module_graph(
             .expect("ICE: module graph missing node for known module");
 
         for imp in effective_imports(
-            session,
+            project,
             module_name,
             &module_file.imports,
             module_file.parsed.file,

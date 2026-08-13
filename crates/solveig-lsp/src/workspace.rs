@@ -1511,11 +1511,11 @@ secondAnswer = 2
         assert!(state.workspaces.contains_key(&first_root));
         assert!(state.workspaces.contains_key(&second_root));
         assert!(!state.workspaces.contains_key(&container_path));
-        let _publications = state.check_all();
+        let publications = state.check_all();
 
         let first_hover = state
             .hover(&first_uri, Position::new(3, 7))
-            .expect("first project hover should work");
+            .unwrap_or_else(|| panic!("first project hover should work: {publications:#?}"));
         let second_hover = state
             .hover(&second_uri, Position::new(3, 7))
             .expect("second project hover should work");
@@ -1561,7 +1561,7 @@ secondAnswer = 2
         write_source(
             &project.join("solveig.toml"),
             r#"[package]
-name = "broken-prelude-client"
+name = "broken_prelude_client"
 version = "0.1.0"
 
 [language]

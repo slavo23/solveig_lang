@@ -1,21 +1,26 @@
 //! Project discovery and file loading for Solveig packages.
 //! The compile facade calls this before parsing modules into the project graph.
 
-use solveig_base::FxHashMap;
+use solveig_base::{FxHashMap, FxHashSet};
+use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use solveig_base::{FileId, FileSpan, Session};
-use solveig_package::{LibraryLocation, LibraryOrigin, find_nearest_manifest};
-use solveig_resolve::project::{
-    ModuleFile, ModuleTable, ParsedProject, Project, ResolveError, effective_imports,
+use solveig_package::{
+    LibraryLocation, LibraryOrigin, Manifest, Package, PackageError, PackageGraph, PackageId,
+    PackageKind, find_nearest_manifest,
 };
+use solveig_resolve::project::{ModuleFile, ParsedProject, Project, ResolveError};
 use solveig_syntax::ast::{ModuleName, ParsedModule};
 use solveig_syntax::lowering;
 
 use crate::DriverError;
-use crate::library::{compiler_library_location, embedded_prelude_source};
+use crate::library::{
+    compiler_library_location, embedded_library_manifest, embedded_library_modules,
+    embedded_library_source,
+};
 use crate::source_provider::SourceProvider;
 
 #[derive(Debug)]
@@ -36,12 +41,10 @@ impl From<ResolveError> for ProjectError {
     }
 }
 
-fn prelude_module(session: &Session, module: &ModuleName) -> Option<&'static str> {
-    embedded_prelude_source(&module.as_string(session))
-}
-
-pub fn is_compiler_prelude_module(session: &Session, module: &ModuleName) -> bool {
-    prelude_module(session, module).is_some()
+impl From<PackageError> for ProjectError {
+    fn from(error: PackageError) -> Self {
+        Self::Driver(error.into())
+    }
 }
 
 fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModule {
@@ -54,75 +57,9 @@ fn source_hash(source: &str) -> u64 {
     hasher.finish()
 }
 
-fn load_prelude_file(
-    session: &Session,
-    module: &ModuleName,
-    sources: &SourceProvider,
-    library: &LibraryLocation,
-) -> Result<ModuleFile, ProjectError> {
-    let root = library.package_source_root("prelude").into_std_path_buf();
-    let path = file_from_module_name(session, &root, module);
-
-    if library.origin() != LibraryOrigin::Embedded {
-        return scan_module_file(session, &root, &path, sources).map_err(ProjectError::from);
-    }
-
-    let source = prelude_module(session, module)
-        .ok_or_else(|| DriverError::UnknownCompilerPrelude {
-            module: module.as_string(session),
-        })?
-        .to_string();
-    Ok(module_file_from_source(
-        session,
-        module.clone(),
-        path,
-        &source,
-    ))
-}
-
-fn load_prelude_module(
-    session: &Session,
-    modules: &mut FxHashMap<ModuleName, ModuleFile>,
-    module: &ModuleName,
-    sources: &SourceProvider,
-    library: &LibraryLocation,
-    cached_prelude_modules: Option<&FxHashMap<ModuleName, ModuleFile>>,
-) -> Result<(), ProjectError> {
-    if modules.contains_key(module) {
-        return Ok(());
-    }
-
-    let module_file = cached_prelude_modules
-        .and_then(|cached| cached.get(module).cloned())
-        .map_or_else(|| load_prelude_file(session, module, sources, library), Ok)?;
-    let imports = module_file.imports.clone();
-    let file = module_file.parsed.file;
-    modules.insert(module.clone(), module_file);
-
-    for imp in effective_imports(session, module, &imports, file) {
-        if prelude_module(session, &imp.module).is_some() {
-            load_prelude_module(
-                session,
-                modules,
-                &imp.module,
-                sources,
-                library,
-                cached_prelude_modules,
-            )?;
-        } else {
-            return Err(ResolveError::UnknownModule {
-                span: imp.span,
-                module: imp.module,
-            }
-            .into());
-        }
-    }
-
-    Ok(())
-}
-
 fn scan_module_file(
     session: &Session,
+    package: PackageId,
     root: &Path,
     file: &Path,
     sources: &SourceProvider,
@@ -137,6 +74,7 @@ fn scan_module_file(
     let name = module_name_from_file(session, root, file)?;
     Ok(module_file_from_source(
         session,
+        package,
         name,
         file.to_path_buf(),
         &source,
@@ -145,6 +83,7 @@ fn scan_module_file(
 
 fn module_file_from_source(
     session: &Session,
+    package: PackageId,
     name: ModuleName,
     path: PathBuf,
     source: &str,
@@ -154,6 +93,7 @@ fn module_file_from_source(
     let imports = parsed.imports.clone();
 
     ModuleFile {
+        package,
         name,
         path,
         source_hash: source_hash(source),
@@ -226,25 +166,72 @@ pub(crate) fn load_project_with_source_provider(
     session: &Session,
     entry_file: &Path,
     sources: &SourceProvider,
-    cached_prelude_modules: Option<&FxHashMap<ModuleName, ModuleFile>>,
 ) -> Result<(PathBuf, Project), ProjectError> {
     let library = compiler_library_location()?;
-    let root = if let Some(entry_file) = camino::Utf8Path::from_path(entry_file)
+    if let Some(entry_file) = camino::Utf8Path::from_path(entry_file)
         && let Some(package_root) = find_nearest_manifest(entry_file)
     {
-        package_root
-            .join(solveig_package::SOURCE_DIRECTORY)
-            .into_std_path_buf()
-    } else {
-        entry_file
-            .parent()
-            .ok_or_else(|| DriverError::SourceRootMissing {
-                entry_file: entry_file.to_path_buf(),
-            })?
-            .to_path_buf()
-    };
+        return load_package_project(
+            session,
+            &package_root,
+            entry_file.as_std_path(),
+            sources,
+            &library,
+        );
+    }
+
+    load_legacy_project(session, entry_file, sources, &library)
+}
+
+fn load_legacy_project(
+    session: &Session,
+    entry_file: &Path,
+    sources: &SourceProvider,
+    library: &LibraryLocation,
+) -> Result<(PathBuf, Project), ProjectError> {
+    let root = entry_file
+        .parent()
+        .ok_or_else(|| DriverError::SourceRootMissing {
+            entry_file: entry_file.to_path_buf(),
+        })?
+        .to_path_buf();
+    let local_package = PackageId(0);
+    let prelude_package = PackageId(1);
+    let entry_module = module_name_from_file(session, &root, entry_file)?;
 
     let mut modules = FxHashMap::<ModuleName, ModuleFile>::default();
+    let mut compiler_packages = Vec::new();
+    let temporary_id = add_compiler_package(
+        &mut compiler_packages,
+        library,
+        "prelude",
+        PackageKind::Implicit,
+    )?;
+    let mut prelude = compiler_packages
+        .pop()
+        .unwrap_or_else(|| solveig_base::ice!("compiler Prelude package was not added"));
+    if prelude.id != temporary_id {
+        solveig_base::ice!("compiler Prelude package received an unexpected identity");
+    }
+    prelude.id = prelude_package;
+    let prelude_source_root = prelude.root.join(solveig_package::SOURCE_DIRECTORY);
+    for file in &prelude.modules {
+        let module = scan_package_module(
+            session,
+            &prelude,
+            &prelude_source_root,
+            file,
+            sources,
+            library,
+        )?;
+        modules.insert(module.name.clone(), module);
+    }
+    let implicit_modules = prelude
+        .language
+        .implicit
+        .iter()
+        .map(|module| module_name_from_text(session, module))
+        .collect::<Vec<_>>();
     let mut stack = vec![PendingModule {
         file: entry_file.to_path_buf(),
         requested_module: None,
@@ -252,19 +239,20 @@ pub(crate) fn load_project_with_source_provider(
     }];
 
     while let Some(pending) = stack.pop() {
-        let module_file = match scan_module_file(session, &root, &pending.file, sources) {
-            Ok(module_file) => module_file,
-            Err(error) => {
-                if !sources.has_source(&pending.file)
-                    && let (Some(module), Some(span)) =
-                        (pending.requested_module, pending.import_span)
-                {
-                    return Err(ResolveError::UnknownModule { span, module }.into());
-                }
+        let module_file =
+            match scan_module_file(session, local_package, &root, &pending.file, sources) {
+                Ok(module_file) => module_file,
+                Err(error) => {
+                    if !sources.has_source(&pending.file)
+                        && let (Some(module), Some(span)) =
+                            (pending.requested_module, pending.import_span)
+                    {
+                        return Err(ResolveError::UnknownModule { span, module }.into());
+                    }
 
-                return Err(ProjectError::Driver(error));
-            }
-        };
+                    return Err(ProjectError::Driver(error));
+                }
+            };
         if modules.contains_key(&module_file.name) {
             continue;
         }
@@ -272,41 +260,292 @@ pub(crate) fn load_project_with_source_provider(
         let module_name = module_file.name.clone();
 
         if !session.diagnostics().has_errors() {
-            for imp in effective_imports(
-                session,
-                &module_name,
-                &module_file.imports,
-                module_file.parsed.file,
-            ) {
-                if prelude_module(session, &imp.module).is_some() {
-                    load_prelude_module(
-                        session,
-                        &mut modules,
-                        &imp.module,
-                        sources,
-                        &library,
-                        cached_prelude_modules,
-                    )?;
-                } else {
-                    stack.push(PendingModule {
-                        file: file_from_module_name(session, &root, &imp.module),
-                        requested_module: Some(imp.module),
-                        import_span: Some(imp.span),
-                    });
+            for imp in &module_file.imports {
+                if modules.contains_key(&imp.module) {
+                    continue;
                 }
+                stack.push(PendingModule {
+                    file: file_from_module_name(session, &root, &imp.module),
+                    requested_module: Some(imp.module.clone()),
+                    import_span: Some(FileSpan::new(module_file.parsed.file, imp.span)),
+                });
             }
         }
 
         modules.insert(module_name, module_file);
     }
 
-    let module_table = ModuleTable::new(session, modules.keys());
+    let package_kinds = FxHashMap::from_iter([
+        (local_package, PackageKind::Local),
+        (prelude_package, PackageKind::Implicit),
+    ]);
+    let project = Project::new(
+        session,
+        modules,
+        package_kinds,
+        implicit_modules,
+        entry_module,
+    );
 
-    Ok((
-        root,
-        Project {
-            modules,
-            module_table,
-        },
+    Ok((root, project))
+}
+
+fn load_package_project(
+    session: &Session,
+    package_root: &camino::Utf8Path,
+    entry_file: &Path,
+    sources: &SourceProvider,
+    library: &LibraryLocation,
+) -> Result<(PathBuf, Project), ProjectError> {
+    let graph = PackageGraph::load(package_root)?;
+    let mut packages = graph.packages().to_vec();
+    if let Some(local) = packages.iter_mut().find(|package| package.id == graph.root) {
+        let canonical_root = local.root.clone();
+        if canonical_root != package_root {
+            local.modules = local
+                .modules
+                .iter()
+                .map(|module| {
+                    module
+                        .strip_prefix(&canonical_root)
+                        .map_or_else(|_| module.clone(), |relative| package_root.join(relative))
+                })
+                .collect();
+            local.root = package_root.to_path_buf();
+        }
+        if !local
+            .modules
+            .iter()
+            .any(|module| module.as_std_path() == entry_file)
+        {
+            local.modules.push(
+                camino::Utf8PathBuf::from_path_buf(entry_file.to_path_buf())
+                    .map_err(|path| PackageError::NonUtf8Path { path })?,
+            );
+            local.modules.sort();
+        }
+    }
+
+    let prelude_package =
+        add_compiler_package(&mut packages, library, "prelude", PackageKind::Implicit)?;
+    let mut modules = FxHashMap::<ModuleName, ModuleFile>::default();
+    for package in &packages {
+        let source_root = package.root.join(solveig_package::SOURCE_DIRECTORY);
+        for file in &package.modules {
+            let module =
+                scan_package_module(session, package, &source_root, file, sources, library)?;
+            let module_name = module.name.clone();
+            if modules.insert(module_name.clone(), module).is_some() {
+                return Err(DriverError::DuplicateDefinition {
+                    kind: "module",
+                    name: module_name.as_string(session),
+                }
+                .into());
+            }
+        }
+    }
+
+    qualify_package_imports(session, &packages, &mut modules);
+    let package_kinds = packages
+        .iter()
+        .map(|package| (package.id, package.kind))
+        .collect();
+    let implicit_modules = packages
+        .iter()
+        .find(|package| package.id == prelude_package)
+        .map(|package| {
+            package
+                .language
+                .implicit
+                .iter()
+                .map(|module| module_name_from_text(session, module))
+                .filter(|module| modules.contains_key(module))
+                .collect()
+        })
+        .unwrap_or_default();
+    let local_package = packages
+        .iter()
+        .find(|package| package.id == graph.root)
+        .unwrap_or_else(|| solveig_base::ice!("package graph lost its root package"));
+    let source_root = local_package
+        .root
+        .join(solveig_package::SOURCE_DIRECTORY)
+        .into_std_path_buf();
+    let entry_module = package_module_name(
+        session,
+        &local_package.name,
+        module_name_from_text(session, &local_package.language.entry),
+    );
+    let project = Project::new(
+        session,
+        modules,
+        package_kinds,
+        implicit_modules,
+        entry_module,
+    );
+
+    Ok((source_root, project))
+}
+
+fn add_compiler_package(
+    packages: &mut Vec<Package>,
+    library: &LibraryLocation,
+    name: &'static str,
+    kind: PackageKind,
+) -> Result<PackageId, ProjectError> {
+    let root = library.package_root(name);
+    if let Some(package) = packages.iter_mut().find(|package| package.root == root) {
+        package.kind = kind;
+        return Ok(package.id);
+    }
+    if let Some(package) = packages.iter().find(|package| package.name == name) {
+        return Err(PackageError::PackageNameCollision {
+            name: name.to_string(),
+            first: package.root.clone(),
+            second: root,
+        }
+        .into());
+    }
+
+    let id = PackageId(u32::try_from(packages.len()).map_err(|_source| {
+        PackageError::TooManyPackages {
+            count: packages.len(),
+        }
+    })?);
+    let package = if root.exists() {
+        let graph = PackageGraph::load(&root)?;
+        let mut package = graph
+            .package(graph.root)
+            .cloned()
+            .unwrap_or_else(|| solveig_base::ice!("compiler package graph lost its root"));
+        package.id = id;
+        package.kind = kind;
+        package
+    } else {
+        let manifest = compiler_manifest(library, name)?;
+        Package {
+            id,
+            name: manifest.package.name,
+            version: manifest.package.version,
+            root: root.clone(),
+            kind,
+            modules: embedded_library_modules(name)
+                .iter()
+                .map(|relative| root.join(solveig_package::SOURCE_DIRECTORY).join(relative))
+                .collect(),
+            deps: BTreeMap::new(),
+            language: manifest.language,
+        }
+    };
+    packages.push(package);
+    Ok(id)
+}
+
+fn scan_package_module(
+    session: &Session,
+    package: &Package,
+    source_root: &camino::Utf8Path,
+    file: &camino::Utf8Path,
+    sources: &SourceProvider,
+    library: &LibraryLocation,
+) -> Result<ModuleFile, ProjectError> {
+    let raw_name = module_name_from_file(session, source_root.as_std_path(), file.as_std_path())?;
+    let name = package_module_name(session, &package.name, raw_name);
+    let source = match sources.read_to_string(file.as_std_path()) {
+        Ok(source) => source,
+        Err(source)
+            if library.origin() == LibraryOrigin::Embedded
+                && matches!(
+                    package.kind,
+                    PackageKind::Implicit | PackageKind::Dependency
+                ) =>
+        {
+            embedded_library_source(&name.as_string(session))
+                .ok_or_else(|| DriverError::ReadFile {
+                    path: file.as_std_path().to_path_buf(),
+                    source,
+                })?
+                .to_string()
+        }
+        Err(source) => {
+            return Err(DriverError::ReadFile {
+                path: file.as_std_path().to_path_buf(),
+                source,
+            }
+            .into());
+        }
+    };
+
+    Ok(module_file_from_source(
+        session,
+        package.id,
+        name,
+        file.as_std_path().to_path_buf(),
+        &source,
     ))
+}
+
+fn package_module_name(session: &Session, package: &str, mut module: ModuleName) -> ModuleName {
+    let package = session.intern(package);
+    if module.0.first().copied() != Some(package) {
+        module.0.insert(0, package);
+    }
+    module
+}
+
+fn qualify_package_imports(
+    session: &Session,
+    packages: &[Package],
+    modules: &mut FxHashMap<ModuleName, ModuleFile>,
+) {
+    let module_names = modules.keys().cloned().collect::<FxHashSet<_>>();
+    let package_names = packages
+        .iter()
+        .map(|package| (package.id, session.intern(&package.name)))
+        .collect::<FxHashMap<_, _>>();
+    let package_prefixes = package_names.values().copied().collect::<FxHashSet<_>>();
+
+    for module in modules.values_mut() {
+        let Some(package_name) = package_names.get(&module.package).copied() else {
+            continue;
+        };
+        for import in &mut module.parsed.imports {
+            let mut relative = import.module.clone();
+            relative.0.insert(0, package_name);
+            let starts_with_package = import
+                .module
+                .0
+                .first()
+                .is_some_and(|segment| package_prefixes.contains(segment));
+            if module_names.contains(&relative) || !starts_with_package {
+                import.module = relative;
+            }
+        }
+        module.imports = module.parsed.imports.clone();
+    }
+}
+
+fn module_name_from_text(session: &Session, name: &str) -> ModuleName {
+    ModuleName(
+        name.split('.')
+            .map(|segment| session.intern(segment))
+            .collect(),
+    )
+}
+
+fn compiler_manifest(
+    library: &LibraryLocation,
+    package: &'static str,
+) -> Result<Manifest, ProjectError> {
+    let root = library.package_root(package);
+    if root.exists() {
+        return Manifest::read(&root).map_err(ProjectError::from);
+    }
+
+    let source =
+        embedded_library_manifest(package).ok_or_else(|| PackageError::InvalidLibraryRoot {
+            path: library.root().to_path_buf(),
+            message: "embedded package manifest is missing",
+        })?;
+    Manifest::parse(source).map_err(ProjectError::from)
 }

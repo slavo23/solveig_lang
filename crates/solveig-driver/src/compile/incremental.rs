@@ -1,13 +1,10 @@
 //! Retained per-compilation checked-module cache for editor-speed rechecks.
 
-use crate::project::is_compiler_prelude_module;
-
 use super::*;
 
 #[derive(Clone, Debug)]
-pub(super) struct IncrementalCache {
-    pub(super) module_ids: FxHashMap<ModuleName, ModuleId>,
-    pub(super) source_hashes: FxHashMap<ModuleName, u64>,
+pub(super) struct PackageCache {
+    pub(super) packages: FxHashMap<PackageId, CachedPackage>,
     pub(super) names: Names,
     pub(super) apis: FxHashMap<ModuleName, SharedModuleApi>,
     pub(super) typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
@@ -19,10 +16,15 @@ pub(super) struct IncrementalCache {
     pub(super) verified_core: bool,
 }
 
-impl IncrementalCache {
+#[derive(Clone, Debug, Default)]
+pub(super) struct CachedPackage {
+    pub(super) module_ids: FxHashMap<ModuleName, ModuleId>,
+    pub(super) source_hashes: FxHashMap<ModuleName, u64>,
+}
+
+impl PackageCache {
     pub(super) fn reusable_modules(
         &self,
-        session: &Session,
         project: &Project,
         verify_core: bool,
     ) -> FxHashSet<ModuleName> {
@@ -30,12 +32,11 @@ impl IncrementalCache {
             return FxHashSet::default();
         }
 
-        let invalidated = self.invalidated_modules(session, project);
+        let invalidated = self.invalidated_modules(project);
         let mut reusable = FxHashSet::default();
 
         for module_name in project.modules.keys() {
             if invalidated.contains(module_name)
-                || is_compiler_prelude_module(session, module_name)
                 || self.non_reusable_modules.contains(module_name)
                 || !self.has_current_artifacts(project, module_name)
             {
@@ -48,38 +49,33 @@ impl IncrementalCache {
         reusable
     }
 
-    fn invalidated_modules(&self, session: &Session, project: &Project) -> FxHashSet<ModuleName> {
+    fn invalidated_modules(&self, project: &Project) -> FxHashSet<ModuleName> {
         let mut invalidated = FxHashSet::default();
         let mut reverse_imports = FxHashMap::<ModuleName, Vec<ModuleName>>::default();
 
         for (module_name, module_file) in &project.modules {
-            if is_compiler_prelude_module(session, module_name) {
-                continue;
-            }
-
             let module_id = project
                 .module_table
                 .id(module_name)
                 .expect("ICE: invalidation referenced unknown module");
 
-            if self.module_ids.get(module_name) != Some(&module_id)
-                || self.source_hashes.get(module_name) != Some(&module_file.source_hash)
+            let cached_package = self.packages.get(&module_file.package);
+            if cached_package.and_then(|package| package.module_ids.get(module_name))
+                != Some(&module_id)
+                || cached_package.and_then(|package| package.source_hashes.get(module_name))
+                    != Some(&module_file.source_hash)
                 || !self.has_current_artifacts(project, module_name)
             {
                 invalidated.insert(module_name.clone());
             }
 
             let imports = effective_imports(
-                session,
+                project,
                 module_name,
                 &module_file.imports,
                 module_file.parsed.file,
             );
             for import in imports {
-                if is_compiler_prelude_module(session, &import.module) {
-                    continue;
-                }
-
                 reverse_imports
                     .entry(import.module)
                     .or_default()

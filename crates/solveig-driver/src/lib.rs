@@ -18,6 +18,6 @@ pub use compile::{
 /// Re-exports the top-level driver error type.
 pub use error::DriverError;
 pub use library::compiler_library_location;
-pub use project::{is_compiler_prelude_module, module_name_from_file};
+pub use project::module_name_from_file;
 pub use solveig_vm::vm::ExitStatus;
 pub use source_provider::SourceProvider;

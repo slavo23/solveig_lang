@@ -29,25 +29,8 @@ impl Compilation {
             self.entry_file.as_deref(),
             &self.source_provider,
         )?;
-        let cached_prelude_modules = self
-            .prelude_cache
-            .as_ref()
-            .map(|cache| &cache.project_modules);
-        let loaded_project = if let Some(cached_prelude_modules) = cached_prelude_modules {
-            load_project_with_source_provider(
-                &self.session,
-                &entry_file,
-                &self.source_provider,
-                Some(cached_prelude_modules),
-            )
-        } else {
-            load_project_with_source_provider(
-                &self.session,
-                &entry_file,
-                &self.source_provider,
-                None,
-            )
-        };
+        let loaded_project =
+            load_project_with_source_provider(&self.session, &entry_file, &self.source_provider);
         let (source_root, project) = match loaded_project {
             Ok(project) => project,
             Err(ProjectError::Driver(error)) => return Err(error),
@@ -98,21 +81,13 @@ impl Compilation {
                 });
             }
         };
-        let prelude_cache = self
-            .prelude_cache
-            .as_ref()
-            .filter(|cache| cache.can_reuse(&project, verify_core));
         let reusable_modules = self
-            .incremental_cache
+            .package_cache
             .as_ref()
-            .map(|cache| cache.reusable_modules(&self.session, &project, verify_core))
+            .map(|cache| cache.reusable_modules(&project, verify_core))
             .unwrap_or_default();
 
-        let caches = (
-            prelude_cache,
-            self.incremental_cache.as_ref(),
-            &reusable_modules,
-        );
+        let caches = (self.package_cache.as_ref(), &reusable_modules);
         let mut state = match FrontendState::new(
             &self.session,
             &mut self.names,
@@ -141,13 +116,10 @@ impl Compilation {
         let phase = state.check_all(&order);
 
         let source_files = self.session.source_map().files().to_vec();
-        let (snapshot, prelude_cache, incremental_cache, freshly_checked_modules, reused_modules) =
+        let (snapshot, package_cache, freshly_checked_modules, reused_modules) =
             state.into_snapshot(source_root, source_files, &order);
-        if let Some(prelude_cache) = prelude_cache {
-            self.prelude_cache = Some(prelude_cache);
-        }
-        if let Some(incremental_cache) = incremental_cache {
-            self.incremental_cache = Some(incremental_cache);
+        if let Some(package_cache) = package_cache {
+            self.package_cache = Some(package_cache);
         }
 
         Ok(CheckProjectOutcome {

@@ -52,6 +52,8 @@ pub struct PathDependency {
 #[serde(deny_unknown_fields)]
 pub struct LanguageManifest {
     pub entry: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub implicit: Vec<String>,
 }
 
 impl Manifest {
@@ -93,9 +95,12 @@ impl Manifest {
     }
 
     fn validate(&self) -> Result<(), PackageError> {
-        validate_nonempty("package.name", &self.package.name)?;
+        validate_module_segment("package.name", &self.package.name)?;
         validate_nonempty("package.version", &self.package.version)?;
         validate_module_name("language.entry", &self.language.entry)?;
+        for module in &self.language.implicit {
+            validate_module_name("language.implicit", module)?;
+        }
 
         for (name, dependency) in &self.dependencies {
             validate_nonempty("dependency name", name)?;
@@ -109,6 +114,24 @@ impl Manifest {
 
         Ok(())
     }
+}
+
+fn validate_module_segment(field: &'static str, value: &str) -> Result<(), PackageError> {
+    validate_nonempty(field, value)?;
+    let mut chars = value.chars();
+    let starts_valid = chars
+        .next()
+        .is_some_and(|character| character.is_ascii_alphabetic() || character == '_');
+    if !starts_valid
+        || !chars
+            .all(|character| character.is_ascii_alphanumeric() || matches!(character, '_' | '\''))
+    {
+        return Err(PackageError::InvalidField {
+            field,
+            message: "value must be a valid Solveig module segment".to_string(),
+        });
+    }
+    Ok(())
 }
 
 fn validate_nonempty(field: &'static str, value: &str) -> Result<(), PackageError> {
@@ -169,6 +192,7 @@ impl PackageGraph {
         let root = canonical_utf8(root)?;
         let mut loader = GraphLoader::default();
         let root_id = loader.load(&root, PackageKind::Local)?;
+        validate_unique_package_names(&loader.packages)?;
         Ok(Self {
             root: root_id,
             packages: loader.packages,
@@ -184,6 +208,20 @@ impl PackageGraph {
             .ok()
             .and_then(|index| self.packages.get(index))
     }
+}
+
+fn validate_unique_package_names(packages: &[Package]) -> Result<(), PackageError> {
+    let mut roots = BTreeMap::<&str, &Utf8Path>::new();
+    for package in packages {
+        if let Some(first) = roots.insert(&package.name, &package.root) {
+            return Err(PackageError::PackageNameCollision {
+                name: package.name.clone(),
+                first: first.to_path_buf(),
+                second: package.root.clone(),
+            });
+        }
+    }
+    Ok(())
 }
 
 #[derive(Default)]
@@ -340,6 +378,11 @@ pub enum PackageError {
     DependencyCycle {
         cycle: Vec<Utf8PathBuf>,
     },
+    PackageNameCollision {
+        name: String,
+        first: Utf8PathBuf,
+        second: Utf8PathBuf,
+    },
     TooManyPackages {
         count: usize,
     },
@@ -392,6 +435,14 @@ impl fmt::Display for PackageError {
                     .join(" -> ");
                 write!(f, "cyclic path dependency: {rendered}")
             }
+            Self::PackageNameCollision {
+                name,
+                first,
+                second,
+            } => write!(
+                f,
+                "package name `{name}` is claimed by both {first} and {second}"
+            ),
             Self::TooManyPackages { count } => {
                 write!(f, "package graph has too many packages ({count})")
             }
@@ -414,6 +465,7 @@ impl std::error::Error for PackageError {
             | Self::InvalidField { .. }
             | Self::NonUtf8Path { .. }
             | Self::DependencyCycle { .. }
+            | Self::PackageNameCollision { .. }
             | Self::TooManyPackages { .. }
             | Self::InvalidLibraryRoot { .. } => None,
         }

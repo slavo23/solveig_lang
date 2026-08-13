@@ -44,7 +44,7 @@ pub enum SourceSemanticTokenModifier {
     Definition,
     /// Marks immutable values from Solveig source.
     Readonly,
-    /// Marks symbols that come from the compiler prelude.
+    /// Marks symbols that come from an implicit package.
     DefaultLibrary,
 }
 

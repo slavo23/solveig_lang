@@ -55,11 +55,11 @@ use solveig_check::inference::type_infer::{
 use solveig_lower::closure_ir::CCProgram;
 use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
-use solveig_package::{Manifest, find_nearest_manifest};
+use solveig_package::{Manifest, PackageId, find_nearest_manifest};
 use solveig_resolve::project::{
-    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleFile,
-    ModuleTable, ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi,
-    TypeAlias, TypedDisplayMaps, build_module_api, build_typed_module_api, compiler_builtin_api,
+    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleTable,
+    ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi, TypeAlias,
+    TypedDisplayMaps, build_module_api, build_typed_module_api, compiler_builtin_api,
     compiler_prelude_prim_module, effective_imports, module_order_checked,
     seed_compiler_prelude_module_api,
 };
@@ -68,9 +68,7 @@ use solveig_syntax::ast::{ImportSpec, ModuleName};
 use solveig_vm::vm::{ExitStatus, Machine};
 
 use crate::DriverError;
-use crate::project::{
-    ProjectError, is_compiler_prelude_module, load_project_with_source_provider, parse_project,
-};
+use crate::project::{ProjectError, load_project_with_source_provider, parse_project};
 use crate::source_provider::SourceProvider;
 
 mod builtins;
@@ -81,6 +79,7 @@ mod pipeline;
 mod show_entry;
 
 use builtins::driver_builtin_api;
+use compilation::CheckedProject;
 pub use compilation::{
     CheckResult, Compilation, CompilationSnapshot, CompileOptions, ModuleResolveErrors,
     ProjectDocs, ProjectSchemes, checked_project_docs, checked_project_schemes,
@@ -88,8 +87,7 @@ pub use compilation::{
     compile_and_run_project_with_options_and_args, run_project_capture,
     run_project_capture_with_stdin, run_project_capture_with_stdin_and_args,
 };
-use compilation::{CheckedProject, PreludeCache};
 use evidence_dump::dump_solved_evidence;
-use incremental::IncrementalCache;
+use incremental::{CachedPackage, PackageCache};
 use pipeline::{FrontendPhase, merge_checked_modules, verify_lowering_core};
 use show_entry::{add_show_entry_wrapper, entry_returns_io};

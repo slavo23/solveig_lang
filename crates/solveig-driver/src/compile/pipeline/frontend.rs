@@ -12,7 +12,6 @@ struct FrontendState<'a> {
     module_files: FxHashMap<ModuleId, FileId>,
     next_instance_id: u32,
     verify_core: bool,
-    prelude_cache: Option<PreludeCache>,
     resolve_errors: Vec<ModuleResolveErrors>,
     type_errors: Vec<TypeError>,
     holes: Vec<HoleInfo>,
@@ -22,15 +21,13 @@ struct FrontendState<'a> {
 }
 
 type FrontendCaches<'cache> = (
-    Option<&'cache PreludeCache>,
-    Option<&'cache IncrementalCache>,
+    Option<&'cache PackageCache>,
     &'cache FxHashSet<ModuleName>,
 );
 type FrontendProjectInput<'a> = (&'a Project, &'a ParsedProject, &'a [ModuleName]);
 type FrontendRetained = (
     CompilationSnapshot,
-    Option<PreludeCache>,
-    Option<IncrementalCache>,
+    Option<PackageCache>,
     Vec<String>,
     Vec<String>,
 );
@@ -74,38 +71,16 @@ impl<'a> FrontendState<'a> {
         let (project, parsed, order) = project_input;
         let mut apis = FxHashMap::default();
         let mut errors = Vec::new();
-        let (prelude_cache, incremental_cache, reusable_modules) = caches;
-        let incremental_cache = incremental_cache.filter(|_| !reusable_modules.is_empty());
-        if let Some(cache) = incremental_cache {
-            *names = cache.names.clone();
-        } else if let Some(cache) = prelude_cache {
+        let (package_cache, reusable_modules) = caches;
+        let package_cache = package_cache.filter(|_| !reusable_modules.is_empty());
+        if let Some(cache) = package_cache {
             *names = cache.names.clone();
         }
-        let builtins = prelude_cache.map_or_else(
-            || Arc::new(driver_builtin_api(session, names, &project.module_table)),
-            |cache| cache.builtins.clone(),
-        );
+        let builtins = Arc::new(driver_builtin_api(session, names, &project.module_table));
 
         for module_name in order {
-            if let Some(cache) = prelude_cache
-                && is_compiler_prelude_module(session, module_name)
-            {
-                let api = cache
-                    .apis
-                    .get(module_name)
-                    .unwrap_or_else(|| {
-                        solveig_base::ice!(
-                            "usable prelude cache missing API for {}",
-                            module_name.as_string(session)
-                        )
-                    })
-                    .clone();
-                apis.insert(module_name.clone(), api);
-                continue;
-            }
-
             if reusable_modules.contains(module_name)
-                && let Some(cache) = incremental_cache
+                && let Some(cache) = package_cache
             {
                 let api = cache
                     .apis
@@ -125,7 +100,8 @@ impl<'a> FrontendState<'a> {
                 .module_table
                 .id(module_name)
                 .expect("ICE: checked module order referenced unknown module");
-            match build_module_api(module_id, parsed.get(session, module_name)) {
+            let package = project.module_table.package(module_id);
+            match build_module_api(package, module_id, parsed.get(session, module_name)) {
                 Ok(mut api) => {
                     seed_compiler_prelude_module_api(
                         session,
@@ -148,25 +124,13 @@ impl<'a> FrontendState<'a> {
             return Err(errors);
         }
 
-        let mut typed_apis = prelude_cache
-            .map(|cache| cache.typed_apis.clone())
-            .unwrap_or_default();
-        let mut checked = prelude_cache
-            .map(|cache| cache.checked.clone())
-            .unwrap_or_default();
-        let mut module_files = prelude_cache
-            .map(|cache| cache.module_files.clone())
-            .unwrap_or_default();
-        let mut resolutions = prelude_cache
-            .map(|cache| cache.resolutions.clone())
-            .unwrap_or_default();
-        let mut next_instance_id = prelude_cache.map_or(0, |cache| cache.next_instance_id);
+        let mut typed_apis = FxHashMap::default();
+        let mut checked = FxHashMap::default();
+        let mut module_files = FxHashMap::default();
+        let mut resolutions = FxHashMap::default();
+        let mut next_instance_id = 0;
 
-        if let Some(cache) = prelude_cache {
-            rebase_cached_prelude_artifacts(project, cache, &mut module_files, &mut resolutions);
-        }
-
-        if let Some(cache) = incremental_cache {
+        if let Some(cache) = package_cache {
             next_instance_id = next_instance_id.max(cache.next_instance_id);
 
             for module_name in reusable_modules {
@@ -244,7 +208,6 @@ impl<'a> FrontendState<'a> {
             module_files,
             next_instance_id,
             verify_core,
-            prelude_cache: prelude_cache.cloned(),
             resolve_errors: Vec::new(),
             type_errors: Vec::new(),
             holes: Vec::new(),
@@ -267,7 +230,7 @@ impl<'a> FrontendState<'a> {
                 self.checked.get(&module_id).cloned()
             })
             .collect();
-        let incremental_cache = self.capture_incremental_cache();
+        let package_cache = self.capture_package_cache();
         let freshly_checked_modules =
             module_names_as_strings(self.session, &self.freshly_checked_modules);
         let reused_modules = module_names_as_strings(self.session, &self.reused_modules);
@@ -302,8 +265,7 @@ impl<'a> FrontendState<'a> {
                 type_errors: self.type_errors,
                 holes: self.holes,
             },
-            self.prelude_cache,
-            Some(incremental_cache),
+            Some(package_cache),
             freshly_checked_modules,
             reused_modules,
         )
@@ -324,7 +286,7 @@ impl<'a> FrontendState<'a> {
 
             let parsed = self.parsed.get(self.session, module_name);
             let imports =
-                effective_imports(self.session, module_name, &parsed.imports, parsed.file);
+                effective_imports(self.project, module_name, &parsed.imports, parsed.file);
 
             if imports
                 .iter()
@@ -344,6 +306,12 @@ impl<'a> FrontendState<'a> {
                 }
             };
             let checked = module_check.module;
+            let module_api = self.apis.get(module_name).unwrap_or_else(|| {
+                solveig_base::ice!(
+                    "module API missing during typed API construction for {}",
+                    module_name.as_string(self.session)
+                )
+            });
 
             let typed_api = Arc::new(build_typed_module_api(
                 self.session,
@@ -354,24 +322,12 @@ impl<'a> FrontendState<'a> {
                 self.resolved_type_aliases
                     .remove(&module_id)
                     .unwrap_or_default(),
-                self.apis
-                    .get(module_name)
-                    .unwrap_or_else(|| {
-                        solveig_base::ice!(
-                            "module API missing during typed API construction for {}",
-                            module_name.as_string(self.session)
-                        )
-                    })
-                    .docs
-                    .clone(),
+                module_api,
             ));
 
             self.typed_apis.insert(module_name.clone(), typed_api);
             self.module_files.insert(module_id, parsed.file);
             self.checked.insert(module_id, checked.clone());
-            if is_compiler_prelude_module(self.session, module_name) {
-                self.capture_prelude_cache(order);
-            }
             if let Some(phase) = module_check.failure {
                 first_failure = Some(first_failure.map_or(phase, |current| current.min(phase)));
             }
@@ -412,7 +368,7 @@ impl<'a> FrontendState<'a> {
             .module_table
             .id(module_name)
             .expect("ICE: module check referenced unknown module");
-        let imports = effective_imports(self.session, module_name, &parsed.imports, file);
+        let imports = effective_imports(self.project, module_name, &parsed.imports, file);
 
         let imported_apis = self.build_imported_apis(&imports);
         let cx = ModuleContext {
@@ -675,28 +631,6 @@ fn validate_selected_import_names(
     }
 
     errors
-}
-
-fn rebase_cached_prelude_artifacts(
-    project: &Project,
-    cache: &PreludeCache,
-    module_files: &mut FxHashMap<ModuleId, FileId>,
-    resolutions: &mut FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
-) {
-    for (module_name, module_id) in &cache.module_ids {
-        let Some(module_file) = project.modules.get(module_name) else {
-            continue;
-        };
-        let current_file = module_file.parsed.file;
-
-        module_files.insert(*module_id, current_file);
-        if let Some(cached_resolutions) = cache.resolutions.get(module_id) {
-            resolutions.insert(
-                *module_id,
-                rebase_resolutions_file(cached_resolutions, current_file),
-            );
-        }
-    }
 }
 
 include!("frontend/imported_type_info.rs");

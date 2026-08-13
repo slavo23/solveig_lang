@@ -11,8 +11,7 @@ pub struct Compilation {
     pub(super) source_provider: SourceProvider,
     pub(super) snapshot: Option<CompilationSnapshot>,
     pub(super) checked_project: Option<CheckedProject>,
-    pub(super) prelude_cache: Option<PreludeCache>,
-    pub(super) incremental_cache: Option<IncrementalCache>,
+    pub(super) package_cache: Option<PackageCache>,
     pub(super) retained_verify_core: Option<bool>,
     check_result: CheckResult,
 }
@@ -109,21 +108,6 @@ pub(super) struct CheckedProject {
     pub(super) module_files: FxHashMap<ModuleId, FileId>,
 }
 
-#[derive(Clone, Debug)]
-pub(super) struct PreludeCache {
-    pub(super) project_modules: FxHashMap<ModuleName, ModuleFile>,
-    pub(super) module_ids: FxHashMap<ModuleName, ModuleId>,
-    pub(super) names: Names,
-    pub(super) builtins: Arc<BuiltinApi>,
-    pub(super) apis: FxHashMap<ModuleName, SharedModuleApi>,
-    pub(super) typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
-    pub(super) checked: FxHashMap<ModuleId, CheckedModule>,
-    pub(super) module_files: FxHashMap<ModuleId, FileId>,
-    pub(super) resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
-    pub(super) next_instance_id: u32,
-    pub(super) verified_core: bool,
-}
-
 struct CapturedRun {
     output: String,
 }
@@ -145,23 +129,6 @@ impl CheckedProject {
     }
 }
 
-impl PreludeCache {
-    pub(super) fn can_reuse(&self, project: &Project, verify_core: bool) -> bool {
-        if verify_core && !self.verified_core {
-            return false;
-        }
-
-        self.module_ids.iter().all(|(module, cached_id)| {
-            project.module_table.id(module) == Some(*cached_id)
-                && self
-                    .project_modules
-                    .get(module)
-                    .zip(project.modules.get(module))
-                    .is_some_and(|(cached, current)| cached.source_hash == current.source_hash)
-        })
-    }
-}
-
 impl Compilation {
     pub fn new(project_root: impl Into<PathBuf>) -> Self {
         Self {
@@ -172,8 +139,7 @@ impl Compilation {
             source_provider: SourceProvider::default(),
             snapshot: None,
             checked_project: None,
-            prelude_cache: None,
-            incremental_cache: None,
+            package_cache: None,
             retained_verify_core: None,
             check_result: CheckResult::default(),
         }
@@ -484,7 +450,14 @@ impl Compilation {
         let mut merged =
             merge_checked_modules(checked_project.modules.clone(), &mut checked_project.names)?;
 
-        let entry_fq = format!("main.{entry_name}");
+        let entry_module = self
+            .snapshot
+            .as_ref()
+            .expect("ICE: successful check did not retain compilation snapshot")
+            .project
+            .entry_module()
+            .as_string(&self.session);
+        let entry_fq = format!("{entry_module}.{entry_name}");
         let entry_is_io = entry_returns_io(&merged, &checked_project.names, &entry_fq);
         let show_entry = if entry_is_io {
             None

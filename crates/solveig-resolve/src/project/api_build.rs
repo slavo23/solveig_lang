@@ -34,10 +34,11 @@ fn insert_docs(api: &mut ModuleApi, def_id: DefId, docs: Option<&DocComment>) {
 }
 
 pub fn build_module_api(
+    package: PackageId,
     module_id: ModuleId,
     parsed: &ParsedModule,
 ) -> Result<ModuleApi, ResolveError> {
-    let mut api = ModuleApi::default();
+    let mut api = ModuleApi::new(package);
     let function_groups = function_equation_group_indices(parsed)?;
     let function_group_starts = function_groups
         .iter()
@@ -219,16 +220,16 @@ pub fn build_typed_module_api(
     module_name: &ModuleName,
     checked: &CheckedModule,
     type_aliases: FxHashMap<DefId, TypeAlias>,
-    docs: FxHashMap<DefId, DocComment>,
+    module_api: &ModuleApi,
 ) -> TypedModuleApi {
-    let mut api = TypedModuleApi::default();
+    let mut api = TypedModuleApi::new(module_api.package);
     let prefix = module_name.as_string(session) + ".";
 
     api.tycon_table = checked.tycon_table.clone();
     api.ctor_table = checked.ctor_table.clone();
     api.class_table = checked.class_table.clone();
     api.type_aliases = type_aliases;
-    api.docs = docs;
+    api.docs = module_api.docs.clone();
 
     for (id, scheme) in &checked.func_schemes {
         if id.module == module_id {

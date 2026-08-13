@@ -13,7 +13,6 @@ pub enum DriverError {
     InvalidModulePath { file: PathBuf, root: PathBuf },
     EmptyModulePath { file: PathBuf },
     ExpectedSolveigFile { file: PathBuf },
-    UnknownCompilerPrelude { module: String },
     DuplicateDefinition { kind: &'static str, name: String },
     Runtime { message: String },
     WriteOutput { source: io::Error },
@@ -56,9 +55,6 @@ impl fmt::Display for DriverError {
             Self::EmptyModulePath { file } => write!(f, "empty module path {}", file.display()),
             Self::ExpectedSolveigFile { file } => {
                 write!(f, "expected .sv file: {}", file.display())
-            }
-            Self::UnknownCompilerPrelude { module } => {
-                write!(f, "unknown compiler prelude module {module}")
             }
             Self::DuplicateDefinition { kind, name } => write!(f, "duplicate {kind} {name}"),
             Self::Runtime { message } => write!(f, "runtime error: {message}"),
