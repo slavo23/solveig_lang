@@ -2,6 +2,8 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
+use solveig_package::PackageError;
+
 #[derive(Debug)]
 pub enum DriverError {
     CompilationFailed { message: &'static str },
@@ -16,6 +18,7 @@ pub enum DriverError {
     Runtime { message: String },
     WriteOutput { source: io::Error },
     DumpBytecode { source: io::Error },
+    Package { source: PackageError },
 }
 
 impl DriverError {
@@ -61,6 +64,7 @@ impl fmt::Display for DriverError {
             Self::Runtime { message } => write!(f, "runtime error: {message}"),
             Self::WriteOutput { source } => write!(f, "failed to write output: {source}"),
             Self::DumpBytecode { source } => write!(f, "failed to dump bytecode: {source}"),
+            Self::Package { source } => write!(f, "{source}"),
         }
     }
 }
@@ -71,7 +75,14 @@ impl std::error::Error for DriverError {
             Self::ReadFile { source, .. }
             | Self::WriteOutput { source }
             | Self::DumpBytecode { source } => Some(source),
+            Self::Package { source } => Some(source),
             _ => None,
         }
+    }
+}
+
+impl From<PackageError> for DriverError {
+    fn from(source: PackageError) -> Self {
+        Self::Package { source }
     }
 }

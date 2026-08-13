@@ -55,6 +55,7 @@ use solveig_check::inference::type_infer::{
 use solveig_lower::closure_ir::CCProgram;
 use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
+use solveig_package::{Manifest, find_nearest_manifest};
 use solveig_resolve::project::{
     BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleFile,
     ModuleTable, ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi,

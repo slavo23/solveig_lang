@@ -574,10 +574,10 @@ impl Compilation {
 fn discover_project_for_source_file(source_file: &Path) -> (PathBuf, Option<PathBuf>) {
     let source_dir = source_file.parent().unwrap_or_else(|| Path::new("."));
 
-    for candidate in source_dir.ancestors() {
-        if candidate.join("src").join("main.sv").is_file() {
-            return (candidate.to_path_buf(), None);
-        }
+    if let Some(source_file) = camino::Utf8Path::from_path(source_file)
+        && let Some(project_root) = find_nearest_manifest(source_file)
+    {
+        return (project_root.into_std_path_buf(), None);
     }
 
     (source_dir.to_path_buf(), Some(source_file.to_path_buf()))

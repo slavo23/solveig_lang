@@ -1,0 +1,6 @@
+[package]
+name = "smoke_suite"
+version = "0.1.0"
+
+[language]
+entry = "main"

@@ -185,8 +185,8 @@ and values cannot contain NUL. Invalid inputs raise `GetEnvError` or
 `SetEnvError`. `getEnvironment` is sorted by variable name for deterministic
 iteration.
 
-Until package manifests define an executable name, `getProgName` returns the
-project root's final directory component. Non-UTF-8 host entries are omitted
+`getProgName` currently returns the project root's final directory component.
+Non-UTF-8 host entries are omitted
 because Solveig `String` is UTF-8.
 
 ## Clocks

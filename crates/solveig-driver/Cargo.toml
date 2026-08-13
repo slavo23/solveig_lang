@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+camino = { workspace = true }
 solveig-ast = { path = "../solveig-ast", version = "0.1.0" }
 solveig-base = { path = "../solveig-base", version = "0.1.0" }
 solveig-check = { path = "../solveig-check", version = "0.1.0" }
 solveig-lower = { path = "../solveig-lower", version = "0.1.0" }
+solveig-package = { path = "../solveig-package", version = "0.1.0" }
 solveig-report = { path = "../solveig-report", version = "0.1.0" }
 solveig-resolve = { path = "../solveig-resolve", version = "0.1.0" }
 solveig-syntax = { path = "../solveig-syntax", version = "0.1.0" }

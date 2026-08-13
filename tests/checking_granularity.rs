@@ -230,6 +230,16 @@ main = 0
 fn source_file_entry_walks_up_to_project_marker() {
     let project_root = temp_project_root("marker");
     write_source(
+        &project_root.join("solveig.toml"),
+        r#"[package]
+name = "marker"
+version = "0.1.0"
+
+[language]
+entry = "main"
+"#,
+    );
+    write_source(
         &project_root.join("src/main.sv"),
         r#"import a(answer)
 
@@ -253,6 +263,40 @@ answer = 41
     let fresh = module_set(result.freshly_checked_modules());
     assert!(fresh.contains("main"));
     assert!(fresh.contains("a"));
+
+    drop(project_root);
+}
+
+#[test]
+fn manifest_entry_module_selects_the_project_entry_file() {
+    let project_root = temp_project_root("manifest_entry");
+    write_source(
+        &project_root.join("solveig.toml"),
+        r#"[package]
+name = "entry-test"
+version = "0.1.0"
+
+[language]
+entry = "app.cli"
+"#,
+    );
+    write_source(
+        &project_root.join("src/app/cli.sv"),
+        r#"main : Int
+main = 42
+"#,
+    );
+
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation
+        .check(true)
+        .expect("manifest entry module check should run");
+
+    assert!(result.success(), "manifest entry module should succeed");
+    assert_eq!(
+        module_set(result.freshly_checked_modules()),
+        expected_modules(["app.cli"])
+    );
 
     drop(project_root);
 }

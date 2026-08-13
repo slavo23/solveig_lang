@@ -292,30 +292,41 @@ workflow.
 
 ## Project Layout
 
-A Solveig project is a directory with source files under `src/`.
+A Solveig project has a strict `solveig.toml` manifest and source files under
+`src/`.
 
 ```text
 my-project/
+|-- solveig.toml
 `-- src/
-    |-- main.sv
+    |-- app/
+    |   `-- main.sv
     `-- math/
         `-- stats.sv
 ```
 
-The compiler looks for:
+The manifest names the package and its entry module:
 
-```text
-<project-root>/src/main.sv
+```toml
+[package]
+name = "app"
+version = "0.1.0"
+
+[language]
+entry = "app.main"
 ```
+
+Manifest keys are checked strictly, so misspellings are errors. A path
+dependency uses `name = { path = "../name" }` under `[dependencies]`.
 
 Module names come from file paths:
 
 ```text
-src/main.sv          -> main
+src/app/main.sv      -> app.main
 src/math/stats.sv    -> math.stats
 ```
 
-The default entry is `main.main`, written in source as:
+The configured entry above exposes `app.main`, written in source as:
 
 ```solveig
 main : Int

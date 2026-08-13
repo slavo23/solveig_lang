@@ -7,6 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use solveig_base::{FileId, FileSpan, Session};
+use solveig_package::find_nearest_manifest;
 use solveig_resolve::project::{
     ModuleFile, ModuleTable, ParsedProject, Project, ResolveError, effective_imports,
 };
@@ -231,6 +232,12 @@ pub(crate) fn load_project_with_source_provider(
 ) -> Result<(PathBuf, Project), ProjectError> {
     let root = if let Some(root) = bundled_prelude_source_root(entry_file) {
         root
+    } else if let Some(entry_file) = camino::Utf8Path::from_path(entry_file)
+        && let Some(package_root) = find_nearest_manifest(entry_file)
+    {
+        package_root
+            .join(solveig_package::SOURCE_DIRECTORY)
+            .into_std_path_buf()
     } else {
         entry_file
             .parent()

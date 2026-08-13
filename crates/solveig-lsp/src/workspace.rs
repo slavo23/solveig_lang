@@ -14,6 +14,7 @@ use async_lsp::lsp_types::{
 use solveig_base::{PositionEncoding, Session, SourceMap, SourcePosition};
 use solveig_driver::{Compilation, CompilationSnapshot, DriverError, SourceProvider};
 use solveig_ide::{ProjectSnapshotView, SourceCodeActionCategory, SourceInlayHintConfig};
+use solveig_package::{find_nearest_manifest_path, is_package_root};
 use tokio::task::JoinHandle;
 
 use crate::code_actions::lsp_code_actions;
@@ -680,21 +681,15 @@ fn extend_diagnostic_map(
 fn project_root_for_file(path: &Path) -> PathBuf {
     let source_dir = path.parent().unwrap_or_else(|| Path::new("."));
 
-    for candidate in source_dir.ancestors() {
-        if candidate.join("src").join("main.sv").is_file() {
-            return candidate.to_path_buf();
-        }
-    }
-
-    source_dir.to_path_buf()
+    find_nearest_manifest_path(path).unwrap_or_else(|| source_dir.to_path_buf())
 }
 
 fn is_solveig_project_root(path: &Path) -> bool {
-    path.join("src").join("main.sv").is_file()
+    is_package_root(path)
 }
 
 fn compilation_for(root: &Path, first_file: &Path) -> Compilation {
-    if root.join("src").join("main.sv").is_file() {
+    if is_package_root(root) {
         Compilation::new(root)
     } else {
         Compilation::for_source_file(first_file)
@@ -1400,6 +1395,27 @@ main = count [1, 2, 3]
         let first_helper = first_root.join("src/helper.sv");
         let second_main = second_root.join("src/main.sv");
         let second_helper = second_root.join("src/helper.sv");
+
+        write_source(
+            &first_root.join("solveig.toml"),
+            r#"[package]
+name = "first"
+version = "0.1.0"
+
+[language]
+entry = "main"
+"#,
+        );
+        write_source(
+            &second_root.join("solveig.toml"),
+            r#"[package]
+name = "second"
+version = "0.1.0"
+
+[language]
+entry = "main"
+"#,
+        );
 
         write_source(
             &first_main,

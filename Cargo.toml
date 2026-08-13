@@ -33,6 +33,7 @@ members = [
     "crates/solveig-ide",
     "crates/solveig-lsp",
     "crates/solveig-lower",
+    "crates/solveig-package",
     "crates/solveig-report",
     "crates/solveig-resolve",
     "crates/solveig-syntax",
@@ -40,11 +41,14 @@ members = [
 ]
 
 [workspace.dependencies]
+camino = { version = "1.2.1", features = ["serde1"] }
 ena = "0.14.4"
 la-arena = "0.3.1"
 petgraph = "0.8.3"
 rustc-hash = "2.1.1"
+serde = { version = "1", features = ["derive"] }
 text-size = "1.1.1"
+toml = "1.1.4"
 
 [workspace.lints.clippy]
 string_slice = "warn"

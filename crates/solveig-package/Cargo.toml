@@ -1,0 +1,16 @@
+[package]
+name = "solveig-package"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+camino = { workspace = true }
+serde = { workspace = true }
+solveig-base = { path = "../solveig-base", version = "0.1.0" }
+toml = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

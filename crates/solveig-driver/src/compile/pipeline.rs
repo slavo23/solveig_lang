@@ -204,10 +204,20 @@ fn find_entry_file(
     entry_file: Option<&Path>,
     sources: &SourceProvider,
 ) -> Result<PathBuf, DriverError> {
-    let entry = entry_file.map_or_else(
-        || project_root.join("src").join("main.sv"),
-        Path::to_path_buf,
-    );
+    let entry = if let Some(entry_file) = entry_file {
+        entry_file.to_path_buf()
+    } else if project_root.join(solveig_package::MANIFEST_FILE).is_file() {
+        let project_root = camino::Utf8Path::from_path(project_root).ok_or_else(|| {
+            solveig_package::PackageError::NonUtf8Path {
+                path: project_root.to_path_buf(),
+            }
+        })?;
+        Manifest::read(project_root)?
+            .entry_file(project_root)
+            .into_std_path_buf()
+    } else {
+        project_root.join("src").join("main.sv")
+    };
     if sources.has_source(&entry) {
         Ok(entry)
     } else {

@@ -19,16 +19,29 @@ cargo run -- --project-root examples/quiz_game
 
 ## 1. Your first project
 
-A project is a directory containing `.sv` source files under `src/`. The entry
-module is `src/main.sv`.
+A project contains a strict `solveig.toml` manifest and `.sv` source files
+under `src/`. The manifest selects the entry module.
 
 ```text
 hello/
+|-- solveig.toml
 `-- src/
-    `-- main.sv
+    `-- hello/
+        `-- main.sv
 ```
 
-Create `hello/src/main.sv`:
+Create `hello/solveig.toml`:
+
+```toml
+[package]
+name = "hello"
+version = "0.1.0"
+
+[language]
+entry = "hello.main"
+```
+
+Create `hello/src/hello/main.sv`:
 
 ```solveig
 main : String
