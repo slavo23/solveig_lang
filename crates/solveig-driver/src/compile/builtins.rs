@@ -4,6 +4,7 @@
 use super::*;
 
 mod handles;
+mod os;
 mod schemes;
 
 use schemes::*;
@@ -105,6 +106,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     );
     let handle_specs =
         handles::handle_builtin_specs(names, &int, &string, &bytes, &bool_ty, &io_error);
+    let os_specs = os::os_builtin_specs(names, &int, &string, &bool_ty, &io_error);
 
     let mut specs = vec![
         prim_spec(
@@ -650,5 +652,6 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         ),
     ];
     specs.extend(handle_specs);
+    specs.extend(os_specs);
     specs
 }

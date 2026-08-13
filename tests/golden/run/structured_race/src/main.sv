@@ -47,6 +47,18 @@ reportError ioError =
         | ReadHandleError message => printLine "unexpected read handle error"
         | WriteHandleError message => printLine "unexpected write handle error"
         | SetBufferingError message => printLine "unexpected buffering error"
+        | GetEnvError message => printLine "unexpected get environment error"
+        | SetEnvError message => printLine "unexpected set environment error"
+        | GetCurrentDirectoryError message => printLine "unexpected get cwd error"
+        | SetCurrentDirectoryError path message => printLine "unexpected set cwd error"
+        | DoesFileExistError path message => printLine "unexpected file existence error"
+        | DoesDirectoryExistError path message => printLine "unexpected directory existence error"
+        | ListDirectoryError path message => printLine "unexpected list directory error"
+        | CreateDirectoryError path message => printLine "unexpected create directory error"
+        | RemoveFileError path message => printLine "unexpected remove file error"
+        | RenameFileError source destination message => printLine "unexpected rename error"
+        | GetFileSizeError path message => printLine "unexpected file size error"
+        | GetModificationTimeError path message => printLine "unexpected modification time error"
 
 main : Task ()
 main = do

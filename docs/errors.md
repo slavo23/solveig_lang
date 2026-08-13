@@ -49,6 +49,18 @@ data IOError =
   | ReadHandleError String
   | WriteHandleError String
   | SetBufferingError String
+  | GetEnvError String
+  | SetEnvError String
+  | GetCurrentDirectoryError String
+  | SetCurrentDirectoryError String String
+  | DoesFileExistError String String
+  | DoesDirectoryExistError String String
+  | ListDirectoryError String String
+  | CreateDirectoryError String String
+  | RemoveFileError String String
+  | RenameFileError String String String
+  | GetFileSizeError String String
+  | GetModificationTimeError String String
 ```
 
 A typed failure short-circuits `bind`: later actions in the same sequence do
@@ -86,6 +98,27 @@ reportIOError ioError =
         | ReadHandleError message => printLine (appendString "read handle: " message)
         | WriteHandleError message => printLine (appendString "write handle: " message)
         | SetBufferingError message => printLine (appendString "buffering: " message)
+        | GetEnvError message => printLine (appendString "environment: " message)
+        | SetEnvError message => printLine (appendString "environment: " message)
+        | GetCurrentDirectoryError message => printLine (appendString "cwd: " message)
+        | SetCurrentDirectoryError path message =>
+            printLine (appendString path (appendString ": " message))
+        | DoesFileExistError path message =>
+            printLine (appendString path (appendString ": " message))
+        | DoesDirectoryExistError path message =>
+            printLine (appendString path (appendString ": " message))
+        | ListDirectoryError path message =>
+            printLine (appendString path (appendString ": " message))
+        | CreateDirectoryError path message =>
+            printLine (appendString path (appendString ": " message))
+        | RemoveFileError path message =>
+            printLine (appendString path (appendString ": " message))
+        | RenameFileError source destination message =>
+            printLine (appendString source (appendString " -> " (appendString destination (appendString ": " message))))
+        | GetFileSizeError path message =>
+            printLine (appendString path (appendString ": " message))
+        | GetModificationTimeError path message =>
+            printLine (appendString path (appendString ": " message))
 
 printSettings : Task ()
 printSettings = do

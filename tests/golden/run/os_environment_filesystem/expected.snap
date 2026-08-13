@@ -1,0 +1,28 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+os_environment_filesystem
+missing
+violet
+violet
+cwd
+True
+False
+True
+3
+modified
+data.txt
+False
+True
+False
+inside
+get-env-error
+set-env-error
+set-cwd-error
+list-error
+create-error
+remove-error
+rename-error
+size-error
+modified-error

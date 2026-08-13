@@ -1,0 +1,110 @@
+//! Scheduler-thread allocation of structured host IO results.
+
+use super::*;
+use crate::builtins::VmCtx;
+use solveig_ast::ast::CtorRuntimeRole;
+
+impl Interpreter<'_> {
+    pub(super) fn resume_worker_result(
+        &mut self,
+        program: &BytecodeProgram,
+        result: IoResult,
+    ) -> Result<Option<Value>, StepOutcome> {
+        let value = match result {
+            IoResult::Unit => Value::Unit,
+            IoResult::Text(text) => {
+                self.safe_point();
+                self.heap.alloc_str(&text)
+            }
+            IoResult::Bytes(bytes) => {
+                self.safe_point();
+                self.heap.alloc_bytes(&bytes)
+            }
+            IoResult::Socket(socket) => Value::SocketId(socket.0),
+            IoResult::Listener { socket, port } => {
+                self.safe_point();
+                VmCtx::new(self).alloc_data2_ctor(
+                    CtorRuntimeRole::PreludePair,
+                    Value::SocketId(socket.0),
+                    Value::Int(i64::from(port)),
+                    "listen",
+                )?
+            }
+            IoResult::Handle(handle) => Value::HandleId(handle.0),
+            IoResult::Bool(value) => {
+                if value {
+                    self.bools.true_val
+                } else {
+                    self.bools.false_val
+                }
+            }
+            IoResult::Int(value) => Value::Int(value),
+            IoResult::TextList(values) => self.alloc_string_list(&values, "listDirectory")?,
+            IoResult::DirectoryChanged(path) => {
+                self.io.set_current_directory(path);
+                Value::Unit
+            }
+            IoResult::Failed(failure) => {
+                self.io_current = Some(self.alloc_io_failure_action(failure)?);
+                return Ok(None);
+            }
+        };
+        self.resume_io_value(program, value)
+    }
+
+    pub(super) fn alloc_string_list(
+        &mut self,
+        strings: &[String],
+        builtin: &str,
+    ) -> Result<Value, RuntimeError> {
+        let checkpoint = self.temporary_roots.len();
+        for string in strings {
+            self.safe_point();
+            let value = self.heap.alloc_str(string);
+            self.temporary_roots.push(value);
+        }
+        let value = VmCtx::new(self).alloc_list_from_root_range(checkpoint, strings.len(), builtin);
+        self.temporary_roots.truncate(checkpoint);
+        value
+    }
+
+    pub(super) fn alloc_environment_list(
+        &mut self,
+        entries: &[(String, String)],
+    ) -> Result<Value, RuntimeError> {
+        let checkpoint = self.temporary_roots.len();
+        for (name, value) in entries {
+            self.safe_point();
+            let name = self.heap.alloc_str(name);
+            self.temporary_roots.push(name);
+            self.safe_point();
+            let value = self.heap.alloc_str(value);
+            self.temporary_roots.push(value);
+            self.safe_point();
+            let fields_start = self.temporary_roots.len() - 2;
+            let name = *self
+                .temporary_roots
+                .get(fields_start)
+                .expect("ICE: environment name root disappeared");
+            let value = *self
+                .temporary_roots
+                .last()
+                .expect("ICE: environment value root disappeared");
+            let pair = VmCtx::new(self).alloc_data2_ctor(
+                CtorRuntimeRole::PreludePair,
+                name,
+                value,
+                "getEnvironment",
+            )?;
+            self.temporary_roots.truncate(fields_start);
+            self.temporary_roots.push(pair);
+        }
+        let result = VmCtx::new(self).alloc_list_from_root_range(
+            checkpoint,
+            entries.len(),
+            "getEnvironment",
+        );
+        self.temporary_roots.truncate(checkpoint);
+        result
+    }
+}

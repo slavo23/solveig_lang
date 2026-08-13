@@ -42,7 +42,7 @@ hClose : Handle -> Task ()
 hFlush : Handle -> Task ()
 ```
 
-`openFile` resolves relative paths against the project root and raises
+`openFile` resolves relative paths against the logical working directory and raises
 `OpenHandleError path message` on failure.
 
 - `ReadMode` opens an existing readable file.
@@ -167,6 +167,60 @@ logical position. Text input still decodes strictly: invalid UTF-8 raises the
 operation's read error. Byte input never decodes. Convert explicitly with
 `bytesToString`; it returns `Err (InvalidUtf8 message)` rather than panicking or
 replacing malformed input.
+
+## Environment and program identity
+
+```solveig
+getEnv : String -> Task (Maybe String)
+setEnv : String -> String -> Task ()
+getEnvironment : Task [Pair String String]
+getProgName : Task String
+```
+
+The runtime snapshots UTF-8 host environment entries at startup. `setEnv`
+changes this runtime-local copy, and subsequent environment reads observe the
+change; it does not mutate the host process's global environment. Names must be
+non-empty and contain neither `=` nor NUL,
+and values cannot contain NUL. Invalid inputs raise `GetEnvError` or
+`SetEnvError`. `getEnvironment` is sorted by variable name for deterministic
+iteration.
+
+Until package manifests define an executable name, `getProgName` returns the
+project root's final directory component. Non-UTF-8 host entries are omitted
+because Solveig `String` is UTF-8.
+
+## Filesystem and logical working directory
+
+```solveig
+getCurrentDirectory : Task String
+setCurrentDirectory : String -> Task ()
+doesFileExist : String -> Task Bool
+doesDirectoryExist : String -> Task Bool
+listDirectory : String -> Task [String]
+createDirectory : String -> Task ()
+removeFile : String -> Task ()
+renameFile : String -> String -> Task ()
+getFileSize : String -> Task Int
+getModificationTime : String -> Task Int
+```
+
+Each runtime starts at the canonical project root and owns a logical working
+directory. Relative paths for these operations and all file/handle operations
+resolve against it. `setCurrentDirectory` updates only the runtime, never the
+host process, so concurrent Solveig runtimes cannot change one another's path
+resolution. The target must already be a directory.
+
+`listDirectory` returns immediate entry names, excludes `.` and `..`, and
+sorts them lexically. A non-UTF-8 entry name is a `ListDirectoryError`.
+`createDirectory` creates exactly one directory and requires its parent to
+exist. `doesFileExist` and `doesDirectoryExist` return `False` for a missing
+path; other metadata failures remain typed errors. `getFileSize` reports bytes.
+`getModificationTime` reports signed nanoseconds since the Unix epoch and
+raises its typed error if the host value cannot fit `Int`.
+
+Potentially blocking metadata, directory, and mutation calls use the bounded
+IO worker pool. Every failure uses the constructor named for the attempted
+operation and retains its path(s) plus the platform error message.
 
 ## Platform notes
 

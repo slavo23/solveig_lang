@@ -619,8 +619,8 @@ Blocking host IO does not run on the scheduler thread. `Runtime` owns an
 `IoSubsystem` with four scoped OS workers, one readiness-driven socket thread,
 a typed request table, one host-handle side table distributed across those
 workers, and one multi-producer/single-consumer completion channel. Performing
-a handle operation, whole-file text/byte operation, or `appendFile` follows this
-state transition:
+a handle operation, whole-file text/byte operation, `appendFile`, or a
+potentially blocking filesystem operation follows this state transition:
 
 1. The scheduler thread resolves every VM operand to owned Rust data and
    submits an `IoRequest` associated with the current `ProcessId`.
@@ -655,13 +655,22 @@ consumed, so a `RequestId` identifies at most one outstanding operation. The
 table contains the process association rather than encoding it in the id.
 
 Terminal reads and writes share worker zero and therefore retain submission
-order on the caller-provided streams. File and DNS requests are distributed
-round-robin across the other three workers and may finish in a different order;
+order on the caller-provided streams. File, filesystem-metadata, directory,
+and DNS requests are distributed round-robin across the other three workers
+and may finish in a different order;
 each completion wakes only its requesting process. DNS produces an owned IPv4
 address string before `connect` submits it to the socket thread. Stream
 references are borrowed by scoped workers and protected by `Mutex` because
 multiple worker threads exist, but the mutex does not protect compiler or VM
 heap state.
+
+The subsystem snapshots a UTF-8 environment and canonical project-root cwd at
+startup. Both remain runtime-local mutable state on the scheduler thread.
+Environment reads and writes complete immediately; filesystem paths are
+resolved against the logical cwd before an owned request crosses to a worker.
+Successful `setCurrentDirectory` returns a canonical host path which the
+scheduler installs only after wakeup. This avoids unsafe host-global
+environment or cwd mutation when multiple workers and runtimes exist.
 
 TCP resources live only in the socket thread's monotonic side table keyed by
 `SocketId`. A Solveig `Socket` value is the typed id, never an OS descriptor or

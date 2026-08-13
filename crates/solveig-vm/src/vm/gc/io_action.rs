@@ -1,6 +1,7 @@
 //! Exhaustive GC traversal for values retained by inert IO actions.
 
 use super::*;
+use crate::heap::{EnvironmentAction, FilesystemAction};
 
 pub(super) fn rewrite(
     heap: &mut Heap,
@@ -101,6 +102,8 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
             visit(handle);
             visit(text);
         }
+        IoAction::Environment(action) => visit_environment_mut(action, visit),
+        IoAction::Filesystem(action) => visit_filesystem_mut(action, visit),
         IoAction::ReadLine
         | IoAction::GetArgs
         | IoAction::NewChan { .. }
@@ -181,10 +184,76 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
             visit(handle);
             visit(text);
         }
+        IoAction::Environment(action) => visit_environment(action, visit),
+        IoAction::Filesystem(action) => visit_filesystem(action, visit),
         IoAction::ReadLine
         | IoAction::GetArgs
         | IoAction::NewChan { .. }
         | IoAction::Sleep { .. }
         | IoAction::Listen { .. } => {}
+    }
+}
+
+fn visit_environment_mut(action: &mut EnvironmentAction, mut visit: impl FnMut(&mut Value)) {
+    match action {
+        EnvironmentAction::Get { name } => visit(name),
+        EnvironmentAction::Set { name, value } => {
+            visit(name);
+            visit(value);
+        }
+        EnvironmentAction::GetAll | EnvironmentAction::GetProgramName => {}
+    }
+}
+
+fn visit_environment(action: EnvironmentAction, mut visit: impl FnMut(Value)) {
+    match action {
+        EnvironmentAction::Get { name } => visit(name),
+        EnvironmentAction::Set { name, value } => {
+            visit(name);
+            visit(value);
+        }
+        EnvironmentAction::GetAll | EnvironmentAction::GetProgramName => {}
+    }
+}
+
+fn visit_filesystem_mut(action: &mut FilesystemAction, mut visit: impl FnMut(&mut Value)) {
+    match action {
+        FilesystemAction::GetCurrentDirectory => {}
+        FilesystemAction::SetCurrentDirectory { path }
+        | FilesystemAction::DoesFileExist { path }
+        | FilesystemAction::DoesDirectoryExist { path }
+        | FilesystemAction::ListDirectory { path }
+        | FilesystemAction::CreateDirectory { path }
+        | FilesystemAction::RemoveFile { path }
+        | FilesystemAction::GetFileSize { path }
+        | FilesystemAction::GetModificationTime { path } => visit(path),
+        FilesystemAction::RenameFile {
+            source,
+            destination,
+        } => {
+            visit(source);
+            visit(destination);
+        }
+    }
+}
+
+fn visit_filesystem(action: FilesystemAction, mut visit: impl FnMut(Value)) {
+    match action {
+        FilesystemAction::GetCurrentDirectory => {}
+        FilesystemAction::SetCurrentDirectory { path }
+        | FilesystemAction::DoesFileExist { path }
+        | FilesystemAction::DoesDirectoryExist { path }
+        | FilesystemAction::ListDirectory { path }
+        | FilesystemAction::CreateDirectory { path }
+        | FilesystemAction::RemoveFile { path }
+        | FilesystemAction::GetFileSize { path }
+        | FilesystemAction::GetModificationTime { path } => visit(path),
+        FilesystemAction::RenameFile {
+            source,
+            destination,
+        } => {
+            visit(source);
+            visit(destination);
+        }
     }
 }

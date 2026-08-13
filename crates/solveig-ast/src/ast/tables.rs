@@ -260,6 +260,26 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         PRELUDE_IO_ERROR_READ_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorReadHandle,
         PRELUDE_IO_ERROR_WRITE_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorWriteHandle,
         PRELUDE_IO_ERROR_SET_BUFFERING_NAME => CtorRuntimeRole::PreludeIoErrorSetBuffering,
+        PRELUDE_IO_ERROR_GET_ENV_NAME => CtorRuntimeRole::PreludeIoErrorGetEnv,
+        PRELUDE_IO_ERROR_SET_ENV_NAME => CtorRuntimeRole::PreludeIoErrorSetEnv,
+        PRELUDE_IO_ERROR_GET_CURRENT_DIRECTORY_NAME => {
+            CtorRuntimeRole::PreludeIoErrorGetCurrentDirectory
+        }
+        PRELUDE_IO_ERROR_SET_CURRENT_DIRECTORY_NAME => {
+            CtorRuntimeRole::PreludeIoErrorSetCurrentDirectory
+        }
+        PRELUDE_IO_ERROR_DOES_FILE_EXIST_NAME => CtorRuntimeRole::PreludeIoErrorDoesFileExist,
+        PRELUDE_IO_ERROR_DOES_DIRECTORY_EXIST_NAME => {
+            CtorRuntimeRole::PreludeIoErrorDoesDirectoryExist
+        }
+        PRELUDE_IO_ERROR_LIST_DIRECTORY_NAME => CtorRuntimeRole::PreludeIoErrorListDirectory,
+        PRELUDE_IO_ERROR_CREATE_DIRECTORY_NAME => CtorRuntimeRole::PreludeIoErrorCreateDirectory,
+        PRELUDE_IO_ERROR_REMOVE_FILE_NAME => CtorRuntimeRole::PreludeIoErrorRemoveFile,
+        PRELUDE_IO_ERROR_RENAME_FILE_NAME => CtorRuntimeRole::PreludeIoErrorRenameFile,
+        PRELUDE_IO_ERROR_GET_FILE_SIZE_NAME => CtorRuntimeRole::PreludeIoErrorGetFileSize,
+        PRELUDE_IO_ERROR_GET_MODIFICATION_TIME_NAME => {
+            CtorRuntimeRole::PreludeIoErrorGetModificationTime
+        }
         PRELUDE_IO_MODE_READ_NAME => CtorRuntimeRole::PreludeIoModeRead,
         PRELUDE_IO_MODE_WRITE_NAME => CtorRuntimeRole::PreludeIoModeWrite,
         PRELUDE_IO_MODE_APPEND_NAME => CtorRuntimeRole::PreludeIoModeAppend,
@@ -513,6 +533,18 @@ pub enum CtorRuntimeRole {
     PreludeIoErrorReadHandle,
     PreludeIoErrorWriteHandle,
     PreludeIoErrorSetBuffering,
+    PreludeIoErrorGetEnv,
+    PreludeIoErrorSetEnv,
+    PreludeIoErrorGetCurrentDirectory,
+    PreludeIoErrorSetCurrentDirectory,
+    PreludeIoErrorDoesFileExist,
+    PreludeIoErrorDoesDirectoryExist,
+    PreludeIoErrorListDirectory,
+    PreludeIoErrorCreateDirectory,
+    PreludeIoErrorRemoveFile,
+    PreludeIoErrorRenameFile,
+    PreludeIoErrorGetFileSize,
+    PreludeIoErrorGetModificationTime,
     PreludeIoModeRead,
     PreludeIoModeWrite,
     PreludeIoModeAppend,

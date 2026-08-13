@@ -29,6 +29,18 @@ reportMapped error =
         | ReadHandleError _ => printLine "unexpected-read-handle"
         | WriteHandleError _ => printLine "unexpected-write-handle"
         | SetBufferingError _ => printLine "unexpected-buffering"
+        | GetEnvError _ => printLine "unexpected-get-env"
+        | SetEnvError _ => printLine "unexpected-set-env"
+        | GetCurrentDirectoryError _ => printLine "unexpected-get-cwd"
+        | SetCurrentDirectoryError _ _ => printLine "unexpected-set-cwd"
+        | DoesFileExistError _ _ => printLine "unexpected-file-exists"
+        | DoesDirectoryExistError _ _ => printLine "unexpected-directory-exists"
+        | ListDirectoryError _ _ => printLine "unexpected-list-directory"
+        | CreateDirectoryError _ _ => printLine "unexpected-create-directory"
+        | RemoveFileError _ _ => printLine "unexpected-remove-file"
+        | RenameFileError _ _ _ => printLine "unexpected-rename-file"
+        | GetFileSizeError _ _ => printLine "unexpected-file-size"
+        | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
 
 reportRead : IOError -> Task ()
 reportRead error =
@@ -53,6 +65,18 @@ reportRead error =
         | ReadHandleError _ => printLine "unexpected-read-handle"
         | WriteHandleError _ => printLine "unexpected-write-handle"
         | SetBufferingError _ => printLine "unexpected-buffering"
+        | GetEnvError _ => printLine "unexpected-get-env"
+        | SetEnvError _ => printLine "unexpected-set-env"
+        | GetCurrentDirectoryError _ => printLine "unexpected-get-cwd"
+        | SetCurrentDirectoryError _ _ => printLine "unexpected-set-cwd"
+        | DoesFileExistError _ _ => printLine "unexpected-file-exists"
+        | DoesDirectoryExistError _ _ => printLine "unexpected-directory-exists"
+        | ListDirectoryError _ _ => printLine "unexpected-list-directory"
+        | CreateDirectoryError _ _ => printLine "unexpected-create-directory"
+        | RemoveFileError _ _ => printLine "unexpected-remove-file"
+        | RenameFileError _ _ _ => printLine "unexpected-rename-file"
+        | GetFileSizeError _ _ => printLine "unexpected-file-size"
+        | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
 
 reportWrite : IOError -> Task ()
 reportWrite error =
@@ -77,6 +101,18 @@ reportWrite error =
         | ReadHandleError _ => printLine "unexpected-read-handle"
         | WriteHandleError _ => printLine "unexpected-write-handle"
         | SetBufferingError _ => printLine "unexpected-buffering"
+        | GetEnvError _ => printLine "unexpected-get-env"
+        | SetEnvError _ => printLine "unexpected-set-env"
+        | GetCurrentDirectoryError _ => printLine "unexpected-get-cwd"
+        | SetCurrentDirectoryError _ _ => printLine "unexpected-set-cwd"
+        | DoesFileExistError _ _ => printLine "unexpected-file-exists"
+        | DoesDirectoryExistError _ _ => printLine "unexpected-directory-exists"
+        | ListDirectoryError _ _ => printLine "unexpected-list-directory"
+        | CreateDirectoryError _ _ => printLine "unexpected-create-directory"
+        | RemoveFileError _ _ => printLine "unexpected-remove-file"
+        | RenameFileError _ _ _ => printLine "unexpected-rename-file"
+        | GetFileSizeError _ _ => printLine "unexpected-file-size"
+        | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
 
 reportAppend : IOError -> Task ()
 reportAppend error =
@@ -101,6 +137,18 @@ reportAppend error =
         | ReadHandleError _ => printLine "unexpected-read-handle"
         | WriteHandleError _ => printLine "unexpected-write-handle"
         | SetBufferingError _ => printLine "unexpected-buffering"
+        | GetEnvError _ => printLine "unexpected-get-env"
+        | SetEnvError _ => printLine "unexpected-set-env"
+        | GetCurrentDirectoryError _ => printLine "unexpected-get-cwd"
+        | SetCurrentDirectoryError _ _ => printLine "unexpected-set-cwd"
+        | DoesFileExistError _ _ => printLine "unexpected-file-exists"
+        | DoesDirectoryExistError _ _ => printLine "unexpected-directory-exists"
+        | ListDirectoryError _ _ => printLine "unexpected-list-directory"
+        | CreateDirectoryError _ _ => printLine "unexpected-create-directory"
+        | RemoveFileError _ _ => printLine "unexpected-remove-file"
+        | RenameFileError _ _ _ => printLine "unexpected-rename-file"
+        | GetFileSizeError _ _ => printLine "unexpected-file-size"
+        | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
 
 releaseResource : String -> Task ()
 releaseResource name = printLine (appendString "release " name)

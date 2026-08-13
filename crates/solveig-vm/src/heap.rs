@@ -190,6 +190,30 @@ pub enum IoAction {
         handle: Value,
         buffering: Buffering,
     },
+    Environment(EnvironmentAction),
+    Filesystem(FilesystemAction),
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum EnvironmentAction {
+    Get { name: Value },
+    Set { name: Value, value: Value },
+    GetAll,
+    GetProgramName,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum FilesystemAction {
+    GetCurrentDirectory,
+    SetCurrentDirectory { path: Value },
+    DoesFileExist { path: Value },
+    DoesDirectoryExist { path: Value },
+    ListDirectory { path: Value },
+    CreateDirectory { path: Value },
+    RemoveFile { path: Value },
+    RenameFile { source: Value, destination: Value },
+    GetFileSize { path: Value },
+    GetModificationTime { path: Value },
 }
 
 /// Identifies a channel heap object while it is registered with the scheduler.

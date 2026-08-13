@@ -14,6 +14,10 @@ use std::sync::{Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
+pub(super) mod filesystem;
+
+use filesystem::{FilesystemFailure, FilesystemRequest};
+
 use super::socket::{SocketRequest, SocketSubsystem};
 
 const IO_WORKER_COUNT: usize = 4;
@@ -32,6 +36,7 @@ pub(super) enum IoRequest {
         path: PathBuf,
         contents: Vec<u8>,
     },
+    Filesystem(FilesystemRequest),
     ResolveHost(String),
     Connect {
         host: String,
@@ -61,6 +66,9 @@ pub(super) enum IoResult {
     Listener { socket: SocketId, port: u16 },
     Handle(HandleId),
     Bool(bool),
+    Int(i64),
+    TextList(Vec<String>),
+    DirectoryChanged(PathBuf),
     Failed(IoFailure),
 }
 
@@ -76,6 +84,9 @@ pub(super) enum IoFailure {
         append: bool,
         source: io::Error,
     },
+    GetEnv(String),
+    SetEnv(String),
+    Filesystem(FilesystemFailure),
     ResolveHost {
         host: String,
         source: io::Error,
@@ -122,6 +133,8 @@ pub(super) struct IoSubsystem {
     handle_workers: Vec<Option<usize>>,
     args: Vec<String>,
     cwd: PathBuf,
+    environment: std::collections::BTreeMap<String, String>,
+    program_name: String,
 }
 
 impl IoSubsystem {
@@ -137,6 +150,8 @@ impl IoSubsystem {
             handle_workers: vec![None; FIRST_FILE_HANDLE as usize],
             args: Vec::new(),
             cwd: PathBuf::new(),
+            environment: std::collections::BTreeMap::new(),
+            program_name: String::new(),
         }
     }
 
@@ -149,6 +164,16 @@ impl IoSubsystem {
         args: &[String],
         cwd: &Path,
     ) -> Result<Self, RuntimeError> {
+        let cwd = fs::canonicalize(cwd).map_err(|error| {
+            RuntimeError::builtin(format!(
+                "failed to resolve the runtime working directory: {error}"
+            ))
+        })?;
+        let program_name = cwd
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("solveig")
+            .to_string();
         let (completion_tx, completions) = mpsc::channel();
         let sockets = SocketSubsystem::start(scope, completion_tx.clone()).map_err(|error| {
             RuntimeError::builtin(format!("failed to start socket event loop: {error}"))
@@ -188,7 +213,15 @@ impl IoSubsystem {
             next_worker: 0,
             handle_workers: vec![Some(0), Some(1), Some(2)],
             args: args.to_vec(),
-            cwd: cwd.to_path_buf(),
+            cwd,
+            environment: std::env::vars_os()
+                .filter_map(|(name, value)| {
+                    let name = name.into_string().ok()?;
+                    validate_environment_name(&name).ok()?;
+                    Some((name, value.into_string().ok()?))
+                })
+                .collect(),
+            program_name,
         })
     }
 
@@ -227,6 +260,7 @@ impl IoSubsystem {
             | IoRequest::ReadFileBytes(_)
             | IoRequest::WriteFile { .. }
             | IoRequest::WriteFileBytes { .. }
+            | IoRequest::Filesystem(_)
             | IoRequest::ResolveHost(_) => {
                 1 + self.next_worker % (self.workers.len().saturating_sub(1))
             }
@@ -377,6 +411,38 @@ impl IoSubsystem {
         &self.args
     }
 
+    pub(super) fn get_env(&self, name: &str) -> Result<Option<&str>, IoFailure> {
+        validate_environment_name(name).map_err(IoFailure::GetEnv)?;
+        Ok(self.environment.get(name).map(String::as_str))
+    }
+
+    pub(super) fn set_env(&mut self, name: String, value: String) -> Result<(), IoFailure> {
+        validate_environment_name(&name).map_err(IoFailure::SetEnv)?;
+        if value.contains('\0') {
+            return Err(IoFailure::SetEnv(
+                "environment values cannot contain NUL".to_string(),
+            ));
+        }
+        self.environment.insert(name, value);
+        Ok(())
+    }
+
+    pub(super) fn environment(&self) -> &std::collections::BTreeMap<String, String> {
+        &self.environment
+    }
+
+    pub(super) fn program_name(&self) -> &str {
+        &self.program_name
+    }
+
+    pub(super) fn current_directory(&self) -> &Path {
+        &self.cwd
+    }
+
+    pub(super) fn set_current_directory(&mut self, path: PathBuf) {
+        self.cwd = path;
+    }
+
     pub(super) fn resolve_path(&self, path: &str) -> PathBuf {
         let path = Path::new(path);
         if path.is_absolute() {
@@ -460,6 +526,7 @@ fn perform_request(
                 source,
             }),
         },
+        IoRequest::Filesystem(request) => filesystem::perform(request),
         IoRequest::ResolveHost(host) => perform_resolve_host(host),
         IoRequest::Handle(request) => match handles.perform(request, stdin, stdout, stderr) {
             Ok(HandleOutput::Unit) => IoResult::Unit,
@@ -477,6 +544,16 @@ fn perform_request(
         | IoRequest::CloseSocket(_) => {
             solveig_base::ice!("socket request reached the blocking worker pool")
         }
+    }
+}
+
+fn validate_environment_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        Err("environment variable names cannot be empty".to_string())
+    } else if name.contains(['=', '\0']) {
+        Err("environment variable names cannot contain '=' or NUL".to_string())
+    } else {
+        Ok(())
     }
 }
 

@@ -4,14 +4,14 @@
 //! returns plain Rust data for scheduler-thread conversion.
 
 use super::channel::{ChannelOutcome, bounded_channel_capacity};
-use super::io_worker::{IoRequest, IoResult};
+use super::io_os::{EnvironmentOutcome, FilesystemOutcome};
+use super::io_worker::IoRequest;
 use super::*;
 use crate::builtins::VmCtx;
 use crate::bytecode::BytecodeProgram;
 use crate::handle::HandleRequest;
 use crate::heap::IoAction;
 use crate::values::{Continuation, Value};
-use solveig_ast::ast::CtorRuntimeRole;
 
 impl Interpreter<'_> {
     pub(super) fn perform_io(
@@ -50,68 +50,9 @@ impl Interpreter<'_> {
 
         if let Some(result) = self.io_result.take() {
             self.io_current = None;
-            match result {
-                IoResult::Unit => {
-                    if let Some(value) = self.resume_io_value(program, Value::Unit)? {
-                        self.continuations.clear();
-                        return Ok(value);
-                    }
-                }
-                IoResult::Text(text) => {
-                    self.safe_point();
-                    let value = self.heap.alloc_str(&text);
-                    if let Some(value) = self.resume_io_value(program, value)? {
-                        self.continuations.clear();
-                        return Ok(value);
-                    }
-                }
-                IoResult::Bytes(bytes) => {
-                    self.safe_point();
-                    let value = self.heap.alloc_bytes(&bytes);
-                    if let Some(value) = self.resume_io_value(program, value)? {
-                        self.continuations.clear();
-                        return Ok(value);
-                    }
-                }
-                IoResult::Socket(socket) => {
-                    if let Some(value) = self.resume_io_value(program, Value::SocketId(socket.0))? {
-                        self.continuations.clear();
-                        return Ok(value);
-                    }
-                }
-                IoResult::Listener { socket, port } => {
-                    self.safe_point();
-                    let value = VmCtx::new(self).alloc_data2_ctor(
-                        CtorRuntimeRole::PreludePair,
-                        Value::SocketId(socket.0),
-                        Value::Int(i64::from(port)),
-                        "listen",
-                    )?;
-                    if let Some(value) = self.resume_io_value(program, value)? {
-                        self.continuations.clear();
-                        return Ok(value);
-                    }
-                }
-                IoResult::Handle(handle) => {
-                    if let Some(value) = self.resume_io_value(program, Value::HandleId(handle.0))? {
-                        self.continuations.clear();
-                        return Ok(value);
-                    }
-                }
-                IoResult::Bool(value) => {
-                    let value = if value {
-                        self.bools.true_val
-                    } else {
-                        self.bools.false_val
-                    };
-                    if let Some(value) = self.resume_io_value(program, value)? {
-                        self.continuations.clear();
-                        return Ok(value);
-                    }
-                }
-                IoResult::Failed(failure) => {
-                    self.io_current = Some(self.alloc_io_failure_action(failure)?);
-                }
+            if let Some(value) = self.resume_worker_result(program, result)? {
+                self.continuations.clear();
+                return Ok(value);
             }
         }
 
@@ -224,6 +165,33 @@ impl Interpreter<'_> {
                         return Ok(value);
                     }
                 }
+                IoAction::Environment(action) => match self.perform_environment_action(action)? {
+                    EnvironmentOutcome::Value(value) => {
+                        if let Some(value) = self.resume_io_value(program, value)? {
+                            return Ok(value);
+                        }
+                    }
+                    EnvironmentOutcome::Failure(failure) => {
+                        self.io_current = Some(self.alloc_io_failure_action(failure)?);
+                    }
+                },
+                IoAction::Filesystem(action) => match self.prepare_filesystem_action(action)? {
+                    FilesystemOutcome::Value(value) => {
+                        if let Some(value) = self.resume_io_value(program, value)? {
+                            return Ok(value);
+                        }
+                    }
+                    FilesystemOutcome::Failure(failure) => {
+                        self.io_current = Some(self.alloc_io_failure_action(failure)?);
+                    }
+                    FilesystemOutcome::Request(request) => {
+                        if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                            self.resume_io_interruption(program, interruption)?;
+                            continue;
+                        }
+                        return self.block_on_io(IoRequest::Filesystem(request));
+                    }
+                },
                 IoAction::Spawn { action } => {
                     let thread_id = self.spawn_io_process(action);
                     if let Some(value) = self.resume_io_value(program, thread_id)? {
@@ -583,7 +551,7 @@ impl Interpreter<'_> {
         Err(StepOutcome::Blocked)
     }
 
-    fn resume_io_value(
+    pub(super) fn resume_io_value(
         &mut self,
         program: &BytecodeProgram,
         value: Value,

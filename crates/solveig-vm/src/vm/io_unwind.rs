@@ -1,6 +1,7 @@
 //! IO outcome unwinding, typed failure construction, and operand decoding.
 
 use super::io_worker::IoFailure;
+use super::io_worker::filesystem::FilesystemFailure;
 use super::*;
 use crate::builtins::VmCtx;
 use crate::bytecode::BytecodeProgram;
@@ -319,6 +320,78 @@ impl Interpreter<'_> {
                     builtin,
                 )
             }
+            IoFailure::GetEnv(message) => {
+                self.alloc_string_ctor(CtorRuntimeRole::PreludeIoErrorGetEnv, &message, "getEnv")
+            }
+            IoFailure::SetEnv(message) => {
+                self.alloc_string_ctor(CtorRuntimeRole::PreludeIoErrorSetEnv, &message, "setEnv")
+            }
+            IoFailure::Filesystem(failure) => match failure {
+                FilesystemFailure::GetCurrentDirectory(source) => self.alloc_string_ctor(
+                    CtorRuntimeRole::PreludeIoErrorGetCurrentDirectory,
+                    &source.to_string(),
+                    "getCurrentDirectory",
+                ),
+                FilesystemFailure::SetCurrentDirectory { path, source } => self.alloc_io_error2(
+                    CtorRuntimeRole::PreludeIoErrorSetCurrentDirectory,
+                    &path.display().to_string(),
+                    &source.to_string(),
+                    "setCurrentDirectory",
+                ),
+                FilesystemFailure::DoesFileExist { path, source } => self.alloc_io_error2(
+                    CtorRuntimeRole::PreludeIoErrorDoesFileExist,
+                    &path.display().to_string(),
+                    &source.to_string(),
+                    "doesFileExist",
+                ),
+                FilesystemFailure::DoesDirectoryExist { path, source } => self.alloc_io_error2(
+                    CtorRuntimeRole::PreludeIoErrorDoesDirectoryExist,
+                    &path.display().to_string(),
+                    &source.to_string(),
+                    "doesDirectoryExist",
+                ),
+                FilesystemFailure::ListDirectory { path, source } => self.alloc_io_error2(
+                    CtorRuntimeRole::PreludeIoErrorListDirectory,
+                    &path.display().to_string(),
+                    &source.to_string(),
+                    "listDirectory",
+                ),
+                FilesystemFailure::CreateDirectory { path, source } => self.alloc_io_error2(
+                    CtorRuntimeRole::PreludeIoErrorCreateDirectory,
+                    &path.display().to_string(),
+                    &source.to_string(),
+                    "createDirectory",
+                ),
+                FilesystemFailure::RemoveFile { path, source } => self.alloc_io_error2(
+                    CtorRuntimeRole::PreludeIoErrorRemoveFile,
+                    &path.display().to_string(),
+                    &source.to_string(),
+                    "removeFile",
+                ),
+                FilesystemFailure::RenameFile {
+                    source_path,
+                    destination,
+                    source,
+                } => self.alloc_io_error3(
+                    CtorRuntimeRole::PreludeIoErrorRenameFile,
+                    &source_path.display().to_string(),
+                    &destination.display().to_string(),
+                    &source.to_string(),
+                    "renameFile",
+                ),
+                FilesystemFailure::GetFileSize { path, source } => self.alloc_io_error2(
+                    CtorRuntimeRole::PreludeIoErrorGetFileSize,
+                    &path.display().to_string(),
+                    &source.to_string(),
+                    "getFileSize",
+                ),
+                FilesystemFailure::GetModificationTime { path, source } => self.alloc_io_error2(
+                    CtorRuntimeRole::PreludeIoErrorGetModificationTime,
+                    &path.display().to_string(),
+                    &source.to_string(),
+                    "getModificationTime",
+                ),
+            },
             IoFailure::Handle(failure) => match failure {
                 HandleFailure::Open { path, source } => self.alloc_io_error2(
                     CtorRuntimeRole::PreludeIoErrorOpenHandle,
@@ -408,6 +481,31 @@ impl Interpreter<'_> {
         let result = VmCtx::new(self).alloc_data1_ctor(role, message, builtin);
         self.temporary_roots.truncate(root);
         result
+    }
+
+    fn alloc_io_error3(
+        &mut self,
+        role: CtorRuntimeRole,
+        first: &str,
+        second: &str,
+        third: &str,
+        builtin: &str,
+    ) -> Result<Value, RuntimeError> {
+        let checkpoint = self.temporary_roots.len();
+        for field in [first, second, third] {
+            self.safe_point();
+            let field = self.heap.alloc_str(field);
+            self.temporary_roots.push(field);
+        }
+        self.safe_point();
+        let tag = VmCtx::new(self).ctor_tag_with_arity(role, 3, builtin)?;
+        let mut rooted_fields = self.temporary_roots.split_off(checkpoint);
+        let fields = self
+            .heap
+            .alloc_payload_from_stack_tail(&mut rooted_fields, 3);
+        let result = self.heap.alloc(HeapObject::DataN { tag, fields });
+        self.temporary_roots.truncate(checkpoint);
+        Ok(result)
     }
 
     pub(super) fn alloc_io_error2(

@@ -71,6 +71,30 @@ data IOError =
     WriteHandleError String
   | -- | Changing a handle's buffering failed.
     SetBufferingError String
+  | -- | Reading an environment variable failed.
+    GetEnvError String
+  | -- | Changing an environment variable failed.
+    SetEnvError String
+  | -- | Reading the runtime working directory failed.
+    GetCurrentDirectoryError String
+  | -- | Changing the runtime working directory failed.
+    SetCurrentDirectoryError String String
+  | -- | Inspecting whether a file exists failed.
+    DoesFileExistError String String
+  | -- | Inspecting whether a directory exists failed.
+    DoesDirectoryExistError String String
+  | -- | Listing a directory failed.
+    ListDirectoryError String String
+  | -- | Creating a directory failed.
+    CreateDirectoryError String String
+  | -- | Removing a file failed.
+    RemoveFileError String String
+  | -- | Renaming a file failed, with source, destination and host message.
+    RenameFileError String String String
+  | -- | Reading a file's size failed.
+    GetFileSizeError String String
+  | -- | Reading a file's modification time failed.
+    GetModificationTimeError String String
 
 -- | How a file is opened.
 data IOMode =
@@ -346,6 +370,18 @@ printStr text =
 readLine : Task String;
 readLine = hGetLine stdin;
 
+-- | Reads a runtime-local environment variable when it is present.
+getEnv : String -> Task (Maybe String);
+getEnv name = prelude.prim.getEnv name;
+
+-- | Sets a runtime-local environment variable inherited by child processes.
+setEnv : String -> String -> Task ();
+setEnv name value = prelude.prim.setEnv name value;
+
+-- | Returns the current Solveig project's directory name.
+getProgName : Task String;
+getProgName = prelude.prim.getProgName;
+
 -- | The process standard-input handle.
 stdin : Handle;
 stdin = prelude.prim.stdin;
@@ -421,6 +457,42 @@ writeFile path contents = prelude.prim.writeFile path contents;
 -- | Writes arbitrary bytes to a file, replacing its previous contents.
 writeFileBytes : String -> Bytes -> Task ();
 writeFileBytes path contents = prelude.prim.writeFileBytes path contents;
+
+-- | Returns the runtime's current working directory.
+getCurrentDirectory : Task String;
+getCurrentDirectory = prelude.prim.getCurrentDirectory;
+
+-- | Changes the runtime's working directory after verifying it exists.
+setCurrentDirectory : String -> Task ();
+setCurrentDirectory path = prelude.prim.setCurrentDirectory path;
+
+-- | Reports whether a path names a regular file.
+doesFileExist : String -> Task Bool;
+doesFileExist path = prelude.prim.doesFileExist path;
+
+-- | Reports whether a path names a directory.
+doesDirectoryExist : String -> Task Bool;
+doesDirectoryExist path = prelude.prim.doesDirectoryExist path;
+
+-- | Creates one directory; its parent must already exist.
+createDirectory : String -> Task ();
+createDirectory path = prelude.prim.createDirectory path;
+
+-- | Removes one file.
+removeFile : String -> Task ();
+removeFile path = prelude.prim.removeFile path;
+
+-- | Renames a file or directory.
+renameFile : String -> String -> Task ();
+renameFile source destination = prelude.prim.renameFile source destination;
+
+-- | Returns a file's size in bytes.
+getFileSize : String -> Task Int;
+getFileSize path = prelude.prim.getFileSize path;
+
+-- | Returns nanoseconds since the Unix epoch for a path's modification time.
+getModificationTime : String -> Task Int;
+getModificationTime path = prelude.prim.getModificationTime path;
 
 -- | Appends text to the end of a file.
 appendFile : String -> String -> Task ();

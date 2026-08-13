@@ -47,10 +47,18 @@ prelude.builtins.closeChan : forall a. Chan a -> IO IOError ()
 prelude.builtins.closeSocket : Socket -> IO IOError ()
 prelude.builtins.concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
 prelude.builtins.connect : String -> Int -> IO IOError Socket
+prelude.builtins.createDirectory : String -> IO IOError ()
+prelude.builtins.doesDirectoryExist : String -> IO IOError Bool
+prelude.builtins.doesFileExist : String -> IO IOError Bool
 prelude.builtins.error : forall a. String -> a
 prelude.builtins.even : Int -> Bool
 prelude.builtins.failIO : forall e a. e -> IO e a
 prelude.builtins.finally : forall e a b. IO e a -> IO e b -> IO e a
+prelude.builtins.getCurrentDirectory : IO IOError String
+prelude.builtins.getEnv : String -> IO IOError (Maybe String)
+prelude.builtins.getFileSize : String -> IO IOError Int
+prelude.builtins.getModificationTime : String -> IO IOError Int
+prelude.builtins.getProgName : IO IOError String
 prelude.builtins.hClose : Handle -> IO IOError ()
 prelude.builtins.hFlush : Handle -> IO IOError ()
 prelude.builtins.hGetBytes : Handle -> Int -> IO IOError Bytes
@@ -81,9 +89,13 @@ prelude.builtins.readFileBytes : String -> IO IOError Bytes
 prelude.builtins.readLine : IO IOError String
 prelude.builtins.recv : forall a. Chan a -> IO IOError a
 prelude.builtins.recvBytes : Socket -> Int -> IO IOError Bytes
+prelude.builtins.removeFile : String -> IO IOError ()
+prelude.builtins.renameFile : String -> String -> IO IOError ()
 prelude.builtins.resolveHost : String -> IO IOError String
 prelude.builtins.send : forall a. Chan a -> a -> IO IOError ()
 prelude.builtins.sendBytes : Socket -> Bytes -> IO IOError ()
+prelude.builtins.setCurrentDirectory : String -> IO IOError ()
+prelude.builtins.setEnv : String -> String -> IO IOError ()
 prelude.builtins.sleep : Int -> IO IOError ()
 prelude.builtins.spawn : forall childError e. IO childError () -> IO e ThreadId
 prelude.builtins.stderr : Handle
@@ -130,6 +142,9 @@ prelude.prim.charsToString : [Char] -> String
 prelude.prim.closeChan : forall a. Chan a -> IO IOError ()
 prelude.prim.closeSocket : Socket -> IO IOError ()
 prelude.prim.connect : String -> Int -> IO IOError Socket
+prelude.prim.createDirectory : String -> IO IOError ()
+prelude.prim.doesDirectoryExist : String -> IO IOError Bool
+prelude.prim.doesFileExist : String -> IO IOError Bool
 prelude.prim.error : forall a. String -> a
 prelude.prim.failIO : forall e a. e -> IO e a
 prelude.prim.finallyIO : forall e a b. IO e a -> IO e b -> IO e a
@@ -146,6 +161,12 @@ prelude.prim.floatSub : Float -> Float -> Float
 prelude.prim.floatToInt : Float -> Int
 prelude.prim.floatToString : Float -> String
 prelude.prim.getArgs : forall e. IO e [String]
+prelude.prim.getCurrentDirectory : IO IOError String
+prelude.prim.getEnv : String -> IO IOError (Maybe String)
+prelude.prim.getEnvironment : IO IOError [Pair String String]
+prelude.prim.getFileSize : String -> IO IOError Int
+prelude.prim.getModificationTime : String -> IO IOError Int
+prelude.prim.getProgName : IO IOError String
 prelude.prim.hClose : Handle -> IO IOError ()
 prelude.prim.hFlush : Handle -> IO IOError ()
 prelude.prim.hGetBytes : Handle -> Int -> IO IOError Bytes
@@ -171,6 +192,7 @@ prelude.prim.intSub : Int -> Int -> Int
 prelude.prim.intToFloat : Int -> Float
 prelude.prim.intToString : Int -> String
 prelude.prim.killThread : ThreadId -> IO IOError ()
+prelude.prim.listDirectory : String -> IO IOError [String]
 prelude.prim.listen : Int -> IO IOError (Pair Socket Int)
 prelude.prim.maskIO : forall e a. IO e a -> IO e a
 prelude.prim.newBoundedChan : forall e a. Int -> IO e (Chan a)
@@ -185,10 +207,14 @@ prelude.prim.readFileBytes : String -> IO IOError Bytes
 prelude.prim.readLine : IO IOError String
 prelude.prim.recv : forall a. Chan a -> IO IOError a
 prelude.prim.recvBytes : Socket -> Int -> IO IOError Bytes
+prelude.prim.removeFile : String -> IO IOError ()
+prelude.prim.renameFile : String -> String -> IO IOError ()
 prelude.prim.resolveHost : String -> IO IOError String
 prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
 prelude.prim.send : forall a. Chan a -> a -> IO IOError ()
 prelude.prim.sendBytes : Socket -> Bytes -> IO IOError ()
+prelude.prim.setCurrentDirectory : String -> IO IOError ()
+prelude.prim.setEnv : String -> String -> IO IOError ()
 prelude.prim.sleep : Int -> IO IOError ()
 prelude.prim.spawn : forall e f. IO e () -> IO f ThreadId
 prelude.prim.stderr : Handle
@@ -213,12 +239,14 @@ prelude.typeclasses.div : Int -> Int -> Int
 prelude.typeclasses.eq : forall a. Eq a => a -> a -> Bool
 prelude.typeclasses.filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
 prelude.typeclasses.getArgs : forall e. IO e [String]
+prelude.typeclasses.getEnvironment : IO IOError [Pair String String]
 prelude.typeclasses.greater : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.greaterEq : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.join : forall m a. Monad m => m (m a) -> m a
 prelude.typeclasses.less : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.lessEq : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.liftA2 : forall f a b c. Applicative f => (a -> b -> c) -> f a -> f b -> f c
+prelude.typeclasses.listDirectory : String -> IO IOError [String]
 prelude.typeclasses.mapIO_ : forall e a. (a -> IO e ()) -> [a] -> IO e ()
 prelude.typeclasses.mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]
 prelude.typeclasses.maxOrd : forall a. Ord a => a -> a -> a

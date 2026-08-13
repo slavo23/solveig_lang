@@ -379,6 +379,14 @@ instance Monad (IO e) where
 getArgs : forall e. IO e [String]
 getArgs = prelude.prim.getArgs
 
+-- | Returns the runtime environment sorted by variable name.
+getEnvironment : Task [Pair String String]
+getEnvironment = prelude.prim.getEnvironment
+
+-- | Lists a directory's immediate entries in lexical order.
+listDirectory : String -> Task [String]
+listDirectory path = prelude.prim.listDirectory path
+
 -- | Runs two IO actions and keeps the result of the second.
 seqIO : forall e a b. IO e a -> IO e b -> IO e b
 seqIO left right = thenM left right

@@ -340,6 +340,22 @@ pub const PRELUDE_IO_ERROR_FLUSH_HANDLE_NAME: &str = "prelude.builtins.FlushHand
 pub const PRELUDE_IO_ERROR_READ_HANDLE_NAME: &str = "prelude.builtins.ReadHandleError";
 pub const PRELUDE_IO_ERROR_WRITE_HANDLE_NAME: &str = "prelude.builtins.WriteHandleError";
 pub const PRELUDE_IO_ERROR_SET_BUFFERING_NAME: &str = "prelude.builtins.SetBufferingError";
+pub const PRELUDE_IO_ERROR_GET_ENV_NAME: &str = "prelude.builtins.GetEnvError";
+pub const PRELUDE_IO_ERROR_SET_ENV_NAME: &str = "prelude.builtins.SetEnvError";
+pub const PRELUDE_IO_ERROR_GET_CURRENT_DIRECTORY_NAME: &str =
+    "prelude.builtins.GetCurrentDirectoryError";
+pub const PRELUDE_IO_ERROR_SET_CURRENT_DIRECTORY_NAME: &str =
+    "prelude.builtins.SetCurrentDirectoryError";
+pub const PRELUDE_IO_ERROR_DOES_FILE_EXIST_NAME: &str = "prelude.builtins.DoesFileExistError";
+pub const PRELUDE_IO_ERROR_DOES_DIRECTORY_EXIST_NAME: &str =
+    "prelude.builtins.DoesDirectoryExistError";
+pub const PRELUDE_IO_ERROR_LIST_DIRECTORY_NAME: &str = "prelude.builtins.ListDirectoryError";
+pub const PRELUDE_IO_ERROR_CREATE_DIRECTORY_NAME: &str = "prelude.builtins.CreateDirectoryError";
+pub const PRELUDE_IO_ERROR_REMOVE_FILE_NAME: &str = "prelude.builtins.RemoveFileError";
+pub const PRELUDE_IO_ERROR_RENAME_FILE_NAME: &str = "prelude.builtins.RenameFileError";
+pub const PRELUDE_IO_ERROR_GET_FILE_SIZE_NAME: &str = "prelude.builtins.GetFileSizeError";
+pub const PRELUDE_IO_ERROR_GET_MODIFICATION_TIME_NAME: &str =
+    "prelude.builtins.GetModificationTimeError";
 pub const PRELUDE_IO_MODE_NAME: &str = "prelude.builtins.IOMode";
 pub const PRELUDE_IO_MODE_READ_NAME: &str = "prelude.builtins.ReadMode";
 pub const PRELUDE_IO_MODE_WRITE_NAME: &str = "prelude.builtins.WriteMode";
@@ -459,3 +475,17 @@ pub const BUILTIN_READ_FILE_BYTES: BuiltinId = BuiltinId(88);
 pub const BUILTIN_WRITE_FILE_BYTES: BuiltinId = BuiltinId(89);
 pub const BUILTIN_H_GET_BYTES: BuiltinId = BuiltinId(90);
 pub const BUILTIN_H_PUT_BYTES: BuiltinId = BuiltinId(91);
+pub const BUILTIN_GET_ENV: BuiltinId = BuiltinId(92);
+pub const BUILTIN_SET_ENV: BuiltinId = BuiltinId(93);
+pub const BUILTIN_GET_ENVIRONMENT: BuiltinId = BuiltinId(94);
+pub const BUILTIN_GET_PROG_NAME: BuiltinId = BuiltinId(95);
+pub const BUILTIN_GET_CURRENT_DIRECTORY: BuiltinId = BuiltinId(96);
+pub const BUILTIN_SET_CURRENT_DIRECTORY: BuiltinId = BuiltinId(97);
+pub const BUILTIN_DOES_FILE_EXIST: BuiltinId = BuiltinId(98);
+pub const BUILTIN_DOES_DIRECTORY_EXIST: BuiltinId = BuiltinId(99);
+pub const BUILTIN_LIST_DIRECTORY: BuiltinId = BuiltinId(100);
+pub const BUILTIN_CREATE_DIRECTORY: BuiltinId = BuiltinId(101);
+pub const BUILTIN_REMOVE_FILE: BuiltinId = BuiltinId(102);
+pub const BUILTIN_RENAME_FILE: BuiltinId = BuiltinId(103);
+pub const BUILTIN_GET_FILE_SIZE: BuiltinId = BuiltinId(104);
+pub const BUILTIN_GET_MODIFICATION_TIME: BuiltinId = BuiltinId(105);

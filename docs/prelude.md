@@ -62,6 +62,18 @@ data IOError =
   | ReadHandleError String
   | WriteHandleError String
   | SetBufferingError String
+  | GetEnvError String
+  | SetEnvError String
+  | GetCurrentDirectoryError String
+  | SetCurrentDirectoryError String String
+  | DoesFileExistError String String
+  | DoesDirectoryExistError String String
+  | ListDirectoryError String String
+  | CreateDirectoryError String String
+  | RemoveFileError String String
+  | RenameFileError String String String
+  | GetFileSizeError String String
+  | GetModificationTimeError String String
 data IOMode = ReadMode | WriteMode | AppendMode | ReadWriteMode
 data BufferMode = NoBuffering | LineBuffering | BlockBuffering (Maybe Int)
 data Defect =
@@ -99,6 +111,10 @@ timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 printLine : String -> Task ()
 printStr : String -> Task ()
 readLine : Task String
+getEnv : String -> Task (Maybe String)
+setEnv : String -> String -> Task ()
+getEnvironment : Task [Pair String String]
+getProgName : Task String
 stdin : Handle
 stdout : Handle
 stderr : Handle
@@ -119,6 +135,16 @@ readFileBytes : String -> Task Bytes
 writeFile : String -> String -> Task ()
 writeFileBytes : String -> Bytes -> Task ()
 appendFile : String -> String -> Task ()
+getCurrentDirectory : Task String
+setCurrentDirectory : String -> Task ()
+doesFileExist : String -> Task Bool
+doesDirectoryExist : String -> Task Bool
+listDirectory : String -> Task [String]
+createDirectory : String -> Task ()
+removeFile : String -> Task ()
+renameFile : String -> String -> Task ()
+getFileSize : String -> Task Int
+getModificationTime : String -> Task Int
 spawn : forall childError e. IO childError () -> IO e ThreadId
 killThread : ThreadId -> Task ()
 sleep : Int -> Task ()
@@ -157,6 +183,12 @@ non-negative count and returns empty bytes at EOF; `hPutBytes` follows the
 handle's buffering policy. See [`io.md`](io.md) for mixing text and byte IO,
 buffering, failures, and platform behavior.
 
+Environment changes and the working directory are runtime-local. Relative
+paths resolve against the logical working directory, directory listings are
+sorted, file sizes are bytes, and modification times are nanoseconds since the
+Unix epoch. See [`io.md`](io.md) for validation, errors, determinism, and
+platform behavior.
+
 `Bytes` is immutable arbitrary byte data, distinct from UTF-8 `String`.
 `stringToBytes` encodes UTF-8; `bytesToString` returns `Err (InvalidUtf8 ...)`
 instead of replacing invalid input. Byte indices are zero-based, out-of-range
@@ -170,7 +202,7 @@ accepts that IP literal or `localhost`; it does not perform DNS itself.
 `sendBytes` completes only after the full buffer is sent. `recvBytes` returns
 at most its non-negative maximum and returns empty bytes at EOF. Sockets are
 closed only by explicit, idempotent `closeSocket`; GC does not close them.
-Relative paths are resolved against the Solveig project root. Their host
+Relative paths are resolved against the runtime's logical working directory. Their host
 failures are ordinary `IOError` values and can be handled with `catchError`.
 `finally` runs cleanup after success, typed failure, a defect, or interruption.
 The action runs with the caller's interruption state restored and cleanup runs
@@ -529,11 +561,25 @@ printLine : String -> IO IOError ()
 printStr : String -> IO IOError ()
 readLine : IO IOError String
 getArgs : forall e. IO e [String]
+getEnv : String -> IO IOError (Maybe String)
+setEnv : String -> String -> IO IOError ()
+getEnvironment : IO IOError [Pair String String]
+getProgName : IO IOError String
 readFile : String -> IO IOError String
 readFileBytes : String -> IO IOError Bytes
 writeFile : String -> String -> IO IOError ()
 writeFileBytes : String -> Bytes -> IO IOError ()
 appendFile : String -> String -> IO IOError ()
+getCurrentDirectory : IO IOError String
+setCurrentDirectory : String -> IO IOError ()
+doesFileExist : String -> IO IOError Bool
+doesDirectoryExist : String -> IO IOError Bool
+listDirectory : String -> IO IOError [String]
+createDirectory : String -> IO IOError ()
+removeFile : String -> IO IOError ()
+renameFile : String -> String -> IO IOError ()
+getFileSize : String -> IO IOError Int
+getModificationTime : String -> IO IOError Int
 openFile : String -> IOMode -> IO IOError Handle
 hClose : Handle -> IO IOError ()
 hFlush : Handle -> IO IOError ()
