@@ -30,9 +30,11 @@ prelude.builtins.failIO : forall e a. e -> IO e a
 prelude.builtins.finally : forall e a b. IO e a -> IO e b -> IO e a
 prelude.builtins.hClose : Handle -> IO IOError ()
 prelude.builtins.hFlush : Handle -> IO IOError ()
+prelude.builtins.hGetBytes : Handle -> Int -> IO IOError Bytes
 prelude.builtins.hGetContents : Handle -> IO IOError String
 prelude.builtins.hGetLine : Handle -> IO IOError String
 prelude.builtins.hIsEOF : Handle -> IO IOError Bool
+prelude.builtins.hPutBytes : Handle -> Bytes -> IO IOError ()
 prelude.builtins.hPutStr : Handle -> String -> IO IOError ()
 prelude.builtins.hPutStrLn : Handle -> String -> IO IOError ()
 prelude.builtins.hSetBuffering : Handle -> BufferMode -> IO IOError ()
@@ -52,6 +54,7 @@ prelude.builtins.printStr : String -> IO IOError ()
 prelude.builtins.pureIO : forall e a. a -> IO e a
 prelude.builtins.race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
 prelude.builtins.readFile : String -> IO IOError String
+prelude.builtins.readFileBytes : String -> IO IOError Bytes
 prelude.builtins.readLine : IO IOError String
 prelude.builtins.recv : forall a. Chan a -> IO IOError a
 prelude.builtins.recvBytes : Socket -> Int -> IO IOError Bytes
@@ -69,6 +72,7 @@ prelude.builtins.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
 prelude.builtins.withFile : forall a. String -> IOMode -> (Handle -> IO IOError a) -> IO IOError a
 prelude.builtins.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
 prelude.builtins.writeFile : String -> String -> IO IOError ()
+prelude.builtins.writeFileBytes : String -> Bytes -> IO IOError ()
 prelude.list.++ : forall a. [a] -> [a] -> [a]
 prelude.list.append : forall a. [a] -> [a] -> [a]
 prelude.list.concat : forall a. [[a]] -> [a]
@@ -121,9 +125,11 @@ prelude.prim.floatToString : Float -> String
 prelude.prim.getArgs : forall e. IO e [String]
 prelude.prim.hClose : Handle -> IO IOError ()
 prelude.prim.hFlush : Handle -> IO IOError ()
+prelude.prim.hGetBytes : Handle -> Int -> IO IOError Bytes
 prelude.prim.hGetContents : Handle -> IO IOError String
 prelude.prim.hGetLine : Handle -> IO IOError String
 prelude.prim.hIsEOF : Handle -> IO IOError Bool
+prelude.prim.hPutBytes : Handle -> Bytes -> IO IOError ()
 prelude.prim.hPutStr : Handle -> String -> IO IOError ()
 prelude.prim.hPutStrLn : Handle -> String -> IO IOError ()
 prelude.prim.hSetBuffering : Handle -> BufferMode -> IO IOError ()
@@ -152,6 +158,7 @@ prelude.prim.printStr : String -> IO IOError ()
 prelude.prim.pureIO : forall e a. a -> IO e a
 prelude.prim.raiseDefectIO : forall e a. Defect -> IO e a
 prelude.prim.readFile : String -> IO IOError String
+prelude.prim.readFileBytes : String -> IO IOError Bytes
 prelude.prim.readLine : IO IOError String
 prelude.prim.recv : forall a. Chan a -> IO IOError a
 prelude.prim.recvBytes : Socket -> Int -> IO IOError Bytes
@@ -174,6 +181,7 @@ prelude.prim.stringToBytes : String -> Bytes
 prelude.prim.stringToChars : String -> [Char]
 prelude.prim.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
 prelude.prim.writeFile : String -> String -> IO IOError ()
+prelude.prim.writeFileBytes : String -> Bytes -> IO IOError ()
 prelude.typeclasses.applyLeft : forall f a b. Applicative f => f a -> f b -> f a
 prelude.typeclasses.applyRight : forall f a b. Applicative f => f a -> f b -> f b
 prelude.typeclasses.clampOrd : forall a. Ord a => a -> a -> a -> a

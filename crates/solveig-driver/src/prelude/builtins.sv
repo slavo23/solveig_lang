@@ -35,9 +35,9 @@ data IOError =
     StdoutError String
   | -- | Reading from standard input failed.
     StdinError String
-  | -- | Reading a UTF-8 text file failed, with path and host message.
+  | -- | Reading a file failed, with path and host message.
     ReadFileError String String
-  | -- | Replacing a file failed, with path and host message.
+  | -- | Replacing a file's contents failed, with path and host message.
     WriteFileError String String
   | -- | Appending to a file failed, with path and host message.
     AppendFileError String String
@@ -65,9 +65,9 @@ data IOError =
     CloseHandleError String
   | -- | Flushing buffered output failed.
     FlushHandleError String
-  | -- | Reading text from a handle failed.
+  | -- | Reading from a handle failed.
     ReadHandleError String
-  | -- | Writing text to a handle failed.
+  | -- | Writing to a handle failed.
     WriteHandleError String
   | -- | Changing a handle's buffering failed.
     SetBufferingError String
@@ -378,6 +378,10 @@ hGetLine handle = prelude.prim.hGetLine handle;
 hGetContents : Handle -> Task String;
 hGetContents handle = prelude.prim.hGetContents handle;
 
+-- | Reads at most the requested number of arbitrary bytes, returning empty at EOF.
+hGetBytes : Handle -> Int -> Task Bytes;
+hGetBytes handle maximum = prelude.prim.hGetBytes handle maximum;
+
 -- | Writes text to a handle.
 hPutStr : Handle -> String -> Task ();
 hPutStr handle text = prelude.prim.hPutStr handle text;
@@ -385,6 +389,10 @@ hPutStr handle text = prelude.prim.hPutStr handle text;
 -- | Writes text followed by a newline to a handle.
 hPutStrLn : Handle -> String -> Task ();
 hPutStrLn handle text = prelude.prim.hPutStrLn handle text;
+
+-- | Writes arbitrary bytes to a handle.
+hPutBytes : Handle -> Bytes -> Task ();
+hPutBytes handle bytes = prelude.prim.hPutBytes handle bytes;
 
 -- | Reports whether a readable handle is at end of input.
 hIsEOF : Handle -> Task Bool;
@@ -402,9 +410,17 @@ withFile path mode use = bracket (openFile path mode) hClose use;
 readFile : String -> Task String;
 readFile path = prelude.prim.readFile path;
 
+-- | Reads an entire file as arbitrary bytes.
+readFileBytes : String -> Task Bytes;
+readFileBytes path = prelude.prim.readFileBytes path;
+
 -- | Writes text to a file, replacing its previous contents.
 writeFile : String -> String -> Task ();
 writeFile path contents = prelude.prim.writeFile path contents;
+
+-- | Writes arbitrary bytes to a file, replacing its previous contents.
+writeFileBytes : String -> Bytes -> Task ();
+writeFileBytes path contents = prelude.prim.writeFileBytes path contents;
 
 -- | Appends text to the end of a file.
 appendFile : String -> String -> Task ();

@@ -432,6 +432,15 @@ impl Interpreter<'_> {
                     }
                     return self.block_on_io(IoRequest::ReadFile(resolved));
                 }
+                IoAction::ReadFileBytes { path } => {
+                    let path = self.expect_string_value(path, "readFileBytes")?;
+                    let resolved = self.io.resolve_path(&path);
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::ReadFileBytes(resolved));
+                }
                 IoAction::WriteFile {
                     path,
                     contents,
@@ -449,6 +458,19 @@ impl Interpreter<'_> {
                         path: resolved,
                         contents,
                         append,
+                    });
+                }
+                IoAction::WriteFileBytes { path, contents } => {
+                    let path = self.expect_string_value(path, "writeFileBytes")?;
+                    let contents = self.expect_bytes_value(contents, "writeFileBytes")?;
+                    let resolved = self.io.resolve_path(&path);
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::WriteFileBytes {
+                        path: resolved,
+                        contents,
                     });
                 }
                 IoAction::OpenFile { path, mode } => {
@@ -494,6 +516,17 @@ impl Interpreter<'_> {
                     }
                     return self.block_on_io(IoRequest::Handle(HandleRequest::GetContents(handle)));
                 }
+                IoAction::GetHandleBytes { handle, maximum } => {
+                    let handle = self.expect_handle_id(handle, "hGetBytes")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::Handle(HandleRequest::GetBytes {
+                        handle,
+                        maximum,
+                    }));
+                }
                 IoAction::PutHandle {
                     handle,
                     text,
@@ -510,6 +543,16 @@ impl Interpreter<'_> {
                         text,
                         newline,
                     }));
+                }
+                IoAction::PutHandleBytes { handle, bytes } => {
+                    let handle = self.expect_handle_id(handle, "hPutBytes")?;
+                    let bytes = self.expect_bytes_value(bytes, "hPutBytes")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self
+                        .block_on_io(IoRequest::Handle(HandleRequest::PutBytes { handle, bytes }));
                 }
                 IoAction::IsHandleEof { handle } => {
                     let handle = self.expect_handle_id(handle, "hIsEOF")?;

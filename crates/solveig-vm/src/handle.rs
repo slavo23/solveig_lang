@@ -2,10 +2,14 @@
 //! Each table belongs to one blocking worker, so requests for one handle stay
 //! FIFO while separate workers can make progress on separate handles.
 
-use std::fs::{File, OpenOptions};
-use std::io::{self, BufRead, Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
+use std::fs::File;
+use std::io::{self, BufRead, Read, Write};
+use std::path::PathBuf;
 use std::sync::Mutex;
+
+mod file;
+
+use file::open_host_file;
 
 const DEFAULT_BLOCK_SIZE: usize = 8 * 1024;
 
@@ -68,10 +72,18 @@ pub(crate) enum HandleRequest {
     Flush(HandleId),
     GetLine(HandleId),
     GetContents(HandleId),
+    GetBytes {
+        handle: HandleId,
+        maximum: i64,
+    },
     Put {
         handle: HandleId,
         text: String,
         newline: bool,
+    },
+    PutBytes {
+        handle: HandleId,
+        bytes: Vec<u8>,
     },
     IsEof(HandleId),
     SetBuffering {
@@ -88,7 +100,9 @@ impl HandleRequest {
             | Self::Flush(handle)
             | Self::GetLine(handle)
             | Self::GetContents(handle)
+            | Self::GetBytes { handle, .. }
             | Self::Put { handle, .. }
+            | Self::PutBytes { handle, .. }
             | Self::IsEof(handle)
             | Self::SetBuffering { handle, .. } => *handle,
         }
@@ -99,6 +113,7 @@ pub(crate) enum HandleOutput {
     Unit,
     Opened(HandleId),
     Text(String),
+    Bytes(Vec<u8>),
     Bool(bool),
 }
 
@@ -212,6 +227,7 @@ impl HandleTable {
             HandleRequest::Flush(handle) => self.flush(handle, stdout, stderr),
             HandleRequest::GetLine(handle) => self.get_line(handle, stdin),
             HandleRequest::GetContents(handle) => self.get_contents(handle, stdin),
+            HandleRequest::GetBytes { handle, maximum } => self.get_bytes(handle, maximum, stdin),
             HandleRequest::Put {
                 handle,
                 mut text,
@@ -222,6 +238,7 @@ impl HandleTable {
                 }
                 self.put(handle, text.as_bytes(), stdout, stderr)
             }
+            HandleRequest::PutBytes { handle, bytes } => self.put(handle, &bytes, stdout, stderr),
             HandleRequest::IsEof(handle) => self.is_eof(handle, stdin),
             HandleRequest::SetBuffering { handle, buffering } => {
                 self.set_buffering(handle, buffering, stdout, stderr)
@@ -343,6 +360,25 @@ impl HandleTable {
             .map_err(|source| HandleFailure::Read { label, source })
     }
 
+    fn get_bytes(
+        &mut self,
+        handle: HandleId,
+        maximum: i64,
+        stdin: &Mutex<&mut (dyn BufRead + Send)>,
+    ) -> Result<HandleOutput, HandleFailure> {
+        let slot = self.slot_mut(handle);
+        let label = slot_label(slot, handle);
+        let result = match slot {
+            HandleSlot::Open(HostHandle::Input { .. }) => read_standard_bytes(stdin, maximum),
+            HandleSlot::Open(HostHandle::File(file)) => file.read_bytes(maximum),
+            HandleSlot::Open(HostHandle::Output { .. }) => Err(not_readable_error()),
+            HandleSlot::Closed { .. } | HandleSlot::Vacant => Err(closed_error(&label)),
+        };
+        result
+            .map(HandleOutput::Bytes)
+            .map_err(|source| HandleFailure::Read { label, source })
+    }
+
     fn put(
         &mut self,
         handle: HandleId,
@@ -428,152 +464,6 @@ impl HandleTable {
     }
 }
 
-impl HostFile {
-    fn can_read(&self) -> bool {
-        matches!(self.mode, FileMode::Read | FileMode::ReadWrite)
-    }
-
-    fn can_write(&self) -> bool {
-        matches!(
-            self.mode,
-            FileMode::Write | FileMode::Append | FileMode::ReadWrite
-        )
-    }
-
-    fn prepare_read(&mut self) -> io::Result<()> {
-        if !self.can_read() {
-            return Err(not_readable_error());
-        }
-        self.flush_write_buffer()
-    }
-
-    fn prepare_write(&mut self) -> io::Result<()> {
-        if !self.can_write() {
-            return Err(not_writable_error());
-        }
-        let unread = self.read_buffer.len().saturating_sub(self.read_cursor);
-        if unread > 0 {
-            let unread = i64::try_from(unread)
-                .map_err(|_too_large| io::Error::other("read buffer exceeded seek range"))?;
-            self.file.seek(SeekFrom::Current(-unread))?;
-        }
-        self.read_buffer.clear();
-        self.read_cursor = 0;
-        Ok(())
-    }
-
-    fn fill_read_buffer(&mut self) -> io::Result<usize> {
-        self.prepare_read()?;
-        let capacity = self.buffering.capacity()?;
-        self.read_buffer.resize(capacity, 0);
-        let read = self.file.read(&mut self.read_buffer)?;
-        self.read_buffer.truncate(read);
-        self.read_cursor = 0;
-        Ok(read)
-    }
-
-    fn read_line(&mut self) -> io::Result<String> {
-        let mut bytes = Vec::new();
-        loop {
-            if self.read_cursor == self.read_buffer.len() && self.fill_read_buffer()? == 0 {
-                break;
-            }
-            let Some(remaining) = self.read_buffer.get(self.read_cursor..) else {
-                solveig_base::ice!("file read cursor exceeded its buffer")
-            };
-            if let Some(newline) = remaining.iter().position(|byte| *byte == b'\n') {
-                let Some(line) = remaining.get(..newline) else {
-                    solveig_base::ice!("newline position exceeded the file read buffer")
-                };
-                bytes.extend_from_slice(line);
-                self.read_cursor += newline + 1;
-                if bytes.last() == Some(&b'\r') {
-                    bytes.pop();
-                }
-                break;
-            }
-            bytes.extend_from_slice(remaining);
-            self.read_cursor = self.read_buffer.len();
-        }
-        String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-    }
-
-    fn read_contents(&mut self) -> io::Result<String> {
-        self.prepare_read()?;
-        let Some(remaining) = self.read_buffer.get(self.read_cursor..) else {
-            solveig_base::ice!("file read cursor exceeded its buffer")
-        };
-        let mut bytes = remaining.to_vec();
-        self.read_buffer.clear();
-        self.read_cursor = 0;
-        self.file.read_to_end(&mut bytes)?;
-        String::from_utf8(bytes).map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))
-    }
-
-    fn is_eof(&mut self) -> io::Result<bool> {
-        self.prepare_read()?;
-        if self.read_cursor < self.read_buffer.len() {
-            return Ok(false);
-        }
-        Ok(self.fill_read_buffer()? == 0)
-    }
-
-    fn write(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.prepare_write()?;
-        self.write_buffer.extend_from_slice(bytes);
-        if self.buffering.flushes(&self.write_buffer)? {
-            self.flush_write_buffer()?;
-        }
-        Ok(())
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.prepare_write_if_needed()?;
-        self.file.flush()
-    }
-
-    fn set_buffering(&mut self, buffering: Buffering) -> io::Result<()> {
-        self.flush_write_buffer()?;
-        let unread = self.read_buffer.len().saturating_sub(self.read_cursor);
-        if unread > 0 {
-            let unread = i64::try_from(unread)
-                .map_err(|_too_large| io::Error::other("read buffer exceeded seek range"))?;
-            self.file.seek(SeekFrom::Current(-unread))?;
-        }
-        self.read_buffer.clear();
-        self.read_cursor = 0;
-        self.buffering = buffering;
-        Ok(())
-    }
-
-    fn prepare_write_if_needed(&mut self) -> io::Result<()> {
-        if self.can_write() {
-            self.flush_write_buffer()
-        } else {
-            Ok(())
-        }
-    }
-
-    fn flush_write_buffer(&mut self) -> io::Result<()> {
-        if !self.write_buffer.is_empty() {
-            self.file.write_all(&self.write_buffer)?;
-            self.write_buffer.clear();
-        }
-        Ok(())
-    }
-}
-
-fn open_host_file(path: &Path, mode: FileMode) -> io::Result<File> {
-    let mut options = OpenOptions::new();
-    match mode {
-        FileMode::Read => options.read(true),
-        FileMode::Write => options.write(true).create(true).truncate(true),
-        FileMode::Append => options.append(true).create(true),
-        FileMode::ReadWrite => options.read(true).write(true),
-    };
-    options.open(path)
-}
-
 fn slot_label(slot: &HandleSlot, handle: HandleId) -> String {
     match slot {
         HandleSlot::Open(HostHandle::Input { label, .. })
@@ -620,6 +510,32 @@ fn read_standard_contents(stdin: &Mutex<&mut (dyn BufRead + Send)>) -> io::Resul
     let mut contents = String::new();
     stdin.read_to_string(&mut contents)?;
     Ok(contents)
+}
+
+fn read_standard_bytes(
+    stdin: &Mutex<&mut (dyn BufRead + Send)>,
+    maximum: i64,
+) -> io::Result<Vec<u8>> {
+    let maximum = usize::try_from(maximum).map_err(|_negative| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "hGetBytes maximum must be non-negative and fit the host address space",
+        )
+    })?;
+    let mut bytes = Vec::new();
+    bytes.try_reserve_exact(maximum).map_err(|error| {
+        io::Error::new(
+            io::ErrorKind::OutOfMemory,
+            format!("byte read is too large: {error}"),
+        )
+    })?;
+    bytes.resize(maximum, 0);
+    let mut stdin = stdin
+        .lock()
+        .map_err(|_poisoned| io::Error::other("stdin lock was poisoned"))?;
+    let read = stdin.read(&mut bytes)?;
+    bytes.truncate(read);
+    Ok(bytes)
 }
 
 fn standard_is_eof(stdin: &Mutex<&mut (dyn BufRead + Send)>) -> io::Result<bool> {

@@ -103,7 +103,8 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         ),
         int.clone(),
     );
-    let handle_specs = handles::handle_builtin_specs(names, &string, &bool_ty, &io_error);
+    let handle_specs =
+        handles::handle_builtin_specs(names, &int, &string, &bytes, &bool_ty, &io_error);
 
     let mut specs = vec![
         prim_spec(

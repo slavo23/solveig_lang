@@ -455,3 +455,7 @@ pub const BUILTIN_H_SET_BUFFERING: BuiltinId = BuiltinId(84);
 pub const BUILTIN_STDIN: BuiltinId = BuiltinId(85);
 pub const BUILTIN_STDOUT: BuiltinId = BuiltinId(86);
 pub const BUILTIN_STDERR: BuiltinId = BuiltinId(87);
+pub const BUILTIN_READ_FILE_BYTES: BuiltinId = BuiltinId(88);
+pub const BUILTIN_WRITE_FILE_BYTES: BuiltinId = BuiltinId(89);
+pub const BUILTIN_H_GET_BYTES: BuiltinId = BuiltinId(90);
+pub const BUILTIN_H_PUT_BYTES: BuiltinId = BuiltinId(91);

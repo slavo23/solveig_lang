@@ -74,8 +74,8 @@ removes `\n` and an immediately preceding `\r`; at EOF it returns `""`. Use
 `hGetContents` strictly reads and allocates all remaining text before the
 action succeeds. This deliberately differs from Haskell's lazy
 `hGetContents`: it does not defer reads, keep a hidden semi-closed handle, or
-move failures outside the action. For large or binary inputs, later Phase L
-streaming byte operations are the appropriate API.
+move failures outside the action. For large or binary inputs, use `hGetBytes`
+so decoding remains explicit.
 
 `hIsEOF` may fill the handle's read buffer, but it does not consume a byte.
 Read-ahead is internal and preserves the program-visible position.
@@ -134,11 +134,45 @@ behavior regardless of redirection. Direct `hPutStr` calls retain full control
 over buffering. Failures use `ReadHandleError` or `WriteHandleError`, including
 when the corresponding standard handle was explicitly closed.
 
+## Byte input and output
+
+```solveig
+readFileBytes : String -> Task Bytes
+writeFileBytes : String -> Bytes -> Task ()
+hGetBytes : Handle -> Int -> Task Bytes
+hPutBytes : Handle -> Bytes -> Task ()
+```
+
+These operations transfer arbitrary bytes without encoding or newline
+translation. `readFileBytes` strictly reads and allocates the entire file;
+`writeFileBytes` creates or replaces a file just like `writeFile`, but writes
+the supplied bytes unchanged. They bypass handle buffering and raise
+`ReadFileError path message` or `WriteFileError path message` on host failure.
+
+`hGetBytes handle maximum` reads at most the non-negative `maximum`. It returns
+fewer bytes at EOF and returns empty bytes when called at EOF or with zero.
+Regular files fill the requested count unless EOF is reached; `stdin` may
+return a shorter chunk when that is what the embedding host stream makes
+available. A negative or host-unrepresentable maximum, a non-readable or
+closed handle, and host failures raise `ReadHandleError message`.
+
+`hPutBytes` uses precisely the same buffer as text output. Under line
+buffering, a byte value `10` triggers a flush; block-buffer sizes count bytes.
+Success means the bytes reached the language buffer, so use `hFlush` when the
+host must observe them immediately. A non-writable or closed handle and host
+failures raise `WriteHandleError message`.
+
+Text and byte operations can be mixed on one handle without changing its
+logical position. Text input still decodes strictly: invalid UTF-8 raises the
+operation's read error. Byte input never decodes. Convert explicitly with
+`bytesToString`; it returns `Err (InvalidUtf8 message)` rather than panicking or
+replacing malformed input.
+
 ## Platform notes
 
 File sharing and permission errors retain the host operating system's message
 inside the operation-specific `IOError`, so wording differs by platform.
 `ReadWriteMode` does not request file creation on any platform. Files are opened
 in binary host mode and Solveig performs UTF-8 decoding and newline handling,
-which keeps written bytes consistent across Unix and Windows. Paths otherwise
-follow host syntax and filesystem semantics.
+which keeps text and byte writes consistent across Unix and Windows. Paths
+otherwise follow host syntax and filesystem semantics.

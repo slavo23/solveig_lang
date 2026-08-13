@@ -156,6 +156,55 @@ main = do
 }
 
 #[test]
+fn byte_file_and_handle_io_preserves_invalid_utf8() {
+    let _guard = project_run_lock();
+    let project_root = write_temp_project(
+        "binary_io",
+        r#"readBytes : Handle -> Task Bytes;
+readBytes input = hGetBytes input 64;
+
+writeBytes : Bytes -> Handle -> Task ();
+writeBytes bytes output = hPutBytes output bytes;
+
+describeUtf8 : Result IOError String -> Task ();
+describeUtf8 result =
+    case result of
+        Err (InvalidUtf8 message) => printLine "invalid"
+        | Err _ => printLine "wrong-error"
+        | Ok _ => printLine "wrong-success";
+
+main : Task ();
+main = do
+    whole <- readFileBytes "invalid.bin"
+    handleWrite <- withFile "handle-copy.bin" WriteMode (writeBytes whole)
+    throughHandle <- withFile "invalid.bin" ReadMode readBytes
+    writeFileBytes "whole-copy.bin" throughHandle
+    copied <- readFileBytes "whole-copy.bin"
+    printLine (show (bytesLength copied))
+    describeUtf8 (bytesToString copied);
+"#,
+    );
+    let bytes = [0, 0xff, 0x80, b'A', b'\n'];
+    fs::write(project_root.join("invalid.bin"), bytes)
+        .expect("invalid UTF-8 fixture should be writable");
+
+    let output = run_project_capture(&project_root, "main")
+        .expect("binary IO project should run without decoding its input");
+
+    assert_eq!(output, "5\ninvalid\n");
+    assert_eq!(
+        fs::read(project_root.join("handle-copy.bin"))
+            .expect("handle byte copy should be readable"),
+        bytes
+    );
+    assert_eq!(
+        fs::read(project_root.join("whole-copy.bin"))
+            .expect("whole-file byte copy should be readable"),
+        bytes
+    );
+}
+
+#[test]
 fn io_bind_chain_allocates_under_gc_stress() {
     const STEPS: usize = 10_000;
 

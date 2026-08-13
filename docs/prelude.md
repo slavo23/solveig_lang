@@ -107,13 +107,17 @@ hClose : Handle -> Task ()
 hFlush : Handle -> Task ()
 hGetLine : Handle -> Task String
 hGetContents : Handle -> Task String
+hGetBytes : Handle -> Int -> Task Bytes
 hPutStr : Handle -> String -> Task ()
 hPutStrLn : Handle -> String -> Task ()
+hPutBytes : Handle -> Bytes -> Task ()
 hIsEOF : Handle -> Task Bool
 hSetBuffering : Handle -> BufferMode -> Task ()
 withFile : forall a. String -> IOMode -> (Handle -> Task a) -> Task a
 readFile : String -> Task String
+readFileBytes : String -> Task Bytes
 writeFile : String -> String -> Task ()
+writeFileBytes : String -> Bytes -> Task ()
 appendFile : String -> String -> Task ()
 spawn : forall childError e. IO childError () -> IO e ThreadId
 killThread : ThreadId -> Task ()
@@ -147,6 +151,11 @@ closeSocket : Socket -> Task ()
 `readLine` returns a line without the trailing newline. At EOF it returns `""`.
 
 `readFile`, `writeFile`, and `appendFile` are whole-file UTF-8 text operations.
+`readFileBytes` and `writeFileBytes` are strict whole-file operations that do
+not decode or translate their contents. `hGetBytes` reads at most its
+non-negative count and returns empty bytes at EOF; `hPutBytes` follows the
+handle's buffering policy. See [`io.md`](io.md) for mixing text and byte IO,
+buffering, failures, and platform behavior.
 
 `Bytes` is immutable arbitrary byte data, distinct from UTF-8 `String`.
 `stringToBytes` encodes UTF-8; `bytesToString` returns `Err (InvalidUtf8 ...)`
@@ -521,15 +530,19 @@ printStr : String -> IO IOError ()
 readLine : IO IOError String
 getArgs : forall e. IO e [String]
 readFile : String -> IO IOError String
+readFileBytes : String -> IO IOError Bytes
 writeFile : String -> String -> IO IOError ()
+writeFileBytes : String -> Bytes -> IO IOError ()
 appendFile : String -> String -> IO IOError ()
 openFile : String -> IOMode -> IO IOError Handle
 hClose : Handle -> IO IOError ()
 hFlush : Handle -> IO IOError ()
 hGetLine : Handle -> IO IOError String
 hGetContents : Handle -> IO IOError String
+hGetBytes : Handle -> Int -> IO IOError Bytes
 hPutStr : Handle -> String -> IO IOError ()
 hPutStrLn : Handle -> String -> IO IOError ()
+hPutBytes : Handle -> Bytes -> IO IOError ()
 hIsEOF : Handle -> IO IOError Bool
 hSetBuffering : Handle -> BufferMode -> IO IOError ()
 stdin : Handle

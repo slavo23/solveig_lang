@@ -76,8 +76,25 @@ pub(super) fn read_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value
     Ok(ctx.alloc_io_action(IoAction::ReadFile { path }))
 }
 
+pub(super) fn read_file_bytes(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let path = expect_value(args, 0, "readFileBytes")?;
+    Ok(ctx.alloc_io_action(IoAction::ReadFileBytes { path }))
+}
+
 pub(super) fn write_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     write_file_action(ctx, args, false, "writeFile")
+}
+
+pub(super) fn write_file_bytes(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let path = expect_value(args, 0, "writeFileBytes")?;
+    let contents = expect_value(args, 1, "writeFileBytes")?;
+    Ok(ctx.alloc_io_action(IoAction::WriteFileBytes { path, contents }))
 }
 
 pub(super) fn append_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {

@@ -32,12 +32,24 @@ pub(super) fn h_get_contents(
     Ok(ctx.alloc_io_action(IoAction::GetHandleContents { handle }))
 }
 
+pub(super) fn h_get_bytes(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let handle = expect_handle(args, 0, "hGetBytes")?;
+    let maximum = expect_int(args, 1, "hGetBytes")?;
+    Ok(ctx.alloc_io_action(IoAction::GetHandleBytes { handle, maximum }))
+}
+
 pub(super) fn h_put_str(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     put_action(ctx, args, false, "hPutStr")
 }
 
 pub(super) fn h_put_str_ln(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     put_action(ctx, args, true, "hPutStrLn")
+}
+
+pub(super) fn h_put_bytes(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let handle = expect_handle(args, 0, "hPutBytes")?;
+    let bytes = expect_value(args, 1, "hPutBytes")?;
+    Ok(ctx.alloc_io_action(IoAction::PutHandleBytes { handle, bytes }))
 }
 
 pub(super) fn h_is_eof(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {

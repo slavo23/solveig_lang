@@ -4,7 +4,9 @@ use super::*;
 
 pub(super) fn handle_builtin_specs(
     names: &mut Names,
+    int: &Ty,
     string: &Ty,
+    bytes: &Ty,
     bool_ty: &Ty,
     io_error: &Ty,
 ) -> Vec<PrimitiveBuiltinSpec> {
@@ -45,6 +47,12 @@ pub(super) fn handle_builtin_specs(
             unary(handle.clone(), task(string.clone())),
         ),
         prim_spec(
+            "hGetBytes",
+            BUILTIN_H_GET_BYTES,
+            2,
+            arr(&[handle.clone(), int.clone()], task(bytes.clone())),
+        ),
+        prim_spec(
             "hPutStr",
             BUILTIN_H_PUT_STR,
             2,
@@ -55,6 +63,12 @@ pub(super) fn handle_builtin_specs(
             BUILTIN_H_PUT_STR_LN,
             2,
             arr(&[handle.clone(), string.clone()], task(Ty::TyUnit)),
+        ),
+        prim_spec(
+            "hPutBytes",
+            BUILTIN_H_PUT_BYTES,
+            2,
+            arr(&[handle.clone(), bytes.clone()], task(Ty::TyUnit)),
         ),
         prim_spec(
             "hIsEOF",
@@ -71,5 +85,17 @@ pub(super) fn handle_builtin_specs(
         prim_spec("stdin", BUILTIN_STDIN, 0, Scheme::mono(handle.clone())),
         prim_spec("stdout", BUILTIN_STDOUT, 0, Scheme::mono(handle.clone())),
         prim_spec("stderr", BUILTIN_STDERR, 0, Scheme::mono(handle)),
+        prim_spec(
+            "readFileBytes",
+            BUILTIN_READ_FILE_BYTES,
+            1,
+            unary(string.clone(), task(bytes.clone())),
+        ),
+        prim_spec(
+            "writeFileBytes",
+            BUILTIN_WRITE_FILE_BYTES,
+            2,
+            arr(&[string.clone(), bytes.clone()], task(Ty::TyUnit)),
+        ),
     ]
 }

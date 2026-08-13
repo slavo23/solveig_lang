@@ -142,10 +142,17 @@ pub enum IoAction {
     ReadFile {
         path: Value,
     },
+    ReadFileBytes {
+        path: Value,
+    },
     WriteFile {
         path: Value,
         contents: Value,
         append: bool,
+    },
+    WriteFileBytes {
+        path: Value,
+        contents: Value,
     },
     OpenFile {
         path: Value,
@@ -163,10 +170,18 @@ pub enum IoAction {
     GetHandleContents {
         handle: Value,
     },
+    GetHandleBytes {
+        handle: Value,
+        maximum: i64,
+    },
     PutHandle {
         handle: Value,
         text: Value,
         newline: bool,
+    },
+    PutHandleBytes {
+        handle: Value,
+        bytes: Value,
     },
     IsHandleEof {
         handle: Value,

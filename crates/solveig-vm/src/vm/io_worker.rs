@@ -22,10 +22,15 @@ pub(super) enum IoRequest {
     Print(String),
     ReadLine,
     ReadFile(PathBuf),
+    ReadFileBytes(PathBuf),
     WriteFile {
         path: PathBuf,
         contents: String,
         append: bool,
+    },
+    WriteFileBytes {
+        path: PathBuf,
+        contents: Vec<u8>,
     },
     ResolveHost(String),
     Connect {
@@ -218,7 +223,11 @@ impl IoSubsystem {
                         RuntimeError::builtin(format!("unknown Handle identity {}", handle.0))
                     })?
             }
-            IoRequest::ReadFile(_) | IoRequest::WriteFile { .. } | IoRequest::ResolveHost(_) => {
+            IoRequest::ReadFile(_)
+            | IoRequest::ReadFileBytes(_)
+            | IoRequest::WriteFile { .. }
+            | IoRequest::WriteFileBytes { .. }
+            | IoRequest::ResolveHost(_) => {
                 1 + self.next_worker % (self.workers.len().saturating_sub(1))
             }
         };
@@ -434,16 +443,29 @@ fn perform_request(
             Ok(contents) => IoResult::Text(contents),
             Err(source) => IoResult::Failed(IoFailure::ReadFile { path, source }),
         },
+        IoRequest::ReadFileBytes(path) => match fs::read(&path) {
+            Ok(contents) => IoResult::Bytes(contents),
+            Err(source) => IoResult::Failed(IoFailure::ReadFile { path, source }),
+        },
         IoRequest::WriteFile {
             path,
             contents,
             append,
         } => perform_write_file(path, &contents, append),
+        IoRequest::WriteFileBytes { path, contents } => match fs::write(&path, contents) {
+            Ok(()) => IoResult::Unit,
+            Err(source) => IoResult::Failed(IoFailure::WriteFile {
+                path,
+                append: false,
+                source,
+            }),
+        },
         IoRequest::ResolveHost(host) => perform_resolve_host(host),
         IoRequest::Handle(request) => match handles.perform(request, stdin, stdout, stderr) {
             Ok(HandleOutput::Unit) => IoResult::Unit,
             Ok(HandleOutput::Opened(handle)) => IoResult::Handle(handle),
             Ok(HandleOutput::Text(text)) => IoResult::Text(text),
+            Ok(HandleOutput::Bytes(bytes)) => IoResult::Bytes(bytes),
             Ok(HandleOutput::Bool(value)) => IoResult::Bool(value),
             Err(failure) => IoResult::Failed(IoFailure::Handle(failure)),
         },

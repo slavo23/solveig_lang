@@ -9,6 +9,8 @@ use crate::heap::{ChanId, Heap, HeapObject, IoAction, PayloadRef};
 use crate::values::{BoolCache, Continuation, NullaryCtorCache, ObjId, Value};
 use solveig_ast::ast::{CtorId, PRIM_TYS};
 
+mod io_action;
+
 pub(super) struct Roots<'a> {
     active_process: Option<&'a mut Process>,
     inactive_processes: &'a mut Arena<Process>,
@@ -391,7 +393,7 @@ fn rewrite_promoted_object(
             evacuate_value(heap, field1, worklist, promoted);
         }
         HeapObject::IoAction(action) => {
-            rewrite_io_action(heap, action, worklist, promoted);
+            io_action::rewrite(heap, action, worklist, promoted);
         }
         HeapObject::Chan(channel) => {
             rewrite_old_payload(heap, channel.queue, worklist, promoted);
@@ -418,87 +420,6 @@ fn rewrite_old_payload(
         let mut value = heap.payloads.old_value(index);
         evacuate_value(heap, &mut value, worklist, promoted);
         heap.payloads.set_old_value(index, value);
-    }
-}
-
-fn rewrite_io_action(
-    heap: &mut Heap,
-    action: &mut IoAction,
-    worklist: &mut Vec<ObjId>,
-    promoted: &mut usize,
-) {
-    match action {
-        IoAction::Pure(value)
-        | IoAction::Fail(value)
-        | IoAction::RaiseDefect { defect: value }
-        | IoAction::Print { text: value, .. }
-        | IoAction::Spawn { action: value }
-        | IoAction::KillThread { thread: value }
-        | IoAction::Mask { action: value }
-        | IoAction::RestoreMask { action: value }
-        | IoAction::ResolveHost { host: value }
-        | IoAction::Connect { host: value, .. }
-        | IoAction::Accept { socket: value }
-        | IoAction::RecvBytes { socket: value, .. }
-        | IoAction::CloseSocket { socket: value } => {
-            evacuate_value(heap, value, worklist, promoted);
-        }
-        IoAction::Bind {
-            action,
-            continuation,
-        }
-        | IoAction::Catch {
-            action,
-            handler: continuation,
-        }
-        | IoAction::CatchDefect {
-            action,
-            handler: continuation,
-        }
-        | IoAction::Finally {
-            action,
-            cleanup: continuation,
-        } => {
-            evacuate_value(heap, action, worklist, promoted);
-            evacuate_value(heap, continuation, worklist, promoted);
-        }
-        IoAction::ReadFile { path } | IoAction::OpenFile { path, .. } => {
-            evacuate_value(heap, path, worklist, promoted);
-        }
-        IoAction::WriteFile { path, contents, .. } => {
-            evacuate_value(heap, path, worklist, promoted);
-            evacuate_value(heap, contents, worklist, promoted);
-        }
-        IoAction::Send { channel, value } => {
-            evacuate_value(heap, channel, worklist, promoted);
-            evacuate_value(heap, value, worklist, promoted);
-        }
-        IoAction::SendBytes { socket, bytes } => {
-            evacuate_value(heap, socket, worklist, promoted);
-            evacuate_value(heap, bytes, worklist, promoted);
-        }
-        IoAction::Recv { channel }
-        | IoAction::TryRecv { channel }
-        | IoAction::CloseChan { channel }
-        | IoAction::CloseHandle { handle: channel }
-        | IoAction::FlushHandle { handle: channel }
-        | IoAction::GetHandleLine { handle: channel }
-        | IoAction::GetHandleContents { handle: channel }
-        | IoAction::IsHandleEof { handle: channel }
-        | IoAction::SetHandleBuffering {
-            handle: channel, ..
-        } => {
-            evacuate_value(heap, channel, worklist, promoted);
-        }
-        IoAction::PutHandle { handle, text, .. } => {
-            evacuate_value(heap, handle, worklist, promoted);
-            evacuate_value(heap, text, worklist, promoted);
-        }
-        IoAction::ReadLine
-        | IoAction::GetArgs
-        | IoAction::NewChan { .. }
-        | IoAction::Sleep { .. }
-        | IoAction::Listen { .. } => {}
     }
 }
 
@@ -602,7 +523,7 @@ fn mark_old_object_children(heap: &mut Heap, id: ObjId, worklist: &mut Vec<ObjId
             mark_old_child(heap, field0, worklist);
             mark_old_child(heap, field1, worklist);
         }
-        HeapObject::IoAction(action) => mark_old_io_action(heap, action, worklist),
+        HeapObject::IoAction(action) => io_action::mark_old(heap, action, worklist),
         HeapObject::Chan(channel) => mark_old_payload(heap, channel.queue, worklist),
         HeapObject::Data0 { .. } | HeapObject::Str { .. } | HeapObject::Bytes { .. } => {}
         HeapObject::Forwarded(_) => {
@@ -626,80 +547,6 @@ fn mark_old_child(heap: &mut Heap, value: Value, worklist: &mut Vec<ObjId>) {
         value,
         worklist,
     );
-}
-
-fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjId>) {
-    match action {
-        IoAction::Pure(value)
-        | IoAction::Fail(value)
-        | IoAction::RaiseDefect { defect: value }
-        | IoAction::Print { text: value, .. }
-        | IoAction::Spawn { action: value }
-        | IoAction::KillThread { thread: value }
-        | IoAction::Mask { action: value }
-        | IoAction::RestoreMask { action: value }
-        | IoAction::ResolveHost { host: value }
-        | IoAction::Connect { host: value, .. }
-        | IoAction::Accept { socket: value }
-        | IoAction::RecvBytes { socket: value, .. }
-        | IoAction::CloseSocket { socket: value } => {
-            mark_old_child(heap, value, worklist);
-        }
-        IoAction::Bind {
-            action,
-            continuation,
-        }
-        | IoAction::Catch {
-            action,
-            handler: continuation,
-        }
-        | IoAction::CatchDefect {
-            action,
-            handler: continuation,
-        }
-        | IoAction::Finally {
-            action,
-            cleanup: continuation,
-        } => {
-            mark_old_child(heap, action, worklist);
-            mark_old_child(heap, continuation, worklist);
-        }
-        IoAction::ReadFile { path } | IoAction::OpenFile { path, .. } => {
-            mark_old_child(heap, path, worklist);
-        }
-        IoAction::WriteFile { path, contents, .. } => {
-            mark_old_child(heap, path, worklist);
-            mark_old_child(heap, contents, worklist);
-        }
-        IoAction::Send { channel, value } => {
-            mark_old_child(heap, channel, worklist);
-            mark_old_child(heap, value, worklist);
-        }
-        IoAction::SendBytes { socket, bytes } => {
-            mark_old_child(heap, socket, worklist);
-            mark_old_child(heap, bytes, worklist);
-        }
-        IoAction::Recv { channel }
-        | IoAction::TryRecv { channel }
-        | IoAction::CloseChan { channel }
-        | IoAction::CloseHandle { handle: channel }
-        | IoAction::FlushHandle { handle: channel }
-        | IoAction::GetHandleLine { handle: channel }
-        | IoAction::GetHandleContents { handle: channel }
-        | IoAction::IsHandleEof { handle: channel }
-        | IoAction::SetHandleBuffering {
-            handle: channel, ..
-        } => mark_old_child(heap, channel, worklist),
-        IoAction::PutHandle { handle, text, .. } => {
-            mark_old_child(heap, handle, worklist);
-            mark_old_child(heap, text, worklist);
-        }
-        IoAction::ReadLine
-        | IoAction::GetArgs
-        | IoAction::NewChan { .. }
-        | IoAction::Sleep { .. }
-        | IoAction::Listen { .. } => {}
-    }
 }
 
 #[cfg(debug_assertions)]
@@ -759,79 +606,7 @@ fn assert_object_children_live(
             assert_value_live(heap, field0, seen, worklist);
             assert_value_live(heap, field1, seen, worklist);
         }
-        HeapObject::IoAction(action) => match action {
-            IoAction::Pure(value)
-            | IoAction::Fail(value)
-            | IoAction::RaiseDefect { defect: value }
-            | IoAction::Print { text: value, .. }
-            | IoAction::Spawn { action: value }
-            | IoAction::KillThread { thread: value }
-            | IoAction::Mask { action: value }
-            | IoAction::RestoreMask { action: value }
-            | IoAction::ResolveHost { host: value }
-            | IoAction::Connect { host: value, .. }
-            | IoAction::Accept { socket: value }
-            | IoAction::RecvBytes { socket: value, .. }
-            | IoAction::CloseSocket { socket: value } => {
-                assert_value_live(heap, value, seen, worklist);
-            }
-            IoAction::Bind {
-                action,
-                continuation,
-            }
-            | IoAction::Catch {
-                action,
-                handler: continuation,
-            }
-            | IoAction::CatchDefect {
-                action,
-                handler: continuation,
-            }
-            | IoAction::Finally {
-                action,
-                cleanup: continuation,
-            } => {
-                assert_value_live(heap, action, seen, worklist);
-                assert_value_live(heap, continuation, seen, worklist);
-            }
-            IoAction::ReadFile { path } | IoAction::OpenFile { path, .. } => {
-                assert_value_live(heap, path, seen, worklist);
-            }
-            IoAction::WriteFile { path, contents, .. } => {
-                assert_value_live(heap, path, seen, worklist);
-                assert_value_live(heap, contents, seen, worklist);
-            }
-            IoAction::Send { channel, value } => {
-                assert_value_live(heap, channel, seen, worklist);
-                assert_value_live(heap, value, seen, worklist);
-            }
-            IoAction::SendBytes { socket, bytes } => {
-                assert_value_live(heap, socket, seen, worklist);
-                assert_value_live(heap, bytes, seen, worklist);
-            }
-            IoAction::Recv { channel }
-            | IoAction::TryRecv { channel }
-            | IoAction::CloseChan { channel }
-            | IoAction::CloseHandle { handle: channel }
-            | IoAction::FlushHandle { handle: channel }
-            | IoAction::GetHandleLine { handle: channel }
-            | IoAction::GetHandleContents { handle: channel }
-            | IoAction::IsHandleEof { handle: channel }
-            | IoAction::SetHandleBuffering {
-                handle: channel, ..
-            } => {
-                assert_value_live(heap, channel, seen, worklist);
-            }
-            IoAction::PutHandle { handle, text, .. } => {
-                assert_value_live(heap, handle, seen, worklist);
-                assert_value_live(heap, text, seen, worklist);
-            }
-            IoAction::ReadLine
-            | IoAction::GetArgs
-            | IoAction::NewChan { .. }
-            | IoAction::Sleep { .. }
-            | IoAction::Listen { .. } => {}
-        },
+        HeapObject::IoAction(action) => io_action::assert_live(heap, action, seen, worklist),
         HeapObject::Chan(channel) => {
             assert_payload_live(heap, id, channel.queue, seen, worklist);
         }

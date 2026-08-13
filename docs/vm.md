@@ -619,7 +619,7 @@ Blocking host IO does not run on the scheduler thread. `Runtime` owns an
 `IoSubsystem` with four scoped OS workers, one readiness-driven socket thread,
 a typed request table, one host-handle side table distributed across those
 workers, and one multi-producer/single-consumer completion channel. Performing
-a handle operation, `readFile`, `writeFile`, or `appendFile` follows this
+a handle operation, whole-file text/byte operation, or `appendFile` follows this
 state transition:
 
 1. The scheduler thread resolves every VM operand to owned Rust data and
@@ -632,7 +632,8 @@ state transition:
 4. The scheduler drains completions, verifies that request and block reason
    match, stores the plain result on the process, and returns it to the FIFO
    run queue. That process converts text into a heap string at its next
-   allocation safe point on the scheduler thread. A host error becomes the
+   allocation safe point on the scheduler thread. Bytes likewise become an
+   immutable heap byte string only after wakeup. A host error becomes the
    matching closed `IOError` constructor and an inert `Fail` action there; it
    does not enter the VM defect channel.
 

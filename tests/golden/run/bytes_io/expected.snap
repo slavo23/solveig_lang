@@ -1,0 +1,28 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+5
+65
+206
+2
+65
+206
+2
+187
+10
+1
+66
+missing
+0
+negative-read
+1
+65
+missing
+λ
+1
+66
+missing
+5
+65
+206

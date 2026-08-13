@@ -1,0 +1,190 @@
+//! Exhaustive GC traversal for values retained by inert IO actions.
+
+use super::*;
+
+pub(super) fn rewrite(
+    heap: &mut Heap,
+    action: &mut IoAction,
+    worklist: &mut Vec<ObjId>,
+    promoted: &mut usize,
+) {
+    visit_action_mut(action, |value| {
+        evacuate_value(heap, value, worklist, promoted);
+    });
+}
+
+pub(super) fn mark_old(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjId>) {
+    visit_action(action, |value| mark_old_child(heap, value, worklist));
+}
+
+#[cfg(debug_assertions)]
+pub(super) fn assert_live(
+    heap: &Heap,
+    action: IoAction,
+    seen: &mut [bool],
+    worklist: &mut Vec<ObjId>,
+) {
+    visit_action(action, |value| {
+        assert_value_live(heap, value, seen, worklist);
+    });
+}
+
+fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
+    match action {
+        IoAction::Pure(value)
+        | IoAction::Fail(value)
+        | IoAction::RaiseDefect { defect: value }
+        | IoAction::Print { text: value, .. }
+        | IoAction::Spawn { action: value }
+        | IoAction::KillThread { thread: value }
+        | IoAction::Mask { action: value }
+        | IoAction::RestoreMask { action: value }
+        | IoAction::ResolveHost { host: value }
+        | IoAction::Connect { host: value, .. }
+        | IoAction::Accept { socket: value }
+        | IoAction::RecvBytes { socket: value, .. }
+        | IoAction::CloseSocket { socket: value } => visit(value),
+        IoAction::Bind {
+            action,
+            continuation,
+        }
+        | IoAction::Catch {
+            action,
+            handler: continuation,
+        }
+        | IoAction::CatchDefect {
+            action,
+            handler: continuation,
+        }
+        | IoAction::Finally {
+            action,
+            cleanup: continuation,
+        } => {
+            visit(action);
+            visit(continuation);
+        }
+        IoAction::ReadFile { path }
+        | IoAction::ReadFileBytes { path }
+        | IoAction::OpenFile { path, .. } => visit(path),
+        IoAction::WriteFile { path, contents, .. }
+        | IoAction::WriteFileBytes { path, contents } => {
+            visit(path);
+            visit(contents);
+        }
+        IoAction::Send { channel, value } => {
+            visit(channel);
+            visit(value);
+        }
+        IoAction::SendBytes { socket, bytes } => {
+            visit(socket);
+            visit(bytes);
+        }
+        IoAction::Recv { channel }
+        | IoAction::TryRecv { channel }
+        | IoAction::CloseChan { channel }
+        | IoAction::CloseHandle { handle: channel }
+        | IoAction::FlushHandle { handle: channel }
+        | IoAction::GetHandleLine { handle: channel }
+        | IoAction::GetHandleContents { handle: channel }
+        | IoAction::GetHandleBytes {
+            handle: channel, ..
+        }
+        | IoAction::IsHandleEof { handle: channel }
+        | IoAction::SetHandleBuffering {
+            handle: channel, ..
+        } => visit(channel),
+        IoAction::PutHandle { handle, text, .. }
+        | IoAction::PutHandleBytes {
+            handle,
+            bytes: text,
+        } => {
+            visit(handle);
+            visit(text);
+        }
+        IoAction::ReadLine
+        | IoAction::GetArgs
+        | IoAction::NewChan { .. }
+        | IoAction::Sleep { .. }
+        | IoAction::Listen { .. } => {}
+    }
+}
+
+fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
+    match action {
+        IoAction::Pure(value)
+        | IoAction::Fail(value)
+        | IoAction::RaiseDefect { defect: value }
+        | IoAction::Print { text: value, .. }
+        | IoAction::Spawn { action: value }
+        | IoAction::KillThread { thread: value }
+        | IoAction::Mask { action: value }
+        | IoAction::RestoreMask { action: value }
+        | IoAction::ResolveHost { host: value }
+        | IoAction::Connect { host: value, .. }
+        | IoAction::Accept { socket: value }
+        | IoAction::RecvBytes { socket: value, .. }
+        | IoAction::CloseSocket { socket: value } => visit(value),
+        IoAction::Bind {
+            action,
+            continuation,
+        }
+        | IoAction::Catch {
+            action,
+            handler: continuation,
+        }
+        | IoAction::CatchDefect {
+            action,
+            handler: continuation,
+        }
+        | IoAction::Finally {
+            action,
+            cleanup: continuation,
+        } => {
+            visit(action);
+            visit(continuation);
+        }
+        IoAction::ReadFile { path }
+        | IoAction::ReadFileBytes { path }
+        | IoAction::OpenFile { path, .. } => visit(path),
+        IoAction::WriteFile { path, contents, .. }
+        | IoAction::WriteFileBytes { path, contents } => {
+            visit(path);
+            visit(contents);
+        }
+        IoAction::Send { channel, value } => {
+            visit(channel);
+            visit(value);
+        }
+        IoAction::SendBytes { socket, bytes } => {
+            visit(socket);
+            visit(bytes);
+        }
+        IoAction::Recv { channel }
+        | IoAction::TryRecv { channel }
+        | IoAction::CloseChan { channel }
+        | IoAction::CloseHandle { handle: channel }
+        | IoAction::FlushHandle { handle: channel }
+        | IoAction::GetHandleLine { handle: channel }
+        | IoAction::GetHandleContents { handle: channel }
+        | IoAction::GetHandleBytes {
+            handle: channel, ..
+        }
+        | IoAction::IsHandleEof { handle: channel }
+        | IoAction::SetHandleBuffering {
+            handle: channel, ..
+        } => visit(channel),
+        IoAction::PutHandle { handle, text, .. }
+        | IoAction::PutHandleBytes {
+            handle,
+            bytes: text,
+        } => {
+            visit(handle);
+            visit(text);
+        }
+        IoAction::ReadLine
+        | IoAction::GetArgs
+        | IoAction::NewChan { .. }
+        | IoAction::Sleep { .. }
+        | IoAction::Listen { .. } => {}
+    }
+}
