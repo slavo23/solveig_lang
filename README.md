@@ -436,6 +436,8 @@ and typeclasses instead.
 See [docs/prelude.md](docs/prelude.md) for signatures and examples.
 See [docs/errors.md](docs/errors.md) for typed errors, defects, cleanup, and
 the interruption model.
+See [docs/concurrency.md](docs/concurrency.md) for green threads, channels,
+structured concurrency, timers, and sockets.
 
 ## Diagnostics
 
@@ -528,4 +530,5 @@ SOLVEIG_BIN="$(command -v solveig)" python3 scripts/lsp_smoke.py tests/golden/di
 - [docs/tutorial.md](docs/tutorial.md)
 - [docs/prelude.md](docs/prelude.md)
 - [docs/errors.md](docs/errors.md)
+- [docs/concurrency.md](docs/concurrency.md)
 - [docs/diagnostics.md](docs/diagnostics.md)

@@ -157,6 +157,9 @@ deadline or `Just value` when the action finishes first. These combinators use
 private channels in Prelude code; a child never outlives the scope that created
 it.
 
+See [concurrency.md](concurrency.md) for the scheduler model, fairness and
+determinism guarantees, interruption rules, and concurrency testing strategy.
+
 `killThread` requests asynchronous interruption and returns immediately.
 Delivery occurs at the target's next VM safe point; killing an already finished
 or unknown thread succeeds. `mask` defers delivery while its action remains
