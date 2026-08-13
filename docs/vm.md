@@ -611,6 +611,24 @@ system time both equal the logical elapsed duration, making the virtual system
 clock begin at the Unix epoch. Clock reads neither park the green thread nor
 cross the worker pool.
 
+## Explicit pseudorandom state
+
+`StdGen` is an immediate opaque `Value` carrying one SplitMix64 seed. A pure
+`randomInt` transition adds the fixed golden-gamma increment, applies the
+published `mix64` permutation, and returns the signed output with the new
+generator in a Prelude `Pair`. `randomRange` maps that word into inclusive
+bounds using multiply-high rejection sampling rather than biased modulo. It
+may advance through more than one word and raises an `Error` defect before a
+draw when its lower bound exceeds its upper bound.
+
+`newStdGen` is an inert nullary IO action. `Runtime` owns one `RandomSeeder`,
+initialized from its `TimerClock` system reading, and performing the action
+advances only that runtime-local stream. The action neither allocates host
+state nor crosses the worker pool. Virtual clock mode starts the seeder at
+zero, giving captured tests a fixed sequence. The generator is intentionally
+non-cryptographic; runtime locality prevents global mutation, not seed
+prediction.
+
 ## Typed channels
 
 `Chan a` is a compiler-known abstract type whose values point to mutable

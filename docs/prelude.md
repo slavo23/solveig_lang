@@ -21,6 +21,12 @@ Char
 String
 IO e a
 Bool
+ThreadId
+Chan a
+Bytes
+Socket
+Handle
+StdGen
 ()
 ```
 
@@ -149,6 +155,10 @@ getFileSize : String -> Task Int
 getModificationTime : String -> Task Int
 getMonotonicTime : Task Int
 getSystemTime : Task Int
+mkStdGen : Int -> StdGen
+newStdGen : Task StdGen
+randomInt : StdGen -> Pair Int StdGen
+randomRange : Int -> Int -> StdGen -> Pair Int StdGen
 runProcess : String -> [String] -> Task ProcessResult
 processExitCode : ProcessResult -> Int
 processStdout : ProcessResult -> String
@@ -267,6 +277,14 @@ Both readings saturate at the `Int` bounds rather than wrapping. Captured and
 deterministic execution use the scheduler's virtual clock, with system time
 starting at the Unix epoch, so exact clock-dependent tests can advance time
 through `sleep` without waiting.
+
+`StdGen` is opaque immutable SplitMix64 state. `mkStdGen seed` deterministically
+replays the same sequence; `newStdGen` is the only operation that obtains a
+fresh runtime-local seed. `randomInt` and inclusive `randomRange` are pure:
+both return `MkPair value nextGenerator`, so programs explicitly thread state.
+Reversed range bounds raise an `Error` defect. These clock-seeded generators
+are not cryptographically secure; see [IO](io.md#pseudorandom-generation) for
+the exact range, seeding, and deterministic-testing contracts.
 
 `error` raises `Error`; integer division and modulo by zero raise
 `DivisionByZero`. The VM's managed stack and heap-object ceilings raise

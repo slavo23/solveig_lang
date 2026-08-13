@@ -211,6 +211,40 @@ epoch. A virtual `sleep 5` therefore advances both readings by exactly
 5,000,000 nanoseconds. This makes clock-dependent program tests exact while
 keeping the same action and scheduler paths as normal execution.
 
+## Pseudorandom generation
+
+```solveig
+mkStdGen : Int -> StdGen
+newStdGen : Task StdGen
+randomInt : StdGen -> Pair Int StdGen
+randomRange : Int -> Int -> StdGen -> Pair Int StdGen
+```
+
+`StdGen` is opaque, immutable SplitMix64 state. `mkStdGen` makes a repeatable
+generator from any `Int`; the sequence for a fixed seed is part of Solveig's
+behavior. Each pure draw returns both its result and the next generator. Reuse
+the same input generator to replay the same result, or thread the returned
+state through later draws:
+
+```solveig
+case randomRange 1 6 (mkStdGen 42) of
+    MkPair die next => randomRange 1 6 next
+```
+
+`randomInt` covers the complete signed `Int` range. `randomRange lower upper`
+uses inclusive bounds and unbiased rejection sampling. It raises an
+`Error "randomRange lower bound must be less than or equal to upper bound"`
+defect when the bounds are reversed. Because rejection may consume another
+word, callers must treat the returned generator—not a guessed step count—as
+the next state.
+
+Only `newStdGen` performs IO. It draws a distinct generator seed from one
+runtime-local SplitMix stream initially seeded from the runtime's system clock.
+Captured and deterministic execution begin that stream at seed zero, so tests
+remain exact. Clock-derived seeds can repeat across runtimes and are not host
+entropy. These APIs are pseudorandom and must not be used for keys, tokens,
+nonces, passwords, or any other cryptographic purpose.
+
 ## Filesystem and logical working directory
 
 ```solveig

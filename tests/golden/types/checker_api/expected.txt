@@ -74,8 +74,10 @@ prelude.builtins.killThread : ThreadId -> IO IOError ()
 prelude.builtins.listen : Int -> IO IOError (Pair Socket Int)
 prelude.builtins.mapError : forall e f a. (e -> f) -> IO e a -> IO f a
 prelude.builtins.mask : forall e a. IO e a -> IO e a
+prelude.builtins.mkStdGen : Int -> StdGen
 prelude.builtins.newBoundedChan : forall e a. Int -> IO e (Chan a)
 prelude.builtins.newChan : forall e a. IO e (Chan a)
+prelude.builtins.newStdGen : IO IOError StdGen
 prelude.builtins.not : Bool -> Bool
 prelude.builtins.odd : Int -> Bool
 prelude.builtins.openFile : String -> IOMode -> IO IOError Handle
@@ -88,6 +90,8 @@ prelude.builtins.processStderr : ProcessResult -> String
 prelude.builtins.processStdout : ProcessResult -> String
 prelude.builtins.pureIO : forall e a. a -> IO e a
 prelude.builtins.race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
+prelude.builtins.randomInt : StdGen -> Pair Int StdGen
+prelude.builtins.randomRange : Int -> Int -> StdGen -> Pair Int StdGen
 prelude.builtins.readFile : String -> IO IOError String
 prelude.builtins.readFileBytes : String -> IO IOError Bytes
 prelude.builtins.readLine : IO IOError String
@@ -202,13 +206,17 @@ prelude.prim.killThread : ThreadId -> IO IOError ()
 prelude.prim.listDirectory : String -> IO IOError [String]
 prelude.prim.listen : Int -> IO IOError (Pair Socket Int)
 prelude.prim.maskIO : forall e a. IO e a -> IO e a
+prelude.prim.mkStdGen : Int -> StdGen
 prelude.prim.newBoundedChan : forall e a. Int -> IO e (Chan a)
 prelude.prim.newChan : forall e a. IO e (Chan a)
+prelude.prim.newStdGen : forall e. IO e StdGen
 prelude.prim.openFile : String -> IOMode -> IO IOError Handle
 prelude.prim.printLine : String -> IO IOError ()
 prelude.prim.printStr : String -> IO IOError ()
 prelude.prim.pureIO : forall e a. a -> IO e a
 prelude.prim.raiseDefectIO : forall e a. Defect -> IO e a
+prelude.prim.randomInt : StdGen -> Pair Int StdGen
+prelude.prim.randomRange : Int -> Int -> StdGen -> Pair Int StdGen
 prelude.prim.readFile : String -> IO IOError String
 prelude.prim.readFileBytes : String -> IO IOError Bytes
 prelude.prim.readLine : IO IOError String

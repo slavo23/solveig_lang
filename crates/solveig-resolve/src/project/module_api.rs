@@ -500,6 +500,7 @@ fn compiler_type_doc(name: &str) -> Option<&'static str> {
         "Chan" => "A typed FIFO channel shared by lightweight threads.",
         "Bytes" => "An immutable sequence of arbitrary bytes.",
         "Socket" => "An opaque identity for an explicitly managed TCP resource.",
+        "StdGen" => "Explicit immutable state for deterministic pseudorandom generation.",
         _ => return None,
     })
 }
@@ -599,6 +600,10 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "getModificationTime" => "Returns modification time as nanoseconds since the Unix epoch.",
         "getMonotonicTime" => "Returns nanoseconds from a runtime-local monotonic origin.",
         "getSystemTime" => "Returns signed nanoseconds since the Unix epoch.",
+        "mkStdGen" => "Creates a deterministic pseudorandom generator from an integer seed.",
+        "newStdGen" => "Creates a fresh runtime-seeded pseudorandom generator.",
+        "randomInt" => "Produces an integer and the next explicit generator state.",
+        "randomRange" => "Produces an integer in an inclusive range and the next generator state.",
         "runProcess" => "Runs a child process and strictly captures its output and exit code.",
         "exitWith" => "Terminates the main program with a requested host status after cleanup.",
         "exitSuccess" => "Terminates the main program successfully after cleanup.",
@@ -640,7 +645,7 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
     })
 }
 
-fn compiler_type_entries() -> [(&'static str, TyConId); 11] {
+fn compiler_type_entries() -> [(&'static str, TyConId); 12] {
     [
         ("Int", PRIM_TYS.int),
         ("Float", PRIM_TYS.float),
@@ -653,6 +658,7 @@ fn compiler_type_entries() -> [(&'static str, TyConId); 11] {
         ("Bytes", PRIM_TYS.bytes),
         ("Socket", PRIM_TYS.socket),
         ("Handle", PRIM_TYS.handle),
+        ("StdGen", PRIM_TYS.std_gen),
     ]
 }
 

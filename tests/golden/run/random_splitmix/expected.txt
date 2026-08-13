@@ -1,0 +1,16 @@
+fixed integers
+-7160610219483255062
+-3239489724241199657
+-2886436458091595389
+7702497325448497534
+2492011547730241671
+inclusive range
+2
+7
+7
+-2
+-8
+fresh generators
+8777449547987942575
+8955162454538977886
+invalid bounds: randomRange lower bound must be less than or equal to upper bound

@@ -117,6 +117,7 @@ pub enum IoAction {
     },
     GetMonotonicTime,
     GetSystemTime,
+    NewStdGen,
     ResolveHost {
         host: Value,
     },

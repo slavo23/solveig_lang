@@ -4,6 +4,7 @@
 use crate::bytecode::{BytecodeProgram, lower_to_bytecode};
 use crate::display::DisplayValue;
 use crate::heap::{ChanId, Heap, HeapObject};
+use crate::random::RandomSeeder;
 use crate::values::{BoolCache, Continuation, NullaryCtorCache, Value};
 use la_arena::{Arena, Idx, RawIdx};
 use solveig_ast::ast::CtorRuntimeInfo;
@@ -88,6 +89,7 @@ pub struct Runtime {
     io: IoSubsystem,
     channel_waiters: FxHashMap<ChanId, ChannelWaiters>,
     timers: TimerQueue,
+    random_seeder: RandomSeeder,
     reduction_budget: u32,
     stack_limit: usize,
     heap_limit: usize,
@@ -219,6 +221,7 @@ pub(crate) struct Interpreter<'a> {
     io: &'a mut IoSubsystem,
     channel_waiters: &'a mut FxHashMap<ChanId, ChannelWaiters>,
     timers: &'a mut TimerQueue,
+    random_seeder: &'a mut RandomSeeder,
     reduction_budget: u32,
     stack_limit: usize,
     heap_limit: usize,
@@ -375,6 +378,7 @@ impl Runtime {
         io: IoSubsystem,
         timers: TimerQueue,
     ) -> Self {
+        let random_seeder = RandomSeeder::from_seed(timers.system_nanos());
         let max_tag = program
             .constructor_arities
             .iter()
@@ -403,6 +407,7 @@ impl Runtime {
             io,
             channel_waiters: FxHashMap::default(),
             timers,
+            random_seeder,
             reduction_budget,
             stack_limit: runtime_limit_from_env("SOLVEIG_STACK_LIMIT", DEFAULT_STACK_LIMIT),
             heap_limit: runtime_limit_from_env("SOLVEIG_HEAP_LIMIT", DEFAULT_HEAP_LIMIT),
@@ -530,6 +535,7 @@ impl<'a> Interpreter<'a> {
             io,
             channel_waiters,
             timers,
+            random_seeder,
             reduction_budget,
             stack_limit,
             heap_limit,
@@ -546,6 +552,7 @@ impl<'a> Interpreter<'a> {
             io,
             channel_waiters,
             timers,
+            random_seeder,
             reduction_budget: *reduction_budget,
             stack_limit: *stack_limit,
             heap_limit: *heap_limit,

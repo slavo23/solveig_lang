@@ -21,8 +21,9 @@ use solveig_ast::ast::{
     BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD,
     BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING,
     BUILTIN_KILL_THREAD, BUILTIN_LIST_DIRECTORY, BUILTIN_LISTEN, BUILTIN_MASK_IO,
-    BUILTIN_NEW_BOUNDED_CHAN, BUILTIN_NEW_CHAN, BUILTIN_OPEN_FILE, BUILTIN_PRINT_LINE,
-    BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_RAISE_DEFECT_IO, BUILTIN_READ_FILE,
+    BUILTIN_MK_STD_GEN, BUILTIN_NEW_BOUNDED_CHAN, BUILTIN_NEW_CHAN, BUILTIN_NEW_STD_GEN,
+    BUILTIN_OPEN_FILE, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR, BUILTIN_PURE_IO,
+    BUILTIN_RAISE_DEFECT_IO, BUILTIN_RANDOM_INT, BUILTIN_RANDOM_RANGE, BUILTIN_READ_FILE,
     BUILTIN_READ_FILE_BYTES, BUILTIN_READ_LINE, BUILTIN_RECV_BYTES, BUILTIN_RECV_CHAN,
     BUILTIN_REMOVE_FILE, BUILTIN_RENAME_FILE, BUILTIN_RESOLVE_HOST, BUILTIN_RESTORE_MASK_IO,
     BUILTIN_RUN_PROCESS, BUILTIN_SEND_BYTES, BUILTIN_SEND_CHAN, BUILTIN_SET_CURRENT_DIRECTORY,
@@ -41,12 +42,14 @@ mod handles;
 mod io_actions;
 mod network;
 mod os;
+mod random;
 mod text;
 
 use handles::*;
 use io_actions::*;
 use network::*;
 use os::*;
+use random::*;
 use text::*;
 
 pub type BuiltinRun = for<'context, 'runtime> fn(
@@ -405,6 +408,10 @@ static ALL_BUILTINS: &[Builtin] = &[
         get_monotonic_time
     ),
     builtin!(BUILTIN_GET_SYSTEM_TIME, "getSystemTime", 0, get_system_time),
+    builtin!(BUILTIN_MK_STD_GEN, "mkStdGen", 1, mk_std_gen),
+    builtin!(BUILTIN_NEW_STD_GEN, "newStdGen", 0, new_std_gen),
+    builtin!(BUILTIN_RANDOM_INT, "randomInt", 1, random_int),
+    builtin!(BUILTIN_RANDOM_RANGE, "randomRange", 3, random_range),
     builtin!(BUILTIN_SPAWN, "spawn", 1, spawn),
     builtin!(BUILTIN_NEW_CHAN, "newChan", 0, new_chan),
     builtin!(

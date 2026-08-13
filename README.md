@@ -424,6 +424,17 @@ main = do
     writeFile "copy.txt" contents
 ```
 
+Deterministic pseudorandom values use explicit immutable state:
+
+```solveig
+case randomRange 1 6 (mkStdGen 42) of
+    MkPair die nextGenerator => die
+```
+
+Use `newStdGen : Task StdGen` when a runtime-local clock seed is wanted, then
+thread the generator returned by each draw. The generator is not suitable for
+cryptographic use.
+
 ## Prelude
 
 Ordinary modules implicitly import:

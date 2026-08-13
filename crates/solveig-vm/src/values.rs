@@ -3,6 +3,8 @@
 
 use std::hash::{Hash, Hasher};
 
+use crate::StdGen;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ObjId(pub u32);
 
@@ -15,6 +17,7 @@ pub enum Value {
     ThreadId(u32),
     SocketId(u32),
     HandleId(u32),
+    StdGen(StdGen),
     CtorFn { tag: u16, arity: u16 },
     FunctionRef { chunk: u32, arity: u16 },
     Obj(ObjId),
@@ -44,6 +47,7 @@ impl PartialEq for Value {
             (Value::ThreadId(lhs), Value::ThreadId(rhs))
             | (Value::SocketId(lhs), Value::SocketId(rhs))
             | (Value::HandleId(lhs), Value::HandleId(rhs)) => lhs == rhs,
+            (Value::StdGen(lhs), Value::StdGen(rhs)) => lhs == rhs,
             (
                 Value::CtorFn {
                     tag: lhs_tag,
@@ -83,6 +87,7 @@ impl Hash for Value {
             Value::ThreadId(value) | Value::SocketId(value) | Value::HandleId(value) => {
                 value.hash(state);
             }
+            Value::StdGen(value) => value.hash(state),
             Value::CtorFn { tag, arity } => {
                 tag.hash(state);
                 arity.hash(state);

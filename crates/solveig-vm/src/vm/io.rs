@@ -363,6 +363,13 @@ impl Interpreter<'_> {
                     }
                     continue;
                 }
+                IoAction::NewStdGen => {
+                    let generator = self.random_seeder.next_generator();
+                    if let Some(value) = self.resume_io_value(program, Value::StdGen(generator))? {
+                        return Ok(value);
+                    }
+                    continue;
+                }
                 IoAction::ResolveHost { host } => {
                     let host = self.expect_string_value(host, "resolveHost")?;
                     if let Some(interruption) = self.accept_pending_interruption_at_block() {
