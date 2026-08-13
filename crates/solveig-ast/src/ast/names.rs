@@ -356,6 +356,9 @@ pub const PRELUDE_IO_ERROR_RENAME_FILE_NAME: &str = "prelude.builtins.RenameFile
 pub const PRELUDE_IO_ERROR_GET_FILE_SIZE_NAME: &str = "prelude.builtins.GetFileSizeError";
 pub const PRELUDE_IO_ERROR_GET_MODIFICATION_TIME_NAME: &str =
     "prelude.builtins.GetModificationTimeError";
+pub const PRELUDE_IO_ERROR_RUN_PROCESS_NAME: &str = "prelude.builtins.RunProcessError";
+pub const PRELUDE_PROCESS_RESULT_NAME: &str = "prelude.builtins.ProcessResult";
+pub const PRELUDE_PROCESS_RESULT_CTOR_NAME: &str = "prelude.builtins.MkProcessResult";
 pub const PRELUDE_IO_MODE_NAME: &str = "prelude.builtins.IOMode";
 pub const PRELUDE_IO_MODE_READ_NAME: &str = "prelude.builtins.ReadMode";
 pub const PRELUDE_IO_MODE_WRITE_NAME: &str = "prelude.builtins.WriteMode";
@@ -489,3 +492,4 @@ pub const BUILTIN_REMOVE_FILE: BuiltinId = BuiltinId(102);
 pub const BUILTIN_RENAME_FILE: BuiltinId = BuiltinId(103);
 pub const BUILTIN_GET_FILE_SIZE: BuiltinId = BuiltinId(104);
 pub const BUILTIN_GET_MODIFICATION_TIME: BuiltinId = BuiltinId(105);
+pub const BUILTIN_RUN_PROCESS: BuiltinId = BuiltinId(106);

@@ -222,6 +222,39 @@ Potentially blocking metadata, directory, and mutation calls use the bounded
 IO worker pool. Every failure uses the constructor named for the attempted
 operation and retains its path(s) plus the platform error message.
 
+## Child processes
+
+```solveig
+data ProcessResult = MkProcessResult Int String String
+
+runProcess : String -> [String] -> Task ProcessResult
+processExitCode : ProcessResult -> Int
+processStdout : ProcessResult -> String
+processStderr : ProcessResult -> String
+```
+
+`runProcess program arguments` starts one child with the argument list exactly
+as supplied: it does not invoke a shell, expand wildcards, or perform quoting.
+The child inherits the runtime-local environment and logical working directory,
+while standard input is closed. Standard output and error are piped and
+strictly captured to completion. Non-zero child status is a successful
+`ProcessResult`, so programs can inspect and handle it as normal data.
+
+The exit code is the platform's ordinary integer status. When a platform ends
+the child without an exit code, such as a Unix signal, Solveig reports `-1`.
+Both captured streams must be UTF-8 because `ProcessResult` exposes `String`;
+invalid output, failure to start or wait for the program, and other host
+capture failures raise `RunProcessError program message`. Use an absolute path
+for a specific executable. A bare program name uses the host executable search
+path; a relative path containing components resolves against the logical cwd.
+
+Process execution uses the bounded blocking pool and allocates captured strings
+only after the scheduler wakes the calling green thread. Capture is deliberately
+strict and memory-bounded only by runtime/host limits; streaming subprocess IO
+is a later feature and should be used instead for unbounded output once added.
+Interrupting the Solveig caller stops waiting for the result, but the underlying
+blocking host request may finish in the background before its worker is reused.
+
 ## Platform notes
 
 File sharing and permission errors retain the host operating system's message

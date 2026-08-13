@@ -387,6 +387,10 @@ getEnvironment = prelude.prim.getEnvironment
 listDirectory : String -> Task [String]
 listDirectory path = prelude.prim.listDirectory path
 
+-- | Runs a child process and strictly captures its output and exit code.
+runProcess : String -> [String] -> Task ProcessResult
+runProcess program arguments = prelude.prim.runProcess program arguments
+
 -- | Runs two IO actions and keeps the result of the second.
 seqIO : forall e a b. IO e a -> IO e b -> IO e b
 seqIO left right = thenM left right

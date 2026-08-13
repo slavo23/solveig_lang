@@ -26,6 +26,23 @@ data Pair a b =
     -- | Builds a pair from its first and second values.
     MkPair a b;
 
+-- | Captured output and status from a completed child process.
+data ProcessResult =
+    -- | Builds a result from exit code, standard output, and standard error.
+    MkProcessResult Int String String;
+
+-- | Returns a child process's exit code.
+processExitCode : ProcessResult -> Int;
+processExitCode (MkProcessResult exitCode output errorOutput) = exitCode;
+
+-- | Returns a child process's captured standard output.
+processStdout : ProcessResult -> String;
+processStdout (MkProcessResult exitCode output errorOutput) = output;
+
+-- | Returns a child process's captured standard error.
+processStderr : ProcessResult -> String;
+processStderr (MkProcessResult exitCode output errorOutput) = errorOutput;
+
 -- | An error type with no possible values.
 data Never
 
@@ -95,6 +112,8 @@ data IOError =
     GetFileSizeError String String
   | -- | Reading a file's modification time failed.
     GetModificationTimeError String String
+  | -- | Starting or capturing a child process failed.
+    RunProcessError String String
 
 -- | How a file is opened.
 data IOMode =

@@ -192,6 +192,17 @@ impl Interpreter<'_> {
                         return self.block_on_io(IoRequest::Filesystem(request));
                     }
                 },
+                IoAction::RunProcess {
+                    program: child_program,
+                    arguments,
+                } => {
+                    let request = self.prepare_process_request(child_program, arguments)?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::Process(request));
+                }
                 IoAction::Spawn { action } => {
                     let thread_id = self.spawn_io_process(action);
                     if let Some(value) = self.resume_io_value(program, thread_id)? {

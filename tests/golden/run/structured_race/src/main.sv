@@ -59,6 +59,7 @@ reportError ioError =
         | RenameFileError source destination message => printLine "unexpected rename error"
         | GetFileSizeError path message => printLine "unexpected file size error"
         | GetModificationTimeError path message => printLine "unexpected modification time error"
+        | RunProcessError program message => printLine "unexpected run process error"
 
 main : Task ()
 main = do

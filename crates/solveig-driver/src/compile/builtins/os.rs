@@ -26,6 +26,7 @@ pub(super) fn os_builtin_specs(
         string.clone(),
     );
     let environment = Ty::make_app(Ty::make_con_id(prelude_list_tycon_id(names)), string_pair);
+    let process_result = Ty::make_con_id(prelude_process_result_tycon_id(names));
 
     vec![
         prim_spec(
@@ -80,7 +81,7 @@ pub(super) fn os_builtin_specs(
             "listDirectory",
             BUILTIN_LIST_DIRECTORY,
             1,
-            unary(string.clone(), task(string_list)),
+            unary(string.clone(), task(string_list.clone())),
         ),
         prim_spec(
             "createDirectory",
@@ -111,6 +112,12 @@ pub(super) fn os_builtin_specs(
             BUILTIN_GET_MODIFICATION_TIME,
             1,
             unary(string.clone(), task(int.clone())),
+        ),
+        prim_spec(
+            "runProcess",
+            BUILTIN_RUN_PROCESS,
+            2,
+            arr(&[string.clone(), string_list], task(process_result)),
         ),
     ]
 }

@@ -61,6 +61,7 @@ data IOError =
   | RenameFileError String String String
   | GetFileSizeError String String
   | GetModificationTimeError String String
+  | RunProcessError String String
 ```
 
 A typed failure short-circuits `bind`: later actions in the same sequence do
@@ -119,6 +120,8 @@ reportIOError ioError =
             printLine (appendString path (appendString ": " message))
         | GetModificationTimeError path message =>
             printLine (appendString path (appendString ": " message))
+        | RunProcessError program message =>
+            printLine (appendString program (appendString ": " message))
 
 printSettings : Task ()
 printSettings = do

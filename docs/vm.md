@@ -619,8 +619,9 @@ Blocking host IO does not run on the scheduler thread. `Runtime` owns an
 `IoSubsystem` with four scoped OS workers, one readiness-driven socket thread,
 a typed request table, one host-handle side table distributed across those
 workers, and one multi-producer/single-consumer completion channel. Performing
-a handle operation, whole-file text/byte operation, `appendFile`, or a
-potentially blocking filesystem operation follows this state transition:
+a handle operation, whole-file text/byte operation, `appendFile`, a
+potentially blocking filesystem operation, or captured child process follows
+this state transition:
 
 1. The scheduler thread resolves every VM operand to owned Rust data and
    submits an `IoRequest` associated with the current `ProcessId`.
@@ -671,6 +672,14 @@ resolved against the logical cwd before an owned request crosses to a worker.
 Successful `setCurrentDirectory` returns a canonical host path which the
 scheduler installs only after wakeup. This avoids unsafe host-global
 environment or cwd mutation when multiple workers and runtimes exist.
+
+Captured process requests copy the executable, argument vector, logical cwd,
+and complete runtime-local environment before crossing the worker boundary.
+The worker invokes no shell, closes stdin, and strictly captures both output
+streams with `Command::output`; the scheduler later allocates the three-field
+`ProcessResult`. A non-zero status is data, while spawn/wait/UTF-8 failures map
+to `RunProcessError`. Cancellation tombstones the request like other blocking
+work; it does not synchronously kill a child already owned by a worker.
 
 TCP resources live only in the socket thread's monotonic side table keyed by
 `SocketId`. A Solveig `Socket` value is the typed id, never an OS descriptor or

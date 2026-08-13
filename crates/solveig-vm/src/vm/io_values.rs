@@ -44,12 +44,48 @@ impl Interpreter<'_> {
                 self.io.set_current_directory(path);
                 Value::Unit
             }
+            IoResult::Process(output) => {
+                self.alloc_process_result(output.exit_code, &output.stdout, &output.stderr)?
+            }
             IoResult::Failed(failure) => {
                 self.io_current = Some(self.alloc_io_failure_action(failure)?);
                 return Ok(None);
             }
         };
         self.resume_io_value(program, value)
+    }
+
+    fn alloc_process_result(
+        &mut self,
+        exit_code: i64,
+        stdout: &str,
+        stderr: &str,
+    ) -> Result<Value, RuntimeError> {
+        let checkpoint = self.temporary_roots.len();
+        self.safe_point();
+        let stdout = self.heap.alloc_str(stdout);
+        self.temporary_roots.push(stdout);
+        self.safe_point();
+        let stderr = self.heap.alloc_str(stderr);
+        self.temporary_roots.push(stderr);
+        self.safe_point();
+        let stdout = *self
+            .temporary_roots
+            .get(checkpoint)
+            .expect("ICE: process stdout root disappeared during allocation");
+        let stderr = *self
+            .temporary_roots
+            .get(checkpoint + 1)
+            .expect("ICE: process stderr root disappeared during allocation");
+        let result = VmCtx::new(self).alloc_data3_ctor(
+            CtorRuntimeRole::PreludeProcessResult,
+            Value::Int(exit_code),
+            stdout,
+            stderr,
+            "runProcess",
+        );
+        self.temporary_roots.truncate(checkpoint);
+        result
     }
 
     pub(super) fn alloc_string_list(

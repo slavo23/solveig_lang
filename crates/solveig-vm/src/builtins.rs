@@ -24,12 +24,12 @@ use solveig_ast::ast::{
     BUILTIN_NEW_CHAN, BUILTIN_OPEN_FILE, BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR, BUILTIN_PURE_IO,
     BUILTIN_RAISE_DEFECT_IO, BUILTIN_READ_FILE, BUILTIN_READ_FILE_BYTES, BUILTIN_READ_LINE,
     BUILTIN_RECV_BYTES, BUILTIN_RECV_CHAN, BUILTIN_REMOVE_FILE, BUILTIN_RENAME_FILE,
-    BUILTIN_RESOLVE_HOST, BUILTIN_RESTORE_MASK_IO, BUILTIN_SEND_BYTES, BUILTIN_SEND_CHAN,
-    BUILTIN_SET_CURRENT_DIRECTORY, BUILTIN_SET_ENV, BUILTIN_SLEEP, BUILTIN_SPAWN, BUILTIN_STDERR,
-    BUILTIN_STDIN, BUILTIN_STDOUT, BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT,
-    BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE,
-    BUILTIN_STRING_TO_BYTES, BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE,
-    BUILTIN_WRITE_FILE_BYTES, BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
+    BUILTIN_RESOLVE_HOST, BUILTIN_RESTORE_MASK_IO, BUILTIN_RUN_PROCESS, BUILTIN_SEND_BYTES,
+    BUILTIN_SEND_CHAN, BUILTIN_SET_CURRENT_DIRECTORY, BUILTIN_SET_ENV, BUILTIN_SLEEP,
+    BUILTIN_SPAWN, BUILTIN_STDERR, BUILTIN_STDIN, BUILTIN_STDOUT, BUILTIN_STRING_APPEND,
+    BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH,
+    BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_BYTES, BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN,
+    BUILTIN_WRITE_FILE, BUILTIN_WRITE_FILE_BYTES, BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
 };
 
 use crate::heap::{HeapObject, IoAction};
@@ -161,6 +161,26 @@ impl<'context, 'runtime> VmCtx<'context, 'runtime> {
             field0,
             field1,
         }))
+    }
+
+    pub(crate) fn alloc_data3_ctor(
+        &mut self,
+        role: CtorRuntimeRole,
+        field0: Value,
+        field1: Value,
+        field2: Value,
+        builtin: &str,
+    ) -> Result<Value, RuntimeError> {
+        let tag = self.ctor_tag_with_arity(role, 3, builtin)?;
+        let mut fields = vec![field0, field1, field2];
+        let fields = self
+            .interpreter
+            .heap
+            .alloc_payload_from_stack_tail(&mut fields, 3);
+        Ok(self
+            .interpreter
+            .heap
+            .alloc(HeapObject::DataN { tag, fields }))
     }
 
     pub(crate) fn alloc_list_from_values(
@@ -375,6 +395,7 @@ static ALL_BUILTINS: &[Builtin] = &[
         1,
         get_modification_time
     ),
+    builtin!(BUILTIN_RUN_PROCESS, "runProcess", 2, run_process_action),
     builtin!(BUILTIN_SPAWN, "spawn", 1, spawn),
     builtin!(BUILTIN_NEW_CHAN, "newChan", 0, new_chan),
     builtin!(

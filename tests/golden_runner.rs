@@ -143,7 +143,13 @@ fn case_stdin(case_name: &str, case_root: &Path) -> String {
 fn case_args(case_name: &str, case_root: &Path) -> Vec<String> {
     let args_path = case_root.join("args.txt");
     match fs::read_to_string(&args_path) {
-        Ok(args) => args.lines().map(|arg| arg.to_string()).collect(),
+        Ok(args) => args
+            .lines()
+            .map(|arg| match arg {
+                "$SOLVEIG_EXE" => env!("CARGO_BIN_EXE_solveig").to_string(),
+                arg => arg.to_string(),
+            })
+            .collect(),
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => Vec::new(),
         Err(err) => panic!(
             "failed to read args for `{case_name}` at {}: {err}",

@@ -230,6 +230,10 @@ pub fn prelude_buffer_mode_tycon_id(names: &mut Names) -> TyConId {
     names.tycon_id(PRELUDE_BUFFER_MODE_NAME)
 }
 
+pub fn prelude_process_result_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_PROCESS_RESULT_NAME)
+}
+
 pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
     match names.ctor_display_name(ctor).as_str() {
         PRELUDE_MAYBE_JUST_NAME => CtorRuntimeRole::PreludeMaybeJust,
@@ -280,6 +284,8 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         PRELUDE_IO_ERROR_GET_MODIFICATION_TIME_NAME => {
             CtorRuntimeRole::PreludeIoErrorGetModificationTime
         }
+        PRELUDE_IO_ERROR_RUN_PROCESS_NAME => CtorRuntimeRole::PreludeIoErrorRunProcess,
+        PRELUDE_PROCESS_RESULT_CTOR_NAME => CtorRuntimeRole::PreludeProcessResult,
         PRELUDE_IO_MODE_READ_NAME => CtorRuntimeRole::PreludeIoModeRead,
         PRELUDE_IO_MODE_WRITE_NAME => CtorRuntimeRole::PreludeIoModeWrite,
         PRELUDE_IO_MODE_APPEND_NAME => CtorRuntimeRole::PreludeIoModeAppend,
@@ -545,6 +551,8 @@ pub enum CtorRuntimeRole {
     PreludeIoErrorRenameFile,
     PreludeIoErrorGetFileSize,
     PreludeIoErrorGetModificationTime,
+    PreludeIoErrorRunProcess,
+    PreludeProcessResult,
     PreludeIoModeRead,
     PreludeIoModeWrite,
     PreludeIoModeAppend,

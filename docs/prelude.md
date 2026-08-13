@@ -40,6 +40,7 @@ data Maybe a = Just a | Nothing
 data Either a b = Left a | Right b
 data Pair a b = MkPair a b
 data Result e a = Ok a | Err e
+data ProcessResult = MkProcessResult Int String String
 data Never
 data IOError =
     StdoutError String
@@ -74,6 +75,7 @@ data IOError =
   | RenameFileError String String String
   | GetFileSizeError String String
   | GetModificationTimeError String String
+  | RunProcessError String String
 data IOMode = ReadMode | WriteMode | AppendMode | ReadWriteMode
 data BufferMode = NoBuffering | LineBuffering | BlockBuffering (Maybe Int)
 data Defect =
@@ -145,6 +147,10 @@ removeFile : String -> Task ()
 renameFile : String -> String -> Task ()
 getFileSize : String -> Task Int
 getModificationTime : String -> Task Int
+runProcess : String -> [String] -> Task ProcessResult
+processExitCode : ProcessResult -> Int
+processStdout : ProcessResult -> String
+processStderr : ProcessResult -> String
 spawn : forall childError e. IO childError () -> IO e ThreadId
 killThread : ThreadId -> Task ()
 sleep : Int -> Task ()
@@ -188,6 +194,12 @@ paths resolve against the logical working directory, directory listings are
 sorted, file sizes are bytes, and modification times are nanoseconds since the
 Unix epoch. See [`io.md`](io.md) for validation, errors, determinism, and
 platform behavior.
+
+`runProcess` performs no shell interpretation, inherits the runtime-local
+environment and cwd, closes child stdin, and strictly captures UTF-8 stdout and
+stderr. Non-zero status remains a successful `ProcessResult`; start/capture
+failures use `RunProcessError`. See [`io.md`](io.md) for executable lookup,
+status, cancellation, memory, and platform semantics.
 
 `Bytes` is immutable arbitrary byte data, distinct from UTF-8 `String`.
 `stringToBytes` encodes UTF-8; `bytesToString` returns `Err (InvalidUtf8 ...)`
@@ -580,6 +592,10 @@ removeFile : String -> IO IOError ()
 renameFile : String -> String -> IO IOError ()
 getFileSize : String -> IO IOError Int
 getModificationTime : String -> IO IOError Int
+runProcess : String -> [String] -> IO IOError ProcessResult
+processExitCode : ProcessResult -> Int
+processStdout : ProcessResult -> String
+processStderr : ProcessResult -> String
 openFile : String -> IOMode -> IO IOError Handle
 hClose : Handle -> IO IOError ()
 hFlush : Handle -> IO IOError ()

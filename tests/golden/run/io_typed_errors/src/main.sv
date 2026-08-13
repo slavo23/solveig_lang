@@ -41,6 +41,7 @@ reportMapped error =
         | RenameFileError _ _ _ => printLine "unexpected-rename-file"
         | GetFileSizeError _ _ => printLine "unexpected-file-size"
         | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
+        | RunProcessError _ _ => printLine "unexpected-run-process"
 
 reportRead : IOError -> Task ()
 reportRead error =
@@ -77,6 +78,7 @@ reportRead error =
         | RenameFileError _ _ _ => printLine "unexpected-rename-file"
         | GetFileSizeError _ _ => printLine "unexpected-file-size"
         | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
+        | RunProcessError _ _ => printLine "unexpected-run-process"
 
 reportWrite : IOError -> Task ()
 reportWrite error =
@@ -113,6 +115,7 @@ reportWrite error =
         | RenameFileError _ _ _ => printLine "unexpected-rename-file"
         | GetFileSizeError _ _ => printLine "unexpected-file-size"
         | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
+        | RunProcessError _ _ => printLine "unexpected-run-process"
 
 reportAppend : IOError -> Task ()
 reportAppend error =
@@ -149,6 +152,7 @@ reportAppend error =
         | RenameFileError _ _ _ => printLine "unexpected-rename-file"
         | GetFileSizeError _ _ => printLine "unexpected-file-size"
         | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
+        | RunProcessError _ _ => printLine "unexpected-run-process"
 
 releaseResource : String -> Task ()
 releaseResource name = printLine (appendString "release " name)

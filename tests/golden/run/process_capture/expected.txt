@@ -1,0 +1,8 @@
+exit=0
+inherited
+alpha
+two words
+child-stderr
+failure-exit=2
+failure-stderr
+run-process-error

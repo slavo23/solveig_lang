@@ -192,6 +192,10 @@ pub enum IoAction {
     },
     Environment(EnvironmentAction),
     Filesystem(FilesystemAction),
+    RunProcess {
+        program: Value,
+        arguments: Value,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]

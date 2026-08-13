@@ -326,6 +326,12 @@ impl Interpreter<'_> {
             IoFailure::SetEnv(message) => {
                 self.alloc_string_ctor(CtorRuntimeRole::PreludeIoErrorSetEnv, &message, "setEnv")
             }
+            IoFailure::Process(failure) => self.alloc_io_error2(
+                CtorRuntimeRole::PreludeIoErrorRunProcess,
+                &failure.program,
+                &failure.source.to_string(),
+                "runProcess",
+            ),
             IoFailure::Filesystem(failure) => match failure {
                 FilesystemFailure::GetCurrentDirectory(source) => self.alloc_string_ctor(
                     CtorRuntimeRole::PreludeIoErrorGetCurrentDirectory,
@@ -498,12 +504,19 @@ impl Interpreter<'_> {
             self.temporary_roots.push(field);
         }
         self.safe_point();
-        let tag = VmCtx::new(self).ctor_tag_with_arity(role, 3, builtin)?;
-        let mut rooted_fields = self.temporary_roots.split_off(checkpoint);
-        let fields = self
-            .heap
-            .alloc_payload_from_stack_tail(&mut rooted_fields, 3);
-        let result = self.heap.alloc(HeapObject::DataN { tag, fields });
+        let first = *self
+            .temporary_roots
+            .get(checkpoint)
+            .expect("ICE: first IO error field root disappeared during allocation");
+        let second = *self
+            .temporary_roots
+            .get(checkpoint + 1)
+            .expect("ICE: second IO error field root disappeared during allocation");
+        let third = *self
+            .temporary_roots
+            .get(checkpoint + 2)
+            .expect("ICE: third IO error field root disappeared during allocation");
+        let result = VmCtx::new(self).alloc_data3_ctor(role, first, second, third, builtin)?;
         self.temporary_roots.truncate(checkpoint);
         Ok(result)
     }

@@ -15,8 +15,10 @@ use std::thread;
 use std::time::Duration;
 
 pub(super) mod filesystem;
+pub(super) mod process;
 
 use filesystem::{FilesystemFailure, FilesystemRequest};
+use process::{ProcessFailure, ProcessOutput, ProcessRequest};
 
 use super::socket::{SocketRequest, SocketSubsystem};
 
@@ -37,6 +39,7 @@ pub(super) enum IoRequest {
         contents: Vec<u8>,
     },
     Filesystem(FilesystemRequest),
+    Process(ProcessRequest),
     ResolveHost(String),
     Connect {
         host: String,
@@ -69,6 +72,7 @@ pub(super) enum IoResult {
     Int(i64),
     TextList(Vec<String>),
     DirectoryChanged(PathBuf),
+    Process(ProcessOutput),
     Failed(IoFailure),
 }
 
@@ -87,6 +91,7 @@ pub(super) enum IoFailure {
     GetEnv(String),
     SetEnv(String),
     Filesystem(FilesystemFailure),
+    Process(ProcessFailure),
     ResolveHost {
         host: String,
         source: io::Error,
@@ -261,6 +266,7 @@ impl IoSubsystem {
             | IoRequest::WriteFile { .. }
             | IoRequest::WriteFileBytes { .. }
             | IoRequest::Filesystem(_)
+            | IoRequest::Process(_)
             | IoRequest::ResolveHost(_) => {
                 1 + self.next_worker % (self.workers.len().saturating_sub(1))
             }
@@ -527,6 +533,7 @@ fn perform_request(
             }),
         },
         IoRequest::Filesystem(request) => filesystem::perform(request),
+        IoRequest::Process(request) => process::perform(request),
         IoRequest::ResolveHost(host) => perform_resolve_host(host),
         IoRequest::Handle(request) => match handles.perform(request, stdin, stdout, stderr) {
             Ok(HandleOutput::Unit) => IoResult::Unit,

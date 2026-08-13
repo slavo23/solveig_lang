@@ -83,3 +83,12 @@ pub(super) fn rename_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Val
         })),
     )
 }
+
+pub(super) fn run_process_action(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let program = expect_value(args, 0, "runProcess")?;
+    let arguments = expect_value(args, 1, "runProcess")?;
+    Ok(ctx.alloc_io_action(IoAction::RunProcess { program, arguments }))
+}

@@ -68,7 +68,11 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
         | IoAction::ReadFileBytes { path }
         | IoAction::OpenFile { path, .. } => visit(path),
         IoAction::WriteFile { path, contents, .. }
-        | IoAction::WriteFileBytes { path, contents } => {
+        | IoAction::WriteFileBytes { path, contents }
+        | IoAction::RunProcess {
+            program: path,
+            arguments: contents,
+        } => {
             visit(path);
             visit(contents);
         }
@@ -150,7 +154,11 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
         | IoAction::ReadFileBytes { path }
         | IoAction::OpenFile { path, .. } => visit(path),
         IoAction::WriteFile { path, contents, .. }
-        | IoAction::WriteFileBytes { path, contents } => {
+        | IoAction::WriteFileBytes { path, contents }
+        | IoAction::RunProcess {
+            program: path,
+            arguments: contents,
+        } => {
             visit(path);
             visit(contents);
         }

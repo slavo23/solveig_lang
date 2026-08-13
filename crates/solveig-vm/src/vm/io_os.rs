@@ -4,9 +4,12 @@
 
 use super::io_worker::IoFailure;
 use super::io_worker::filesystem::{FilesystemFailure, FilesystemRequest};
+use super::io_worker::process::ProcessRequest;
 use super::*;
-use crate::heap::{EnvironmentAction, FilesystemAction};
+use crate::builtins::VmCtx;
+use crate::heap::{EnvironmentAction, FilesystemAction, HeapObject};
 use crate::values::Value;
+use solveig_ast::ast::CtorRuntimeRole;
 
 pub(super) enum EnvironmentOutcome {
     Value(Value),
@@ -126,6 +129,69 @@ impl Interpreter<'_> {
             }
         };
         Ok(FilesystemOutcome::Request(request))
+    }
+
+    pub(super) fn prepare_process_request(
+        &mut self,
+        program: Value,
+        arguments: Value,
+    ) -> Result<ProcessRequest, RuntimeError> {
+        let program = self.expect_string_value(program, "runProcess")?;
+        let arguments = self.expect_string_list_value(arguments, "runProcess")?;
+        let program_path = std::path::Path::new(&program);
+        let executable = if program_path.is_absolute() || program_path.components().count() == 1 {
+            program_path.to_path_buf()
+        } else {
+            self.io.resolve_path(&program)
+        };
+        Ok(ProcessRequest {
+            program,
+            executable,
+            arguments,
+            cwd: self.io.current_directory().to_path_buf(),
+            environment: self
+                .io
+                .environment()
+                .iter()
+                .map(|(name, value)| (name.clone(), value.clone()))
+                .collect(),
+        })
+    }
+
+    fn expect_string_list_value(
+        &mut self,
+        mut current: Value,
+        builtin: &str,
+    ) -> Result<Vec<String>, RuntimeError> {
+        let nil_tag =
+            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludeListNil, 0, builtin)?;
+        let cons_tag =
+            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludeListCons, 2, builtin)?;
+        let mut strings = Vec::new();
+
+        loop {
+            let Value::Obj(id) = current else {
+                return Err(RuntimeError::builtin(format!(
+                    "{builtin} expected [String] list spine"
+                )));
+            };
+            match self.heap.get(id) {
+                HeapObject::Data0 { tag } if *tag == nil_tag => return Ok(strings),
+                HeapObject::Data2 {
+                    tag,
+                    field0,
+                    field1,
+                } if *tag == cons_tag => {
+                    strings.push(self.expect_string_value(*field0, builtin)?);
+                    current = *field1;
+                }
+                _ => {
+                    return Err(RuntimeError::builtin(format!(
+                        "{builtin} expected [String] list spine"
+                    )));
+                }
+            }
+        }
     }
 
     fn resolve_filesystem_path(
