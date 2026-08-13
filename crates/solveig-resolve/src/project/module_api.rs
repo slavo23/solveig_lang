@@ -562,6 +562,9 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "bytesSlice" => "Takes a byte slice from a starting index and length.",
         "bytesAppend" => "Concatenates two byte strings.",
         "connect" => "Opens a TCP connection to an IP address or localhost.",
+        "resolveHost" => {
+            "Resolves a host name to an IPv4 address without blocking other green threads."
+        }
         "listen" => "Binds a loopback TCP listener and returns its actual port.",
         "accept" => "Accepts the next connection from a TCP listener.",
         "sendBytes" => "Sends an entire byte string on a connected TCP socket.",

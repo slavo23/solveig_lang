@@ -5,6 +5,7 @@
 use super::*;
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, Write};
+use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
 use std::thread;
@@ -23,6 +24,7 @@ pub(super) enum IoRequest {
         contents: String,
         append: bool,
     },
+    ResolveHost(String),
     Connect {
         host: String,
         port: i64,
@@ -61,6 +63,10 @@ pub(super) enum IoFailure {
     WriteFile {
         path: PathBuf,
         append: bool,
+        source: io::Error,
+    },
+    ResolveHost {
+        host: String,
         source: io::Error,
     },
     Connect {
@@ -173,8 +179,8 @@ impl IoSubsystem {
         }
         let worker_index = match &request {
             // A single FIFO worker preserves the program-visible order of
-            // operations on the shared terminal streams. File requests can
-            // still run concurrently on the rest of the pool.
+            // operations on the shared terminal streams. File and resolver
+            // requests can still run concurrently on the rest of the pool.
             IoRequest::Print(_)
             | IoRequest::ReadLine
             | IoRequest::Connect { .. }
@@ -183,7 +189,7 @@ impl IoSubsystem {
             | IoRequest::SendBytes { .. }
             | IoRequest::RecvBytes { .. }
             | IoRequest::CloseSocket(_) => 0,
-            IoRequest::ReadFile(_) | IoRequest::WriteFile { .. } => {
+            IoRequest::ReadFile(_) | IoRequest::WriteFile { .. } | IoRequest::ResolveHost(_) => {
                 1 + self.next_worker % (self.workers.len().saturating_sub(1))
             }
         };
@@ -376,6 +382,7 @@ fn perform_request(
             contents,
             append,
         } => perform_write_file(path, &contents, append),
+        IoRequest::ResolveHost(host) => perform_resolve_host(host),
         IoRequest::Connect { .. }
         | IoRequest::Listen { .. }
         | IoRequest::Accept(_)
@@ -384,6 +391,20 @@ fn perform_request(
         | IoRequest::CloseSocket(_) => {
             solveig_base::ice!("socket request reached the blocking worker pool")
         }
+    }
+}
+
+fn perform_resolve_host(host: String) -> IoResult {
+    let addresses = match (host.as_str(), 0).to_socket_addrs() {
+        Ok(addresses) => addresses,
+        Err(source) => return IoResult::Failed(IoFailure::ResolveHost { host, source }),
+    };
+    match addresses.into_iter().find(|address| address.is_ipv4()) {
+        Some(address) => IoResult::Text(address.ip().to_string()),
+        None => IoResult::Failed(IoFailure::ResolveHost {
+            host,
+            source: io::Error::new(io::ErrorKind::AddrNotAvailable, "host has no IPv4 address"),
+        }),
     }
 }
 

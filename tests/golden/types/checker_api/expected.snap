@@ -69,6 +69,7 @@ prelude.builtins.readFile : String -> IO IOError String
 prelude.builtins.readLine : IO IOError String
 prelude.builtins.recv : forall a. Chan a -> IO IOError a
 prelude.builtins.recvBytes : Socket -> Int -> IO IOError Bytes
+prelude.builtins.resolveHost : String -> IO IOError String
 prelude.builtins.send : forall a. Chan a -> a -> IO IOError ()
 prelude.builtins.sendBytes : Socket -> Bytes -> IO IOError ()
 prelude.builtins.sleep : Int -> IO IOError ()
@@ -155,6 +156,7 @@ prelude.prim.readFile : String -> IO IOError String
 prelude.prim.readLine : IO IOError String
 prelude.prim.recv : forall a. Chan a -> IO IOError a
 prelude.prim.recvBytes : Socket -> Int -> IO IOError Bytes
+prelude.prim.resolveHost : String -> IO IOError String
 prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
 prelude.prim.send : forall a. Chan a -> a -> IO IOError ()
 prelude.prim.sendBytes : Socket -> Bytes -> IO IOError ()

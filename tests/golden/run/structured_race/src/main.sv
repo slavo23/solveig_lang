@@ -34,6 +34,7 @@ reportError ioError =
         | WriteFileError path message => printLine "unexpected write error"
         | AppendFileError path message => printLine "unexpected append error"
         | InvalidUtf8 message => printLine "unexpected UTF-8 error"
+        | ResolveHostError message => printLine "unexpected resolve host error"
         | ConnectError message => printLine "unexpected connect error"
         | ListenError message => printLine "unexpected listen error"
         | AcceptError message => printLine "unexpected accept error"

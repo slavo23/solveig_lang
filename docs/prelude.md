@@ -49,6 +49,7 @@ data IOError =
   | AppendFileError String String
   | ChannelClosed
   | InvalidUtf8 String
+  | ResolveHostError String
   | ConnectError String
   | ListenError String
   | AcceptError String
@@ -109,6 +110,7 @@ bytesLength : Bytes -> Int
 bytesIndex : Bytes -> Int -> Maybe Int
 bytesSlice : Bytes -> Int -> Int -> Bytes
 bytesAppend : Bytes -> Bytes -> Bytes
+resolveHost : String -> Task String
 connect : String -> Int -> Task Socket
 listen : Int -> Task (Pair Socket Int)
 accept : Socket -> Task Socket
@@ -131,7 +133,9 @@ indexing returns `Nothing`, and slicing clamps negative and oversized bounds.
 
 `listen` binds an IPv4 loopback listener. Port zero asks the OS to choose a
 free port, returned with the listener as `MkPair listener actualPort`.
-`connect` accepts an IP literal or `localhost`; DNS is not part of J5.
+`resolveHost` resolves a name on the blocking IO pool and returns one IPv4
+address, so it does not stall the scheduler or the readiness thread. `connect`
+accepts that IP literal or `localhost`; it does not perform DNS itself.
 `sendBytes` completes only after the full buffer is sent. `recvBytes` returns
 at most its non-negative maximum and returns empty bytes at EOF. Sockets are
 closed only by explicit, idempotent `closeSocket`; GC does not close them.

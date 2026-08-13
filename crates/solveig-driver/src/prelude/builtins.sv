@@ -45,6 +45,8 @@ data IOError =
     ChannelClosed
   | -- | A byte string is not valid UTF-8 text.
     InvalidUtf8 String
+  | -- | Resolving a host name to an IPv4 address failed.
+    ResolveHostError String
   | -- | Opening a TCP connection failed.
     ConnectError String
   | -- | Binding a TCP listener failed.
@@ -397,6 +399,10 @@ bytesAppend left right = prelude.prim.bytesAppend left right;
 -- | Opens a TCP connection to an IP address or localhost.
 connect : String -> Int -> Task Socket;
 connect host port = prelude.prim.connect host port;
+
+-- | Resolves a host name to an IPv4 address without blocking other green threads.
+resolveHost : String -> Task String;
+resolveHost host = prelude.prim.resolveHost host;
 
 -- | Binds a loopback TCP listener and returns its actual port.
 listen : Int -> Task (Pair Socket Int);

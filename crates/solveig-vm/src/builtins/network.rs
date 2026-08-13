@@ -12,6 +12,11 @@ pub(super) fn connect(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, 
     Ok(ctx.alloc_io_action(IoAction::Connect { host, port }))
 }
 
+pub(super) fn resolve_host(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let host = expect_value(args, 0, "resolveHost")?;
+    Ok(ctx.alloc_io_action(IoAction::ResolveHost { host }))
+}
+
 pub(super) fn listen(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let port = expect_int(args, 0, "listen")?;
     Ok(ctx.alloc_io_action(IoAction::Listen { port }))

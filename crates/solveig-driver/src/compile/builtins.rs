@@ -90,6 +90,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         ),
         string.clone(),
     );
+    let resolve_host = unary(string.clone(), io_of(io_error.clone(), string.clone()));
     let listener_result = Ty::make_app(
         Ty::make_app(
             Ty::make_con_id(prelude_pair_tycon_id(names)),
@@ -366,6 +367,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
                 io_of(io_error.clone(), socket.clone()),
             ),
         ),
+        prim_spec("resolveHost", BUILTIN_RESOLVE_HOST, 1, resolve_host),
         prim_spec(
             "listen",
             BUILTIN_LISTEN,

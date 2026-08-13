@@ -125,11 +125,13 @@ Run the Scry mini rule engine:
 solveig --project-root examples/scry < examples/scry/sample-input.txt
 ```
 
-Run the hermetic concurrent HTTP downloader:
+Run the concurrent internet HTTP downloader:
 
 ```bash
 solveig --project-root examples/concurrent_downloader
 ```
+
+Pass `-- --local` for its deterministic in-program server mode.
 
 ## Command Line
 
@@ -356,7 +358,7 @@ Solveig currently supports:
 - project-relative UTF-8 text file IO
 - typed FIFO channels, interruption, scoped masking, lightweight timers, and
   structured `withThread`/`race`/`concurrently`/`timeout` combinators
-- immutable byte strings and readiness-driven loopback TCP sockets
+- immutable byte strings, blocking-pool DNS, and readiness-driven TCP sockets
 - structured diagnostics with stable codes
 - typed holes with LSP diagnostics and quick-fix fill suggestions
 
@@ -464,9 +466,9 @@ See [docs/diagnostics.md](docs/diagnostics.md) for the full code index.
   scores answers, writes `last-score.txt`, and appends `score-history.txt`.
 - `examples/scry` is a mini S-expression rule engine with facts, rules,
   recursive queries, file IO, and an interactive prompt.
-- `examples/concurrent_downloader` fetches several HTTP resources through a
-  bounded-channel worker pool from its own loopback server, reports progress,
-  and recovers a typed request failure.
+- `examples/concurrent_downloader` resolves and fetches several plain-HTTP
+  internet resources through a bounded-channel worker pool, writes four fixed
+  ignored outputs, and retains a hermetic `--local` mode for tests.
 - `tests/golden/run/` contains small executable regression cases.
 - `tests/golden/diag/` contains diagnostic regression cases.
 

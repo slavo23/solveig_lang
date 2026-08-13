@@ -653,11 +653,13 @@ consumed, so a `RequestId` identifies at most one outstanding operation. The
 table contains the process association rather than encoding it in the id.
 
 Terminal reads and writes share worker zero and therefore retain submission
-order on the caller-provided streams. File requests are distributed
+order on the caller-provided streams. File and DNS requests are distributed
 round-robin across the other three workers and may finish in a different order;
-each completion wakes only its requesting process. Stream references are
-borrowed by scoped workers and protected by `Mutex` because multiple worker
-threads exist, but the mutex does not protect compiler or VM heap state.
+each completion wakes only its requesting process. DNS produces an owned IPv4
+address string before `connect` submits it to the socket thread. Stream
+references are borrowed by scoped workers and protected by `Mutex` because
+multiple worker threads exist, but the mutex does not protect compiler or VM
+heap state.
 
 TCP resources live only in the socket thread's monotonic side table keyed by
 `SocketId`. A Solveig `Socket` value is the typed id, never an OS descriptor or

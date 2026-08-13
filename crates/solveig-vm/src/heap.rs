@@ -114,6 +114,9 @@ pub enum IoAction {
     Sleep {
         milliseconds: i64,
     },
+    ResolveHost {
+        host: Value,
+    },
     Connect {
         host: Value,
         port: i64,

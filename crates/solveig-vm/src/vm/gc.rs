@@ -436,6 +436,7 @@ fn rewrite_io_action(
         | IoAction::KillThread { thread: value }
         | IoAction::Mask { action: value }
         | IoAction::RestoreMask { action: value }
+        | IoAction::ResolveHost { host: value }
         | IoAction::Connect { host: value, .. }
         | IoAction::Accept { socket: value }
         | IoAction::RecvBytes { socket: value, .. }
@@ -625,6 +626,7 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
         | IoAction::KillThread { thread: value }
         | IoAction::Mask { action: value }
         | IoAction::RestoreMask { action: value }
+        | IoAction::ResolveHost { host: value }
         | IoAction::Connect { host: value, .. }
         | IoAction::Accept { socket: value }
         | IoAction::RecvBytes { socket: value, .. }
@@ -740,6 +742,7 @@ fn assert_object_children_live(
             | IoAction::KillThread { thread: value }
             | IoAction::Mask { action: value }
             | IoAction::RestoreMask { action: value }
+            | IoAction::ResolveHost { host: value }
             | IoAction::Connect { host: value, .. }
             | IoAction::Accept { socket: value }
             | IoAction::RecvBytes { socket: value, .. }

@@ -349,6 +349,14 @@ impl Interpreter<'_> {
                     self.status = ProcStatus::Blocked(BlockReason::Timer(deadline));
                     return Err(StepOutcome::Blocked);
                 }
+                IoAction::ResolveHost { host } => {
+                    let host = self.expect_string_value(host, "resolveHost")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::ResolveHost(host));
+                }
                 IoAction::Connect { host, port } => {
                     let host = self.expect_string_value(host, "connect")?;
                     if let Some(interruption) = self.accept_pending_interruption_at_block() {
@@ -847,6 +855,11 @@ impl Interpreter<'_> {
                 CtorRuntimeRole::PreludeIoErrorConnect,
                 &format!("{host}:{port}: {source}"),
                 "connect",
+            ),
+            IoFailure::ResolveHost { host, source } => self.alloc_string_ctor(
+                CtorRuntimeRole::PreludeIoErrorResolveHost,
+                &format!("{host}: {source}"),
+                "resolveHost",
             ),
             IoFailure::Listen { port, source } => self.alloc_string_ctor(
                 CtorRuntimeRole::PreludeIoErrorListen,

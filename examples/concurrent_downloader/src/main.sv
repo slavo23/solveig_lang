@@ -1,4 +1,4 @@
-data DownloadJob = DownloadJob String
+data DownloadJob = DownloadJob String String
 
 data DownloadResult =
     Downloaded Int
@@ -8,6 +8,9 @@ data DownloadStats = DownloadStats Int Int Int
 
 emptyBytes : Bytes
 emptyBytes = stringToBytes ""
+
+maxResponseBytes : Int
+maxResponseBytes = 1048576
 
 byteIs : Bytes -> Int -> Int -> Bool
 byteIs bytes index expected =
@@ -48,16 +51,20 @@ readResponse socket accumulated = do
     chunk <- recvBytes socket 1024
     if bytesLength chunk == 0 then
         pureIO accumulated
+    else if bytesLength accumulated + bytesLength chunk > maxResponseBytes then
+        failIO (RecvError "HTTP response exceeded the one-megabyte limit")
     else
         readResponse socket (bytesAppend accumulated chunk)
 
-makeRequest : String -> String
-makeRequest path =
+makeRequest : String -> String -> String
+makeRequest host path =
     appendString
         "GET "
         (appendString
             path
-            " HTTP/1.0\u{d}\nHost: localhost\u{d}\nConnection: close\u{d}\n\u{d}\n")
+            (appendString
+                " HTTP/1.0\u{d}\nHost: "
+                (appendString host "\u{d}\nConnection: close\u{d}\n\u{d}\n")))
 
 makeResponse : String -> String -> String
 makeResponse status body =
@@ -73,11 +80,11 @@ makeResponse status body =
 
 responseFor : String -> String
 responseFor request =
-    if request == makeRequest "/alpha" then
+    if request == makeRequest "localhost" "/alpha" then
         makeResponse "200 OK" "alpha"
-    else if request == makeRequest "/bravo" then
+    else if request == makeRequest "localhost" "/bravo" then
         makeResponse "200 OK" "bravo!"
-    else if request == makeRequest "/charlie" then
+    else if request == makeRequest "localhost" "/charlie" then
         makeResponse "200 OK" "charlie"
     else
         makeResponse "404 Not Found" "not found"
@@ -117,9 +124,9 @@ responseBody response =
             Ok (bytesSlice response start (bytesLength response - start))
         | Nothing => Err (RecvError "HTTP response has no header terminator")
 
-fetchWith : String -> Socket -> Task Bytes
-fetchWith path socket = do
-    sendBytes socket (stringToBytes (makeRequest path))
+fetchWith : String -> String -> Socket -> Task Bytes
+fetchWith host path socket = do
+    sendBytes socket (stringToBytes (makeRequest host path))
     response <- readResponse socket emptyBytes
     if successfulStatus response then
         case responseBody response of
@@ -128,42 +135,67 @@ fetchWith path socket = do
     else
         failIO (RecvError (appendString "HTTP request failed: " path))
 
-fetch : Int -> String -> Task Bytes
-fetch port path =
+fetch : String -> Int -> String -> String -> Task Bytes
+fetch address port host path =
     bracket
-        (connect "127.0.0.1" port)
+        (connect address port)
         closeSocket
-        (fetchWith path)
+        (fetchWith host path)
 
-download : Chan DownloadResult -> Int -> DownloadJob -> Task ()
-download results port (DownloadJob path) =
+download : Chan DownloadResult -> (String -> Int -> String -> String -> Task (Maybe Bytes)) -> String -> Int -> String -> DownloadJob -> Task ()
+download results fetcher address port host (DownloadJob path output) =
     catchError
-        (downloadAttempt results port path)
+        (downloadAttempt results fetcher address port host path output)
         (fun error => send results DownloadFailed)
 
-downloadAttempt : Chan DownloadResult -> Int -> String -> Task ()
-downloadAttempt results port path = do
-    body <- fetch port path
-    send results (Downloaded (bytesLength body))
+fetchLocal : String -> Int -> String -> String -> Task (Maybe Bytes)
+fetchLocal address port host path = do
+    body <- fetch address port host path
+    pureIO (Just body)
 
-worker : Chan DownloadJob -> Chan DownloadResult -> Int -> Task ()
-worker jobs results port =
+fetchInternet : String -> Int -> String -> String -> Task (Maybe Bytes)
+fetchInternet address port host path =
+    timeout 5000 (fetch address port host path)
+
+downloadAttempt : Chan DownloadResult -> (String -> Int -> String -> String -> Task (Maybe Bytes)) -> String -> Int -> String -> String -> String -> Task ()
+downloadAttempt results fetcher address port host path output = do
+    writeFile output ""
+    fetched <- fetcher address port host path
+    case fetched of
+        Just body =>
+            case bytesToString body of
+                Ok contents => do
+                    writeFile output contents
+                    send results (Downloaded (bytesLength body))
+                | Err error => failIO error
+        | Nothing => failIO (RecvError "HTTP request timed out after five seconds")
+
+worker : Chan DownloadJob -> Chan DownloadResult -> (String -> Int -> String -> String -> Task (Maybe Bytes)) -> String -> Int -> String -> Task ()
+worker jobs results fetcher address port host =
     catchError
-        (workerStep jobs results port)
+        (workerStep jobs results fetcher address port host)
         (fun error => pureIO ())
 
-workerStep : Chan DownloadJob -> Chan DownloadResult -> Int -> Task ()
-workerStep jobs results port = do
+workerStep : Chan DownloadJob -> Chan DownloadResult -> (String -> Int -> String -> String -> Task (Maybe Bytes)) -> String -> Int -> String -> Task ()
+workerStep jobs results fetcher address port host = do
     job <- recv jobs
-    download results port job
-    worker jobs results port
+    download results fetcher address port host job
+    worker jobs results fetcher address port host
 
-enqueueJobs : Chan DownloadJob -> Task ()
-enqueueJobs jobs = do
-    send jobs (DownloadJob "/alpha")
-    send jobs (DownloadJob "/missing")
-    send jobs (DownloadJob "/bravo")
-    send jobs (DownloadJob "/charlie")
+enqueueLocalJobs : Chan DownloadJob -> Task ()
+enqueueLocalJobs jobs = do
+    send jobs (DownloadJob "/alpha" "downloads/download-1.txt")
+    send jobs (DownloadJob "/missing" "downloads/download-2.txt")
+    send jobs (DownloadJob "/bravo" "downloads/download-3.txt")
+    send jobs (DownloadJob "/charlie" "downloads/download-4.txt")
+    closeChan jobs
+
+enqueueInternetJobs : Chan DownloadJob -> Task ()
+enqueueInternetJobs jobs = do
+    send jobs (DownloadJob "/?solveig=1" "downloads/download-1.txt")
+    send jobs (DownloadJob "/?solveig=2" "downloads/download-2.txt")
+    send jobs (DownloadJob "/?solveig=3" "downloads/download-3.txt")
+    send jobs (DownloadJob "/?solveig=4" "downloads/download-4.txt")
     closeChan jobs
 
 collect : Chan DownloadResult -> Int -> Int -> Int -> Int -> Task DownloadStats
@@ -202,32 +234,50 @@ printSummary (DownloadStats successes failures totalBytes) =
                             " failed, "
                             (appendString (show totalBytes) " bytes"))))))
 
-runPool : Int -> Task ()
-runPool port = do
+runPool : (String -> Int -> String -> String -> Task (Maybe Bytes)) -> String -> Int -> String -> (Chan DownloadJob -> Task ()) -> Task ()
+runPool fetcher address port host enqueue = do
     jobs <- newBoundedChan 2
     results <- newBoundedChan 4
     withThread
-        (worker jobs results port)
+        (worker jobs results fetcher address port host)
         (fun firstWorker =>
             withThread
-                (worker jobs results port)
+                (worker jobs results fetcher address port host)
                 (fun secondWorker => do
-                    enqueueJobs jobs
+                    enqueue jobs
                     stats <- collect results 4 0 0 0
                     closeChan results
                     printSummary stats))
 
-runExample : Socket -> Int -> Task ()
-runExample listener port =
+runLocalExample : String -> Socket -> Int -> Task ()
+runLocalExample address listener port =
     finally
         (withThread
             (serve listener 4)
-            (fun server => runPool port))
+            (fun server => runPool fetchLocal address port "localhost" enqueueLocalJobs))
         (closeSocket listener)
+
+runLocal : Task ()
+runLocal = do
+    address <- resolveHost "localhost"
+    listenerInfo <- listen 0
+    case listenerInfo of
+        MkPair listener port => runLocalExample address listener port
+
+runInternet : Task ()
+runInternet = do
+    printLine "downloading from http://neverssl.com with two workers"
+    address <- resolveHost "neverssl.com"
+    runPool fetchInternet address 80 "neverssl.com" enqueueInternetJobs
+
+useLocalServer : List String -> Bool
+useLocalServer args =
+    case args of
+        Cons first rest => first == "--local"
+        | Nil => False
 
 main : Task ()
 main = do
     printLine "downloader starting"
-    listenerInfo <- listen 0
-    case listenerInfo of
-        MkPair listener port => runExample listener port
+    args <- getArgs
+    if useLocalServer args then runLocal else runInternet

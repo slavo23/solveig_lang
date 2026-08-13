@@ -36,6 +36,7 @@ data IOError =
   | AppendFileError String String
   | ChannelClosed
   | InvalidUtf8 String
+  | ResolveHostError String
   | ConnectError String
   | ListenError String
   | AcceptError String
@@ -63,6 +64,15 @@ reportIOError ioError =
         | AppendFileError path message =>
             printLine (appendString path (appendString ": " message))
         | ChannelClosed => printLine "channel closed"
+        | ResolveHostError message =>
+            printLine (appendString "host resolution: " message)
+        | InvalidUtf8 message => printLine (appendString "invalid UTF-8: " message)
+        | ConnectError message => printLine (appendString "connect: " message)
+        | ListenError message => printLine (appendString "listen: " message)
+        | AcceptError message => printLine (appendString "accept: " message)
+        | SendError message => printLine (appendString "send: " message)
+        | RecvError message => printLine (appendString "receive: " message)
+        | CloseSocketError message => printLine (appendString "close: " message)
 
 printSettings : Task ()
 printSettings = do
