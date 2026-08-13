@@ -85,7 +85,8 @@ impl Interpreter<'_> {
                     return Ok(());
                 }
                 Continuation::IoRestoreMask(mask_depth)
-                | Continuation::IoRestoreInterruption { mask_depth, .. } => {
+                | Continuation::IoRestoreInterruption { mask_depth, .. }
+                | Continuation::IoRestoreExit { mask_depth, .. } => {
                     self.mask_depth = mask_depth;
                 }
                 Continuation::IoCatchDefect(handler) => {

@@ -151,6 +151,9 @@ runProcess : String -> [String] -> Task ProcessResult
 processExitCode : ProcessResult -> Int
 processStdout : ProcessResult -> String
 processStderr : ProcessResult -> String
+exitWith : forall a. Int -> Task a
+exitSuccess : forall a. Task a
+exitFailure : forall a. Task a
 spawn : forall childError e. IO childError () -> IO e ThreadId
 killThread : ThreadId -> Task ()
 sleep : Int -> Task ()
@@ -200,6 +203,13 @@ environment and cwd, closes child stdin, and strictly captures UTF-8 stdout and
 stderr. Non-zero status remains a successful `ProcessResult`; start/capture
 failures use `RunProcessError`. See [`io.md`](io.md) for executable lookup,
 status, cancellation, memory, and platform semantics.
+
+`exitWith` is a non-returning main-thread exit action. It bypasses ordinary
+error and defect handlers, runs installed cleanup, interrupts and drains sibling
+green threads, flushes output handles, and returns the requested status to the
+host. `exitSuccess` uses zero and `exitFailure` uses one. An exit escaping a
+spawned thread ends only that thread. See [`io.md`](io.md) for cleanup,
+cancellation, flushing, and platform status details.
 
 `Bytes` is immutable arbitrary byte data, distinct from UTF-8 `String`.
 `stringToBytes` encodes UTF-8; `bytesToString` returns `Err (InvalidUtf8 ...)`
@@ -596,6 +606,9 @@ runProcess : String -> [String] -> IO IOError ProcessResult
 processExitCode : ProcessResult -> Int
 processStdout : ProcessResult -> String
 processStderr : ProcessResult -> String
+exitWith : forall a. Int -> IO IOError a
+exitSuccess : forall a. IO IOError a
+exitFailure : forall a. IO IOError a
 openFile : String -> IOMode -> IO IOError Handle
 hClose : Handle -> IO IOError ()
 hFlush : Handle -> IO IOError ()

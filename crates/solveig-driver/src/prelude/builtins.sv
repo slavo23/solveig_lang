@@ -513,6 +513,18 @@ getFileSize path = prelude.prim.getFileSize path;
 getModificationTime : String -> Task Int;
 getModificationTime path = prelude.prim.getModificationTime path;
 
+-- | Terminates the main program with a host exit status after cleanup.
+exitWith : forall a. Int -> Task a;
+exitWith status = prelude.prim.exitWith status;
+
+-- | Terminates the main program successfully after cleanup.
+exitSuccess : forall a. Task a;
+exitSuccess = exitWith 0;
+
+-- | Terminates the main program unsuccessfully after cleanup.
+exitFailure : forall a. Task a;
+exitFailure = exitWith 1;
+
 -- | Appends text to the end of a file.
 appendFile : String -> String -> Task ();
 appendFile path contents = prelude.prim.appendFile path contents;

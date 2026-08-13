@@ -107,12 +107,33 @@ fn run_cli_case(case_name: &str, case_root: &Path, stdin: &str, args: &[String])
         .wait_with_output()
         .unwrap_or_else(|err| panic!("golden run case `{case_name}` did not finish: {err}"));
 
-    let expected_success = !case_root.join("expected.failure").is_file();
-    assert_eq!(
-        output.status.success(),
-        expected_success,
-        "golden run case `{case_name}` exit status changed"
-    );
+    let expected_exit_path = case_root.join("expected.exit.txt");
+    if expected_exit_path.is_file() {
+        let expected_exit = fs::read_to_string(&expected_exit_path)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "golden run case `{case_name}` exit-code golden failed at {}: {err}",
+                    expected_exit_path.display()
+                )
+            })
+            .trim()
+            .parse::<i32>()
+            .unwrap_or_else(|err| {
+                panic!("golden run case `{case_name}` has an invalid exit code: {err}")
+            });
+        assert_eq!(
+            output.status.code(),
+            Some(expected_exit),
+            "golden run case `{case_name}` exit status changed"
+        );
+    } else {
+        let expected_success = !case_root.join("expected.failure").is_file();
+        assert_eq!(
+            output.status.success(),
+            expected_success,
+            "golden run case `{case_name}` exit status changed"
+        );
+    }
     let stderr = String::from_utf8(output.stderr)
         .unwrap_or_else(|err| panic!("golden run case `{case_name}` stderr was not UTF-8: {err}"));
     let stderr = stderr.replace(&case_root.display().to_string(), "$CASE");

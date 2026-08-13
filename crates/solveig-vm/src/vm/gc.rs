@@ -74,7 +74,8 @@ impl Roots<'_> {
                 BlockReason::Io(_) | BlockReason::Blackhole(_) | BlockReason::Timer(_),
             )
             | ProcStatus::Failed(_)
-            | ProcStatus::Interrupted(_) => {}
+            | ProcStatus::Interrupted(_)
+            | ProcStatus::Exited(_) => {}
         }
         if let Some(value) = &mut process.io_current {
             visit(value);
@@ -95,7 +96,8 @@ impl Roots<'_> {
                 | Continuation::PublishGlobalThenHalt { .. }
                 | Continuation::PublishGlobalThenResume { .. }
                 | Continuation::IoRestoreMask(_)
-                | Continuation::IoRestoreInterruption { .. } => {}
+                | Continuation::IoRestoreInterruption { .. }
+                | Continuation::IoRestoreExit { .. } => {}
             }
         }
     }

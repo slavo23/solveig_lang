@@ -92,3 +92,8 @@ pub(super) fn run_process_action(
     let arguments = expect_value(args, 1, "runProcess")?;
     Ok(ctx.alloc_io_action(IoAction::RunProcess { program, arguments }))
 }
+
+pub(super) fn exit_with(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let status = expect_int(args, 0, "exitWith")?;
+    Ok(ctx.alloc_io_action(IoAction::Exit { status }))
+}

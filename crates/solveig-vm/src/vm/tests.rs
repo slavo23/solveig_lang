@@ -139,7 +139,10 @@ fn call_safe_points_yield_and_resume_with_consistent_process_state() {
                 assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
             }
             StepOutcome::Finished(value) => break value,
-            StepOutcome::Blocked | StepOutcome::Failed(_) | StepOutcome::Interrupted(_) => {
+            StepOutcome::Blocked
+            | StepOutcome::Failed(_)
+            | StepOutcome::Interrupted(_)
+            | StepOutcome::Exited(_) => {
                 solveig_base::ice!("countdown process did not remain runnable")
             }
         }
@@ -250,7 +253,10 @@ fn io_callback_yields_and_resumes_through_the_same_safe_point() {
                 assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
             }
             StepOutcome::Finished(value) => break value,
-            StepOutcome::Blocked | StepOutcome::Failed(_) | StepOutcome::Interrupted(_) => {
+            StepOutcome::Blocked
+            | StepOutcome::Failed(_)
+            | StepOutcome::Interrupted(_)
+            | StepOutcome::Exited(_) => {
                 solveig_base::ice!("IO callback did not remain resumable")
             }
         }
@@ -426,7 +432,8 @@ fn typed_io_handler_frames_keep_their_values_live() {
             | Continuation::PublishGlobalThenResume { .. }
             | Continuation::IoBind(_)
             | Continuation::IoRestoreMask(_)
-            | Continuation::IoRestoreInterruption { .. } => {
+            | Continuation::IoRestoreInterruption { .. }
+            | Continuation::IoRestoreExit { .. } => {
                 solveig_base::ice!("typed IO root test found an unrelated continuation")
             }
         })
@@ -1511,7 +1518,7 @@ fn scheduler_completes_ten_thousand_threads() {
 
     assert_eq!(
         scheduler::schedule_io(&mut runtime, main, action, &stderr),
-        Ok(Value::Unit)
+        Ok((Value::Unit, ExitStatus::SUCCESS))
     );
     assert_eq!(
         runtime

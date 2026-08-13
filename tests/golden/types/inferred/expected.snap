@@ -29,6 +29,9 @@ prelude.builtins.doesDirectoryExist : String -> IO IOError Bool
 prelude.builtins.doesFileExist : String -> IO IOError Bool
 prelude.builtins.error : forall a. String -> a
 prelude.builtins.even : Int -> Bool
+prelude.builtins.exitFailure : forall a. IO IOError a
+prelude.builtins.exitSuccess : forall a. IO IOError a
+prelude.builtins.exitWith : forall a. Int -> IO IOError a
 prelude.builtins.failIO : forall e a. e -> IO e a
 prelude.builtins.finally : forall e a b. IO e a -> IO e b -> IO e a
 prelude.builtins.getCurrentDirectory : IO IOError String
@@ -126,6 +129,7 @@ prelude.prim.createDirectory : String -> IO IOError ()
 prelude.prim.doesDirectoryExist : String -> IO IOError Bool
 prelude.prim.doesFileExist : String -> IO IOError Bool
 prelude.prim.error : forall a. String -> a
+prelude.prim.exitWith : forall a. Int -> IO IOError a
 prelude.prim.failIO : forall e a. e -> IO e a
 prelude.prim.finallyIO : forall e a b. IO e a -> IO e b -> IO e a
 prelude.prim.floatAdd : Float -> Float -> Float

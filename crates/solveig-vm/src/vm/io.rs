@@ -127,6 +127,9 @@ impl Interpreter<'_> {
                     self.continuations.push(Continuation::IoFinally(cleanup));
                     self.io_current = Some(action);
                 }
+                IoAction::Exit { status } => {
+                    self.resume_io_exit(program, ExitStatus::new(status))?;
+                }
                 IoAction::Print { text, newline } => {
                     let mut text = self.expect_string_value(text, "IO print")?;
                     if newline {
@@ -615,6 +618,11 @@ impl Interpreter<'_> {
                     self.resume_io_interruption(program, interruption)?;
                     return Ok(None);
                 }
+                Continuation::IoRestoreExit { status, mask_depth } => {
+                    self.mask_depth = mask_depth;
+                    self.resume_io_exit(program, status)?;
+                    return Ok(None);
+                }
                 Continuation::Halt
                 | Continuation::CallerFrame { .. }
                 | Continuation::PublishGlobalThenHalt { .. }
@@ -658,7 +666,8 @@ impl Interpreter<'_> {
                     return Ok(None);
                 }
                 Continuation::IoRestoreMask(mask_depth)
-                | Continuation::IoRestoreInterruption { mask_depth, .. } => {
+                | Continuation::IoRestoreInterruption { mask_depth, .. }
+                | Continuation::IoRestoreExit { mask_depth, .. } => {
                     self.mask_depth = mask_depth;
                 }
                 Continuation::Halt

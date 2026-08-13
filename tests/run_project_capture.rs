@@ -403,6 +403,37 @@ main = do
 }
 
 #[test]
+fn cli_exit_flushes_an_open_file_and_propagates_its_status() {
+    let _guard = project_run_lock();
+    let project_root = write_temp_project(
+        "cli_exit_flush",
+        r#"main : Task ()
+main = do
+    output <- openFile "buffered.txt" WriteMode
+    hSetBuffering output (BlockBuffering (Just 4096))
+    hPutStr output "flushed during exit"
+    exitWith 37
+"#,
+    );
+
+    let output = Command::new(env!("CARGO_BIN_EXE_solveig"))
+        .arg("--project-root")
+        .arg(&project_root)
+        .output()
+        .expect("Solveig exit process should run");
+
+    assert_eq!(output.status.code(), Some(37));
+    assert!(output.stderr.is_empty());
+    assert_eq!(
+        fs::read_to_string(project_root.join("buffered.txt"))
+            .expect("open output handle should be flushed during exit"),
+        "flushed during exit"
+    );
+
+    drop(project_root);
+}
+
+#[test]
 fn primitive_int_division_by_zero_reports_runtime_error() {
     let _guard = project_run_lock();
     let project_root =

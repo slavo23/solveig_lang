@@ -67,9 +67,13 @@ fn main() {
         eprintln!("failed to print diagnostics: {report_err}");
     }
 
-    if let Err(err) = run_result {
-        eprintln!("{err}");
-        std::process::exit(1);
+    match run_result {
+        Ok(status) if !status.is_success() => std::process::exit(status.host_code()),
+        Ok(_) => {}
+        Err(err) => {
+            eprintln!("{err}");
+            std::process::exit(1);
+        }
     }
 }
 

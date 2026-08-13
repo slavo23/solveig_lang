@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::heap::IoAction;
+use std::collections::HashSet;
 use std::sync::Mutex;
 
 pub(super) fn run(runtime: &mut Runtime, process: &mut Process) -> StepOutcome {
@@ -129,7 +130,7 @@ pub(super) fn schedule_io(
     main: ProcessId,
     action: Value,
     stderr: &Mutex<&mut (dyn Write + Send)>,
-) -> Result<Value, RuntimeError> {
+) -> Result<(Value, ExitStatus), RuntimeError> {
     let main_process = &mut runtime.processes[main];
     main_process.io_current = Some(action);
     main_process.status = ProcStatus::Runnable;
@@ -150,7 +151,7 @@ pub(super) fn schedule_io(
                     }
                     report_thread_failure(stderr, id.into_raw().into_u32(), &error)?;
                 } else if id == main {
-                    return Ok(value);
+                    return Ok((value, ExitStatus::SUCCESS));
                 }
             }
             StepOutcome::Yielded | StepOutcome::Blocked => {}
@@ -165,8 +166,76 @@ pub(super) fn schedule_io(
                     ));
                 }
             }
+            StepOutcome::Exited(status) => {
+                if id == main {
+                    shutdown_siblings(runtime, main, stderr)?;
+                    return Ok((Value::Unit, status));
+                }
+            }
         }
     }
+}
+
+fn shutdown_siblings(
+    runtime: &mut Runtime,
+    main: ProcessId,
+    stderr: &Mutex<&mut (dyn Write + Send)>,
+) -> Result<(), RuntimeError> {
+    let mut interrupted = HashSet::new();
+    loop {
+        let live = runtime
+            .processes
+            .iter()
+            .filter_map(|(id, process)| {
+                (id != main && !process_is_terminal(&process.status)).then_some(id)
+            })
+            .collect::<Vec<_>>();
+        if live.is_empty() {
+            return Ok(());
+        }
+        let targets = live
+            .into_iter()
+            .filter(|id| interrupted.insert(*id))
+            .collect::<Vec<_>>();
+
+        if !targets.is_empty() {
+            let mut main_process = runtime.take_process(main);
+            {
+                let mut interpreter = Interpreter::new(runtime, &mut main_process);
+                for target in targets {
+                    interpreter.interrupt_thread(Value::ThreadId(target.into_raw().into_u32()))?;
+                }
+            }
+            runtime.restore_process(main_process);
+        }
+
+        let id = next_runnable(runtime)?;
+        let outcome = perform_process_io(runtime, id, Value::Unit);
+        match outcome {
+            StepOutcome::Finished(value) => {
+                if let Some(error) = unhandled_io_error(runtime, value) {
+                    report_thread_failure(stderr, id.into_raw().into_u32(), &error)?;
+                }
+            }
+            StepOutcome::Failed(error) => {
+                report_thread_failure(stderr, id.into_raw().into_u32(), &error)?;
+            }
+            StepOutcome::Yielded
+            | StepOutcome::Blocked
+            | StepOutcome::Interrupted(_)
+            | StepOutcome::Exited(_) => {}
+        }
+    }
+}
+
+fn process_is_terminal(status: &ProcStatus) -> bool {
+    matches!(
+        status,
+        ProcStatus::Finished(_)
+            | ProcStatus::Failed(_)
+            | ProcStatus::Interrupted(_)
+            | ProcStatus::Exited(_)
+    )
 }
 
 fn unhandled_io_error(runtime: &Runtime, value: Value) -> Option<RuntimeError> {

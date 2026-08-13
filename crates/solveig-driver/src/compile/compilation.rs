@@ -191,7 +191,7 @@ impl Compilation {
         &mut self,
         entry_name: &str,
         dump_bytecode: bool,
-    ) -> Result<(), DriverError> {
+    ) -> Result<ExitStatus, DriverError> {
         self.compile_and_run_project_with_options(
             entry_name,
             CompileOptions {
@@ -206,7 +206,7 @@ impl Compilation {
         &mut self,
         entry_name: &str,
         options: CompileOptions,
-    ) -> Result<(), DriverError> {
+    ) -> Result<ExitStatus, DriverError> {
         self.compile_and_run_project_with_options_and_args(entry_name, options, &[])
     }
 
@@ -229,7 +229,7 @@ impl Compilation {
         entry_name: &str,
         options: CompileOptions,
         args: &[String],
-    ) -> Result<(), DriverError> {
+    ) -> Result<ExitStatus, DriverError> {
         let mut stdin = io::BufReader::new(io::stdin());
         let mut stdout = io::stdout();
 
@@ -243,10 +243,10 @@ impl Compilation {
         stdin: &mut (dyn BufRead + Send),
         stdout: &mut (dyn Write + Send),
         args: &[String],
-    ) -> Result<(), DriverError> {
+    ) -> Result<ExitStatus, DriverError> {
         let prepared = self.prepare_project_run(entry_name, options)?;
 
-        if prepared.entry_is_io {
+        let exit_status = if prepared.entry_is_io {
             Machine::exec_io_with_streams(
                 &prepared.cc,
                 &prepared.entry_fq,
@@ -255,7 +255,8 @@ impl Compilation {
                 args,
                 &self.project_root,
             )
-            .map_err(|err| DriverError::runtime(err.to_string()))?;
+            .map_err(|err| DriverError::runtime(err.to_string()))?
+            .exit_status()
         } else if let Some(show_entry) = prepared.show_entry {
             let result = Machine::exec(&prepared.cc, &show_entry)
                 .map_err(|err| DriverError::runtime(err.to_string()))?;
@@ -263,14 +264,16 @@ impl Compilation {
                 .as_string()
                 .ok_or_else(|| DriverError::runtime("Show main did not return String"))?;
             writeln!(stdout, "{output}").map_err(|source| DriverError::WriteOutput { source })?;
+            ExitStatus::SUCCESS
         } else {
             let result = Machine::exec(&prepared.cc, &prepared.entry_fq)
                 .map_err(|err| DriverError::runtime(err.to_string()))?;
             writeln!(stdout, "{}", result.display())
                 .map_err(|source| DriverError::WriteOutput { source })?;
-        }
+            ExitStatus::SUCCESS
+        };
 
-        Ok(())
+        Ok(exit_status)
     }
 
     pub fn run_project_capture(&mut self, entry_name: &str) -> Result<String, DriverError> {
@@ -608,7 +611,7 @@ pub fn compile_and_run_project(
     project_root: &Path,
     entry_name: &str,
     dump_bytecode: bool,
-) -> Result<(), DriverError> {
+) -> Result<ExitStatus, DriverError> {
     Compilation::new(project_root).compile_and_run_project(entry_name, dump_bytecode)
 }
 
@@ -616,7 +619,7 @@ pub fn compile_and_run_project_with_options(
     project_root: &Path,
     entry_name: &str,
     options: CompileOptions,
-) -> Result<(), DriverError> {
+) -> Result<ExitStatus, DriverError> {
     Compilation::new(project_root).compile_and_run_project_with_options(entry_name, options)
 }
 
@@ -625,7 +628,7 @@ pub fn compile_and_run_project_with_options_and_args(
     entry_name: &str,
     options: CompileOptions,
     args: &[String],
-) -> Result<(), DriverError> {
+) -> Result<ExitStatus, DriverError> {
     Compilation::new(project_root)
         .compile_and_run_project_with_options_and_args(entry_name, options, args)
 }

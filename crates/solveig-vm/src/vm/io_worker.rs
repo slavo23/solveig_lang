@@ -495,7 +495,7 @@ fn worker_loop(
             })
             .is_err()
         {
-            return;
+            break;
         }
     }
     handles.shutdown(stdout, stderr);

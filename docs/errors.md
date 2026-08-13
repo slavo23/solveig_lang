@@ -1,21 +1,26 @@
-# Errors, Defects, and Interruption
+# Errors, Defects, Interruption, and Exit
 
-Solveig keeps three kinds of program failure separate. The distinction decides
-whether a failure appears in a type, whether ordinary sequencing can recover
-from it, and whether the runtime unwinds the current computation.
+Solveig keeps three kinds of program failure separate and models requested
+program exit as a fourth control outcome. The distinction decides whether an
+outcome appears in a type, whether ordinary sequencing can recover from it,
+and whether the runtime unwinds the current computation.
 
 | Channel | Examples | Visible in `IO e a` | Recovery |
 | --- | --- | --- | --- |
 | Typed error | File or terminal failure, a domain error | Yes, as `e` | `catchError`, `mapError`, or `orElse` |
 | Defect | `error`, division by zero, managed exhaustion | No | `catchDefect` at an installed IO scope |
 | Interruption | A killed thread, timeout, or lost race | No | Not catchable as an ordinary error; cleanup still runs |
+| Program exit | `exitWith`, `exitSuccess`, or `exitFailure` | No | Not catchable as an ordinary error; cleanup still runs |
 
 Use a typed error when callers are expected to make a normal decision about
 the failure. Use a defect for a broken program assumption or an exhausted
 runtime resource. Interruption is external cancellation of otherwise valid
 work; it is neither a returned domain value nor a defect to suppress.
+Program exit is a requested control outcome rather than a failure: when it
+escapes `main`, the scheduler shuts down sibling work and returns its status to
+the host.
 
-VM infrastructure failures are outside these three language channels. A VM
+VM infrastructure failures are outside these language channels. A VM
 trap, cyclic global evaluation, or scheduler deadlock produces an uncatchable
 `RuntimeError`. `catchDefect` deliberately cannot turn a compiler or runtime
 invariant failure into an ordinary program value.
@@ -263,6 +268,19 @@ typed error. Scope cleanup waits for the cancelled child to finish unwinding,
 so no child survives its `withThread`, `race`, `concurrently`, or `timeout`
 scope.
 
+## Program exit
+
+`exitWith status` uses the same cleanup stack as interruption but remains a
+distinct synchronous outcome. `catchError` and `catchDefect` ignore it;
+`finally` and `bracket` run cleanup. If cleanup itself fails or raises a defect,
+that newer outcome replaces the exit request.
+
+Only an exit escaping `main` terminates the program. The scheduler interrupts
+each live sibling once, lets its installed cleanup finish, flushes worker-owned
+handles during runtime shutdown, and returns the requested status to the host.
+An exit escaping a spawned thread retires that thread without changing the
+main program's status.
+
 ## Pattern-match failures are compile-time errors
 
 An incomplete pattern match is not a fourth runtime failure channel. The type
@@ -286,6 +304,8 @@ runtime match exception is needed for either case.
   at a deliberate isolation boundary.
 - If work must be cancelled externally, use the structured interruption API
   introduced by Phase J rather than encoding cancellation as an error value.
+- If the whole program should terminate with a status, request program exit
+  from `main`; do not encode it as a typed error or defect.
 - If the VM reports an infrastructure failure, treat it as an implementation
   problem; program handlers cannot catch it.
 

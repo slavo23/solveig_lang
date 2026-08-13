@@ -49,7 +49,10 @@ impl Interpreter<'_> {
                 process.status = ProcStatus::Runnable;
                 self.run_queue.push_back(target);
             }
-            ProcStatus::Finished(_) | ProcStatus::Failed(_) | ProcStatus::Interrupted(_) => {}
+            ProcStatus::Finished(_)
+            | ProcStatus::Failed(_)
+            | ProcStatus::Interrupted(_)
+            | ProcStatus::Exited(_) => {}
             ProcStatus::Running => {
                 solveig_base::ice!("inactive process table contained a running process")
             }
@@ -150,7 +153,74 @@ impl Interpreter<'_> {
                     return Ok(());
                 }
                 Continuation::IoRestoreMask(mask_depth)
-                | Continuation::IoRestoreInterruption { mask_depth, .. } => {
+                | Continuation::IoRestoreInterruption { mask_depth, .. }
+                | Continuation::IoRestoreExit { mask_depth, .. } => {
+                    self.mask_depth = mask_depth;
+                }
+                Continuation::IoBind(_)
+                | Continuation::IoCatch(_)
+                | Continuation::IoCatchDefect(_)
+                | Continuation::IoRestore(_)
+                | Continuation::IoRestoreDefect(_) => {}
+            }
+        }
+    }
+
+    /// Unwinds a synchronous program-exit request through installed cleanup.
+    pub(super) fn resume_io_exit(
+        &mut self,
+        program: &BytecodeProgram,
+        status: ExitStatus,
+    ) -> Result<(), StepOutcome> {
+        self.io_current = None;
+        loop {
+            let frame_base = self.frame_base;
+            self.stack.truncate(frame_base);
+            let Some(frame) = self.continuations.pop() else {
+                return Err(StepOutcome::Exited(status));
+            };
+
+            match frame {
+                Continuation::CallerFrame {
+                    chunk,
+                    pc,
+                    frame_base,
+                } => {
+                    self.chunk = chunk;
+                    self.pc = pc;
+                    self.frame_base = frame_base;
+                }
+                Continuation::PublishGlobalThenResume {
+                    global_index,
+                    chunk,
+                    pc,
+                    frame_base,
+                } => {
+                    self.abandon_global_eval(program, GlobalIndex(global_index));
+                    self.chunk = chunk;
+                    self.pc = pc;
+                    self.frame_base = frame_base;
+                }
+                Continuation::PublishGlobalThenHalt { global_index } => {
+                    self.abandon_global_eval(program, GlobalIndex(global_index));
+                    self.frame_base = self.stack.len();
+                }
+                Continuation::Halt => {
+                    self.frame_base = self.stack.len();
+                }
+                Continuation::IoFinally(cleanup) => {
+                    let mask_depth = self.mask_depth;
+                    self.mask_depth = mask_depth.checked_add(1).unwrap_or_else(|| {
+                        solveig_base::ice!("cleanup mask depth overflowed before stack limit")
+                    });
+                    self.continuations
+                        .push(Continuation::IoRestoreExit { status, mask_depth });
+                    self.io_current = Some(cleanup);
+                    return Ok(());
+                }
+                Continuation::IoRestoreMask(mask_depth)
+                | Continuation::IoRestoreInterruption { mask_depth, .. }
+                | Continuation::IoRestoreExit { mask_depth, .. } => {
                     self.mask_depth = mask_depth;
                 }
                 Continuation::IoBind(_)

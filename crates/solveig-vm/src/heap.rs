@@ -196,6 +196,9 @@ pub enum IoAction {
         program: Value,
         arguments: Value,
     },
+    Exit {
+        status: i64,
+    },
 }
 
 #[derive(Debug, Clone, Copy)]

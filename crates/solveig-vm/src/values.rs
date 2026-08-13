@@ -132,6 +132,11 @@ pub enum Continuation {
         interruption: crate::vm::Interruption,
         mask_depth: u32,
     },
+    /// Resumes program-exit unwinding after masked cleanup succeeds.
+    IoRestoreExit {
+        status: crate::vm::ExitStatus,
+        mask_depth: u32,
+    },
 }
 
 // The pre-I1 layout measured 40 bytes; IO frames must not widen this hot type.

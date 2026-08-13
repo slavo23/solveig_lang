@@ -255,6 +255,36 @@ is a later feature and should be used instead for unbounded output once added.
 Interrupting the Solveig caller stops waiting for the result, but the underlying
 blocking host request may finish in the background before its worker is reused.
 
+## Program exit
+
+```solveig
+exitWith : forall a. Int -> Task a
+exitSuccess : forall a. Task a
+exitFailure : forall a. Task a
+```
+
+`exitWith status` starts synchronous exit unwinding. Typed-error and defect
+handlers do not catch it, while every installed `finally` or `bracket` cleanup
+runs before the request escapes its green thread. A cleanup failure or defect
+replaces the requested exit, just as it replaces any other outcome.
+
+An exit escaping `main` interrupts all other green threads once and drains their
+installed cleanup before returning the status to the host CLI. An exit from a
+spawned thread ends only that thread; call `exitWith` from `main` to terminate
+the program. `exitSuccess` requests zero and `exitFailure` requests one.
+
+When shutdown completes, all worker-owned output handles—including open file
+handles and the standard output streams—are flushed before library execution
+returns or the CLI exits. Shutdown flush errors cannot replace an exit already
+in progress. A blocking host operation that cannot be cancelled, such as the
+capture-only `runProcess`, may still delay worker-pool shutdown even though its
+green thread has stopped waiting.
+
+The `Int` is narrowed to the host's 32-bit process status, whose final
+interpretation is operating-system dependent. Values from 0 through 255 are
+the portable choice; Unix-like systems ordinarily expose only the low eight
+bits to a parent process.
+
 ## Platform notes
 
 File sharing and permission errors retain the host operating system's message

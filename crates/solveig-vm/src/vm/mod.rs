@@ -122,6 +122,38 @@ enum ChannelResult {
 pub enum Interruption {
     Killed,
 }
+
+/// The host status requested by a Solveig program.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExitStatus(i64);
+
+impl ExitStatus {
+    /// Represents ordinary successful completion.
+    pub const SUCCESS: Self = Self(0);
+
+    pub(crate) fn new(code: i64) -> Self {
+        Self(code)
+    }
+
+    /// Returns the full Solveig status before host narrowing.
+    pub fn code(self) -> i64 {
+        self.0
+    }
+
+    /// Reports whether this status denotes success.
+    pub fn is_success(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Narrows the status to the host process API's 32-bit representation.
+    pub fn host_code(self) -> i32 {
+        let modulus = i64::from(u32::MAX) + 1;
+        let low_bits = u32::try_from(self.0.rem_euclid(modulus))
+            .unwrap_or_else(|_| solveig_base::ice!("32-bit remainder exceeded u32"));
+        i32::from_ne_bytes(low_bits.to_ne_bytes())
+    }
+}
+
 /// Describes whether a process may run or why it has stopped.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProcStatus {
@@ -131,6 +163,7 @@ pub enum ProcStatus {
     Finished(Value),
     Failed(RuntimeError),
     Interrupted(Interruption),
+    Exited(ExitStatus),
 }
 
 /// Describes the resource that prevents a process from running.
@@ -171,6 +204,7 @@ pub enum StepOutcome {
     Finished(Value),
     Failed(RuntimeError),
     Interrupted(Interruption),
+    Exited(ExitStatus),
 }
 
 pub(crate) struct Interpreter<'a> {
@@ -251,13 +285,15 @@ impl Process {
                 | ProcStatus::Running
                 | ProcStatus::Finished(_)
                 | ProcStatus::Failed(_)
-                | ProcStatus::Interrupted(_) => {
+                | ProcStatus::Interrupted(_)
+                | ProcStatus::Exited(_) => {
                     solveig_base::ice!("blocked step returned without a block reason")
                 }
             },
             StepOutcome::Finished(value) => ProcStatus::Finished(*value),
             StepOutcome::Failed(error) => ProcStatus::Failed(error.clone()),
             StepOutcome::Interrupted(interruption) => ProcStatus::Interrupted(*interruption),
+            StepOutcome::Exited(status) => ProcStatus::Exited(*status),
         };
     }
 
@@ -295,7 +331,8 @@ impl Process {
                 | Continuation::IoRestore(_)
                 | Continuation::IoRestoreDefect(_)
                 | Continuation::IoRestoreMask(_)
-                | Continuation::IoRestoreInterruption { .. } => None,
+                | Continuation::IoRestoreInterruption { .. }
+                | Continuation::IoRestoreExit { .. } => None,
             }
         }))
     }
@@ -421,7 +458,7 @@ impl Runtime {
                 process.timer_result = None;
                 process.continuations.clear();
             }
-            StepOutcome::Interrupted(_) => {
+            StepOutcome::Interrupted(_) | StepOutcome::Exited(_) => {
                 process.io_current = None;
                 process.io_result = None;
                 process.channel_result = None;
@@ -470,11 +507,12 @@ impl Runtime {
         }
     }
 
-    fn into_eval_result(self, root: Value) -> EvalResult {
+    fn into_eval_result(self, root: Value, exit_status: ExitStatus) -> EvalResult {
         EvalResult {
             root,
             heap: self.heap,
             constructor_arities: self.program.constructor_arities,
+            exit_status,
         }
     }
 }
@@ -574,7 +612,8 @@ fn owned_globals(process: &Process) -> Vec<GlobalIndex> {
             | Continuation::IoRestore(_)
             | Continuation::IoRestoreDefect(_)
             | Continuation::IoRestoreMask(_)
-            | Continuation::IoRestoreInterruption { .. } => None,
+            | Continuation::IoRestoreInterruption { .. }
+            | Continuation::IoRestoreExit { .. } => None,
         })
         .collect()
 }
@@ -585,6 +624,9 @@ fn outcome_value(outcome: StepOutcome) -> Result<Value, RuntimeError> {
         StepOutcome::Failed(error) => Err(error),
         StepOutcome::Interrupted(_) => Err(RuntimeError::builtin(
             "main thread was interrupted".to_string(),
+        )),
+        StepOutcome::Exited(_) => Err(RuntimeError::builtin(
+            "program exit escaped pure evaluation".to_string(),
         )),
         StepOutcome::Yielded | StepOutcome::Blocked => {
             solveig_base::ice!("single-process execution stopped before producing a value")
@@ -620,6 +662,7 @@ pub struct EvalResult {
     root: Value,
     heap: Heap,
     constructor_arities: Vec<CtorRuntimeInfo>,
+    exit_status: ExitStatus,
 }
 
 pub struct IoEvalResult {
@@ -731,7 +774,7 @@ impl Machine {
         let (_, outcome) = evaluate_entry(&mut runtime, entry);
         let root = outcome_value(outcome)?;
 
-        Ok(runtime.into_eval_result(root))
+        Ok(runtime.into_eval_result(root, ExitStatus::SUCCESS))
     }
 
     pub fn exec_io(
@@ -862,9 +905,9 @@ impl Machine {
             let mut runtime = Runtime::new_with_io_and_timers(program, io, timers);
             let (id, outcome) = evaluate_entry(&mut runtime, entry);
             let action = outcome_value(outcome)?;
-            let root = scheduler::schedule_io(&mut runtime, id, action, &stderr)?;
+            let (root, exit_status) = scheduler::schedule_io(&mut runtime, id, action, &stderr)?;
 
-            Ok(runtime.into_eval_result(root))
+            Ok(runtime.into_eval_result(root, exit_status))
         })
     }
 
@@ -878,6 +921,10 @@ impl Machine {
 }
 
 impl EvalResult {
+    pub fn exit_status(&self) -> ExitStatus {
+        self.exit_status
+    }
+
     pub fn display(&self) -> DisplayValue<'_> {
         DisplayValue {
             root: self.root,

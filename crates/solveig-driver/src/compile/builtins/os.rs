@@ -27,6 +27,8 @@ pub(super) fn os_builtin_specs(
     );
     let environment = Ty::make_app(Ty::make_con_id(prelude_list_tycon_id(names)), string_pair);
     let process_result = Ty::make_con_id(prelude_process_result_tycon_id(names));
+    let a_id = names.fresh_tyvar("a");
+    let a = Ty::TyVar(a_id);
 
     vec![
         prim_spec(
@@ -118,6 +120,12 @@ pub(super) fn os_builtin_specs(
             BUILTIN_RUN_PROCESS,
             2,
             arr(&[string.clone(), string_list], task(process_result)),
+        ),
+        prim_spec(
+            "exitWith",
+            BUILTIN_EXIT_WITH,
+            1,
+            poly_arr(&[a_id], std::slice::from_ref(int), task(a)),
         ),
     ]
 }

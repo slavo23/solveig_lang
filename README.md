@@ -355,7 +355,9 @@ Solveig currently supports:
 - indentation-sensitive `do` notation over the generic `Monad` class
 - terminal input/output
 - program args through `getArgs`
-- project-relative UTF-8 text file IO
+- explicit buffered handles plus UTF-8 and arbitrary-byte file IO
+- runtime-local environment and working-directory operations
+- shell-free child-process capture and cleanup-safe program exit statuses
 - typed FIFO channels, interruption, scoped masking, lightweight timers, and
   structured `withThread`/`race`/`concurrently`/`timeout` combinators
 - immutable byte strings, blocking-pool DNS, and readiness-driven TCP sockets
@@ -498,8 +500,10 @@ scope.
 - `do` notation supports variable binds, `_` binds, local `let` statements, and
   expression statements. Pattern binds are reserved for a later failure-semantics
   decision.
-- File IO is whole-file UTF-8 text IO. There are no handles or binary file
-  operations yet.
+- Captured subprocess output is strict UTF-8 and held in memory; streaming
+  subprocess IO is not implemented yet.
+- Open handles require explicit `hClose` or `withFile`; GC does not close host
+  resources.
 - `/` is currently `Fractional` and only has a `Float` instance. Use `div` and
   `mod` for Int division and modulo.
 - `String` concatenation is `appendString`; `+` is numeric.

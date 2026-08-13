@@ -148,11 +148,12 @@ the continuation stack.
 | `IoBind(continuation)` | Apply the saved Solveig continuation to the completed IO result and continue with the returned action. |
 | `IoCatch(handler)` | Handle the next typed failure below this frame; successful values pass through it. |
 | `IoCatchDefect(handler)` | Handle a defect raised while executing the action below this installed scope. |
-| `IoFinally(cleanup)` | Run cleanup after the action below finishes with a value, typed failure, defect, or interruption. |
+| `IoFinally(cleanup)` | Run cleanup after the action below finishes with a value, typed failure, defect, interruption, or program exit. |
 | `IoRestore(outcome)` | Resume the saved success or typed failure after cleanup succeeds. |
 | `IoRestoreDefect(defect)` | Resume defect unwinding after cleanup succeeds. |
 | `IoRestoreMask(depth)` | Restore the previous scoped interruption-mask depth. |
 | `IoRestoreInterruption { interruption, mask_depth }` | Restore masking and continue interruption unwind after cleanup succeeds. |
+| `IoRestoreExit { status, mask_depth }` | Restore masking and continue program-exit unwind after cleanup succeeds. |
 
 The enum is guarded at 40 bytes because `PublishGlobalThenResume` already sets
 its hot-path size; the IO frames must not widen it. GC traces the `Value`
@@ -509,6 +510,7 @@ The scheduler transition for each `StepOutcome` is fixed:
 | `Finished(value)` | Retain the finished value as a GC root. Main completion returns it and ends scheduling; a non-main process remains finished and is otherwise ignored. |
 | `Failed(error)` | Fail any globals owned by the process and clear its resumable state. Main failure returns the error; non-main failure is written to stderr. |
 | `Interrupted` | Revert interrupted global evaluations, run installed cleanup while unwinding, clear resumable state, and retire the process without reporting cancellation as an error. |
+| `Exited(status)` | Revert owned global evaluations and unwind installed cleanup. A child is retired; main triggers sibling shutdown and returns the status to the host boundary. |
 
 `spawn : forall childError e. IO childError () -> IO e ThreadId` constructs an
 inert IO action.
@@ -525,6 +527,10 @@ Program lifetime is owned by the main process:
   threads are joined before a library-backed execution call returns, so an
   already-running host call is allowed to finish without touching VM state.
 - When main fails, that `RuntimeError` terminates the program.
+- When `exitWith` escapes main, the scheduler interrupts every live sibling
+  once and drains its cleanup before returning the requested `ExitStatus`.
+  Runtime teardown then joins the IO workers and flushes every still-open
+  output handle. A child-thread exit retires only that child.
 - When a non-main process fails, the scheduler writes
   `thread <id> failed: <error>` to stderr, retires that process, and continues
   running the program. The failure does not propagate to main.
@@ -567,6 +573,12 @@ succeeds. A cleanup typed failure or defect replaces the interruption, matching
 the existing cleanup-precedence rule. No uninterruptible mask is exposed: the
 first interruption cannot land in runnable cleanup, while a later request may
 still stop cleanup at an indefinitely blocking operation.
+
+Program exit is a separate synchronous `StepOutcome::Exited(ExitStatus)`.
+Its unwind likewise skips typed-error and defect handlers, runs `IoFinally`
+cleanup masked, and resumes through `IoRestoreExit`. Main exit then uses the
+ordinary interruption machinery to cancel siblings; each sibling is signalled
+only once so shutdown cannot cancel the cleanup it just entered.
 
 ## Timers and virtual time
 
@@ -680,6 +692,10 @@ streams with `Command::output`; the scheduler later allocates the three-field
 `ProcessResult`. A non-zero status is data, while spawn/wait/UTF-8 failures map
 to `RunProcessError`. Cancellation tombstones the request like other blocking
 work; it does not synchronously kill a child already owned by a worker.
+
+Dropping the IO subsystem closes every worker queue. Each worker then flushes
+all open output handles before its scoped host thread joins; this also happens
+when its completion receiver has already closed during program exit.
 
 TCP resources live only in the socket thread's monotonic side table keyed by
 `SocketId`. A Solveig `Socket` value is the typed id, never an OS descriptor or
