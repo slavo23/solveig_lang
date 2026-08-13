@@ -1,3 +1,6 @@
+import std.task
+import std.thread
+import std.channel
 acquire : Chan () -> Task String
 acquire ready = do
     send ready ()

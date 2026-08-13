@@ -1,3 +1,4 @@
+import std.env
 main : Task ()
 main = do
     printStr "name> "

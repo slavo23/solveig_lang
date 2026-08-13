@@ -106,10 +106,10 @@ fn expect_handle(args: &[Value], index: usize, builtin: &str) -> Result<Value, R
 
 fn decode_file_mode(ctx: &VmCtx<'_, '_>, value: Value) -> Result<FileMode, RuntimeError> {
     Ok(match value_ctor(ctx, value, "openFile")?.0 {
-        CtorRuntimeRole::PreludeIoModeRead => FileMode::Read,
-        CtorRuntimeRole::PreludeIoModeWrite => FileMode::Write,
-        CtorRuntimeRole::PreludeIoModeAppend => FileMode::Append,
-        CtorRuntimeRole::PreludeIoModeReadWrite => FileMode::ReadWrite,
+        CtorRuntimeRole::StdIoModeRead => FileMode::Read,
+        CtorRuntimeRole::StdIoModeWrite => FileMode::Write,
+        CtorRuntimeRole::StdIoModeAppend => FileMode::Append,
+        CtorRuntimeRole::StdIoModeReadWrite => FileMode::ReadWrite,
         _ => {
             return Err(RuntimeError::builtin(
                 "openFile expected an IOMode".to_string(),
@@ -121,9 +121,9 @@ fn decode_file_mode(ctx: &VmCtx<'_, '_>, value: Value) -> Result<FileMode, Runti
 fn decode_buffering(ctx: &VmCtx<'_, '_>, value: Value) -> Result<Buffering, RuntimeError> {
     let (role, field) = value_ctor(ctx, value, "hSetBuffering")?;
     match role {
-        CtorRuntimeRole::PreludeBufferModeNone => Ok(Buffering::None),
-        CtorRuntimeRole::PreludeBufferModeLine => Ok(Buffering::Line),
-        CtorRuntimeRole::PreludeBufferModeBlock => {
+        CtorRuntimeRole::StdBufferModeNone => Ok(Buffering::None),
+        CtorRuntimeRole::StdBufferModeLine => Ok(Buffering::Line),
+        CtorRuntimeRole::StdBufferModeBlock => {
             let Some(size) = field else {
                 return Err(RuntimeError::builtin(
                     "BlockBuffering runtime value had no size field".to_string(),

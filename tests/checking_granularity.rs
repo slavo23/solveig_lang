@@ -69,7 +69,7 @@ valueC = 3
 fn module_set(modules: &[String]) -> BTreeSet<String> {
     modules
         .iter()
-        .filter(|module| !module.starts_with("prelude."))
+        .filter(|module| !module.starts_with("prelude.") && !module.starts_with("std."))
         .cloned()
         .collect()
 }
@@ -418,6 +418,61 @@ main = answer + 1
     );
 
     drop(container);
+}
+
+#[test]
+fn standard_library_names_require_an_explicit_import() {
+    let project_root = temp_project_root("explicit_std");
+    write_source(
+        &project_root.join("solveig.toml"),
+        r#"[package]
+name = "explicit_std"
+version = "0.1.0"
+
+[language]
+entry = "main"
+"#,
+    );
+    write_source(
+        &project_root.join("src/main.sv"),
+        r#"main : [Int]
+main = take 2 [1, 2, 3]
+"#,
+    );
+
+    let mut compilation = Compilation::new(&project_root);
+    let unimported = compilation
+        .check(true)
+        .expect("unimported std check should run");
+    assert!(
+        !unimported.success(),
+        "std.list names must not enter the implicit Prelude"
+    );
+
+    compilation.set_overlay(
+        "src/main.sv",
+        r#"import std.list(take)
+
+main : [Int]
+main = take 2 [1, 2, 3]
+"#,
+    );
+    let imported = compilation
+        .check(true)
+        .expect("explicit std import check should run");
+
+    assert!(
+        imported.success(),
+        "std.list should be explicitly importable"
+    );
+    assert!(
+        imported
+            .freshly_checked_modules()
+            .iter()
+            .any(|module| module == "explicit_std.main")
+    );
+
+    drop(project_root);
 }
 
 #[test]

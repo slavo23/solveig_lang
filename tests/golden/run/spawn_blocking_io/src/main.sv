@@ -1,3 +1,4 @@
+import std.thread
 reader : Task ()
 reader = do
     line <- readLine

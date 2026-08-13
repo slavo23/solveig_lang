@@ -1,3 +1,5 @@
+import std.thread
+import std.channel
 producer : Chan Int -> Chan () -> Chan () -> Task ()
 producer values ready done = do
     send values 20

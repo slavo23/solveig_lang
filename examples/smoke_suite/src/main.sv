@@ -1,3 +1,4 @@
+import std.list
 import nQueens(solveNQueensCount)
 import sudoku(solveBoard, samplePuzzle)
 import binaryTree(sampleTree)

@@ -13,6 +13,18 @@ sockets. Those host threads exchange owned Rust data with the scheduler; they
 never evaluate Solveig code or access VM values. This is concurrency, not
 parallel execution of Solveig programs.
 
+Concurrency capabilities are explicit standard-library imports. A typical
+networked program starts with the modules it actually needs:
+
+```solveig
+import std.channel
+import std.thread
+import std.task
+import std.time
+import std.bytes
+import std.net
+```
+
 The design follows the lightweight-thread and typed-channel model of Peyton
 Jones, Gordon, and Finne, “Concurrent Haskell” (POPL 1996). Interruption and
 masking follow Marlow, Peyton Jones, Moran, and Reppy, “Asynchronous Exceptions
@@ -22,15 +34,15 @@ in Haskell” (PLDI 2001). The structured combinator shapes follow Haskell's
 ## Runtime boundary
 
 The runtime implements only operations that need scheduler, heap, clock, or
-host-resource access. Higher-level lifetime policy remains ordinary Prelude
-code.
+host-resource access. Higher-level lifetime policy remains ordinary
+standard-library code.
 
 | Layer | Operations | Responsibility |
 |---|---|---|
 | Public runtime-backed operations | `spawn`, `killThread`, `mask`, `sleep`, `newChan`, `newBoundedChan`, `send`, `recv`, `tryRecv`, `closeChan` | Create or suspend processes, deliver interruption, and mutate channel state. |
 | Network runtime-backed operations | `resolveHost`, `connect`, `listen`, `accept`, `sendBytes`, `recvBytes`, `closeSocket` | Cross the host DNS and TCP boundary without blocking the scheduler. |
 | Private runtime primitives in `prelude.prim` | `maskIO`, `restoreMaskIO`, `finallyIO`, `raiseDefectIO` | Preserve mask state and exact outcomes while public cleanup/combinator code is expressed in Solveig. |
-| Public Prelude library | `finally`, `bracket`, `withThread`, `race`, `concurrently`, `timeout` | Define cleanup, child lifetime, result propagation, and cancellation policy using the primitives above. |
+| Public `std.task` library | `finally`, `bracket`, `withThread`, `race`, `concurrently`, `timeout` | Define cleanup, child lifetime, result propagation, and cancellation policy using the primitives above. |
 
 `MVar`, semaphores, actor mailboxes, supervision trees, STM, and async/await are
 not separate features. Typed channels plus structured scopes are the intended
@@ -168,7 +180,7 @@ Cleanup runs masked after success, typed failure, defect, or interruption. A
 cleanup typed failure or defect replaces the saved outcome. A later
 interruption can still stop cleanup if cleanup blocks.
 
-Use `bracket` for channels, sockets, and—when Phase L adds them—handles. The GC
+Use `bracket` for channels, sockets, and handles. The GC
 does not own external-resource lifetime, and `closeSocket` is explicit and
 idempotent.
 
@@ -181,7 +193,7 @@ concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
 timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 ```
 
-These functions are implemented in Prelude Solveig, using `bracket`,
+These functions are implemented in `std.task` using Solveig, `bracket`,
 `killThread`, and private typed channels:
 
 - `withThread child body` starts `child`, runs `body` with its identity, and

@@ -242,9 +242,12 @@ total values =
         | value :: rest => value + total rest
 ```
 
-The Prelude includes `map`, `filter`, `foldl`, `foldr`, `append`, `concat`,
-`take`, `drop`, `takeWhile`, `dropWhile`, `zip`, `zipWith`, `reverse`, and
-`range`.
+The Prelude includes the ubiquitous traversal operations `map`, `filter`,
+`foldl`, `foldr`, `append`, and `concat`. Extended operations are explicit:
+
+```solveig
+import std.list(take, drop, takeWhile, dropWhile, zip, zipWith, reverse, range)
+```
 
 A practical calculation is often a short pipeline:
 
@@ -323,16 +326,17 @@ import orders.pricing as pricing
 ```
 
 Every normal module implicitly imports `prelude.builtins`, `prelude.list`, and
-`prelude.typeclasses`. Low-level compiler primitives live in `prelude.prim` and
-must be selected explicitly:
+`prelude.typeclasses`. Domain APIs live in the non-implicit `std` package:
 
 ```solveig
-import prelude.prim(stringLength, stringToChars)
+import std.io(readFile)
+import std.list(take, zip)
+import std.text(stringToChars)
 ```
 
-Prefer public Prelude wrappers where they exist. Primitive imports make sense
-for operations such as string indexing that do not yet have a higher-level
-wrapper.
+Low-level compiler primitives remain in `prelude.prim`. Application code should
+prefer the public `std.*` wrapper where one exists. The explicit split keeps a
+new file, network, or collection operation from entering every module's scope.
 
 ## 8. Polymorphism, aliases, and higher-rank functions
 
@@ -447,6 +451,23 @@ when the intended grouping is not obvious.
 
 ## 11. IO as a value
 
+The practical IO sections use explicit domain imports. A module only needs the
+ones matching the work it performs:
+
+```solveig
+import std.env
+import std.io
+import std.fs
+import std.process
+import std.channel
+import std.thread
+import std.task
+import std.time
+import std.random
+import std.bytes
+import std.net
+```
+
 This distinction is the foundation of practical Solveig:
 
 ```solveig
@@ -538,6 +559,9 @@ shift-note/
 ```
 
 ```solveig
+import std.env(getArgs)
+import std.io(writeFile)
+
 notePath : [String] -> String
 notePath args =
     case args of
@@ -583,6 +607,12 @@ Keep `renderNote` pure. You can test it without files or input streams, and a
 future JSON or database frontend could reuse the same validated content.
 
 ## 13. Whole files, handles, and resource ownership
+
+The functions in this section come from `std.io`:
+
+```solveig
+import std.io
+```
 
 Use whole-file functions when the complete value comfortably fits memory:
 
@@ -708,6 +738,12 @@ cancellation and leaving a structured scope unable to finish.
 
 ## 15. Cleanup combinators
 
+Cleanup and defect scopes are provided by `std.task`:
+
+```solveig
+import std.task(catchDefect, finally, bracket)
+```
+
 Use cleanup policy instead of open-coded acquire/use/release sequences:
 
 ```solveig
@@ -760,6 +796,15 @@ error. Prefer `withThread`, `concurrently`, `race`, or `timeout` when lifetime
 or results matter.
 
 ## 17. Typed channels and backpressure
+
+Channel operations are explicit:
+
+```solveig
+import std.channel
+import std.thread(spawn)
+import std.task(withThread, concurrently)
+import std.time(sleep)
+```
 
 Channels are mutable FIFO queues with a type for their messages:
 
@@ -892,6 +937,10 @@ virtual-time worker delays.
 
 ## 18. Structured concurrency
 
+```solveig
+import std.task(withThread, concurrently, race, timeout)
+```
+
 Structured combinators connect a child's lifetime to a lexical scope:
 
 ```solveig
@@ -965,6 +1014,11 @@ waits for its cleanup. The child cannot leak into the next session.
 
 ## 19. Determinism, clocks, and randomness
 
+```solveig
+import std.time
+import std.random
+```
+
 Concurrent host IO may finish in any order. Make observable results
 deterministic by design:
 
@@ -1023,6 +1077,14 @@ The generator is clock-seeded and non-cryptographic: never use it for keys,
 tokens, passwords, or security nonces.
 
 ## 20. Environment, processes, and TCP
+
+```solveig
+import std.env
+import std.fs
+import std.process
+import std.bytes
+import std.net
+```
 
 Environment and filesystem state are runtime-local where host APIs permit:
 
@@ -1179,6 +1241,8 @@ The repository includes several programs with different lessons:
 Then use the focused references:
 
 - [Prelude reference](prelude.md) for exact signatures.
+- [Standard library](standard-library.md) for module boundaries, imports, and
+  exact host-facing APIs.
 - [Input and output](io.md) for encoding, buffering, platform behavior, and
   resource ownership.
 - [Errors, defects, and interruption](errors.md) for recovery and cleanup.

@@ -1,345 +1,104 @@
 # Solveig Prelude Reference
 
+The Prelude is the small, stable vocabulary automatically available to every
+ordinary module. It is intentionally limited to names that almost every
+program can reasonably want in scope. Domain APIs—files, processes, channels,
+networking, clocks, randomness, and extended list operations—live in explicit
+`std.*` modules documented in [standard-library.md](standard-library.md).
+
 Every ordinary module implicitly imports:
 
 - `prelude.builtins`
 - `prelude.list`
 - `prelude.typeclasses`
 
-The compiler also provides `prelude.prim`, a low-level primitive module. It is
-not imported implicitly; user programs usually prefer the wrappers and classes
-from the ordinary Prelude.
+`prelude.prim` is the compiler bridge used to implement the public libraries.
+Application code should import `std.*`, not `prelude.prim`, unless it is
+deliberately testing or extending the primitive boundary.
 
-## Primitive Types
+## Primitive types
 
-These types are compiler-known:
+The compiler provides these types:
 
 ```solveig
 Int
 Float
 Char
 String
-IO e a
 Bool
+()
+IO error value
 ThreadId
-Chan a
+Chan value
 Bytes
 Socket
 Handle
 StdGen
-()
 ```
 
-`Int` is a signed 64-bit integer. `Float` is an IEEE-754 `f64`. `String` is
-immutable UTF-8 text. `IO e a` is an abstract monadic action that may fail with
-`e` or succeed with `a`.
+The opaque runtime types have no numeric operations. Their values are created
+and consumed through the appropriate explicit standard-library module.
 
-See [Errors, Defects, and Interruption](errors.md) for the semantic distinction
-between typed errors, defects, interruption, and VM infrastructure failures.
-
-## `prelude.builtins`
-
-### Data Types
+## Fundamental data
 
 ```solveig
 data Maybe a = Just a | Nothing
 data Either a b = Left a | Right b
-data Pair a b = MkPair a b
 data Result e a = Ok a | Err e
-data ProcessResult = MkProcessResult Int String String
+data Pair a b = MkPair a b
 data Never
-data IOError =
-    StdoutError String
-  | StdinError String
-  | ReadFileError String String
-  | WriteFileError String String
-  | AppendFileError String String
-  | ChannelClosed
-  | InvalidUtf8 String
-  | ResolveHostError String
-  | ConnectError String
-  | ListenError String
-  | AcceptError String
-  | SendError String
-  | RecvError String
-  | CloseSocketError String
-  | OpenHandleError String String
-  | CloseHandleError String
-  | FlushHandleError String
-  | ReadHandleError String
-  | WriteHandleError String
-  | SetBufferingError String
-  | GetEnvError String
-  | SetEnvError String
-  | GetCurrentDirectoryError String
-  | SetCurrentDirectoryError String String
-  | DoesFileExistError String String
-  | DoesDirectoryExistError String String
-  | ListDirectoryError String String
-  | CreateDirectoryError String String
-  | RemoveFileError String String
-  | RenameFileError String String String
-  | GetFileSizeError String String
-  | GetModificationTimeError String String
-  | RunProcessError String String
-data IOMode = ReadMode | WriteMode | AppendMode | ReadWriteMode
-data BufferMode = NoBuffering | LineBuffering | BlockBuffering (Maybe Int)
+```
+
+`Maybe` represents absence. `Result` represents a pure expected failure.
+`Either` carries one of two alternatives. `Pair` is the small positional
+product used by APIs that return two values.
+
+## Typed IO and defects
+
+```solveig
+type Task a = IO IOError a
+
+pureIO : forall e a. a -> IO e a
+bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
+failIO : forall e a. e -> IO e a
+catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a
+mapError : forall e f a. (e -> f) -> IO e a -> IO f a
+orElse : forall e f a. IO e a -> IO f a -> IO f a
+error : forall a. String -> a
+```
+
+`IOError` is the closed error vocabulary produced by built-in host operations.
+Its constructors stay in the Prelude because `Task` uses that type and callers
+must be able to handle failures precisely. Defects remain distinct:
+
+```solveig
 data Defect =
     Error String
   | DivisionByZero
   | StackExhausted
   | HeapExhausted
-type Task a = IO IOError a
 ```
 
-`Bool` is compiler-defined and exported as:
+Defect handling, cleanup, masking, and structured concurrency are explicit in
+`std.task`.
+
+Three console conveniences remain universal:
 
 ```solveig
-True : Bool
-False : Bool
-```
-
-### IO
-
-```solveig
-pureIO : forall e a. a -> IO e a
-bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
-failIO : forall e a. e -> IO e a
-error : forall a. String -> a
-catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a
-catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
-mapError : forall e f a. (e -> f) -> IO e a -> IO f a
-orElse : forall e f a. IO e a -> IO f a -> IO f a
-finally : forall e a b. IO e a -> IO e b -> IO e a
-bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
-withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
-race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
-concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
-timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 printLine : String -> Task ()
 printStr : String -> Task ()
 readLine : Task String
-getEnv : String -> Task (Maybe String)
-setEnv : String -> String -> Task ()
-getEnvironment : Task [Pair String String]
-getProgName : Task String
-stdin : Handle
-stdout : Handle
-stderr : Handle
-openFile : String -> IOMode -> Task Handle
-hClose : Handle -> Task ()
-hFlush : Handle -> Task ()
-hGetLine : Handle -> Task String
-hGetContents : Handle -> Task String
-hGetBytes : Handle -> Int -> Task Bytes
-hPutStr : Handle -> String -> Task ()
-hPutStrLn : Handle -> String -> Task ()
-hPutBytes : Handle -> Bytes -> Task ()
-hIsEOF : Handle -> Task Bool
-hSetBuffering : Handle -> BufferMode -> Task ()
-withFile : forall a. String -> IOMode -> (Handle -> Task a) -> Task a
-readFile : String -> Task String
-readFileBytes : String -> Task Bytes
-writeFile : String -> String -> Task ()
-writeFileBytes : String -> Bytes -> Task ()
-appendFile : String -> String -> Task ()
-getCurrentDirectory : Task String
-setCurrentDirectory : String -> Task ()
-doesFileExist : String -> Task Bool
-doesDirectoryExist : String -> Task Bool
-listDirectory : String -> Task [String]
-createDirectory : String -> Task ()
-removeFile : String -> Task ()
-renameFile : String -> String -> Task ()
-getFileSize : String -> Task Int
-getModificationTime : String -> Task Int
-getMonotonicTime : Task Int
-getSystemTime : Task Int
-mkStdGen : Int -> StdGen
-newStdGen : Task StdGen
-randomInt : StdGen -> Pair Int StdGen
-randomRange : Int -> Int -> StdGen -> Pair Int StdGen
-runProcess : String -> [String] -> Task ProcessResult
-processExitCode : ProcessResult -> Int
-processStdout : ProcessResult -> String
-processStderr : ProcessResult -> String
-exitWith : forall a. Int -> Task a
-exitSuccess : forall a. Task a
-exitFailure : forall a. Task a
-spawn : forall childError e. IO childError () -> IO e ThreadId
-killThread : ThreadId -> Task ()
-sleep : Int -> Task ()
-mask : forall e a. IO e a -> IO e a
-newChan : forall e a. IO e (Chan a)
-newBoundedChan : forall e a. Int -> IO e (Chan a)
-send : forall a. Chan a -> a -> Task ()
-recv : forall a. Chan a -> Task a
-tryRecv : forall a. Chan a -> Task (Maybe a)
-closeChan : forall a. Chan a -> Task ()
-stringToBytes : String -> Bytes
-bytesToString : Bytes -> Result IOError String
-bytesLength : Bytes -> Int
-bytesIndex : Bytes -> Int -> Maybe Int
-bytesSlice : Bytes -> Int -> Int -> Bytes
-bytesAppend : Bytes -> Bytes -> Bytes
-resolveHost : String -> Task String
-connect : String -> Int -> Task Socket
-listen : Int -> Task (Pair Socket Int)
-accept : Socket -> Task Socket
-sendBytes : Socket -> Bytes -> Task ()
-recvBytes : Socket -> Int -> Task Bytes
-closeSocket : Socket -> Task ()
 ```
 
-`printLine`, `printStr`, and `readLine` are wrappers over the standard handles.
-`printStr` flushes after writing so prompts remain visible. See
-[`io.md`](io.md) for handle ownership, strict text input, buffering, and errors.
+## Lists
 
-`readLine` returns a line without the trailing newline. At EOF it returns `""`.
-
-`readFile`, `writeFile`, and `appendFile` are whole-file UTF-8 text operations.
-`readFileBytes` and `writeFileBytes` are strict whole-file operations that do
-not decode or translate their contents. `hGetBytes` reads at most its
-non-negative count and returns empty bytes at EOF; `hPutBytes` follows the
-handle's buffering policy. See [`io.md`](io.md) for mixing text and byte IO,
-buffering, failures, and platform behavior.
-
-Environment changes and the working directory are runtime-local. Relative
-paths resolve against the logical working directory, directory listings are
-sorted, file sizes are bytes, and modification times are nanoseconds since the
-Unix epoch. See [`io.md`](io.md) for validation, errors, determinism, and
-platform behavior.
-
-`runProcess` performs no shell interpretation, inherits the runtime-local
-environment and cwd, closes child stdin, and strictly captures UTF-8 stdout and
-stderr. Non-zero status remains a successful `ProcessResult`; start/capture
-failures use `RunProcessError`. See [`io.md`](io.md) for executable lookup,
-status, cancellation, memory, and platform semantics.
-
-`exitWith` is a non-returning main-thread exit action. It bypasses ordinary
-error and defect handlers, runs installed cleanup, interrupts and drains sibling
-green threads, flushes output handles, and returns the requested status to the
-host. `exitSuccess` uses zero and `exitFailure` uses one. An exit escaping a
-spawned thread ends only that thread. See [`io.md`](io.md) for cleanup,
-cancellation, flushing, and platform status details.
-
-`Bytes` is immutable arbitrary byte data, distinct from UTF-8 `String`.
-`stringToBytes` encodes UTF-8; `bytesToString` returns `Err (InvalidUtf8 ...)`
-instead of replacing invalid input. Byte indices are zero-based, out-of-range
-indexing returns `Nothing`, and slicing clamps negative and oversized bounds.
-
-`listen` binds an IPv4 loopback listener. Port zero asks the OS to choose a
-free port, returned with the listener as `MkPair listener actualPort`.
-`resolveHost` resolves a name on the blocking IO pool and returns one IPv4
-address, so it does not stall the scheduler or the readiness thread. `connect`
-accepts that IP literal or `localhost`; it does not perform DNS itself.
-`sendBytes` completes only after the full buffer is sent. `recvBytes` returns
-at most its non-negative maximum and returns empty bytes at EOF. Sockets are
-closed only by explicit, idempotent `closeSocket`; GC does not close them.
-Relative paths are resolved against the runtime's logical working directory. Their host
-failures are ordinary `IOError` values and can be handled with `catchError`.
-`finally` runs cleanup after success, typed failure, a defect, or interruption.
-The action runs with the caller's interruption state restored and cleanup runs
-masked. `bracket` masks acquisition and cleanup while restoring the prior state
-for resource use, closing the cancellation window between acquisition and
-cleanup installation. A cleanup failure replaces the saved outcome.
-
-`withThread` scopes a spawned child to its body. When the body succeeds, fails,
-defects, or is interrupted, the child is interrupted and its cleanup finishes
-before the scope exits. `race` returns the first result and cancels the loser;
-`concurrently` returns both results and cancels the remaining action as soon as
-one fails. Both propagate the winning typed error or defect without changing
-its constructor. `timeout milliseconds action` returns `Nothing` after the
-deadline or `Just value` when the action finishes first. These combinators use
-private channels in Prelude code; a child never outlives the scope that created
-it.
-
-See [concurrency.md](concurrency.md) for the scheduler model, fairness and
-determinism guarantees, interruption rules, and concurrency testing strategy.
-
-`killThread` requests asynchronous interruption and returns immediately.
-Delivery occurs at the target's next VM safe point; killing an already finished
-or unknown thread succeeds. `mask` defers delivery while its action remains
-runnable. Operations that actually block on a channel or host IO remain
-interruptible, so masked code cannot become permanently unkillable. Nested
-masks restore one depth at a time.
-
-`sleep milliseconds` parks only the current lightweight thread. Non-positive
-durations complete immediately. Normal execution uses monotonic elapsed time;
-deterministic execution advances virtual time when no process is runnable, so
-concurrency tests do not wait on or assert against the wall clock. A sleeping
-thread remains interruptible, including inside `mask`.
-
-`getMonotonicTime` returns nanoseconds from an arbitrary origin local to the
-runtime. Use differences between readings for elapsed durations; the value is
-not a date. `getSystemTime` returns signed nanoseconds since the Unix epoch.
-Both readings saturate at the `Int` bounds rather than wrapping. Captured and
-deterministic execution use the scheduler's virtual clock, with system time
-starting at the Unix epoch, so exact clock-dependent tests can advance time
-through `sleep` without waiting.
-
-`StdGen` is opaque immutable SplitMix64 state. `mkStdGen seed` deterministically
-replays the same sequence; `newStdGen` is the only operation that obtains a
-fresh runtime-local seed. `randomInt` and inclusive `randomRange` are pure:
-both return `MkPair value nextGenerator`, so programs explicitly thread state.
-Reversed range bounds raise an `Error` defect. These clock-seeded generators
-are not cryptographically secure; see [IO](io.md#pseudorandom-generation) for
-the exact range, seeding, and deterministic-testing contracts.
-
-`error` raises `Error`; integer division and modulo by zero raise
-`DivisionByZero`. The VM's managed stack and heap-object ceilings raise
-`StackExhausted` and `HeapExhausted`. Because Solveig is strict, the protected
-action must be constructed before `catchDefect` installs its scope; pure work
-that should be protected belongs inside an executed IO callback.
-
-Channels are typed FIFO queues shared by lightweight threads. Unbounded sends
-enqueue immediately; bounded sends block when the queue is full. Receives block
-only while an open queue is empty, and `tryRecv` returns `Nothing` in that
-state. Closing preserves queued values, then raises `ChannelClosed` from
-further receives and sends. Waiting senders and receivers are resumed FIFO.
-
-Example:
-
-```solveig
-main : Task ()
-main = do
-    printStr "name> "
-    name <- readLine
-    printLine (appendString "hello, " name)
-```
-
-### Strings And Booleans
-
-```solveig
-appendString : String -> String -> String
-
-even : Int -> Bool
-odd : Int -> Bool
-not : Bool -> Bool
-and : Bool -> Bool -> Bool
-or : Bool -> Bool -> Bool
-```
-
-Use `appendString` for ordinary string concatenation. The `+` operator belongs
-to `Num`; there is no `Num String` instance.
-
-## `prelude.list`
-
-### Data Type
+List syntax is backed by the universal data type:
 
 ```solveig
 data List a = Cons a (List a) | Nil
 ```
 
-Lists can also be written with surface syntax:
-
-```solveig
-[] : [a]
-x :: xs : [a]
-[1, 2, 3] : [Int]
-```
-
-### Functions
+The always-available operations are the common traversal vocabulary:
 
 ```solveig
 map : forall a b. (a -> b) -> [a] -> [b]
@@ -348,326 +107,64 @@ foldr : forall a b. (a -> b -> b) -> b -> [a] -> b
 foldl : forall a b. (b -> a -> b) -> b -> [a] -> b
 concat : forall a. [[a]] -> [a]
 append : forall a. [a] -> [a] -> [a]
-reverse : forall a. [a] -> [a]
-range : Int -> Int -> Bool -> [Int]
+(++) : forall a. [a] -> [a] -> [a]
 ```
 
-`range start end inclusive` counts upward. When `inclusive` is `True`, `end`
-is included; otherwise it stops before `end`.
+Slicing, zipping, reversal, and integer ranges are in `std.list` because many
+programs never need them.
 
-Examples:
+## Operators and typeclasses
+
+The Prelude defines the ordinary numeric and comparison operators through
+`Eq`, `Ord`, `Num`, and `Fractional`, plus `Show` for rendering values.
 
 ```solveig
-squares : [Int]
-squares = map (fun x => x * x) [1, 2, 3, 4]
-
-sum : [Int] -> Int
-sum xs = foldl (fun total x => total + x) 0 xs
-
-firstFive : [Int]
-firstFive = range 1 5 True
+(==), (/=) : forall a. Eq a => a -> a -> Bool
+(<), (<=), (>), (>=) : forall a. Ord a => a -> a -> Bool
+(+), (-), (*) : forall a. Num a => a -> a -> a
+(/) : forall a. Fractional a => a -> a -> a
+show : forall a. Show a => a -> String
 ```
 
-## `prelude.typeclasses`
+`Functor`, `Applicative`, and `Monad` are universal because `do` notation
+resolves through `bind` and `thenM`. Their common combinators include `fmap`,
+`pure`, `apply`, `liftA2`, `join`, `composeK`, `mapM`, `sequence`, `filterM`,
+`seqIO`, and `mapIO_`.
 
-### Ordering Data
+`Semigroup` and `Monoid` currently remain here with `appendS`, `empty`, and
+`mconcat`; they are stable general-purpose abstractions rather than host-domain
+operations.
+
+## Strings and booleans
 
 ```solveig
-data Ordering = LT | EQ | GT
+appendString : String -> String -> String
+even : Int -> Bool
+odd : Int -> Bool
+not : Bool -> Bool
+and : Bool -> Bool -> Bool
+or : Bool -> Bool -> Bool
 ```
 
-### Equality
+Text conversion and character-list operations are in `std.text`; byte
+conversion is in `std.bytes`.
+
+## Importing explicit functionality
+
+Import a whole module when most of its vocabulary is relevant:
 
 ```solveig
-class Eq a where
-    (==) : a -> a -> Bool
-    (/=) : a -> a -> Bool
-
-eq : forall a. Eq a => a -> a -> Bool
-notEq : forall a. Eq a => a -> a -> Bool
+import std.io
+import std.task
 ```
 
-Instances are provided for `Int`, `Float`, `Char`, `String`, `()`, `Bool`,
-`Maybe a`, `[a]`, and `Pair a b` when their element types have `Eq`.
-
-### Ord
+Prefer selective imports in modules with a narrow purpose:
 
 ```solveig
-class Eq a => Ord a where
-    compare : a -> a -> Ordering
-    (<) : a -> a -> Bool
-    (<=) : a -> a -> Bool
-    (>) : a -> a -> Bool
-    (>=) : a -> a -> Bool
-
-less : forall a. Ord a => a -> a -> Bool
-lessEq : forall a. Ord a => a -> a -> Bool
-greater : forall a. Ord a => a -> a -> Bool
-greaterEq : forall a. Ord a => a -> a -> Bool
-minOrd : forall a. Ord a => a -> a -> a
-maxOrd : forall a. Ord a => a -> a -> a
-clampOrd : forall a. Ord a => a -> a -> a -> a
+import std.list(take, zip)
+import std.random(mkStdGen, randomRange)
 ```
 
-Instances are provided for `Int`, `Float`, `Char`, `String`, `()`, `Bool`,
-`Maybe a`, `[a]`, and `Pair a b` when their element types have `Ord`.
-
-### Numeric Classes
-
-```solveig
-class Num a where
-    (+) : a -> a -> a
-    (-) : a -> a -> a
-    (*) : a -> a -> a
-    negate : a -> a
-
-div : Int -> Int -> Int
-mod : Int -> Int -> Int
-subtract : forall a. Num a => a -> a -> a
-
-class Num a => Fractional a where
-    (/) : a -> a -> a
-```
-
-`subtract x y` is `y - x`, matching Haskell's section-friendly helper.
-`Num` instances exist for `Int` and `Float`. `Fractional` currently has only a
-`Float` instance. Int division uses `div`; `/` is not Int division.
-
-### Functor, Applicative, Monad
-
-```solveig
-class Functor f where
-    fmap : forall a b. (a -> b) -> f a -> f b
-
-class Functor f => Applicative f where
-    pure : forall a. a -> f a
-    apply : forall a b. f (a -> b) -> f a -> f b
-
-liftA2 : forall f a b c. Applicative f => (a -> b -> c) -> f a -> f b -> f c
-applyRight : forall f a b. Applicative f => f a -> f b -> f b
-applyLeft : forall f a b. Applicative f => f a -> f b -> f a
-
-class Applicative m => Monad m where
-    bind : forall a b. m a -> (a -> m b) -> m b
-
-thenM : forall m a b. Monad m => m a -> m b -> m b
-join : forall m a. Monad m => m (m a) -> m a
-composeK : forall m a b c. Monad m => (a -> m b) -> (b -> m c) -> a -> m c
-mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]
-sequence : forall m a. Monad m => [m a] -> m [a]
-filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
-```
-
-Instances are provided for `Maybe`, `List`, and `IO e` where appropriate.
-Solveig's `do` notation desugars through this generic `Monad` class. A bind
-statement `x <- action` uses `bind`, an ordinary expression statement before
-the final line uses `thenM`, and the final statement is returned directly.
-
-Example:
-
-```solveig
-readTwo : Task [String]
-readTwo = mapM
-    (fun prompt => do
-        printStr prompt
-        readLine)
-    ["first> ", "second> "]
-```
-
-### IO Helpers
-
-```solveig
-getArgs : forall e. IO e [String]
-seqIO : forall e a b. IO e a -> IO e b -> IO e b
-mapIO_ : forall e a. (a -> IO e ()) -> [a] -> IO e ()
-```
-
-`seqIO left right` runs `left`, discards its result, then runs `right`.
-
-`mapIO_ f xs` runs an IO action for each list element and discards all results.
-
-Example:
-
-```solveig
-main : Task ()
-main = do
-    args <- getArgs
-    mapIO_ printLine args
-```
-
-### Show
-
-```solveig
-class Show a where
-    show : a -> String
-```
-
-Instances are provided for `Int`, `Float`, `Char`, `String`, `()`, `Bool`,
-`Ordering`, `Maybe a`, `[a]`, and `Pair a b` when their element types have
-`Show`.
-
-For non-IO `main`, the driver uses `Show` when possible:
-
-```solveig
-main : [Int]
-main = [1, 2, 3]
-```
-
-prints:
-
-```text
-[1, 2, 3]
-```
-
-User types can opt in:
-
-```solveig
-data Person = Person String Int
-
-instance Show Person where
-    show person =
-        case person of
-            Person name age =>
-                appendString name (appendString " (" (appendString (show age) ")"))
-```
-
-### Semigroup And Monoid
-
-```solveig
-class Semigroup a where
-    appendS : a -> a -> a
-
-class Semigroup a => Monoid a where
-    empty : a
-
-mconcat : forall a. Monoid a => [a] -> a
-```
-
-The classes are present, but the Prelude currently does not ship broad
-instances for them.
-
-## `prelude.prim`
-
-`prelude.prim` is the low-level primitive bridge. Import it explicitly when
-you need a primitive not wrapped by the public Prelude:
-
-```solveig
-import prelude.prim(stringLength, stringSlice, stringCharAt)
-```
-
-Primitive functions include:
-
-```solveig
-intAdd : Int -> Int -> Int
-intSub : Int -> Int -> Int
-intMul : Int -> Int -> Int
-intDiv : Int -> Int -> Int
-intMod : Int -> Int -> Int
-intNeg : Int -> Int
-intEq : Int -> Int -> Bool
-intLt : Int -> Int -> Bool
-intLe : Int -> Int -> Bool
-intGt : Int -> Int -> Bool
-intGe : Int -> Int -> Bool
-intCompare : Int -> Int -> Ordering
-
-floatAdd : Float -> Float -> Float
-floatSub : Float -> Float -> Float
-floatMul : Float -> Float -> Float
-floatDiv : Float -> Float -> Float
-floatNeg : Float -> Float
-floatEq : Float -> Float -> Bool
-floatLt : Float -> Float -> Bool
-floatLe : Float -> Float -> Bool
-floatGt : Float -> Float -> Bool
-floatGe : Float -> Float -> Bool
-
-intToFloat : Int -> Float
-floatToInt : Float -> Int
-intToString : Int -> String
-floatToString : Float -> String
-charToString : Char -> String
-
-stringLength : String -> Int
-stringAppend : String -> String -> String
-stringSlice : String -> Int -> Int -> String
-stringCharAt : String -> Int -> Maybe Char
-stringEq : String -> String -> Bool
-stringCompare : String -> String -> Ordering
-stringToChars : String -> [Char]
-charsToString : [Char] -> String
-charEq : Char -> Char -> Bool
-charCompare : Char -> Char -> Ordering
-
-pureIO : forall e a. a -> IO e a
-bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
-failIO : forall e a. e -> IO e a
-error : forall a. String -> a
-catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
-catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
-raiseDefectIO : forall e a. Defect -> IO e a
-finallyIO : forall e a b. IO e a -> IO e b -> IO e a
-printLine : String -> IO IOError ()
-printStr : String -> IO IOError ()
-readLine : IO IOError String
-getArgs : forall e. IO e [String]
-getEnv : String -> IO IOError (Maybe String)
-setEnv : String -> String -> IO IOError ()
-getEnvironment : IO IOError [Pair String String]
-getProgName : IO IOError String
-readFile : String -> IO IOError String
-readFileBytes : String -> IO IOError Bytes
-writeFile : String -> String -> IO IOError ()
-writeFileBytes : String -> Bytes -> IO IOError ()
-appendFile : String -> String -> IO IOError ()
-getCurrentDirectory : IO IOError String
-setCurrentDirectory : String -> IO IOError ()
-doesFileExist : String -> IO IOError Bool
-doesDirectoryExist : String -> IO IOError Bool
-listDirectory : String -> IO IOError [String]
-createDirectory : String -> IO IOError ()
-removeFile : String -> IO IOError ()
-renameFile : String -> String -> IO IOError ()
-getFileSize : String -> IO IOError Int
-getModificationTime : String -> IO IOError Int
-runProcess : String -> [String] -> IO IOError ProcessResult
-processExitCode : ProcessResult -> Int
-processStdout : ProcessResult -> String
-processStderr : ProcessResult -> String
-exitWith : forall a. Int -> IO IOError a
-exitSuccess : forall a. IO IOError a
-exitFailure : forall a. IO IOError a
-openFile : String -> IOMode -> IO IOError Handle
-hClose : Handle -> IO IOError ()
-hFlush : Handle -> IO IOError ()
-hGetLine : Handle -> IO IOError String
-hGetContents : Handle -> IO IOError String
-hGetBytes : Handle -> Int -> IO IOError Bytes
-hPutStr : Handle -> String -> IO IOError ()
-hPutStrLn : Handle -> String -> IO IOError ()
-hPutBytes : Handle -> Bytes -> IO IOError ()
-hIsEOF : Handle -> IO IOError Bool
-hSetBuffering : Handle -> BufferMode -> IO IOError ()
-stdin : Handle
-stdout : Handle
-stderr : Handle
-spawn : forall childError e. IO childError () -> IO e ThreadId
-killThread : ThreadId -> IO IOError ()
-sleep : Int -> IO IOError ()
-maskIO : forall e a. IO e a -> IO e a
-restoreMaskIO : forall e a. IO e a -> IO e a
-newChan : forall e a. IO e (Chan a)
-newBoundedChan : forall e a. Int -> IO e (Chan a)
-send : forall a. Chan a -> a -> IO IOError ()
-recv : forall a. Chan a -> IO IOError a
-tryRecv : forall a. Chan a -> IO IOError (Maybe a)
-closeChan : forall a. Chan a -> IO IOError ()
-```
-
-`raiseDefectIO` is a low-level operation reserved for Prelude composition. User
-code should normally raise `Error` with `error` or let the originating defect
-propagate without catching it.
-
-Primitive Int add/sub/mul/neg wrap on `i64` overflow. `intDiv` and `intMod`
-raise `DivisionByZero` defects for a zero divisor. String indexing and slicing
-count Unicode scalar values.
+An unimported std name is a normal `RES0003` unknown-name error. This is
+intentional: adding a new standard-library operation cannot silently create an
+ambiguity in every Solveig program.

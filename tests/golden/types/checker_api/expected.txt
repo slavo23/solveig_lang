@@ -26,113 +26,29 @@ main.useMap : [Int] -> [Int]
 main.useRank2 : (forall a. a -> a) -> Int
 main.useRank2Eq : (forall a. Eq a => a -> a -> Bool) -> Bool
 main.wrapNotEqInt : Bool
-prelude.builtins.accept : Socket -> IO IOError Socket
 prelude.builtins.and : Bool -> Bool -> Bool
-prelude.builtins.appendFile : String -> String -> IO IOError ()
 prelude.builtins.appendString : String -> String -> String
 prelude.builtins.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
-prelude.builtins.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
-prelude.builtins.bytesAppend : Bytes -> Bytes -> Bytes
-prelude.builtins.bytesIndex : Bytes -> Int -> Maybe Int
-prelude.builtins.bytesLength : Bytes -> Int
-prelude.builtins.bytesSlice : Bytes -> Int -> Int -> Bytes
-prelude.builtins.bytesToString : Bytes -> Result IOError String
-prelude.builtins.catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.builtins.catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a
-prelude.builtins.closeChan : forall a. Chan a -> IO IOError ()
-prelude.builtins.closeSocket : Socket -> IO IOError ()
-prelude.builtins.concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
-prelude.builtins.connect : String -> Int -> IO IOError Socket
-prelude.builtins.createDirectory : String -> IO IOError ()
-prelude.builtins.doesDirectoryExist : String -> IO IOError Bool
-prelude.builtins.doesFileExist : String -> IO IOError Bool
 prelude.builtins.error : forall a. String -> a
 prelude.builtins.even : Int -> Bool
-prelude.builtins.exitFailure : forall a. IO IOError a
-prelude.builtins.exitSuccess : forall a. IO IOError a
-prelude.builtins.exitWith : forall a. Int -> IO IOError a
 prelude.builtins.failIO : forall e a. e -> IO e a
-prelude.builtins.finally : forall e a b. IO e a -> IO e b -> IO e a
-prelude.builtins.getCurrentDirectory : IO IOError String
-prelude.builtins.getEnv : String -> IO IOError (Maybe String)
-prelude.builtins.getFileSize : String -> IO IOError Int
-prelude.builtins.getModificationTime : String -> IO IOError Int
-prelude.builtins.getMonotonicTime : IO IOError Int
-prelude.builtins.getProgName : IO IOError String
-prelude.builtins.getSystemTime : IO IOError Int
-prelude.builtins.hClose : Handle -> IO IOError ()
-prelude.builtins.hFlush : Handle -> IO IOError ()
-prelude.builtins.hGetBytes : Handle -> Int -> IO IOError Bytes
-prelude.builtins.hGetContents : Handle -> IO IOError String
-prelude.builtins.hGetLine : Handle -> IO IOError String
-prelude.builtins.hIsEOF : Handle -> IO IOError Bool
-prelude.builtins.hPutBytes : Handle -> Bytes -> IO IOError ()
-prelude.builtins.hPutStr : Handle -> String -> IO IOError ()
-prelude.builtins.hPutStrLn : Handle -> String -> IO IOError ()
-prelude.builtins.hSetBuffering : Handle -> BufferMode -> IO IOError ()
-prelude.builtins.killThread : ThreadId -> IO IOError ()
-prelude.builtins.listen : Int -> IO IOError (Pair Socket Int)
 prelude.builtins.mapError : forall e f a. (e -> f) -> IO e a -> IO f a
-prelude.builtins.mask : forall e a. IO e a -> IO e a
-prelude.builtins.mkStdGen : Int -> StdGen
-prelude.builtins.newBoundedChan : forall e a. Int -> IO e (Chan a)
-prelude.builtins.newChan : forall e a. IO e (Chan a)
-prelude.builtins.newStdGen : IO IOError StdGen
 prelude.builtins.not : Bool -> Bool
 prelude.builtins.odd : Int -> Bool
-prelude.builtins.openFile : String -> IOMode -> IO IOError Handle
 prelude.builtins.or : Bool -> Bool -> Bool
 prelude.builtins.orElse : forall e f a. IO e a -> IO f a -> IO f a
 prelude.builtins.printLine : String -> IO IOError ()
 prelude.builtins.printStr : String -> IO IOError ()
-prelude.builtins.processExitCode : ProcessResult -> Int
-prelude.builtins.processStderr : ProcessResult -> String
-prelude.builtins.processStdout : ProcessResult -> String
 prelude.builtins.pureIO : forall e a. a -> IO e a
-prelude.builtins.race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
-prelude.builtins.randomInt : StdGen -> Pair Int StdGen
-prelude.builtins.randomRange : Int -> Int -> StdGen -> Pair Int StdGen
-prelude.builtins.readFile : String -> IO IOError String
-prelude.builtins.readFileBytes : String -> IO IOError Bytes
 prelude.builtins.readLine : IO IOError String
-prelude.builtins.recv : forall a. Chan a -> IO IOError a
-prelude.builtins.recvBytes : Socket -> Int -> IO IOError Bytes
-prelude.builtins.removeFile : String -> IO IOError ()
-prelude.builtins.renameFile : String -> String -> IO IOError ()
-prelude.builtins.resolveHost : String -> IO IOError String
-prelude.builtins.send : forall a. Chan a -> a -> IO IOError ()
-prelude.builtins.sendBytes : Socket -> Bytes -> IO IOError ()
-prelude.builtins.setCurrentDirectory : String -> IO IOError ()
-prelude.builtins.setEnv : String -> String -> IO IOError ()
-prelude.builtins.sleep : Int -> IO IOError ()
-prelude.builtins.spawn : forall childError e. IO childError () -> IO e ThreadId
-prelude.builtins.stderr : Handle
-prelude.builtins.stdin : Handle
-prelude.builtins.stdout : Handle
-prelude.builtins.stringToBytes : String -> Bytes
-prelude.builtins.timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
-prelude.builtins.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
-prelude.builtins.withFile : forall a. String -> IOMode -> (Handle -> IO IOError a) -> IO IOError a
-prelude.builtins.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
-prelude.builtins.writeFile : String -> String -> IO IOError ()
-prelude.builtins.writeFileBytes : String -> Bytes -> IO IOError ()
 prelude.list.++ : forall a. [a] -> [a] -> [a]
 prelude.list.append : forall a. [a] -> [a] -> [a]
 prelude.list.concat : forall a. [[a]] -> [a]
-prelude.list.drop : forall a. Int -> [a] -> [a]
-prelude.list.dropWhile : forall a. (a -> Bool) -> [a] -> [a]
 prelude.list.filter : forall a. (a -> Bool) -> [a] -> [a]
 prelude.list.foldl : forall a b. (b -> a -> b) -> b -> [a] -> b
 prelude.list.foldr : forall a b. (a -> b -> b) -> b -> [a] -> b
 prelude.list.map : forall a b. (a -> b) -> [a] -> [b]
-prelude.list.range : Int -> Int -> Bool -> [Int]
-prelude.list.rangeDown : Int -> Int -> [Int] -> [Int]
-prelude.list.reverse : forall a. [a] -> [a]
-prelude.list.reverseGo : forall a. [a] -> [a] -> [a]
-prelude.list.take : forall a. Int -> [a] -> [a]
-prelude.list.takeWhile : forall a. (a -> Bool) -> [a] -> [a]
-prelude.list.zip : forall a b. [a] -> [b] -> [Pair a b]
-prelude.list.zipWith : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c]
 prelude.prim.accept : Socket -> IO IOError Socket
 prelude.prim.appendFile : String -> String -> IO IOError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
@@ -254,15 +170,12 @@ prelude.typeclasses.composeK : forall m a b c. Monad m => (a -> m b) -> (b -> m 
 prelude.typeclasses.div : Int -> Int -> Int
 prelude.typeclasses.eq : forall a. Eq a => a -> a -> Bool
 prelude.typeclasses.filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
-prelude.typeclasses.getArgs : forall e. IO e [String]
-prelude.typeclasses.getEnvironment : IO IOError [Pair String String]
 prelude.typeclasses.greater : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.greaterEq : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.join : forall m a. Monad m => m (m a) -> m a
 prelude.typeclasses.less : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.lessEq : forall a. Ord a => a -> a -> Bool
 prelude.typeclasses.liftA2 : forall f a b c. Applicative f => (a -> b -> c) -> f a -> f b -> f c
-prelude.typeclasses.listDirectory : String -> IO IOError [String]
 prelude.typeclasses.mapIO_ : forall e a. (a -> IO e ()) -> [a] -> IO e ()
 prelude.typeclasses.mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]
 prelude.typeclasses.maxOrd : forall a. Ord a => a -> a -> a
@@ -270,7 +183,6 @@ prelude.typeclasses.mconcat : forall a. Monoid a => [a] -> a
 prelude.typeclasses.minOrd : forall a. Ord a => a -> a -> a
 prelude.typeclasses.mod : Int -> Int -> Int
 prelude.typeclasses.notEq : forall a. Eq a => a -> a -> Bool
-prelude.typeclasses.runProcess : String -> [String] -> IO IOError ProcessResult
 prelude.typeclasses.seqIO : forall e a b. IO e a -> IO e b -> IO e b
 prelude.typeclasses.sequence : forall m a. Monad m => [m a] -> m [a]
 prelude.typeclasses.showCharPayload : Char -> String
@@ -279,3 +191,94 @@ prelude.typeclasses.showStringChars : [Char] -> String
 prelude.typeclasses.showStringPayload : Char -> String
 prelude.typeclasses.subtract : forall a. Num a => a -> a -> a
 prelude.typeclasses.thenM : forall m a b. Monad m => m a -> m b -> m b
+std.bytes.bytesAppend : Bytes -> Bytes -> Bytes
+std.bytes.bytesIndex : Bytes -> Int -> Maybe Int
+std.bytes.bytesLength : Bytes -> Int
+std.bytes.bytesSlice : Bytes -> Int -> Int -> Bytes
+std.bytes.bytesToString : Bytes -> Result IOError String
+std.bytes.stringToBytes : String -> Bytes
+std.channel.closeChan : forall a. Chan a -> IO IOError ()
+std.channel.newBoundedChan : forall e a. Int -> IO e (Chan a)
+std.channel.newChan : forall e a. IO e (Chan a)
+std.channel.recv : forall a. Chan a -> IO IOError a
+std.channel.send : forall a. Chan a -> a -> IO IOError ()
+std.channel.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
+std.env.getArgs : forall e. IO e [String]
+std.env.getEnv : String -> IO IOError (Maybe String)
+std.env.getEnvironment : IO IOError [Pair String String]
+std.env.getProgName : IO IOError String
+std.env.setEnv : String -> String -> IO IOError ()
+std.fs.createDirectory : String -> IO IOError ()
+std.fs.doesDirectoryExist : String -> IO IOError Bool
+std.fs.doesFileExist : String -> IO IOError Bool
+std.fs.getCurrentDirectory : IO IOError String
+std.fs.getFileSize : String -> IO IOError Int
+std.fs.getModificationTime : String -> IO IOError Int
+std.fs.listDirectory : String -> IO IOError [String]
+std.fs.removeFile : String -> IO IOError ()
+std.fs.renameFile : String -> String -> IO IOError ()
+std.fs.setCurrentDirectory : String -> IO IOError ()
+std.io.appendFile : String -> String -> IO IOError ()
+std.io.hClose : Handle -> IO IOError ()
+std.io.hFlush : Handle -> IO IOError ()
+std.io.hGetBytes : Handle -> Int -> IO IOError Bytes
+std.io.hGetContents : Handle -> IO IOError String
+std.io.hGetLine : Handle -> IO IOError String
+std.io.hIsEOF : Handle -> IO IOError Bool
+std.io.hPutBytes : Handle -> Bytes -> IO IOError ()
+std.io.hPutStr : Handle -> String -> IO IOError ()
+std.io.hPutStrLn : Handle -> String -> IO IOError ()
+std.io.hSetBuffering : Handle -> BufferMode -> IO IOError ()
+std.io.openFile : String -> IOMode -> IO IOError Handle
+std.io.readFile : String -> IO IOError String
+std.io.readFileBytes : String -> IO IOError Bytes
+std.io.stderr : Handle
+std.io.stdin : Handle
+std.io.stdout : Handle
+std.io.withFile : forall a. String -> IOMode -> (Handle -> IO IOError a) -> IO IOError a
+std.io.writeFile : String -> String -> IO IOError ()
+std.io.writeFileBytes : String -> Bytes -> IO IOError ()
+std.list.drop : forall a. Int -> [a] -> [a]
+std.list.dropWhile : forall a. (a -> Bool) -> [a] -> [a]
+std.list.range : Int -> Int -> Bool -> [Int]
+std.list.rangeDown : Int -> Int -> [Int] -> [Int]
+std.list.reverse : forall a. [a] -> [a]
+std.list.reverseInto : forall a. [a] -> [a] -> [a]
+std.list.take : forall a. Int -> [a] -> [a]
+std.list.takeWhile : forall a. (a -> Bool) -> [a] -> [a]
+std.list.zip : forall a b. [a] -> [b] -> [Pair a b]
+std.list.zipWith : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c]
+std.net.accept : Socket -> IO IOError Socket
+std.net.closeSocket : Socket -> IO IOError ()
+std.net.connect : String -> Int -> IO IOError Socket
+std.net.listen : Int -> IO IOError (Pair Socket Int)
+std.net.recvBytes : Socket -> Int -> IO IOError Bytes
+std.net.resolveHost : String -> IO IOError String
+std.net.sendBytes : Socket -> Bytes -> IO IOError ()
+std.process.exitFailure : forall a. IO IOError a
+std.process.exitSuccess : forall a. IO IOError a
+std.process.exitWith : forall a. Int -> IO IOError a
+std.process.processExitCode : ProcessResult -> Int
+std.process.processStderr : ProcessResult -> String
+std.process.processStdout : ProcessResult -> String
+std.process.runProcess : String -> [String] -> IO IOError ProcessResult
+std.random.mkStdGen : Int -> StdGen
+std.random.newStdGen : IO IOError StdGen
+std.random.randomInt : StdGen -> Pair Int StdGen
+std.random.randomRange : Int -> Int -> StdGen -> Pair Int StdGen
+std.task.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
+std.task.catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
+std.task.concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
+std.task.finally : forall e a b. IO e a -> IO e b -> IO e a
+std.task.mask : forall e a. IO e a -> IO e a
+std.task.race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
+std.task.timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
+std.task.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
+std.text.charsToString : [Char] -> String
+std.text.intToString : Int -> String
+std.text.stringToChars : String -> [Char]
+std.thread.killThread : ThreadId -> IO IOError ()
+std.thread.spawn : forall childError e. IO childError () -> IO e ThreadId
+std.time.getMonotonicTime : IO IOError Int
+std.time.getSystemTime : IO IOError Int
+std.time.sleep : Int -> IO IOError ()

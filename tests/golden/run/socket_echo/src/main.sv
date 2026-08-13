@@ -1,3 +1,6 @@
+import std.net
+import std.bytes
+import std.task
 echoOnce : Socket -> Task ()
 echoOnce listener = do
     connection <- accept listener

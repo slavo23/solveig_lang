@@ -1,3 +1,6 @@
+import std.task
+import std.thread
+import std.channel
 waitForValue : Chan Int -> Chan () -> Task ()
 waitForValue values ready = do
     send ready ()

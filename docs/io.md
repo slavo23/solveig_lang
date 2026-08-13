@@ -6,9 +6,25 @@ on the bounded IO worker pool, so a blocked handle does not block lightweight
 threads or the scheduler. Open files are distributed across that pool and all
 operations for one handle stay FIFO.
 
+Host-facing APIs live in explicit standard-library modules rather than the
+implicit Prelude. Import only the capabilities a module uses:
+
+```solveig
+import std.io       # handles and whole-file IO
+import std.fs       # filesystem queries and mutations
+import std.env      # arguments and environment
+import std.process  # child processes and exit
+import std.time     # clocks
+import std.random   # pseudorandom generators
+import std.bytes    # byte conversion and manipulation
+```
+
+The Prelude still provides `Task`, typed-error sequencing, `printLine`,
+`printStr`, and `readLine`, since they are useful in nearly every executable.
+
 ## Handles and ownership
 
-`Handle` is an abstract compiler-known type. A value is only an opaque identity
+`Handle`, `IOMode`, and `BufferMode` are exported by `std.io`. A handle is only an opaque identity
 into one runtime's host-resource table; a Solveig program cannot inspect or
 construct one. Handles are not heap objects.
 

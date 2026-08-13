@@ -11,8 +11,8 @@ pub(super) fn handle_builtin_specs(
     io_error: &Ty,
 ) -> Vec<PrimitiveBuiltinSpec> {
     let handle = Ty::make_con_id(PRIM_TYS.handle);
-    let io_mode = Ty::make_con_id(prelude_io_mode_tycon_id(names));
-    let buffer_mode = Ty::make_con_id(prelude_buffer_mode_tycon_id(names));
+    let io_mode = Ty::make_con_id(std_io_mode_tycon_id(names));
+    let buffer_mode = Ty::make_con_id(std_buffer_mode_tycon_id(names));
     let task = |value| io_of(io_error.clone(), value);
 
     vec![

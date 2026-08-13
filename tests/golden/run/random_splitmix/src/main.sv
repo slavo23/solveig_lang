@@ -1,4 +1,7 @@
-import prelude.prim(intToString)
+import std.list
+import std.random
+import std.task
+import std.text(intToString)
 
 printInts : Int -> StdGen -> Task ()
 printInts remaining generator =

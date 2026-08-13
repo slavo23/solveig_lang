@@ -1,4 +1,4 @@
-import prelude.prim(intToString)
+import std.text(intToString)
 
 sumList : [Int] -> Int
 sumList xs =

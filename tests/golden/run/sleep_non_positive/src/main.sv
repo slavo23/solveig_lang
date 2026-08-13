@@ -1,3 +1,4 @@
+import std.time
 main : Task ()
 main = do
     sleep 0

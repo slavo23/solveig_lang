@@ -1,4 +1,6 @@
-import prelude.prim(stringToChars, charsToString)
+import std.list
+import std.io
+import std.text(stringToChars, charsToString)
 
 data QuizCard = QuizCard String String
 

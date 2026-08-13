@@ -1,3 +1,5 @@
+import std.thread
+import std.channel
 sender : Chan Int -> Chan () -> Int -> Task ()
 sender values ready value = do
     send ready ()

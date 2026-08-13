@@ -1,3 +1,7 @@
+import std.task
+import std.time
+import std.thread
+import std.channel
 wait : Chan () -> Task ()
 wait ready = do
     send ready ()

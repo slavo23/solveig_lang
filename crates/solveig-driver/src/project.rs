@@ -196,36 +196,40 @@ fn load_legacy_project(
         })?
         .to_path_buf();
     let local_package = PackageId(0);
-    let prelude_package = PackageId(1);
     let entry_module = module_name_from_file(session, &root, entry_file)?;
 
     let mut modules = FxHashMap::<ModuleName, ModuleFile>::default();
     let mut compiler_packages = Vec::new();
-    let temporary_id = add_compiler_package(
+    add_compiler_package(
         &mut compiler_packages,
         library,
         "prelude",
         PackageKind::Implicit,
     )?;
-    let mut prelude = compiler_packages
-        .pop()
+    add_compiler_package(
+        &mut compiler_packages,
+        library,
+        "std",
+        PackageKind::Dependency,
+    )?;
+    for (index, package) in compiler_packages.iter_mut().enumerate() {
+        package.id = PackageId(
+            u32::try_from(index + 1)
+                .unwrap_or_else(|_| solveig_base::ice!("compiler package identity overflowed")),
+        );
+    }
+    for package in &compiler_packages {
+        let source_root = package.root.join(solveig_package::SOURCE_DIRECTORY);
+        for file in &package.modules {
+            let module =
+                scan_package_module(session, package, &source_root, file, sources, library)?;
+            modules.insert(module.name.clone(), module);
+        }
+    }
+    let prelude = compiler_packages
+        .iter()
+        .find(|package| package.kind == PackageKind::Implicit)
         .unwrap_or_else(|| solveig_base::ice!("compiler Prelude package was not added"));
-    if prelude.id != temporary_id {
-        solveig_base::ice!("compiler Prelude package received an unexpected identity");
-    }
-    prelude.id = prelude_package;
-    let prelude_source_root = prelude.root.join(solveig_package::SOURCE_DIRECTORY);
-    for file in &prelude.modules {
-        let module = scan_package_module(
-            session,
-            &prelude,
-            &prelude_source_root,
-            file,
-            sources,
-            library,
-        )?;
-        modules.insert(module.name.clone(), module);
-    }
     let implicit_modules = prelude
         .language
         .implicit
@@ -275,10 +279,11 @@ fn load_legacy_project(
         modules.insert(module_name, module_file);
     }
 
-    let package_kinds = FxHashMap::from_iter([
-        (local_package, PackageKind::Local),
-        (prelude_package, PackageKind::Implicit),
-    ]);
+    let mut package_kinds = compiler_packages
+        .iter()
+        .map(|package| (package.id, package.kind))
+        .collect::<FxHashMap<_, _>>();
+    package_kinds.insert(local_package, PackageKind::Local);
     let project = Project::new(
         session,
         modules,
@@ -328,6 +333,7 @@ fn load_package_project(
 
     let prelude_package =
         add_compiler_package(&mut packages, library, "prelude", PackageKind::Implicit)?;
+    add_compiler_package(&mut packages, library, "std", PackageKind::Dependency)?;
     let mut modules = FxHashMap::<ModuleName, ModuleFile>::default();
     for package in &packages {
         let source_root = package.root.join(solveig_package::SOURCE_DIRECTORY);

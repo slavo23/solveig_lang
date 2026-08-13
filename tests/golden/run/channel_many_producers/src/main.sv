@@ -1,3 +1,5 @@
+import std.thread
+import std.channel
 spawnProducers : Chan Int -> Int -> Task ()
 spawnProducers channel remaining =
     if remaining == 0 then pureIO ()

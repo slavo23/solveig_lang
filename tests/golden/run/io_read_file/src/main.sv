@@ -1,3 +1,4 @@
+import std.io
 main : Task ()
 main =
     do

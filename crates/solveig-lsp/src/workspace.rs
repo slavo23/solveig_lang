@@ -795,7 +795,19 @@ pub(crate) mod tests {
             "prelude/src/prelude/prim.sv",
             "prelude/src/prelude/typeclasses.sv",
             "std/solveig.toml",
-            "std/src/std.sv",
+            "std/src/std/bytes.sv",
+            "std/src/std/channel.sv",
+            "std/src/std/env.sv",
+            "std/src/std/fs.sv",
+            "std/src/std/io.sv",
+            "std/src/std/list.sv",
+            "std/src/std/net.sv",
+            "std/src/std/process.sv",
+            "std/src/std/random.sv",
+            "std/src/std/task.sv",
+            "std/src/std/text.sv",
+            "std/src/std/thread.sv",
+            "std/src/std/time.sv",
         ] {
             let destination = root.join(relative);
             fs::create_dir_all(
@@ -1381,11 +1393,6 @@ main = count [1, 2, 3]
                 "compare x y = stringCompare x y",
                 "stringCompare",
                 "stringCompare : String -> String -> Ordering",
-            ),
-            (
-                "getArgs = prelude.prim.getArgs",
-                "prelude.prim.getArgs",
-                "getArgs : forall e. IO e [String]",
             ),
             (
                 "apply fs xs = concat (map (fun f => map f xs) fs)",

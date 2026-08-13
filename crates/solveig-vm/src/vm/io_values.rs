@@ -78,7 +78,7 @@ impl Interpreter<'_> {
             .get(checkpoint + 1)
             .expect("ICE: process stderr root disappeared during allocation");
         let result = VmCtx::new(self).alloc_data3_ctor(
-            CtorRuntimeRole::PreludeProcessResult,
+            CtorRuntimeRole::StdProcessResult,
             Value::Int(exit_code),
             stdout,
             stderr,

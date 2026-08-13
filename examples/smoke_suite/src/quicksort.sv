@@ -1,3 +1,4 @@
+import std.list
 data Partition3 a = Partition3 [a] [a] [a]
 
 middleFrom : forall a. a -> [a] -> [a] -> a

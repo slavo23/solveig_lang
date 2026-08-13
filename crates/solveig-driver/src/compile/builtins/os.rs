@@ -26,7 +26,7 @@ pub(super) fn os_builtin_specs(
         string.clone(),
     );
     let environment = Ty::make_app(Ty::make_con_id(prelude_list_tycon_id(names)), string_pair);
-    let process_result = Ty::make_con_id(prelude_process_result_tycon_id(names));
+    let process_result = Ty::make_con_id(std_process_result_tycon_id(names));
     let a_id = names.fresh_tyvar("a");
     let a = Ty::TyVar(a_id);
 

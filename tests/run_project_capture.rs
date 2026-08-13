@@ -122,7 +122,9 @@ fn io_streams_prompt_readline_and_program_args() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "io_streams",
-        r#"main : Task ()
+        r#"import std.env(getArgs)
+
+main : Task ()
 main = do
     printStr "name> "
     name <- readLine
@@ -160,7 +162,10 @@ fn byte_file_and_handle_io_preserves_invalid_utf8() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "binary_io",
-        r#"readBytes : Handle -> Task Bytes;
+        r#"import std.bytes
+import std.io
+
+readBytes : Handle -> Task Bytes;
 readBytes input = hGetBytes input 64;
 
 writeBytes : Bytes -> Handle -> Task ();
@@ -348,7 +353,9 @@ fn file_io_reads_writes_and_appends_project_relative_text() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "file_io",
-        r#"main : Task ()
+        r#"import std.io
+
+main : Task ()
 main = do
     writeFile "score.txt" "seed\n"
     appendFile "score.txt" "extra\n"
@@ -373,7 +380,9 @@ fn cli_passes_program_args_after_separator() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "cli_args",
-        r#"main : Task ()
+        r#"import std.env(getArgs)
+
+main : Task ()
 main = do
     args <- getArgs
     mapIO_ printLine args
@@ -408,7 +417,10 @@ fn cli_exit_flushes_an_open_file_and_propagates_its_status() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "cli_exit_flush",
-        r#"main : Task ()
+        r#"import std.io
+import std.process(exitWith)
+
+main : Task ()
 main = do
     output <- openFile "buffered.txt" WriteMode
     hSetBuffering output (BlockBuffering (Just 4096))
@@ -487,7 +499,9 @@ fn catch_defect_recovers_from_managed_stack_exhaustion() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "stack_defect",
-        r#"grow : Int -> Int
+        r#"import std.task(catchDefect)
+
+grow : Int -> Int
 grow n =
     if n == 0 then 0
     else 1 + grow (n - 1)
@@ -533,7 +547,9 @@ fn catch_defect_recovers_from_managed_heap_exhaustion() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "heap_defect",
-        r#"build : Int -> [Int] -> [Int]
+        r#"import std.task(catchDefect)
+
+build : Int -> [Int] -> [Int]
 build n values =
     if n == 0 then values
     else build (n - 1) (n :: values)

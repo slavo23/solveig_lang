@@ -1,3 +1,5 @@
+import std.task
+import std.time
 data WorkError = WorkFailed
 
 pause : Int -> IO WorkError ()

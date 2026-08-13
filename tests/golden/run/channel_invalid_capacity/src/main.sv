@@ -1,3 +1,5 @@
+import std.task
+import std.channel
 report : Defect -> Task ()
 report (Error _) = printLine "invalid-capacity"
 report _ = printLine "unexpected-defect"

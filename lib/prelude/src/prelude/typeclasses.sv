@@ -375,22 +375,6 @@ instance Monad List where
 instance Monad (IO e) where
     bind action f = prelude.builtins.bindIO action f
 
--- | Reads the command-line arguments passed to the program.
-getArgs : forall e. IO e [String]
-getArgs = prelude.prim.getArgs
-
--- | Returns the runtime environment sorted by variable name.
-getEnvironment : Task [Pair String String]
-getEnvironment = prelude.prim.getEnvironment
-
--- | Lists a directory's immediate entries in lexical order.
-listDirectory : String -> Task [String]
-listDirectory path = prelude.prim.listDirectory path
-
--- | Runs a child process and strictly captures its output and exit code.
-runProcess : String -> [String] -> Task ProcessResult
-runProcess program arguments = prelude.prim.runProcess program arguments
-
 -- | Runs two IO actions and keeps the result of the second.
 seqIO : forall e a b. IO e a -> IO e b -> IO e b
 seqIO left right = thenM left right

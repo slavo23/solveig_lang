@@ -1,4 +1,5 @@
-import prelude.prim(intToString)
+import std.time
+import std.text(intToString)
 
 main : Task ()
 main = do

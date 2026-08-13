@@ -1,3 +1,4 @@
+import std.thread
 pause : Int -> Task ()
 pause n =
     if n == 0 then pureIO ()

@@ -1,3 +1,5 @@
+import std.thread
+import std.channel
 worker : Chan String -> Chan String -> Task ()
 worker requests replies = do
     request <- recv requests

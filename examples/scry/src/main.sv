@@ -1,3 +1,4 @@
+import std.io
 import scry.ast
 import scry.parser
 import scry.pretty

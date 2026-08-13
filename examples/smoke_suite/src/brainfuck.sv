@@ -1,3 +1,4 @@
+import std.list
 data Pair a b = Pair a b;
 data State s a = State (s -> Pair a s);
 

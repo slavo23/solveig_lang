@@ -1,4 +1,5 @@
-import prelude.prim(stringToChars, charsToString)
+import std.list
+import std.text(stringToChars, charsToString)
 import scry.ast
 
 

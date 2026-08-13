@@ -1,3 +1,4 @@
+import std.list
 sumList : [Int] -> Int;
 sumList xs =
     foldl (fun acc x => acc + x) 0 xs;

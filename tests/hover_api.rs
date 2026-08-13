@@ -1156,7 +1156,8 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
 fn hover_on_paren_left_operand_of_cons_uses_group_span() {
     let project_root = temp_root("paren_cons_left_operand_hover");
     let file = project_root.join("src/main.sv");
-    let source = r#"import prelude.prim(charsToString)
+    let source = r#"import std.list(reverse)
+import std.text(charsToString)
 
 data Tok = TAtom String
 
@@ -1315,11 +1316,6 @@ fn hover_covers_direct_prelude_imported_references() {
             "stringCompare : String -> String -> Ordering",
         ),
         (
-            "getArgs = prelude.prim.getArgs",
-            "prelude.prim.getArgs",
-            "getArgs : forall e. IO e [String]",
-        ),
-        (
             "    apply fs xs = concat (map (fun f => map f xs) fs)",
             "map",
             "map : forall a b. (a -> b) -> [a] -> [b]",
@@ -1369,35 +1365,35 @@ fn hover_audits_quiz_game_sensitive_tokens() {
     assert!(!actual.contains("bind :"));
 
     let expected = concat!(
-        " 13:1   `statePure` => statePure : forall s a. a -> State s a\n",
-        " 13:11  `value` => value : a\n",
-        " 13:17  `=` => <none>\n",
-        " 13:19  `State` => State : forall s a. (s -> Pair a s) -> State s a\n",
-        " 13:25  `(` => s -> Pair a s\n",
-        " 13:26  `fun` => <none>\n",
-        " 13:30  `state` => state : s\n",
-        " 13:36  `=>` => <none>\n",
-        " 13:39  `MkPair` => MkPair : forall a b. a -> b -> Pair a b\n",
-        " 13:46  `value` => value : a\n",
-        " 13:52  `state` => state : s\n",
-        " 13:57  `)` => s -> Pair a s\n",
-        " 74:9   `MkPair` => MkPair : forall a b. a -> b -> Pair a b\n",
-        " 74:16  `question` => question : String\n",
-        " 74:25  `answer` => answer : String\n",
-        " 74:32  `=>` => <none>\n",
-        " 74:35  `QuizCard` => QuizCard : String -> String -> QuizCard\n",
-        " 74:44  `question` => question : String\n",
-        " 74:53  `answer` => answer : String\n",
-        " 90:1   `askCards` => askCards : [QuizCard] -> Task [Pair QuizCard String]\n",
-        " 90:10  `cards` => cards : [QuizCard]\n",
-        " 90:16  `=` => <none>\n",
-        " 90:18  `mapM` => mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]\n",
-        " 90:23  `askCard` => askCard : QuizCard -> Task (Pair QuizCard String)\n",
-        " 90:31  `cards` => cards : [QuizCard]\n",
-        "136:9   `responses` => responses : [Pair QuizCard String]\n",
-        "136:19  `<-` => <none>\n",
-        "136:22  `askCards` => askCards : [QuizCard] -> Task [Pair QuizCard String]\n",
-        "136:31  `cards` => cards : [QuizCard]\n",
+        " 15:1   `statePure` => statePure : forall s a. a -> State s a\n",
+        " 15:11  `value` => value : a\n",
+        " 15:17  `=` => <none>\n",
+        " 15:19  `State` => State : forall s a. (s -> Pair a s) -> State s a\n",
+        " 15:25  `(` => s -> Pair a s\n",
+        " 15:26  `fun` => <none>\n",
+        " 15:30  `state` => state : s\n",
+        " 15:36  `=>` => <none>\n",
+        " 15:39  `MkPair` => MkPair : forall a b. a -> b -> Pair a b\n",
+        " 15:46  `value` => value : a\n",
+        " 15:52  `state` => state : s\n",
+        " 15:57  `)` => s -> Pair a s\n",
+        " 76:9   `MkPair` => MkPair : forall a b. a -> b -> Pair a b\n",
+        " 76:16  `question` => question : String\n",
+        " 76:25  `answer` => answer : String\n",
+        " 76:32  `=>` => <none>\n",
+        " 76:35  `QuizCard` => QuizCard : String -> String -> QuizCard\n",
+        " 76:44  `question` => question : String\n",
+        " 76:53  `answer` => answer : String\n",
+        " 92:1   `askCards` => askCards : [QuizCard] -> Task [Pair QuizCard String]\n",
+        " 92:10  `cards` => cards : [QuizCard]\n",
+        " 92:16  `=` => <none>\n",
+        " 92:18  `mapM` => mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]\n",
+        " 92:23  `askCard` => askCard : QuizCard -> Task (Pair QuizCard String)\n",
+        " 92:31  `cards` => cards : [QuizCard]\n",
+        "138:9   `responses` => responses : [Pair QuizCard String]\n",
+        "138:19  `<-` => <none>\n",
+        "138:22  `askCards` => askCards : [QuizCard] -> Task [Pair QuizCard String]\n",
+        "138:31  `cards` => cards : [QuizCard]\n",
     );
 
     assert_eq!(actual, expected);

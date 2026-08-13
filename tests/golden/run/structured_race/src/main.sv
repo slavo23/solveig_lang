@@ -1,3 +1,7 @@
+import std.net
+import std.task
+import std.time
+import std.channel
 slow : Task String
 slow =
     finally

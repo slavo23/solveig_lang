@@ -232,16 +232,16 @@ pub fn prelude_ordering_gt_ctor_id(names: &mut Names) -> CtorId {
     names.ctor_id(PRELUDE_ORDERING_GT_NAME)
 }
 
-pub fn prelude_io_mode_tycon_id(names: &mut Names) -> TyConId {
-    names.tycon_id(PRELUDE_IO_MODE_NAME)
+pub fn std_io_mode_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(STD_IO_MODE_NAME)
 }
 
-pub fn prelude_buffer_mode_tycon_id(names: &mut Names) -> TyConId {
-    names.tycon_id(PRELUDE_BUFFER_MODE_NAME)
+pub fn std_buffer_mode_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(STD_BUFFER_MODE_NAME)
 }
 
-pub fn prelude_process_result_tycon_id(names: &mut Names) -> TyConId {
-    names.tycon_id(PRELUDE_PROCESS_RESULT_NAME)
+pub fn std_process_result_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(STD_PROCESS_RESULT_NAME)
 }
 
 pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
@@ -295,14 +295,14 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
             CtorRuntimeRole::PreludeIoErrorGetModificationTime
         }
         PRELUDE_IO_ERROR_RUN_PROCESS_NAME => CtorRuntimeRole::PreludeIoErrorRunProcess,
-        PRELUDE_PROCESS_RESULT_CTOR_NAME => CtorRuntimeRole::PreludeProcessResult,
-        PRELUDE_IO_MODE_READ_NAME => CtorRuntimeRole::PreludeIoModeRead,
-        PRELUDE_IO_MODE_WRITE_NAME => CtorRuntimeRole::PreludeIoModeWrite,
-        PRELUDE_IO_MODE_APPEND_NAME => CtorRuntimeRole::PreludeIoModeAppend,
-        PRELUDE_IO_MODE_READ_WRITE_NAME => CtorRuntimeRole::PreludeIoModeReadWrite,
-        PRELUDE_BUFFER_MODE_NONE_NAME => CtorRuntimeRole::PreludeBufferModeNone,
-        PRELUDE_BUFFER_MODE_LINE_NAME => CtorRuntimeRole::PreludeBufferModeLine,
-        PRELUDE_BUFFER_MODE_BLOCK_NAME => CtorRuntimeRole::PreludeBufferModeBlock,
+        STD_PROCESS_RESULT_CTOR_NAME => CtorRuntimeRole::StdProcessResult,
+        STD_IO_MODE_READ_NAME => CtorRuntimeRole::StdIoModeRead,
+        STD_IO_MODE_WRITE_NAME => CtorRuntimeRole::StdIoModeWrite,
+        STD_IO_MODE_APPEND_NAME => CtorRuntimeRole::StdIoModeAppend,
+        STD_IO_MODE_READ_WRITE_NAME => CtorRuntimeRole::StdIoModeReadWrite,
+        STD_BUFFER_MODE_NONE_NAME => CtorRuntimeRole::StdBufferModeNone,
+        STD_BUFFER_MODE_LINE_NAME => CtorRuntimeRole::StdBufferModeLine,
+        STD_BUFFER_MODE_BLOCK_NAME => CtorRuntimeRole::StdBufferModeBlock,
         PRELUDE_RESULT_OK_NAME => CtorRuntimeRole::PreludeResultOk,
         PRELUDE_RESULT_ERR_NAME => CtorRuntimeRole::PreludeResultErr,
         PRELUDE_DEFECT_ERROR_NAME => CtorRuntimeRole::PreludeDefectError,
@@ -562,14 +562,14 @@ pub enum CtorRuntimeRole {
     PreludeIoErrorGetFileSize,
     PreludeIoErrorGetModificationTime,
     PreludeIoErrorRunProcess,
-    PreludeProcessResult,
-    PreludeIoModeRead,
-    PreludeIoModeWrite,
-    PreludeIoModeAppend,
-    PreludeIoModeReadWrite,
-    PreludeBufferModeNone,
-    PreludeBufferModeLine,
-    PreludeBufferModeBlock,
+    StdProcessResult,
+    StdIoModeRead,
+    StdIoModeWrite,
+    StdIoModeAppend,
+    StdIoModeReadWrite,
+    StdBufferModeNone,
+    StdBufferModeLine,
+    StdBufferModeBlock,
     PreludeResultOk,
     PreludeResultErr,
     PreludeDefectError,

@@ -1,4 +1,7 @@
-import prelude.prim(stringToChars)
+import std.task
+import std.channel
+import std.io
+import std.text(stringToChars)
 
 data LogJob = LogJob String
 

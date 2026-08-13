@@ -1,3 +1,4 @@
+import std.thread
 spin : Int -> ()
 spin n = if n == 0 then () else spin (n - 1)
 

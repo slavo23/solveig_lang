@@ -462,6 +462,8 @@ main = do
 Deterministic pseudorandom values use explicit immutable state:
 
 ```solveig
+import std.random(randomRange, mkStdGen)
+
 case randomRange 1 6 (mkStdGen 42) of
     MkPair die nextGenerator => die
 ```
@@ -479,10 +481,21 @@ Ordinary modules implicitly import:
 - `prelude.typeclasses`
 
 The low-level `prelude.prim` module exists for primitive operations, but it is
-not imported implicitly. Most programs should use the public Prelude wrappers
-and typeclasses instead.
+not imported implicitly. Most programs should use the public Prelude and
+explicit standard-library modules instead:
+
+```solveig
+import std.io(readFile, writeFile)
+import std.list(take, zip)
+import std.task(concurrently)
+```
+
+The shipped `std` package is available to every project but never automatic,
+so adding a library API cannot silently introduce names into existing code.
 
 See [docs/prelude.md](docs/prelude.md) for signatures and examples.
+See [docs/standard-library.md](docs/standard-library.md) for the `std.*` module
+map and practical import examples.
 See [docs/errors.md](docs/errors.md) for typed errors, defects, cleanup, and
 the interruption model.
 See [docs/concurrency.md](docs/concurrency.md) for green threads, channels,
@@ -583,6 +596,7 @@ SOLVEIG_BIN="$(command -v solveig)" python3 scripts/lsp_smoke.py tests/golden/di
 
 - [docs/tutorial.md](docs/tutorial.md)
 - [docs/prelude.md](docs/prelude.md)
+- [docs/standard-library.md](docs/standard-library.md)
 - [docs/io.md](docs/io.md)
 - [docs/errors.md](docs/errors.md)
 - [docs/concurrency.md](docs/concurrency.md)

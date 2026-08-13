@@ -1,3 +1,6 @@
+import std.env
+import std.fs
+import std.io
 lookupEnvironment : String -> [Pair String String] -> Maybe String;
 lookupEnvironment name [] = Nothing;
 lookupEnvironment name (MkPair key value :: rest) =

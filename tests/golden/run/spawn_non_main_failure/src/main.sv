@@ -1,3 +1,4 @@
+import std.thread
 failAction : () -> Task ()
 failAction _ =
     bindIO (pureIO ()) (fun _ =>
