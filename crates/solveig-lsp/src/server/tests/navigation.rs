@@ -145,3 +145,67 @@ unwrap value =
     server.shutdown(()).await.expect("shutdown should succeed");
     drop(project_root);
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn goto_definition_into_prelude_returns_an_openable_file() {
+    let project_root = temp_root("prelude_navigation");
+    let main = project_root.join("src/main.sv");
+    let main_text = r#"main : [Int]
+main = map (fun value => value + 1) [1, 2]
+"#;
+    write_source(&main, main_text);
+    let main_uri = Url::from_file_path(&main).expect("test path should become a file URI");
+    let root_uri =
+        Url::from_directory_path(&project_root).expect("test root should become a file URI");
+    let mut server = LspServer::new(ClientSocket::new_closed());
+
+    server
+        .initialize(initialize_params(root_uri))
+        .await
+        .expect("initialize should succeed");
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: main_uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: main_text.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
+
+    let definition = server
+        .definition(GotoDefinitionParams {
+            text_document_position_params: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: main_uri },
+                position: Position::new(1, 8),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        })
+        .await
+        .expect("definition request should succeed")
+        .expect("Prelude definition should exist");
+    let GotoDefinitionResponse::Scalar(location) = definition else {
+        panic!("Prelude definition should return one location");
+    };
+    let prelude_file = location
+        .uri
+        .to_file_path()
+        .expect("Prelude definition should use a file URI");
+
+    assert!(prelude_file.is_absolute());
+    assert!(
+        prelude_file.is_file(),
+        "{} should be openable",
+        prelude_file.display()
+    );
+    assert!(prelude_file.ends_with("lib/prelude/src/prelude/list.sv"));
+    assert_eq!(location.range.start.line, 11);
+
+    server.shutdown(()).await.expect("shutdown should succeed");
+    drop(project_root);
+}

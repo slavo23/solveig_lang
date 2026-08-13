@@ -7,7 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use solveig_base::{FileId, FileSpan, Session};
-use solveig_package::find_nearest_manifest;
+use solveig_package::{LibraryLocation, LibraryOrigin, find_nearest_manifest};
 use solveig_resolve::project::{
     ModuleFile, ModuleTable, ParsedProject, Project, ResolveError, effective_imports,
 };
@@ -15,13 +15,8 @@ use solveig_syntax::ast::{ModuleName, ParsedModule};
 use solveig_syntax::lowering;
 
 use crate::DriverError;
+use crate::library::{compiler_library_location, embedded_prelude_source};
 use crate::source_provider::SourceProvider;
-
-const PRELUDE_BUILTINS_SRC: &str = include_str!("./prelude/builtins.sv");
-const PRELUDE_LIST_SRC: &str = include_str!("./prelude/list.sv");
-const PRELUDE_TYPECLASS_SRC: &str = include_str!("./prelude/typeclasses.sv");
-const PRELUDE_PRIM_SRC: &str = "";
-const BUNDLED_PRELUDE_FILES: [&str; 3] = ["builtins.sv", "list.sv", "typeclasses.sv"];
 
 #[derive(Debug)]
 pub enum ProjectError {
@@ -42,13 +37,7 @@ impl From<ResolveError> for ProjectError {
 }
 
 fn prelude_module(session: &Session, module: &ModuleName) -> Option<&'static str> {
-    match module.as_string(session).as_str() {
-        "prelude.builtins" => Some(PRELUDE_BUILTINS_SRC),
-        "prelude.list" => Some(PRELUDE_LIST_SRC),
-        "prelude.typeclasses" => Some(PRELUDE_TYPECLASS_SRC),
-        "prelude.prim" => Some(PRELUDE_PRIM_SRC),
-        _ => None,
-    }
+    embedded_prelude_source(&module.as_string(session))
 }
 
 pub fn is_compiler_prelude_module(session: &Session, module: &ModuleName) -> bool {
@@ -65,50 +54,38 @@ fn source_hash(source: &str) -> u64 {
     hasher.finish()
 }
 
-fn bundled_prelude_source_root(entry_file: &Path) -> Option<PathBuf> {
-    let driver_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let prelude_dir = driver_src.join("prelude");
-    let rel = entry_file.strip_prefix(&prelude_dir).ok()?;
-    let file_name = rel.file_name()?.to_str()?;
-
-    if rel.components().count() == 1 && BUNDLED_PRELUDE_FILES.contains(&file_name) {
-        Some(driver_src)
-    } else {
-        None
-    }
-}
-
-fn mk_virtual_prelude_file(
+fn load_prelude_file(
     session: &Session,
     module: &ModuleName,
+    sources: &SourceProvider,
+    library: &LibraryLocation,
 ) -> Result<ModuleFile, ProjectError> {
+    let root = library.package_source_root("prelude").into_std_path_buf();
+    let path = file_from_module_name(session, &root, module);
+
+    if library.origin() != LibraryOrigin::Embedded {
+        return scan_module_file(session, &root, &path, sources).map_err(ProjectError::from);
+    }
+
     let source = prelude_module(session, module)
         .ok_or_else(|| DriverError::UnknownCompilerPrelude {
             module: module.as_string(session),
         })?
         .to_string();
-
-    let path = PathBuf::from(format!(
-        "<compiler-prelude>/{}.sv",
-        module.as_string(session)
-    ));
-    let file = session.add_or_update_file(path.clone(), source.clone());
-    let parsed = parse_source(session, file, &source);
-    let imports = parsed.imports.clone();
-
-    Ok(ModuleFile {
-        name: module.clone(),
+    Ok(module_file_from_source(
+        session,
+        module.clone(),
         path,
-        source_hash: source_hash(&source),
-        imports,
-        parsed,
-    })
+        &source,
+    ))
 }
 
-fn load_virtual_prelude_module(
+fn load_prelude_module(
     session: &Session,
     modules: &mut FxHashMap<ModuleName, ModuleFile>,
     module: &ModuleName,
+    sources: &SourceProvider,
+    library: &LibraryLocation,
     cached_prelude_modules: Option<&FxHashMap<ModuleName, ModuleFile>>,
 ) -> Result<(), ProjectError> {
     if modules.contains_key(module) {
@@ -117,14 +94,21 @@ fn load_virtual_prelude_module(
 
     let module_file = cached_prelude_modules
         .and_then(|cached| cached.get(module).cloned())
-        .map_or_else(|| mk_virtual_prelude_file(session, module), Ok)?;
+        .map_or_else(|| load_prelude_file(session, module, sources, library), Ok)?;
     let imports = module_file.imports.clone();
     let file = module_file.parsed.file;
     modules.insert(module.clone(), module_file);
 
     for imp in effective_imports(session, module, &imports, file) {
         if prelude_module(session, &imp.module).is_some() {
-            load_virtual_prelude_module(session, modules, &imp.module, cached_prelude_modules)?;
+            load_prelude_module(
+                session,
+                modules,
+                &imp.module,
+                sources,
+                library,
+                cached_prelude_modules,
+            )?;
         } else {
             return Err(ResolveError::UnknownModule {
                 span: imp.span,
@@ -151,17 +135,31 @@ fn scan_module_file(
         })?;
 
     let name = module_name_from_file(session, root, file)?;
-    let file_id = session.add_or_update_file(file.to_path_buf(), source.clone());
-    let parsed = parse_source(session, file_id, &source);
+    Ok(module_file_from_source(
+        session,
+        name,
+        file.to_path_buf(),
+        &source,
+    ))
+}
+
+fn module_file_from_source(
+    session: &Session,
+    name: ModuleName,
+    path: PathBuf,
+    source: &str,
+) -> ModuleFile {
+    let file_id = session.add_or_update_file(path.clone(), source.to_string());
+    let parsed = parse_source(session, file_id, source);
     let imports = parsed.imports.clone();
 
-    Ok(ModuleFile {
+    ModuleFile {
         name,
-        path: file.to_path_buf(),
-        source_hash: source_hash(&source),
+        path,
+        source_hash: source_hash(source),
         imports,
         parsed,
-    })
+    }
 }
 
 pub fn module_name_from_file(
@@ -230,9 +228,8 @@ pub(crate) fn load_project_with_source_provider(
     sources: &SourceProvider,
     cached_prelude_modules: Option<&FxHashMap<ModuleName, ModuleFile>>,
 ) -> Result<(PathBuf, Project), ProjectError> {
-    let root = if let Some(root) = bundled_prelude_source_root(entry_file) {
-        root
-    } else if let Some(entry_file) = camino::Utf8Path::from_path(entry_file)
+    let library = compiler_library_location()?;
+    let root = if let Some(entry_file) = camino::Utf8Path::from_path(entry_file)
         && let Some(package_root) = find_nearest_manifest(entry_file)
     {
         package_root
@@ -282,10 +279,12 @@ pub(crate) fn load_project_with_source_provider(
                 module_file.parsed.file,
             ) {
                 if prelude_module(session, &imp.module).is_some() {
-                    load_virtual_prelude_module(
+                    load_prelude_module(
                         session,
                         &mut modules,
                         &imp.module,
+                        sources,
+                        &library,
                         cached_prelude_modules,
                     )?;
                 } else {

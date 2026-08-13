@@ -296,6 +296,10 @@ fn million_step_io_loop_runs_on_small_native_stack() {
 fn repeated_checks_reuse_compiler_prelude_cache() {
     let project_root = write_temp_project("prelude_cache", "main = ()\n");
     let mut compilation = Compilation::new(&project_root);
+    let prelude_root = solveig_driver::compiler_library_location()
+        .expect("compiler library should resolve")
+        .package_source_root("prelude")
+        .into_std_path_buf();
 
     assert!(
         compilation
@@ -308,11 +312,7 @@ fn repeated_checks_reuse_compiler_prelude_cache() {
         .source_map()
         .files()
         .iter()
-        .filter(|file| {
-            file.path
-                .to_string_lossy()
-                .starts_with("<compiler-prelude>/")
-        })
+        .filter(|file| file.path.starts_with(&prelude_root))
         .count();
 
     assert!(
@@ -326,17 +326,13 @@ fn repeated_checks_reuse_compiler_prelude_cache() {
         .source_map()
         .files()
         .iter()
-        .filter(|file| {
-            file.path
-                .to_string_lossy()
-                .starts_with("<compiler-prelude>/")
-        })
+        .filter(|file| file.path.starts_with(&prelude_root))
         .count();
 
     assert!(first_prelude_files > 0, "Prelude files should be loaded");
     assert_eq!(
         first_prelude_files, second_prelude_files,
-        "cached checks should not add another virtual Prelude file set"
+        "cached checks should not add another Prelude file set"
     );
 
     drop(project_root);

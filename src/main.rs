@@ -1,5 +1,5 @@
 use clap::{Parser, Subcommand};
-use solveig_driver::{Compilation, CompileOptions};
+use solveig_driver::{Compilation, CompileOptions, compiler_library_location};
 use solveig_report::emit_diagnostics;
 use std::fs::{File, OpenOptions};
 use std::io::{self, Write};
@@ -48,6 +48,7 @@ fn main() {
         return;
     }
 
+    trace_compiler_library();
     let mut compilation = Compilation::new(&cli.run.project_root);
 
     let run_result = compilation.compile_and_run_project_with_options_and_args(
@@ -74,6 +75,17 @@ fn main() {
             eprintln!("{err}");
             std::process::exit(1);
         }
+    }
+}
+
+fn trace_compiler_library() {
+    match compiler_library_location() {
+        Ok(location) => tracing::info!(
+            root = %location.root(),
+            origin = location.origin().as_str(),
+            "Resolved Solveig compiler library"
+        ),
+        Err(error) => tracing::error!(%error, "Failed to resolve Solveig compiler library"),
     }
 }
 

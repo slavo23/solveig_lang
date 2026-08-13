@@ -1258,7 +1258,7 @@ fn hover_covers_non_empty_and_nested_list_literal_brackets() {
 #[test]
 fn hover_covers_direct_prelude_imported_references() {
     let workspace_root = fixture_root(".");
-    let typeclasses_file = workspace_root.join("crates/solveig-driver/src/prelude/typeclasses.sv");
+    let typeclasses_file = workspace_root.join("lib/prelude/src/prelude/typeclasses.sv");
     let typeclasses_source =
         fs::read_to_string(&typeclasses_file).expect("typeclasses source should load");
     let mut compilation = Compilation::for_source_file(&typeclasses_file);

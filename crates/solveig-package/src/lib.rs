@@ -18,6 +18,10 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
+mod library;
+
+pub use library::{LIBRARY_ENV_VAR, LibraryLocation, LibraryOrigin, resolve_library_location};
+
 pub const MANIFEST_FILE: &str = "solveig.toml";
 pub const SOURCE_DIRECTORY: &str = "src";
 pub const SOURCE_EXTENSION: &str = "sv";
@@ -339,6 +343,10 @@ pub enum PackageError {
     TooManyPackages {
         count: usize,
     },
+    InvalidLibraryRoot {
+        path: Utf8PathBuf,
+        message: &'static str,
+    },
 }
 
 impl PackageError {
@@ -387,6 +395,9 @@ impl fmt::Display for PackageError {
             Self::TooManyPackages { count } => {
                 write!(f, "package graph has too many packages ({count})")
             }
+            Self::InvalidLibraryRoot { path, message } => {
+                write!(f, "invalid Solveig library root {path}: {message}")
+            }
         }
     }
 }
@@ -403,7 +414,8 @@ impl std::error::Error for PackageError {
             | Self::InvalidField { .. }
             | Self::NonUtf8Path { .. }
             | Self::DependencyCycle { .. }
-            | Self::TooManyPackages { .. } => None,
+            | Self::TooManyPackages { .. }
+            | Self::InvalidLibraryRoot { .. } => None,
         }
     }
 }

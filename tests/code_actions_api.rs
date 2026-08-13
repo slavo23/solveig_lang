@@ -426,9 +426,9 @@ main = answer
 }
 
 #[test]
-fn bundled_typeclasses_file_checks_when_opened_directly() {
-    let source_path = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("crates/solveig-driver/src/prelude/typeclasses.sv");
+fn shipped_typeclasses_file_checks_when_opened_directly() {
+    let source_path =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("lib/prelude/src/prelude/typeclasses.sv");
     let mut compilation = Compilation::for_source_file(&source_path);
 
     let result = compilation
@@ -436,7 +436,7 @@ fn bundled_typeclasses_file_checks_when_opened_directly() {
         .expect("direct prelude file check should finish");
     assert!(
         result.success(),
-        "bundled prelude file should check as prelude.typeclasses, got: {:#?}",
+        "shipped prelude file should check as prelude.typeclasses, got: {:#?}",
         result.diagnostics()
     );
 }

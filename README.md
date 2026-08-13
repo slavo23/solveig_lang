@@ -43,13 +43,37 @@ Or install from a local checkout:
 ```bash
 git clone https://github.com/slavo23/lang_experiments.git
 cd lang_experiments
-cargo install --path .
+just install
 ```
+
+The all-in-one command requires [`just`](https://github.com/casey/just) in
+addition to the toolchain prerequisites above.
+
+`just install` installs the command and VS Code extension, then copies the
+shipped compiler libraries beside the executable. A direct `cargo install`
+still runs through the embedded fallback, but installing the files is preferred
+because editor navigation can open Prelude definitions as ordinary source.
 
 Cargo installs the executable as `solveig`. The usual install locations are:
 
 - macOS and Linux: `~/.cargo/bin/solveig`
 - Windows: `%USERPROFILE%\.cargo\bin\solveig.exe`
+
+The library directory sits beside that executable:
+
+```text
+bin/
+|-- solveig
+`-- lib/
+    |-- prelude/
+    `-- std/
+```
+
+Packagers should preserve that layout. `SOLVEIG_LIB` may instead point at a
+different `lib` directory containing both package manifests. Library discovery
+uses the override first, then `lib` beside the executable, and finally the
+copy embedded in the binary. The selected path and source are written to the
+compiler's tracing output.
 
 Check the installation:
 
@@ -81,7 +105,7 @@ From a local checkout:
 
 ```bash
 git pull
-cargo install --path . --force
+just install
 ```
 
 ### Uninstall the Solveig Command

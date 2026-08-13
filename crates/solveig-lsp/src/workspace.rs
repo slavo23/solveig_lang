@@ -12,7 +12,9 @@ use async_lsp::lsp_types::{
     Position, Range, SemanticTokens, SymbolInformation, Url,
 };
 use solveig_base::{PositionEncoding, Session, SourceMap, SourcePosition};
-use solveig_driver::{Compilation, CompilationSnapshot, DriverError, SourceProvider};
+use solveig_driver::{
+    Compilation, CompilationSnapshot, DriverError, SourceProvider, compiler_library_location,
+};
 use solveig_ide::{ProjectSnapshotView, SourceCodeActionCategory, SourceInlayHintConfig};
 use solveig_package::{find_nearest_manifest_path, is_package_root};
 use tokio::task::JoinHandle;
@@ -94,6 +96,14 @@ impl ServerState {
     }
 
     pub(crate) fn new_with_config(encoding: PositionEncoding, config: ServerConfig) -> Self {
+        match compiler_library_location() {
+            Ok(location) => tracing::info!(
+                root = %location.root(),
+                origin = location.origin().as_str(),
+                "Resolved Solveig compiler library"
+            ),
+            Err(error) => tracing::error!(%error, "Failed to resolve Solveig compiler library"),
+        }
         Self {
             workspaces: BTreeMap::new(),
             roots: Vec::new(),
@@ -706,7 +716,11 @@ pub(crate) mod tests {
     use solveig_driver::Compilation;
     use std::fs;
     use std::ops::Deref;
+    use std::process::Command;
     use tempfile::{Builder, TempDir};
+
+    const BROKEN_PRELUDE_CHILD: &str = "SOLVEIG_S2_BROKEN_PRELUDE_CHILD";
+    const BROKEN_PRELUDE_PROJECT: &str = "SOLVEIG_S2_BROKEN_PRELUDE_PROJECT";
 
     fn workspace_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -770,6 +784,39 @@ pub(crate) mod tests {
         )
         .expect("test source directory should be creatable");
         fs::write(path, source).expect("test source should be writable");
+    }
+
+    fn write_broken_library(root: &Path) {
+        let shipped = workspace_root().join("lib");
+        for relative in [
+            "prelude/solveig.toml",
+            "prelude/src/prelude/builtins.sv",
+            "prelude/src/prelude/list.sv",
+            "prelude/src/prelude/prim.sv",
+            "prelude/src/prelude/typeclasses.sv",
+            "std/solveig.toml",
+            "std/src/std.sv",
+        ] {
+            let destination = root.join(relative);
+            fs::create_dir_all(
+                destination
+                    .parent()
+                    .expect("library fixture path should have a parent"),
+            )
+            .expect("library fixture directory should be creatable");
+            fs::copy(shipped.join(relative), &destination)
+                .expect("shipped library file should copy into the fixture");
+        }
+
+        let list = root.join("prelude/src/prelude/list.sv");
+        let source = fs::read_to_string(&list).expect("fixture list source should be readable");
+        let broken = source.replacen(
+            "map : forall a b. (a -> b) -> [a] -> [b]",
+            "map : MissingType",
+            1,
+        );
+        assert_ne!(broken, source, "Prelude fixture mutation should apply");
+        fs::write(list, broken).expect("broken list fixture should be writable");
     }
 
     #[test]
@@ -1287,9 +1334,9 @@ main = count [1, 2, 3]
     }
 
     #[test]
-    fn bundled_prelude_file_opens_as_canonical_module() {
-        let source = workspace_root().join("crates/solveig-driver/src/prelude/typeclasses.sv");
-        let text = fs::read_to_string(&source).expect("bundled typeclasses source should load");
+    fn shipped_prelude_file_opens_as_canonical_module() {
+        let source = workspace_root().join("lib/prelude/src/prelude/typeclasses.sv");
+        let text = fs::read_to_string(&source).expect("shipped typeclasses source should load");
         let uri = Url::from_file_path(&source).expect("test path should become a file URI");
         let target_line = text
             .lines()
@@ -1306,7 +1353,7 @@ main = count [1, 2, 3]
         let initial_publications = state.check_all();
         assert!(
             diagnostics_for_uri(&initial_publications, &uri).is_empty(),
-            "direct bundled prelude diagnostics should stay clean before hover: {initial_publications:#?}"
+            "direct shipped prelude diagnostics should stay clean before hover: {initial_publications:#?}"
         );
         let hover = state
             .hover(
@@ -1316,13 +1363,13 @@ main = count [1, 2, 3]
                     u32::try_from(target_character).expect("test character should fit in u32"),
                 ),
             )
-            .expect("hover should work in directly opened bundled prelude");
+            .expect("hover should work in directly opened shipped prelude");
         assert_hover_contains(hover, "intCompare : Int -> Int -> Ordering");
 
         let checked_publications = state.check_all();
         assert!(
             diagnostics_for_uri(&checked_publications, &uri).is_empty(),
-            "direct bundled prelude diagnostics should stay clean after recheck: {checked_publications:#?}"
+            "direct shipped prelude diagnostics should stay clean after recheck: {checked_publications:#?}"
         );
         for (line_text, needle, expected) in [
             (
@@ -1382,7 +1429,7 @@ main = count [1, 2, 3]
             edited_diagnostics
                 .iter()
                 .any(|diagnostic| diagnostic.severity == Some(DiagnosticSeverity::ERROR)),
-            "direct bundled prelude edits should invalidate stale cache: {edited_publications:#?}"
+            "direct shipped prelude edits should invalidate stale cache: {edited_publications:#?}"
         );
     }
 
@@ -1477,6 +1524,65 @@ secondAnswer = 2
         assert_hover_contains(second_hover, "secondAnswer : Int");
 
         drop(container);
+    }
+
+    #[test]
+    fn solveig_lib_override_publishes_prelude_diagnostics() {
+        if std::env::var_os(BROKEN_PRELUDE_CHILD).is_some() {
+            let project_root = PathBuf::from(
+                std::env::var_os(BROKEN_PRELUDE_PROJECT)
+                    .expect("child project path should be present"),
+            );
+            let list = PathBuf::from(
+                std::env::var_os(solveig_package::LIBRARY_ENV_VAR)
+                    .expect("child library path should be present"),
+            )
+            .join("prelude/src/prelude/list.sv");
+            let list = fs::canonicalize(list).expect("Prelude fixture path should canonicalize");
+            let list_uri = Url::from_file_path(&list).expect("Prelude URI should be valid");
+            let mut state = ServerState::new(PositionEncoding::Utf16);
+            state.set_roots(vec![project_root.clone()]);
+            state.touch_path(&project_root.join("src/main.sv"));
+
+            let publications = state.check_all();
+            let diagnostics = diagnostics_for_uri(&publications, &list_uri);
+
+            assert!(
+                !diagnostics.is_empty(),
+                "broken Prelude diagnostics should publish at {list_uri}: {publications:#?}"
+            );
+            return;
+        }
+
+        let fixture = temp_root("broken_prelude");
+        let library = fixture.join("lib");
+        let project = fixture.join("project");
+        write_broken_library(&library);
+        write_source(
+            &project.join("solveig.toml"),
+            r#"[package]
+name = "broken-prelude-client"
+version = "0.1.0"
+
+[language]
+entry = "main"
+"#,
+        );
+        write_source(&project.join("src/main.sv"), "main : Int\nmain = 1\n");
+
+        let status = Command::new(std::env::current_exe().expect("test executable should resolve"))
+            .arg("--exact")
+            .arg("workspace::tests::solveig_lib_override_publishes_prelude_diagnostics")
+            .arg("--nocapture")
+            .arg("--test-threads=1")
+            .env(BROKEN_PRELUDE_CHILD, "1")
+            .env(BROKEN_PRELUDE_PROJECT, &project)
+            .env(solveig_package::LIBRARY_ENV_VAR, &library)
+            .status()
+            .expect("broken Prelude child test should start");
+
+        assert!(status.success(), "broken Prelude child test should pass");
+        drop(fixture);
     }
 
     fn assert_hover_contains(hover: Hover, needle: &str) {
