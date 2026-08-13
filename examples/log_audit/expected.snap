@@ -1,0 +1,11 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+Solveig log audit
+files analyzed: 4
+files missing: 1
+events: 14
+info: 8
+warnings: 3
+errors: 3

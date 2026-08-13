@@ -349,3 +349,31 @@ inside the operation-specific `IOError`, so wording differs by platform.
 in binary host mode and Solveig performs UTF-8 decoding and newline handling,
 which keeps text and byte writes consistent across Unix and Windows. Paths
 otherwise follow host syntax and filesystem semantics.
+
+## Complete example: bounded concurrent file analysis
+
+[`examples/log_audit`](../examples/log_audit) is the Phase L capstone. It
+combines the facilities in this guide into one practical project:
+
+- three scoped green-thread workers perform whole-file UTF-8 reads;
+- capacity-two job and result channels bound queued memory and apply
+  backpressure in both directions;
+- producer and collector run concurrently, avoiding the bounded-pipeline
+  deadlock that would result from enqueueing every job before receiving any
+  results;
+- each worker converts a missing file's `ReadFileError` into ordinary
+  `MissingLog` result data with `catchError`;
+- the collector computes an order-independent summary because independent host
+  file completions have no stable order;
+- the final report replaces one ignored path, is read back, and is printed for
+  exact golden verification.
+
+Run it with:
+
+```sh
+cargo run -- --project-root examples/log_audit
+```
+
+The example's README walks through the ownership and backpressure choices.
+For a different, tutorial-style concurrency example based on an order
+fulfilment pipeline, see [The Solveig Tutorial](tutorial.md#17-typed-channels-and-backpressure).

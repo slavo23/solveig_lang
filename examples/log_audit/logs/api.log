@@ -1,0 +1,4 @@
+INFO server started
+INFO GET /health 200
+WARN request exceeded 500ms
+ERROR database unavailable

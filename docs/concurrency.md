@@ -306,6 +306,13 @@ The downloader follows the same rule: normal execution contacts the internet,
 while its checked-in `args.txt` selects `--local` for the golden suite. Its
 loopback server, fixed resource set, and exact summary make CI hermetic.
 
+The Phase L [`log_audit`](../examples/log_audit) example applies the same
+discipline to host file IO. Workers never print completion-order events;
+instead, one collector combines fixed-count results into a commutative summary
+and writes a report after all inputs are accounted for. Its capacity-two job
+and result channels demonstrate backpressure without relying on scheduler or
+filesystem timing.
+
 For runtime or concurrency changes, run:
 
 ```sh

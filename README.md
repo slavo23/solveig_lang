@@ -485,6 +485,9 @@ See [docs/diagnostics.md](docs/diagnostics.md) for the full code index.
 - `examples/concurrent_downloader` resolves and fetches several plain-HTTP
   internet resources through a bounded-channel worker pool, writes four fixed
   ignored outputs, and retains a hermetic `--local` mode for tests.
+- `examples/log_audit` is the Phase L capstone: three scoped workers read log
+  files through bounded job/result channels, recover from a missing input,
+  aggregate completion-order-independent counts, and write a fixed report.
 - `tests/golden/run/` contains small executable regression cases.
 - `tests/golden/diag/` contains diagnostic regression cases.
 
@@ -545,6 +548,7 @@ SOLVEIG_BIN="$(command -v solveig)" python3 scripts/lsp_smoke.py tests/golden/di
 
 - [docs/tutorial.md](docs/tutorial.md)
 - [docs/prelude.md](docs/prelude.md)
+- [docs/io.md](docs/io.md)
 - [docs/errors.md](docs/errors.md)
 - [docs/concurrency.md](docs/concurrency.md)
 - [docs/diagnostics.md](docs/diagnostics.md)
