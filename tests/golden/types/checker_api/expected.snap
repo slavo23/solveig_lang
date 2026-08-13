@@ -61,7 +61,9 @@ prelude.builtins.getCurrentDirectory : IO IOError String
 prelude.builtins.getEnv : String -> IO IOError (Maybe String)
 prelude.builtins.getFileSize : String -> IO IOError Int
 prelude.builtins.getModificationTime : String -> IO IOError Int
+prelude.builtins.getMonotonicTime : IO IOError Int
 prelude.builtins.getProgName : IO IOError String
+prelude.builtins.getSystemTime : IO IOError Int
 prelude.builtins.hClose : Handle -> IO IOError ()
 prelude.builtins.hFlush : Handle -> IO IOError ()
 prelude.builtins.hGetBytes : Handle -> Int -> IO IOError Bytes
@@ -173,7 +175,9 @@ prelude.prim.getEnv : String -> IO IOError (Maybe String)
 prelude.prim.getEnvironment : IO IOError [Pair String String]
 prelude.prim.getFileSize : String -> IO IOError Int
 prelude.prim.getModificationTime : String -> IO IOError Int
+prelude.prim.getMonotonicTime : forall e. IO e Int
 prelude.prim.getProgName : IO IOError String
+prelude.prim.getSystemTime : forall e. IO e Int
 prelude.prim.hClose : Handle -> IO IOError ()
 prelude.prim.hFlush : Handle -> IO IOError ()
 prelude.prim.hGetBytes : Handle -> Int -> IO IOError Bytes

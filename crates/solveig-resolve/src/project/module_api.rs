@@ -597,6 +597,8 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "renameFile" => "Renames a file or directory.",
         "getFileSize" => "Returns a file's size in bytes.",
         "getModificationTime" => "Returns modification time as nanoseconds since the Unix epoch.",
+        "getMonotonicTime" => "Returns nanoseconds from a runtime-local monotonic origin.",
+        "getSystemTime" => "Returns signed nanoseconds since the Unix epoch.",
         "runProcess" => "Runs a child process and strictly captures its output and exit code.",
         "exitWith" => "Terminates the main program with a requested host status after cleanup.",
         "exitSuccess" => "Terminates the main program successfully after cleanup.",

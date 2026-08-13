@@ -494,3 +494,5 @@ pub const BUILTIN_GET_FILE_SIZE: BuiltinId = BuiltinId(104);
 pub const BUILTIN_GET_MODIFICATION_TIME: BuiltinId = BuiltinId(105);
 pub const BUILTIN_RUN_PROCESS: BuiltinId = BuiltinId(106);
 pub const BUILTIN_EXIT_WITH: BuiltinId = BuiltinId(107);
+pub const BUILTIN_GET_MONOTONIC_TIME: BuiltinId = BuiltinId(108);
+pub const BUILTIN_GET_SYSTEM_TIME: BuiltinId = BuiltinId(109);

@@ -112,6 +112,8 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
         | IoAction::GetArgs
         | IoAction::NewChan { .. }
         | IoAction::Sleep { .. }
+        | IoAction::GetMonotonicTime
+        | IoAction::GetSystemTime
         | IoAction::Listen { .. }
         | IoAction::Exit { .. } => {}
     }
@@ -199,6 +201,8 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
         | IoAction::GetArgs
         | IoAction::NewChan { .. }
         | IoAction::Sleep { .. }
+        | IoAction::GetMonotonicTime
+        | IoAction::GetSystemTime
         | IoAction::Listen { .. }
         | IoAction::Exit { .. } => {}
     }

@@ -513,6 +513,14 @@ getFileSize path = prelude.prim.getFileSize path;
 getModificationTime : String -> Task Int;
 getModificationTime path = prelude.prim.getModificationTime path;
 
+-- | Returns nanoseconds from an arbitrary runtime-local monotonic origin.
+getMonotonicTime : Task Int;
+getMonotonicTime = prelude.prim.getMonotonicTime;
+
+-- | Returns signed nanoseconds since the Unix epoch.
+getSystemTime : Task Int;
+getSystemTime = prelude.prim.getSystemTime;
+
 -- | Terminates the main program with a host exit status after cleanup.
 exitWith : forall a. Int -> Task a;
 exitWith status = prelude.prim.exitWith status;

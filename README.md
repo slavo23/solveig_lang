@@ -358,6 +358,7 @@ Solveig currently supports:
 - explicit buffered handles plus UTF-8 and arbitrary-byte file IO
 - runtime-local environment and working-directory operations
 - shell-free child-process capture and cleanup-safe program exit statuses
+- nanosecond monotonic and Unix-epoch clocks with deterministic virtual time
 - typed FIFO channels, interruption, scoped masking, lightweight timers, and
   structured `withThread`/`race`/`concurrently`/`timeout` combinators
 - immutable byte strings, blocking-pool DNS, and readiness-driven TCP sockets

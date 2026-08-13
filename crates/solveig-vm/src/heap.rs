@@ -115,6 +115,8 @@ pub enum IoAction {
     Sleep {
         milliseconds: i64,
     },
+    GetMonotonicTime,
+    GetSystemTime,
     ResolveHost {
         host: Value,
     },

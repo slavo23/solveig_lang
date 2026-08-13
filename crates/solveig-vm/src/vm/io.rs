@@ -349,6 +349,20 @@ impl Interpreter<'_> {
                     self.status = ProcStatus::Blocked(BlockReason::Timer(deadline));
                     return Err(StepOutcome::Blocked);
                 }
+                IoAction::GetMonotonicTime => {
+                    let nanoseconds = self.timers.monotonic_nanos();
+                    if let Some(value) = self.resume_io_value(program, Value::Int(nanoseconds))? {
+                        return Ok(value);
+                    }
+                    continue;
+                }
+                IoAction::GetSystemTime => {
+                    let nanoseconds = self.timers.system_nanos();
+                    if let Some(value) = self.resume_io_value(program, Value::Int(nanoseconds))? {
+                        return Ok(value);
+                    }
+                    continue;
+                }
                 IoAction::ResolveHost { host } => {
                     let host = self.expect_string_value(host, "resolveHost")?;
                     if let Some(interruption) = self.accept_pending_interruption_at_block() {

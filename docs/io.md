@@ -189,6 +189,28 @@ Until package manifests define an executable name, `getProgName` returns the
 project root's final directory component. Non-UTF-8 host entries are omitted
 because Solveig `String` is UTF-8.
 
+## Clocks
+
+```solveig
+getMonotonicTime : Task Int
+getSystemTime : Task Int
+```
+
+Both operations return nanoseconds. `getMonotonicTime` measures elapsed time
+from an arbitrary origin local to one runtime and never decreases; subtract
+two readings to measure a duration. Its absolute value has no relationship to
+a calendar clock. `getSystemTime` is a signed count since the Unix epoch and
+can move when the host clock is adjusted. Values outside the `Int` nanosecond
+range saturate instead of wrapping.
+
+The operations execute directly on the scheduler thread: neither blocks nor
+uses an IO worker. Normal execution reads the host clocks. Captured execution
+and `SOLVEIG_SCHED_DETERMINISTIC=1` expose the scheduler's logical elapsed time
+for both operations, with the virtual system clock beginning at the Unix
+epoch. A virtual `sleep 5` therefore advances both readings by exactly
+5,000,000 nanoseconds. This makes clock-dependent program tests exact while
+keeping the same action and scheduler paths as normal execution.
+
 ## Filesystem and logical working directory
 
 ```solveig

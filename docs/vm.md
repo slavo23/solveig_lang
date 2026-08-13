@@ -602,6 +602,15 @@ masking, cleanup, and cancellation without host sleeps or elapsed-time
 assertions. This preserves invariant I9 while using the same timer queue and
 process transitions as real execution.
 
+The same `TimerClock` also serves the inert `getMonotonicTime` and
+`getSystemTime` actions, so the VM has no competing clock origin. Both return
+nanoseconds as saturating `Int` values. In normal execution, monotonic time is
+elapsed `Instant` time from runtime creation and system time is read from
+`SystemTime` relative to `UNIX_EPOCH`. In virtual execution, monotonic time and
+system time both equal the logical elapsed duration, making the virtual system
+clock begin at the Unix epoch. Clock reads neither park the green thread nor
+cross the worker pool.
+
 ## Typed channels
 
 `Chan a` is a compiler-known abstract type whose values point to mutable

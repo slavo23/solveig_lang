@@ -147,6 +147,8 @@ removeFile : String -> Task ()
 renameFile : String -> String -> Task ()
 getFileSize : String -> Task Int
 getModificationTime : String -> Task Int
+getMonotonicTime : Task Int
+getSystemTime : Task Int
 runProcess : String -> [String] -> Task ProcessResult
 processExitCode : ProcessResult -> Int
 processStdout : ProcessResult -> String
@@ -257,6 +259,14 @@ durations complete immediately. Normal execution uses monotonic elapsed time;
 deterministic execution advances virtual time when no process is runnable, so
 concurrency tests do not wait on or assert against the wall clock. A sleeping
 thread remains interruptible, including inside `mask`.
+
+`getMonotonicTime` returns nanoseconds from an arbitrary origin local to the
+runtime. Use differences between readings for elapsed durations; the value is
+not a date. `getSystemTime` returns signed nanoseconds since the Unix epoch.
+Both readings saturate at the `Int` bounds rather than wrapping. Captured and
+deterministic execution use the scheduler's virtual clock, with system time
+starting at the Unix epoch, so exact clock-dependent tests can advance time
+through `sleep` without waiting.
 
 `error` raises `Error`; integer division and modulo by zero raise
 `DivisionByZero`. The VM's managed stack and heap-object ceilings raise

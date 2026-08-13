@@ -167,6 +167,20 @@ pub(super) fn sleep(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, Ru
     Ok(ctx.alloc_io_action(IoAction::Sleep { milliseconds }))
 }
 
+pub(super) fn get_monotonic_time(
+    ctx: &mut VmCtx<'_, '_>,
+    _args: &[Value],
+) -> Result<Value, RuntimeError> {
+    Ok(ctx.alloc_io_action(IoAction::GetMonotonicTime))
+}
+
+pub(super) fn get_system_time(
+    ctx: &mut VmCtx<'_, '_>,
+    _args: &[Value],
+) -> Result<Value, RuntimeError> {
+    Ok(ctx.alloc_io_action(IoAction::GetSystemTime))
+}
+
 fn print_action(
     ctx: &mut VmCtx<'_, '_>,
     args: &[Value],

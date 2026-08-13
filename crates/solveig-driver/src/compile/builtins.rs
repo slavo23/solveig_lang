@@ -629,10 +629,22 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             unary(thread_id, io_of(io_error.clone(), Ty::TyUnit)),
         ),
         prim_spec(
+            "getMonotonicTime",
+            BUILTIN_GET_MONOTONIC_TIME,
+            0,
+            poly(&[e_id], io_of(e.clone(), int.clone())),
+        ),
+        prim_spec(
+            "getSystemTime",
+            BUILTIN_GET_SYSTEM_TIME,
+            0,
+            poly(&[e_id], io_of(e.clone(), int.clone())),
+        ),
+        prim_spec(
             "sleep",
             BUILTIN_SLEEP,
             1,
-            unary(int, io_of(io_error, Ty::TyUnit)),
+            unary(int.clone(), io_of(io_error, Ty::TyUnit)),
         ),
         prim_spec(
             "maskIO",

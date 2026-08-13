@@ -1,0 +1,6 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+monotonic delta: 5000000
+system delta: 5000000
