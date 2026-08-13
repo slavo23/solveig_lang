@@ -1,6 +1,7 @@
 //! Managed heap storage for VM values, closures, thunks, and constructors.
 //! Garbage collection and runtime allocation share this ownership boundary.
 
+use crate::handle::{Buffering, FileMode};
 use crate::values::{ObjId, Value};
 use solveig_base::FxHashSet;
 
@@ -145,6 +146,34 @@ pub enum IoAction {
         path: Value,
         contents: Value,
         append: bool,
+    },
+    OpenFile {
+        path: Value,
+        mode: FileMode,
+    },
+    CloseHandle {
+        handle: Value,
+    },
+    FlushHandle {
+        handle: Value,
+    },
+    GetHandleLine {
+        handle: Value,
+    },
+    GetHandleContents {
+        handle: Value,
+    },
+    PutHandle {
+        handle: Value,
+        text: Value,
+        newline: bool,
+    },
+    IsHandleEof {
+        handle: Value,
+    },
+    SetHandleBuffering {
+        handle: Value,
+        buffering: Buffering,
     },
 }
 

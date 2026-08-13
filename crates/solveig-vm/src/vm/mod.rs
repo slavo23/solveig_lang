@@ -11,6 +11,7 @@ use solveig_base::FxHashMap;
 use solveig_lower::closure_ir::CCProgram;
 use std::collections::VecDeque;
 use std::fmt;
+use std::io::IsTerminal;
 use std::io::{BufRead, Cursor, Write};
 use std::ops::{Deref, DerefMut};
 use std::path::Path;
@@ -23,6 +24,7 @@ mod dispatch;
 mod gc;
 mod interruption;
 mod io;
+mod io_unwind;
 mod io_worker;
 mod scheduler;
 mod socket;
@@ -795,8 +797,7 @@ impl Machine {
         cwd: &Path,
     ) -> Result<EvalResult, RuntimeError> {
         let bytecode = lower_to_bytecode(program);
-        let stderr = std::io::stderr();
-        let mut stderr = stderr.lock();
+        let mut stderr = std::io::stderr();
         Self::exec_owned_io_with_streams(
             bytecode,
             entry_name,
@@ -816,8 +817,7 @@ impl Machine {
         args: &[String],
         cwd: &Path,
     ) -> Result<EvalResult, RuntimeError> {
-        let stderr = std::io::stderr();
-        let mut stderr = stderr.lock();
+        let mut stderr = std::io::stderr();
         Self::exec_owned_io_with_streams(
             program.clone(),
             entry_name,
@@ -834,7 +834,7 @@ impl Machine {
         entry_name: &str,
         stdin: &mut (dyn BufRead + Send),
         stdout: &mut (dyn Write + Send),
-        stderr: &mut dyn Write,
+        stderr: &mut (dyn Write + Send),
         io_context: (&[String], &Path),
         timers: TimerQueue,
     ) -> Result<EvalResult, RuntimeError> {
@@ -848,13 +848,19 @@ impl Machine {
 
         let stdin = Mutex::new(stdin);
         let stdout = Mutex::new(stdout);
+        let stderr = Mutex::new(stderr);
+        let terminal_outputs = (
+            std::io::stdout().is_terminal(),
+            std::io::stderr().is_terminal(),
+        );
         let (args, cwd) = io_context;
         thread::scope(|scope| {
-            let io = IoSubsystem::start(scope, &stdin, &stdout, args, cwd)?;
+            let io =
+                IoSubsystem::start(scope, &stdin, &stdout, &stderr, terminal_outputs, args, cwd)?;
             let mut runtime = Runtime::new_with_io_and_timers(program, io, timers);
             let (id, outcome) = evaluate_entry(&mut runtime, entry);
             let action = outcome_value(outcome)?;
-            let root = scheduler::schedule_io(&mut runtime, id, action, stderr)?;
+            let root = scheduler::schedule_io(&mut runtime, id, action, &stderr)?;
 
             Ok(runtime.into_eval_result(root))
         })

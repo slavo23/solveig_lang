@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::heap::IoAction;
+use std::sync::Mutex;
 
 pub(super) fn run(runtime: &mut Runtime, process: &mut Process) -> StepOutcome {
     if process.reductions_left == 0 {
@@ -127,7 +128,7 @@ pub(super) fn schedule_io(
     runtime: &mut Runtime,
     main: ProcessId,
     action: Value,
-    stderr: &mut dyn Write,
+    stderr: &Mutex<&mut (dyn Write + Send)>,
 ) -> Result<Value, RuntimeError> {
     let main_process = &mut runtime.processes[main];
     main_process.io_current = Some(action);
@@ -258,10 +259,13 @@ fn wake_io_process(
 }
 
 fn report_thread_failure(
-    stderr: &mut dyn Write,
+    stderr: &Mutex<&mut (dyn Write + Send)>,
     thread_id: u32,
     error: &RuntimeError,
 ) -> Result<(), RuntimeError> {
+    let mut stderr = stderr
+        .lock()
+        .map_err(|_poisoned| RuntimeError::builtin("IO stderr lock was poisoned".to_string()))?;
     writeln!(stderr, "thread {thread_id} failed: {error}")
         .and_then(|()| stderr.flush())
         .map_err(|write_error| {

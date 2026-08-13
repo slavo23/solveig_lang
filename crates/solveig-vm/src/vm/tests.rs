@@ -461,12 +461,22 @@ fn scheduler_waits_for_worker_io_and_wakes_the_blocked_process() {
     let bytecode = lower_to_bytecode(&program);
     let mut input = Cursor::new(b"from worker\n".to_vec());
     let mut output = Vec::new();
+    let mut errors = Vec::new();
     let input = Mutex::new(&mut input as &mut (dyn BufRead + Send));
     let output = Mutex::new(&mut output as &mut (dyn Write + Send));
+    let errors = Mutex::new(&mut errors as &mut (dyn Write + Send));
 
     thread::scope(|scope| {
-        let io = IoSubsystem::start(scope, &input, &output, &[], Path::new("."))
-            .expect("IO workers should start");
+        let io = IoSubsystem::start(
+            scope,
+            &input,
+            &output,
+            &errors,
+            (false, false),
+            &[],
+            Path::new("."),
+        )
+        .expect("IO workers should start");
         let mut runtime = Runtime::new_with_io(bytecode, io);
         let process_id = runtime.allocate_process();
         assert_eq!(runtime.run_queue.pop_front(), Some(process_id));
@@ -511,12 +521,22 @@ fn scheduler_runs_another_process_while_worker_io_is_blocked() {
         contents: Cursor::new(b"eventually\n".to_vec()),
     });
     let mut output = Vec::new();
+    let mut errors = Vec::new();
     let input = Mutex::new(&mut input as &mut (dyn BufRead + Send));
     let output = Mutex::new(&mut output as &mut (dyn Write + Send));
+    let errors = Mutex::new(&mut errors as &mut (dyn Write + Send));
 
     thread::scope(|scope| {
-        let io = IoSubsystem::start(scope, &input, &output, &[], Path::new("."))
-            .expect("IO workers should start");
+        let io = IoSubsystem::start(
+            scope,
+            &input,
+            &output,
+            &errors,
+            (false, false),
+            &[],
+            Path::new("."),
+        )
+        .expect("IO workers should start");
         let mut runtime = Runtime::new_with_io(bytecode, io);
         let blocked = runtime.allocate_process();
         assert_eq!(runtime.run_queue.pop_front(), Some(blocked));
@@ -565,12 +585,22 @@ fn interruption_cancels_a_blocked_worker_io_registration() {
         contents: Cursor::new(b"discarded\n".to_vec()),
     });
     let mut output = Vec::new();
+    let mut errors = Vec::new();
     let input = Mutex::new(&mut input as &mut (dyn BufRead + Send));
     let output = Mutex::new(&mut output as &mut (dyn Write + Send));
+    let errors = Mutex::new(&mut errors as &mut (dyn Write + Send));
 
     thread::scope(|scope| {
-        let io = IoSubsystem::start(scope, &input, &output, &[], Path::new("."))
-            .expect("IO workers should start");
+        let io = IoSubsystem::start(
+            scope,
+            &input,
+            &output,
+            &errors,
+            (false, false),
+            &[],
+            Path::new("."),
+        )
+        .expect("IO workers should start");
         let mut runtime = Runtime::new_with_io(bytecode, io);
         let blocked = runtime.allocate_process();
         assert_eq!(runtime.run_queue.pop_front(), Some(blocked));
@@ -1477,9 +1507,10 @@ fn scheduler_completes_ten_thousand_threads() {
     }
 
     let mut stderr = Vec::new();
+    let stderr = Mutex::new(&mut stderr as &mut (dyn Write + Send));
 
     assert_eq!(
-        scheduler::schedule_io(&mut runtime, main, action, &mut stderr),
+        scheduler::schedule_io(&mut runtime, main, action, &stderr),
         Ok(Value::Unit)
     );
     assert_eq!(

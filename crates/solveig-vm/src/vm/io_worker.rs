@@ -3,6 +3,9 @@
 //! Rust data and are converted only after the scheduler wakes the process.
 
 use super::*;
+use crate::handle::{
+    FIRST_FILE_HANDLE, FileMode, HandleFailure, HandleId, HandleOutput, HandleRequest, HandleTable,
+};
 use std::fs::{self, OpenOptions};
 use std::io::{self, BufRead, Write};
 use std::net::ToSocketAddrs;
@@ -42,6 +45,7 @@ pub(super) enum IoRequest {
         maximum: i64,
     },
     CloseSocket(SocketId),
+    Handle(HandleRequest),
 }
 
 pub(super) enum IoResult {
@@ -50,6 +54,8 @@ pub(super) enum IoResult {
     Bytes(Vec<u8>),
     Socket(SocketId),
     Listener { socket: SocketId, port: u16 },
+    Handle(HandleId),
+    Bool(bool),
     Failed(IoFailure),
 }
 
@@ -82,6 +88,7 @@ pub(super) enum IoFailure {
     Send(io::Error),
     Recv(io::Error),
     CloseSocket(io::Error),
+    Handle(HandleFailure),
 }
 
 struct IoWork {
@@ -107,6 +114,7 @@ pub(super) struct IoSubsystem {
     requests: Vec<Option<RequestOwner>>,
     free_requests: Vec<u32>,
     next_worker: usize,
+    handle_workers: Vec<Option<usize>>,
     args: Vec<String>,
     cwd: PathBuf,
 }
@@ -121,6 +129,7 @@ impl IoSubsystem {
             requests: Vec::new(),
             free_requests: Vec::new(),
             next_worker: 0,
+            handle_workers: vec![None; FIRST_FILE_HANDLE as usize],
             args: Vec::new(),
             cwd: PathBuf::new(),
         }
@@ -130,6 +139,8 @@ impl IoSubsystem {
         scope: &'scope thread::Scope<'scope, '_>,
         stdin: &'scope Mutex<&mut (dyn BufRead + Send)>,
         stdout: &'scope Mutex<&mut (dyn Write + Send)>,
+        stderr: &'scope Mutex<&mut (dyn Write + Send)>,
+        terminal_outputs: (bool, bool),
         args: &[String],
         cwd: &Path,
     ) -> Result<Self, RuntimeError> {
@@ -145,7 +156,15 @@ impl IoSubsystem {
             let handle = thread::Builder::new()
                 .name(format!("solveig-io-{worker_index}"))
                 .spawn_scoped(scope, move || {
-                    worker_loop(&work_rx, &completion_tx, stdin, stdout);
+                    worker_loop(
+                        worker_index,
+                        &work_rx,
+                        &completion_tx,
+                        stdin,
+                        stdout,
+                        stderr,
+                        terminal_outputs,
+                    );
                 })
                 .map_err(|error| {
                     RuntimeError::builtin(format!("failed to start IO worker: {error}"))
@@ -162,6 +181,7 @@ impl IoSubsystem {
             requests: Vec::new(),
             free_requests: Vec::new(),
             next_worker: 0,
+            handle_workers: vec![Some(0), Some(1), Some(2)],
             args: args.to_vec(),
             cwd: cwd.to_path_buf(),
         })
@@ -189,6 +209,15 @@ impl IoSubsystem {
             | IoRequest::SendBytes { .. }
             | IoRequest::RecvBytes { .. }
             | IoRequest::CloseSocket(_) => 0,
+            IoRequest::Handle(request) => {
+                let handle = request.handle();
+                self.handle_workers
+                    .get(handle.0 as usize)
+                    .and_then(|worker| *worker)
+                    .ok_or_else(|| {
+                        RuntimeError::builtin(format!("unknown Handle identity {}", handle.0))
+                    })?
+            }
             IoRequest::ReadFile(_) | IoRequest::WriteFile { .. } | IoRequest::ResolveHost(_) => {
                 1 + self.next_worker % (self.workers.len().saturating_sub(1))
             }
@@ -244,6 +273,27 @@ impl IoSubsystem {
             return Err(error);
         }
         Ok(id)
+    }
+
+    pub(super) fn issue_open_file(
+        &mut self,
+        process: ProcessId,
+        path: PathBuf,
+        mode: FileMode,
+    ) -> Result<RequestId, RuntimeError> {
+        let raw = u32::try_from(self.handle_workers.len()).map_err(|_too_many_handles| {
+            RuntimeError::builtin("handle table exhausted".to_string())
+        })?;
+        let worker = self.next_worker % self.workers.len();
+        self.handle_workers.push(Some(worker));
+        self.issue(
+            process,
+            IoRequest::Handle(HandleRequest::OpenFile {
+                handle: HandleId(raw),
+                path,
+                mode,
+            }),
+        )
     }
 
     pub(super) fn try_completion(
@@ -346,13 +396,17 @@ impl IoSubsystem {
 }
 
 fn worker_loop(
+    worker_index: usize,
     work: &mpsc::Receiver<IoWork>,
     completions: &mpsc::Sender<IoCompletion>,
     stdin: &Mutex<&mut (dyn BufRead + Send)>,
     stdout: &Mutex<&mut (dyn Write + Send)>,
+    stderr: &Mutex<&mut (dyn Write + Send)>,
+    terminal_outputs: (bool, bool),
 ) {
+    let mut handles = HandleTable::for_worker(worker_index, terminal_outputs);
     while let Ok(work) = work.recv() {
-        let result = perform_request(work.request, stdin, stdout);
+        let result = perform_request(work.request, stdin, stdout, stderr, &mut handles);
         if completions
             .send(IoCompletion {
                 id: work.id,
@@ -363,12 +417,15 @@ fn worker_loop(
             return;
         }
     }
+    handles.shutdown(stdout, stderr);
 }
 
 fn perform_request(
     request: IoRequest,
     stdin: &Mutex<&mut (dyn BufRead + Send)>,
     stdout: &Mutex<&mut (dyn Write + Send)>,
+    stderr: &Mutex<&mut (dyn Write + Send)>,
+    handles: &mut HandleTable,
 ) -> IoResult {
     match request {
         IoRequest::Print(text) => write_stdout(stdout, &text),
@@ -383,6 +440,13 @@ fn perform_request(
             append,
         } => perform_write_file(path, &contents, append),
         IoRequest::ResolveHost(host) => perform_resolve_host(host),
+        IoRequest::Handle(request) => match handles.perform(request, stdin, stdout, stderr) {
+            Ok(HandleOutput::Unit) => IoResult::Unit,
+            Ok(HandleOutput::Opened(handle)) => IoResult::Handle(handle),
+            Ok(HandleOutput::Text(text)) => IoResult::Text(text),
+            Ok(HandleOutput::Bool(value)) => IoResult::Bool(value),
+            Err(failure) => IoResult::Failed(IoFailure::Handle(failure)),
+        },
         IoRequest::Connect { .. }
         | IoRequest::Listen { .. }
         | IoRequest::Accept(_)

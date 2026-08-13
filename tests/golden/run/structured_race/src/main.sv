@@ -41,6 +41,12 @@ reportError ioError =
         | SendError message => printLine "unexpected send error"
         | RecvError message => printLine "unexpected recv error"
         | CloseSocketError message => printLine "unexpected close socket error"
+        | OpenHandleError path message => printLine "unexpected open handle error"
+        | CloseHandleError message => printLine "unexpected close handle error"
+        | FlushHandleError message => printLine "unexpected flush handle error"
+        | ReadHandleError message => printLine "unexpected read handle error"
+        | WriteHandleError message => printLine "unexpected write handle error"
+        | SetBufferingError message => printLine "unexpected buffering error"
 
 main : Task ()
 main = do

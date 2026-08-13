@@ -43,6 +43,12 @@ data IOError =
   | SendError String
   | RecvError String
   | CloseSocketError String
+  | OpenHandleError String String
+  | CloseHandleError String
+  | FlushHandleError String
+  | ReadHandleError String
+  | WriteHandleError String
+  | SetBufferingError String
 ```
 
 A typed failure short-circuits `bind`: later actions in the same sequence do
@@ -73,6 +79,13 @@ reportIOError ioError =
         | SendError message => printLine (appendString "send: " message)
         | RecvError message => printLine (appendString "receive: " message)
         | CloseSocketError message => printLine (appendString "close: " message)
+        | OpenHandleError path message =>
+            printLine (appendString path (appendString ": " message))
+        | CloseHandleError message => printLine (appendString "close handle: " message)
+        | FlushHandleError message => printLine (appendString "flush handle: " message)
+        | ReadHandleError message => printLine (appendString "read handle: " message)
+        | WriteHandleError message => printLine (appendString "write handle: " message)
+        | SetBufferingError message => printLine (appendString "buffering: " message)
 
 printSettings : Task ()
 printSettings = do

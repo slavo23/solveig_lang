@@ -56,6 +56,14 @@ data IOError =
   | SendError String
   | RecvError String
   | CloseSocketError String
+  | OpenHandleError String String
+  | CloseHandleError String
+  | FlushHandleError String
+  | ReadHandleError String
+  | WriteHandleError String
+  | SetBufferingError String
+data IOMode = ReadMode | WriteMode | AppendMode | ReadWriteMode
+data BufferMode = NoBuffering | LineBuffering | BlockBuffering (Maybe Int)
 data Defect =
     Error String
   | DivisionByZero
@@ -91,6 +99,19 @@ timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 printLine : String -> Task ()
 printStr : String -> Task ()
 readLine : Task String
+stdin : Handle
+stdout : Handle
+stderr : Handle
+openFile : String -> IOMode -> Task Handle
+hClose : Handle -> Task ()
+hFlush : Handle -> Task ()
+hGetLine : Handle -> Task String
+hGetContents : Handle -> Task String
+hPutStr : Handle -> String -> Task ()
+hPutStrLn : Handle -> String -> Task ()
+hIsEOF : Handle -> Task Bool
+hSetBuffering : Handle -> BufferMode -> Task ()
+withFile : forall a. String -> IOMode -> (Handle -> Task a) -> Task a
 readFile : String -> Task String
 writeFile : String -> String -> Task ()
 appendFile : String -> String -> Task ()
@@ -119,8 +140,9 @@ recvBytes : Socket -> Int -> Task Bytes
 closeSocket : Socket -> Task ()
 ```
 
-`printLine` writes a trailing newline. `printStr` does not, and the CLI flushes
-after each print so prompts appear before `readLine`.
+`printLine`, `printStr`, and `readLine` are wrappers over the standard handles.
+`printStr` flushes after writing so prompts remain visible. See
+[`io.md`](io.md) for handle ownership, strict text input, buffering, and errors.
 
 `readLine` returns a line without the trailing newline. At EOF it returns `""`.
 
@@ -501,6 +523,18 @@ getArgs : forall e. IO e [String]
 readFile : String -> IO IOError String
 writeFile : String -> String -> IO IOError ()
 appendFile : String -> String -> IO IOError ()
+openFile : String -> IOMode -> IO IOError Handle
+hClose : Handle -> IO IOError ()
+hFlush : Handle -> IO IOError ()
+hGetLine : Handle -> IO IOError String
+hGetContents : Handle -> IO IOError String
+hPutStr : Handle -> String -> IO IOError ()
+hPutStrLn : Handle -> String -> IO IOError ()
+hIsEOF : Handle -> IO IOError Bool
+hSetBuffering : Handle -> BufferMode -> IO IOError ()
+stdin : Handle
+stdout : Handle
+stderr : Handle
 spawn : forall childError e. IO childError () -> IO e ThreadId
 killThread : ThreadId -> IO IOError ()
 sleep : Int -> IO IOError ()

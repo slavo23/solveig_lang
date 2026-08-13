@@ -462,7 +462,7 @@ fn rewrite_io_action(
             evacuate_value(heap, action, worklist, promoted);
             evacuate_value(heap, continuation, worklist, promoted);
         }
-        IoAction::ReadFile { path } => {
+        IoAction::ReadFile { path } | IoAction::OpenFile { path, .. } => {
             evacuate_value(heap, path, worklist, promoted);
         }
         IoAction::WriteFile { path, contents, .. } => {
@@ -479,8 +479,20 @@ fn rewrite_io_action(
         }
         IoAction::Recv { channel }
         | IoAction::TryRecv { channel }
-        | IoAction::CloseChan { channel } => {
+        | IoAction::CloseChan { channel }
+        | IoAction::CloseHandle { handle: channel }
+        | IoAction::FlushHandle { handle: channel }
+        | IoAction::GetHandleLine { handle: channel }
+        | IoAction::GetHandleContents { handle: channel }
+        | IoAction::IsHandleEof { handle: channel }
+        | IoAction::SetHandleBuffering {
+            handle: channel, ..
+        } => {
             evacuate_value(heap, channel, worklist, promoted);
+        }
+        IoAction::PutHandle { handle, text, .. } => {
+            evacuate_value(heap, handle, worklist, promoted);
+            evacuate_value(heap, text, worklist, promoted);
         }
         IoAction::ReadLine
         | IoAction::GetArgs
@@ -652,7 +664,9 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
             mark_old_child(heap, action, worklist);
             mark_old_child(heap, continuation, worklist);
         }
-        IoAction::ReadFile { path } => mark_old_child(heap, path, worklist),
+        IoAction::ReadFile { path } | IoAction::OpenFile { path, .. } => {
+            mark_old_child(heap, path, worklist);
+        }
         IoAction::WriteFile { path, contents, .. } => {
             mark_old_child(heap, path, worklist);
             mark_old_child(heap, contents, worklist);
@@ -667,7 +681,19 @@ fn mark_old_io_action(heap: &mut Heap, action: IoAction, worklist: &mut Vec<ObjI
         }
         IoAction::Recv { channel }
         | IoAction::TryRecv { channel }
-        | IoAction::CloseChan { channel } => mark_old_child(heap, channel, worklist),
+        | IoAction::CloseChan { channel }
+        | IoAction::CloseHandle { handle: channel }
+        | IoAction::FlushHandle { handle: channel }
+        | IoAction::GetHandleLine { handle: channel }
+        | IoAction::GetHandleContents { handle: channel }
+        | IoAction::IsHandleEof { handle: channel }
+        | IoAction::SetHandleBuffering {
+            handle: channel, ..
+        } => mark_old_child(heap, channel, worklist),
+        IoAction::PutHandle { handle, text, .. } => {
+            mark_old_child(heap, handle, worklist);
+            mark_old_child(heap, text, worklist);
+        }
         IoAction::ReadLine
         | IoAction::GetArgs
         | IoAction::NewChan { .. }
@@ -768,7 +794,9 @@ fn assert_object_children_live(
                 assert_value_live(heap, action, seen, worklist);
                 assert_value_live(heap, continuation, seen, worklist);
             }
-            IoAction::ReadFile { path } => assert_value_live(heap, path, seen, worklist),
+            IoAction::ReadFile { path } | IoAction::OpenFile { path, .. } => {
+                assert_value_live(heap, path, seen, worklist);
+            }
             IoAction::WriteFile { path, contents, .. } => {
                 assert_value_live(heap, path, seen, worklist);
                 assert_value_live(heap, contents, seen, worklist);
@@ -783,8 +811,20 @@ fn assert_object_children_live(
             }
             IoAction::Recv { channel }
             | IoAction::TryRecv { channel }
-            | IoAction::CloseChan { channel } => {
+            | IoAction::CloseChan { channel }
+            | IoAction::CloseHandle { handle: channel }
+            | IoAction::FlushHandle { handle: channel }
+            | IoAction::GetHandleLine { handle: channel }
+            | IoAction::GetHandleContents { handle: channel }
+            | IoAction::IsHandleEof { handle: channel }
+            | IoAction::SetHandleBuffering {
+                handle: channel, ..
+            } => {
                 assert_value_live(heap, channel, seen, worklist);
+            }
+            IoAction::PutHandle { handle, text, .. } => {
+                assert_value_live(heap, handle, seen, worklist);
+                assert_value_live(heap, text, seen, worklist);
             }
             IoAction::ReadLine
             | IoAction::GetArgs

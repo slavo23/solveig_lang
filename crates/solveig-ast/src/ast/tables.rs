@@ -19,6 +19,7 @@ pub struct PrimTys {
     pub chan: TyConId,
     pub bytes: TyConId,
     pub socket: TyConId,
+    pub handle: TyConId,
     pub true_ctor: CtorId,
     pub false_ctor: CtorId,
 }
@@ -34,6 +35,7 @@ pub const PRIM_TYS: PrimTys = PrimTys {
     chan: TyConId(7),
     bytes: TyConId(8),
     socket: TyConId(9),
+    handle: TyConId(10),
     true_ctor: CtorId(0),
     false_ctor: CtorId(1),
 };
@@ -97,6 +99,13 @@ pub fn compiler_primitive_tycon_infos(names: &mut Names) -> Vec<(TyConId, TyConI
             "Socket",
             Kind::Star,
         ),
+        compiler_primitive_tycon_info(
+            names,
+            PRIM_TYS.handle,
+            COMPILER_HANDLE_NAME,
+            "Handle",
+            Kind::Star,
+        ),
     ]
 }
 
@@ -114,6 +123,7 @@ pub fn compiler_primitive_tycon_kinds() -> FxHashMap<TyConId, Kind> {
         (PRIM_TYS.chan, Kind::make_arrow(Kind::Star, Kind::Star)),
         (PRIM_TYS.bytes, Kind::Star),
         (PRIM_TYS.socket, Kind::Star),
+        (PRIM_TYS.handle, Kind::Star),
     ])
 }
 
@@ -212,6 +222,14 @@ pub fn prelude_ordering_gt_ctor_id(names: &mut Names) -> CtorId {
     names.ctor_id(PRELUDE_ORDERING_GT_NAME)
 }
 
+pub fn prelude_io_mode_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_IO_MODE_NAME)
+}
+
+pub fn prelude_buffer_mode_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_BUFFER_MODE_NAME)
+}
+
 pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
     match names.ctor_display_name(ctor).as_str() {
         PRELUDE_MAYBE_JUST_NAME => CtorRuntimeRole::PreludeMaybeJust,
@@ -236,6 +254,19 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         PRELUDE_IO_ERROR_SEND_NAME => CtorRuntimeRole::PreludeIoErrorSend,
         PRELUDE_IO_ERROR_RECV_NAME => CtorRuntimeRole::PreludeIoErrorRecv,
         PRELUDE_IO_ERROR_CLOSE_SOCKET_NAME => CtorRuntimeRole::PreludeIoErrorCloseSocket,
+        PRELUDE_IO_ERROR_OPEN_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorOpenHandle,
+        PRELUDE_IO_ERROR_CLOSE_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorCloseHandle,
+        PRELUDE_IO_ERROR_FLUSH_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorFlushHandle,
+        PRELUDE_IO_ERROR_READ_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorReadHandle,
+        PRELUDE_IO_ERROR_WRITE_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorWriteHandle,
+        PRELUDE_IO_ERROR_SET_BUFFERING_NAME => CtorRuntimeRole::PreludeIoErrorSetBuffering,
+        PRELUDE_IO_MODE_READ_NAME => CtorRuntimeRole::PreludeIoModeRead,
+        PRELUDE_IO_MODE_WRITE_NAME => CtorRuntimeRole::PreludeIoModeWrite,
+        PRELUDE_IO_MODE_APPEND_NAME => CtorRuntimeRole::PreludeIoModeAppend,
+        PRELUDE_IO_MODE_READ_WRITE_NAME => CtorRuntimeRole::PreludeIoModeReadWrite,
+        PRELUDE_BUFFER_MODE_NONE_NAME => CtorRuntimeRole::PreludeBufferModeNone,
+        PRELUDE_BUFFER_MODE_LINE_NAME => CtorRuntimeRole::PreludeBufferModeLine,
+        PRELUDE_BUFFER_MODE_BLOCK_NAME => CtorRuntimeRole::PreludeBufferModeBlock,
         PRELUDE_RESULT_OK_NAME => CtorRuntimeRole::PreludeResultOk,
         PRELUDE_RESULT_ERR_NAME => CtorRuntimeRole::PreludeResultErr,
         PRELUDE_DEFECT_ERROR_NAME => CtorRuntimeRole::PreludeDefectError,
@@ -476,6 +507,19 @@ pub enum CtorRuntimeRole {
     PreludeIoErrorSend,
     PreludeIoErrorRecv,
     PreludeIoErrorCloseSocket,
+    PreludeIoErrorOpenHandle,
+    PreludeIoErrorCloseHandle,
+    PreludeIoErrorFlushHandle,
+    PreludeIoErrorReadHandle,
+    PreludeIoErrorWriteHandle,
+    PreludeIoErrorSetBuffering,
+    PreludeIoModeRead,
+    PreludeIoModeWrite,
+    PreludeIoModeAppend,
+    PreludeIoModeReadWrite,
+    PreludeBufferModeNone,
+    PreludeBufferModeLine,
+    PreludeBufferModeBlock,
     PreludeResultOk,
     PreludeResultErr,
     PreludeDefectError,

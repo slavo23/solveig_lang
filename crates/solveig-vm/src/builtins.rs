@@ -11,27 +11,33 @@ use solveig_ast::ast::{
     BUILTIN_CONNECT, BUILTIN_ERROR, BUILTIN_FAIL_IO, BUILTIN_FINALLY_IO, BUILTIN_FLOAT_ADD,
     BUILTIN_FLOAT_DIV, BUILTIN_FLOAT_EQ, BUILTIN_FLOAT_GE, BUILTIN_FLOAT_GT, BUILTIN_FLOAT_LE,
     BUILTIN_FLOAT_LT, BUILTIN_FLOAT_MUL, BUILTIN_FLOAT_NEG, BUILTIN_FLOAT_SUB,
-    BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_INT_ADD,
+    BUILTIN_FLOAT_TO_INT, BUILTIN_FLOAT_TO_STRING, BUILTIN_GET_ARGS, BUILTIN_H_CLOSE,
+    BUILTIN_H_FLUSH, BUILTIN_H_GET_CONTENTS, BUILTIN_H_GET_LINE, BUILTIN_H_IS_EOF,
+    BUILTIN_H_PUT_STR, BUILTIN_H_PUT_STR_LN, BUILTIN_H_SET_BUFFERING, BUILTIN_INT_ADD,
     BUILTIN_INT_COMPARE, BUILTIN_INT_DIV, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT,
     BUILTIN_INT_LE, BUILTIN_INT_LT, BUILTIN_INT_MOD, BUILTIN_INT_MUL, BUILTIN_INT_NEG,
     BUILTIN_INT_SUB, BUILTIN_INT_TO_FLOAT, BUILTIN_INT_TO_STRING, BUILTIN_KILL_THREAD,
-    BUILTIN_LISTEN, BUILTIN_MASK_IO, BUILTIN_NEW_BOUNDED_CHAN, BUILTIN_NEW_CHAN,
+    BUILTIN_LISTEN, BUILTIN_MASK_IO, BUILTIN_NEW_BOUNDED_CHAN, BUILTIN_NEW_CHAN, BUILTIN_OPEN_FILE,
     BUILTIN_PRINT_LINE, BUILTIN_PRINT_STR, BUILTIN_PURE_IO, BUILTIN_RAISE_DEFECT_IO,
     BUILTIN_READ_FILE, BUILTIN_READ_LINE, BUILTIN_RECV_BYTES, BUILTIN_RECV_CHAN,
     BUILTIN_RESOLVE_HOST, BUILTIN_RESTORE_MASK_IO, BUILTIN_SEND_BYTES, BUILTIN_SEND_CHAN,
-    BUILTIN_SLEEP, BUILTIN_SPAWN, BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT,
-    BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE,
-    BUILTIN_STRING_TO_BYTES, BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE,
-    BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
+    BUILTIN_SLEEP, BUILTIN_SPAWN, BUILTIN_STDERR, BUILTIN_STDIN, BUILTIN_STDOUT,
+    BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
+    BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE, BUILTIN_STRING_TO_BYTES, BUILTIN_STRING_TO_CHARS,
+    BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE, BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
 };
 
 use crate::heap::{HeapObject, IoAction};
 use crate::values::Value;
 use crate::vm::{DefectKind, Interpreter, RuntimeError};
 
+mod handles;
+mod io_actions;
 mod network;
 mod text;
 
+use handles::*;
+use io_actions::*;
 use network::*;
 use text::*;
 
@@ -282,6 +288,18 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_SEND_BYTES, "sendBytes", 2, send_bytes),
     builtin!(BUILTIN_RECV_BYTES, "recvBytes", 2, recv_bytes),
     builtin!(BUILTIN_CLOSE_SOCKET, "closeSocket", 1, close_socket),
+    builtin!(BUILTIN_OPEN_FILE, "openFile", 2, open_file),
+    builtin!(BUILTIN_H_CLOSE, "hClose", 1, h_close),
+    builtin!(BUILTIN_H_FLUSH, "hFlush", 1, h_flush),
+    builtin!(BUILTIN_H_GET_LINE, "hGetLine", 1, h_get_line),
+    builtin!(BUILTIN_H_GET_CONTENTS, "hGetContents", 1, h_get_contents),
+    builtin!(BUILTIN_H_PUT_STR, "hPutStr", 2, h_put_str),
+    builtin!(BUILTIN_H_PUT_STR_LN, "hPutStrLn", 2, h_put_str_ln),
+    builtin!(BUILTIN_H_IS_EOF, "hIsEOF", 1, h_is_eof),
+    builtin!(BUILTIN_H_SET_BUFFERING, "hSetBuffering", 2, h_set_buffering),
+    builtin!(BUILTIN_STDIN, "stdin", 0, stdin),
+    builtin!(BUILTIN_STDOUT, "stdout", 0, stdout),
+    builtin!(BUILTIN_STDERR, "stderr", 0, stderr),
     builtin!(BUILTIN_PURE_IO, "pureIO", 1, pure_io),
     builtin!(BUILTIN_BIND_IO, "bindIO", 2, bind_io),
     builtin!(BUILTIN_FAIL_IO, "failIO", 1, fail_io),
@@ -467,159 +485,6 @@ fn float_to_int(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, Runti
     // D3: truncate toward zero. Rust's f64 -> i64 cast is saturating and keeps
     // this conversion total for NaN and out-of-range values.
     Ok(Value::Int(value.trunc() as i64))
-}
-
-fn pure_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let value = expect_value(args, 0, "pureIO")?;
-    Ok(ctx.alloc_io_action(IoAction::Pure(value)))
-}
-
-fn bind_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let action = expect_value(args, 0, "bindIO")?;
-    let continuation = expect_value(args, 1, "bindIO")?;
-    Ok(ctx.alloc_io_action(IoAction::Bind {
-        action,
-        continuation,
-    }))
-}
-
-fn fail_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let error = expect_value(args, 0, "failIO")?;
-    Ok(ctx.alloc_io_action(IoAction::Fail(error)))
-}
-
-fn raise_error(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let message = expect_string_owned(ctx, args, 0, "error")?;
-    Err(RuntimeError::defect(DefectKind::Error(message)))
-}
-
-fn catch_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let action = expect_value(args, 0, "catchIO")?;
-    let handler = expect_value(args, 1, "catchIO")?;
-    Ok(ctx.alloc_io_action(IoAction::Catch { action, handler }))
-}
-
-fn catch_defect_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let action = expect_value(args, 0, "catchDefectIO")?;
-    let handler = expect_value(args, 1, "catchDefectIO")?;
-    Ok(ctx.alloc_io_action(IoAction::CatchDefect { action, handler }))
-}
-
-fn raise_defect_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let defect = expect_value(args, 0, "raiseDefectIO")?;
-    Ok(ctx.alloc_io_action(IoAction::RaiseDefect { defect }))
-}
-
-fn finally_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let action = expect_value(args, 0, "finallyIO")?;
-    let cleanup = expect_value(args, 1, "finallyIO")?;
-    Ok(ctx.alloc_io_action(IoAction::Finally { action, cleanup }))
-}
-
-fn print_line(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let text = expect_value(args, 0, "printLine")?;
-    Ok(ctx.alloc_io_action(IoAction::Print {
-        text,
-        newline: true,
-    }))
-}
-
-fn print_str(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let text = expect_value(args, 0, "printStr")?;
-    Ok(ctx.alloc_io_action(IoAction::Print {
-        text,
-        newline: false,
-    }))
-}
-
-fn read_line(ctx: &mut VmCtx<'_, '_>, _args: &[Value]) -> Result<Value, RuntimeError> {
-    Ok(ctx.alloc_io_action(IoAction::ReadLine))
-}
-
-fn get_args(ctx: &mut VmCtx<'_, '_>, _args: &[Value]) -> Result<Value, RuntimeError> {
-    Ok(ctx.alloc_io_action(IoAction::GetArgs))
-}
-
-fn read_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let path = expect_value(args, 0, "readFile")?;
-    Ok(ctx.alloc_io_action(IoAction::ReadFile { path }))
-}
-
-fn write_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let path = expect_value(args, 0, "writeFile")?;
-    let contents = expect_value(args, 1, "writeFile")?;
-    Ok(ctx.alloc_io_action(IoAction::WriteFile {
-        path,
-        contents,
-        append: false,
-    }))
-}
-
-fn append_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let path = expect_value(args, 0, "appendFile")?;
-    let contents = expect_value(args, 1, "appendFile")?;
-    Ok(ctx.alloc_io_action(IoAction::WriteFile {
-        path,
-        contents,
-        append: true,
-    }))
-}
-
-fn spawn(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let action = expect_value(args, 0, "spawn")?;
-    Ok(ctx.alloc_io_action(IoAction::Spawn { action }))
-}
-
-fn new_chan(ctx: &mut VmCtx<'_, '_>, _args: &[Value]) -> Result<Value, RuntimeError> {
-    Ok(ctx.alloc_io_action(IoAction::NewChan { capacity: None }))
-}
-
-fn new_bounded_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let capacity = expect_int(args, 0, "newBoundedChan")?;
-    Ok(ctx.alloc_io_action(IoAction::NewChan {
-        capacity: Some(capacity),
-    }))
-}
-
-fn send_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let channel = expect_value(args, 0, "send")?;
-    let value = expect_value(args, 1, "send")?;
-    Ok(ctx.alloc_io_action(IoAction::Send { channel, value }))
-}
-
-fn recv_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let channel = expect_value(args, 0, "recv")?;
-    Ok(ctx.alloc_io_action(IoAction::Recv { channel }))
-}
-
-fn try_recv_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let channel = expect_value(args, 0, "tryRecv")?;
-    Ok(ctx.alloc_io_action(IoAction::TryRecv { channel }))
-}
-
-fn close_chan(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let channel = expect_value(args, 0, "closeChan")?;
-    Ok(ctx.alloc_io_action(IoAction::CloseChan { channel }))
-}
-
-fn kill_thread(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let thread = expect_value(args, 0, "killThread")?;
-    Ok(ctx.alloc_io_action(IoAction::KillThread { thread }))
-}
-
-fn mask_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let action = expect_value(args, 0, "maskIO")?;
-    Ok(ctx.alloc_io_action(IoAction::Mask { action }))
-}
-
-fn restore_mask_io(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let action = expect_value(args, 0, "restoreMaskIO")?;
-    Ok(ctx.alloc_io_action(IoAction::RestoreMask { action }))
-}
-
-fn sleep(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let milliseconds = expect_int(args, 0, "sleep")?;
-    Ok(ctx.alloc_io_action(IoAction::Sleep { milliseconds }))
 }
 
 fn ordering_value(

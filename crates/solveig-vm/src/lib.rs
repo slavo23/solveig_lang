@@ -7,6 +7,7 @@ pub mod builtins;
 pub mod bytecode;
 /// Renders runtime values for output and tests.
 pub mod display;
+mod handle;
 /// Owns heap allocation and garbage collection support.
 pub mod heap;
 /// Defines runtime values, frames, and executable chunks.

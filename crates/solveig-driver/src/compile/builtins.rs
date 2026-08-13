@@ -3,6 +3,11 @@
 
 use super::*;
 
+mod handles;
+mod schemes;
+
+use schemes::*;
+
 pub(super) fn driver_builtin_api(
     session: &Session,
     names: &mut Names,
@@ -46,7 +51,7 @@ fn seed_primitive_builtin_terms(
     }
 }
 
-struct PrimitiveBuiltinSpec {
+pub(super) struct PrimitiveBuiltinSpec {
     short_name: &'static str,
     builtin: BuiltinId,
     arity: usize,
@@ -98,8 +103,9 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         ),
         int.clone(),
     );
+    let handle_specs = handles::handle_builtin_specs(names, &string, &bool_ty, &io_error);
 
-    vec![
+    let mut specs = vec![
         prim_spec(
             "intAdd",
             BUILTIN_INT_ADD,
@@ -641,58 +647,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             1,
             poly_arr(&[e_id, a_id], &[io_of(e.clone(), a.clone())], io_of(e, a)),
         ),
-    ]
-}
-
-fn prim_spec(
-    short_name: &'static str,
-    builtin: BuiltinId,
-    arity: usize,
-    scheme: Scheme,
-) -> PrimitiveBuiltinSpec {
-    PrimitiveBuiltinSpec {
-        short_name,
-        builtin,
-        arity,
-        scheme,
-    }
-}
-
-fn unary(arg: Ty, ret: Ty) -> Scheme {
-    arr(&[arg], ret)
-}
-
-fn binary(arg: Ty, ret: Ty) -> Scheme {
-    arr(&[arg.clone(), arg], ret)
-}
-
-fn ternary(a: Ty, b: Ty, c: Ty, ret: Ty) -> Scheme {
-    arr(&[a, b, c], ret)
-}
-
-fn arr(args: &[Ty], ret: Ty) -> Scheme {
-    Scheme::mono(arr_ty(args, ret))
-}
-
-fn arr_ty(args: &[Ty], ret: Ty) -> Ty {
-    args.iter()
-        .rev()
-        .cloned()
-        .fold(ret, |body, arg| Ty::make_arr(arg, body))
-}
-
-fn poly_arr(vars: &[TyVarId], args: &[Ty], ret: Ty) -> Scheme {
-    poly(vars, arr_ty(args, ret))
-}
-
-fn poly(vars: &[TyVarId], ty: Ty) -> Scheme {
-    Scheme {
-        quantifiers: vars.iter().map(|id| (*id, Kind::Star)).collect(),
-        predicates: Vec::new(),
-        ty,
-    }
-}
-
-fn io_of(error: Ty, value: Ty) -> Ty {
-    Ty::make_app(Ty::make_app(Ty::make_con_id(PRIM_TYS.io), error), value)
+    ];
+    specs.extend(handle_specs);
+    specs
 }

@@ -617,15 +617,16 @@ their channel keys and parked sender values are roots rewritten by collection.
 
 Blocking host IO does not run on the scheduler thread. `Runtime` owns an
 `IoSubsystem` with four scoped OS workers, one readiness-driven socket thread,
-a typed request table, and one multi-producer/single-consumer completion channel. Performing `printLine`,
-`printStr`, `readLine`, `readFile`, `writeFile`, or `appendFile` follows this
+a typed request table, one host-handle side table distributed across those
+workers, and one multi-producer/single-consumer completion channel. Performing
+a handle operation, `readFile`, `writeFile`, or `appendFile` follows this
 state transition:
 
 1. The scheduler thread resolves every VM operand to owned Rust data and
    submits an `IoRequest` associated with the current `ProcessId`.
 2. The process records `Blocked(Io(RequestId))` and leaves the run queue.
 3. A worker or the socket event loop performs the host operation and returns
-   only owned text/bytes, a `SocketId`, unit, or a contextual `io::Error`.
+   only owned text/bytes, a `HandleId`, a `SocketId`, unit, or a contextual `io::Error`.
    Host threads never hold `Value`, `ObjId`, heap roots, or any other VM
    reference.
 4. The scheduler drains completions, verifies that request and block reason

@@ -33,6 +33,7 @@ impl DisplayValue<'_> {
             Value::Char(ch) => format!("'{}'", escape_char_literal(ch)),
             Value::ThreadId(id) => format!("<thread {id}>"),
             Value::SocketId(id) => format!("<socket {id}>"),
+            Value::HandleId(id) => format!("<handle {id}>"),
             Value::CtorFn { tag, .. } => {
                 format!("<ctor {}>", tag_name(self.arities, tag))
             }

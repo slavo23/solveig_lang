@@ -23,6 +23,12 @@ reportMapped error =
         | SendError _ => printLine "unexpected-send"
         | RecvError _ => printLine "unexpected-recv"
         | CloseSocketError _ => printLine "unexpected-close-socket"
+        | OpenHandleError _ _ => printLine "unexpected-open-handle"
+        | CloseHandleError _ => printLine "unexpected-close-handle"
+        | FlushHandleError _ => printLine "unexpected-flush-handle"
+        | ReadHandleError _ => printLine "unexpected-read-handle"
+        | WriteHandleError _ => printLine "unexpected-write-handle"
+        | SetBufferingError _ => printLine "unexpected-buffering"
 
 reportRead : IOError -> Task ()
 reportRead error =
@@ -41,6 +47,12 @@ reportRead error =
         | SendError _ => printLine "unexpected-send"
         | RecvError _ => printLine "unexpected-recv"
         | CloseSocketError _ => printLine "unexpected-close-socket"
+        | OpenHandleError _ _ => printLine "unexpected-open-handle"
+        | CloseHandleError _ => printLine "unexpected-close-handle"
+        | FlushHandleError _ => printLine "unexpected-flush-handle"
+        | ReadHandleError _ => printLine "unexpected-read-handle"
+        | WriteHandleError _ => printLine "unexpected-write-handle"
+        | SetBufferingError _ => printLine "unexpected-buffering"
 
 reportWrite : IOError -> Task ()
 reportWrite error =
@@ -59,6 +71,12 @@ reportWrite error =
         | SendError _ => printLine "unexpected-send"
         | RecvError _ => printLine "unexpected-recv"
         | CloseSocketError _ => printLine "unexpected-close-socket"
+        | OpenHandleError _ _ => printLine "unexpected-open-handle"
+        | CloseHandleError _ => printLine "unexpected-close-handle"
+        | FlushHandleError _ => printLine "unexpected-flush-handle"
+        | ReadHandleError _ => printLine "unexpected-read-handle"
+        | WriteHandleError _ => printLine "unexpected-write-handle"
+        | SetBufferingError _ => printLine "unexpected-buffering"
 
 reportAppend : IOError -> Task ()
 reportAppend error =
@@ -77,6 +95,12 @@ reportAppend error =
         | SendError _ => printLine "unexpected-send"
         | RecvError _ => printLine "unexpected-recv"
         | CloseSocketError _ => printLine "unexpected-close-socket"
+        | OpenHandleError _ _ => printLine "unexpected-open-handle"
+        | CloseHandleError _ => printLine "unexpected-close-handle"
+        | FlushHandleError _ => printLine "unexpected-flush-handle"
+        | ReadHandleError _ => printLine "unexpected-read-handle"
+        | WriteHandleError _ => printLine "unexpected-write-handle"
+        | SetBufferingError _ => printLine "unexpected-buffering"
 
 releaseResource : String -> Task ()
 releaseResource name = printLine (appendString "release " name)

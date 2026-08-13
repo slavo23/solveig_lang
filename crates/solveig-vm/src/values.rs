@@ -14,6 +14,7 @@ pub enum Value {
     Char(char),
     ThreadId(u32),
     SocketId(u32),
+    HandleId(u32),
     CtorFn { tag: u16, arity: u16 },
     FunctionRef { chunk: u32, arity: u16 },
     Obj(ObjId),
@@ -41,7 +42,8 @@ impl PartialEq for Value {
             (Value::Float(lhs), Value::Float(rhs)) => lhs.to_bits() == rhs.to_bits(),
             (Value::Char(lhs), Value::Char(rhs)) => lhs == rhs,
             (Value::ThreadId(lhs), Value::ThreadId(rhs))
-            | (Value::SocketId(lhs), Value::SocketId(rhs)) => lhs == rhs,
+            | (Value::SocketId(lhs), Value::SocketId(rhs))
+            | (Value::HandleId(lhs), Value::HandleId(rhs)) => lhs == rhs,
             (
                 Value::CtorFn {
                     tag: lhs_tag,
@@ -78,7 +80,9 @@ impl Hash for Value {
             Value::Int(value) => value.hash(state),
             Value::Float(value) => value.to_bits().hash(state),
             Value::Char(value) => value.hash(state),
-            Value::ThreadId(value) | Value::SocketId(value) => value.hash(state),
+            Value::ThreadId(value) | Value::SocketId(value) | Value::HandleId(value) => {
+                value.hash(state);
+            }
             Value::CtorFn { tag, arity } => {
                 tag.hash(state);
                 arity.hash(state);

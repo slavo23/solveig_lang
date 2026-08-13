@@ -581,6 +581,19 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "readFile" => "Reads a file as text.",
         "writeFile" => "Writes text to a file, replacing its previous contents.",
         "appendFile" => "Appends text to the end of a file.",
+        "openFile" => "Opens an explicitly owned text-file handle in the selected mode.",
+        "hClose" => "Flushes and explicitly closes a handle.",
+        "hFlush" => "Flushes buffered handle output to its host stream.",
+        "hGetLine" => "Reads one UTF-8 line without its line terminator.",
+        "hGetContents" => "Strictly reads all remaining UTF-8 text from a handle.",
+        "hPutStr" => "Writes UTF-8 text through a handle's buffering policy.",
+        "hPutStrLn" => "Writes UTF-8 text and a newline through a handle.",
+        "hIsEOF" => "Checks for end of input without consuming a byte.",
+        "hSetBuffering" => "Flushes and changes a handle's buffering policy.",
+        "stdin" => "The process standard-input handle.",
+        "stdout" => "The process standard-output handle.",
+        "stderr" => "The process standard-error handle.",
+        "withFile" => "Opens a file and closes it after success, failure, defect, or interruption.",
         "spawn" => "Starts an IO action in a new lightweight thread.",
         "newChan" => "Creates an unbounded typed channel.",
         "newBoundedChan" => "Creates a typed channel with a positive capacity.",
@@ -600,7 +613,7 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
     })
 }
 
-fn compiler_type_entries() -> [(&'static str, TyConId); 10] {
+fn compiler_type_entries() -> [(&'static str, TyConId); 11] {
     [
         ("Int", PRIM_TYS.int),
         ("Float", PRIM_TYS.float),
@@ -612,6 +625,7 @@ fn compiler_type_entries() -> [(&'static str, TyConId); 10] {
         ("Chan", PRIM_TYS.chan),
         ("Bytes", PRIM_TYS.bytes),
         ("Socket", PRIM_TYS.socket),
+        ("Handle", PRIM_TYS.handle),
     ]
 }
 

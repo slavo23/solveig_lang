@@ -59,6 +59,31 @@ data IOError =
     RecvError String
   | -- | Closing a TCP resource failed.
     CloseSocketError String
+  | -- | Opening a handle failed, with path and host message.
+    OpenHandleError String String
+  | -- | Closing a handle failed.
+    CloseHandleError String
+  | -- | Flushing buffered output failed.
+    FlushHandleError String
+  | -- | Reading text from a handle failed.
+    ReadHandleError String
+  | -- | Writing text to a handle failed.
+    WriteHandleError String
+  | -- | Changing a handle's buffering failed.
+    SetBufferingError String
+
+-- | How a file is opened.
+data IOMode =
+    ReadMode
+  | WriteMode
+  | AppendMode
+  | ReadWriteMode
+
+-- | A handle's buffering policy. Nothing selects the platform default block size.
+data BufferMode =
+    NoBuffering
+  | LineBuffering
+  | BlockBuffering (Maybe Int)
 
 -- | A defect raised by pure evaluation or a managed runtime limit.
 data Defect =
@@ -310,15 +335,68 @@ timeout milliseconds action =
 
 -- | Writes text followed by a newline.
 printLine : String -> Task ();
-printLine text = prelude.prim.printLine text;
+printLine text = hPutStrLn stdout text;
 
 -- | Writes text without adding a newline.
 printStr : String -> Task ();
-printStr text = prelude.prim.printStr text;
+printStr text =
+    bindIO (hPutStr stdout text) (fun written => hFlush stdout);
 
 -- | Reads one line of input.
 readLine : Task String;
-readLine = prelude.prim.readLine;
+readLine = hGetLine stdin;
+
+-- | The process standard-input handle.
+stdin : Handle;
+stdin = prelude.prim.stdin;
+
+-- | The process standard-output handle.
+stdout : Handle;
+stdout = prelude.prim.stdout;
+
+-- | The process standard-error handle.
+stderr : Handle;
+stderr = prelude.prim.stderr;
+
+-- | Opens a file handle. The handle must be closed explicitly.
+openFile : String -> IOMode -> Task Handle;
+openFile path mode = prelude.prim.openFile path mode;
+
+-- | Closes a handle, flushing pending output first.
+hClose : Handle -> Task ();
+hClose handle = prelude.prim.hClose handle;
+
+-- | Flushes pending output from a handle.
+hFlush : Handle -> Task ();
+hFlush handle = prelude.prim.hFlush handle;
+
+-- | Reads one line without its line terminator.
+hGetLine : Handle -> Task String;
+hGetLine handle = prelude.prim.hGetLine handle;
+
+-- | Strictly reads all remaining text from a handle.
+hGetContents : Handle -> Task String;
+hGetContents handle = prelude.prim.hGetContents handle;
+
+-- | Writes text to a handle.
+hPutStr : Handle -> String -> Task ();
+hPutStr handle text = prelude.prim.hPutStr handle text;
+
+-- | Writes text followed by a newline to a handle.
+hPutStrLn : Handle -> String -> Task ();
+hPutStrLn handle text = prelude.prim.hPutStrLn handle text;
+
+-- | Reports whether a readable handle is at end of input.
+hIsEOF : Handle -> Task Bool;
+hIsEOF handle = prelude.prim.hIsEOF handle;
+
+-- | Changes a handle's buffering policy, flushing pending output first.
+hSetBuffering : Handle -> BufferMode -> Task ();
+hSetBuffering handle mode = prelude.prim.hSetBuffering handle mode;
+
+-- | Opens a file and closes it after use, including errors and interruption.
+withFile : forall a. String -> IOMode -> (Handle -> Task a) -> Task a;
+withFile path mode use = bracket (openFile path mode) hClose use;
 
 -- | Reads a file as text.
 readFile : String -> Task String;

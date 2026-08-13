@@ -1,0 +1,18 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+alpha
+more
+beta
+eof
+onetwo
+three
+closed-read
+flush-error
+buffering-error
+close-error
+open-error
+closed-after-error
+closed-after-interruption
+done
