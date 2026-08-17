@@ -14,6 +14,18 @@ const PROJECT_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/benches/program
 fn benchmark_language(c: &mut Criterion) {
     benchmark_pure(c, "allocation", "allocationMain", "1250025000");
     benchmark_pure(c, "arithmetic", "arithmeticMain", "1701658789");
+    benchmark_pure(
+        c,
+        "constraint_generic",
+        "constraintGenericMain",
+        "20000100000",
+    );
+    benchmark_pure(
+        c,
+        "constraint_concrete",
+        "constraintConcreteMain",
+        "20000100000",
+    );
     benchmark_pure(c, "closures", "closureMain", "1400001");
     benchmark_pure(c, "patterns", "patternMain", "524288");
     benchmark_pure(c, "string_bytes", "stringBytesMain", "2260000");

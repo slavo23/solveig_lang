@@ -57,6 +57,8 @@ synthetic interpreter-only number.
 |---|---|
 | `language/allocation` | Builds 50,000 list cells and tail-recursively sums them |
 | `language/arithmetic` | Runs 200,000 concrete `Int` iterations using typeclass operators and `mod`; this is the primary O2 signal |
+| `language/constraint_generic` | Calls a user-defined `Num a` addition helper at `Int` for 200,000 iterations; this is the primary O3 residual-dictionary signal |
+| `language/constraint_concrete` | Runs the equivalent loop through a monomorphic `Int` helper as O3's direct-call control |
 | `language/closures` | Applies one capturing closure through a higher-order function 200,000 times |
 | `language/patterns` | Traverses a shared algebraic tree eight times, performing 524,288 leaf matches plus branch matches |
 | `language/string_bytes` | Round-trips text through characters, then performs 20,000 byte slices, appends, indexes, and length queries |
@@ -107,6 +109,21 @@ single-opcode or physical-disk limits.
 The comparatively wide `language/string_bytes` interval makes a small claimed
 improvement there untrustworthy. Any optimization targeting that case should
 first rerun it with a longer measurement window.
+
+## Optimization results
+
+O2 removed concrete method dictionary projection and lowered exact primitive
+instance forwarders directly. The focused `language/arithmetic` estimate fell
+from 126.33 ms immediately before the change to 46.521 ms afterward: 63.17%
+less time, or 2.72x the throughput.
+
+O3 added a paired user-defined constrained-function workload. Before
+specialization, `language/constraint_generic` measured 53.029–54.300 ms
+(53.566 ms estimate), while the equivalent monomorphic control measured
+34.073–35.381 ms (34.617 ms estimate). After bounded specialization, the
+generic case measured 34.880–35.042 ms (34.963 ms estimate), 34.73% less time
+and statistically indistinguishable from the unchanged control. These O2 and
+O3 runs used only their focused filters, following the policy below.
 
 ## Capacity and whole-program checks
 

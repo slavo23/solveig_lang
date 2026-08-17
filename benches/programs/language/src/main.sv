@@ -30,6 +30,28 @@ arithmeticLoop remaining value =
 arithmeticMain : Int
 arithmeticMain = arithmeticLoop 200000 1013904223
 
+addGeneric : forall a. Num a => a -> a -> a
+addGeneric left right = left + right
+
+constraintGenericLoop : Int -> Int -> Int
+constraintGenericLoop remaining total =
+    if remaining == 0 then total
+    else constraintGenericLoop (remaining - 1) (addGeneric total remaining)
+
+constraintGenericMain : Int
+constraintGenericMain = constraintGenericLoop 200000 0
+
+addConcrete : Int -> Int -> Int
+addConcrete left right = left + right
+
+constraintConcreteLoop : Int -> Int -> Int
+constraintConcreteLoop remaining total =
+    if remaining == 0 then total
+    else constraintConcreteLoop (remaining - 1) (addConcrete total remaining)
+
+constraintConcreteMain : Int
+constraintConcreteMain = constraintConcreteLoop 200000 0
+
 applyMany : (Int -> Int) -> Int -> Int -> Int
 applyMany transform remaining value =
     if remaining == 0 then value

@@ -242,6 +242,22 @@ pub enum TermExpr<A, P = A> {
     Let(String, Box<TermExprNode<A, P>>, Box<TermExprNode<A, P>>),
 }
 
+/// Separates the head and source-order evidence arguments of nested evidence applications.
+pub fn collect_evidence_application_spine<A, P>(
+    expr: &TermExprNode<A, P>,
+) -> (&TermExprNode<A, P>, Vec<&Ev>) {
+    let mut evidence = Vec::new();
+    let mut head = expr;
+
+    while let TermExpr::EvApp(inner, argument) = &head.node {
+        evidence.push(argument);
+        head = inner;
+    }
+
+    evidence.reverse();
+    (head, evidence)
+}
+
 #[derive(Clone, Debug)]
 pub enum Pattern<A> {
     Con(CtorId, Vec<PatternNode<A>>),

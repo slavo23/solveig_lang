@@ -9,6 +9,7 @@ use solveig_ast::ast::{
     CaseArmNode, ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Ev, EvVarId,
     InstanceDefinition, InstanceId, Kind, MatchArmNode, ModuleId, Names, Pattern, PatternNode,
     Predicate, Scheme, TermExpr, TermExprNode, Ty, TyConTable, TyVarId, VarRef,
+    collect_evidence_application_spine,
 };
 use solveig_base::{Diagnostic, Label};
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};
@@ -404,7 +405,7 @@ impl CoreLinter<'_> {
     }
 
     fn lint_ev_app_chain(&mut self, expr: &TermExprNode<TcMetadata, Range<usize>>) {
-        let (head, evidence) = collect_ev_app_spine(expr);
+        let (head, evidence) = collect_evidence_application_spine(expr);
         let expected = self.expected_predicates_for_head(head);
 
         if expected.len() < evidence.len() {
@@ -732,21 +733,6 @@ impl CoreLinter<'_> {
 
         self.diagnostics.push(diagnostic);
     }
-}
-
-fn collect_ev_app_spine(
-    expr: &TermExprNode<TcMetadata, Range<usize>>,
-) -> (&TermExprNode<TcMetadata, Range<usize>>, Vec<&Ev>) {
-    let mut evidence = Vec::new();
-    let mut head = expr;
-
-    while let TermExpr::EvApp(inner, ev) = &head.node {
-        evidence.push(ev);
-        head = inner;
-    }
-
-    evidence.reverse();
-    (head, evidence)
 }
 
 fn global_head_id(expr: &TermExprNode<TcMetadata, Range<usize>>) -> Option<DefId> {

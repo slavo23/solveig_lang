@@ -7,8 +7,8 @@ use std::rc::Rc;
 use solveig_ast::ast::{
     BinOp, BuiltinDefinition, BuiltinId, CaseArm, ClassId, CtorId, CtorRuntimeInfo, DefId, Ev,
     EvVarId, InstanceDefinition, InstanceId, InstanceMethodDef, Literal, MatchArmNode, ModuleId,
-    Names, Pattern, PatternNode, ResolvedModule, StrLitId, TermExpr, TermExprNode, UnOp, VarRef,
-    runtime_ctor_role,
+    Names, Pattern, PatternNode, ResolvedModule, StrLitId, TermDefinition, TermExpr, TermExprNode,
+    UnOp, VarRef, collect_evidence_application_spine, runtime_ctor_role,
 };
 
 use super::dicts::{DictLayout, DictLayouts, DictMethodLayout, instance_global_name};
@@ -21,6 +21,10 @@ enum Binding {
     Evidence(EvVarId),
 }
 
+const SPECIALIZATION_BODY_NODE_LIMIT: usize = 128;
+const SPECIALIZATIONS_PER_FUNCTION_LIMIT: usize = 4;
+const SPECIALIZATION_GLOBAL_LIMIT: usize = 64;
+
 struct LowerCtx {
     names: Names,
     scope: Vec<Binding>,
@@ -28,6 +32,11 @@ struct LowerCtx {
     constructors: FxHashMap<CtorId, LowerConstructorInfo>,
     dicts: DictLayouts,
     primitive_instance_methods: FxHashMap<(InstanceId, DefId), PrimitiveForwarder>,
+    constrained_functions: FxHashMap<DefId, ConstrainedFunction>,
+    evidence_substitutions: FxHashMap<EvVarId, Ev>,
+    function_specializations: FxHashMap<FunctionSpecialization, usize>,
+    specialization_requests: Vec<FunctionSpecialization>,
+    next_global: usize,
     string_constants: Vec<String>,
     string_indices: FxHashMap<StrLitId, u32>,
 }
@@ -36,6 +45,18 @@ struct LowerCtx {
 struct PrimitiveForwarder {
     builtin: BuiltinId,
     arity: usize,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ConstrainedFunction {
+    predicate_count: usize,
+    body_nodes: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct FunctionSpecialization {
+    function: DefId,
+    evidence: Vec<Ev>,
 }
 
 #[derive(Clone, Debug)]
@@ -104,6 +125,66 @@ impl LowerCtx {
         solveig_base::ice!("unbound evidence variable during lowering: {evvar:?}");
     }
 
+    fn substitute_evidence(&self, evidence: &Ev) -> Ev {
+        match evidence {
+            Ev::Var(evvar) => self
+                .evidence_substitutions
+                .get(evvar)
+                .cloned()
+                .unwrap_or(Ev::Var(*evvar)),
+            Ev::Placeholder(evvar) => Ev::Placeholder(*evvar),
+            Ev::Inst(instance, types, args) => Ev::Inst(
+                *instance,
+                types.clone(),
+                args.iter()
+                    .map(|arg| self.substitute_evidence(arg))
+                    .collect(),
+            ),
+            Ev::Super(root, class, index) => {
+                Ev::Super(Box::new(self.substitute_evidence(root)), *class, *index)
+            }
+        }
+    }
+
+    fn request_function_specialization(
+        &mut self,
+        function: DefId,
+        evidence: Vec<Ev>,
+    ) -> Option<usize> {
+        let plan = self.constrained_functions.get(&function)?;
+        if evidence.len() != plan.predicate_count || evidence.iter().any(evidence_has_free_vars) {
+            return None;
+        }
+
+        let key = FunctionSpecialization { function, evidence };
+        if let Some(index) = self.function_specializations.get(&key) {
+            return Some(*index);
+        }
+        let function_specializations = self
+            .specialization_requests
+            .iter()
+            .filter(|request| request.function == function)
+            .count();
+        if !specialization_budget_allows(
+            *plan,
+            function_specializations,
+            self.specialization_requests.len(),
+        ) {
+            return None;
+        }
+
+        let index = self.next_global;
+        let Some(next_global) = self.next_global.checked_add(1) else {
+            solveig_base::ice!(
+                "global index space exhausted by constrained function specialization"
+            );
+        };
+        self.next_global = next_global;
+        self.function_specializations.insert(key.clone(), index);
+        self.specialization_requests.push(key);
+        Some(index)
+    }
+
     fn constructor_named(&self, name: &str) -> Option<&LowerConstructorInfo> {
         self.constructors
             .values()
@@ -168,6 +249,16 @@ impl LowerCtx {
     }
 }
 
+fn specialization_budget_allows(
+    function: ConstrainedFunction,
+    function_specializations: usize,
+    total_specializations: usize,
+) -> bool {
+    function.body_nodes <= SPECIALIZATION_BODY_NODE_LIMIT
+        && function_specializations < SPECIALIZATIONS_PER_FUNCTION_LIMIT
+        && total_specializations < SPECIALIZATION_GLOBAL_LIMIT
+}
+
 fn lower_expr<A: Clone, P: Clone, S>(
     ctx: &mut LowerCtx,
     expr: &TermExprNode<A, P>,
@@ -176,6 +267,9 @@ fn lower_expr<A: Clone, P: Clone, S>(
 where
     S: Fn(&A) -> Option<FileSpan>,
 {
+    if let Some(specialized) = lower_specialized_function_ref(ctx, expr) {
+        return with_source(source_span(&expr.anno), specialized);
+    }
     if let Some(specialized) = lower_specialized_method_call(ctx, expr, source_span) {
         return with_source(source_span(&expr.anno), specialized);
     }
@@ -262,6 +356,30 @@ where
     with_source(source_span(&expr.anno), lowered)
 }
 
+// Following the specialization transformation used for dictionary-passing
+// code (Jones 1994): a concrete evidence application selects one bounded clone
+// whose evidence binders are substituted while that clone is lowered.
+fn lower_specialized_function_ref<A, P>(
+    ctx: &mut LowerCtx,
+    expr: &TermExprNode<A, P>,
+) -> Option<Rc<IRExpr>> {
+    let (head, evidence) = collect_evidence_application_spine(expr);
+    let head = strip_term_wrappers(head);
+    let TermExpr::Var(VarRef::Global(function)) = &head.node else {
+        return None;
+    };
+    if evidence.is_empty() {
+        return None;
+    }
+
+    let evidence = evidence
+        .into_iter()
+        .map(|argument| erase_evidence_types(&ctx.substitute_evidence(argument)))
+        .collect::<Vec<_>>();
+    ctx.request_function_specialization(*function, evidence)
+        .map(|index| Rc::new(IRExpr::FVar(index)))
+}
+
 // Jones 1994, "Dictionary-free Overloading by Partial Evaluation": once evidence
 // selects a concrete instance, specialize the application instead of constructing
 // and projecting a runtime dictionary. Calls with free evidence keep the generic path.
@@ -275,7 +393,8 @@ where
 {
     let (callee, args) = application_spine(expr);
     let (method_id, evidence) = evidence_applied_method_ref(callee)?;
-    let Ev::Inst(instance_id, _, evidence_args) = evidence else {
+    let evidence = ctx.substitute_evidence(evidence);
+    let Ev::Inst(instance_id, _, evidence_args) = &evidence else {
         return None;
     };
     if evidence_args.iter().any(evidence_has_free_vars) {
@@ -322,6 +441,21 @@ fn evidence_has_free_vars(evidence: &Ev) -> bool {
         Ev::Var(_) | Ev::Placeholder(_) => true,
         Ev::Inst(_, _, args) => args.iter().any(evidence_has_free_vars),
         Ev::Super(root, _, _) => evidence_has_free_vars(root),
+    }
+}
+
+fn erase_evidence_types(evidence: &Ev) -> Ev {
+    match evidence {
+        Ev::Var(evvar) => Ev::Var(*evvar),
+        Ev::Placeholder(evvar) => Ev::Placeholder(*evvar),
+        Ev::Inst(instance, _, args) => Ev::Inst(
+            *instance,
+            Vec::new(),
+            args.iter().map(erase_evidence_types).collect(),
+        ),
+        Ev::Super(root, class, index) => {
+            Ev::Super(Box::new(erase_evidence_types(root)), *class, *index)
+        }
     }
 }
 
@@ -721,10 +855,11 @@ fn lower_ev_app<A: Clone, P: Clone, S>(
 where
     S: Fn(&A) -> Option<FileSpan>,
 {
+    let ev = ctx.substitute_evidence(ev);
     if let Some(method_id) = global_method_ref(inner)
         && let Some((class_id, field_index)) = ctx.dicts.method_field(method_id)
     {
-        if let Ev::Inst(instance_id, _, evidence_args) = ev
+        if let Ev::Inst(instance_id, _, evidence_args) = &ev
             && !evidence_args.iter().any(evidence_has_free_vars)
             && let Some(global_name) = ctx.dicts.instance_method_global(*instance_id, method_id)
         {
@@ -740,16 +875,22 @@ where
                 });
         }
 
-        let dict = lower_ev(ctx, ev);
+        let dict = lower_ev(ctx, &ev);
         return project_dict_field(ctx, class_id, dict, field_index);
     }
 
     let lowered_func = lower_expr(ctx, inner, source_span);
-    let lowered_ev = lower_ev(ctx, ev);
+    let lowered_ev = lower_ev(ctx, &ev);
     Rc::new(IRExpr::App(lowered_func, lowered_ev))
 }
 
 fn lower_ev(ctx: &mut LowerCtx, ev: &Ev) -> Rc<IRExpr> {
+    if let Ev::Var(evvar) = ev
+        && let Some(evidence) = ctx.evidence_substitutions.get(evvar).cloned()
+    {
+        return lower_ev(ctx, &evidence);
+    }
+
     match ev {
         Ev::Var(evvar) => ctx.resolve_ev_var(*evvar),
         Ev::Placeholder(evvar) => {
@@ -818,6 +959,60 @@ fn primitive_instance_methods<A, P>(
     }
 
     forwarders
+}
+
+fn constrained_functions<A, P>(
+    module: &ResolvedModule<A, P>,
+) -> FxHashMap<DefId, ConstrainedFunction> {
+    module
+        .func_defs
+        .iter()
+        .filter_map(|function| {
+            let predicate_count = module.func_schemes.get(&function.id)?.predicates.len();
+            (predicate_count > 0).then(|| {
+                (
+                    function.id,
+                    ConstrainedFunction {
+                        predicate_count,
+                        body_nodes: term_node_count(&function.body),
+                    },
+                )
+            })
+        })
+        .collect()
+}
+
+fn term_node_count<A, P>(expr: &TermExprNode<A, P>) -> usize {
+    let children = match &expr.node {
+        TermExpr::App(func, arg) | TermExpr::Let(_, func, arg) => {
+            term_node_count(func).saturating_add(term_node_count(arg))
+        }
+        TermExpr::Abs(_, _, body)
+        | TermExpr::TyAbs(_, _, body)
+        | TermExpr::TyApp(body, _)
+        | TermExpr::EvAbs(_, _, body)
+        | TermExpr::EvApp(body, _)
+        | TermExpr::Anno(body, _) => term_node_count(body),
+        TermExpr::Case(scrutinee, arms) => {
+            arms.iter().fold(term_node_count(scrutinee), |count, arm| {
+                count.saturating_add(term_node_count(&arm.node.expr))
+            })
+        }
+        TermExpr::Match(scrutinees, arms) => scrutinees
+            .iter()
+            .map(term_node_count)
+            .chain(arms.iter().map(|arm| term_node_count(&arm.node.expr)))
+            .fold(0, usize::saturating_add),
+        TermExpr::IfThenElse(cond, then_branch, else_branch) => term_node_count(cond)
+            .saturating_add(term_node_count(then_branch))
+            .saturating_add(term_node_count(else_branch)),
+        TermExpr::Unit
+        | TermExpr::Var(_)
+        | TermExpr::Lit(_)
+        | TermExpr::Hole
+        | TermExpr::Con(_) => 0,
+    };
+    1usize.saturating_add(children)
 }
 
 fn primitive_forwarder<A, P>(
@@ -1093,6 +1288,51 @@ where
     }
 }
 
+fn lower_function_specialization_global<A: Clone, P: Clone, S>(
+    ctx: &mut LowerCtx,
+    function: &TermDefinition<A, P>,
+    request: &FunctionSpecialization,
+    ordinal: usize,
+    source_span: &S,
+) -> IRGlobalDef
+where
+    S: Fn(&A) -> Option<FileSpan>,
+{
+    let mut body = &function.body;
+    let mut previous = Vec::with_capacity(request.evidence.len());
+
+    for evidence in &request.evidence {
+        while let TermExpr::TyAbs(_, _, inner) | TermExpr::Anno(inner, _) = &body.node {
+            body = inner;
+        }
+        let TermExpr::EvAbs(evvar, _, inner) = &body.node else {
+            solveig_base::ice!(
+                "constrained function `{}` has fewer evidence binders than its scheme",
+                function.name
+            );
+        };
+        previous.push((
+            *evvar,
+            ctx.evidence_substitutions.insert(*evvar, evidence.clone()),
+        ));
+        body = inner;
+    }
+
+    let lowered = lower_expr(ctx, body, source_span);
+    for (evvar, old) in previous.into_iter().rev() {
+        if let Some(evidence) = old {
+            ctx.evidence_substitutions.insert(evvar, evidence);
+        } else {
+            ctx.evidence_substitutions.remove(&evvar);
+        }
+    }
+
+    IRGlobalDef {
+        name: format!("$specialize.{}.{ordinal}", function.name),
+        body: lowered,
+    }
+}
+
 fn build_constructor_table<A, P>(
     module: &ResolvedModule<A, P>,
     names: &Names,
@@ -1160,6 +1400,7 @@ where
     let (next_ctor_id, next_tag) = next_synthetic_constructor_base(&constructors);
     let dicts = DictLayouts::build(module, next_ctor_id, next_tag);
     let primitive_instance_methods = primitive_instance_methods(module, names, &dicts);
+    let constrained_functions = constrained_functions(module);
 
     let mut globals: FxHashMap<String, usize> = FxHashMap::default();
     for (index, func_def) in module.func_defs.iter().enumerate() {
@@ -1204,6 +1445,11 @@ where
         constructors: constructors.clone(),
         dicts: dicts.clone(),
         primitive_instance_methods,
+        constrained_functions,
+        evidence_substitutions: FxHashMap::default(),
+        function_specializations: FxHashMap::default(),
+        specialization_requests: Vec::new(),
+        next_global,
         string_constants: Vec::new(),
         string_indices: FxHashMap::default(),
     };
@@ -1248,6 +1494,39 @@ where
                 .iter()
                 .map(|method| lower_instance_method_global(&mut ctx, inst, method, &source_span)),
         );
+    }
+
+    let mut specialization = 0;
+    while let Some(request) = ctx.specialization_requests.get(specialization).cloned() {
+        let expected_index = *ctx
+            .function_specializations
+            .get(&request)
+            .unwrap_or_else(|| solveig_base::ice!("missing requested function specialization"));
+        if ir_globals.len() != expected_index {
+            solveig_base::ice!(
+                "specialized global index mismatch: planned {expected_index}, emitted {}",
+                ir_globals.len()
+            );
+        }
+        let function = module
+            .func_defs
+            .iter()
+            .find(|function| function.id == request.function)
+            .unwrap_or_else(|| {
+                solveig_base::ice!(
+                    "specialization references missing function {:?}",
+                    request.function
+                )
+            });
+        let source_span = |anno: &A| source_span(function.id.module, anno);
+        ir_globals.push(lower_function_specialization_global(
+            &mut ctx,
+            function,
+            &request,
+            specialization,
+            &source_span,
+        ));
+        specialization += 1;
     }
 
     let mut constructor_arities = constructors
@@ -1388,5 +1667,34 @@ mod tests {
             expr = inner;
         }
         expr.as_ref()
+    }
+
+    #[test]
+    fn constrained_function_specialization_budget_has_hard_boundaries() {
+        let admitted = ConstrainedFunction {
+            predicate_count: 1,
+            body_nodes: SPECIALIZATION_BODY_NODE_LIMIT,
+        };
+        assert!(specialization_budget_allows(
+            admitted,
+            SPECIALIZATIONS_PER_FUNCTION_LIMIT - 1,
+            SPECIALIZATION_GLOBAL_LIMIT - 1,
+        ));
+
+        let oversized = ConstrainedFunction {
+            body_nodes: SPECIALIZATION_BODY_NODE_LIMIT + 1,
+            ..admitted
+        };
+        assert!(!specialization_budget_allows(oversized, 0, 0));
+        assert!(!specialization_budget_allows(
+            admitted,
+            SPECIALIZATIONS_PER_FUNCTION_LIMIT,
+            0,
+        ));
+        assert!(!specialization_budget_allows(
+            admitted,
+            0,
+            SPECIALIZATION_GLOBAL_LIMIT,
+        ));
     }
 }
