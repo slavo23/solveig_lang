@@ -11,6 +11,7 @@ solveig-driver = { path = "../solveig-driver", version = "0.1.0" }
 solveig-package = { path = "../solveig-package", version = "0.1.0" }
 solveig-resolve = { path = "../solveig-resolve", version = "0.1.0" }
 solveig-syntax = { path = "../solveig-syntax", version = "0.1.0" }
+thiserror.workspace = true
 
 [lints]
 workspace = true

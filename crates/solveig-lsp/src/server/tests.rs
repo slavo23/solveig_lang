@@ -205,6 +205,22 @@ fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
 }
 
 #[test]
+fn source_edit_refusals_are_clear_lsp_request_failures() {
+    let error = source_edit_response_error(SourceEditError::DependencyPackage {
+        path: std::path::PathBuf::from("/dependencies/toolkit/src/core.sv"),
+    });
+
+    assert_eq!(error.code, ErrorCode::REQUEST_FAILED);
+    assert!(error.message.contains("dependency source"), "{error}");
+    assert!(
+        error
+            .message
+            .contains("open that package as the local project"),
+        "{error}"
+    );
+}
+
+#[test]
 fn initialize_options_configure_editor_hints() {
     let default_config = server_config_from_initialize(&InitializeParams::default());
     assert!(default_config.inlay_hints_enabled);

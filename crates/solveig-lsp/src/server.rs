@@ -29,8 +29,9 @@ use async_lsp::lsp_types::{
     WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use async_lsp::router::Router;
-use async_lsp::{ClientSocket, LanguageServer, MainLoop, ResponseError};
+use async_lsp::{ClientSocket, ErrorCode, LanguageServer, MainLoop, ResponseError};
 use solveig_base::PositionEncoding;
+use solveig_ide::SourceEditError;
 
 use crate::semantic_tokens::semantic_tokens_legend;
 use crate::workspace::{ServerConfig, ServerState, WorkspaceSnapshot, check_workspaces};
@@ -375,10 +376,14 @@ impl LanguageServer for LspServer {
     ) -> LspFuture<Option<PrepareRenameResponse>> {
         let position = params.position;
 
-        snapshot_response(
+        snapshot_result_response(
             &self.state,
             &params.text_document.uri,
-            move |path, encoding, _, snapshot| snapshot.prepare_rename(&path, position, encoding),
+            move |path, encoding, _, snapshot| {
+                snapshot
+                    .prepare_rename(&path, position, encoding)
+                    .map_err(source_edit_response_error)
+            },
         )
     }
 
@@ -387,8 +392,10 @@ impl LanguageServer for LspServer {
         let uri = params.text_document_position.text_document.uri;
         let new_name = params.new_name;
 
-        snapshot_response(&self.state, &uri, move |path, encoding, _, snapshot| {
-            snapshot.rename(&path, position, encoding, &new_name)
+        snapshot_result_response(&self.state, &uri, move |path, encoding, _, snapshot| {
+            snapshot
+                .rename(&path, position, encoding, &new_name)
+                .map_err(source_edit_response_error)
         })
     }
 
@@ -467,15 +474,37 @@ fn snapshot_response<T>(
 where
     T: Send + 'static,
 {
+    snapshot_result_response(state, uri, move |path, encoding, config, snapshot| {
+        Ok(f(path, encoding, config, snapshot))
+    })
+}
+
+fn snapshot_result_response<T>(
+    state: &Arc<Mutex<ServerState>>,
+    uri: &async_lsp::lsp_types::Url,
+    f: impl FnOnce(PathBuf, PositionEncoding, ServerConfig, WorkspaceSnapshot) -> LspResult<Option<T>>
+    + Send
+    + 'static,
+) -> LspFuture<Option<T>>
+where
+    T: Send + 'static,
+{
     let snapshot = {
         let state = lock_state(state);
         state.snapshot_for_uri(uri)
     };
 
     Box::pin(async move {
-        Ok(snapshot
-            .and_then(|(path, encoding, config, snapshot)| f(path, encoding, config, snapshot)))
+        let Some((path, encoding, config, snapshot)) = snapshot else {
+            return Ok(None);
+        };
+
+        f(path, encoding, config, snapshot)
     })
+}
+
+fn source_edit_response_error(error: SourceEditError) -> ResponseError {
+    ResponseError::new(ErrorCode::REQUEST_FAILED, error)
 }
 
 fn ready_response<T>(value: T) -> LspFuture<T>

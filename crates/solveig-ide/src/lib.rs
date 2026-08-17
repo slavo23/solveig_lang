@@ -51,6 +51,7 @@ mod source_code_action;
 mod source_completion;
 mod source_document_highlight;
 mod source_document_link;
+mod source_edit;
 mod source_folding_range;
 mod source_inlay_hint;
 mod source_lookup;
@@ -88,6 +89,7 @@ use source_completion::SourceCompletionCandidate;
 pub use source_completion::{SourceCompletionItem, SourceCompletionItemKind};
 pub use source_document_highlight::{SourceDocumentHighlight, SourceDocumentHighlightKind};
 pub use source_document_link::SourceDocumentLink;
+pub use source_edit::SourceEditError;
 pub use source_folding_range::{SourceFoldingRange, SourceFoldingRangeKind};
 pub use source_inlay_hint::{
     SourceInlayHint, SourceInlayHintCategory, SourceInlayHintConfig, SourceInlayHintKind,
@@ -358,6 +360,10 @@ pub(crate) fn source_code_actions_for_snapshot(
             PrettyTables::new(&snapshot.names, &tycon_table, &class_table),
         ));
     }
+
+    out.retain(|action| {
+        source_edit::code_action_is_editable(&snapshot.project, source_map, action)
+    });
 
     out
 }

@@ -6,57 +6,60 @@ use super::*;
 
 pub(super) fn prepare_rename_in_artifacts(
     artifacts: &CompilationArtifacts,
+    project: &Project,
     source_map: &SourceMap,
     file: &Path,
     position: SourcePosition,
     encoding: PositionEncoding,
-) -> Option<FileSpan> {
-    let candidate = rename_candidate_at_position(artifacts, source_map, file, position, encoding)?;
-    if !renameable_def(artifacts, source_map, candidate.def_id) {
-        return None;
-    }
-    let old_name = source_text(source_map, candidate.span)?;
+) -> Result<Option<FileSpan>, SourceEditError> {
+    let Some(candidate) =
+        rename_candidate_at_position(artifacts, source_map, file, position, encoding)
+    else {
+        return Ok(None);
+    };
+    let Some(old_name) = source_text(source_map, candidate.span) else {
+        return Ok(None);
+    };
     if !valid_existing_name(old_name) {
-        return None;
+        return Ok(None);
     }
+    let Some(_) = editable_rename_spans(artifacts, project, source_map, candidate.def_id)? else {
+        return Ok(None);
+    };
 
-    Some(candidate.span)
+    Ok(Some(candidate.span))
 }
 
 pub(super) fn rename_edits_in_artifacts(
     artifacts: &CompilationArtifacts,
+    project: &Project,
     source_map: &SourceMap,
     file: &Path,
     position: SourcePosition,
     encoding: PositionEncoding,
     new_name: &str,
-) -> Vec<SourceTextEdit> {
+) -> Result<Vec<SourceTextEdit>, SourceEditError> {
     let Some(candidate) =
         rename_candidate_at_position(artifacts, source_map, file, position, encoding)
     else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
-    if !renameable_def(artifacts, source_map, candidate.def_id) {
-        return Vec::new();
-    }
     let Some(old_name) = source_text(source_map, candidate.span) else {
-        return Vec::new();
+        return Ok(Vec::new());
     };
     if !valid_new_name_for_old_name(new_name, old_name) {
-        return Vec::new();
+        return Ok(Vec::new());
     }
 
-    let mut spans = references_to_def(artifacts, candidate.def_id, true)
-        .into_iter()
-        .filter(|span| editable_file(source_map, span.file))
-        .collect::<Vec<_>>();
-    spans.sort_by_key(|span| (span.file, span.span.start, span.span.end));
-    spans.dedup();
+    let Some(spans) = editable_rename_spans(artifacts, project, source_map, candidate.def_id)?
+    else {
+        return Ok(Vec::new());
+    };
 
-    spans
+    Ok(spans
         .into_iter()
         .map(|span| SourceTextEdit::new(span.file, span.span, new_name.to_string()))
-        .collect()
+        .collect())
 }
 
 fn rename_candidate_at_position(
@@ -69,13 +72,24 @@ fn rename_candidate_at_position(
     def_target_at_position(artifacts, source_map, file, position, encoding)
 }
 
-fn renameable_def(artifacts: &CompilationArtifacts, source_map: &SourceMap, def_id: DefId) -> bool {
-    declaration_span(artifacts, def_id).is_some_and(|span| editable_file(source_map, span.file))
-}
+fn editable_rename_spans(
+    artifacts: &CompilationArtifacts,
+    project: &Project,
+    source_map: &SourceMap,
+    def_id: DefId,
+) -> Result<Option<Vec<FileSpan>>, SourceEditError> {
+    if declaration_span(artifacts, def_id).is_none() {
+        return Ok(None);
+    }
 
-fn editable_file(source_map: &SourceMap, file: FileId) -> bool {
-    let path = &source_map.lookup(file).path;
-    path.is_absolute() && !path.to_string_lossy().starts_with('<')
+    let mut spans = references_to_def(artifacts, def_id, true);
+    spans.sort_by_key(|span| (span.file, span.span.start, span.span.end));
+    spans.dedup();
+    for span in &spans {
+        source_edit::ensure_file_id_editable(project, source_map, span.file)?;
+    }
+
+    Ok(Some(spans))
 }
 
 fn source_text(source_map: &SourceMap, span: FileSpan) -> Option<&str> {

@@ -894,6 +894,7 @@ dependencies = [
  "solveig-package",
  "solveig-resolve",
  "solveig-syntax",
+ "thiserror",
 ]
 
 [[package]]

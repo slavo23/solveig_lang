@@ -225,13 +225,15 @@ increment value = value + 1
 
     let rename_span = compilation
         .prepare_rename_at_position(&main, increment_position, PositionEncoding::Utf8)
+        .expect("local source should be editable")
         .expect("increment should be renameable");
     assert_eq!(
         source_text(compilation.source_map(), rename_span),
         "increment"
     );
-    let edits =
-        compilation.rename_at_position(&main, increment_position, PositionEncoding::Utf8, "bump");
+    let edits = compilation
+        .rename_at_position(&main, increment_position, PositionEncoding::Utf8, "bump")
+        .expect("local rename should be editable");
     assert!(edits.len() >= 4, "{edits:#?}");
     assert!(edits.iter().all(|edit| edit.new_text() == "bump"));
     assert!(
@@ -368,6 +370,171 @@ main =
     assert_eq!(
         do_docs.as_deref(),
         Some("Writes text without adding a newline.")
+    );
+
+    drop(project_root);
+}
+
+#[test]
+fn dependency_sources_stay_queryable_but_mutating_features_refuse_them() {
+    let project_root = temp_root("dependency_editability");
+    let app_root = project_root.join("app");
+    let dependency_root = project_root.join("dependency");
+    let app = app_root.join("src/main.sv");
+    let dependency = dependency_root.join("src/core.sv");
+    let app_source = r#"import dependency.core(answer)
+
+main = answer
+"#;
+    let dependency_source = r#"-- | The dependency answer.
+answer = 42
+"#;
+
+    write_source(
+        &app_root.join("solveig.toml"),
+        r#"[package]
+name = "app"
+version = "0.1.0"
+
+[dependencies]
+dependency = { path = "../dependency" }
+
+[language]
+entry = "main"
+"#,
+    );
+    write_source(
+        &dependency_root.join("solveig.toml"),
+        r#"[package]
+name = "dependency"
+version = "0.1.0"
+
+[language]
+entry = "core"
+"#,
+    );
+    write_source(&app, app_source);
+    write_source(&dependency, dependency_source);
+    let dependency_canonical =
+        fs::canonicalize(&dependency).expect("dependency source should canonicalize");
+
+    let mut compilation = Compilation::new(&app_root);
+    let result = compilation.check(true).expect("check should finish");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let reference = position_in_line(app_source, "main = answer", "answer");
+    let definition = compilation
+        .definition_at_position(&app, reference, PositionEncoding::Utf8)
+        .expect("dependency definition should remain navigable");
+    assert_eq!(
+        compilation.source_map().lookup(definition.file).path,
+        dependency_canonical
+    );
+
+    let references = compilation
+        .references_at_position(&app, reference, PositionEncoding::Utf8, true)
+        .expect("dependency references should remain available");
+    assert!(
+        references
+            .iter()
+            .any(|span| { compilation.source_map().lookup(span.file).path == app })
+    );
+    assert!(
+        references.iter().any(|span| {
+            compilation.source_map().lookup(span.file).path == dependency_canonical
+        })
+    );
+
+    let dependency_position = position_in_line(dependency_source, "answer = 42", "answer");
+    let hover = compilation
+        .hover_at_position(
+            &dependency_canonical,
+            dependency_position,
+            PositionEncoding::Utf8,
+        )
+        .expect("dependency hover should remain available");
+    assert!(hover.signature().contains("answer : Int"), "{hover:#?}");
+    let completions = compilation.completion_items_at_position(
+        &dependency_canonical,
+        dependency_position,
+        PositionEncoding::Utf8,
+    );
+    assert!(
+        completions.iter().any(|item| item.label() == "answer"),
+        "dependency completion should remain available: {completions:#?}"
+    );
+
+    compilation
+        .ensure_source_editable(&app)
+        .expect("the local package should remain editable");
+    let formatting_error = compilation
+        .ensure_source_editable(&dependency_canonical)
+        .expect_err("formatting a dependency must be refused");
+    assert!(
+        formatting_error.to_string().contains("dependency source"),
+        "{formatting_error}"
+    );
+    assert!(
+        formatting_error
+            .to_string()
+            .contains("open that package as the local project"),
+        "{formatting_error}"
+    );
+    let prelude = compilation
+        .source_map()
+        .files()
+        .iter()
+        .find(|file| file.path.ends_with("prelude/list.sv"))
+        .expect("Prelude list source should be loaded")
+        .path
+        .clone();
+    let implicit_error = compilation
+        .ensure_source_editable(&prelude)
+        .expect_err("formatting an implicit library must be refused");
+    assert!(
+        implicit_error
+            .to_string()
+            .contains("implicit library source"),
+        "{implicit_error}"
+    );
+
+    let prepare_error = compilation
+        .prepare_rename_at_position(&app, reference, PositionEncoding::Utf8)
+        .expect_err("renaming a dependency reference must be refused entirely");
+    assert_eq!(prepare_error, formatting_error);
+    let rename_error = compilation
+        .rename_at_position(&app, reference, PositionEncoding::Utf8, "renamedAnswer")
+        .expect_err("a dependency-spanning rename must not return partial edits");
+    assert_eq!(rename_error, formatting_error);
+
+    let dependency_actions = compilation.code_actions_at_range(
+        &dependency_canonical,
+        SourcePosition::new(0, 0),
+        SourcePosition::new(2, 0),
+        PositionEncoding::Utf8,
+    );
+    assert!(
+        dependency_actions.is_empty(),
+        "dependency code actions must be filtered: {dependency_actions:#?}"
+    );
+    let local_actions = compilation.source_code_actions();
+    assert!(
+        local_actions
+            .iter()
+            .any(|action| action.title().contains("type signature for `main`")),
+        "local code actions should remain available: {local_actions:#?}"
+    );
+    assert!(
+        local_actions
+            .iter()
+            .flat_map(|action| action.edits())
+            .all(|edit| {
+                compilation
+                    .source_map()
+                    .lookup(edit.file())
+                    .path
+                    .starts_with(&app_root)
+            })
     );
 
     drop(project_root);

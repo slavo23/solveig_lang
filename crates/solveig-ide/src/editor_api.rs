@@ -56,6 +56,9 @@ pub trait CompilationIdeExt {
     /// Checks the current project and returns semantic tokens for one source file.
     fn semantic_tokens(&mut self, file: impl AsRef<Path>) -> Vec<SourceSemanticToken>;
 
+    /// Checks whether mutating editor features may edit a source file.
+    fn ensure_source_editable(&mut self, file: impl AsRef<Path>) -> Result<(), SourceEditError>;
+
     /// Checks the current project and returns code actions visible for an editor range.
     fn code_actions_at_range(
         &mut self,
@@ -109,7 +112,7 @@ pub trait CompilationIdeExt {
         file: impl AsRef<Path>,
         position: SourcePosition,
         encoding: PositionEncoding,
-    ) -> Option<FileSpan>;
+    ) -> Result<Option<FileSpan>, SourceEditError>;
 
     /// Checks the current project and returns edits that rename a semantic symbol.
     fn rename_at_position(
@@ -118,7 +121,7 @@ pub trait CompilationIdeExt {
         position: SourcePosition,
         encoding: PositionEncoding,
         new_name: &str,
-    ) -> Vec<SourceTextEdit>;
+    ) -> Result<Vec<SourceTextEdit>, SourceEditError>;
 
     /// Checks the current project and returns module document links for one source file.
     fn document_links(&mut self, file: impl AsRef<Path>) -> Vec<SourceDocumentLink>;
@@ -281,6 +284,11 @@ impl<'a> ProjectSnapshotView<'a> {
         )
     }
 
+    /// Checks whether mutating editor features, including formatting, may edit a source file.
+    pub fn ensure_source_editable(&self, file: impl AsRef<Path>) -> Result<(), SourceEditError> {
+        source_edit::ensure_source_editable(&self.snapshot.project, self.source_map, file.as_ref())
+    }
+
     /// Returns all retained source-level code actions.
     pub fn source_code_actions(&self) -> Vec<SourceCodeAction> {
         source_code_actions_for_snapshot(
@@ -299,6 +307,9 @@ impl<'a> ProjectSnapshotView<'a> {
         end: SourcePosition,
         encoding: PositionEncoding,
     ) -> Vec<SourceCodeAction> {
+        if self.ensure_source_editable(file.as_ref()).is_err() {
+            return Vec::new();
+        }
         if self.source_map.is_empty() {
             return Vec::new();
         }
@@ -423,14 +434,15 @@ impl<'a> ProjectSnapshotView<'a> {
         file: impl AsRef<Path>,
         position: SourcePosition,
         encoding: PositionEncoding,
-    ) -> Option<FileSpan> {
+    ) -> Result<Option<FileSpan>, SourceEditError> {
         if !self.success {
-            return None;
+            return Ok(None);
         }
 
         with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             prepare_rename_in_artifacts(
                 artifacts,
+                &self.snapshot.project,
                 self.source_map,
                 file.as_ref(),
                 position,
@@ -446,14 +458,15 @@ impl<'a> ProjectSnapshotView<'a> {
         position: SourcePosition,
         encoding: PositionEncoding,
         new_name: &str,
-    ) -> Vec<SourceTextEdit> {
+    ) -> Result<Vec<SourceTextEdit>, SourceEditError> {
         if !self.success {
-            return Vec::new();
+            return Ok(Vec::new());
         }
 
         with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
             rename_edits_in_artifacts(
                 artifacts,
+                &self.snapshot.project,
                 self.source_map,
                 file.as_ref(),
                 position,
@@ -580,6 +593,18 @@ impl CompilationIdeExt for Compilation {
             .map_or_else(Vec::new, |view| view.semantic_tokens(file))
     }
 
+    fn ensure_source_editable(&mut self, file: impl AsRef<Path>) -> Result<(), SourceEditError> {
+        let _result = self.ensure_checked(false);
+        let path = file.as_ref();
+        let Some(view) = project_snapshot_view(self, true) else {
+            return Err(SourceEditError::UnknownSource {
+                path: path.to_path_buf(),
+            });
+        };
+
+        view.ensure_source_editable(path)
+    }
+
     fn code_actions_at_range(
         &mut self,
         file: impl AsRef<Path>,
@@ -659,10 +684,14 @@ impl CompilationIdeExt for Compilation {
         file: impl AsRef<Path>,
         position: SourcePosition,
         encoding: PositionEncoding,
-    ) -> Option<FileSpan> {
+    ) -> Result<Option<FileSpan>, SourceEditError> {
         let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
 
-        project_snapshot_view(self, success)?.prepare_rename_at_position(file, position, encoding)
+        let Some(view) = project_snapshot_view(self, success) else {
+            return Ok(None);
+        };
+
+        view.prepare_rename_at_position(file, position, encoding)
     }
 
     fn rename_at_position(
@@ -671,12 +700,14 @@ impl CompilationIdeExt for Compilation {
         position: SourcePosition,
         encoding: PositionEncoding,
         new_name: &str,
-    ) -> Vec<SourceTextEdit> {
+    ) -> Result<Vec<SourceTextEdit>, SourceEditError> {
         let success = self.ensure_checked(false).is_ok_and(CheckResult::success);
 
-        project_snapshot_view(self, success).map_or_else(Vec::new, |view| {
-            view.rename_at_position(file, position, encoding, new_name)
-        })
+        let Some(view) = project_snapshot_view(self, success) else {
+            return Ok(Vec::new());
+        };
+
+        view.rename_at_position(file, position, encoding, new_name)
     }
 
     fn document_links(&mut self, file: impl AsRef<Path>) -> Vec<SourceDocumentLink> {

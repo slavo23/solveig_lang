@@ -7,6 +7,7 @@ use async_lsp::lsp_types::{
     SignatureHelp, WorkspaceEdit,
 };
 use solveig_base::{PositionEncoding, SourcePosition};
+use solveig_ide::SourceEditError;
 
 use super::{WorkspaceSnapshot, guarded};
 use crate::editor_features::{
@@ -95,18 +96,21 @@ impl WorkspaceSnapshot {
         path: &Path,
         position: Position,
         encoding: PositionEncoding,
-    ) -> Option<PrepareRenameResponse> {
+    ) -> Result<Option<PrepareRenameResponse>, SourceEditError> {
         guarded("prepare-rename request", || {
-            let span = self.view().prepare_rename_at_position(
-                path,
-                SourcePosition::new(position.line, position.character),
-                encoding,
-            )?;
-
-            lsp_prepare_rename(span, &self.source_map, encoding)
+            self.view()
+                .prepare_rename_at_position(
+                    path,
+                    SourcePosition::new(position.line, position.character),
+                    encoding,
+                )
+                .map(|span| {
+                    span.and_then(|span| lsp_prepare_rename(span, &self.source_map, encoding))
+                })
         })
         .ok()
-        .flatten()
+        .transpose()
+        .map(Option::flatten)
     }
 
     pub(crate) fn rename(
@@ -115,22 +119,26 @@ impl WorkspaceSnapshot {
         position: Position,
         encoding: PositionEncoding,
         new_name: &str,
-    ) -> Option<WorkspaceEdit> {
+    ) -> Result<Option<WorkspaceEdit>, SourceEditError> {
         guarded("rename request", || {
-            let edits = self.view().rename_at_position(
-                path,
-                SourcePosition::new(position.line, position.character),
-                encoding,
-                new_name,
-            );
-            if edits.is_empty() {
-                return None;
-            }
-
-            lsp_workspace_edit(&edits, &self.source_map, encoding)
+            self.view()
+                .rename_at_position(
+                    path,
+                    SourcePosition::new(position.line, position.character),
+                    encoding,
+                    new_name,
+                )
+                .map(|edits| {
+                    if edits.is_empty() {
+                        None
+                    } else {
+                        lsp_workspace_edit(&edits, &self.source_map, encoding)
+                    }
+                })
         })
         .ok()
-        .flatten()
+        .transpose()
+        .map(Option::flatten)
     }
 
     pub(crate) fn document_links(
