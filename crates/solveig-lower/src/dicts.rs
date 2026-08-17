@@ -33,6 +33,7 @@ pub struct DictLayouts {
     classes: FxHashMap<ClassId, DictLayout>,
     method_classes: FxHashMap<DefId, ClassId>,
     instance_globals: FxHashMap<InstanceId, String>,
+    instance_method_globals: FxHashMap<(InstanceId, DefId), String>,
     runtime_constructors: Vec<CtorRuntimeInfo>,
 }
 
@@ -102,6 +103,19 @@ impl DictLayouts {
         for inst in &module.instance_defs {
             out.instance_globals
                 .insert(inst.id, instance_global_name(inst.id));
+
+            let layout = out.classes.get(&inst.head.class_id).unwrap_or_else(|| {
+                solveig_base::ice!(
+                    "missing dictionary layout for instance head {:?}",
+                    inst.head.class_id
+                )
+            });
+            for method in &layout.methods {
+                out.instance_method_globals.insert(
+                    (inst.id, method.id),
+                    instance_method_global_name(inst.id, method.field_index),
+                );
+            }
         }
 
         out
@@ -127,6 +141,12 @@ impl DictLayouts {
         self.instance_globals.get(&id).map(String::as_str)
     }
 
+    pub fn instance_method_global(&self, instance: InstanceId, method: DefId) -> Option<&str> {
+        self.instance_method_globals
+            .get(&(instance, method))
+            .map(String::as_str)
+    }
+
     pub fn runtime_constructors(&self) -> &[CtorRuntimeInfo] {
         &self.runtime_constructors
     }
@@ -134,4 +154,8 @@ impl DictLayouts {
 
 pub fn instance_global_name(id: InstanceId) -> String {
     format!("$dict.instance.{}", id.0)
+}
+
+pub fn instance_method_global_name(id: InstanceId, field_index: usize) -> String {
+    format!("$dict.instance.{}.method.{field_index}", id.0)
 }

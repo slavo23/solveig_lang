@@ -5,12 +5,13 @@ use solveig_base::{FileSpan, FxHashMap};
 use std::rc::Rc;
 
 use solveig_ast::ast::{
-    BuiltinDefinition, CaseArm, ClassId, CtorId, CtorRuntimeInfo, DefId, Ev, EvVarId,
-    InstanceDefinition, Literal, MatchArmNode, ModuleId, Names, Pattern, PatternNode,
-    ResolvedModule, StrLitId, TermExpr, TermExprNode, VarRef, runtime_ctor_role,
+    BinOp, BuiltinDefinition, BuiltinId, CaseArm, ClassId, CtorId, CtorRuntimeInfo, DefId, Ev,
+    EvVarId, InstanceDefinition, InstanceId, InstanceMethodDef, Literal, MatchArmNode, ModuleId,
+    Names, Pattern, PatternNode, ResolvedModule, StrLitId, TermExpr, TermExprNode, UnOp, VarRef,
+    runtime_ctor_role,
 };
 
-use super::dicts::{DictLayout, DictLayouts, instance_global_name};
+use super::dicts::{DictLayout, DictLayouts, DictMethodLayout, instance_global_name};
 use super::lowered_ast::{IRExpr, IRGlobalDef, IRProgram};
 use super::patterns::{LowerCaseArm, LowerPattern};
 
@@ -26,8 +27,15 @@ struct LowerCtx {
     globals: FxHashMap<String, usize>,
     constructors: FxHashMap<CtorId, LowerConstructorInfo>,
     dicts: DictLayouts,
+    primitive_instance_methods: FxHashMap<(InstanceId, DefId), PrimitiveForwarder>,
     string_constants: Vec<String>,
     string_indices: FxHashMap<StrLitId, u32>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PrimitiveForwarder {
+    builtin: BuiltinId,
+    arity: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -168,6 +176,10 @@ fn lower_expr<A: Clone, P: Clone, S>(
 where
     S: Fn(&A) -> Option<FileSpan>,
 {
+    if let Some(specialized) = lower_specialized_method_call(ctx, expr, source_span) {
+        return with_source(source_span(&expr.anno), specialized);
+    }
+
     let lowered = match &expr.node {
         TermExpr::Unit => Rc::new(IRExpr::Unit),
         TermExpr::Var(name) => ctx.resolve_var(name),
@@ -248,6 +260,102 @@ where
     };
 
     with_source(source_span(&expr.anno), lowered)
+}
+
+// Jones 1994, "Dictionary-free Overloading by Partial Evaluation": once evidence
+// selects a concrete instance, specialize the application instead of constructing
+// and projecting a runtime dictionary. Calls with free evidence keep the generic path.
+fn lower_specialized_method_call<A: Clone, P: Clone, S>(
+    ctx: &mut LowerCtx,
+    expr: &TermExprNode<A, P>,
+    source_span: &S,
+) -> Option<Rc<IRExpr>>
+where
+    S: Fn(&A) -> Option<FileSpan>,
+{
+    let (callee, args) = application_spine(expr);
+    let (method_id, evidence) = evidence_applied_method_ref(callee)?;
+    let Ev::Inst(instance_id, _, evidence_args) = evidence else {
+        return None;
+    };
+    if evidence_args.iter().any(evidence_has_free_vars) {
+        return None;
+    }
+
+    let forwarder = *ctx
+        .primitive_instance_methods
+        .get(&(*instance_id, method_id))?;
+    if args.len() != forwarder.arity {
+        return None;
+    }
+
+    let lowered_args = args
+        .into_iter()
+        .map(|arg| lower_expr(ctx, arg, source_span))
+        .collect::<Vec<_>>();
+    Some(lower_primitive_call(forwarder.builtin, lowered_args))
+}
+
+fn application_spine<A, P>(
+    expr: &TermExprNode<A, P>,
+) -> (&TermExprNode<A, P>, Vec<&TermExprNode<A, P>>) {
+    let mut callee = expr;
+    let mut args = Vec::new();
+    while let TermExpr::App(func, arg) = &callee.node {
+        args.push(arg.as_ref());
+        callee = func.as_ref();
+    }
+    args.reverse();
+    (callee, args)
+}
+
+fn evidence_applied_method_ref<A, P>(expr: &TermExprNode<A, P>) -> Option<(DefId, &Ev)> {
+    match &expr.node {
+        TermExpr::EvApp(inner, evidence) => Some((global_method_ref(inner)?, evidence)),
+        TermExpr::TyApp(inner, _) | TermExpr::Anno(inner, _) => evidence_applied_method_ref(inner),
+        _ => None,
+    }
+}
+
+fn evidence_has_free_vars(evidence: &Ev) -> bool {
+    match evidence {
+        Ev::Var(_) | Ev::Placeholder(_) => true,
+        Ev::Inst(_, _, args) => args.iter().any(evidence_has_free_vars),
+        Ev::Super(root, _, _) => evidence_has_free_vars(root),
+    }
+}
+
+fn lower_primitive_call(builtin: BuiltinId, args: Vec<Rc<IRExpr>>) -> Rc<IRExpr> {
+    use solveig_ast::ast::{
+        BUILTIN_INT_ADD, BUILTIN_INT_EQ, BUILTIN_INT_GE, BUILTIN_INT_GT, BUILTIN_INT_LE,
+        BUILTIN_INT_LT, BUILTIN_INT_MUL, BUILTIN_INT_NEG, BUILTIN_INT_SUB,
+    };
+
+    let binary = match builtin {
+        BUILTIN_INT_ADD => Some(BinOp::Plus),
+        BUILTIN_INT_SUB => Some(BinOp::Minus),
+        BUILTIN_INT_MUL => Some(BinOp::Mult),
+        BUILTIN_INT_EQ => Some(BinOp::Equal),
+        BUILTIN_INT_LT => Some(BinOp::Less),
+        BUILTIN_INT_LE => Some(BinOp::LessOrEqual),
+        BUILTIN_INT_GT => Some(BinOp::Greater),
+        BUILTIN_INT_GE => Some(BinOp::GreaterOrEqual),
+        _ => None,
+    };
+    if let Some(op) = binary {
+        let [lhs, rhs] = args.as_slice() else {
+            solveig_base::ice!("binary primitive forwarder had {} arguments", args.len());
+        };
+        return Rc::new(IRExpr::BinaryOp(op, lhs.clone(), rhs.clone()));
+    }
+    if builtin == BUILTIN_INT_NEG {
+        let [rhs] = args.as_slice() else {
+            solveig_base::ice!("unary primitive forwarder had {} arguments", args.len());
+        };
+        return Rc::new(IRExpr::UnaryOp(UnOp::Neg, rhs.clone()));
+    }
+
+    Rc::new(IRExpr::CallBuiltin(builtin, args))
 }
 
 fn lower_match_expr<A: Clone, P: Clone, S>(
@@ -616,6 +724,22 @@ where
     if let Some(method_id) = global_method_ref(inner)
         && let Some((class_id, field_index)) = ctx.dicts.method_field(method_id)
     {
+        if let Ev::Inst(instance_id, _, evidence_args) = ev
+            && !evidence_args.iter().any(evidence_has_free_vars)
+            && let Some(global_name) = ctx.dicts.instance_method_global(*instance_id, method_id)
+        {
+            let global_index = *ctx.globals.get(global_name).unwrap_or_else(|| {
+                solveig_base::ice!(
+                    "instance method global `{global_name}` was not registered before lowering"
+                )
+            });
+            return evidence_args
+                .iter()
+                .fold(Rc::new(IRExpr::FVar(global_index)), |method, evidence| {
+                    Rc::new(IRExpr::App(method, lower_ev(ctx, evidence)))
+                });
+        }
+
         let dict = lower_ev(ctx, ev);
         return project_dict_field(ctx, class_id, dict, field_index);
     }
@@ -664,6 +788,100 @@ fn global_method_ref<A, P>(expr: &TermExprNode<A, P>) -> Option<DefId> {
         TermExpr::TyApp(inner, _) | TermExpr::Anno(inner, _) => global_method_ref(inner),
         _ => None,
     }
+}
+
+fn primitive_instance_methods<A, P>(
+    module: &ResolvedModule<A, P>,
+    names: &Names,
+    dicts: &DictLayouts,
+) -> FxHashMap<(InstanceId, DefId), PrimitiveForwarder> {
+    let builtins = module
+        .builtin_defs
+        .iter()
+        .map(|builtin| (builtin.id, builtin))
+        .collect::<FxHashMap<_, _>>();
+    let mut forwarders = FxHashMap::default();
+
+    for instance in &module.instance_defs {
+        let layout = dicts.class(instance.head.class_id).unwrap_or_else(|| {
+            solveig_base::ice!(
+                "missing dictionary layout for instance head {:?}",
+                instance.head.class_id
+            )
+        });
+        for method_layout in &layout.methods {
+            let method = instance_method(instance, method_layout);
+            if let Some(forwarder) = primitive_forwarder(&method.body, names, &builtins) {
+                forwarders.insert((instance.id, method_layout.id), forwarder);
+            }
+        }
+    }
+
+    forwarders
+}
+
+fn primitive_forwarder<A, P>(
+    body: &TermExprNode<A, P>,
+    names: &Names,
+    builtins: &FxHashMap<DefId, &BuiltinDefinition>,
+) -> Option<PrimitiveForwarder> {
+    let mut body = strip_term_wrappers(body);
+    while let TermExpr::TyAbs(_, _, inner) = &body.node {
+        body = strip_term_wrappers(inner);
+    }
+
+    let mut params = Vec::new();
+    while let TermExpr::Abs(param, _, inner) = &body.node {
+        params.push(param.as_str());
+        body = strip_term_wrappers(inner);
+    }
+
+    let (callee, args) = application_spine(body);
+    let TermExpr::Var(VarRef::Global(callee_id)) = &strip_term_wrappers(callee).node else {
+        return None;
+    };
+    let builtin = builtins.get(callee_id)?;
+    if params.len() != builtin.arity || args.len() != builtin.arity {
+        return None;
+    }
+
+    for (param, arg) in params.iter().zip(args) {
+        let TermExpr::Var(VarRef::Local(symbol)) = &strip_term_wrappers(arg).node else {
+            return None;
+        };
+        if names.symbol_display_name(*symbol) != *param {
+            return None;
+        }
+    }
+
+    Some(PrimitiveForwarder {
+        builtin: builtin.builtin,
+        arity: builtin.arity,
+    })
+}
+
+fn strip_term_wrappers<A, P>(mut expr: &TermExprNode<A, P>) -> &TermExprNode<A, P> {
+    while let TermExpr::TyApp(inner, _) | TermExpr::Anno(inner, _) = &expr.node {
+        expr = inner;
+    }
+    expr
+}
+
+fn instance_method<'a, A, P>(
+    instance: &'a InstanceDefinition<A, P>,
+    layout: &DictMethodLayout,
+) -> &'a InstanceMethodDef<A, P> {
+    instance
+        .methods
+        .iter()
+        .find(|method| method.name == layout.name || method.name == layout.short_name)
+        .unwrap_or_else(|| {
+            solveig_base::ice!(
+                "instance {:?} missing implementation for class method {}",
+                instance.id,
+                layout.name
+            )
+        })
 }
 
 fn project_dict_field(
@@ -771,14 +989,10 @@ fn lower_pattern<A>(ctx: &LowerCtx, pattern: &PatternNode<A>) -> LowerPattern {
     }
 }
 
-fn lower_instance_dict_global<A: Clone, P: Clone, S>(
+fn lower_instance_dict_global<A, P>(
     ctx: &mut LowerCtx,
     inst: &InstanceDefinition<A, P>,
-    source_span: &S,
-) -> IRGlobalDef
-where
-    S: Fn(&A) -> Option<FileSpan>,
-{
+) -> IRGlobalDef {
     let layout = ctx
         .dicts
         .class(inst.head.class_id)
@@ -814,21 +1028,22 @@ where
     }
 
     for method_layout in &layout.methods {
-        let impl_method = inst
-            .methods
-            .iter()
-            .find(|method| {
-                method.name == method_layout.name || method.name == method_layout.short_name
-            })
+        let global_name = ctx
+            .dicts
+            .instance_method_global(inst.id, method_layout.id)
             .unwrap_or_else(|| {
                 solveig_base::ice!(
-                    "instance {:?} missing implementation for class method {}",
+                    "missing direct method global for instance {:?}, method {:?}",
                     inst.id,
-                    method_layout.name
+                    method_layout.id
                 )
             });
-
-        let mut field = lower_expr(ctx, &impl_method.body, source_span);
+        let global_index = *ctx.globals.get(global_name).unwrap_or_else(|| {
+            solveig_base::ice!(
+                "instance method global `{global_name}` was not registered before lowering"
+            )
+        });
+        let mut field = Rc::new(IRExpr::FVar(global_index));
         for evvar in &inst.context_evidence {
             field = Rc::new(IRExpr::App(field, ctx.resolve_ev_var(*evvar)));
         }
@@ -848,6 +1063,33 @@ where
     IRGlobalDef {
         name: instance_global_name(inst.id),
         body,
+    }
+}
+
+fn lower_instance_method_global<A: Clone, P: Clone, S>(
+    ctx: &mut LowerCtx,
+    inst: &InstanceDefinition<A, P>,
+    method_layout: &DictMethodLayout,
+    source_span: &S,
+) -> IRGlobalDef
+where
+    S: Fn(&A) -> Option<FileSpan>,
+{
+    let method = instance_method(inst, method_layout);
+    let name = ctx
+        .dicts
+        .instance_method_global(inst.id, method_layout.id)
+        .unwrap_or_else(|| {
+            solveig_base::ice!(
+                "missing direct method global for instance {:?}, method {:?}",
+                inst.id,
+                method_layout.id
+            )
+        })
+        .to_string();
+    IRGlobalDef {
+        name,
+        body: lower_expr(ctx, &method.body, source_span),
     }
 }
 
@@ -917,6 +1159,7 @@ where
     let constructors = build_constructor_table(module, names);
     let (next_ctor_id, next_tag) = next_synthetic_constructor_base(&constructors);
     let dicts = DictLayouts::build(module, next_ctor_id, next_tag);
+    let primitive_instance_methods = primitive_instance_methods(module, names, &dicts);
 
     let mut globals: FxHashMap<String, usize> = FxHashMap::default();
     for (index, func_def) in module.func_defs.iter().enumerate() {
@@ -929,6 +1172,30 @@ where
     for (offset, inst) in module.instance_defs.iter().enumerate() {
         globals.insert(instance_global_name(inst.id), instance_offset + offset);
     }
+    let mut next_global = instance_offset + module.instance_defs.len();
+    for inst in &module.instance_defs {
+        let layout = dicts.class(inst.head.class_id).unwrap_or_else(|| {
+            solveig_base::ice!(
+                "missing dictionary layout for instance head {:?}",
+                inst.head.class_id
+            )
+        });
+        for method in &layout.methods {
+            let name = dicts
+                .instance_method_global(inst.id, method.id)
+                .unwrap_or_else(|| {
+                    solveig_base::ice!(
+                        "missing direct method global for instance {:?}, method {:?}",
+                        inst.id,
+                        method.id
+                    )
+                });
+            globals.insert(name.to_string(), next_global);
+            next_global = next_global
+                .checked_add(1)
+                .expect("ICE: global index space exhausted by instance methods");
+        }
+    }
 
     let mut ctx = LowerCtx {
         names: names.clone(),
@@ -936,6 +1203,7 @@ where
         globals,
         constructors: constructors.clone(),
         dicts: dicts.clone(),
+        primitive_instance_methods,
         string_constants: Vec::new(),
         string_indices: FxHashMap::default(),
     };
@@ -955,10 +1223,32 @@ where
 
     ir_globals.extend(module.builtin_defs.iter().map(lower_builtin_global));
 
-    ir_globals.extend(module.instance_defs.iter().map(|inst| {
+    ir_globals.extend(
+        module
+            .instance_defs
+            .iter()
+            .map(|inst| lower_instance_dict_global(&mut ctx, inst)),
+    );
+
+    for inst in &module.instance_defs {
         let source_span = |anno: &A| source_span(inst.def_module, anno);
-        lower_instance_dict_global(&mut ctx, inst, &source_span)
-    }));
+        let layout = ctx
+            .dicts
+            .class(inst.head.class_id)
+            .unwrap_or_else(|| {
+                solveig_base::ice!(
+                    "missing dictionary layout for instance head {:?}",
+                    inst.head.class_id
+                )
+            })
+            .clone();
+        ir_globals.extend(
+            layout
+                .methods
+                .iter()
+                .map(|method| lower_instance_method_global(&mut ctx, inst, method, &source_span)),
+        );
+    }
 
     let mut constructor_arities = constructors
         .iter()
@@ -996,7 +1286,7 @@ mod tests {
     }
 
     #[test]
-    fn class_method_evidence_application_lowers_to_dictionary_projection() {
+    fn class_method_lowering_specializes_concrete_but_not_free_evidence() {
         let mut names = Names::new();
         let class_id = ClassId(0);
         let method_id = names.def_id("test.Eq.eq");
@@ -1006,7 +1296,7 @@ mod tests {
             args: Vec::new(),
         };
 
-        let module = ResolvedModule {
+        let mut module = ResolvedModule {
             data_defs: Vec::new(),
             class_defs: vec![ClassDefinition {
                 id: class_id,
@@ -1034,7 +1324,7 @@ mod tests {
                 type_module: Some(ModuleId(0)),
                 context: Vec::new(),
                 context_evidence: Vec::new(),
-                head: pred,
+                head: pred.clone(),
                 superclass_evidence: Vec::new(),
                 methods: vec![InstanceMethodDef {
                     name: "eq".to_string(),
@@ -1063,31 +1353,40 @@ mod tests {
         let expected_source = FileSpan::new(FileId(3), Span::new(20, 24));
         let ir = lower_module(&module, &names, |_, _| Some(expected_source));
 
-        assert_eq!(ir.globals.len(), 2);
-        let dict_tag = ir
-            .constructor_arities
-            .iter()
-            .find(|info| info.name == "$dict.test.Eq.Mk")
-            .expect("dictionary constructor should be registered")
-            .tag;
+        assert_eq!(ir.globals.len(), 3);
+        assert_eq!(ir.globals[2].name, "$dict.instance.0.method.0");
 
         let IRExpr::Located(source, body) = ir.globals[0].body.as_ref() else {
             solveig_base::ice!("expected source-located lowered expression")
         };
         assert_eq!(*source, expected_source);
 
-        match body.as_ref() {
-            IRExpr::Case { scrutinee, arms } => {
-                assert!(matches!(scrutinee.as_ref(), IRExpr::FVar(1)));
-                assert_eq!(arms.len(), 1);
-                assert!(matches!(
-                    &arms[0].pattern,
-                    LowerPattern::Con(tag, fields)
-                        if *tag == dict_tag && matches!(fields.as_slice(), [LowerPattern::Var])
-                ));
-                assert!(matches!(arms[0].body.as_ref(), IRExpr::BVar(0)));
-            }
-            other => solveig_base::ice!("expected dictionary projection case, got {other:?}"),
+        assert!(matches!(body.as_ref(), IRExpr::FVar(2)));
+
+        let evvar = EvVarId(0);
+        module.func_defs[0].body = node(TermExpr::EvAbs(
+            evvar,
+            pred,
+            Box::new(node(TermExpr::EvApp(
+                Box::new(node(TermExpr::Var(VarRef::Global(method_id)))),
+                Ev::Var(evvar),
+            ))),
+        ));
+        let generic_ir = lower_module(&module, &names, |_, _| Some(expected_source));
+        let generic_body = strip_ir_locations(&generic_ir.globals[0].body);
+        let IRExpr::Abs(body) = generic_body else {
+            solveig_base::ice!("expected generic evidence abstraction")
+        };
+        let IRExpr::Case { scrutinee, .. } = strip_ir_locations(body) else {
+            solveig_base::ice!("expected free evidence to retain dictionary projection")
+        };
+        assert!(matches!(strip_ir_locations(scrutinee), IRExpr::BVar(0)));
+    }
+
+    fn strip_ir_locations(mut expr: &Rc<IRExpr>) -> &IRExpr {
+        while let IRExpr::Located(_, inner) = expr.as_ref() {
+            expr = inner;
         }
+        expr.as_ref()
     }
 }
