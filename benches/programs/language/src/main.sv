@@ -63,6 +63,14 @@ addBy amount = fun value => value + amount
 closureMain : Int
 closureMain = applyMany (addBy 7) 200000 1
 
+applyStaticMany : Int -> Int -> Int
+applyStaticMany remaining value =
+    if remaining == 0 then value
+    else applyStaticMany (remaining - 1) ((fun item => item + 1) value)
+
+staticClosureMain : Int
+staticClosureMain = applyStaticMany 200000 1
+
 data Tree = Leaf Int | Branch Tree Tree
 
 sharedTree : Int -> Tree

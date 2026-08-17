@@ -27,6 +27,7 @@ fn benchmark_language(c: &mut Criterion) {
         "20000100000",
     );
     benchmark_pure(c, "closures", "closureMain", "1400001");
+    benchmark_pure(c, "static_closures", "staticClosureMain", "200001");
     benchmark_pure(c, "patterns", "patternMain", "524288");
     benchmark_pure(c, "string_bytes", "stringBytesMain", "2260000");
 

@@ -585,4 +585,28 @@ mod tests {
                 if *source == body_source && matches!(inner.as_ref(), CCExpr::Local(0))
         ));
     }
+
+    #[test]
+    fn nested_zero_capture_lambda_is_a_static_function_reference() {
+        let program = IRProgram {
+            globals: vec![IRGlobalDef {
+                name: "main".to_string(),
+                body: Rc::new(IRExpr::Let(
+                    Rc::new(IRExpr::Int(1)),
+                    Rc::new(IRExpr::Abs(Rc::new(IRExpr::BVar(0)))),
+                )),
+            }],
+            constructor_arities: Vec::new(),
+            string_constants: Vec::new(),
+            string_literals: Vec::new(),
+        };
+
+        let lowered = lower_to_closure_ir(&program);
+        let CCExpr::Let(_, closure) = lowered.globals[0].body.as_ref() else {
+            panic!("fixture should retain its let binding");
+        };
+
+        assert!(matches!(closure.as_ref(), CCExpr::FunctionRef { .. }));
+        assert_eq!(lowered.functions[0].capture_count, 0);
+    }
 }

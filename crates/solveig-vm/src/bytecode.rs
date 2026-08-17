@@ -12,6 +12,7 @@ use solveig_lower::closure_ir::{CCExpr, CCFunction, CCGlobalDef, CCProgram};
 
 const NON_EXHAUSTIVE_CASE_TRAP: u16 = 1;
 
+#[repr(u8)]
 #[derive(Debug, Clone, Copy)]
 pub enum Instr {
     PushUnit,
@@ -21,6 +22,8 @@ pub enum Instr {
     PushStr(u32),
     LoadLocal(u16),
     LoadGlobal(u32),
+    /// Runtime-patched fast path for a global proven to be evaluated.
+    LoadGlobalCached(u32),
     PushCtorFn {
         tag: u16,
         arity: u16,
@@ -65,6 +68,8 @@ pub enum Instr {
     Match(u16),
     Trap(u16),
 }
+
+const _: () = assert!(std::mem::size_of::<Instr>() <= 16);
 
 #[derive(Debug, Clone)]
 pub struct MatchArm {

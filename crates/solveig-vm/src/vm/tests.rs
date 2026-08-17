@@ -908,6 +908,102 @@ fn global_thunks_resume_dependency_order() {
 }
 
 #[test]
+fn repeated_global_load_patches_its_runtime_instruction() {
+    let sum_shared = function(
+        0,
+        "sumShared",
+        2,
+        if_then_else(
+            bin(BinOp::Equal, local(1), int(0)),
+            local(0),
+            call_known(
+                0,
+                vec![
+                    bin(BinOp::Minus, local(1), int(1)),
+                    bin(BinOp::Plus, local(0), global_ref(1)),
+                ],
+            ),
+        ),
+    );
+    let program = program(
+        vec![
+            global("main", call_known(0, vec![int(4), int(0)])),
+            global("shared", int(7)),
+        ],
+        vec![sum_shared],
+        &[],
+    );
+    let bytecode = lower_to_bytecode(&program);
+    let loop_chunk = bytecode
+        .chunks
+        .iter()
+        .position(|chunk| chunk.name == "sumShared")
+        .expect("sumShared chunk should be lowered");
+    let load_pc = bytecode.chunks[loop_chunk]
+        .code
+        .iter()
+        .position(|instr| matches!(instr, Instr::LoadGlobal(1)))
+        .expect("sumShared should load the shared global");
+    let entry = bytecode
+        .global_index_by_name("main")
+        .expect("global cache fixture should contain main");
+    let mut runtime = Runtime::new(bytecode);
+
+    let (_, outcome) = evaluate_entry(&mut runtime, entry);
+
+    assert_eq!(outcome, StepOutcome::Finished(Value::Int(28)));
+    assert!(matches!(
+        runtime.instructions[loop_chunk][load_pc],
+        Instr::LoadGlobalCached(1)
+    ));
+    assert_eq!(runtime.evaluated_globals[1], Value::Int(7));
+}
+
+#[test]
+fn cached_heap_global_remains_relocatable() {
+    let touch_shared = function(
+        0,
+        "touchShared",
+        1,
+        if_then_else(
+            bin(BinOp::Equal, local(0), int(0)),
+            global_ref(1),
+            let_in(
+                global_ref(1),
+                call_known(0, vec![bin(BinOp::Minus, local(1), int(1))]),
+            ),
+        ),
+    );
+    let program = program(
+        vec![
+            global("main", call_known(0, vec![int(50)])),
+            global("shared", pack(2, 1, vec![int(42)])),
+        ],
+        vec![touch_shared],
+        &[("Box", 2, 1)],
+    );
+    let bytecode = lower_to_bytecode(&program);
+    let entry = bytecode
+        .global_index_by_name("main")
+        .expect("cached heap-global fixture should contain main");
+    let mut runtime = Runtime::new_with_collection_limits_for_test(bytecode, 1, 4);
+
+    let (_, outcome) = evaluate_entry(&mut runtime, entry);
+
+    let StepOutcome::Finished(Value::Obj(id)) = outcome else {
+        solveig_base::ice!("cached heap-global fixture did not return an object");
+    };
+    assert!(matches!(
+        runtime.heap.get(id),
+        HeapObject::Data1 {
+            tag: 2,
+            field: Value::Int(42)
+        }
+    ));
+    assert!(runtime.heap.minor_collections > 0);
+}
+
+#[test]
 fn blackhole_waiters_resume_with_the_published_value() {
     let program = program(
         vec![

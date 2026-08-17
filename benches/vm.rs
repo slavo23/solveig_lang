@@ -11,6 +11,7 @@ use solveig_vm::vm::Machine;
 
 const ARITHMETIC_ITERATIONS: i64 = 250_000;
 const ALLOCATION_ITERATIONS: i64 = 100_000;
+const GLOBAL_LOAD_ITERATIONS: i64 = 250_000;
 
 fn benchmark_vm(c: &mut Criterion) {
     let arithmetic = arithmetic_program();
@@ -26,6 +27,14 @@ fn benchmark_vm(c: &mut Criterion) {
     c.bench_function("vm/allocation_gc", |b| {
         b.iter(|| {
             let _result = black_box(Machine::exec_compiled(&allocation, "main"));
+        });
+    });
+
+    let global_load = global_load_program();
+    validate(&global_load, "1750000");
+    c.bench_function("vm/global_load", |b| {
+        b.iter(|| {
+            let _result = black_box(Machine::exec_compiled(&global_load, "main"));
         });
     });
 }
@@ -88,6 +97,51 @@ fn allocation_program() -> BytecodeProgram {
     )
 }
 
+fn global_load_program() -> BytecodeProgram {
+    let main_code = vec![
+        Instr::PushInt(GLOBAL_LOAD_ITERATIONS),
+        Instr::StoreLocal(0),
+        Instr::PushInt(0),
+        Instr::StoreLocal(1),
+        Instr::LoadLocal(0),
+        Instr::PushInt(0),
+        Instr::Binary(BinOp::Equal),
+        Instr::JumpIfFalse(10),
+        Instr::LoadLocal(1),
+        Instr::Return,
+        Instr::LoadLocal(1),
+        Instr::LoadGlobal(1),
+        Instr::Binary(BinOp::Plus),
+        Instr::StoreLocal(1),
+        Instr::LoadLocal(0),
+        Instr::PushInt(1),
+        Instr::Binary(BinOp::Minus),
+        Instr::StoreLocal(0),
+        Instr::Jump(4),
+    ];
+    let shared_code = vec![Instr::PushInt(7), Instr::Return];
+
+    BytecodeProgram {
+        chunks: vec![
+            chunk(0, "main", 2, main_code),
+            chunk(1, "shared", 0, shared_code),
+        ],
+        globals: vec![
+            CompiledGlobal {
+                name: "main".to_string(),
+                chunk: 0,
+            },
+            CompiledGlobal {
+                name: "shared".to_string(),
+                chunk: 1,
+            },
+        ],
+        constructor_arities: bool_constructors(),
+        string_constants: Vec::new(),
+        string_literals: Vec::new(),
+    }
+}
+
 fn validate(program: &BytecodeProgram, expected: &str) {
     let output = Machine::exec_compiled(program, "main")
         .map(|result| result.display().to_string())
@@ -97,17 +151,8 @@ fn validate(program: &BytecodeProgram, expected: &str) {
 }
 
 fn program(slot_count: u16, code: Vec<Instr>) -> BytecodeProgram {
-    let source_spans = vec![None; code.len()];
     BytecodeProgram {
-        chunks: vec![Chunk {
-            id: 0,
-            name: "main".to_string(),
-            kind: ChunkKind::GlobalThunk,
-            slot_count,
-            code,
-            source_spans,
-            match_tables: Vec::new(),
-        }],
+        chunks: vec![chunk(0, "main", slot_count, code)],
         globals: vec![CompiledGlobal {
             name: "main".to_string(),
             chunk: 0,
@@ -115,6 +160,19 @@ fn program(slot_count: u16, code: Vec<Instr>) -> BytecodeProgram {
         constructor_arities: bool_constructors(),
         string_constants: Vec::new(),
         string_literals: Vec::new(),
+    }
+}
+
+fn chunk(id: usize, name: &str, slot_count: u16, code: Vec<Instr>) -> Chunk {
+    let source_spans = vec![None; code.len()];
+    Chunk {
+        id,
+        name: name.to_string(),
+        kind: ChunkKind::GlobalThunk,
+        slot_count,
+        code,
+        source_spans,
+        match_tables: Vec::new(),
     }
 }
 

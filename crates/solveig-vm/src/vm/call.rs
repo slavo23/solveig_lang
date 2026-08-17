@@ -661,8 +661,8 @@ impl Interpreter<'_> {
     }
 
     /// The sole mutable publication site in the I4 write-barrier inventory.
-    /// Globals are scanned as roots on every minor collection, so publication
-    /// needs no remembered-set insertion while remaining collector-visible.
+    /// Both global stores are scanned as roots on every minor collection, so
+    /// publication needs no remembered-set insertion while remaining visible.
     fn publish_global(&mut self, global_index: usize, result: Value) {
         let Some(global_slot) = self.globals.get_mut(global_index) else {
             solveig_base::ice!("global publish index {global_index} out of bounds");
@@ -679,6 +679,10 @@ impl Interpreter<'_> {
             }
         };
         *global_slot = GlobalSlot::Evaluated(result);
+        let Some(cached_value) = self.evaluated_globals.get_mut(global_index) else {
+            solveig_base::ice!("global value cache index {global_index} out of bounds");
+        };
+        *cached_value = result;
 
         let global_index = GlobalIndex(global_index);
         for waiter_id in waiters {

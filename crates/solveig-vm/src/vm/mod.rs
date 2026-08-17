@@ -1,7 +1,7 @@
 //! Stack virtual machine state and execution entry points.
 //! Child modules own call handling, dispatch, garbage collection, and IO actions.
 
-use crate::bytecode::{BytecodeProgram, lower_to_bytecode};
+use crate::bytecode::{BytecodeProgram, Instr, lower_to_bytecode};
 use crate::display::DisplayValue;
 use crate::heap::{ChanId, Heap, HeapObject};
 use crate::random::RandomSeeder;
@@ -80,8 +80,10 @@ pub struct ProcessFrame {
 /// Shared state that outlives every individual interpreter step.
 pub struct Runtime {
     program: BytecodeProgram,
+    instructions: Vec<Vec<Instr>>,
     heap: Heap,
     globals: Vec<GlobalSlot>,
+    evaluated_globals: Vec<Value>,
     nullary_ctors: NullaryCtorCache,
     bools: BoolCache,
     processes: Arena<Process>,
@@ -212,8 +214,10 @@ pub enum StepOutcome {
 pub(crate) struct Interpreter<'a> {
     pub(crate) process: &'a mut Process,
     pub(crate) program: &'a BytecodeProgram,
+    instructions: &'a mut [Vec<Instr>],
     pub(crate) heap: &'a mut Heap,
     globals: &'a mut Vec<GlobalSlot>,
+    evaluated_globals: &'a mut [Value],
     pub(crate) nullary_ctors: &'a mut NullaryCtorCache,
     pub(crate) bools: &'a mut BoolCache,
     inactive_processes: &'a mut Arena<Process>,
@@ -393,10 +397,27 @@ impl Runtime {
                 chunk: global.chunk,
             })
             .collect();
+        let instructions = program
+            .chunks
+            .iter()
+            .map(|chunk| {
+                chunk
+                    .code
+                    .iter()
+                    .map(|instr| match *instr {
+                        Instr::LoadGlobalCached(index) => Instr::LoadGlobal(index),
+                        instr => instr,
+                    })
+                    .collect()
+            })
+            .collect();
+        let evaluated_globals = vec![Value::Unit; program.globals.len()];
         let mut runtime = Self {
             program,
+            instructions,
             heap,
             globals,
+            evaluated_globals,
             nullary_ctors: NullaryCtorCache::new(max_tag),
             bools: BoolCache {
                 true_val: Value::Unit,
@@ -526,8 +547,10 @@ impl<'a> Interpreter<'a> {
     fn new(runtime: &'a mut Runtime, process: &'a mut Process) -> Self {
         let Runtime {
             program,
+            instructions,
             heap,
             globals,
+            evaluated_globals,
             nullary_ctors,
             bools,
             processes,
@@ -543,8 +566,10 @@ impl<'a> Interpreter<'a> {
         Self {
             process,
             program,
+            instructions,
             heap,
             globals,
+            evaluated_globals,
             nullary_ctors,
             bools,
             inactive_processes: processes,

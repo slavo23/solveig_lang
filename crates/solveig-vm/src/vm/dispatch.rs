@@ -167,14 +167,17 @@ impl Interpreter<'_> {
     }
 
     pub(super) fn dispatch(&mut self, program: &BytecodeProgram) -> Result<Value, StepOutcome> {
-        let mut code = &program.chunk(self.chunk).code;
+        let (mut code, mut code_len) = self.instruction_window();
         loop {
             if let Some(error) = self.resource_defect() {
                 return Err(error.into());
             }
+            debug_assert!(self.pc < code_len, "bytecode PC escaped its chunk");
             // SAFETY: The bytecode emitter and jump patching only produce PCs
-            // inside the current chunk; any violation is an internal bytecode ICE.
-            let instr = unsafe { *code.get_unchecked(self.pc) };
+            // inside the current chunk; the debug assertion checks this invariant.
+            let instruction = unsafe { code.add(self.pc) };
+            // SAFETY: `instruction` was derived from the in-bounds PC above.
+            let instr = unsafe { *instruction };
             self.pc += 1;
 
             match instr {
@@ -201,7 +204,10 @@ impl Interpreter<'_> {
                     self.store(slot, val);
                 }
                 Instr::LoadGlobal(index) => {
+                    let cached_index = index;
                     let index = index as usize;
+                    let load_chunk = self.chunk;
+                    let load_pc = self.pc - 1;
                     let continuation = Continuation::PublishGlobalThenResume {
                         global_index: index,
                         chunk: self.chunk,
@@ -209,11 +215,35 @@ impl Interpreter<'_> {
                         frame_base: self.frame_base,
                     };
                     match self.start_global_eval(program, index, continuation)? {
-                        GlobalEval::Evaluated(value) => self.push(value),
+                        GlobalEval::Evaluated(value) => {
+                            let Some(instr) = self
+                                .instructions
+                                .get_mut(load_chunk)
+                                .and_then(|code| code.get_mut(load_pc))
+                            else {
+                                solveig_base::ice!(
+                                    "global load cache site {load_chunk}:{load_pc} disappeared"
+                                );
+                            };
+                            *instr = Instr::LoadGlobalCached(cached_index);
+                            self.push(value);
+                        }
                         GlobalEval::Entered => {}
                         GlobalEval::Blocked => return Err(StepOutcome::Blocked),
                     }
-                    code = &program.chunk(self.chunk).code;
+                    (code, code_len) = self.instruction_window();
+                }
+                Instr::LoadGlobalCached(index) => {
+                    let index = index as usize;
+                    debug_assert!(matches!(
+                        self.globals.get(index),
+                        Some(GlobalSlot::Evaluated(_))
+                    ));
+                    debug_assert!(index < self.evaluated_globals.len());
+                    // SAFETY: Cached loads are installed only after successful
+                    // publication, which initializes this dense cache slot.
+                    let value = unsafe { *self.evaluated_globals.get_unchecked(index) };
+                    self.push(value);
                 }
                 Instr::PushCtorFn { tag, arity } => {
                     if arity == 0 {
@@ -308,7 +338,7 @@ impl Interpreter<'_> {
                         self.push(val);
                     }
 
-                    code = &program.chunk(self.chunk).code;
+                    (code, code_len) = self.instruction_window();
                 }
 
                 Instr::CallKnown { chunk, arg_count } => {
@@ -322,7 +352,7 @@ impl Interpreter<'_> {
                         self.push(val);
                     }
 
-                    code = &program.chunk(self.chunk).code;
+                    (code, code_len) = self.instruction_window();
                 }
                 Instr::TailCallN { arg_count } => {
                     self.safe_point();
@@ -335,7 +365,7 @@ impl Interpreter<'_> {
                         return Ok(done);
                     }
 
-                    code = &program.chunk(self.chunk).code;
+                    (code, code_len) = self.instruction_window();
                 }
                 Instr::TailCallKnown { chunk, arg_count } => {
                     self.safe_point();
@@ -349,7 +379,7 @@ impl Interpreter<'_> {
                         return Ok(done);
                     }
 
-                    code = &program.chunk(self.chunk).code;
+                    (code, code_len) = self.instruction_window();
                 }
                 Instr::Return => {
                     let result = self.pop();
@@ -358,7 +388,7 @@ impl Interpreter<'_> {
                         return Ok(done);
                     }
 
-                    code = &program.chunk(self.chunk).code;
+                    (code, code_len) = self.instruction_window();
                 }
                 Instr::Jump(target) => {
                     if (target as usize) < self.pc {
@@ -391,6 +421,14 @@ impl Interpreter<'_> {
                 return Err(StepOutcome::Yielded);
             }
         }
+    }
+
+    #[inline(always)]
+    fn instruction_window(&self) -> (*const Instr, usize) {
+        let Some(code) = self.instructions.get(self.chunk) else {
+            solveig_base::ice!("bytecode chunk {} disappeared at runtime", self.chunk);
+        };
+        (code.as_ptr(), code.len())
     }
 
     pub(super) fn resource_defect(&mut self) -> Option<RuntimeError> {

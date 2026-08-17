@@ -23,6 +23,8 @@ pub enum Value {
     Obj(ObjId),
 }
 
+const _: () = assert!(std::mem::size_of::<Value>() <= 16);
+
 impl PartialEq for ObjId {
     fn eq(&self, other: &Self) -> bool {
         self.0 == other.0

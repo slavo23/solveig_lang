@@ -45,6 +45,7 @@ result teardown; it is not presented as instruction dispatch in isolation.
 |---|---|
 | `vm/arithmetic_dispatch` | 250,000 integer loop iterations over loads, equality, addition, subtraction, branches, and backward-jump safe points |
 | `vm/allocation_gc` | Builds a rooted 100,000-object linked structure, crossing nursery collections |
+| `vm/global_load` | Reads one already-forced global from the same bytecode site during 250,000 integer loop iterations; this is O4's global inline-cache signal |
 
 The `language` harness runs a real package through `solveig-driver`. One
 `Compilation` is retained per case, so package-check caching is warm after the
@@ -60,6 +61,7 @@ synthetic interpreter-only number.
 | `language/constraint_generic` | Calls a user-defined `Num a` addition helper at `Int` for 200,000 iterations; this is the primary O3 residual-dictionary signal |
 | `language/constraint_concrete` | Runs the equivalent loop through a monomorphic `Int` helper as O3's direct-call control |
 | `language/closures` | Applies one capturing closure through a higher-order function 200,000 times |
+| `language/static_closures` | Creates and invokes the same zero-capture lambda during 200,000 recursive iterations; this is O4's static-closure signal |
 | `language/patterns` | Traverses a shared algebraic tree eight times, performing 524,288 leaf matches plus branch matches |
 | `language/string_bytes` | Round-trips text through characters, then performs 20,000 byte slices, appends, indexes, and length queries |
 | `language/file_io` | Reads the 3,588-byte benchmark source 64 times through the IO worker path and validates non-empty results |
@@ -124,6 +126,24 @@ specialization, `language/constraint_generic` measured 53.029–54.300 ms
 generic case measured 34.880–35.042 ms (34.963 ms estimate), 34.73% less time
 and statistically indistinguishable from the unchanged control. These O2 and
 O3 runs used only their focused filters, following the policy below.
+
+O4 measured each dispatch-hygiene item separately. Adding `#[repr(u8)]` and
+the 16-byte layout guards left `vm/arithmetic_dispatch` statistically
+unchanged: 15.263–15.346 ms (15.295 ms estimate) before and 15.333–15.430 ms
+(15.376 ms estimate) after. `Value` and `Instr` are both currently 16 bytes.
+A controlled release-mode checked-fetch variant measured 15.055–15.114 ms
+(15.084 ms estimate), while the retained debug-asserted unchecked fetch
+measured 14.997–15.026 ms (15.009 ms estimate), a 0.50% point-estimate
+reduction below the benchmark's practical noise threshold.
+
+The new global call-site cache reduced `vm/global_load` from 15.984–16.184 ms
+(16.052 ms estimate) to 15.218–15.408 ms (15.323 ms estimate), 4.54% less
+time. The zero-capture static representation already existed before O4; its
+new regression workload compared a controlled allocating variant at
+35.784–35.978 ms (35.875 ms estimate) with the retained `FunctionRef` path at
+33.927–33.987 ms (33.955 ms estimate), 5.35% less time and 200,000 avoided
+closure allocations. Only these focused cases ran; the full suite remains
+reserved for the Phase O exit gate.
 
 ## Capacity and whole-program checks
 

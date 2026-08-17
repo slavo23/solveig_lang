@@ -156,6 +156,7 @@ fn format_instr(instr: &Instr) -> String {
         Instr::PushStr(index) => format!("PushStr const#{index}"),
         Instr::LoadLocal(slot) => format!("LoadLocal {slot}"),
         Instr::LoadGlobal(idx) => format!("LoadGlobal {idx}"),
+        Instr::LoadGlobalCached(idx) => format!("LoadGlobalCached {idx}"),
         Instr::PushCtorFn { tag, arity } => format!("PushCtorFn tag={tag} arity={arity}"),
         Instr::MakeClosure {
             chunk,

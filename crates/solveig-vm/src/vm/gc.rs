@@ -15,6 +15,7 @@ pub(super) struct Roots<'a> {
     active_process: Option<&'a mut Process>,
     inactive_processes: &'a mut Arena<Process>,
     globals: &'a mut [GlobalSlot],
+    evaluated_globals: &'a mut [Value],
     nullary_ctors: &'a mut NullaryCtorCache,
     bools: &'a mut BoolCache,
     channel_waiters: &'a mut FxHashMap<ChanId, ChannelWaiters>,
@@ -36,6 +37,9 @@ impl Roots<'_> {
                 | GlobalSlot::Evaluating { .. }
                 | GlobalSlot::Failed(_) => {}
             }
+        }
+        for value in &mut *self.evaluated_globals {
+            visit(value);
         }
         for value in self.nullary_ctors.tags.iter_mut().flatten() {
             visit(value);
@@ -142,6 +146,7 @@ impl Interpreter<'_> {
                 active_process: Some(self.process),
                 inactive_processes: self.inactive_processes,
                 globals: self.globals,
+                evaluated_globals: self.evaluated_globals,
                 nullary_ctors: self.nullary_ctors,
                 bools: self.bools,
                 channel_waiters: self.channel_waiters,
@@ -155,6 +160,7 @@ impl Interpreter<'_> {
             active_process: Some(self.process),
             inactive_processes: self.inactive_processes,
             globals: self.globals,
+            evaluated_globals: self.evaluated_globals,
             nullary_ctors: self.nullary_ctors,
             bools: self.bools,
             channel_waiters: self.channel_waiters,
@@ -183,6 +189,7 @@ impl Runtime {
                     active_process: None,
                     inactive_processes: &mut self.processes,
                     globals: &mut self.globals,
+                    evaluated_globals: &mut self.evaluated_globals,
                     nullary_ctors: &mut self.nullary_ctors,
                     bools: &mut self.bools,
                     channel_waiters: &mut self.channel_waiters,
@@ -209,6 +216,7 @@ impl Runtime {
                 active_process: None,
                 inactive_processes: &mut self.processes,
                 globals: &mut self.globals,
+                evaluated_globals: &mut self.evaluated_globals,
                 nullary_ctors: &mut self.nullary_ctors,
                 bools: &mut self.bools,
                 channel_waiters: &mut self.channel_waiters,
@@ -223,6 +231,7 @@ impl Runtime {
             active_process: None,
             inactive_processes: &mut self.processes,
             globals: &mut self.globals,
+            evaluated_globals: &mut self.evaluated_globals,
             nullary_ctors: &mut self.nullary_ctors,
             bools: &mut self.bools,
             channel_waiters: &mut self.channel_waiters,
