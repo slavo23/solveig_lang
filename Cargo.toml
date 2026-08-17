@@ -14,12 +14,23 @@ tracing = "0.1"
 tracing-subscriber = "0.3"
 
 [dev-dependencies]
+criterion = "0.7"
 insta = "1"
 pretty_assertions = "1"
+solveig-ast = { path = "crates/solveig-ast", version = "0.1.0" }
 solveig-base = { path = "crates/solveig-base", version = "0.1.0" }
 solveig-ide = { path = "crates/solveig-ide", version = "0.1.0" }
 solveig-syntax = { path = "crates/solveig-syntax", version = "0.1.0" }
+solveig-vm = { path = "crates/solveig-vm", version = "0.1.0" }
 tempfile = "3"
+
+[[bench]]
+name = "language"
+harness = false
+
+[[bench]]
+name = "vm"
+harness = false
 
 [lints]
 workspace = true

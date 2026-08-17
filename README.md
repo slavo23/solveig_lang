@@ -593,6 +593,10 @@ cargo test --workspace
 cargo clippy --workspace --all-targets
 ```
 
+Performance work uses the measured workloads and selective-run policy in
+[docs/benchmarks.md](docs/benchmarks.md). The complete suite is not part of the
+routine contributor check.
+
 To smoke-test the installed language server command from macOS or Linux:
 
 ```bash
@@ -608,4 +612,5 @@ SOLVEIG_BIN="$(command -v solveig)" python3 scripts/lsp_smoke.py tests/golden/di
 - [docs/io.md](docs/io.md)
 - [docs/errors.md](docs/errors.md)
 - [docs/concurrency.md](docs/concurrency.md)
+- [docs/benchmarks.md](docs/benchmarks.md)
 - [docs/diagnostics.md](docs/diagnostics.md)
