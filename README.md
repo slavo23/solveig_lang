@@ -323,8 +323,7 @@ A Solveig project has a strict `solveig.toml` manifest and source files under
 my-project/
 |-- solveig.toml
 `-- src/
-    |-- app/
-    |   `-- main.sv
+    |-- main.sv
     `-- math/
         `-- stats.sv
 ```
@@ -337,7 +336,7 @@ name = "app"
 version = "0.1.0"
 
 [language]
-entry = "app.main"
+entry = "main"
 ```
 
 Manifest keys are checked strictly, so misspellings are errors. A path
@@ -346,11 +345,16 @@ dependency uses `name = { path = "../name" }` under `[dependencies]`.
 Module names come from file paths:
 
 ```text
-src/app/main.sv      -> app.main
-src/math/stats.sv    -> math.stats
+src/main.sv          -> app.main
+src/math/stats.sv    -> app.math.stats
 ```
 
-The configured entry above exposes `app.main`, written in source as:
+The package name is always the first module segment. Within the package,
+`math.stats` is a convenient relative import; another package imports the same
+module as `app.math.stats`.
+
+The configured entry selects `src/main.sv`, loaded as `app.main` and written
+in source as:
 
 ```solveig
 main : Int
@@ -362,6 +366,9 @@ Run it with:
 ```bash
 solveig --project-root my-project
 ```
+
+See [docs/packages.md](docs/packages.md) for the full manifest reference, path
+dependencies, library search order, Prelude/std behavior, and IDE edit policy.
 
 ## Language Features
 
@@ -595,6 +602,7 @@ SOLVEIG_BIN="$(command -v solveig)" python3 scripts/lsp_smoke.py tests/golden/di
 ## More Documentation
 
 - [docs/tutorial.md](docs/tutorial.md)
+- [docs/packages.md](docs/packages.md)
 - [docs/prelude.md](docs/prelude.md)
 - [docs/standard-library.md](docs/standard-library.md)
 - [docs/io.md](docs/io.md)

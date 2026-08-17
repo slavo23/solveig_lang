@@ -26,8 +26,7 @@ under `src/`. The manifest selects the entry module.
 hello/
 |-- solveig.toml
 `-- src/
-    `-- hello/
-        `-- main.sv
+    `-- main.sv
 ```
 
 Create `hello/solveig.toml`:
@@ -38,10 +37,10 @@ name = "hello"
 version = "0.1.0"
 
 [language]
-entry = "hello.main"
+entry = "main"
 ```
 
-Create `hello/src/hello/main.sv`:
+Create `hello/src/main.sv`:
 
 ```solveig
 main : String
@@ -1240,6 +1239,8 @@ The repository includes several programs with different lessons:
 
 Then use the focused references:
 
+- [Packages](packages.md) for manifests, layout, path dependencies, compiler
+  libraries, and IDE edit policy.
 - [Prelude reference](prelude.md) for exact signatures.
 - [Standard library](standard-library.md) for module boundaries, imports, and
   exact host-facing APIs.

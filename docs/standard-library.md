@@ -5,6 +5,10 @@ Prelude, its modules are never imported automatically. This keeps application
 namespaces predictable and makes dependencies visible at the top of each
 source file.
 
+Applications do not list `std` in `[dependencies]`; the compiler loads its
+shipped package automatically. See [Packages](packages.md) for compiler-library
+discovery, package manifests, and the Prelude/std boundary.
+
 ## Module map
 
 | Module | Purpose |

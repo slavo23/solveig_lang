@@ -5,6 +5,8 @@ ordinary module. It is intentionally limited to names that almost every
 program can reasonably want in scope. Domain APIs—files, processes, channels,
 networking, clocks, randomness, and extended list operations—live in explicit
 `std.*` modules documented in [standard-library.md](standard-library.md).
+Package layout, compiler-library discovery, and the IDE's dependency edit
+policy are documented in [Packages](packages.md).
 
 Every ordinary module implicitly imports:
 
