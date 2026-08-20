@@ -1,7 +1,8 @@
 import std.map
-import std.list
+import std.list(take, drop, range, rangeInclusive, length, isEmpty)
 import std.queue
 import std.set
+import std.text(lines, splitOnce)
 import std.vector
 
 vectorExample : std.vector.Vector Int
@@ -68,3 +69,9 @@ main = do
     printLine (show (std.list.range 5 2))
     printLine (show (std.list.range minimumInt (minimumInt + 1)))
     printLine (show (std.list.rangeInclusive minimumInt minimumInt))
+    printLine (show (std.list.length [10, 20, 30]))
+    printLine (show (std.list.isEmpty (std.list.take 0 [1])))
+    printLine (show (std.list.isEmpty [1]))
+    printLine (show (std.text.lines "alpha\n\nbeta\n"))
+    printLine (show (std.text.splitOnce ':' "key:value:rest"))
+    printLine (show (std.text.splitOnce ':' "missing"))

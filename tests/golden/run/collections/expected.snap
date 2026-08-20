@@ -25,3 +25,9 @@ Just "two"
 []
 [-9223372036854775808]
 [-9223372036854775808]
+3
+True
+False
+["alpha", "", "beta"]
+Just ("key", "value:rest")
+Nothing

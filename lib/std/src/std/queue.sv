@@ -48,11 +48,7 @@ dequeue queue =
 
 -- | Builds a queue in linear time.
 fromList : forall a. [a] -> Queue a
-fromList values = MkQueue (listLength values) values []
-
-listLength : forall a. [a] -> Int
-listLength [] = 0
-listLength (_ :: rest) = 1 + listLength rest
+fromList values = foldl enqueue empty values
 
 -- | Returns elements from front to back in linear time.
 toList : forall a. Queue a -> [a]

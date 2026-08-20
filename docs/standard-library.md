@@ -13,12 +13,12 @@ discovery, package manifests, and the Prelude/std boundary.
 
 | Module | Purpose |
 |---|---|
-| `std.list` | Extended list slicing, zipping, reversal, and ranges |
+| `std.list` | List sizing, slicing, zipping, reversal, and ranges |
 | `std.vector` | Persistent indexed sequences with logarithmic updates |
 | `std.map` | Persistent ordered key-value maps |
 | `std.set` | Persistent ordered sets |
 | `std.queue` | Persistent FIFO queues |
-| `std.text` | Text/character conversion and integer rendering |
+| `std.text` | Text sizing, line/split operations, character conversion, and integer rendering |
 | `std.bytes` | UTF-8 conversion and immutable byte operations |
 | `std.parser` | Generic parser combinators with structured errors and streaming input |
 | `std.json` | Bounded byte-level JSON, exact numbers, deterministic rendering, and direct decoders |
@@ -29,23 +29,28 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.process` | Child processes and structured program exit |
 | `std.channel` | Typed channel creation and communication |
 | `std.thread` | Raw lightweight-thread creation and interruption |
-| `std.task` | Cleanup, masking, and structured concurrency |
-| `std.time` | Sleeping and clock readings |
+| `std.task` | Cleanup, masking, structured concurrency, and bounded concurrent mapping |
+| `std.time` | Sleeping, clock readings, and monotonic measurement |
 | `std.random` | Explicit deterministic pseudorandom state |
 | `std.net` | TCP sockets and hostname resolution |
 
 ## Lists and text
 
 ```solveig
-import std.list(take, drop, zip, reverse, range, rangeInclusive)
-import std.text(stringToChars, charsToString, intToString)
+import std.list(length, isEmpty, take, drop, zip, reverse, range, rangeInclusive)
+import std.text(lines, splitOnce, stringToChars, charsToString, intToString)
 ```
 
-`std.list` provides `take`, `drop`, `takeWhile`, `dropWhile`, `zip`,
-`zipWith`, `reverse`, half-open integer `range`, and explicit
-`rangeInclusive`. These are
-separate from the universally imported traversal operations such as `map` and
-`foldl`. `take` treats a non-positive count as empty; `drop` treats it as zero.
+`std.list` provides `length`, `isEmpty`, `take`, `drop`, `takeWhile`,
+`dropWhile`, `zip`, `zipWith`, `reverse`, half-open integer `range`, and
+explicit `rangeInclusive`. These are separate from the universally imported
+traversal operations such as `map` and `foldl`. `take` treats a non-positive
+count as empty; `drop` treats it as zero.
+
+`std.text.length` counts Unicode scalar values and `isEmpty` avoids needless
+conversion. `lines` removes newline separators, preserves interior empty
+lines, and does not invent an empty line after a trailing newline. `splitOnce`
+returns the text before and after the first requested character.
 
 ## Persistent collections
 
@@ -309,7 +314,13 @@ withThread : IO e a -> (ThreadId -> IO e b) -> IO e b
 concurrently : IO e a -> IO e b -> IO e (Pair a b)
 race : IO e a -> IO e b -> IO e (Either a b)
 timeout : Int -> IO e a -> IO e (Maybe a)
+mapConcurrentlyBounded : Int -> (a -> Task b) -> [a] -> Task [b]
 ```
+
+`mapConcurrentlyBounded` scopes and joins its worker group, caps in-flight
+operations, and returns results in input order even when completion order
+differs. Use it for independent `Task` operations; keep sequential `mapM` for
+small CPU-only transformations where scheduling would add overhead.
 
 ## Time and randomness
 
@@ -319,7 +330,8 @@ import std.random
 ```
 
 `sleep` and `timeout` use milliseconds. `getMonotonicTime` and
-`getSystemTime` return nanoseconds. Use monotonic differences for durations.
+`getSystemTime` return nanoseconds. `measure task` returns `Pair elapsedNanos
+value`, using the monotonic clock around the complete task.
 
 Random draws use explicit immutable `StdGen` state. `mkStdGen` is reproducible;
 `newStdGen` obtains a runtime-local clock seed. `randomInt` returns
@@ -365,7 +377,9 @@ list of bounded pieces is convenient, or `foldBodyChunks` to process those
 pieces without allocating that list.
 
 Header constructors reject invalid names and newline injection. Header lookup
-is ASCII case-insensitive. `examples/release_radar` demonstrates concurrent
-requests, JSON decoding, stable result ordering, ETag request headers, and a
-single overwritten cache file. See [HTTP and HTTPS](http.md) for policies and
+is ASCII case-insensitive. `examples/release_radar` demonstrates bounded
+concurrent mapping, JSON decoding, stable result ordering, ETag request headers,
+and a single overwritten cache file. Its default local mode measures the same
+delayed workload sequentially and concurrently and fails if concurrency does
+not improve elapsed time. See [HTTP and HTTPS](http.md) for policies and
 complete examples.

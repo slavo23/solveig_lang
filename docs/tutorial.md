@@ -1230,6 +1230,13 @@ For concurrency:
 6. Use `SOLVEIG_SCHED_DETERMINISTIC=1` for timer and scheduler tests.
 7. Run runtime-sensitive programs under `SOLVEIG_GC_STRESS=1`.
 
+For independent `Task` operations, prefer
+`std.task.mapConcurrentlyBounded workerCount operation values`. It owns a
+scoped worker group, caps in-flight work, and restores input order. Release
+Radar uses it in application code; the automated suite tests the combinator and
+HTTP transport separately with hermetic fixtures, so tests never depend on its
+live GitHub mode.
+
 Example commands:
 
 ```sh
@@ -1260,6 +1267,7 @@ shapes still matter:
   returns to the VM unless the language API deliberately owns another model.
 - Measure monotonic time around the whole operation, not individual scheduling
   steps.
+- Use `std.time.measure` when both the elapsed nanoseconds and result are needed.
 
 The runtime yields pure loops at safe points, so one recursive computation
 cannot indefinitely monopolize the VM. This is a scheduling guarantee, not a

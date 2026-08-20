@@ -284,6 +284,11 @@ bounded HTTP/1.1, chunked decoding, redirects, and platform-verified HTTPS on
 the blocking worker pool. UDP and general IPv6 selection are not implemented.
 The older concurrent downloader intentionally demonstrates raw socket
 machinery; `examples/release_radar` demonstrates the production-facing client.
+Release Radar uses `std.task.mapConcurrentlyBounded`, which scopes a fixed
+worker group and restores input order after completion. Its default loopback
+mode runs equal delayed sequential and concurrent workloads and rejects a run
+where the concurrent path is not faster; the example itself is not part of the
+automated test suite and live GitHub access is always explicit.
 
 ## Determinism and fairness guarantees
 

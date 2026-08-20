@@ -368,6 +368,9 @@ std.json.stringToken : JsonLimits -> Parser ByteInput JsonError String
 std.json.validateNumberWith : JsonLimits -> String -> Maybe JsonNumber
 std.list.drop : forall a. Int -> [a] -> [a]
 std.list.dropWhile : forall a. (a -> Bool) -> [a] -> [a]
+std.list.isEmpty : forall a. [a] -> Bool
+std.list.length : forall a. [a] -> Int
+std.list.lengthInto : forall a. [a] -> Int -> Int
 std.list.range : Int -> Int -> [Int]
 std.list.rangeDown : Int -> Int -> [Int] -> [Int]
 std.list.rangeInclusive : Int -> Int -> [Int]
@@ -519,7 +522,6 @@ std.queue.enqueue : forall a. Queue a -> a -> Queue a
 std.queue.fromList : forall a. [a] -> Queue a
 std.queue.isEmpty : forall a. Queue a -> Bool
 std.queue.length : forall a. Queue a -> Int
-std.queue.listLength : forall a. [a] -> Int
 std.queue.normalize : forall a. Queue a -> Queue a
 std.queue.peek : forall a. Queue a -> Maybe a
 std.queue.singleton : forall a. a -> Queue a
@@ -545,21 +547,36 @@ std.set.union : forall a. Ord a => Set a -> Set a -> Set a
 std.set.unionValues : forall a. Ord a => Set a -> [a] -> Set a
 std.task.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
 std.task.catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
+std.task.collectPooled : forall a. Chan (Pair Int (Either IOError a)) -> Int -> Map Int (Either IOError a) -> IO IOError (Map Int (Either IOError a))
 std.task.concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
+std.task.enqueuePooled : forall a. Chan (Pair Int a) -> [a] -> Int -> IO IOError ()
 std.task.finally : forall e a b. IO e a -> IO e b -> IO e a
+std.task.finishPooled : forall a. [Either IOError a] -> IO IOError [a]
+std.task.mapConcurrentlyBounded : forall a b. Int -> (a -> IO IOError b) -> [a] -> IO IOError [b]
 std.task.mask : forall e a. IO e a -> IO e a
+std.task.pooledWorker : forall a b. (a -> IO IOError b) -> Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> IO IOError ()
+std.task.pooledWorkerLoop : forall a b. (a -> IO IOError b) -> Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> IO IOError ()
 std.task.race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
+std.task.runPooled : forall a b. Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> [a] -> Int -> IO IOError [b]
 std.task.timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
+std.task.withPooledWorkers : forall a b result. Int -> (a -> IO IOError b) -> Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> IO IOError result -> IO IOError result
 std.task.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
 std.text.charToCodePoint : Char -> Int
 std.text.charsToString : [Char] -> String
 std.text.codePointToString : Int -> Maybe String
 std.text.intToString : Int -> String
+std.text.isEmpty : String -> Bool
+std.text.length : String -> Int
+std.text.lines : String -> [String]
+std.text.linesFrom : [Char] -> [Char] -> [String]
+std.text.splitOnce : Char -> String -> Maybe (Pair String String)
+std.text.splitOnceFrom : Char -> [Char] -> [Char] -> Maybe (Pair String String)
 std.text.stringToChars : String -> [Char]
 std.thread.killThread : ThreadId -> IO IOError ()
 std.thread.spawn : forall childError e. IO childError () -> IO e ThreadId
 std.time.getMonotonicTime : IO IOError Int
 std.time.getSystemTime : IO IOError Int
+std.time.measure : forall a. IO IOError a -> IO IOError (Pair Int a)
 std.time.sleep : Int -> IO IOError ()
 std.vector.balance : forall a. Vector a -> Vector a -> Vector a
 std.vector.buildVector : forall a. [Vector a] -> Vector a

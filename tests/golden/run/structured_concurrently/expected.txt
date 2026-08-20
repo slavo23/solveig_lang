@@ -1,3 +1,6 @@
 slow-cleaned
 failed=WorkFailed
 pair=7,ok
+pooled=[10, 20, 30, 40]
+pooled-error=ChannelClosed
+measured=True:42

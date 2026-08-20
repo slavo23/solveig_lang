@@ -79,5 +79,6 @@ For ETag caching, retain the response's `ETag` header and send it later as
 `If-None-Match`. Treat status 304 as a successful cache validation. Prefer one
 bounded, overwritten cache file or a bounded key set; do not create a new file
 on every request. `examples/release_radar` is the complete reference: its
-default mode runs a deterministic local service, while `--live` explicitly
-opts into the GitHub Releases API.
+default mode compares equal sequential and four-worker workloads against a
+deterministic delayed local service, while `--live` explicitly opts into the
+GitHub Releases API. The application is not an automated test fixture.

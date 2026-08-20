@@ -35,6 +35,27 @@ rightSuccess = do
     pause 5
     pureIO "ok"
 
+pooledWork : Int -> Task Int
+pooledWork value = do
+    sleep ((5 - value) * 5)
+    pureIO (value * 10)
+
+pooledFailure : Int -> Task Int
+pooledFailure 2 = failIO ChannelClosed
+pooledFailure value = pooledWork value
+
+reportPooledFailure : IOError -> Task ()
+reportPooledFailure ChannelClosed = printLine "pooled-error=ChannelClosed"
+reportPooledFailure _ = error "unexpected pooled error"
+
+expectPooledFailure : Task ()
+expectPooledFailure =
+    catchError
+        (bindIO
+            (mapConcurrentlyBounded 2 pooledFailure [1, 2, 3, 4])
+            (fun unexpected => error ("unexpected pooled success: " <> show unexpected)))
+        reportPooledFailure
+
 reportFailure : WorkError -> Task ()
 reportFailure WorkFailed = printLine "failed=WorkFailed"
 
@@ -52,3 +73,10 @@ main = do
     case pair of
         MkPair leftValue rightValue =>
             printLine (appendString "pair=7," rightValue)
+    pooled <- mapConcurrentlyBounded 2 pooledWork [1, 2, 3, 4]
+    printLine ("pooled=" <> show pooled)
+    expectPooledFailure
+    measured <- std.time.measure (pureIO 42)
+    case measured of
+        MkPair elapsed value =>
+            printLine ("measured=" <> show (elapsed >= 0) <> ":" <> show value)

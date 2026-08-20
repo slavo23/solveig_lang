@@ -1,5 +1,7 @@
 import prelude.prim(catchDefectIO, maskIO, finallyIO, restoreMaskIO, raiseDefectIO)
 import std.channel
+import std.list
+import std.map
 import std.time(sleep)
 import std.thread(spawn, killThread)
 
@@ -211,3 +213,85 @@ timeout milliseconds action =
             case winner of
                 Left timedOut => pureIO timedOut
                 | Right completed => pureIO completed)
+
+-- | Maps an IO operation over a list with at most the requested number of
+-- | operations running concurrently.
+-- |
+-- | Results retain input order even when operations finish out of order. The
+-- | worker group is scoped: returning, failing, or interrupting the caller
+-- | cancels and joins every worker. A non-positive or unsupported concurrency
+-- | limit raises InvalidChannelCapacity.
+mapConcurrentlyBounded : forall a b. Int -> (a -> Task b) -> [a] -> Task [b]
+mapConcurrentlyBounded concurrency transform values =
+    if concurrency < 1 then failIO (InvalidChannelCapacity concurrency)
+    else if concurrency > 4294967295 then failIO (InvalidChannelCapacity concurrency)
+    else
+        let total = std.list.length values in
+        if total == 0 then pureIO []
+        else do
+            jobs <- std.channel.newBoundedChan total
+            outcomes <- std.channel.newBoundedChan total
+            let workers = minOrd concurrency total
+            withPooledWorkers
+                workers
+                transform
+                jobs
+                outcomes
+                (runPooled jobs outcomes values total)
+
+runPooled : forall a b. Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> [a] -> Int -> Task [b]
+runPooled jobs outcomes values total = do
+    enqueuePooled jobs values 0
+    ordered <- collectPooled outcomes total std.map.empty
+    std.channel.closeChan outcomes
+    finishPooled (std.map.values ordered)
+
+withPooledWorkers : forall a b result. Int -> (a -> Task b) -> Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> Task result -> Task result
+withPooledWorkers count transform jobs outcomes body =
+    if count == 0 then body
+    else
+        withThread
+            (pooledWorker transform jobs outcomes)
+            (fun worker => withPooledWorkers (count - 1) transform jobs outcomes body)
+
+pooledWorker : forall a b. (a -> Task b) -> Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> Task ()
+pooledWorker transform jobs outcomes =
+    catchError
+        (pooledWorkerLoop transform jobs outcomes)
+        (fun channelClosed => pureIO ())
+
+pooledWorkerLoop : forall a b. (a -> Task b) -> Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> Task ()
+pooledWorkerLoop transform jobs outcomes = do
+    job <- std.channel.recv jobs
+    case job of
+        MkPair index value => do
+            outcome <- catchError
+                (fmap Right (transform value))
+                (fun operationError => pureIO (Left operationError))
+            std.channel.send outcomes (MkPair index outcome)
+            pooledWorkerLoop transform jobs outcomes
+
+enqueuePooled : forall a. Chan (Pair Int a) -> [a] -> Int -> Task ()
+enqueuePooled jobs [] _ = std.channel.closeChan jobs
+enqueuePooled jobs (value :: rest) index = do
+    std.channel.send jobs (MkPair index value)
+    enqueuePooled jobs rest (index + 1)
+
+collectPooled : forall a. Chan (Pair Int (Either IOError a)) -> Int -> std.map.Map Int (Either IOError a) -> Task (std.map.Map Int (Either IOError a))
+collectPooled outcomes remaining ordered =
+    if remaining == 0 then pureIO ordered
+    else do
+        indexed <- std.channel.recv outcomes
+        case indexed of
+            MkPair index outcome =>
+                collectPooled
+                    outcomes
+                    (remaining - 1)
+                    (std.map.insert index outcome ordered)
+
+finishPooled : forall a. [Either IOError a] -> Task [a]
+finishPooled [] = pureIO []
+finishPooled (Left operationError :: _) = failIO operationError
+finishPooled (Right value :: rest) = do
+    values <- finishPooled rest
+    pureIO (value :: values)

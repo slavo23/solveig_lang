@@ -58,6 +58,19 @@ rangeInclusive start end =
     if start > end then []
     else rangeDown end start []
 
+-- | Returns the number of elements in a finite list.
+length : forall a. [a] -> Int
+length values = lengthInto values 0
+
+lengthInto : forall a. [a] -> Int -> Int
+lengthInto [] count = count
+lengthInto (_ :: rest) count = lengthInto rest (count + 1)
+
+-- | Reports whether a list contains no elements.
+isEmpty : forall a. [a] -> Bool
+isEmpty [] = True
+isEmpty _ = False
+
 -- | Builds an ascending range by counting down into an accumulator.
 rangeDown : Int -> Int -> [Int] -> [Int]
 rangeDown current start acc =
