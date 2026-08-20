@@ -1,4 +1,5 @@
 import prelude.prim
+import std.task(bracket)
 
 -- | Opens a TCP connection to an IP address or localhost.
 connect : String -> Int -> Task Socket
@@ -27,3 +28,19 @@ recvBytes socket maximum = prelude.prim.recvBytes socket maximum
 -- | Explicitly closes a TCP listener or connection.
 closeSocket : Socket -> Task ()
 closeSocket socket = prelude.prim.closeSocket socket
+
+-- | Opens and closes a TCP connection around a use action.
+withConnection : forall a. String -> Int -> (Socket -> Task a) -> Task a
+withConnection host port use = bracket (connect host port) closeSocket use
+
+-- | Closes the listener in a result returned by listen.
+closeListener : Pair Socket Int -> Task ()
+closeListener (MkPair listener _) = closeSocket listener
+
+-- | Binds and closes a TCP listener around a use action.
+withListener : forall a. Int -> (Pair Socket Int -> Task a) -> Task a
+withListener port use = bracket (listen port) closeListener use
+
+-- | Accepts and closes one TCP connection around a use action.
+withAcceptedConnection : forall a. Socket -> (Socket -> Task a) -> Task a
+withAcceptedConnection listener use = bracket (accept listener) closeSocket use

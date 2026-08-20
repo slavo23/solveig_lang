@@ -57,7 +57,7 @@ quicksortInt xs =
 
 sampleInput : Int -> [Int]
 sampleInput howMany =
-    reverse (range 1 howMany True)
+    reverse (rangeInclusive 1 howMany)
 
 sampleSortedQuickSort : Int -> [Int]
 sampleSortedQuickSort n =

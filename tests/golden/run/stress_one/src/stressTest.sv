@@ -24,12 +24,12 @@ benchScalar =
 
 benchRangeFold : Int;
 benchRangeFold =
-    sumList (range 1 500000 True);
+    sumList (rangeInclusive 1 500000);
 
 
 benchPipeline : Int;
 benchPipeline =
-    let xs = range 1 50000 True in
+    let xs = rangeInclusive 1 50000 in
     let ys = map (fun x => x + 3) xs in
     let zs = filter even ys in
         sumList zs;
@@ -37,7 +37,7 @@ benchPipeline =
 
 benchReverseFold : Int;
 benchReverseFold =
-    let xs = range 1 40000 True in
+    let xs = rangeInclusive 1 40000 in
     let ys = reverse xs in
         sumList ys;
 

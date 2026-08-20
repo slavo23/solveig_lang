@@ -46,16 +46,21 @@ reverseInto : forall a. [a] -> [a] -> [a]
 reverseInto [] acc = acc
 reverseInto (y :: ys) acc = reverseInto ys (y :: acc)
 
--- | Builds an ascending integer range.
-range : Int -> Int -> Bool -> [Int]
-range start end inclusive =
-    if inclusive then
-        rangeDown end start []
-    else
-        rangeDown (end - 1) start []
+-- | Builds an ascending half-open integer range.
+range : Int -> Int -> [Int]
+range start end =
+    if start >= end then []
+    else rangeDown (end - 1) start []
+
+-- | Builds an ascending inclusive integer range.
+rangeInclusive : Int -> Int -> [Int]
+rangeInclusive start end =
+    if start > end then []
+    else rangeDown end start []
 
 -- | Builds an ascending range by counting down into an accumulator.
 rangeDown : Int -> Int -> [Int] -> [Int]
 rangeDown current start acc =
     if current < start then acc
+    else if current == start then current :: acc
     else rangeDown (current - 1) start (current :: acc)

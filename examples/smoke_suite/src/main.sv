@@ -25,7 +25,7 @@ runKnapsackExample = sampleTreeDp
 
 treeFromList : Map Int Int
 treeFromList =
-    let intEntries = (map (fun iVal => Entry iVal iVal) (range 1 20000 True)) in 
+    let intEntries = (map (fun iVal => Entry iVal iVal) (rangeInclusive 1 20000)) in
         fromList intEntries
 
 {- if you want the results, just copy-paste the particular example directly into main -}

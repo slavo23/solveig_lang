@@ -31,6 +31,9 @@ queueExample =
             2)
         3
 
+minimumInt : Int
+minimumInt = (0 - 9223372036854775807) - 1
+
 printDequeued : std.queue.Queue Int -> Task ()
 printDequeued queue =
     case std.queue.dequeue queue of
@@ -60,3 +63,8 @@ main = do
     printDequeued queueExample
     printLine (show (std.list.take (0 - 1) [1, 2, 3]))
     printLine (show (std.list.drop (0 - 1) [1, 2, 3]))
+    printLine (show (std.list.range 2 5))
+    printLine (show (std.list.rangeInclusive 2 5))
+    printLine (show (std.list.range 5 2))
+    printLine (show (std.list.range minimumInt (minimumInt + 1)))
+    printLine (show (std.list.rangeInclusive minimumInt minimumInt))

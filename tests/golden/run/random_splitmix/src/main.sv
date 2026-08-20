@@ -1,6 +1,5 @@
 import std.list
 import std.random
-import std.task
 import std.text(intToString)
 
 printInts : Int -> StdGen -> Task ()
@@ -19,7 +18,8 @@ printRanges remaining generator =
         pureIO ()
     else
         case randomRange (-10) 10 generator of
-            MkPair value next => do
+            Nothing => printLine "unexpected invalid range"
+            | Just (MkPair value next) => do
                 printLine (intToString value)
                 printRanges (remaining - 1) next
 
@@ -28,21 +28,11 @@ printFresh generator =
     case randomInt generator of
         MkPair value next => printLine (intToString value)
 
-invalidRange : Task ()
-invalidRange =
-    bindIO
-        (pureIO ())
-        (fun ready =>
-            case randomRange 5 4 (mkStdGen 0) of
-                MkPair value next => printLine "unexpected valid range")
-
-reportDefect : Defect -> Task ()
-reportDefect defect =
-    case defect of
-        Error message => printLine (appendString "invalid bounds: " message)
-        | DivisionByZero => printLine "unexpected DivisionByZero"
-        | StackExhausted => printLine "unexpected StackExhausted"
-        | HeapExhausted => printLine "unexpected HeapExhausted"
+printInvalidRange : Task ()
+printInvalidRange =
+    case randomRange 5 4 (mkStdGen 0) of
+        Nothing => printLine "invalid bounds"
+        | Just _ => printLine "unexpected valid range"
 
 main : Task ()
 main = do
@@ -55,4 +45,4 @@ main = do
     second <- newStdGen
     printFresh first
     printFresh second
-    catchDefect invalidRange reportDefect
+    printInvalidRange

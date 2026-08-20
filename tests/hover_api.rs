@@ -436,7 +436,7 @@ fn hover_on_hole_inside_map_constructor_lambda_uses_hole_type() {
         result.diagnostics()
     );
 
-    let line = "    let intEntries = (map (fun iVal => Entry ?? iVal) (range 1 20000 True)) in ";
+    let line = "    let intEntries = (map (fun iVal => Entry ?? iVal) (rangeInclusive 1 20000)) in";
     let hole_start = offset_in_line(&source, line, "??");
     let hover = compilation
         .hover_info(&file, hole_start)
@@ -478,7 +478,7 @@ fn hover_on_second_map_constructor_lambda_hole_shows_fill_suggestions() {
         result.diagnostics()
     );
 
-    let line = "    let intEntries = (map (fun iVal => Entry iVal ??) (range 1 20000 True)) in ";
+    let line = "    let intEntries = (map (fun iVal => Entry iVal ??) (rangeInclusive 1 20000)) in";
     let hole_start = offset_in_line(&source, line, "??");
     let hover = compilation
         .hover_info(&file, hole_start)
@@ -682,7 +682,7 @@ fn hole_diagnostics_and_hovers_survive_incremental_recheck() {
         );
     }
 
-    let line = "    let intEntries = (map (fun iVal => Entry iVal ??) (range 1 20000 True)) in ";
+    let line = "    let intEntries = (map (fun iVal => Entry iVal ??) (rangeInclusive 1 20000)) in";
     let hole_start = offset_in_line(&source, line, "??");
     let hover = compilation
         .hover_info(&file, hole_start)

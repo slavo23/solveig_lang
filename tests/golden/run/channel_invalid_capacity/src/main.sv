@@ -1,16 +1,22 @@
-import std.task
 import std.channel
-report : Defect -> Task ()
-report (Error _) = printLine "invalid-capacity"
-report _ = printLine "unexpected-defect"
 
-invalid : Task ()
-invalid = do
-    _ <- invalidChannel
-    printLine "unexpected-success"
+report : String -> IOError -> Task ()
+report expected (InvalidChannelCapacity _) = printLine expected
+report _ _ = printLine "unexpected-error"
 
-invalidChannel : Task (Chan Int)
-invalidChannel = newBoundedChan 0
+invalidChannel : Int -> Task (Chan Int)
+invalidChannel capacity = newBoundedChan capacity
+
+checkInvalid : String -> Int -> Task ()
+checkInvalid expected capacity =
+    catchError
+        (bindIO
+            (invalidChannel capacity)
+            (fun channel => printLine "unexpected-success"))
+        (report expected)
 
 main : Task ()
-main = catchDefect invalid report
+main = do
+    checkInvalid "zero-capacity" 0
+    checkInvalid "negative-capacity" (0 - 1)
+    checkInvalid "oversized-capacity" 4294967296

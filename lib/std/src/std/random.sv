@@ -12,7 +12,9 @@ newStdGen = prelude.prim.newStdGen
 randomInt : StdGen -> Pair Int StdGen
 randomInt generator = prelude.prim.randomInt generator
 
--- | Produces an unbiased integer in the inclusive bounds and the next generator.
--- Reversed bounds raise an Error defect. This is not cryptographic.
-randomRange : Int -> Int -> StdGen -> Pair Int StdGen
-randomRange lower upper generator = prelude.prim.randomRange lower upper generator
+-- | Produces an unbiased integer in inclusive bounds when they are ordered.
+-- This is not cryptographic.
+randomRange : Int -> Int -> StdGen -> Maybe (Pair Int StdGen)
+randomRange lower upper generator =
+    if lower > upper then Nothing
+    else Just (prelude.prim.randomRange lower upper generator)

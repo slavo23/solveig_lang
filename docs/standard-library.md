@@ -34,12 +34,13 @@ discovery, package manifests, and the Prelude/std boundary.
 ## Lists and text
 
 ```solveig
-import std.list(take, drop, zip, reverse, range)
+import std.list(take, drop, zip, reverse, range, rangeInclusive)
 import std.text(stringToChars, charsToString, intToString)
 ```
 
 `std.list` provides `take`, `drop`, `takeWhile`, `dropWhile`, `zip`,
-`zipWith`, `reverse`, and inclusive-or-exclusive integer `range`. These are
+`zipWith`, `reverse`, half-open integer `range`, and explicit
+`rangeInclusive`. These are
 separate from the universally imported traversal operations such as `map` and
 `foldl`. `take` treats a non-positive count as empty; `drop` treats it as zero.
 
@@ -190,7 +191,9 @@ import std.time(sleep)
 ```
 
 `std.channel` provides `newChan`, `newBoundedChan`, `send`, `recv`, `tryRecv`,
-and `closeChan`. `std.thread` exposes raw `spawn` and `killThread`.
+and `closeChan`. An invalid bounded capacity is the typed
+`InvalidChannelCapacity capacity` error rather than a defect.
+`std.thread` exposes raw `spawn` and `killThread`.
 
 Prefer `std.task` when lifetime or results matter:
 
@@ -216,9 +219,10 @@ import std.random
 `getSystemTime` return nanoseconds. Use monotonic differences for durations.
 
 Random draws use explicit immutable `StdGen` state. `mkStdGen` is reproducible;
-`newStdGen` obtains a runtime-local clock seed. `randomInt` and inclusive
-`randomRange` return `Pair value nextGenerator`. This generator is not
-cryptographically secure.
+`newStdGen` obtains a runtime-local clock seed. `randomInt` returns
+`Pair value nextGenerator`; inclusive `randomRange` returns `Nothing` for
+reversed bounds and `Just (MkPair value nextGenerator)` otherwise. This
+generator is not cryptographically secure.
 
 ## Networking
 
@@ -228,8 +232,9 @@ import std.net
 ```
 
 `std.net` provides `connect`, `resolveHost`, `listen`, `accept`, `sendBytes`,
-`recvBytes`, and `closeSocket`. Sockets are explicit resources; close them with
-`std.task.bracket` or another cleanup scope.
+`recvBytes`, `closeSocket`, and `closeListener`. Prefer `withConnection`,
+`withListener`, and `withAcceptedConnection`; their bracketed scopes close
+owned sockets after success, typed errors, defects, or interruption.
 
 The current network layer is TCP-oriented and byte-based. HTTP, URL parsing,
 structured codecs, and streaming subprocess pipes remain future library work.

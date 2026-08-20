@@ -33,7 +33,8 @@ type `e` or succeed with a value of type `a`. The Prelude alias
 `IOError` is closed and names the operation that failed. `ReadFileError` also
 reports an invalid or exceeded limit from `readFileLimited` and
 `readFileBytesLimited`; `RunProcessError` likewise reports an invalid or
-exceeded `runProcessLimited` capture bound:
+exceeded `runProcessLimited` capture bound. `InvalidChannelCapacity` reports
+the rejected value before a bounded channel is allocated:
 
 ```solveig
 data IOError =
@@ -43,6 +44,7 @@ data IOError =
   | WriteFileError String String
   | AppendFileError String String
   | ChannelClosed
+  | InvalidChannelCapacity Int
   | InvalidUtf8 String
   | ResolveHostError String
   | ConnectError String
@@ -91,6 +93,8 @@ reportIOError ioError =
         | AppendFileError path message =>
             printLine (appendString path (appendString ": " message))
         | ChannelClosed => printLine "channel closed"
+        | InvalidChannelCapacity capacity =>
+            printLine (appendString "invalid channel capacity: " (show capacity))
         | ResolveHostError message =>
             printLine (appendString "host resolution: " message)
         | InvalidUtf8 message => printLine (appendString "invalid UTF-8: " message)

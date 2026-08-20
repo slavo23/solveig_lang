@@ -88,7 +88,7 @@ blocked forever` instead of spinning.
 
 ```solveig
 newChan : forall e a. IO e (Chan a)
-newBoundedChan : forall e a. Int -> IO e (Chan a)
+newBoundedChan : forall a. Int -> Task (Chan a)
 send : forall a. Chan a -> a -> Task ()
 recv : forall a. Chan a -> Task a
 tryRecv : forall a. Chan a -> Task (Maybe a)
@@ -101,8 +101,8 @@ queues owned by the scheduler, not stored inside the channel object.
 
 - `newChan` creates an unbounded queue.
 - `newBoundedChan capacity` requires a value from 1 through `u32::MAX`.
-  Invalid capacity raises an `Error` defect; capacity zero is not a rendezvous
-  channel.
+  Invalid capacity raises the typed `InvalidChannelCapacity capacity` error;
+  capacity zero is not a rendezvous channel.
 - `send` hands its value directly to the oldest waiting receiver, otherwise
   enqueues it. On a full bounded channel it parks the sender.
 - `recv` removes the oldest queued value. On an open empty channel it parks the
@@ -256,12 +256,22 @@ accept : Socket -> Task Socket
 sendBytes : Socket -> Bytes -> Task ()
 recvBytes : Socket -> Int -> Task Bytes
 closeSocket : Socket -> Task ()
+closeListener : Pair Socket Int -> Task ()
+withConnection : String -> Int -> (Socket -> Task a) -> Task a
+withListener : Int -> (Pair Socket Int -> Task a) -> Task a
+withAcceptedConnection : Socket -> (Socket -> Task a) -> Task a
 ```
 
 `resolveHost` performs blocking standard-library DNS on the worker pool and
 returns one IPv4 literal. `connect` accepts that literal or `localhost`; it
 does not perform DNS itself. `listen` binds IPv4 loopback, and port zero asks
 the OS to choose a free port returned as `MkPair listener actualPort`.
+
+Prefer `withConnection`, `withListener`, and `withAcceptedConnection` for
+owned sockets. They use `bracket`, so the resource closes after success, a
+typed error, a defect, or interruption. `closeListener` closes the socket in
+the `Pair` returned by `listen`; raw `closeSocket` remains available when
+ownership must cross a larger scope.
 
 `sendBytes` completes after the whole buffer is sent. `recvBytes` returns at
 most its non-negative maximum and returns empty bytes at EOF. Socket values

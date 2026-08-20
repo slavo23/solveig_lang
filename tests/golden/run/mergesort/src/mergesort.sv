@@ -58,7 +58,7 @@ sumList xs =
 
 makeInput : Int -> [Int];
 makeInput n =
-    reverse (range 1 n True)
+    reverse (rangeInclusive 1 n)
 
 benchMergesort : Int -> Int;
 benchMergesort n =

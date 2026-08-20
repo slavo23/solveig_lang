@@ -32,6 +32,7 @@ reportError : IOError -> Task ()
 reportError ioError =
     case ioError of
         ChannelClosed => printLine "race-error=ChannelClosed"
+        | InvalidChannelCapacity capacity => printLine "unexpected channel capacity error"
         | StdoutError message => printLine "unexpected stdout error"
         | StdinError message => printLine "unexpected stdin error"
         | ReadFileError path message => printLine "unexpected read error"

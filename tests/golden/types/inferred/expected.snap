@@ -196,7 +196,7 @@ std.bytes.bytesSlice : Bytes -> Int -> Int -> Bytes
 std.bytes.bytesToString : Bytes -> Result IOError String
 std.bytes.stringToBytes : String -> Bytes
 std.channel.closeChan : forall a. Chan a -> IO IOError ()
-std.channel.newBoundedChan : forall e a. Int -> IO e (Chan a)
+std.channel.newBoundedChan : forall a. Int -> IO IOError (Chan a)
 std.channel.newChan : forall e a. IO e (Chan a)
 std.channel.recv : forall a. Chan a -> IO IOError a
 std.channel.send : forall a. Chan a -> a -> IO IOError ()
@@ -240,8 +240,9 @@ std.io.writeFile : String -> String -> IO IOError ()
 std.io.writeFileBytes : String -> Bytes -> IO IOError ()
 std.list.drop : forall a. Int -> [a] -> [a]
 std.list.dropWhile : forall a. (a -> Bool) -> [a] -> [a]
-std.list.range : Int -> Int -> Bool -> [Int]
+std.list.range : Int -> Int -> [Int]
 std.list.rangeDown : Int -> Int -> [Int] -> [Int]
+std.list.rangeInclusive : Int -> Int -> [Int]
 std.list.reverse : forall a. [a] -> [a]
 std.list.reverseInto : forall a. [a] -> [a] -> [a]
 std.list.take : forall a. Int -> [a] -> [a]
@@ -271,12 +272,16 @@ std.map.toAscListInto : forall k v. Map k v -> [Entry k v] -> [Entry k v]
 std.map.values : forall k v. Map k v -> [v]
 std.map.valuesInto : forall k v. Map k v -> [v] -> [v]
 std.net.accept : Socket -> IO IOError Socket
+std.net.closeListener : Pair Socket Int -> IO IOError ()
 std.net.closeSocket : Socket -> IO IOError ()
 std.net.connect : String -> Int -> IO IOError Socket
 std.net.listen : Int -> IO IOError (Pair Socket Int)
 std.net.recvBytes : Socket -> Int -> IO IOError Bytes
 std.net.resolveHost : String -> IO IOError String
 std.net.sendBytes : Socket -> Bytes -> IO IOError ()
+std.net.withAcceptedConnection : forall a. Socket -> (Socket -> IO IOError a) -> IO IOError a
+std.net.withConnection : forall a. String -> Int -> (Socket -> IO IOError a) -> IO IOError a
+std.net.withListener : forall a. Int -> (Pair Socket Int -> IO IOError a) -> IO IOError a
 std.process.exitFailure : forall a. IO IOError a
 std.process.exitSuccess : forall a. IO IOError a
 std.process.exitWith : forall a. Int -> IO IOError a
@@ -299,7 +304,7 @@ std.queue.toList : forall a. Queue a -> [a]
 std.random.mkStdGen : Int -> StdGen
 std.random.newStdGen : IO IOError StdGen
 std.random.randomInt : StdGen -> Pair Int StdGen
-std.random.randomRange : Int -> Int -> StdGen -> Pair Int StdGen
+std.random.randomRange : Int -> Int -> StdGen -> Maybe (Pair Int StdGen)
 std.set.delete : forall a. Ord a => a -> Set a -> Set a
 std.set.difference : forall a. Ord a => Set a -> Set a -> Set a
 std.set.differenceValues : forall a. Ord a => Set a -> [a] -> Set a -> Set a

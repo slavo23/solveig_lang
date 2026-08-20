@@ -1,1 +1,3 @@
-invalid-capacity
+zero-capacity
+negative-capacity
+oversized-capacity

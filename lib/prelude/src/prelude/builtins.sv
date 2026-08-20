@@ -43,6 +43,8 @@ data IOError =
     AppendFileError String String
   | -- | A channel operation cannot continue because the channel is closed.
     ChannelClosed
+  | -- | A bounded channel capacity is outside the supported positive range.
+    InvalidChannelCapacity Int
   | -- | A byte string is not valid UTF-8 text.
     InvalidUtf8 String
   | -- | Resolving a host name to an IPv4 address failed.

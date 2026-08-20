@@ -53,7 +53,7 @@ benchClosures =
 
 benchPipeline : Int;
 benchPipeline =
-    let xs = range 1 50000 True in
+    let xs = rangeInclusive 1 50000 in
     let ys = map (fun x => (x * 3) + 1) xs in
     let zs = filter (fun x => x < 75000) ys in
         sumList zs;

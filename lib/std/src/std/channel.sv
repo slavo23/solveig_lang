@@ -1,12 +1,15 @@
-import prelude.prim
+import prelude.prim(newChan, newBoundedChan, send, recv, tryRecv, closeChan)
 
 -- | Creates an unbounded typed channel.
 newChan : forall e a. IO e (Chan a)
 newChan = prelude.prim.newChan
 
--- | Creates a typed channel with a positive capacity.
-newBoundedChan : forall e a. Int -> IO e (Chan a)
-newBoundedChan capacity = prelude.prim.newBoundedChan capacity
+-- | Creates a typed channel with a supported positive capacity.
+newBoundedChan : forall a. Int -> Task (Chan a)
+newBoundedChan capacity =
+    if capacity < 1 then failIO (InvalidChannelCapacity capacity)
+    else if capacity > 4294967295 then failIO (InvalidChannelCapacity capacity)
+    else prelude.prim.newBoundedChan capacity
 
 -- | Sends a value, blocking while a bounded channel is full.
 send : forall a. Chan a -> a -> Task ()

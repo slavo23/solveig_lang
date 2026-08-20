@@ -616,10 +616,10 @@ cross the worker pool.
 `StdGen` is an immediate opaque `Value` carrying one SplitMix64 seed. A pure
 `randomInt` transition adds the fixed golden-gamma increment, applies the
 published `mix64` permutation, and returns the signed output with the new
-generator in a Prelude `Pair`. `randomRange` maps that word into inclusive
-bounds using multiply-high rejection sampling rather than biased modulo. It
-may advance through more than one word and raises an `Error` defect before a
-draw when its lower bound exceeds its upper bound.
+generator in a Prelude `Pair`. The public `std.random.randomRange` returns
+`Nothing` for reversed bounds before its primitive maps a word into inclusive
+bounds using multiply-high rejection sampling rather than biased modulo. A
+valid draw may advance through more than one word.
 
 `newStdGen` is an inert nullary IO action. `Runtime` owns one `RandomSeeder`,
 initialized from its `TimerClock` system reading, and performing the action
@@ -632,11 +632,11 @@ prediction.
 ## Typed channels
 
 `Chan a` is a compiler-known abstract type whose values point to mutable
-`Chan` heap objects. `newChan` creates an unbounded queue;
-`newBoundedChan` requires a capacity from 1 through `u32::MAX`, raising an
-`Error` defect for an invalid capacity. The constructors quantify their typed
-error parameter so they compose contextually with any `IO e`, following the
-same rule as `pureIO` and the successful parent side of `spawn`.
+`Chan` heap objects. `newChan` creates an unbounded queue and quantifies its
+typed error parameter so it composes contextually with any `IO e`. The public
+`std.channel.newBoundedChan` requires a capacity from 1 through `u32::MAX` and
+raises `InvalidChannelCapacity capacity` as a typed `IOError` before creating
+the primitive action.
 
 `send` hands a value directly to the oldest waiting receiver, appends it to the
 FIFO queue when capacity permits, or parks the sender when a bounded queue is

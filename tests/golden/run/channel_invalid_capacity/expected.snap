@@ -2,4 +2,6 @@
 source: tests/snapshot_support.rs
 expression: actual
 ---
-invalid-capacity
+zero-capacity
+negative-capacity
+oversized-capacity

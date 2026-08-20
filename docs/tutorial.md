@@ -245,8 +245,12 @@ The Prelude includes the ubiquitous traversal operations `map`, `filter`,
 `foldl`, `foldr`, `append`, and `concat`. Extended operations are explicit:
 
 ```solveig
-import std.list(take, drop, takeWhile, dropWhile, zip, zipWith, reverse, range)
+import std.list(take, drop, takeWhile, dropWhile, zip, zipWith, reverse, range, rangeInclusive)
 ```
+
+`range start end` is half-open and excludes `end`; `rangeInclusive start end`
+includes it. Both return `[]` when the bounds descend, so the behavior is named
+rather than selected by a Boolean flag.
 
 A practical calculation is often a short pipeline:
 
@@ -829,7 +833,7 @@ Channels are mutable FIFO queues with a type for their messages:
 
 ```solveig
 newChan : IO e (Chan a)
-newBoundedChan : Int -> IO e (Chan a)
+newBoundedChan : Int -> Task (Chan a)
 send : Chan a -> a -> Task ()
 recv : Chan a -> Task a
 tryRecv : Chan a -> Task (Maybe a)
@@ -838,7 +842,9 @@ closeChan : Chan a -> Task ()
 
 An unbounded channel lets producers allocate queued work without a fixed
 limit. A bounded channel parks a sender when full. That is backpressure: the
-consumer's pace limits queued memory and upstream work.
+consumer's pace limits queued memory and upstream work. Capacities must fit the
+positive runtime range; invalid values fail with the typed
+`InvalidChannelCapacity capacity` error.
 
 Closing is explicit and idempotent. Queued values remain readable; after they
 are drained, `recv` fails with `ChannelClosed`. A worker loop can treat that
@@ -1077,22 +1083,26 @@ Pseudorandom state is explicit:
 ```solveig
 mkStdGen : Int -> StdGen
 newStdGen : Task StdGen
-randomRange : Int -> Int -> StdGen -> Pair Int StdGen
+randomRange : Int -> Int -> StdGen -> Maybe (Pair Int StdGen)
 ```
 
 Thread the returned generator:
 
 ```solveig
-rollTwoDice : StdGen -> Pair (Pair Int Int) StdGen
+rollTwoDice : StdGen -> Maybe (Pair (Pair Int Int) StdGen)
 rollTwoDice generator =
     case randomRange 1 6 generator of
-        MkPair first afterFirst =>
+        Nothing => Nothing
+        | Just (MkPair first afterFirst) =>
             case randomRange 1 6 afterFirst of
-                MkPair second afterSecond =>
-                    MkPair (MkPair first second) afterSecond
+                Nothing => Nothing
+                | Just (MkPair second afterSecond) =>
+                    Just (MkPair (MkPair first second) afterSecond)
 ```
 
 `mkStdGen` makes tests reproducible. `newStdGen` is the only fresh seeding IO.
+`randomRange` uses inclusive bounds and returns `Nothing` when the lower bound
+exceeds the upper bound.
 The generator is clock-seeded and non-cryptographic: never use it for keys,
 tokens, passwords, or security nonces.
 
@@ -1178,13 +1188,19 @@ listen : Int -> Task (Pair Socket Int)
 accept : Socket -> Task Socket
 sendBytes : Socket -> Bytes -> Task ()
 recvBytes : Socket -> Int -> Task Bytes
+withConnection : String -> Int -> (Socket -> Task a) -> Task a
+withListener : Int -> (Pair Socket Int -> Task a) -> Task a
+withAcceptedConnection : Socket -> (Socket -> Task a) -> Task a
 closeSocket : Socket -> Task ()
 ```
 
-Use `bracket` or `finally` to close sockets. The current API is TCP with basic
-IPv4 resolution, not a production HTTP client: it has no TLS, redirect,
-chunked-transfer, or general IPv6 layer. The concurrent downloader example is
-an intentionally constrained demonstration of the machinery.
+Prefer `withConnection`, `withListener`, and `withAcceptedConnection`; each
+uses `bracket` to close its owned socket after success, typed failure, defect,
+or interruption. Use raw acquisition and `closeSocket` only when ownership
+must cross a larger scope. The current API is TCP with basic IPv4 resolution,
+not a production HTTP client: it has no TLS, redirect, chunked-transfer, or
+general IPv6 layer. The concurrent downloader example is an intentionally
+constrained demonstration of the machinery.
 
 ## 21. Testing IO and concurrent programs
 
