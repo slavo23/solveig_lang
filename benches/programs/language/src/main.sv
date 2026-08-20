@@ -4,6 +4,9 @@ import std.env(getArgs)
 import std.io(readFileBytes)
 import std.text(charsToString, stringToChars)
 import std.thread(spawn)
+import std.map
+import std.queue
+import std.vector
 
 compilerPipelineMain : Int
 compilerPipelineMain = 0
@@ -153,3 +156,80 @@ channelMain = do
     _ <- spawn (sendMany channel 10000)
     total <- receiveMany channel 10000 0
     printLine (show total)
+
+benchmarkValues : [Int]
+benchmarkValues = buildList 1024 []
+
+benchmarkVector : std.vector.Vector Int
+benchmarkVector = std.vector.fromList benchmarkValues
+
+listIndex : forall a. [a] -> Int -> Maybe a
+listIndex [] offset = Nothing
+listIndex (value :: rest) 0 = Just value
+listIndex (value :: rest) offset = listIndex rest (offset - 1)
+
+sumIndexed : (Int -> Maybe Int) -> Int -> Int -> Int
+sumIndexed lookupIndex remaining total =
+    if remaining == 0 then total
+    else
+        case lookupIndex (mod (remaining * 37) 1024) of
+            Nothing => error "collection benchmark index escaped its bounds"
+            | Just value => sumIndexed lookupIndex (remaining - 1) (total + value)
+
+vectorIndexMain : Int
+vectorIndexMain = sumIndexed (std.vector.index benchmarkVector) 2000 0
+
+listIndexMain : Int
+listIndexMain = sumIndexed (listIndex benchmarkValues) 2000 0
+
+mapEntries : [Int] -> [std.map.Entry Int Int]
+mapEntries [] = []
+mapEntries (value :: rest) = std.map.Entry value (value * 2) :: mapEntries rest
+
+benchmarkMap : std.map.Map Int Int
+benchmarkMap = std.map.fromList (mapEntries benchmarkValues)
+
+associationLookup : Int -> [Pair Int Int] -> Maybe Int
+associationLookup key [] = Nothing
+associationLookup key (MkPair entryKey value :: rest) =
+    if key == entryKey then Just value else associationLookup key rest
+
+associationEntries : [Int] -> [Pair Int Int]
+associationEntries [] = []
+associationEntries (value :: rest) = MkPair value (value * 2) :: associationEntries rest
+
+benchmarkAssociations : [Pair Int Int]
+benchmarkAssociations = associationEntries benchmarkValues
+
+mapLookupMain : Int
+mapLookupMain = sumIndexed (fun key => std.map.lookup (key + 1) benchmarkMap) 2000 0
+
+associationLookupMain : Int
+associationLookupMain =
+    sumIndexed (fun key => associationLookup (key + 1) benchmarkAssociations) 2000 0
+
+fillQueue : Int -> std.queue.Queue Int -> std.queue.Queue Int
+fillQueue remaining queue =
+    if remaining == 0 then queue
+    else fillQueue (remaining - 1) (std.queue.enqueue queue remaining)
+
+drainQueue : std.queue.Queue Int -> Int -> Int
+drainQueue queue total =
+    case std.queue.dequeue queue of
+        Nothing => total
+        | Just (MkPair value rest) => drainQueue rest (total + value)
+
+queueMain : Int
+queueMain = drainQueue (fillQueue 1000 std.queue.empty) 0
+
+fillNaiveQueue : Int -> [Int] -> [Int]
+fillNaiveQueue remaining queue =
+    if remaining == 0 then queue
+    else fillNaiveQueue (remaining - 1) (queue ++ [remaining])
+
+drainNaiveQueue : [Int] -> Int -> Int
+drainNaiveQueue [] total = total
+drainNaiveQueue (value :: rest) total = drainNaiveQueue rest (total + value)
+
+naiveQueueMain : Int
+naiveQueueMain = drainNaiveQueue (fillNaiveQueue 1000 []) 0

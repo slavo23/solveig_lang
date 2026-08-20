@@ -255,6 +255,32 @@ server or the public internet. Public-internet results are useful integration
 checks but are not accepted as optimization evidence because remote latency
 and congestion are uncontrolled.
 
+## Phase U collection representation checks: 2026-08-20
+
+U2 measured the first language-level collection representations against the
+list encodings they replace. Each pair performs the same deterministic work
+through the public driver and VM path; the result is validated before Criterion
+samples it. These focused filters ran separately, not as a complete benchmark
+suite:
+
+```bash
+cargo bench --bench language -- vector_index
+cargo bench --bench language -- list_index
+cargo bench --bench language -- 'map_lookup|association_lookup'
+cargo bench --bench language -- 'language/(queue|naive_queue)'
+```
+
+| Workload | Retained representation | List control | Point estimate |
+|---|---:|---:|---:|
+| 2,000 indexed reads from 1,024 elements | Vector: 41.784 ms | List: 167.95 ms | Vector 4.02× faster |
+| 2,000 ordered-key lookups in 1,024 entries | AVL Map: 51.585 ms | Association list: 151.44 ms | Map 2.94× faster |
+| Enqueue and drain 1,000 elements | Queue: 33.429 ms | Append-list FIFO: 83.304 ms | Queue 2.49× faster |
+
+These are representation-selection results, not claims that the current
+language-level trees match a native array or hash table. The retained APIs
+state their actual bounds: logarithmic Vector indexing/update/right append,
+logarithmic ordered Map/Set operations, and amortized constant-time Queue ends.
+
 ## Phase O comparison policy
 
 Every optimization records its exact before and after commands and confidence

@@ -243,6 +243,28 @@ std.list.take : forall a. Int -> [a] -> [a]
 std.list.takeWhile : forall a. (a -> Bool) -> [a] -> [a]
 std.list.zip : forall a b. [a] -> [b] -> [Pair a b]
 std.list.zipWith : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c]
+std.map.balance : forall k v. k -> v -> Map k v -> Map k v -> Map k v
+std.map.delete : forall k v. Ord k => k -> Map k v -> Map k v
+std.map.empty : forall k v. Map k v
+std.map.fromList : forall k v. Ord k => [Entry k v] -> Map k v
+std.map.fromListInto : forall k v. Ord k => Map k v -> [Entry k v] -> Map k v
+std.map.insert : forall k v. Ord k => k -> v -> Map k v -> Map k v
+std.map.join : forall k v. Map k v -> Map k v -> Map k v
+std.map.keys : forall k v. Map k v -> [k]
+std.map.keysInto : forall k v. Map k v -> [k] -> [k]
+std.map.lookup : forall k v. Ord k => k -> Map k v -> Maybe v
+std.map.makeNode : forall k v. k -> v -> Map k v -> Map k v -> Map k v
+std.map.mapHeight : forall k v. Map k v -> Int
+std.map.member : forall k v. Ord k => k -> Map k v -> Bool
+std.map.removeMinimum : forall k v. Map k v -> RemoveMinimum k v
+std.map.rotateLeft : forall k v. Map k v -> Map k v
+std.map.rotateRight : forall k v. Map k v -> Map k v
+std.map.singleton : forall k v. k -> v -> Map k v
+std.map.size : forall k v. Map k v -> Int
+std.map.toAscList : forall k v. Map k v -> [Entry k v]
+std.map.toAscListInto : forall k v. Map k v -> [Entry k v] -> [Entry k v]
+std.map.values : forall k v. Map k v -> [v]
+std.map.valuesInto : forall k v. Map k v -> [v] -> [v]
 std.net.accept : Socket -> IO IOError Socket
 std.net.closeSocket : Socket -> IO IOError ()
 std.net.connect : String -> Int -> IO IOError Socket
@@ -257,10 +279,36 @@ std.process.processExitCode : ProcessResult -> Int
 std.process.processStderr : ProcessResult -> String
 std.process.processStdout : ProcessResult -> String
 std.process.runProcess : String -> [String] -> IO IOError ProcessResult
+std.queue.dequeue : forall a. Queue a -> Maybe (Pair a (Queue a))
+std.queue.empty : forall a. Queue a
+std.queue.enqueue : forall a. Queue a -> a -> Queue a
+std.queue.fromList : forall a. [a] -> Queue a
+std.queue.isEmpty : forall a. Queue a -> Bool
+std.queue.length : forall a. Queue a -> Int
+std.queue.listLength : forall a. [a] -> Int
+std.queue.normalize : forall a. Queue a -> Queue a
+std.queue.peek : forall a. Queue a -> Maybe a
+std.queue.singleton : forall a. a -> Queue a
+std.queue.toList : forall a. Queue a -> [a]
 std.random.mkStdGen : Int -> StdGen
 std.random.newStdGen : IO IOError StdGen
 std.random.randomInt : StdGen -> Pair Int StdGen
 std.random.randomRange : Int -> Int -> StdGen -> Pair Int StdGen
+std.set.delete : forall a. Ord a => a -> Set a -> Set a
+std.set.difference : forall a. Ord a => Set a -> Set a -> Set a
+std.set.differenceValues : forall a. Ord a => Set a -> [a] -> Set a -> Set a
+std.set.empty : forall a. Set a
+std.set.fromList : forall a. Ord a => [a] -> Set a
+std.set.fromListInto : forall a. Ord a => Set a -> [a] -> Set a
+std.set.insert : forall a. Ord a => a -> Set a -> Set a
+std.set.intersection : forall a. Ord a => Set a -> Set a -> Set a
+std.set.intersectionValues : forall a. Ord a => Set a -> [a] -> Set a -> Set a
+std.set.member : forall a. Ord a => a -> Set a -> Bool
+std.set.singleton : forall a. a -> Set a
+std.set.size : forall a. Set a -> Int
+std.set.toAscList : forall a. Set a -> [a]
+std.set.union : forall a. Ord a => Set a -> Set a -> Set a
+std.set.unionValues : forall a. Ord a => Set a -> [a] -> Set a
 std.task.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
 std.task.catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 std.task.concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
@@ -277,3 +325,20 @@ std.thread.spawn : forall childError e. IO childError () -> IO e ThreadId
 std.time.getMonotonicTime : IO IOError Int
 std.time.getSystemTime : IO IOError Int
 std.time.sleep : Int -> IO IOError ()
+std.vector.balance : forall a. Vector a -> Vector a -> Vector a
+std.vector.buildVector : forall a. [Vector a] -> Vector a
+std.vector.empty : forall a. Vector a
+std.vector.fromList : forall a. [a] -> Vector a
+std.vector.index : forall a. Vector a -> Int -> Maybe a
+std.vector.indexTree : forall a. Vector a -> Int -> Maybe a
+std.vector.isEmpty : forall a. Vector a -> Bool
+std.vector.length : forall a. Vector a -> Int
+std.vector.makeBranch : forall a. Vector a -> Vector a -> Vector a
+std.vector.pairLevel : forall a. [Vector a] -> [Vector a]
+std.vector.singleton : forall a. a -> Vector a
+std.vector.snoc : forall a. Vector a -> a -> Vector a
+std.vector.toList : forall a. Vector a -> [a]
+std.vector.toListInto : forall a. Vector a -> [a] -> [a]
+std.vector.update : forall a. Vector a -> Int -> a -> Maybe (Vector a)
+std.vector.updateTree : forall a. Vector a -> Int -> a -> Maybe (Vector a)
+std.vector.vectorHeight : forall a. Vector a -> Int

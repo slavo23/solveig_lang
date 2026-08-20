@@ -14,6 +14,10 @@ discovery, package manifests, and the Prelude/std boundary.
 | Module | Purpose |
 |---|---|
 | `std.list` | Extended list slicing, zipping, reversal, and ranges |
+| `std.vector` | Persistent indexed sequences with logarithmic updates |
+| `std.map` | Persistent ordered key-value maps |
+| `std.set` | Persistent ordered sets |
+| `std.queue` | Persistent FIFO queues |
 | `std.text` | Text/character conversion and integer rendering |
 | `std.bytes` | UTF-8 conversion and immutable byte operations |
 | `std.io` | Handles, buffering, and whole-file IO |
@@ -38,6 +42,65 @@ import std.text(stringToChars, charsToString, intToString)
 `zipWith`, `reverse`, and inclusive-or-exclusive integer `range`. These are
 separate from the universally imported traversal operations such as `map` and
 `foldl`.
+
+## Persistent collections
+
+```solveig
+import std.vector
+import std.map
+import std.set
+import std.queue
+```
+
+`Vector` is a persistent height-balanced sequence tree. `length` is constant
+time; `index`, `update`, and `snoc` are logarithmic; `fromList` and `toList`
+are linear. An update returns `Nothing` outside the vector and shares all
+unchanged branches:
+
+```solveig
+numbers : std.vector.Vector Int
+numbers = std.vector.fromList [10, 20, 30, 40]
+
+changed : Maybe (std.vector.Vector Int)
+changed = std.vector.update numbers 2 99
+```
+
+This is an immutable functional vector, not a contiguous mutable array. The
+tree representation is deliberate: it provides predictable persistent updates
+using language-level algebraic data today. A future native wide-branch vector
+may lower the constant factor without changing the safe API.
+
+`Map` and `Set` use persistent AVL trees and therefore require `Ord` keys or
+elements. Lookup, insertion, and deletion are logarithmic; `size` is constant
+time; ordered traversal is linear and deterministic. `Map.fromList` keeps the
+last value for a duplicate key. `Set.fromList` discards duplicates.
+
+```solveig
+phoneBook : std.map.Map String String
+phoneBook =
+    std.map.fromList
+        [ std.map.Entry "Ada" "+44"
+        , std.map.Entry "Linus" "+358"
+        ]
+
+names : [String]
+names = std.map.keys phoneBook
+```
+
+`Queue` uses a front list and a reversed rear list. `enqueue` and `dequeue`
+are amortized constant time, `length` is constant time, and `toList` is linear.
+`dequeue` returns both the oldest value and the persistent remainder:
+
+```solveig
+next : Maybe (Pair String (std.queue.Queue String))
+next =
+    std.queue.dequeue
+        (std.queue.enqueue (std.queue.enqueue std.queue.empty "first") "second")
+```
+
+The exported collection constructors describe the current representation and
+should not be used by application code; use the smart constructors and
+operations above so cached balance and size invariants remain valid.
 
 ## Bytes
 
