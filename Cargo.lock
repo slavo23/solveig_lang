@@ -1146,6 +1146,7 @@ dependencies = [
 name = "solveig-lower"
 version = "0.1.0"
 dependencies = [
+ "smallvec",
  "solveig-ast",
  "solveig-base",
 ]

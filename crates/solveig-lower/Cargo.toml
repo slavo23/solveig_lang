@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 solveig-ast = { path = "../solveig-ast" }
 solveig-base = { path = "../solveig-base" }
+smallvec.workspace = true
 
 [lints]
 workspace = true

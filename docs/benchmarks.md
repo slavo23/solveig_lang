@@ -56,6 +56,7 @@ synthetic interpreter-only number.
 
 | Benchmark | Work per sample |
 |---|---|
+| `language/compiler_pipeline` | Creates a fresh `Compilation`, checks and lowers the complete language benchmark package, starts the VM, and evaluates a trivial integer entry; this is O6's cold compiler-allocation signal |
 | `language/allocation` | Builds 50,000 list cells and tail-recursively sums them |
 | `language/arithmetic` | Runs 200,000 concrete `Int` iterations using typeclass operators and `mod`; this is the primary O2 signal |
 | `language/constraint_generic` | Calls a user-defined `Num a` addition helper at `Int` for 200,000 iterations; this is the primary O3 residual-dictionary signal |
@@ -167,6 +168,58 @@ ms), a statistically detected 3.87% regression from the combined result, so
 the call family independently earns its opcode surface. As with O2–O4, only
 the affected statistical filters ran after profiling; the full statistical
 suite remains reserved for the Phase O exit gate.
+
+O6 profiled the collection lengths produced while checking and lowering the
+complete language benchmark package. All 107 predicate argument vectors had
+length one. Of 303 quantifier vectors, 211 were empty and 72 of the 92
+non-empty vectors fit in two slots. Of 604 application spines, 561 fit in two
+slots; 36 of 42 non-empty closure capture sets did too.
+
+Inlining the AST vectors was rejected after measuring their representation:
+`Ty` is 56 bytes, `SmallVec<[Ty; 1]>` is 72 bytes versus a 24-byte `Vec`, and
+a two-quantifier `SmallVec` is 80 bytes versus 24 bytes. Persistent `CCExpr`
+vectors were also retained because changing them would grow every node from 40
+to 48 bytes. O6 instead uses two-slot work vectors only while collecting
+application spines and capture sources, saving 597 heap allocations per
+conversion without enlarging a retained IR node.
+
+The focused cold `language/compiler_pipeline` benchmark fell from
+68.599–70.726 ms (69.533 ms estimate) to 65.578–67.279 ms (66.321 ms
+estimate), 4.62% less time. A four-slot controlled variant measured
+65.609–69.574 ms (67.156 ms estimate) and had no statistically detected
+improvement over two slots, so the smaller capacity was retained.
+
+## Phase O exit: 2026-08-20
+
+The complete statistical suite ran once after O6 and every required gate. The
+machine, toolchain, Criterion configuration, and correctness policy match the
+O1 baseline above.
+
+| Benchmark | Phase O exit time |
+|---|---:|
+| `vm/arithmetic_dispatch` | 8.043–9.527 ms (8.711 ms estimate) |
+| `vm/allocation_gc` | 8.157–8.236 ms (8.187 ms estimate) |
+| `vm/global_load` | 14.877–15.124 ms (14.972 ms estimate) |
+| `language/compiler_pipeline` | 65.126–65.480 ms (65.277 ms estimate) |
+| `language/allocation` | 26.994–38.085 ms (31.851 ms estimate) |
+| `language/arithmetic` | 43.936–44.805 ms (44.376 ms estimate) |
+| `language/constraint_generic` | 27.848–28.190 ms (27.998 ms estimate) |
+| `language/constraint_concrete` | 27.640–27.847 ms (27.732 ms estimate) |
+| `language/closures` | 31.887–32.982 ms (32.424 ms estimate) |
+| `language/static_closures` | 29.310–51.885 ms (37.497 ms estimate) |
+| `language/patterns` | 64.647–65.244 ms (64.878 ms estimate) |
+| `language/string_bytes` | 31.830–36.784 ms (33.599 ms estimate) |
+| `language/file_io` | 20.333–20.585 ms (20.424 ms estimate) |
+| `language/channels` | 31.474–33.495 ms (32.362 ms estimate) |
+
+For the cases present in the original O1 suite, point-estimate time is lower
+by 42.70% for VM arithmetic, 3.85% for VM allocation, 22.04% for source
+allocation, 65.61% for source arithmetic, 66.61% for closures, 46.31% for
+patterns, 28.41% for strings/bytes, and 10.11% for channels. File IO differs
+by 0.23% in the slower direction, effectively unchanged. The wide exit
+intervals for source allocation and static closures should not be used for a
+small optimization claim; their focused task measurements remain the stronger
+evidence where applicable.
 
 ## Capacity and whole-program checks
 

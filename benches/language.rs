@@ -12,6 +12,7 @@ use solveig_driver::{Compilation, CompileOptions};
 const PROJECT_ROOT: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/benches/programs/language");
 
 fn benchmark_language(c: &mut Criterion) {
+    benchmark_cold_pipeline(c);
     benchmark_pure(c, "allocation", "allocationMain", "1250025000");
     benchmark_pure(c, "arithmetic", "arithmeticMain", "1701658789");
     benchmark_pure(
@@ -34,6 +35,18 @@ fn benchmark_language(c: &mut Criterion) {
     let input = Path::new(PROJECT_ROOT).join("src/main.sv");
     benchmark_io(c, "file_io", "fileIoMain", "64\n", &[path_arg(&input)]);
     benchmark_io(c, "channels", "channelMain", "50005000\n", &[]);
+}
+
+fn benchmark_cold_pipeline(c: &mut Criterion) {
+    let entry = "compilerPipelineMain";
+    validate(entry, "0", &[]);
+
+    c.bench_function("language/compiler_pipeline", |b| {
+        b.iter(|| {
+            let mut compilation = Compilation::new(PROJECT_ROOT);
+            run(&mut compilation, entry, &[]);
+        });
+    });
 }
 
 fn benchmark_pure(c: &mut Criterion, name: &str, entry: &str, expected: &str) {

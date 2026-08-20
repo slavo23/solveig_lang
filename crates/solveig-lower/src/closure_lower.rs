@@ -1,6 +1,7 @@
 //! Closure conversion from lowered terms into closure IR.
 //! This pass records captures and rewrites functions for the VM compiler.
 
+use smallvec::SmallVec;
 use solveig_base::FxHashMap;
 use std::rc::Rc;
 
@@ -296,7 +297,6 @@ impl<'a> ExprLowerer<'a> {
 
             (lowered_body, capture_sources, capture_count)
         };
-
         self.state.push_function(CCFunction {
             id: func_id,
             name: func_name,
@@ -432,8 +432,8 @@ impl<'a> ExprLowerer<'a> {
         slot
     }
 
-    fn capture_sources_in_slot_order(&self) -> Vec<usize> {
-        let mut out = vec![0; self.capture_slots.len()];
+    fn capture_sources_in_slot_order(&self) -> SmallVec<[usize; 2]> {
+        let mut out = SmallVec::from_elem(0, self.capture_slots.len());
 
         for (&parent_visible_pos, &slot) in &self.capture_slots {
             *out.get_mut(slot)
@@ -489,8 +489,8 @@ impl<'a> ExprLowerer<'a> {
     }
 }
 
-fn collect_application_spine(expr: &Rc<IRExpr>) -> (Rc<IRExpr>, Vec<Rc<IRExpr>>) {
-    let mut args = Vec::new();
+fn collect_application_spine(expr: &Rc<IRExpr>) -> (Rc<IRExpr>, SmallVec<[Rc<IRExpr>; 2]>) {
+    let mut args = SmallVec::new();
     let mut head = expr.clone();
 
     loop {

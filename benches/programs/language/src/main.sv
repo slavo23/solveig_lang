@@ -5,6 +5,9 @@ import std.io(readFileBytes)
 import std.text(charsToString, stringToChars)
 import std.thread(spawn)
 
+compilerPipelineMain : Int
+compilerPipelineMain = 0
+
 buildList : Int -> [Int] -> [Int]
 buildList remaining values =
     if remaining == 0 then values
