@@ -305,6 +305,100 @@ std.net.sendBytes : Socket -> Bytes -> IO IOError ()
 std.net.withAcceptedConnection : forall a. Socket -> (Socket -> IO IOError a) -> IO IOError a
 std.net.withConnection : forall a. String -> Int -> (Socket -> IO IOError a) -> IO IOError a
 std.net.withListener : forall a. Int -> (Pair Socket Int -> IO IOError a) -> IO IOError a
+std.parser.addConsumption : forall input custom value. Consumption -> ParseReply input custom value -> ParseReply input custom value
+std.parser.andThen : forall input custom a b. Parser input custom a -> (a -> Parser input custom b) -> Parser input custom b
+std.parser.anyToken : forall input token custom. InputOps input token -> Parser input custom token
+std.parser.appendStreamValues : forall token. Vector token -> [token] -> Vector token
+std.parser.applyParser : forall input custom a b. Parser input custom (a -> b) -> Parser input custom a -> Parser input custom b
+std.parser.attempt : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom value
+std.parser.attemptReply : forall input token custom value. InputOps input token -> input -> ParseReply input custom value -> ParseReply input custom value
+std.parser.between : forall input custom open close value. Parser input custom open -> Parser input custom close -> Parser input custom value -> Parser input custom value
+std.parser.bindReply : forall input custom a b. (a -> Parser input custom b) -> ParseReply input custom a -> ParseReply input custom b
+std.parser.byteInput : Bytes -> ByteInput
+std.parser.byteInputOps : InputOps ByteInput Int
+std.parser.byteNext : ByteInput -> InputStep ByteInput Int
+std.parser.bytePosition : ByteInput -> Position
+std.parser.byteRestore : ByteInput -> ByteInput -> ByteInput
+std.parser.choice : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom value -> Parser input custom value
+std.parser.chooseLeft : forall input token custom value. InputOps input token -> input -> Parser input custom value -> ParseReply input custom value -> ParseReply input custom value
+std.parser.chooseRight : forall input custom value. ParseError custom -> ParseReply input custom value -> ParseReply input custom value
+std.parser.context : forall input custom value. String -> Parser input custom value -> Parser input custom value
+std.parser.contextReply : forall input custom value. String -> ParseReply input custom value -> ParseReply input custom value
+std.parser.customFailure : forall input token custom value. InputOps input token -> custom -> Parser input custom value
+std.parser.cut : forall input custom value. Parser input custom value -> Parser input custom value
+std.parser.cutReply : forall input custom value. ParseReply input custom value -> ParseReply input custom value
+std.parser.defer : forall input custom value. (() -> Parser input custom value) -> Parser input custom value
+std.parser.describeInputToken : forall input token. InputOps input token -> token -> String
+std.parser.emptyError : forall input token custom. InputOps input token -> input -> ParseError custom
+std.parser.endOfInput : forall input token custom. InputOps input token -> Parser input custom ()
+std.parser.endStep : forall input token custom. InputOps input token -> input -> InputStep input token -> ParseReply input custom ()
+std.parser.errorContexts : forall custom. ParseError custom -> [String]
+std.parser.errorCustom : forall custom. ParseError custom -> [custom]
+std.parser.errorExpected : forall custom. ParseError custom -> Set String
+std.parser.errorPosition : forall custom. ParseError custom -> Position
+std.parser.errorReason : forall custom. ParseError custom -> Maybe String
+std.parser.errorUnexpected : forall custom. ParseError custom -> Maybe String
+std.parser.expected : forall input token custom value. InputOps input token -> String -> Parser input custom value
+std.parser.feedStream : forall token. StreamInput token -> [token] -> Maybe (StreamInput token)
+std.parser.finishReply : forall token custom value. ParseReply (StreamInput token) custom value -> ParseReply (StreamInput token) custom value
+std.parser.finishStream : forall token. StreamInput token -> StreamInput token
+std.parser.foldReply : forall input custom value result. (Consumption -> value -> input -> result) -> (Consumption -> input -> ParseError custom -> result) -> (Consumption -> input -> (input -> ParseReply input custom value) -> result) -> ParseReply input custom value -> result
+std.parser.inputPosition : forall input token. InputOps input token -> input -> Position
+std.parser.joinStrings : String -> [String] -> String
+std.parser.keepLeft : forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom a
+std.parser.keepRight : forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom b
+std.parser.label : forall input custom value. String -> Parser input custom value -> Parser input custom value
+std.parser.labelReply : forall input custom value. String -> ParseReply input custom value -> ParseReply input custom value
+std.parser.listInput : forall token. [token] -> ListInput token
+std.parser.listInputOps : forall token. (token -> String) -> InputOps (ListInput token) token
+std.parser.listNext : forall token. ListInput token -> InputStep (ListInput token) token
+std.parser.listPosition : forall token. ListInput token -> Position
+std.parser.listRestore : forall token. ListInput token -> ListInput token -> ListInput token
+std.parser.many : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom [value]
+std.parser.manyFold : forall input token custom value accumulator. InputOps input token -> Parser input custom value -> accumulator -> (accumulator -> value -> accumulator) -> Parser input custom accumulator
+std.parser.manyFoldLoop : forall input token custom value accumulator. InputOps input token -> Parser input custom value -> (accumulator -> value -> accumulator) -> Consumption -> accumulator -> input -> ParseReply input custom accumulator
+std.parser.manyFoldReply : forall input token custom value accumulator. InputOps input token -> Parser input custom value -> (accumulator -> value -> accumulator) -> Consumption -> accumulator -> ParseReply input custom value -> ParseReply input custom accumulator
+std.parser.mapReply : forall input custom a b. (a -> b) -> ParseReply input custom a -> ParseReply input custom b
+std.parser.mapResult : forall input custom a b. (a -> b) -> Parser input custom a -> Parser input custom b
+std.parser.mergeConsumption : Consumption -> Consumption -> Consumption
+std.parser.mergeErrors : forall custom. ParseError custom -> ParseError custom -> ParseError custom
+std.parser.mergeErrorsAtSamePosition : forall custom. ParseError custom -> ParseError custom -> ParseError custom
+std.parser.nextInput : forall input token. InputOps input token -> input -> InputStep input token
+std.parser.optional : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom (Maybe value)
+std.parser.pair : forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom (Pair a b)
+std.parser.positionColumn : Position -> Int
+std.parser.positionLine : Position -> Int
+std.parser.positionOffset : Position -> Int
+std.parser.preferList : forall a. [a] -> [a] -> [a]
+std.parser.preferMaybe : forall a. Maybe a -> Maybe a -> Maybe a
+std.parser.renderContexts : [String] -> String
+std.parser.renderCustomErrors : forall custom. (custom -> String) -> [custom] -> String
+std.parser.renderError : forall custom. (custom -> String) -> ParseError custom -> String
+std.parser.renderErrorBody : Maybe String -> [String] -> Maybe String -> String
+std.parser.restoreInput : forall input token. InputOps input token -> input -> input -> input
+std.parser.resume : forall input custom value. ParseReply input custom value -> input -> ParseReply input custom value
+std.parser.runComplete : forall input token custom value. InputOps input token -> Parser input custom value -> input -> ParseReply input custom value
+std.parser.runParser : forall input custom value. Parser input custom value -> input -> ParseReply input custom value
+std.parser.satisfy : forall input token custom. InputOps input token -> String -> (token -> Bool) -> Parser input custom token
+std.parser.satisfyStep : forall input token custom. InputOps input token -> String -> (token -> Bool) -> input -> InputStep input token -> ParseReply input custom token
+std.parser.separatedBy : forall input token custom value separator. InputOps input token -> Parser input custom value -> Parser input custom separator -> Parser input custom [value]
+std.parser.skipMany : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom ()
+std.parser.some : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom [value]
+std.parser.streamInput : forall token. StreamInput token
+std.parser.streamInputOps : forall token. (token -> String) -> InputOps (StreamInput token) token
+std.parser.streamNext : forall token. StreamInput token -> InputStep (StreamInput token) token
+std.parser.streamPosition : forall token. StreamInput token -> Position
+std.parser.streamRestore : forall token. StreamInput token -> StreamInput token -> StreamInput token
+std.parser.succeed : forall input custom value. value -> Parser input custom value
+std.parser.supply : forall token custom value. ParseReply (StreamInput token) custom value -> [token] -> ParseReply (StreamInput token) custom value
+std.parser.textInput : String -> TextInput
+std.parser.textInputOps : InputOps TextInput Char
+std.parser.textNext : TextInput -> InputStep TextInput Char
+std.parser.textPosition : TextInput -> Position
+std.parser.textRestore : TextInput -> TextInput -> TextInput
+std.parser.token : forall input token custom. Eq token => InputOps input token -> String -> token -> Parser input custom token
+std.parser.tokens : forall input token custom. Eq token => InputOps input token -> String -> [token] -> Parser input custom [token]
+std.parser.tokensExact : forall input token custom. Eq token => InputOps input token -> [token] -> Parser input custom [token]
 std.process.exitFailure : forall a. IO IOError a
 std.process.exitSuccess : forall a. IO IOError a
 std.process.exitWith : forall a. Int -> IO IOError a

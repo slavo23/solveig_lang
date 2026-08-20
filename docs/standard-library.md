@@ -20,6 +20,7 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.queue` | Persistent FIFO queues |
 | `std.text` | Text/character conversion and integer rendering |
 | `std.bytes` | UTF-8 conversion and immutable byte operations |
+| `std.parser` | Generic parser combinators with structured errors and streaming input |
 | `std.io` | Handles, buffering, and whole-file IO |
 | `std.fs` | Directory, path, and file-metadata operations |
 | `std.env` | Arguments, environment, and program identity |
@@ -120,6 +121,47 @@ bytesAppend : Bytes -> Bytes -> Bytes
 
 `String` is valid UTF-8; `Bytes` preserves arbitrary data. Decoding therefore
 returns `Result` instead of replacing invalid input.
+
+## Parser combinators
+
+```solveig
+import std.parser
+import std.text
+```
+
+`Parser input customError value` is generic over the cursor it consumes, the
+domain errors a grammar can attach, and its successful result. An
+`InputOps input token` value supplies token advancement, positions,
+checkpoint restoration, and diagnostic rendering. The module includes ready
+adapters for complete lists, Unicode text, immutable bytes, and persistent
+feedable token streams; user-defined checkpointable inputs use the same
+combinators.
+
+```solveig
+word : std.parser.Parser std.parser.TextInput () String
+word =
+    std.parser.mapResult std.text.charsToString
+        (std.parser.some std.parser.textInputOps
+            (std.parser.satisfy std.parser.textInputOps "letter"
+                (fun character =>
+                    if character >= 'a' then character <= 'z' else False)))
+```
+
+Build grammars from `satisfy`, `token`, and `tokens`; combine them with
+`mapResult`, `applyParser`, `andThen`, `choice`, `many`, `optional`, and
+`between`; then use `runComplete` when trailing input must be rejected. Choice
+retries only failures that consumed nothing. Put `attempt` narrowly around a
+branch with an ambiguous consumed prefix, and put `cut` after a prefix that
+unambiguously selects a branch. `defer` supports non-left-recursive recursive
+grammars in Solveig's strict evaluation model.
+
+Every public parser operation has an API doc comment describing its behavior,
+including failure, consumption, backtracking, and streaming details where they
+apply. In an editor,
+hover the operation you are using; the method documentation is intended to be
+the primary learning path. The complete configuration grammar in
+`tests/golden/run/parser_config` demonstrates nesting, custom errors,
+deliberate backtracking, and parsing across inconvenient chunk boundaries.
 
 ## Handles and files
 

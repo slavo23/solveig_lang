@@ -52,4 +52,45 @@ fn checked_project_docs_include_importable_declarations() {
         docs.get("prelude.prim.intCompare"),
         Some(&"Compares two integers and returns their ordering.".to_string())
     );
+
+    let parser_project =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/run/parser_config");
+    let docs = solveig_driver::checked_project_docs(&parser_project)
+        .expect("parser documentation fixture should check");
+
+    assert_eq!(
+        docs.get("std.parser.Parser"),
+        Some(
+            &"A compositional parser over an input type with caller-defined error values.\n\nThe constructor exposes the minimal functional representation needed by\nuser-defined primitives. Ordinary grammars should prefer the documented\ncombinators so consumption and streaming behavior stay predictable."
+                .to_string()
+        )
+    );
+    assert_eq!(
+        docs.get("std.parser.choice"),
+        Some(
+            &"Tries the right parser only when the left parser fails without consuming.\n\nEmpty failures at the same position merge their expected items. Wrap the\nleft parser in attempt only when its consumed prefix is genuinely shared.\nFor example, alternatives for `\"ab\"` and `\"ac\"` need attempt around the\nfirst token sequence; alternatives starting with different tokens do not."
+                .to_string()
+        )
+    );
+    assert_eq!(
+        docs.get("std.parser.manyFold"),
+        Some(
+            &"Parses zero or more values and folds them without constructing a result list.\n\nAn empty failure ends the repetition. A consumed failure propagates. A\nsuccessful iteration that consumed nothing becomes a committed structural\nerror instead of looping forever."
+                .to_string()
+        )
+    );
+    assert_eq!(
+        docs.get("std.parser.StreamInput"),
+        Some(
+            &"A persistent feedable token cursor for pure incremental parsing.\n\nThe vector retains all supplied tokens so attempt can restore checkpoints\nacross chunk boundaries. finishStream changes an empty cursor from Await to\nfinal End without performing IO inside the parser."
+                .to_string()
+        )
+    );
+    assert_eq!(
+        docs.get("std.parser.renderError"),
+        Some(
+            &"Renders a structured error with deterministic expected-item ordering.\n\nThe custom renderer controls only caller-defined failures; position,\nunexpected input, expected items, contexts, and structural reasons keep the\nsame format for every parser."
+                .to_string()
+        )
+    );
 }

@@ -25,6 +25,7 @@ const STD_FS_SRC: &str = include_str!("../../../lib/std/src/std/fs.sv");
 const STD_IO_SRC: &str = include_str!("../../../lib/std/src/std/io.sv");
 const STD_LIST_SRC: &str = include_str!("../../../lib/std/src/std/list.sv");
 const STD_NET_SRC: &str = include_str!("../../../lib/std/src/std/net.sv");
+const STD_PARSER_SRC: &str = include_str!("../../../lib/std/src/std/parser.sv");
 const STD_PROCESS_SRC: &str = include_str!("../../../lib/std/src/std/process.sv");
 const STD_RANDOM_SRC: &str = include_str!("../../../lib/std/src/std/random.sv");
 const STD_TASK_SRC: &str = include_str!("../../../lib/std/src/std/task.sv");
@@ -56,6 +57,7 @@ pub(crate) fn embedded_library_source(module: &str) -> Option<&'static str> {
         "std.io" => Some(STD_IO_SRC),
         "std.list" => Some(STD_LIST_SRC),
         "std.net" => Some(STD_NET_SRC),
+        "std.parser" => Some(STD_PARSER_SRC),
         "std.process" => Some(STD_PROCESS_SRC),
         "std.random" => Some(STD_RANDOM_SRC),
         "std.task" => Some(STD_TASK_SRC),
@@ -94,6 +96,7 @@ pub(crate) fn embedded_library_modules(package: &str) -> &'static [&'static str]
             "std/io.sv",
             "std/list.sv",
             "std/net.sv",
+            "std/parser.sv",
             "std/process.sv",
             "std/random.sv",
             "std/task.sv",

@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+section app {mode=truly;nested=[alpha,[beta,true]]}
+section app {mode=truly;nested=[alpha,[beta,true]]}
+line 1, column 17 (offset 16): parse failed; reserved name "reserved"
+[1, 2, 3]
+line 1, column 2 (offset 1): unexpected 'c'; expected 'b'
+ac
+line 1, column 1 (offset 0): repeated parser succeeded without consuming input
+[65, 66]
