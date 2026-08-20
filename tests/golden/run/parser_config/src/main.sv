@@ -32,71 +32,78 @@ spaces ops =
         (std.parser.satisfy ops "whitespace" isWhitespace)
 
 lexeme : forall input a. std.parser.InputOps input Char -> std.parser.Parser input ConfigError a -> std.parser.Parser input ConfigError a
-lexeme ops parser = std.parser.keepLeft parser (spaces ops)
+lexeme ops = (<* spaces ops)
 
 symbol : forall input. std.parser.InputOps input Char -> String -> std.parser.Parser input ConfigError [Char]
 symbol ops name =
     lexeme ops
         (std.parser.tokens ops name (std.text.stringToChars name))
 
+identifierLabel : forall input custom value.
+    std.parser.Parser input custom value ->
+    std.parser.Parser input custom value
+identifierLabel = (<?> "identifier")
+
 identifier : forall input. std.parser.InputOps input Char -> std.parser.Parser input ConfigError String
 identifier ops =
-    lexeme ops
-        (std.parser.andThen
-            (std.parser.some ops
-                (std.parser.satisfy ops "name character" isNameCharacter))
-            (fun characters =>
-                let name = std.text.charsToString characters in
+    identifierLabel
+        (lexeme ops
+            (do
+                characters <-
+                    std.parser.some ops
+                        (std.parser.satisfy ops "name character" isNameCharacter)
+                let name = std.text.charsToString characters
                 if name == "reserved" then
                     std.parser.customFailure ops (ReservedName name)
                 else
-                    std.parser.succeed name))
+                    pure name))
+
+asTextValue : forall f. Functor f => f String -> f ConfigValue
+asTextValue = (TextValue <$>)
+
+parserBind : forall input custom a b.
+    std.parser.Parser input custom a ->
+    (a -> std.parser.Parser input custom b) ->
+    std.parser.Parser input custom b
+parserBind = (>>=)
 
 configValue : forall input. std.parser.InputOps input Char -> std.parser.Parser input ConfigError ConfigValue
 configValue ops =
     std.parser.context "value"
         (std.parser.choice ops
             (std.parser.attempt ops
-                (std.parser.mapResult
-                    (fun _ => TextValue "true")
-                    (symbol ops "true")))
+                ((fun _ => TextValue "true") <$> symbol ops "true"))
             (std.parser.choice ops
-                (fmap TextValue (identifier ops))
+                (asTextValue (identifier ops))
                 (configList ops)))
 
 configList : forall input. std.parser.InputOps input Char -> std.parser.Parser input ConfigError ConfigValue
 configList ops =
-    std.parser.mapResult ListValue
-        (std.parser.between
+    ListValue <$>
+        std.parser.between
             (symbol ops "[")
             (symbol ops "]")
             (std.parser.separatedBy ops
                 (std.parser.defer (fun _ => configValue ops))
-                (symbol ops ",")))
+                (symbol ops ","))
 
 setting : forall input. std.parser.InputOps input Char -> std.parser.Parser input ConfigError Setting
 setting ops =
-    std.parser.andThen (identifier ops) (fun name =>
-        std.parser.keepRight (symbol ops "=")
-            (std.parser.andThen (configValue ops) (fun value =>
-                std.parser.mapResult
-                    (fun _ => Setting name value)
-                    (symbol ops ";"))))
+    Setting <$> identifier ops <*>
+        (symbol ops "=" *> configValue ops <* symbol ops ";")
 
 section : forall input. std.parser.InputOps input Char -> std.parser.Parser input ConfigError Section
 section ops =
-    std.parser.keepRight (symbol ops "section")
-        (std.parser.cut
-            (std.parser.andThen (identifier ops) (fun name =>
-                std.parser.mapResult
-                    (fun settings => Section name settings)
-                    (std.parser.between
-                        (symbol ops "{")
-                        (symbol ops "}")
-                        (std.parser.many ops (setting ops))))))
+    symbol ops "section" *>
+        std.parser.cut
+            (Section <$> identifier ops <*>
+                std.parser.between
+                    (symbol ops "{")
+                    (symbol ops "}")
+                    (std.parser.many ops (setting ops)))
 
 document : forall input. std.parser.InputOps input Char -> std.parser.Parser input ConfigError Section
-document ops = std.parser.keepRight (spaces ops) (section ops)
+document ops = spaces ops *> section ops
 
 showConfigError : ConfigError -> String
 showConfigError (ReservedName name) = "reserved name " <> show name

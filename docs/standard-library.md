@@ -155,6 +155,13 @@ branch with an ambiguous consumed prefix, and put `cut` after a prefix that
 unambiguously selects a branch. `defer` supports non-left-recursive recursive
 grammars in Solveig's strict evaluation model.
 
+Because `Parser input customError` implements `Functor`, `Applicative`, and
+`Monad`, ordinary Prelude syntax works: use `<$>` and `<*>` for static grammar
+structure, `<*` and `*>` for delimiters, and `do` or `>>=` only when a parsed
+value selects later parsing. `parser <?> "name"` replaces the expected item on
+an empty failure. Choice remains `choice ops left right` because correct
+incremental backtracking needs the explicit input adapter.
+
 Every public parser operation has an API doc comment describing its behavior,
 including failure, consumption, backtracking, and streaming details where they
 apply. In an editor,

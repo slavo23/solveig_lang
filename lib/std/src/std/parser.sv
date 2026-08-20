@@ -4,6 +4,8 @@ import std.set
 import std.text
 import std.vector
 
+infix 0 <?>
+
 -- | A parser position with a zero-based token offset and one-based line and column.
 -- |
 -- | Custom inputs may use line 1 and offset-plus-one as the column when their
@@ -337,6 +339,14 @@ cutReply (Parsed consumption value rest) = Parsed consumption value rest
 -- | Replaces the expected set when a parser fails without consuming input.
 label : forall input custom value. String -> Parser input custom value -> Parser input custom value
 label expected parser = Parser (fun input => labelReply expected (runParser parser input))
+
+-- | Infix form of label, following the grammar-reading order `parser <?> name`.
+-- |
+-- | Like label, this changes only an empty failure. A consumed or cut failure
+-- | keeps its more specific diagnostic. The operator has precedence zero so a
+-- | complete parser expression normally appears on its left without brackets.
+(<?>) : forall input custom value. Parser input custom value -> String -> Parser input custom value
+(<?>) parser expectedName = label expectedName parser
 
 -- | Labels every eventual empty failure while retaining committed diagnostics.
 labelReply : forall input custom value. String -> ParseReply input custom value -> ParseReply input custom value

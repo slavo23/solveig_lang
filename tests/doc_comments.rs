@@ -73,6 +73,13 @@ fn checked_project_docs_include_importable_declarations() {
         )
     );
     assert_eq!(
+        docs.get("std.parser.<?>"),
+        Some(
+            &"Infix form of label, following the grammar-reading order `parser <?> name`.\n\nLike label, this changes only an empty failure. A consumed or cut failure\nkeeps its more specific diagnostic. The operator has precedence zero so a\ncomplete parser expression normally appears on its left without brackets."
+                .to_string()
+        )
+    );
+    assert_eq!(
         docs.get("std.parser.manyFold"),
         Some(
             &"Parses zero or more values and folds them without constructing a result list.\n\nAn empty failure ends the repetition. A consumed failure propagates. A\nsuccessful iteration that consumed nothing becomes a committed structural\nerror instead of looping forever."

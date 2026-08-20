@@ -278,6 +278,7 @@ std.net.sendBytes : Socket -> Bytes -> IO IOError ()
 std.net.withAcceptedConnection : forall a. Socket -> (Socket -> IO IOError a) -> IO IOError a
 std.net.withConnection : forall a. String -> Int -> (Socket -> IO IOError a) -> IO IOError a
 std.net.withListener : forall a. Int -> (Pair Socket Int -> IO IOError a) -> IO IOError a
+std.parser.<?> : forall input custom value. Parser input custom value -> String -> Parser input custom value
 std.parser.addConsumption : forall input custom value. Consumption -> ParseReply input custom value -> ParseReply input custom value
 std.parser.andThen : forall input custom a b. Parser input custom a -> (a -> Parser input custom b) -> Parser input custom b
 std.parser.anyToken : forall input token custom. InputOps input token -> Parser input custom token
