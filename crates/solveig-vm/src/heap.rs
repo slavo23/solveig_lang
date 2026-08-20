@@ -121,6 +121,10 @@ pub enum IoAction {
     ResolveHost {
         host: Value,
     },
+    HttpRequest {
+        request: Value,
+        limits: Value,
+    },
     Connect {
         host: Value,
         port: i64,

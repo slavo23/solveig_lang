@@ -17,6 +17,15 @@ pub(super) fn resolve_host(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Va
     Ok(ctx.alloc_io_action(IoAction::ResolveHost { host }))
 }
 
+pub(super) fn http_request_raw(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let request = expect_value(args, 0, "httpRequestRaw")?;
+    let limits = expect_value(args, 1, "httpRequestRaw")?;
+    Ok(ctx.alloc_io_action(IoAction::HttpRequest { request, limits }))
+}
+
 pub(super) fn listen(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let port = expect_int(args, 0, "listen")?;
     Ok(ctx.alloc_io_action(IoAction::Listen { port }))

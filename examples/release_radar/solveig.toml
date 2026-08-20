@@ -1,0 +1,6 @@
+[package]
+name = "release_radar"
+version = "0.1.0"
+
+[language]
+entry = "main"

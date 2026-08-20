@@ -99,6 +99,18 @@ data IOError =
     GetModificationTimeError String String
   | -- | Starting or capturing a child process failed.
     RunProcessError String String
+  | -- | An HTTP request failed before a valid response was received.
+    HttpTransportError String
+  | -- | HTTPS certificate verification or TLS negotiation failed.
+    HttpTlsError String
+  | -- | An HTTP request exceeded its configured deadline.
+    HttpTimeoutError String
+  | -- | An HTTP redirect could not be followed under the configured policy.
+    HttpRedirectError String
+  | -- | An HTTP response header exceeded its configured byte bound.
+    HttpHeadersTooLarge Int
+  | -- | An HTTP response body exceeded its configured byte bound.
+    HttpBodyTooLarge Int
 
 -- | A defect raised by pure evaluation or a managed runtime limit.
 data Defect =

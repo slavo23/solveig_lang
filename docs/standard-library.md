@@ -22,6 +22,7 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.bytes` | UTF-8 conversion and immutable byte operations |
 | `std.parser` | Generic parser combinators with structured errors and streaming input |
 | `std.json` | Bounded byte-level JSON, exact numbers, deterministic rendering, and direct decoders |
+| `std.http` | Bounded HTTP/HTTPS requests, verified TLS, redirects, status/header access, and chunk folds |
 | `std.io` | Handles, buffering, and whole-file IO |
 | `std.fs` | Directory, path, and file-metadata operations |
 | `std.env` | Arguments, environment, and program identity |
@@ -338,5 +339,33 @@ import std.net
 `withListener`, and `withAcceptedConnection`; their bracketed scopes close
 owned sockets after success, typed errors, defects, or interruption.
 
-The current network layer is TCP-oriented and byte-based. HTTP, URL parsing,
-structured codecs, and streaming subprocess pipes remain future library work.
+The low-level `std.net` layer is TCP-oriented and byte-based. Use `std.http`
+for bounded HTTP/1.1 and verified HTTPS rather than hand-building wire frames.
+Streaming subprocess pipes, UDP, and general IPv6 selection remain future
+library work.
+
+### HTTP and HTTPS
+
+```solveig
+import std.http
+
+fetch : String -> IO std.http.HttpError std.http.Response
+fetch spelling =
+    case std.http.urlFromString spelling of
+        Err error => failIO error
+        | Ok url => std.http.request std.http.defaultHttpLimits (std.http.get url)
+```
+
+`std.http.request` always applies response-header, response-body, timeout, and
+redirect bounds. Statuses such as 404 remain ordinary `Response` values;
+transport, certificate/TLS, timeout, redirect, and size failures are typed.
+HTTPS verifies certificates through the host platform policy. Response bodies
+are fully bounded before entering the Solveig heap. Use `bodyChunks` when a
+list of bounded pieces is convenient, or `foldBodyChunks` to process those
+pieces without allocating that list.
+
+Header constructors reject invalid names and newline injection. Header lookup
+is ASCII case-insensitive. `examples/release_radar` demonstrates concurrent
+requests, JSON decoding, stable result ordering, ETag request headers, and a
+single overwritten cache file. See [HTTP and HTTPS](http.md) for policies and
+complete examples.

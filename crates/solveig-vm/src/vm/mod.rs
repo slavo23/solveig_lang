@@ -23,6 +23,7 @@ mod call;
 mod channel;
 mod dispatch;
 mod gc;
+mod http;
 mod interruption;
 mod io;
 mod io_os;

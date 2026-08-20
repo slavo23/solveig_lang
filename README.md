@@ -157,6 +157,16 @@ solveig --project-root examples/concurrent_downloader
 
 Pass `-- --local` for its deterministic in-program server mode.
 
+Run the bounded HTTP/HTTPS release radar against its deterministic local
+service:
+
+```bash
+solveig --project-root examples/release_radar
+```
+
+Pass `-- --live` to run the configured repository set through four concurrent,
+certificate-verified GitHub HTTPS workers.
+
 ## Command Line
 
 The CLI runs a Solveig project by pointing at a project root:
@@ -544,6 +554,10 @@ See [docs/diagnostics.md](docs/diagnostics.md) for the full code index.
 - `examples/concurrent_downloader` resolves and fetches several plain-HTTP
   internet resources through a bounded-channel worker pool, writes four fixed
   ignored outputs, and retains a hermetic `--local` mode for tests.
+- `examples/release_radar` concurrently reads release metadata through bounded
+  HTTP/HTTPS requests, decodes JSON, preserves deterministic output order, and
+  overwrites one ignored ETag cache. Its default server is hermetic; `--live`
+  opts into the GitHub Releases API.
 - `examples/log_audit` is the Phase L capstone: three scoped workers read log
   files through bounded job/result channels, recover from a missing input,
   aggregate completion-order-independent counts, and write a fixed report.

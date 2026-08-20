@@ -2,6 +2,7 @@
 //! Workers own no VM values or heap references; completions cross back as plain
 //! Rust data and are converted only after the scheduler wakes the process.
 
+use super::http::{HttpFailure, HttpRequest, HttpResponse};
 use super::*;
 use crate::handle::{
     FIRST_FILE_HANDLE, FileMode, HandleFailure, HandleId, HandleOutput, HandleRequest, HandleTable,
@@ -22,7 +23,9 @@ use process::{ProcessFailure, ProcessOutput, ProcessRequest, ProcessSignal};
 
 use super::socket::{SocketRequest, SocketSubsystem};
 
-const IO_WORKER_COUNT: usize = 4;
+// Worker zero preserves terminal ordering; four general workers provide the
+// bounded host concurrency used by std.http and other blocking operations.
+const IO_WORKER_COUNT: usize = 5;
 
 pub(super) enum IoRequest {
     Print(String),
@@ -65,6 +68,7 @@ pub(super) enum IoRequest {
     },
     CloseSocket(SocketId),
     Handle(HandleRequest),
+    Http(HttpRequest),
 }
 
 pub(super) enum IoResult {
@@ -79,6 +83,7 @@ pub(super) enum IoResult {
     TextList(Vec<String>),
     DirectoryChanged(PathBuf),
     Process(ProcessOutput),
+    Http(HttpResponse),
     Failed(IoFailure),
 }
 
@@ -120,6 +125,7 @@ pub(super) enum IoFailure {
     Recv(io::Error),
     CloseSocket(io::Error),
     Handle(HandleFailure),
+    Http(HttpFailure),
 }
 
 enum IoWork {
@@ -288,9 +294,8 @@ impl IoSubsystem {
             | IoRequest::WriteFileBytes { .. }
             | IoRequest::Filesystem(_)
             | IoRequest::Process(_)
-            | IoRequest::ResolveHost(_) => {
-                1 + self.next_worker % (self.workers.len().saturating_sub(1))
-            }
+            | IoRequest::ResolveHost(_)
+            | IoRequest::Http(_) => 1 + self.next_worker % (self.workers.len().saturating_sub(1)),
         };
         let id = if let Some(raw) = self.free_requests.pop() {
             let Some(slot) = self.requests.get_mut(raw as usize) else {
@@ -559,11 +564,12 @@ fn worker_loop(
     terminal_outputs: (bool, bool),
 ) {
     let mut handles = HandleTable::for_worker(worker_index, terminal_outputs);
+    let http_agent = super::http::agent();
     while let Ok(work) = work.recv() {
         let (id, result) = match work {
             IoWork::Request { id, request } => (
                 id,
-                perform_request(request, stdin, stdout, stderr, &mut handles),
+                perform_request(request, stdin, stdout, stderr, &mut handles, &http_agent),
             ),
             IoWork::Process {
                 id,
@@ -585,6 +591,7 @@ fn perform_request(
     stdout: &Mutex<&mut (dyn Write + Send)>,
     stderr: &Mutex<&mut (dyn Write + Send)>,
     handles: &mut HandleTable,
+    http_agent: &ureq::Agent,
 ) -> IoResult {
     match request {
         IoRequest::Print(text) => write_stdout(stdout, &text),
@@ -609,6 +616,10 @@ fn perform_request(
             solveig_base::ice!("process request reached the non-cancellable worker path")
         }
         IoRequest::ResolveHost(host) => perform_resolve_host(host),
+        IoRequest::Http(request) => match super::http::perform(http_agent, request) {
+            Ok(response) => IoResult::Http(response),
+            Err(failure) => IoResult::Failed(IoFailure::Http(failure)),
+        },
         IoRequest::Handle(request) => match handles.perform(request, stdin, stdout, stderr) {
             Ok(HandleOutput::Unit) => IoResult::Unit,
             Ok(HandleOutput::Opened(handle)) => IoResult::Handle(handle),

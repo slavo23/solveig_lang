@@ -473,7 +473,51 @@ impl Interpreter<'_> {
                 &error.to_string(),
                 "closeSocket",
             ),
+            IoFailure::Http(failure) => match failure {
+                super::http::HttpFailure::Transport(message) => self.alloc_string_ctor(
+                    CtorRuntimeRole::PreludeIoErrorHttpTransport,
+                    &message,
+                    "httpRequestRaw",
+                ),
+                super::http::HttpFailure::Tls(message) => self.alloc_string_ctor(
+                    CtorRuntimeRole::PreludeIoErrorHttpTls,
+                    &message,
+                    "httpRequestRaw",
+                ),
+                super::http::HttpFailure::Timeout(message) => self.alloc_string_ctor(
+                    CtorRuntimeRole::PreludeIoErrorHttpTimeout,
+                    &message,
+                    "httpRequestRaw",
+                ),
+                super::http::HttpFailure::Redirect(message) => self.alloc_string_ctor(
+                    CtorRuntimeRole::PreludeIoErrorHttpRedirect,
+                    &message,
+                    "httpRequestRaw",
+                ),
+                super::http::HttpFailure::HeadersTooLarge(maximum) => self.alloc_int_ctor(
+                    CtorRuntimeRole::PreludeIoErrorHttpHeadersTooLarge,
+                    maximum,
+                    "httpRequestRaw",
+                ),
+                super::http::HttpFailure::BodyTooLarge(maximum) => self.alloc_int_ctor(
+                    CtorRuntimeRole::PreludeIoErrorHttpBodyTooLarge,
+                    maximum,
+                    "httpRequestRaw",
+                ),
+            },
         }
+    }
+
+    fn alloc_int_ctor(
+        &mut self,
+        role: CtorRuntimeRole,
+        value: usize,
+        builtin: &str,
+    ) -> Result<Value, RuntimeError> {
+        let value = i64::try_from(value).map_err(|_out_of_range| {
+            RuntimeError::builtin(format!("{builtin} limit exceeded Int"))
+        })?;
+        VmCtx::new(self).alloc_data1_ctor(role, Value::Int(value), builtin)
     }
 
     pub(super) fn alloc_string_ctor(

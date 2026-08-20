@@ -47,6 +47,7 @@ impl Interpreter<'_> {
             IoResult::Process(output) => {
                 self.alloc_process_result(output.exit_code, &output.stdout, &output.stderr)?
             }
+            IoResult::Http(response) => self.alloc_http_response(&response)?,
             IoResult::Failed(failure) => {
                 self.io_current = Some(self.alloc_io_failure_action(failure)?);
                 return Ok(None);
@@ -83,6 +84,84 @@ impl Interpreter<'_> {
             stdout,
             stderr,
             "runProcess",
+        );
+        self.temporary_roots.truncate(checkpoint);
+        result
+    }
+
+    fn alloc_http_response(
+        &mut self,
+        response: &super::http::HttpResponse,
+    ) -> Result<Value, RuntimeError> {
+        let checkpoint = self.temporary_roots.len();
+        for (name, value) in &response.headers {
+            self.safe_point();
+            let name = self.heap.alloc_str(name);
+            self.temporary_roots.push(name);
+            self.safe_point();
+            let value = self.heap.alloc_str(value);
+            self.temporary_roots.push(value);
+            self.safe_point();
+            let pair_start = self.temporary_roots.len() - 2;
+            let name = self
+                .temporary_roots
+                .get(pair_start)
+                .copied()
+                .expect("ICE: HTTP header name root disappeared");
+            let value = self
+                .temporary_roots
+                .get(pair_start + 1)
+                .copied()
+                .expect("ICE: HTTP header value root disappeared");
+            let pair = VmCtx::new(self).alloc_data2_ctor(
+                CtorRuntimeRole::PreludePair,
+                name,
+                value,
+                "httpRequestRaw",
+            )?;
+            self.temporary_roots.truncate(pair_start);
+            self.temporary_roots.push(pair);
+        }
+        let headers = VmCtx::new(self).alloc_list_from_root_range(
+            checkpoint,
+            response.headers.len(),
+            "httpRequestRaw",
+        )?;
+        self.temporary_roots.truncate(checkpoint);
+        self.temporary_roots.push(headers);
+        self.safe_point();
+        let body = self.heap.alloc_bytes(&response.body);
+        self.temporary_roots.push(body);
+        self.safe_point();
+        let headers = self
+            .temporary_roots
+            .get(checkpoint)
+            .copied()
+            .expect("ICE: HTTP header-list root disappeared");
+        let body = self
+            .temporary_roots
+            .get(checkpoint + 1)
+            .copied()
+            .expect("ICE: HTTP body root disappeared");
+        let payload = VmCtx::new(self).alloc_data2_ctor(
+            CtorRuntimeRole::PreludePair,
+            headers,
+            body,
+            "httpRequestRaw",
+        )?;
+        self.temporary_roots.truncate(checkpoint);
+        self.temporary_roots.push(payload);
+        self.safe_point();
+        let payload = self
+            .temporary_roots
+            .get(checkpoint)
+            .copied()
+            .expect("ICE: HTTP response payload root disappeared");
+        let result = VmCtx::new(self).alloc_data2_ctor(
+            CtorRuntimeRole::PreludePair,
+            Value::Int(response.status),
+            payload,
+            "httpRequestRaw",
         );
         self.temporary_roots.truncate(checkpoint);
         result

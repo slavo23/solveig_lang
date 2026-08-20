@@ -279,10 +279,11 @@ contain only opaque identities: descriptors never live in the moving heap, GC
 never closes sockets, and ids are not reused. Use `bracket` or `finally` with
 `closeSocket`.
 
-The current surface is TCP plus basic IPv4 resolution. TLS/HTTPS, redirects,
-chunked HTTP decoding, UDP, and general IPv6 selection are not implemented.
-The concurrent downloader is intentionally an HTTP/1.0 demonstration, not a
-production HTTP client.
+The low-level surface is TCP plus basic IPv4 resolution. `std.http` now adds
+bounded HTTP/1.1, chunked decoding, redirects, and platform-verified HTTPS on
+the blocking worker pool. UDP and general IPv6 selection are not implemented.
+The older concurrent downloader intentionally demonstrates raw socket
+machinery; `examples/release_radar` demonstrates the production-facing client.
 
 ## Determinism and fairness guarantees
 

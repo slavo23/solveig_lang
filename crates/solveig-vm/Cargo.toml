@@ -9,6 +9,7 @@ mio = { version = "1.2.2", features = ["net", "os-poll"] }
 solveig-ast = { path = "../solveig-ast" }
 solveig-base = { path = "../solveig-base" }
 solveig-lower = { path = "../solveig-lower" }
+ureq = { version = "3.4.0", default-features = false, features = ["rustls", "platform-verifier"] }
 
 [lints]
 workspace = true

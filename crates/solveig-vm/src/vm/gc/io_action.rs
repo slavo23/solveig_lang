@@ -85,6 +85,10 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
             visit(socket);
             visit(bytes);
         }
+        IoAction::HttpRequest { request, limits } => {
+            visit(request);
+            visit(limits);
+        }
         IoAction::Recv { channel }
         | IoAction::TryRecv { channel }
         | IoAction::CloseChan { channel }
@@ -175,6 +179,10 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
         IoAction::SendBytes { socket, bytes } => {
             visit(socket);
             visit(bytes);
+        }
+        IoAction::HttpRequest { request, limits } => {
+            visit(request);
+            visit(limits);
         }
         IoAction::Recv { channel }
         | IoAction::TryRecv { channel }

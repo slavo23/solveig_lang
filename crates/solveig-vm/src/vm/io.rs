@@ -380,6 +380,14 @@ impl Interpreter<'_> {
                     }
                     return self.block_on_io(IoRequest::ResolveHost(host));
                 }
+                IoAction::HttpRequest { request, limits } => {
+                    let request = self.prepare_http_request(request, limits)?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::Http(request));
+                }
                 IoAction::Connect { host, port } => {
                     let host = self.expect_string_value(host, "connect")?;
                     if let Some(interruption) = self.accept_pending_interruption_at_block() {

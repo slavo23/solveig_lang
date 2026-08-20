@@ -22,6 +22,7 @@ fn golden_run_cases() {
     let mut cases = golden_cases(&root);
     cases.push(manifest_root.join("examples/concurrent_downloader"));
     cases.push(manifest_root.join("examples/log_audit"));
+    cases.push(manifest_root.join("examples/release_radar"));
     cases.sort();
 
     assert!(

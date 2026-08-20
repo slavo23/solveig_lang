@@ -295,6 +295,16 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
             CtorRuntimeRole::PreludeIoErrorGetModificationTime
         }
         PRELUDE_IO_ERROR_RUN_PROCESS_NAME => CtorRuntimeRole::PreludeIoErrorRunProcess,
+        PRELUDE_IO_ERROR_HTTP_TRANSPORT_NAME => CtorRuntimeRole::PreludeIoErrorHttpTransport,
+        PRELUDE_IO_ERROR_HTTP_TLS_NAME => CtorRuntimeRole::PreludeIoErrorHttpTls,
+        PRELUDE_IO_ERROR_HTTP_TIMEOUT_NAME => CtorRuntimeRole::PreludeIoErrorHttpTimeout,
+        PRELUDE_IO_ERROR_HTTP_REDIRECT_NAME => CtorRuntimeRole::PreludeIoErrorHttpRedirect,
+        PRELUDE_IO_ERROR_HTTP_HEADERS_TOO_LARGE_NAME => {
+            CtorRuntimeRole::PreludeIoErrorHttpHeadersTooLarge
+        }
+        PRELUDE_IO_ERROR_HTTP_BODY_TOO_LARGE_NAME => {
+            CtorRuntimeRole::PreludeIoErrorHttpBodyTooLarge
+        }
         STD_PROCESS_RESULT_CTOR_NAME => CtorRuntimeRole::StdProcessResult,
         STD_IO_MODE_READ_NAME => CtorRuntimeRole::StdIoModeRead,
         STD_IO_MODE_WRITE_NAME => CtorRuntimeRole::StdIoModeWrite,
@@ -562,6 +572,12 @@ pub enum CtorRuntimeRole {
     PreludeIoErrorGetFileSize,
     PreludeIoErrorGetModificationTime,
     PreludeIoErrorRunProcess,
+    PreludeIoErrorHttpTransport,
+    PreludeIoErrorHttpTls,
+    PreludeIoErrorHttpTimeout,
+    PreludeIoErrorHttpRedirect,
+    PreludeIoErrorHttpHeadersTooLarge,
+    PreludeIoErrorHttpBodyTooLarge,
     StdProcessResult,
     StdIoModeRead,
     StdIoModeWrite,

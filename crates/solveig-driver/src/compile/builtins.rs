@@ -78,7 +78,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         char_ty.clone(),
     );
     let char_list = Ty::make_app(list.clone(), char_ty.clone());
-    let string_list = Ty::make_app(list, string.clone());
+    let string_list = Ty::make_app(list.clone(), string.clone());
     let e_id = names.fresh_tyvar("e");
     let f_id = names.fresh_tyvar("f");
     let a_id = names.fresh_tyvar("a");
@@ -108,6 +108,58 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             socket.clone(),
         ),
         int.clone(),
+    );
+    let header = Ty::make_app(
+        Ty::make_app(
+            Ty::make_con_id(prelude_pair_tycon_id(names)),
+            string.clone(),
+        ),
+        string.clone(),
+    );
+    let headers = Ty::make_app(list, header);
+    let maybe_bytes = Ty::make_app(
+        Ty::make_con_id(prelude_maybe_tycon_id(names)),
+        bytes.clone(),
+    );
+    let request_body = Ty::make_app(
+        Ty::make_app(
+            Ty::make_con_id(prelude_pair_tycon_id(names)),
+            headers.clone(),
+        ),
+        maybe_bytes,
+    );
+    let request_url = Ty::make_app(
+        Ty::make_app(
+            Ty::make_con_id(prelude_pair_tycon_id(names)),
+            string.clone(),
+        ),
+        request_body,
+    );
+    let http_request = Ty::make_app(
+        Ty::make_app(
+            Ty::make_con_id(prelude_pair_tycon_id(names)),
+            string.clone(),
+        ),
+        request_url,
+    );
+    let redirect_limits = Ty::make_app(
+        Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), int.clone()),
+        int.clone(),
+    );
+    let body_limits = Ty::make_app(
+        Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), int.clone()),
+        redirect_limits,
+    );
+    let http_limits = Ty::make_app(
+        Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), int.clone()),
+        body_limits,
+    );
+    let http_response = Ty::make_app(
+        Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), int.clone()),
+        Ty::make_app(
+            Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), headers),
+            bytes.clone(),
+        ),
     );
     let handle_specs =
         handles::handle_builtin_specs(names, &int, &string, &bytes, &bool_ty, &io_error);
@@ -434,6 +486,15 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             ),
         ),
         prim_spec("resolveHost", BUILTIN_RESOLVE_HOST, 1, resolve_host),
+        prim_spec(
+            "httpRequestRaw",
+            BUILTIN_HTTP_REQUEST_RAW,
+            2,
+            arr(
+                &[http_request, http_limits],
+                io_of(io_error.clone(), http_response),
+            ),
+        ),
         prim_spec(
             "listen",
             BUILTIN_LISTEN,

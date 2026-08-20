@@ -47,6 +47,7 @@ reportMapped error =
         | GetFileSizeError _ _ => printLine "unexpected-file-size"
         | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
         | RunProcessError _ _ => printLine "unexpected-run-process"
+        | _ => printLine "unexpected-http"
 
 reportRead : IOError -> Task ()
 reportRead error =
@@ -85,6 +86,7 @@ reportRead error =
         | GetFileSizeError _ _ => printLine "unexpected-file-size"
         | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
         | RunProcessError _ _ => printLine "unexpected-run-process"
+        | _ => printLine "unexpected-http"
 
 reportWrite : IOError -> Task ()
 reportWrite error =
@@ -123,6 +125,7 @@ reportWrite error =
         | GetFileSizeError _ _ => printLine "unexpected-file-size"
         | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
         | RunProcessError _ _ => printLine "unexpected-run-process"
+        | _ => printLine "unexpected-http"
 
 reportAppend : IOError -> Task ()
 reportAppend error =
@@ -161,6 +164,7 @@ reportAppend error =
         | GetFileSizeError _ _ => printLine "unexpected-file-size"
         | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
         | RunProcessError _ _ => printLine "unexpected-run-process"
+        | _ => printLine "unexpected-http"
 
 releaseResource : String -> Task ()
 releaseResource name = printLine (appendString "release " name)

@@ -1,0 +1,7 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+url: https://example.com/releases
+chunks: [3, 3, 1]
+header: Just "v1"

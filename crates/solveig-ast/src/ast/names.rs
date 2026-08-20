@@ -358,6 +358,13 @@ pub const PRELUDE_IO_ERROR_GET_FILE_SIZE_NAME: &str = "prelude.builtins.GetFileS
 pub const PRELUDE_IO_ERROR_GET_MODIFICATION_TIME_NAME: &str =
     "prelude.builtins.GetModificationTimeError";
 pub const PRELUDE_IO_ERROR_RUN_PROCESS_NAME: &str = "prelude.builtins.RunProcessError";
+pub const PRELUDE_IO_ERROR_HTTP_TRANSPORT_NAME: &str = "prelude.builtins.HttpTransportError";
+pub const PRELUDE_IO_ERROR_HTTP_TLS_NAME: &str = "prelude.builtins.HttpTlsError";
+pub const PRELUDE_IO_ERROR_HTTP_TIMEOUT_NAME: &str = "prelude.builtins.HttpTimeoutError";
+pub const PRELUDE_IO_ERROR_HTTP_REDIRECT_NAME: &str = "prelude.builtins.HttpRedirectError";
+pub const PRELUDE_IO_ERROR_HTTP_HEADERS_TOO_LARGE_NAME: &str =
+    "prelude.builtins.HttpHeadersTooLarge";
+pub const PRELUDE_IO_ERROR_HTTP_BODY_TOO_LARGE_NAME: &str = "prelude.builtins.HttpBodyTooLarge";
 pub const STD_PROCESS_RESULT_NAME: &str = "std.process.ProcessResult";
 pub const STD_PROCESS_RESULT_CTOR_NAME: &str = "std.process.MkProcessResult";
 pub const STD_IO_MODE_NAME: &str = "std.io.IOMode";
@@ -512,3 +519,4 @@ pub const BUILTIN_BYTES_SPAN_RANGE: BuiltinId = BuiltinId(121);
 pub const BUILTIN_BYTES_SLICE_TO_STRING: BuiltinId = BuiltinId(122);
 pub const BUILTIN_CHAR_TO_CODE_POINT: BuiltinId = BuiltinId(123);
 pub const BUILTIN_CODE_POINT_TO_STRING: BuiltinId = BuiltinId(124);
+pub const BUILTIN_HTTP_REQUEST_RAW: BuiltinId = BuiltinId(125);

@@ -1197,10 +1197,12 @@ closeSocket : Socket -> Task ()
 Prefer `withConnection`, `withListener`, and `withAcceptedConnection`; each
 uses `bracket` to close its owned socket after success, typed failure, defect,
 or interruption. Use raw acquisition and `closeSocket` only when ownership
-must cross a larger scope. The current API is TCP with basic IPv4 resolution,
-not a production HTTP client: it has no TLS, redirect, chunked-transfer, or
-general IPv6 layer. The concurrent downloader example is an intentionally
-constrained demonstration of the machinery.
+must cross a larger scope. The low-level API remains TCP with basic IPv4
+resolution. For HTTP, use `std.http`: it handles content length, chunked
+transfer, redirect policy, verified HTTPS, typed failures, and configurable
+response bounds. `examples/release_radar` combines that client with structured
+concurrency, JSON decoding, and an ETag cache. General IPv6 selection remains
+outside the current surface.
 
 ## 21. Testing IO and concurrent programs
 

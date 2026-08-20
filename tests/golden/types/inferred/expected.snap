@@ -105,6 +105,7 @@ prelude.prim.hPutBytes : Handle -> Bytes -> IO IOError ()
 prelude.prim.hPutStr : Handle -> String -> IO IOError ()
 prelude.prim.hPutStrLn : Handle -> String -> IO IOError ()
 prelude.prim.hSetBuffering : Handle -> BufferMode -> IO IOError ()
+prelude.prim.httpRequestRaw : Pair String (Pair String (Pair [Pair String String] (Maybe Bytes))) -> Pair Int (Pair Int (Pair Int Int)) -> IO IOError (Pair Int (Pair [Pair String String] Bytes))
 prelude.prim.intAdd : Int -> Int -> Int
 prelude.prim.intCompare : Int -> Int -> Ordering
 prelude.prim.intDiv : Int -> Int -> Int
@@ -228,6 +229,55 @@ std.fs.listDirectory : String -> IO IOError [String]
 std.fs.removeFile : String -> IO IOError ()
 std.fs.renameFile : String -> String -> IO IOError ()
 std.fs.setCurrentDirectory : String -> IO IOError ()
+std.http.allHeaderNameChars : [Char] -> Bool
+std.http.asciiCharsEqual : [Char] -> [Char] -> Bool
+std.http.asciiCode : Char -> Int
+std.http.asciiStringEqual : String -> String -> Bool
+std.http.bodyChunks : Int -> Response -> Result HttpError [Bytes]
+std.http.chunksFrom : Int -> Bytes -> Int -> [Bytes]
+std.http.containsCodePoint : Int -> [Int] -> Bool
+std.http.defaultHttpLimits : HttpLimits
+std.http.delete : Url -> Request
+std.http.findHeader : String -> Response -> Maybe String
+std.http.findHeaderIn : String -> [Header] -> Maybe String
+std.http.foldBodyChunks : forall state. Int -> (state -> Bytes -> state) -> state -> Response -> Result HttpError state
+std.http.foldChunksFrom : forall state. Int -> (state -> Bytes -> state) -> state -> Bytes -> Int -> state
+std.http.get : Url -> Request
+std.http.getUrl : Url -> IO HttpError Response
+std.http.head : Url -> Request
+std.http.header : String -> String -> Result HttpError Header
+std.http.headerFromRaw : Pair String String -> Header
+std.http.headerToRaw : Header -> Pair String String
+std.http.isHeaderNameChar : Char -> Bool
+std.http.isSuccessful : Status -> Bool
+std.http.methodText : Method -> String
+std.http.patch : Url -> Request
+std.http.post : Url -> Request
+std.http.put : Url -> Request
+std.http.redirectCount : RedirectPolicy -> Int
+std.http.request : HttpLimits -> Request -> IO HttpError Response
+std.http.responseBody : Response -> Bytes
+std.http.responseFromRaw : Pair Int (Pair [Pair String String] Bytes) -> Response
+std.http.responseHeaders : Response -> [Header]
+std.http.responseStatus : Response -> Status
+std.http.responseText : Response -> Result HttpError String
+std.http.startsWith : String -> String -> Bool
+std.http.statusCode : Status -> Int
+std.http.urlFromString : String -> Result HttpError Url
+std.http.urlToString : Url -> String
+std.http.validHeaderName : String -> Bool
+std.http.validHeaderValue : String -> Bool
+std.http.validHeaderValueChars : [Char] -> Bool
+std.http.validUrlAuthority : [Char] -> Int -> Bool
+std.http.validUrlChars : [Char] -> Bool
+std.http.validUrlTail : String -> Bool
+std.http.validUrlText : String -> Bool
+std.http.validateHeaders : [Header] -> Request -> Result HttpError Request
+std.http.validateRequest : HttpLimits -> Request -> Result HttpError Request
+std.http.validateRequestFields : Request -> Result HttpError Request
+std.http.withBody : Bytes -> Request -> Request
+std.http.withHeader : Header -> Request -> Request
+std.http.withoutBody : Request -> Request
 std.io.appendFile : String -> String -> IO IOError ()
 std.io.hClose : Handle -> IO IOError ()
 std.io.hFlush : Handle -> IO IOError ()

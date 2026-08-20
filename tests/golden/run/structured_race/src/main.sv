@@ -65,6 +65,7 @@ reportError ioError =
         | GetFileSizeError path message => printLine "unexpected file size error"
         | GetModificationTimeError path message => printLine "unexpected modification time error"
         | RunProcessError program message => printLine "unexpected run process error"
+        | _ => printLine "unexpected HTTP error"
 
 main : Task ()
 main = do
