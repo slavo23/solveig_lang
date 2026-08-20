@@ -200,7 +200,7 @@ fn orphan_instance_warning(
     names: &Names,
     file: FileId,
 ) -> Option<TypeError> {
-    if inst.class_module == Some(inst.def_module) || inst.type_module == Some(inst.def_module) {
+    if !inst.is_orphan {
         return None;
     }
 
@@ -747,6 +747,7 @@ pub fn check_and_elab_module(
             def_module: inst.def_module,
             class_module: inst.class_module,
             type_module: inst.type_module,
+            is_orphan: inst.is_orphan,
             context: inst.context.clone(),
             context_evidence,
             head: inst.head.clone(),

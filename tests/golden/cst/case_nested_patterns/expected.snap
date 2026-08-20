@@ -130,7 +130,7 @@ Module @0..250
                 NamePath @205..209
                   Ident @205..209 line=7 col=30 text="left"
                 Whitespace @209..210 line=7 col=34 text=" "
-                Plus @210..211 line=7 col=35 text="+"
+                Operator @210..211 line=7 col=35 text="+"
                 Whitespace @211..212 line=7 col=36 text=" "
                 NamePath @212..217
                   Ident @212..217 line=7 col=37 text="value"

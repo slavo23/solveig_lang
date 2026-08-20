@@ -1,0 +1,8 @@
+[1, 2, 3]
+42
+Just 5
+Just 10
+Just 22
+operators are terms
+Nothing
+EQ

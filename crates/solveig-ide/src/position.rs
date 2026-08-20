@@ -1482,20 +1482,7 @@ fn keyword_token(token: Token) -> bool {
 fn token_is_semantic_reference(token: Token) -> bool {
     matches!(
         token,
-        Token::Ident
-            | Token::UpperIdent
-            | Token::Operator
-            | Token::Plus
-            | Token::Minus
-            | Token::Star
-            | Token::Slash
-            | Token::Percent
-            | Token::EqEq
-            | Token::Less
-            | Token::Greater
-            | Token::LessEq
-            | Token::GreaterEq
-            | Token::Cons
+        Token::Ident | Token::UpperIdent | Token::Operator | Token::Minus | Token::Cons
     )
 }
 

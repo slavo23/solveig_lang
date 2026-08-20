@@ -56,6 +56,7 @@ mod entailment_tests {
             def_module: ModuleId(0),
             class_module: Some(ModuleId(0)),
             type_module: Some(ModuleId(0)),
+            is_orphan: false,
             context,
             context_evidence: Vec::new(),
             head,

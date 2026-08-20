@@ -14,6 +14,10 @@ const PRELUDE_LIST_SRC: &str = include_str!("../../../lib/prelude/src/prelude/li
 const PRELUDE_PRIM_SRC: &str = include_str!("../../../lib/prelude/src/prelude/prim.sv");
 const PRELUDE_TYPECLASSES_SRC: &str =
     include_str!("../../../lib/prelude/src/prelude/typeclasses.sv");
+const PRELUDE_FUNCTION_SRC: &str = include_str!("../../../lib/prelude/src/prelude/function.sv");
+const PRELUDE_CONTROL_SRC: &str = include_str!("../../../lib/prelude/src/prelude/control.sv");
+const PRELUDE_SHOW_SRC: &str = include_str!("../../../lib/prelude/src/prelude/show.sv");
+const PRELUDE_INSTANCES_SRC: &str = include_str!("../../../lib/prelude/src/prelude/instances.sv");
 const STD_BYTES_SRC: &str = include_str!("../../../lib/std/src/std/bytes.sv");
 const STD_CHANNEL_SRC: &str = include_str!("../../../lib/std/src/std/channel.sv");
 const STD_ENV_SRC: &str = include_str!("../../../lib/std/src/std/env.sv");
@@ -41,6 +45,10 @@ pub(crate) fn embedded_library_source(module: &str) -> Option<&'static str> {
         "prelude.list" => Some(PRELUDE_LIST_SRC),
         "prelude.prim" => Some(PRELUDE_PRIM_SRC),
         "prelude.typeclasses" => Some(PRELUDE_TYPECLASSES_SRC),
+        "prelude.function" => Some(PRELUDE_FUNCTION_SRC),
+        "prelude.control" => Some(PRELUDE_CONTROL_SRC),
+        "prelude.show" => Some(PRELUDE_SHOW_SRC),
+        "prelude.instances" => Some(PRELUDE_INSTANCES_SRC),
         "std.bytes" => Some(STD_BYTES_SRC),
         "std.channel" => Some(STD_CHANNEL_SRC),
         "std.env" => Some(STD_ENV_SRC),
@@ -73,6 +81,10 @@ pub(crate) fn embedded_library_modules(package: &str) -> &'static [&'static str]
             "prelude/list.sv",
             "prelude/prim.sv",
             "prelude/typeclasses.sv",
+            "prelude/function.sv",
+            "prelude/control.sv",
+            "prelude/show.sv",
+            "prelude/instances.sv",
         ],
         "std" => &[
             "std/bytes.sv",

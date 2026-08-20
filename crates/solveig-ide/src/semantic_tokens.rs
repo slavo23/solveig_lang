@@ -174,16 +174,7 @@ fn syntax_token_kind(kind: &Token) -> Option<SourceSemanticTokenKind> {
         | Token::Cons
         | Token::Pipe
         | Token::Dot
-        | Token::Plus
         | Token::Minus
-        | Token::Star
-        | Token::Slash
-        | Token::Percent
-        | Token::EqEq
-        | Token::Less
-        | Token::Greater
-        | Token::LessEq
-        | Token::GreaterEq
         | Token::Backtick
         | Token::Operator
         | Token::ReservedOp => Some(SourceSemanticTokenKind::Operator),

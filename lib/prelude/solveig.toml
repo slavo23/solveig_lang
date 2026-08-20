@@ -4,4 +4,12 @@ version = "0.1.0"
 
 [language]
 entry = "prelude.typeclasses"
-implicit = ["prelude.builtins", "prelude.list", "prelude.typeclasses"]
+implicit = [
+    "prelude.builtins",
+    "prelude.list",
+    "prelude.typeclasses",
+    "prelude.function",
+    "prelude.control",
+    "prelude.show",
+    "prelude.instances",
+]

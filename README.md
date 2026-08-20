@@ -391,7 +391,7 @@ Solveig currently supports:
 - operator sections and backticked infix names
 - `Int`, `Float`, `Char`, `String`, `Bool`, and `()`
 - list syntax: `[]`, `::`, and `[1, 2, 3]`
-- `Eq`, `Ord`, `Num`, `Fractional`, `Functor`, `Applicative`, `Monad`, and `Show`
+- `Eq`, `PartialOrd`, `Ord`, `Num`, `Fractional`, `Functor`, `Applicative`, `Monad`, and `Show`
 - value display through `Show`
 - typed monadic `IO e a` with the `Task a = IO IOError a` application alias
 - indentation-sensitive `do` notation over the generic `Monad` class
@@ -486,6 +486,10 @@ Ordinary modules implicitly import:
 - `prelude.builtins`
 - `prelude.list`
 - `prelude.typeclasses`
+- `prelude.function`
+- `prelude.control`
+- `prelude.show`
+- `prelude.instances`
 
 The low-level `prelude.prim` module exists for primitive operations, but it is
 not imported implicitly. Most programs should use the public Prelude and

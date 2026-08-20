@@ -187,6 +187,9 @@ fn hover_covers_parenthesized_operator_definitions_and_references() {
 
 (++) = append
 
+prepend : forall a. a -> [a] -> [a]
+prepend = (::)
+
 main : [Int]
 main = [1] ++ [2]
 "#;
@@ -226,6 +229,13 @@ main = [1] ++ [2]
         reference_hover.span(),
         reference_operator..reference_operator + "++".len()
     );
+
+    let cons_operator = offset_in_line(source, "prepend = (::)", "::");
+    let cons_hover = compilation
+        .hover_info(&file, cons_operator)
+        .expect("first-class cons operator should hover");
+    assert_contains(cons_hover.signature(), "Cons :");
+    assert_contains(cons_hover.signature(), "a -> [a] -> [a]");
 
     drop(project_root);
 }
@@ -1343,8 +1353,6 @@ fn hover_covers_direct_prelude_imported_references() {
     for (line, needle, expected) in [
         ("class Eq a where", "a where", "a : *"),
         ("    (==) : a -> a -> Bool", "a", "a : *"),
-        ("instance Eq a => Eq (List a) where", "a =>", "a : *"),
-        ("instance Eq a => Eq (List a) where", "a)", "a : *"),
         ("class Functor f where", "f", "f : * -> *"),
         (
             "    fmap : forall a b. (a -> b) -> f a -> f b",
@@ -1366,6 +1374,37 @@ fn hover_covers_direct_prelude_imported_references() {
             "f where",
             "f : * -> *",
         ),
+        (
+            "mconcat xs = foldr combine empty xs",
+            "foldr",
+            "foldr : forall a b. (a -> b -> b) -> b -> [a] -> b",
+        ),
+    ] {
+        let hover = compilation
+            .hover_info(
+                &typeclasses_file,
+                offset_in_line(&typeclasses_source, line, needle),
+            )
+            .unwrap_or_else(|| panic!("`{needle}` in `{line}` should hover"));
+        assert_eq!(hover.signature(), expected);
+    }
+
+    let instances_file = workspace_root.join("lib/prelude/src/prelude/instances.sv");
+    let instances_source =
+        fs::read_to_string(&instances_file).expect("instances source should load");
+    let mut instances_compilation = Compilation::for_source_file(&instances_file);
+    let instances_result = instances_compilation
+        .check(true)
+        .expect("direct instances check should finish");
+    assert!(
+        instances_result.success(),
+        "direct instances diagnostics: {:?}",
+        instances_result.diagnostics()
+    );
+
+    for (line, needle, expected) in [
+        ("instance Eq a => Eq (List a) where", "a =>", "a : *"),
+        ("instance Eq a => Eq (List a) where", "a)", "a : *"),
         ("instance Functor (Pair e) where", "e)", "e : *"),
         (
             "    compare x y = intCompare x y",
@@ -1387,16 +1426,11 @@ fn hover_covers_direct_prelude_imported_references() {
             "map",
             "map : forall a b. (a -> b) -> [a] -> [b]",
         ),
-        (
-            "mconcat xs = foldr appendS empty xs",
-            "foldr",
-            "foldr : forall a b. (a -> b -> b) -> b -> [a] -> b",
-        ),
     ] {
-        let hover = compilation
+        let hover = instances_compilation
             .hover_info(
-                &typeclasses_file,
-                offset_in_line(&typeclasses_source, line, needle),
+                &instances_file,
+                offset_in_line(&instances_source, line, needle),
             )
             .unwrap_or_else(|| panic!("`{needle}` in `{line}` should hover"));
         assert_eq!(hover.signature(), expected);

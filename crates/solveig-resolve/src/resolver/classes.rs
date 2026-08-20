@@ -593,6 +593,12 @@ impl<'a> Resolver<'a> {
                 def_module: cx.module_id,
                 class_module: class_def_id.map(|id| id.module),
                 type_module,
+                is_orphan: {
+                    let package = self.modules.package(cx.module_id);
+                    class_def_id.is_none_or(|id| self.modules.package(id.module) != package)
+                        && type_module
+                            .is_none_or(|module| self.modules.package(module) != package)
+                },
                 context: checked_context,
                 context_evidence: Vec::new(),
                 head: checked_head,

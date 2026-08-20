@@ -354,11 +354,11 @@ impl CstToAst<'_> {
             return Ok(None);
         }
 
-        if !self.child_is_operator(NodeOrToken::Token(*operator), false) {
+        if !self.child_is_operator(NodeOrToken::Token(*operator), true) {
             return Ok(None);
         }
 
-        let symbol = self.operator_symbol_from_token(*operator, false)?;
+        let symbol = self.operator_symbol_from_token(*operator, true)?;
         Ok(Some(sp(
             symbol,
             self.cst.token(*left_paren).start(),

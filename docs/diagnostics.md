@@ -65,7 +65,7 @@ runtime failures are not catchable by program code.
 | `TC0015` | Error | Instance method implementation does not match the class method type. |
 | `TC0016` | Error | Non-exhaustive pattern match. |
 | `TC0017` | Warning | Unreachable pattern. Earlier arms already cover this arm. |
-| `TC0018` | Warning | Orphan instance. The instance is defined outside both the class module and type module. |
+| `TC0018` | Warning | Orphan instance. The instance is defined outside both the class package and type package. |
 | `TC0019` | Error | Missing instance method and no usable class default. |
 | `TC0020` | Error | Float literal pattern. Float patterns are not supported. |
 

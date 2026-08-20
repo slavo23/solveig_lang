@@ -165,19 +165,7 @@ impl Parser<'_> {
     pub(super) fn token_is_section_operator(token: &Token) -> bool {
         matches!(
             token,
-            Token::Operator
-                | Token::Plus
-                | Token::Minus
-                | Token::Star
-                | Token::Slash
-                | Token::Percent
-                | Token::EqEq
-                | Token::Less
-                | Token::Greater
-                | Token::LessEq
-                | Token::GreaterEq
-                | Token::Cons
-                | Token::Dot
+            Token::Operator | Token::Minus | Token::Cons | Token::Dot
         )
     }
 

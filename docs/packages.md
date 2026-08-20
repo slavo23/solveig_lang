@@ -234,6 +234,11 @@ resolution. Dependency cycles and duplicate package names are reported as
 package errors. Unchanged packages are cached independently, so editing local
 application source does not require rechecking an unchanged dependency.
 
+Typeclass instance ownership is package-level. An instance may live in any
+module of the package that defines its class or its outer type constructor, so
+a focused `instances` module remains coherent. An instance defined in an
+unrelated package is still an orphan and produces `TC0018`.
+
 ## Project discovery and scratch files
 
 The command-line `--project-root` should point to the directory containing

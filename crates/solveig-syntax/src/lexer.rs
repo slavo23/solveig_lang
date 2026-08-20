@@ -6,8 +6,6 @@ use text_size::{TextRange, TextSize};
 
 use solveig_base::{FileId, FileSpan, Span, ice};
 
-use crate::ast::{Assoc, Fixity};
-
 #[derive(Logos, Debug, Clone, Copy, PartialEq, Eq)]
 enum RawToken {
     // Keywords (must appear before identifiers).
@@ -215,16 +213,7 @@ pub enum Token {
     RParen,
     LBrack,
     RBrack,
-    Plus,
     Minus,
-    Star,
-    Slash,
-    Percent,
-    EqEq,
-    Less,
-    Greater,
-    LessEq,
-    GreaterEq,
     Hole,
     Underscore,
     Semicolon,
@@ -411,21 +400,12 @@ fn map_raw_token(raw: RawToken, slice: &str) -> Token {
             "<-" => Token::BindArrow,
             "=>" => Token::FatArrow,
             "::" => Token::Cons,
-            "==" => Token::EqEq,
-            ">=" => Token::GreaterEq,
-            "<=" => Token::LessEq,
             "??" => Token::Hole,
             "=" => Token::Eq,
             ":" => Token::Colon,
             "." => Token::Dot,
             "|" => Token::Pipe,
-            "+" => Token::Plus,
             "-" => Token::Minus,
-            "*" => Token::Star,
-            "/" => Token::Slash,
-            "%" => Token::Percent,
-            ">" => Token::Greater,
-            "<" => Token::Less,
             _ => {
                 if is_reserved_operator(slice) {
                     Token::ReservedOp
@@ -636,27 +616,3 @@ pub fn parser_tokens(tokens: Vec<PosToken>) -> Vec<PosToken> {
 
 #[cfg(test)]
 mod tests;
-
-pub fn builtin_fixity(tok: &Token) -> Option<Fixity> {
-    match tok {
-        Token::EqEq | Token::Less | Token::Greater | Token::LessEq | Token::GreaterEq => {
-            Some(Fixity {
-                prec: 4,
-                assoc: Assoc::None,
-            })
-        }
-        Token::Cons => Some(Fixity {
-            prec: 5,
-            assoc: Assoc::Right,
-        }),
-        Token::Plus | Token::Minus => Some(Fixity {
-            prec: 6,
-            assoc: Assoc::Left,
-        }),
-        Token::Star | Token::Slash | Token::Percent => Some(Fixity {
-            prec: 7,
-            assoc: Assoc::Left,
-        }),
-        _ => None,
-    }
-}

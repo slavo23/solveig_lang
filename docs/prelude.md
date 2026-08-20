@@ -13,6 +13,10 @@ Every ordinary module implicitly imports:
 - `prelude.builtins`
 - `prelude.list`
 - `prelude.typeclasses`
+- `prelude.function`
+- `prelude.control`
+- `prelude.show`
+- `prelude.instances`
 
 `prelude.prim` is the compiler bridge used to implement the public libraries.
 Application code should import `std.*`, not `prelude.prim`, unless it is
@@ -117,25 +121,39 @@ programs never need them.
 
 ## Operators and typeclasses
 
-The Prelude defines the ordinary numeric and comparison operators through
-`Eq`, `Ord`, `Num`, and `Fractional`, plus `Show` for rendering values.
+Ordinary operator spellings are Prelude terms, not parser-owned builtins. They
+can be passed point-free, used in sections, imported, shadowed, and assigned
+fixities like named functions. `(::)` is also a first-class value and resolves
+to the same `Cons` constructor used by list syntax.
+
+The comparison hierarchy separates partial and total orders:
 
 ```solveig
 (==), (/=) : forall a. Eq a => a -> a -> Bool
-(<), (<=), (>), (>=) : forall a. Ord a => a -> a -> Bool
+(<), (<=), (>), (>=) : forall a. PartialOrd a => a -> a -> Bool
+partialCompare : forall a. PartialOrd a => a -> a -> Maybe Ordering
+compare : forall a. Ord a => a -> a -> Ordering
 (+), (-), (*) : forall a. Num a => a -> a -> a
 (/) : forall a. Fractional a => a -> a -> a
 show : forall a. Show a => a -> String
 ```
 
+`Float` has `Eq` and `PartialOrd`, but deliberately has no `Ord`: a comparison
+with NaN produces `Nothing`, and ordinary relational operators return `False`.
+Use `totalCompareFloat` only when sorting or another deterministic IEEE total
+order is explicitly required. Signed zeroes remain equal under ordinary Float
+equality and partial comparison.
+
 `Functor`, `Applicative`, and `Monad` are universal because `do` notation
 resolves through `bind` and `thenM`. Their common combinators include `fmap`,
 `pure`, `apply`, `liftA2`, `join`, `composeK`, `mapM`, `sequence`, `filterM`,
-`seqIO`, and `mapIO_`.
+`seqIO`, and `mapIO_`. Operator aliases include `<$>`, `<*>`, `<*`, `*>`,
+`>>=`, and `>>`. Function composition and low-precedence application are `(.)`
+and `($)`.
 
-`Semigroup` and `Monoid` currently remain here with `appendS`, `empty`, and
-`mconcat`; they are stable general-purpose abstractions rather than host-domain
-operations.
+`Semigroup` and `Monoid` currently remain here with `combine`, `empty`, and
+`mconcat`; `(<>)` is the operator alias for `combine`. They are stable
+general-purpose abstractions rather than host-domain operations.
 
 ## Strings and booleans
 

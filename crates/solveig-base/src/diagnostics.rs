@@ -536,7 +536,7 @@ impl TypeError {
             )
             .with_label(Label::primary(
                 *span,
-                "this instance is defined outside both the class and type modules",
+                "this instance is defined outside both the class and type packages",
             ))
             .with_note(
                 "orphan instances are globally visible and can make instance selection less predictable",

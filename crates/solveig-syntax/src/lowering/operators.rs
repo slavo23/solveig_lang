@@ -1,18 +1,9 @@
 use super::*;
 
 impl CstToAst<'_> {
-    pub(super) fn fixed_operator_text(token: &Token) -> Option<&'static str> {
+    pub(super) fn special_operator_text(token: &Token) -> Option<&'static str> {
         match token {
-            Token::Plus => Some("+"),
             Token::Minus => Some("-"),
-            Token::Star => Some("*"),
-            Token::Slash => Some("/"),
-            Token::Percent => Some("%"),
-            Token::EqEq => Some("=="),
-            Token::Less => Some("<"),
-            Token::Greater => Some(">"),
-            Token::LessEq => Some("<="),
-            Token::GreaterEq => Some(">="),
             Token::Cons => Some("::"),
             Token::Dot => Some("."),
             _ => None,
@@ -28,7 +19,7 @@ impl CstToAst<'_> {
         let (text, is_cons_syntax) = match source_token.kind {
             Token::Operator => (self.token_text(token), false),
             ref kind => {
-                let Some(text) = Self::fixed_operator_text(kind) else {
+                let Some(text) = Self::special_operator_text(kind) else {
                     return Err(self.error_at_token(
                         token,
                         format!("expected operator, got {}", self.describe_token(token)),
@@ -107,7 +98,7 @@ impl CstToAst<'_> {
             NodeOrToken::Token(token) => {
                 let kind = &self.cst.token(token).kind;
                 matches!(kind, Token::Operator)
-                    || Self::fixed_operator_text(kind)
+                    || Self::special_operator_text(kind)
                         .is_some_and(|text| allow_cons_syntax || text != "::")
             }
         }

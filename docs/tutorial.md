@@ -325,8 +325,10 @@ import orders.pricing
 import orders.pricing as pricing
 ```
 
-Every normal module implicitly imports `prelude.builtins`, `prelude.list`, and
-`prelude.typeclasses`. Domain APIs live in the non-implicit `std` package:
+Every normal module implicitly imports the focused `prelude.builtins`,
+`prelude.list`, `prelude.typeclasses`, `prelude.function`, `prelude.control`,
+`prelude.show`, and `prelude.instances` modules. Domain APIs live in the
+non-implicit `std` package:
 
 ```solveig
 import std.io(readFile)
@@ -401,9 +403,17 @@ renderPair (MkPair left right) =
     appendString (render left) (appendString " / " (render right))
 ```
 
-The standard classes include `Eq`, `Ord`, `Num`, `Fractional`, `Show`,
+The standard classes include `Eq`, `PartialOrd`, `Ord`, `Num`, `Fractional`, `Show`,
 `Functor`, `Applicative`, `Monad`, `Semigroup`, and `Monoid`. Typeclass
 resolution is static; there is no runtime reflection or method lookup by text.
+
+`PartialOrd` is intentionally separate from `Ord`. In particular, Float is
+partially ordered because NaN is unordered:
+
+```solveig
+partialCompare (0.0 / 0.0) 1.0  -- Nothing
+totalCompareFloat (0.0 / 0.0) 1.0  -- explicit deterministic IEEE ordering
+```
 
 `Show` controls ordinary value rendering:
 

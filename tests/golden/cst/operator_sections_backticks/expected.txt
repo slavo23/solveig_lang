@@ -27,7 +27,7 @@ Module @0..166
         NamePath @26..27
           Ident @26..27 line=2 col=10 text="x"
         Whitespace @27..28 line=2 col=11 text=" "
-        Plus @28..29 line=2 col=12 text="+"
+        Operator @28..29 line=2 col=12 text="+"
         Whitespace @29..30 line=2 col=13 text=" "
         NamePath @30..31
           Ident @30..31 line=2 col=14 text="y"
@@ -44,7 +44,7 @@ Module @0..166
           AtomExpr @40..41
             Int @40..41 line=3 col=8 text="1"
           Whitespace @41..42 line=3 col=9 text=" "
-          Plus @42..43 line=3 col=10 text="+"
+          Operator @42..43 line=3 col=10 text="+"
         RParen @43..44 line=3 col=11 text=")"
     Newline @44..45 line=3 col=12 text="\n"
     VSemi @45..45 line=4 col=0 synthetic text=""
@@ -55,7 +55,7 @@ Module @0..166
       Whitespace @52..53 line=4 col=7 text=" "
       OperatorSection @53..58
         LParen @53..54 line=4 col=8 text="("
-        Plus @54..55 line=4 col=9 text="+"
+        Operator @54..55 line=4 col=9 text="+"
         Whitespace @55..56 line=4 col=10 text=" "
         AtomExpr @56..57
           Int @56..57 line=4 col=11 text="1"
@@ -138,7 +138,7 @@ Module @0..166
             NamePath @153..157
               Ident @153..157 line=9 col=31 text="left"
             Whitespace @157..158 line=9 col=35 text=" "
-            Plus @158..159 line=9 col=36 text="+"
+            Operator @158..159 line=9 col=36 text="+"
             Whitespace @159..160 line=9 col=37 text=" "
             NamePath @160..165
               Ident @160..165 line=9 col=38 text="right"

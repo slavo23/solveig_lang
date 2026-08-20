@@ -1,9 +1,5 @@
-import orphanLib(ForeignBox, ForeignShow)
-
-instance ForeignShow ForeignBox where
-    rank box =
-        case box of
-            ForeignBox x => x
+instance Semigroup Int where
+    combine x y = x + y
 
 main : Int
-main = rank (ForeignBox 5)
+main = combine 2 3

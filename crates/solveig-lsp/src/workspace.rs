@@ -1347,13 +1347,13 @@ main = count [1, 2, 3]
 
     #[test]
     fn shipped_prelude_file_opens_as_canonical_module() {
-        let source = workspace_root().join("lib/prelude/src/prelude/typeclasses.sv");
-        let text = fs::read_to_string(&source).expect("shipped typeclasses source should load");
+        let source = workspace_root().join("lib/prelude/src/prelude/instances.sv");
+        let text = fs::read_to_string(&source).expect("shipped instances source should load");
         let uri = Url::from_file_path(&source).expect("test path should become a file URI");
         let target_line = text
             .lines()
             .position(|line| line.contains("compare x y = intCompare x y"))
-            .expect("typeclasses source should contain the Int Ord instance");
+            .expect("instances source should contain the Int Ord instance");
         let target_character = text
             .lines()
             .nth(target_line)
@@ -1399,16 +1399,11 @@ main = count [1, 2, 3]
                 "map",
                 "map : forall a b. (a -> b) -> [a] -> [b]",
             ),
-            (
-                "mconcat xs = foldr appendS empty xs",
-                "foldr",
-                "foldr : forall a b. (a -> b -> b) -> b -> [a] -> b",
-            ),
         ] {
             let line = text
                 .lines()
                 .position(|line| line.contains(line_text))
-                .unwrap_or_else(|| panic!("typeclasses source should contain `{line_text}`"));
+                .unwrap_or_else(|| panic!("instances source should contain `{line_text}`"));
             let character = text
                 .lines()
                 .nth(line)

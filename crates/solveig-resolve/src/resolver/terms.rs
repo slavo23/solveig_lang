@@ -170,6 +170,22 @@ impl<'a> Resolver<'a> {
         Some(DefId { module, name })
     }
 
+    fn is_list_cons_name_ref(&self, name_ref: &NameRef) -> bool {
+        matches!(name_ref.segments.as_slice(), [name] if self.symbol_text(*name) == "::")
+    }
+
+    fn resolve_list_cons_value(
+        &mut self,
+        source_span: FileSpan,
+    ) -> TermExpr<Span> {
+        if let Some(def_id) = self.prelude_list_cons_def_id() {
+            self.record_resolution(source_span, def_id);
+            self.qualified_def_name(def_id);
+        }
+
+        TermExpr::Con(prelude_list_cons_ctor_id(self.names))
+    }
+
     fn section_param_expr(
         &mut self,
         source_span: SourceSpan,
@@ -424,6 +440,9 @@ impl<'a> Resolver<'a> {
         let node = match &sf.0 {
             SurfaceExpr::Unit => TermExpr::Unit,
             SurfaceExpr::Hole => TermExpr::Hole,
+            SurfaceExpr::Var(var_name) if self.is_list_cons_name_ref(&var_name.0) => {
+                self.resolve_list_cons_value(self.file_span(cx, var_name.1))
+            }
             SurfaceExpr::Var(var_name) => TermExpr::Var(self.resolve_term_ref_with_binders(
                 &var_name.0,
                 self.file_span(cx, var_name.1),

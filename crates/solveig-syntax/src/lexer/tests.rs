@@ -62,6 +62,19 @@ fn nested_block_comment_is_one_lossless_trivia_token() {
 }
 
 #[test]
+fn ordinary_operator_spellings_share_the_generic_operator_token() {
+    let source = "+ * / % == < > <= >= <$> <*> >>= <> $";
+    let tokens = parser_tokens(lex_test_source(source));
+    let operators = tokens
+        .iter()
+        .filter(|token| !token.is_synthetic() && !matches!(token.kind, Token::Eof))
+        .collect::<Vec<_>>();
+
+    assert!(!operators.is_empty());
+    assert!(operators.iter().all(|token| token.kind == Token::Operator));
+}
+
+#[test]
 fn all_repository_solveig_sources_round_trip_through_tokens() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

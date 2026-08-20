@@ -244,6 +244,12 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             binary(float.clone(), bool_ty.clone()),
         ),
         prim_spec(
+            "floatTotalCompare",
+            BUILTIN_FLOAT_TOTAL_COMPARE,
+            2,
+            binary(float.clone(), ordering.clone()),
+        ),
+        prim_spec(
             "intToFloat",
             BUILTIN_INT_TO_FLOAT,
             1,

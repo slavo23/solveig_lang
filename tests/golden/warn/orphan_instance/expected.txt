@@ -1,12 +1,12 @@
 5
-[TC0018] Warning: orphan instance for `orphanLib.ForeignShow ForeignBox`
-   ╭─[ $WORKSPACE/tests/golden/warn/orphan_instance/src/main.sv:3:1 ]
+[TC0018] Warning: orphan instance for `prelude.typeclasses.Semigroup Int`
+   ╭─[ $WORKSPACE/tests/golden/warn/orphan_instance/src/main.sv:1:1 ]
    │
- 3 │ ╭─▶ instance ForeignShow ForeignBox where
+ 1 │ ╭─▶ instance Semigroup Int where
    ┆ ┆   
- 7 │ ├─▶ 
+ 3 │ ├─▶ 
    │ │      
-   │ ╰────── this instance is defined outside both the class and type modules
+   │ ╰────── this instance is defined outside both the class and type packages
    │     
    │     Note: orphan instances are globally visible and can make instance selection less predictable
 ───╯

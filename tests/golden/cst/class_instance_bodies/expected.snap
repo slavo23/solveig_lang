@@ -119,7 +119,7 @@ Module @0..238
         NamePath @188..189
           Ident @188..189 line=7 col=19 text="x"
         Whitespace @189..190 line=7 col=20 text=" "
-        EqEq @190..192 line=7 col=21 text="=="
+        Operator @190..192 line=7 col=21 text="=="
         Whitespace @192..193 line=7 col=23 text=" "
         AtomExpr @193..194
           Int @193..194 line=7 col=24 text="0"
@@ -140,7 +140,7 @@ Module @0..238
         NamePath @212..213
           Ident @212..213 line=8 col=17 text="y"
         Whitespace @213..214 line=8 col=18 text=" "
-        EqEq @214..216 line=8 col=19 text="=="
+        Operator @214..216 line=8 col=19 text="=="
         Whitespace @216..217 line=8 col=21 text=" "
         AtomExpr @217..218
           Int @217..218 line=8 col=22 text="0"

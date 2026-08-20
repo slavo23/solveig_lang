@@ -364,18 +364,9 @@ impl<'source> Parser<'source> {
         }
     }
 
-    fn fixed_operator_text(token: &Token) -> Option<&'static str> {
+    fn special_operator_text(token: &Token) -> Option<&'static str> {
         match token {
-            Token::Plus => Some("+"),
             Token::Minus => Some("-"),
-            Token::Star => Some("*"),
-            Token::Slash => Some("/"),
-            Token::Percent => Some("%"),
-            Token::EqEq => Some("=="),
-            Token::Less => Some("<"),
-            Token::Greater => Some(">"),
-            Token::LessEq => Some("<="),
-            Token::GreaterEq => Some(">="),
             Token::Cons => Some("::"),
             Token::Dot => Some("."),
             _ => None,
@@ -386,7 +377,7 @@ impl<'source> Parser<'source> {
         match self.current_kind() {
             Token::Operator => Some((self.current_source_text(), false)),
             token => {
-                Self::fixed_operator_text(token).map(|text| (text, matches!(token, Token::Cons)))
+                Self::special_operator_text(token).map(|text| (text, matches!(token, Token::Cons)))
             }
         }
     }
@@ -419,7 +410,7 @@ impl<'source> Parser<'source> {
 
     fn parse_parenthesized_operator_name(&mut self) -> Result<(), ParseError> {
         self.expect(&Token::LParen)?;
-        self.expect_operator_span(false)?;
+        self.expect_operator_span(true)?;
         self.expect(&Token::RParen)?;
         Ok(())
     }
@@ -431,8 +422,8 @@ impl<'source> Parser<'source> {
 
         self.peek_kind(1).is_some_and(|kind| match kind {
             Token::Operator => true,
-            other => Self::fixed_operator_text(other)
-                .is_some_and(|text| text != "::" && !text.starts_with(':')),
+            other => Self::special_operator_text(other)
+                .is_some_and(|text| !text.starts_with(':') || text == "::"),
         }) && self
             .peek_kind(2)
             .is_some_and(|kind| matches!(kind, Token::RParen))

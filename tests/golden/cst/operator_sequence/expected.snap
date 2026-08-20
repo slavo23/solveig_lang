@@ -61,7 +61,7 @@ Module @0..99
         NamePath @64..65
           Ident @64..65 line=4 col=12 text="x"
         Whitespace @65..66 line=4 col=13 text=" "
-        Plus @66..67 line=4 col=14 text="+"
+        Operator @66..67 line=4 col=14 text="+"
         Whitespace @67..68 line=4 col=15 text=" "
         NamePath @68..69
           Ident @68..69 line=4 col=16 text="y"
@@ -76,12 +76,12 @@ Module @0..99
         AtomExpr @78..79
           Int @78..79 line=6 col=7 text="1"
         Whitespace @79..80 line=6 col=8 text=" "
-        Plus @80..81 line=6 col=9 text="+"
+        Operator @80..81 line=6 col=9 text="+"
         Whitespace @81..82 line=6 col=10 text=" "
         AtomExpr @82..83
           Int @82..83 line=6 col=11 text="2"
         Whitespace @83..84 line=6 col=12 text=" "
-        Star @84..85 line=6 col=13 text="*"
+        Operator @84..85 line=6 col=13 text="*"
         Whitespace @85..86 line=6 col=14 text=" "
         AtomExpr @86..87
           Int @86..87 line=6 col=15 text="3"

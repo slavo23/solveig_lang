@@ -367,7 +367,7 @@ impl<'a> CstToAst<'a> {
                 *index += 1;
                 self.skip_trivia_children(children, index);
                 let op = self.required_child_token(children.get(*index).copied(), node)?;
-                let symbol = self.operator_symbol_from_token(op, false)?;
+                let symbol = self.operator_symbol_from_token(op, true)?;
                 *index += 1;
                 self.skip_trivia_children(children, index);
                 let end = if let Some(NodeOrToken::Token(close)) = children.get(*index).copied()

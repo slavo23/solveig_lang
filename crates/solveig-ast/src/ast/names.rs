@@ -501,3 +501,4 @@ pub const BUILTIN_MK_STD_GEN: BuiltinId = BuiltinId(110);
 pub const BUILTIN_NEW_STD_GEN: BuiltinId = BuiltinId(111);
 pub const BUILTIN_RANDOM_INT: BuiltinId = BuiltinId(112);
 pub const BUILTIN_RANDOM_RANGE: BuiltinId = BuiltinId(113);
+pub const BUILTIN_FLOAT_TOTAL_COMPARE: BuiltinId = BuiltinId(114);
