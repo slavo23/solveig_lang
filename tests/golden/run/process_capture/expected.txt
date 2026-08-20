@@ -3,6 +3,9 @@ inherited
 alpha
 two words
 child-stderr
+limited-capture
+process-output-limit
+negative-process-limit
 failure-exit=2
 failure-stderr
 run-process-error

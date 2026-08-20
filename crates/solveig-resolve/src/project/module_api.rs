@@ -667,6 +667,7 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "randomInt" => "Produces an integer and the next explicit generator state.",
         "randomRange" => "Produces an integer in an inclusive range and the next generator state.",
         "runProcess" => "Runs a child process and strictly captures its output and exit code.",
+        "runProcessLimited" => "Runs a child process with bounded output capture.",
         "exitWith" => "Terminates the main program with a requested host status after cleanup.",
         "exitSuccess" => "Terminates the main program successfully after cleanup.",
         "exitFailure" => "Terminates the main program unsuccessfully after cleanup.",

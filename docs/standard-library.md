@@ -169,11 +169,16 @@ import std.process
 
 `std.env` provides `getArgs`, `getEnv`, `setEnv`, `getEnvironment`, and
 `getProgName`. `std.process` owns `ProcessResult`, its three accessors,
-`runProcess`, and `exitWith`/`exitSuccess`/`exitFailure`.
+`runProcess`, `runProcessLimited`, and
+`exitWith`/`exitSuccess`/`exitFailure`.
 
 `runProcess` receives an executable and an argument list; it never invokes a
 shell. A non-zero child status is `ProcessResult` data. Failure to start or
-capture the child is `RunProcessError`.
+capture the child is `RunProcessError`. The unrestricted form allocates both
+complete output streams. `runProcessLimited program arguments
+maximumPerStream` bounds each stream in bytes; overflow terminates and reaps
+the child and raises `RunProcessError`. Interrupting the calling thread also
+terminates and reaps its direct child.
 
 ## Channels, threads, and structured tasks
 

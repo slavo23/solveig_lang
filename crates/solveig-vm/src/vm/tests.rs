@@ -711,6 +711,133 @@ fn interruption_cancels_a_blocked_worker_io_registration() {
 }
 
 #[test]
+#[ignore = "invoked as a child-process fixture by the cancellation test"]
+fn cancellable_process_child_fixture() {
+    let ready = std::env::var_os("SOLVEIG_PROCESS_READY")
+        .expect("process fixture should receive its ready-marker path");
+    let survived = std::env::var_os("SOLVEIG_PROCESS_SURVIVED")
+        .expect("process fixture should receive its survival-marker path");
+    std::fs::write(&ready, b"ready").expect("process fixture should publish readiness");
+    std::thread::sleep(std::time::Duration::from_secs(2));
+    std::fs::write(&survived, b"survived").expect("uncancelled process fixture should finish");
+}
+
+#[test]
+fn interruption_terminates_and_reaps_an_active_child_process() {
+    let marker_root =
+        std::env::temp_dir().join(format!("solveig-vm-process-cancel-{}", std::process::id()));
+    let ready = marker_root.join("ready.marker");
+    let survived = marker_root.join("survived.marker");
+    match std::fs::remove_dir_all(&marker_root) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => solveig_base::ice!("failed to clear process-test markers: {error}"),
+    }
+    std::fs::create_dir_all(&marker_root).expect("process-test marker directory should be created");
+
+    let executable = std::env::current_exe().expect("test executable path should be available");
+    let mut environment = std::env::vars().collect::<Vec<_>>();
+    environment.retain(|(name, _value)| {
+        name != "SOLVEIG_PROCESS_READY" && name != "SOLVEIG_PROCESS_SURVIVED"
+    });
+    environment.push((
+        "SOLVEIG_PROCESS_READY".to_string(),
+        ready.to_string_lossy().into_owned(),
+    ));
+    environment.push((
+        "SOLVEIG_PROCESS_SURVIVED".to_string(),
+        survived.to_string_lossy().into_owned(),
+    ));
+
+    let program = program(vec![global("main", int(0))], vec![], &[]);
+    let bytecode = lower_to_bytecode(&program);
+    let mut input = Cursor::new(Vec::new());
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    let input = Mutex::new(&mut input as &mut (dyn BufRead + Send));
+    let output = Mutex::new(&mut output as &mut (dyn Write + Send));
+    let errors = Mutex::new(&mut errors as &mut (dyn Write + Send));
+
+    thread::scope(|scope| {
+        let io = IoSubsystem::start(
+            scope,
+            &input,
+            &output,
+            &errors,
+            (false, false),
+            &[],
+            Path::new("."),
+        )
+        .expect("IO workers should start");
+        let mut runtime = Runtime::new_with_io(bytecode, io);
+        let blocked = runtime.allocate_process();
+        assert_eq!(runtime.run_queue.pop_front(), Some(blocked));
+        let request = runtime
+            .io
+            .issue(
+                blocked,
+                io_worker::IoRequest::Process(io_worker::process::ProcessRequest {
+                    program: executable.display().to_string(),
+                    executable,
+                    arguments: vec![
+                        "--exact".to_string(),
+                        "vm::tests::cancellable_process_child_fixture".to_string(),
+                        "--ignored".to_string(),
+                    ],
+                    cwd: std::env::current_dir()
+                        .expect("process-test working directory should be available"),
+                    environment,
+                    maximum: None,
+                }),
+            )
+            .expect("child-process request should enter the worker pool");
+        runtime.processes[blocked].status = ProcStatus::Blocked(BlockReason::Io(request));
+
+        while !ready.exists() {
+            assert!(
+                runtime
+                    .io
+                    .try_completion()
+                    .expect("process completion polling should succeed")
+                    .is_none(),
+                "child process exited before publishing readiness"
+            );
+            thread::yield_now();
+        }
+
+        let killer = runtime.allocate_process();
+        assert_eq!(runtime.run_queue.pop_front(), Some(killer));
+        let mut killer_process = runtime.take_process(killer);
+        {
+            let mut interpreter = Interpreter::new(&mut runtime, &mut killer_process);
+            interpreter
+                .interrupt_thread(Value::ThreadId(blocked.into_raw().into_u32()))
+                .expect("valid thread interruption should succeed");
+        }
+        runtime.restore_process(killer_process);
+
+        assert!(
+            runtime
+                .io
+                .wait_completion()
+                .expect("cancelled child should produce a discarded completion")
+                .is_none(),
+            "cancelled child completion must not wake its former process"
+        );
+        assert!(
+            !survived.exists(),
+            "cancelled child must not finish its work"
+        );
+        assert_eq!(
+            perform_process_io(&mut runtime, blocked, Value::Unit),
+            StepOutcome::Interrupted(Interruption::Killed)
+        );
+    });
+
+    std::fs::remove_dir_all(&marker_root).expect("process-test markers should be removable");
+}
+
+#[test]
 fn nested_interruption_masks_restore_one_depth_at_a_time() {
     let program = program(vec![global("main", int(0))], Vec::new(), &[]);
     let mut runtime = Runtime::new(lower_to_bytecode(&program));

@@ -680,7 +680,9 @@ this state transition:
 If interruption cancels a blocked request, its request-table entry becomes a
 cancelled tombstone. A blocking worker completion eventually frees it; the
 socket loop instead removes the exact readiness registration and immediately
-acknowledges cancellation. Only a still-owned request can wake a process.
+acknowledges cancellation. A process request additionally signals its owning
+worker to terminate and reap the direct child before completing. Only a
+still-owned request can wake a process.
 
 The VM enforces managed process-stack and heap-object ceilings. The defaults
 are intentionally above the million-bind regression; tests and embedders may
@@ -713,16 +715,20 @@ scheduler installs only after wakeup. This avoids unsafe host-global
 environment or cwd mutation when multiple workers and runtimes exist.
 
 Captured process requests copy the executable, argument vector, logical cwd,
-and complete runtime-local environment before crossing the worker boundary.
-The worker invokes no shell, closes stdin, and strictly captures both output
-streams with `Command::output`; the scheduler later allocates the three-field
-`ProcessResult`. A non-zero status is data, while spawn/wait/UTF-8 failures map
-to `RunProcessError`. Cancellation tombstones the request like other blocking
-work; it does not synchronously kill a child already owned by a worker.
+complete runtime-local environment, and optional per-stream byte limit before
+crossing the worker boundary. The worker invokes no shell, closes stdin, owns
+the direct child through termination and reap, and drains both output pipes
+concurrently. The scheduler later allocates the three-field `ProcessResult`.
+A non-zero status is data, while spawn/wait/UTF-8/limit failures map to
+`RunProcessError`. Cancellation tombstones the language request and signals
+the worker to terminate and reap the child before posting the discarded
+completion.
 
-Dropping the IO subsystem closes every worker queue. Each worker then flushes
-all open output handles before its scoped host thread joins; this also happens
-when its completion receiver has already closed during program exit.
+Dropping the IO subsystem first signals every active child-process request,
+then closes every worker queue. Each worker terminates and reaps its active
+child and flushes all open output handles before its scoped host thread joins;
+this also happens when its completion receiver has already closed during
+program exit.
 
 TCP resources live only in the socket thread's monotonic side table keyed by
 `SocketId`. A Solveig `Socket` value is the typed id, never an OS descriptor or

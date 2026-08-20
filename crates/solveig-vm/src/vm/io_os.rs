@@ -135,9 +135,15 @@ impl Interpreter<'_> {
         &mut self,
         program: Value,
         arguments: Value,
+        maximum: Option<i64>,
     ) -> Result<ProcessRequest, RuntimeError> {
-        let program = self.expect_string_value(program, "runProcess")?;
-        let arguments = self.expect_string_list_value(arguments, "runProcess")?;
+        let builtin = if maximum.is_some() {
+            "runProcessLimited"
+        } else {
+            "runProcess"
+        };
+        let program = self.expect_string_value(program, builtin)?;
+        let arguments = self.expect_string_list_value(arguments, builtin)?;
         let program_path = std::path::Path::new(&program);
         let executable = if program_path.is_absolute() || program_path.components().count() == 1 {
             program_path.to_path_buf()
@@ -155,6 +161,7 @@ impl Interpreter<'_> {
                 .iter()
                 .map(|(name, value)| (name.clone(), value.clone()))
                 .collect(),
+            maximum,
         })
     }
 

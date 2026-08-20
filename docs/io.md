@@ -321,6 +321,7 @@ operation and retains its path(s) plus the platform error message.
 data ProcessResult = MkProcessResult Int String String
 
 runProcess : String -> [String] -> Task ProcessResult
+runProcessLimited : String -> [String] -> Int -> Task ProcessResult
 processExitCode : ProcessResult -> Int
 processStdout : ProcessResult -> String
 processStderr : ProcessResult -> String
@@ -341,12 +342,21 @@ capture failures raise `RunProcessError program message`. Use an absolute path
 for a specific executable. A bare program name uses the host executable search
 path; a relative path containing components resolves against the logical cwd.
 
-Process execution uses the bounded blocking pool and allocates captured strings
-only after the scheduler wakes the calling green thread. Capture is deliberately
-strict and memory-bounded only by runtime/host limits; streaming subprocess IO
-is a later feature and should be used instead for unbounded output once added.
-Interrupting the Solveig caller stops waiting for the result, but the underlying
-blocking host request may finish in the background before its worker is reused.
+`runProcess` has no library capture bound and is suitable only when both output
+streams are trusted to fit memory. `runProcessLimited program arguments
+maximumPerStream` stores at most the non-negative maximum from each of stdout
+and stderr. Either stream exceeding its limit terminates and reaps the child,
+then raises `RunProcessError`; an invalid limit fails before the child starts.
+The maximum counts encoded bytes, so a successful result still decodes both
+complete streams as UTF-8.
+
+Process execution uses the bounded blocking pool. Each active capture drains
+stdout and stderr concurrently so one full pipe cannot deadlock the other, and
+allocates language strings only after the scheduler wakes the caller.
+Interrupting the calling Solveig thread signals the owning worker, which
+terminates and reaps the direct child before reusing that worker. Runtime
+shutdown sends the same cancellation signal. Descendant processes started by
+the child are outside this direct-child ownership contract.
 
 ## Program exit
 
@@ -369,9 +379,8 @@ the program. `exitSuccess` requests zero and `exitFailure` requests one.
 When shutdown completes, all worker-owned output handles—including open file
 handles and the standard output streams—are flushed before library execution
 returns or the CLI exits. Shutdown flush errors cannot replace an exit already
-in progress. A blocking host operation that cannot be cancelled, such as the
-capture-only `runProcess`, may still delay worker-pool shutdown even though its
-green thread has stopped waiting.
+in progress. Active child-process capture is cancelled, terminated, and reaped
+as part of that worker shutdown.
 
 The `Int` is narrowed to the host's 32-bit process status, whose final
 interpretation is operating-system dependent. Values from 0 through 255 are

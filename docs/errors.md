@@ -32,7 +32,8 @@ type `e` or succeed with a value of type `a`. The Prelude alias
 `Task a = IO IOError a` is the conventional type for executable programs.
 `IOError` is closed and names the operation that failed. `ReadFileError` also
 reports an invalid or exceeded limit from `readFileLimited` and
-`readFileBytesLimited`:
+`readFileBytesLimited`; `RunProcessError` likewise reports an invalid or
+exceeded `runProcessLimited` capture bound:
 
 ```solveig
 data IOError =

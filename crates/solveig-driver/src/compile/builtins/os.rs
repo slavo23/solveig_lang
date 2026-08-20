@@ -119,7 +119,19 @@ pub(super) fn os_builtin_specs(
             "runProcess",
             BUILTIN_RUN_PROCESS,
             2,
-            arr(&[string.clone(), string_list], task(process_result)),
+            arr(
+                &[string.clone(), string_list.clone()],
+                task(process_result.clone()),
+            ),
+        ),
+        prim_spec(
+            "runProcessLimited",
+            BUILTIN_RUN_PROCESS_LIMITED,
+            3,
+            arr(
+                &[string.clone(), string_list, int.clone()],
+                task(process_result),
+            ),
         ),
         prim_spec(
             "exitWith",

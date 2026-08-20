@@ -1005,9 +1005,10 @@ Milliseconds are used for `sleep` and `timeout`.
 
 Cancellation does not make every operating-system call synchronously
 cancellable. A cancelled green thread stops waiting, but an already-running
-blocking host request may finish before its worker is reused. Structured scope
-still guarantees that Solveig cleanup and child lifetime are settled before
-the combinator returns.
+file or resolver request may finish before its worker is reused. Captured child
+processes are the important exception: cancellation terminates and reaps the
+direct child. Structured scope still guarantees that Solveig cleanup and child
+lifetime are settled before the combinator returns.
 
 ### Scope a service-style child
 
@@ -1124,7 +1125,7 @@ operation-specific `IOError` constructor.
 
 ```solveig
 runFormatter : String -> Task ProcessResult
-runFormatter path = runProcess "formatter" ["--check", path]
+runFormatter path = runProcessLimited "formatter" ["--check", path] 1048576
 
 reportProcess : ProcessResult -> Task ()
 reportProcess result =
@@ -1135,8 +1136,12 @@ reportProcess result =
 ```
 
 Non-zero status is data, not an `IOError`. Failure to start or capture the
-child is a `RunProcessError`. Output is strictly captured UTF-8, so this API is
-not suitable for unbounded or binary subprocess streams.
+child is a `RunProcessError`. `runProcessLimited` applies its byte limit to
+each of stdout and stderr, terminating and reaping the child on overflow. The
+unrestricted `runProcess` is for trusted small output. Both APIs strictly
+decode UTF-8, so neither is suitable for binary subprocess streams. Killing a
+Solveig thread blocked in either operation also terminates and reaps its direct
+child.
 
 Program exit is also an IO action:
 

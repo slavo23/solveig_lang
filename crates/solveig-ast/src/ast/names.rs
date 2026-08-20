@@ -504,3 +504,4 @@ pub const BUILTIN_RANDOM_RANGE: BuiltinId = BuiltinId(113);
 pub const BUILTIN_FLOAT_TOTAL_COMPARE: BuiltinId = BuiltinId(114);
 pub const BUILTIN_READ_FILE_LIMITED: BuiltinId = BuiltinId(115);
 pub const BUILTIN_READ_FILE_BYTES_LIMITED: BuiltinId = BuiltinId(116);
+pub const BUILTIN_RUN_PROCESS_LIMITED: BuiltinId = BuiltinId(117);

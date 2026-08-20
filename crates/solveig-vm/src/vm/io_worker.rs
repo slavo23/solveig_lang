@@ -18,7 +18,7 @@ pub(super) mod filesystem;
 pub(super) mod process;
 
 use filesystem::{FilesystemFailure, FilesystemRequest};
-use process::{ProcessFailure, ProcessOutput, ProcessRequest};
+use process::{ProcessFailure, ProcessOutput, ProcessRequest, ProcessSignal};
 
 use super::socket::{SocketRequest, SocketSubsystem};
 
@@ -122,9 +122,17 @@ pub(super) enum IoFailure {
     Handle(HandleFailure),
 }
 
-struct IoWork {
-    id: RequestId,
-    request: IoRequest,
+enum IoWork {
+    Request {
+        id: RequestId,
+        request: IoRequest,
+    },
+    Process {
+        id: RequestId,
+        request: ProcessRequest,
+        signals: mpsc::Receiver<ProcessSignal>,
+        signal_tx: mpsc::Sender<ProcessSignal>,
+    },
 }
 
 pub(super) struct IoCompletion {
@@ -143,6 +151,7 @@ pub(super) struct IoSubsystem {
     sockets: SocketSubsystem,
     completions: mpsc::Receiver<IoCompletion>,
     requests: Vec<Option<RequestOwner>>,
+    process_cancellations: Vec<Option<mpsc::Sender<ProcessSignal>>>,
     free_requests: Vec<u32>,
     next_worker: usize,
     handle_workers: Vec<Option<usize>>,
@@ -160,6 +169,7 @@ impl IoSubsystem {
             sockets: SocketSubsystem::inactive(),
             completions,
             requests: Vec::new(),
+            process_cancellations: Vec::new(),
             free_requests: Vec::new(),
             next_worker: 0,
             handle_workers: vec![None; FIRST_FILE_HANDLE as usize],
@@ -224,6 +234,7 @@ impl IoSubsystem {
             sockets,
             completions,
             requests: Vec::new(),
+            process_cancellations: Vec::new(),
             free_requests: Vec::new(),
             next_worker: 0,
             handle_workers: vec![Some(0), Some(1), Some(2)],
@@ -288,12 +299,19 @@ impl IoSubsystem {
             if slot.replace(RequestOwner::Process(process)).is_some() {
                 solveig_base::ice!("free IO request id was still in use");
             }
+            let Some(cancellation) = self.process_cancellations.get(raw as usize) else {
+                solveig_base::ice!("free IO request id had no cancellation-table slot");
+            };
+            if cancellation.is_some() {
+                solveig_base::ice!("free IO request retained process cancellation state");
+            }
             RequestId(raw)
         } else {
             let raw = u32::try_from(self.requests.len()).map_err(|_too_many_requests| {
                 RuntimeError::builtin("IO request table exhausted".to_string())
             })?;
             self.requests.push(Some(RequestOwner::Process(process)));
+            self.process_cancellations.push(None);
             RequestId(raw)
         };
         self.next_worker = self.next_worker.wrapping_add(1);
@@ -311,12 +329,32 @@ impl IoSubsystem {
                 .sockets
                 .issue(id, SocketRequest::Recv { socket, maximum }),
             IoRequest::CloseSocket(socket) => self.sockets.issue(id, SocketRequest::Close(socket)),
+            IoRequest::Process(request) => {
+                let (signal_tx, signals) = mpsc::channel();
+                let Some(cancellation) = self.process_cancellations.get_mut(id.0 as usize) else {
+                    solveig_base::ice!("process request had no cancellation-table slot");
+                };
+                *cancellation = Some(signal_tx.clone());
+                let Some(worker) = self.workers.get(worker_index) else {
+                    solveig_base::ice!("IO request routing selected an absent worker");
+                };
+                worker
+                    .send(IoWork::Process {
+                        id,
+                        request,
+                        signals,
+                        signal_tx,
+                    })
+                    .map_err(|_disconnected| {
+                        RuntimeError::builtin("IO worker pool stopped unexpectedly".to_string())
+                    })
+            }
             request => {
                 let Some(worker) = self.workers.get(worker_index) else {
                     solveig_base::ice!("IO request routing selected an absent worker");
                 };
                 worker
-                    .send(IoWork { id, request })
+                    .send(IoWork::Request { id, request })
                     .map_err(|_disconnected| {
                         RuntimeError::builtin("IO worker pool stopped unexpectedly".to_string())
                     })
@@ -328,6 +366,10 @@ impl IoSubsystem {
                 solveig_base::ice!("failed IO request vanished from the request table");
             };
             *slot = None;
+            let Some(cancellation) = self.process_cancellations.get_mut(id.0 as usize) else {
+                solveig_base::ice!("failed IO request had no cancellation-table slot");
+            };
+            *cancellation = None;
             self.free_requests.push(id.0);
             return Err(error);
         }
@@ -408,6 +450,12 @@ impl IoSubsystem {
         match slot {
             Some(RequestOwner::Process(owner)) if *owner == process => {
                 *slot = Some(RequestOwner::Cancelled);
+                let Some(cancellation) = self.process_cancellations.get_mut(id.0 as usize) else {
+                    solveig_base::ice!("cancelled IO request had no cancellation-table slot");
+                };
+                if let Some(cancellation) = cancellation.take() {
+                    drop(cancellation.send(ProcessSignal::Cancel));
+                }
                 self.sockets.cancel(id)?;
             }
             Some(RequestOwner::Process(_)) | Some(RequestOwner::Cancelled) | None => {
@@ -478,11 +526,26 @@ impl IoSubsystem {
         let Some(owner) = slot.take() else {
             solveig_base::ice!("IO request completed more than once");
         };
+        let Some(cancellation) = self.process_cancellations.get_mut(completion.id.0 as usize)
+        else {
+            solveig_base::ice!("completed IO request had no cancellation-table slot");
+        };
+        *cancellation = None;
         self.free_requests.push(completion.id.0);
         Ok(match owner {
             RequestOwner::Process(process) => Some((completion.id, process, completion.result)),
             RequestOwner::Cancelled => None,
         })
+    }
+}
+
+impl Drop for IoSubsystem {
+    fn drop(&mut self) {
+        for cancellation in &mut self.process_cancellations {
+            if let Some(cancellation) = cancellation.take() {
+                drop(cancellation.send(ProcessSignal::Cancel));
+            }
+        }
     }
 }
 
@@ -497,14 +560,19 @@ fn worker_loop(
 ) {
     let mut handles = HandleTable::for_worker(worker_index, terminal_outputs);
     while let Ok(work) = work.recv() {
-        let result = perform_request(work.request, stdin, stdout, stderr, &mut handles);
-        if completions
-            .send(IoCompletion {
-                id: work.id,
-                result,
-            })
-            .is_err()
-        {
+        let (id, result) = match work {
+            IoWork::Request { id, request } => (
+                id,
+                perform_request(request, stdin, stdout, stderr, &mut handles),
+            ),
+            IoWork::Process {
+                id,
+                request,
+                signals,
+                signal_tx,
+            } => (id, process::perform(request, &signals, signal_tx)),
+        };
+        if completions.send(IoCompletion { id, result }).is_err() {
             break;
         }
     }
@@ -537,7 +605,9 @@ fn perform_request(
             }),
         },
         IoRequest::Filesystem(request) => filesystem::perform(request),
-        IoRequest::Process(request) => process::perform(request),
+        IoRequest::Process(_) => {
+            solveig_base::ice!("process request reached the non-cancellable worker path")
+        }
         IoRequest::ResolveHost(host) => perform_resolve_host(host),
         IoRequest::Handle(request) => match handles.perform(request, stdin, stdout, stderr) {
             Ok(HandleOutput::Unit) => IoResult::Unit,

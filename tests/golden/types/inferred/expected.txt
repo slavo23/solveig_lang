@@ -135,6 +135,7 @@ prelude.prim.renameFile : String -> String -> IO IOError ()
 prelude.prim.resolveHost : String -> IO IOError String
 prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
 prelude.prim.runProcess : String -> [String] -> IO IOError ProcessResult
+prelude.prim.runProcessLimited : String -> [String] -> Int -> IO IOError ProcessResult
 prelude.prim.send : forall a. Chan a -> a -> IO IOError ()
 prelude.prim.sendBytes : Socket -> Bytes -> IO IOError ()
 prelude.prim.setCurrentDirectory : String -> IO IOError ()
@@ -279,6 +280,7 @@ std.process.processExitCode : ProcessResult -> Int
 std.process.processStderr : ProcessResult -> String
 std.process.processStdout : ProcessResult -> String
 std.process.runProcess : String -> [String] -> IO IOError ProcessResult
+std.process.runProcessLimited : String -> [String] -> Int -> IO IOError ProcessResult
 std.queue.dequeue : forall a. Queue a -> Maybe (Pair a (Queue a))
 std.queue.empty : forall a. Queue a
 std.queue.enqueue : forall a. Queue a -> a -> Queue a

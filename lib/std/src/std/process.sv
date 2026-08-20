@@ -17,9 +17,14 @@ processStdout (MkProcessResult exitCode output errorOutput) = output
 processStderr : ProcessResult -> String
 processStderr (MkProcessResult exitCode output errorOutput) = errorOutput
 
--- | Runs a child process and strictly captures its output and exit code.
+-- | Runs a child process and strictly captures its output without a library size limit.
 runProcess : String -> [String] -> Task ProcessResult
 runProcess program arguments = prelude.prim.runProcess program arguments
+
+-- | Runs a child process, capturing at most maximum bytes from each output stream.
+runProcessLimited : String -> [String] -> Int -> Task ProcessResult
+runProcessLimited program arguments maximum =
+    prelude.prim.runProcessLimited program arguments maximum
 
 -- | Terminates the main program with a host exit status after cleanup.
 exitWith : forall a. Int -> Task a

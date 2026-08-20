@@ -72,6 +72,7 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
         | IoAction::RunProcess {
             program: path,
             arguments: contents,
+            ..
         } => {
             visit(path);
             visit(contents);
@@ -162,6 +163,7 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
         | IoAction::RunProcess {
             program: path,
             arguments: contents,
+            ..
         } => {
             visit(path);
             visit(contents);

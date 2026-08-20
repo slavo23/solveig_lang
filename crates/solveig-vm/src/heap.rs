@@ -200,6 +200,7 @@ pub enum IoAction {
     RunProcess {
         program: Value,
         arguments: Value,
+        maximum: Option<i64>,
     },
     Exit {
         status: i64,

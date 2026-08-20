@@ -90,7 +90,25 @@ pub(super) fn run_process_action(
 ) -> Result<Value, RuntimeError> {
     let program = expect_value(args, 0, "runProcess")?;
     let arguments = expect_value(args, 1, "runProcess")?;
-    Ok(ctx.alloc_io_action(IoAction::RunProcess { program, arguments }))
+    Ok(ctx.alloc_io_action(IoAction::RunProcess {
+        program,
+        arguments,
+        maximum: None,
+    }))
+}
+
+pub(super) fn run_process_limited_action(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let program = expect_value(args, 0, "runProcessLimited")?;
+    let arguments = expect_value(args, 1, "runProcessLimited")?;
+    let maximum = expect_int(args, 2, "runProcessLimited")?;
+    Ok(ctx.alloc_io_action(IoAction::RunProcess {
+        program,
+        arguments,
+        maximum: Some(maximum),
+    }))
 }
 
 pub(super) fn exit_with(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
