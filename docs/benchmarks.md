@@ -281,6 +281,25 @@ language-level trees match a native array or hash table. The retained APIs
 state their actual bounds: logarithmic Vector indexing/update/right append,
 logarithmic ordered Map/Set operations, and amortized constant-time Queue ends.
 
+## Phase U JSON scanning check: 2026-08-20
+
+U3.2 compared its general allocation-free byte-range primitive with the scalar
+`bytesIndex : Bytes -> Int -> Maybe Int` loop it replaces in JSON digit runs.
+Both cases scan the same 256 bytes 500 times and validate the same result. Only
+the focused filter ran:
+
+```bash
+cargo bench --bench language -- json_scan
+```
+
+`language/json_scan_bulk` measured 61.543–62.003 ms (61.766 ms estimate).
+`language/json_scan_scalar` measured 140.50–155.02 ms (146.76 ms estimate).
+The bulk boundary is therefore 2.38× faster by point estimate for this
+workload. Each sample still includes the shared warm check-to-run path,
+lowering, VM startup, and teardown, so this is conservative evidence for the
+scanner choice rather than a claim about isolated byte throughput. The full
+benchmark suite remains reserved for U5.
+
 ## Phase O comparison policy
 
 Every optimization records its exact before and after commands and confidence

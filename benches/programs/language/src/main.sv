@@ -1,4 +1,4 @@
-import std.bytes(bytesAppend, bytesIndex, bytesLength, bytesSlice, stringToBytes)
+import std.bytes(bytesAppend, bytesIndex, bytesLength, bytesSlice, bytesSpanRange, stringToBytes)
 import std.channel(newBoundedChan, recv, send)
 import std.env(getArgs)
 import std.io(readFileBytes)
@@ -10,6 +10,35 @@ import std.vector
 
 compilerPipelineMain : Int
 compilerPipelineMain = 0
+
+jsonDigitBytes : Bytes
+jsonDigitBytes = stringToBytes
+    "0123456789012345678901234567890123456789012345678901234567890123012345678901234567890123456789012345678901234567890123456789012301234567890123456789012345678901234567890123456789012345678901230123456789012345678901234567890123456789012345678901234567890123"
+
+jsonBulkScanLoop : Int -> Int -> Int
+jsonBulkScanLoop remaining total =
+    if remaining == 0 then total
+    else jsonBulkScanLoop (remaining - 1)
+        (total + bytesSpanRange jsonDigitBytes 0 48 57)
+
+jsonScanBulkMain : Int
+jsonScanBulkMain = jsonBulkScanLoop 500 0
+
+jsonScalarSpan : Bytes -> Int -> Int
+jsonScalarSpan bytes offset =
+    case bytesIndex bytes offset of
+        Just byte =>
+            if and (byte >= 48) (byte <= 57) then jsonScalarSpan bytes (offset + 1)
+            else offset
+        | Nothing => offset
+
+jsonScalarScanLoop : Int -> Int -> Int
+jsonScalarScanLoop remaining total =
+    if remaining == 0 then total
+    else jsonScalarScanLoop (remaining - 1) (total + jsonScalarSpan jsonDigitBytes 0)
+
+jsonScanScalarMain : Int
+jsonScanScalarMain = jsonScalarScanLoop 500 0
 
 buildList : Int -> [Int] -> [Int]
 buildList remaining values =

@@ -21,6 +21,7 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.text` | Text/character conversion and integer rendering |
 | `std.bytes` | UTF-8 conversion and immutable byte operations |
 | `std.parser` | Generic parser combinators with structured errors and streaming input |
+| `std.json` | Bounded byte-level JSON, exact numbers, deterministic rendering, and direct decoders |
 | `std.io` | Handles, buffering, and whole-file IO |
 | `std.fs` | Directory, path, and file-metadata operations |
 | `std.env` | Arguments, environment, and program identity |
@@ -122,6 +123,13 @@ bytesAppend : Bytes -> Bytes -> Bytes
 `String` is valid UTF-8; `Bytes` preserves arbitrary data. Decoding therefore
 returns `Result` instead of replacing invalid input.
 
+The bulk `bytesSpanAny`, `bytesFindAny`, `bytesFindBelow`, and
+`bytesSpanRange` operations scan without constructing a `Maybe` for each byte.
+`bytesSliceToString` validates one slice without first allocating another
+`Bytes` value. These operations are useful when implementing byte-oriented
+formats; ordinary callers should prefer the higher-level parser for that
+format.
+
 ## Parser combinators
 
 ```solveig
@@ -169,6 +177,51 @@ hover the operation you are using; the method documentation is intended to be
 the primary learning path. The complete configuration grammar in
 `tests/golden/run/parser_config` demonstrates nesting, custom errors,
 deliberate backtracking, and parsing across inconvenient chunk boundaries.
+
+## JSON
+
+```solveig
+import std.bytes
+import std.json
+import std.parser
+import std.vector
+
+reply : std.parser.ParseReply std.parser.ByteInput std.json.JsonError std.json.Json
+reply =
+    std.json.parseJson std.json.defaultJsonLimits
+        (std.bytes.stringToBytes "{\"ready\":true,\"items\":[1,2,3]}")
+```
+
+`std.json` parses RFC 8259 bytes with explicit limits for total input, nesting,
+string tokens, container size, and number tokens. Strings validate UTF-8,
+escapes, control characters, and Unicode surrogate pairs. Duplicate object
+names are rejected. Arrays use persistent `Vector`; objects use ordered `Map`,
+so rendering is deterministic regardless of insertion order.
+
+`JsonNumber` retains a validated decimal spelling instead of rounding through
+`Float`. Construct it with `jsonNumberFromInt`, `jsonNumberFromString`, or
+`jsonNumberFromFloat`; the float constructor rejects NaN and infinities.
+Rendering revalidates even a directly constructed `JsonNumber`, preserving a
+clean future path to a `BigInt` representation.
+
+Use `parseJson` when the whole `Json` tree is useful. Use `decodeJson` with
+`stringDecoder`, `boolDecoder`, `numberDecoder`, `nullDecoder`,
+`arrayDecoder`, `objectDecoder`, or `nullableDecoder` when the requested value
+can be built directly. For example, this creates a vector of strings without
+first allocating a vector of `JsonString` nodes:
+
+```solveig
+names : std.parser.ParseReply std.parser.ByteInput std.json.JsonError
+    (std.vector.Vector String)
+names =
+    std.json.decodeJson std.json.defaultJsonLimits
+        (std.json.arrayDecoder std.json.stringDecoder)
+        (std.bytes.stringToBytes "[\"Ada\",\"Grace\"]")
+```
+
+Both entry points require complete input apart from JSON whitespace and return
+the same structured `std.parser.ParseReply`. Render custom failures with
+`std.json.renderJsonError` through `std.parser.renderError`.
 
 ## Handles and files
 

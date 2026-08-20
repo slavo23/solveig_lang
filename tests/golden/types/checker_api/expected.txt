@@ -65,18 +65,25 @@ prelude.prim.accept : Socket -> IO IOError Socket
 prelude.prim.appendFile : String -> String -> IO IOError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 prelude.prim.bytesAppend : Bytes -> Bytes -> Bytes
+prelude.prim.bytesFindAny : Bytes -> Int -> Bytes -> Int
+prelude.prim.bytesFindBelow : Bytes -> Int -> Int -> Int
 prelude.prim.bytesIndex : Bytes -> Int -> Maybe Int
 prelude.prim.bytesLength : Bytes -> Int
 prelude.prim.bytesSlice : Bytes -> Int -> Int -> Bytes
+prelude.prim.bytesSliceToString : Bytes -> Int -> Int -> Result IOError String
+prelude.prim.bytesSpanAny : Bytes -> Int -> Bytes -> Int
+prelude.prim.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
 prelude.prim.bytesToString : Bytes -> Result IOError String
 prelude.prim.catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.prim.catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.prim.charCompare : Char -> Char -> Ordering
 prelude.prim.charEq : Char -> Char -> Bool
+prelude.prim.charToCodePoint : Char -> Int
 prelude.prim.charToString : Char -> String
 prelude.prim.charsToString : [Char] -> String
 prelude.prim.closeChan : forall a. Chan a -> IO IOError ()
 prelude.prim.closeSocket : Socket -> IO IOError ()
+prelude.prim.codePointToString : Int -> Maybe String
 prelude.prim.connect : String -> Int -> IO IOError Socket
 prelude.prim.createDirectory : String -> IO IOError ()
 prelude.prim.doesDirectoryExist : String -> IO IOError Bool
@@ -209,9 +216,14 @@ prelude.typeclasses.subtract : forall a. Num a => a -> a -> a
 prelude.typeclasses.thenM : forall m a b. Monad m => m a -> m b -> m b
 prelude.typeclasses.totalCompareFloat : Float -> Float -> Ordering
 std.bytes.bytesAppend : Bytes -> Bytes -> Bytes
+std.bytes.bytesFindAny : Bytes -> Int -> Bytes -> Int
+std.bytes.bytesFindBelow : Bytes -> Int -> Int -> Int
 std.bytes.bytesIndex : Bytes -> Int -> Maybe Int
 std.bytes.bytesLength : Bytes -> Int
 std.bytes.bytesSlice : Bytes -> Int -> Int -> Bytes
+std.bytes.bytesSliceToString : Bytes -> Int -> Int -> Result IOError String
+std.bytes.bytesSpanAny : Bytes -> Int -> Bytes -> Int
+std.bytes.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
 std.bytes.bytesToString : Bytes -> Result IOError String
 std.bytes.stringToBytes : String -> Bytes
 std.channel.closeChan : forall a. Chan a -> IO IOError ()
@@ -257,6 +269,76 @@ std.io.stdout : Handle
 std.io.withFile : forall a. String -> IOMode -> (Handle -> IO IOError a) -> IO IOError a
 std.io.writeFile : String -> String -> IO IOError ()
 std.io.writeFileBytes : String -> Bytes -> IO IOError ()
+std.json.arrayDecoder : forall a. Decoder a -> Decoder (Vector a)
+std.json.arrayItems : forall a. JsonLimits -> Parser ByteInput JsonError a -> [a] -> Int -> Parser ByteInput JsonError (Vector a)
+std.json.arrayWith : forall a. JsonLimits -> Int -> Parser ByteInput JsonError a -> Parser ByteInput JsonError (Vector a)
+std.json.boolDecoder : Decoder Bool
+std.json.boolToken : Parser ByteInput JsonError Bool
+std.json.byteAt : Bytes -> Int -> Int
+std.json.byteInputValue : ByteInput -> Maybe Int
+std.json.consumedRejectJson : forall a. ByteInput -> JsonError -> ParseReply ByteInput JsonError a
+std.json.decodeEscape : Bytes -> Int -> Result JsonError (Pair String Int)
+std.json.decodeJson : forall a. JsonLimits -> Decoder a -> Bytes -> ParseReply ByteInput JsonError a
+std.json.decodeUnicodeEscape : Bytes -> Int -> Result JsonError (Pair String Int)
+std.json.decoderParser : forall a. Decoder a -> JsonLimits -> Int -> Parser ByteInput JsonError a
+std.json.defaultJsonLimits : JsonLimits
+std.json.dispatchJsonValue : JsonLimits -> Int -> ByteInput -> ParseReply ByteInput JsonError Json
+std.json.escapeCharacterInto : Char -> [Char] -> [Char]
+std.json.escapeStringInto : [Char] -> [Char] -> [Char]
+std.json.escapedStringLength : [Char] -> Int -> Int
+std.json.finishExponent : JsonLimits -> Bytes -> Int -> Int -> ParseReply ByteInput JsonError JsonNumber
+std.json.finishInteger : JsonLimits -> Bytes -> Int -> Int -> ParseReply ByteInput JsonError JsonNumber
+std.json.finishNumber : JsonLimits -> Bytes -> Int -> Int -> ParseReply ByteInput JsonError JsonNumber
+std.json.hexCharacter : Int -> Char
+std.json.hexDigit : Int -> Maybe Int
+std.json.invalidLimits : JsonLimits -> Maybe JsonError
+std.json.isDigitByte : Int -> Bool
+std.json.jsonDecoder : Decoder Json
+std.json.jsonLexeme : forall a. Parser ByteInput JsonError a -> Parser ByteInput JsonError a
+std.json.jsonNumberFromFloat : Float -> Maybe JsonNumber
+std.json.jsonNumberFromInt : Int -> JsonNumber
+std.json.jsonNumberFromString : String -> Maybe JsonNumber
+std.json.jsonNumberText : JsonNumber -> String
+std.json.jsonStringSpecialBytes : Bytes
+std.json.jsonSymbol : Int -> String -> Parser ByteInput JsonError Int
+std.json.jsonValueAt : JsonLimits -> Int -> Parser ByteInput JsonError Json
+std.json.jsonWhitespace : Parser ByteInput JsonError ()
+std.json.jsonWhitespaceBytes : Bytes
+std.json.mapDecoder : forall a b. (a -> b) -> Decoder a -> Decoder b
+std.json.maximumContainerItems : JsonLimits -> Int
+std.json.maximumDepth : JsonLimits -> Int
+std.json.maximumInputBytes : JsonLimits -> Int
+std.json.maximumNumberBytes : JsonLimits -> Int
+std.json.maximumStringBytes : JsonLimits -> Int
+std.json.nullDecoder : Decoder ()
+std.json.nullToken : Parser ByteInput JsonError ()
+std.json.nullableDecoder : forall a. Decoder a -> Decoder (Maybe a)
+std.json.numberDecoder : Decoder JsonNumber
+std.json.numberToken : JsonLimits -> Parser ByteInput JsonError JsonNumber
+std.json.objectDecoder : forall a. Decoder a -> Decoder (Map String a)
+std.json.objectItems : forall a. JsonLimits -> Parser ByteInput JsonError a -> Map String a -> Int -> Parser ByteInput JsonError (Map String a)
+std.json.objectWith : forall a. JsonLimits -> Int -> Parser ByteInput JsonError a -> Parser ByteInput JsonError (Map String a)
+std.json.parseJson : JsonLimits -> Bytes -> ParseReply ByteInput JsonError Json
+std.json.prependChars : String -> [Char] -> [Char]
+std.json.prependCharsList : [Char] -> [Char] -> [Char]
+std.json.prependReversed : forall a. [a] -> [a] -> [a]
+std.json.prependReversedInto : forall a. [a] -> [a] -> [a]
+std.json.readHex4 : Bytes -> Int -> Maybe Int
+std.json.rejectJson : forall a. ByteInput -> JsonError -> ParseReply ByteInput JsonError a
+std.json.renderArrayReverse : JsonLimits -> Int -> [Json] -> Bool -> [Char] -> Result JsonError [Char]
+std.json.renderJson : Json -> Result JsonError String
+std.json.renderJsonError : JsonError -> String
+std.json.renderJsonWith : JsonLimits -> Json -> Result JsonError String
+std.json.renderObjectReverse : JsonLimits -> Int -> [Entry String Json] -> Bool -> [Char] -> Result JsonError [Char]
+std.json.renderStringInto : JsonLimits -> String -> [Char] -> Result JsonError [Char]
+std.json.renderValueInto : JsonLimits -> Int -> Json -> [Char] -> Result JsonError [Char]
+std.json.scalarString : Int -> Int -> Result JsonError (Pair String Int)
+std.json.scanNumber : JsonLimits -> ByteInput -> ParseReply ByteInput JsonError JsonNumber
+std.json.scanString : JsonLimits -> ByteInput -> ParseReply ByteInput JsonError String
+std.json.scanStringAt : JsonLimits -> Bytes -> Int -> Int -> [Char] -> ParseReply ByteInput JsonError String
+std.json.stringDecoder : Decoder String
+std.json.stringToken : JsonLimits -> Parser ByteInput JsonError String
+std.json.validateNumberWith : JsonLimits -> String -> Maybe JsonNumber
 std.list.drop : forall a. Int -> [a] -> [a]
 std.list.dropWhile : forall a. (a -> Bool) -> [a] -> [a]
 std.list.range : Int -> Int -> [Int]
@@ -442,7 +524,9 @@ std.task.mask : forall e a. IO e a -> IO e a
 std.task.race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
 std.task.timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 std.task.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
+std.text.charToCodePoint : Char -> Int
 std.text.charsToString : [Char] -> String
+std.text.codePointToString : Int -> Maybe String
 std.text.intToString : Int -> String
 std.text.stringToChars : String -> [Char]
 std.thread.killThread : ThreadId -> IO IOError ()

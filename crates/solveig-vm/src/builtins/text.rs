@@ -7,7 +7,7 @@ use super::{
     VmCtx, expect_char, expect_char2, expect_float, expect_int, expect_value, ordering_value,
 };
 use crate::heap::HeapObject;
-use crate::values::Value;
+use crate::values::{ObjId, Value};
 use crate::vm::RuntimeError;
 
 pub(super) fn int_to_string(
@@ -32,6 +32,40 @@ pub(super) fn char_to_string(
 ) -> Result<Value, RuntimeError> {
     let value = expect_char(args, 0, "charToString")?;
     Ok(ctx.alloc_str(&value.to_string()))
+}
+
+pub(super) fn char_to_code_point(
+    _ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let value = expect_char(args, 0, "charToCodePoint")?;
+    Ok(Value::Int(i64::from(u32::from(value))))
+}
+
+pub(super) fn code_point_to_string(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let code_point = expect_int(args, 0, "codePointToString")?;
+    let character = u32::try_from(code_point).ok().and_then(char::from_u32);
+    match character {
+        Some(character) => {
+            let tag =
+                ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeMaybeJust, 1, "codePointToString")?;
+            let checkpoint = ctx.interpreter.process.temporary_roots.len();
+            let text = ctx.alloc_str(&character.to_string());
+            ctx.interpreter.process.temporary_roots.push(text);
+            ctx.interpreter.safe_point();
+            let text = temporary_root(ctx, checkpoint, "codePointToString", "text");
+            let result = ctx
+                .interpreter
+                .heap
+                .alloc(HeapObject::Data1 { tag, field: text });
+            ctx.interpreter.process.temporary_roots.truncate(checkpoint);
+            Ok(result)
+        }
+        None => ctx.nullary_ctor(CtorRuntimeRole::PreludeMaybeNothing, "codePointToString"),
+    }
 }
 
 pub(super) fn string_length(
@@ -148,19 +182,31 @@ pub(super) fn bytes_to_string(
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
     let value = expect_bytes_owned(ctx, args, 0, "bytesToString")?;
+    decode_utf8_result(ctx, value, "bytesToString")
+}
+
+fn decode_utf8_result(
+    ctx: &mut VmCtx<'_, '_>,
+    value: Vec<u8>,
+    builtin: &str,
+) -> Result<Value, RuntimeError> {
     match String::from_utf8(value) {
-        Ok(text) => alloc_valid_utf8_result(ctx, &text),
-        Err(error) => alloc_invalid_utf8_result(ctx, &error.to_string()),
+        Ok(text) => alloc_valid_utf8_result(ctx, &text, builtin),
+        Err(error) => alloc_invalid_utf8_result(ctx, &error.to_string(), builtin),
     }
 }
 
-fn alloc_valid_utf8_result(ctx: &mut VmCtx<'_, '_>, text: &str) -> Result<Value, RuntimeError> {
-    let tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeResultOk, 1, "bytesToString")?;
+fn alloc_valid_utf8_result(
+    ctx: &mut VmCtx<'_, '_>,
+    text: &str,
+    builtin: &str,
+) -> Result<Value, RuntimeError> {
+    let tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeResultOk, 1, builtin)?;
     let checkpoint = ctx.interpreter.process.temporary_roots.len();
     let text = ctx.alloc_str(text);
     ctx.interpreter.process.temporary_roots.push(text);
     ctx.interpreter.safe_point();
-    let text = temporary_root(ctx, checkpoint, "text");
+    let text = temporary_root(ctx, checkpoint, builtin, "text");
     let result = ctx
         .interpreter
         .heap
@@ -172,19 +218,16 @@ fn alloc_valid_utf8_result(ctx: &mut VmCtx<'_, '_>, text: &str) -> Result<Value,
 fn alloc_invalid_utf8_result(
     ctx: &mut VmCtx<'_, '_>,
     message: &str,
+    builtin: &str,
 ) -> Result<Value, RuntimeError> {
-    let invalid_tag = ctx.ctor_tag_with_arity(
-        CtorRuntimeRole::PreludeIoErrorInvalidUtf8,
-        1,
-        "bytesToString",
-    )?;
-    let result_tag =
-        ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeResultErr, 1, "bytesToString")?;
+    let invalid_tag =
+        ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeIoErrorInvalidUtf8, 1, builtin)?;
+    let result_tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeResultErr, 1, builtin)?;
     let checkpoint = ctx.interpreter.process.temporary_roots.len();
     let message = ctx.alloc_str(message);
     ctx.interpreter.process.temporary_roots.push(message);
     ctx.interpreter.safe_point();
-    let message = temporary_root(ctx, checkpoint, "error");
+    let message = temporary_root(ctx, checkpoint, builtin, "error");
     let invalid = ctx.interpreter.heap.alloc(HeapObject::Data1 {
         tag: invalid_tag,
         field: message,
@@ -194,10 +237,10 @@ fn alloc_invalid_utf8_result(
         .process
         .temporary_roots
         .get_mut(checkpoint)
-        .unwrap_or_else(|| solveig_base::ice!("bytesToString error root vanished"));
+        .unwrap_or_else(|| solveig_base::ice!("{builtin} error root vanished"));
     *root = invalid;
     ctx.interpreter.safe_point();
-    let invalid = temporary_root(ctx, checkpoint, "IOError");
+    let invalid = temporary_root(ctx, checkpoint, builtin, "IOError");
     let result = ctx.interpreter.heap.alloc(HeapObject::Data1 {
         tag: result_tag,
         field: invalid,
@@ -206,28 +249,30 @@ fn alloc_invalid_utf8_result(
     Ok(result)
 }
 
-fn temporary_root(ctx: &VmCtx<'_, '_>, index: usize, label: &str) -> Value {
+fn temporary_root(ctx: &VmCtx<'_, '_>, index: usize, builtin: &str, label: &str) -> Value {
     ctx.interpreter
         .process
         .temporary_roots
         .get(index)
         .copied()
-        .unwrap_or_else(|| solveig_base::ice!("bytesToString {label} root vanished"))
+        .unwrap_or_else(|| solveig_base::ice!("{builtin} {label} root vanished"))
 }
 
 pub(super) fn bytes_length(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let value = expect_bytes_owned(ctx, args, 0, "bytesLength")?;
-    let length = i64::try_from(value.len())
+    let id = expect_bytes_id(ctx, args, 0, "bytesLength")?;
+    let byte_ref = bytes_ref(ctx, id, "bytesLength")?;
+    let length = i64::try_from(ctx.interpreter.heap.bytes_value(id, byte_ref).len())
         .map_err(|_range| RuntimeError::builtin("bytesLength exceeds Int range".to_string()))?;
     Ok(Value::Int(length))
 }
 
 pub(super) fn bytes_index(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let value = expect_bytes_owned(ctx, args, 0, "bytesIndex")?;
+    let id = expect_bytes_id(ctx, args, 0, "bytesIndex")?;
     let index = expect_int(args, 1, "bytesIndex")?;
+    let byte_ref = bytes_ref(ctx, id, "bytesIndex")?;
     let byte = usize::try_from(index)
         .ok()
-        .and_then(|index| value.get(index))
+        .and_then(|index| ctx.interpreter.heap.bytes_value(id, byte_ref).get(index))
         .copied()
         .map(|byte| Value::Int(i64::from(byte)));
     match byte {
@@ -237,16 +282,21 @@ pub(super) fn bytes_index(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Val
 }
 
 pub(super) fn bytes_slice(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let value = expect_bytes_owned(ctx, args, 0, "bytesSlice")?;
+    let id = expect_bytes_id(ctx, args, 0, "bytesSlice")?;
     let start = expect_int(args, 1, "bytesSlice")?;
     let length = expect_int(args, 2, "bytesSlice")?;
-    let start = usize::try_from(start).unwrap_or(0).min(value.len());
-    let length = usize::try_from(length).unwrap_or(0);
-    let end = start.saturating_add(length).min(value.len());
-    let Some(slice) = value.get(start..end) else {
-        solveig_base::ice!("clamped byte slice was outside its source")
+    let slice = {
+        let byte_ref = bytes_ref(ctx, id, "bytesSlice")?;
+        let value = ctx.interpreter.heap.bytes_value(id, byte_ref);
+        let start = usize::try_from(start).unwrap_or(0).min(value.len());
+        let length = usize::try_from(length).unwrap_or(0);
+        let end = start.saturating_add(length).min(value.len());
+        let Some(slice) = value.get(start..end) else {
+            solveig_base::ice!("clamped byte slice was outside its source")
+        };
+        slice.to_vec()
     };
-    Ok(ctx.alloc_bytes(slice))
+    Ok(ctx.alloc_bytes(&slice))
 }
 
 pub(super) fn bytes_append(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
@@ -254,6 +304,155 @@ pub(super) fn bytes_append(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Va
     let right = expect_bytes_owned(ctx, args, 1, "bytesAppend")?;
     left.extend_from_slice(&right);
     Ok(ctx.alloc_bytes(&left))
+}
+
+pub(super) fn bytes_span_any(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let source_id = expect_bytes_id(ctx, args, 0, "bytesSpanAny")?;
+    let start = expect_int(args, 1, "bytesSpanAny")?;
+    let accepted_id = expect_bytes_id(ctx, args, 2, "bytesSpanAny")?;
+    let source_ref = bytes_ref(ctx, source_id, "bytesSpanAny")?;
+    let accepted_ref = bytes_ref(ctx, accepted_id, "bytesSpanAny")?;
+    let source = ctx.interpreter.heap.bytes_value(source_id, source_ref);
+    let accepted = ctx.interpreter.heap.bytes_value(accepted_id, accepted_ref);
+    let start = clamp_byte_index(start, source.len());
+    let tail = source
+        .get(start..)
+        .unwrap_or_else(|| solveig_base::ice!("clamped byte span start escaped its source"));
+    let offset = tail
+        .iter()
+        .position(|byte| !accepted.contains(byte))
+        .map_or(source.len(), |offset| start + offset);
+    byte_index_value(offset, "bytesSpanAny")
+}
+
+pub(super) fn bytes_find_any(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let source_id = expect_bytes_id(ctx, args, 0, "bytesFindAny")?;
+    let start = expect_int(args, 1, "bytesFindAny")?;
+    let needles_id = expect_bytes_id(ctx, args, 2, "bytesFindAny")?;
+    let source_ref = bytes_ref(ctx, source_id, "bytesFindAny")?;
+    let needles_ref = bytes_ref(ctx, needles_id, "bytesFindAny")?;
+    let source = ctx.interpreter.heap.bytes_value(source_id, source_ref);
+    let needles = ctx.interpreter.heap.bytes_value(needles_id, needles_ref);
+    let start = clamp_byte_index(start, source.len());
+    let tail = source
+        .get(start..)
+        .unwrap_or_else(|| solveig_base::ice!("clamped byte search start escaped its source"));
+    let offset = tail
+        .iter()
+        .position(|byte| needles.contains(byte))
+        .map_or(source.len(), |offset| start + offset);
+    byte_index_value(offset, "bytesFindAny")
+}
+
+pub(super) fn bytes_find_below(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let source_id = expect_bytes_id(ctx, args, 0, "bytesFindBelow")?;
+    let start = expect_int(args, 1, "bytesFindBelow")?;
+    let limit = expect_int(args, 2, "bytesFindBelow")?;
+    let source_ref = bytes_ref(ctx, source_id, "bytesFindBelow")?;
+    let source = ctx.interpreter.heap.bytes_value(source_id, source_ref);
+    let start = clamp_byte_index(start, source.len());
+    let tail = source
+        .get(start..)
+        .unwrap_or_else(|| solveig_base::ice!("clamped byte search start escaped its source"));
+    let offset = tail
+        .iter()
+        .position(|byte| i64::from(*byte) < limit)
+        .map_or(source.len(), |offset| start + offset);
+    byte_index_value(offset, "bytesFindBelow")
+}
+
+pub(super) fn bytes_span_range(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let source_id = expect_bytes_id(ctx, args, 0, "bytesSpanRange")?;
+    let start = expect_int(args, 1, "bytesSpanRange")?;
+    let lower = expect_int(args, 2, "bytesSpanRange")?;
+    let upper = expect_int(args, 3, "bytesSpanRange")?;
+    let source_ref = bytes_ref(ctx, source_id, "bytesSpanRange")?;
+    let source = ctx.interpreter.heap.bytes_value(source_id, source_ref);
+    let start = clamp_byte_index(start, source.len());
+    let tail = source
+        .get(start..)
+        .unwrap_or_else(|| solveig_base::ice!("clamped byte span start escaped its source"));
+    let offset = tail
+        .iter()
+        .position(|byte| {
+            let byte = i64::from(*byte);
+            byte < lower || byte > upper
+        })
+        .map_or(source.len(), |offset| start + offset);
+    byte_index_value(offset, "bytesSpanRange")
+}
+
+pub(super) fn bytes_slice_to_string(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let source_id = expect_bytes_id(ctx, args, 0, "bytesSliceToString")?;
+    let start = expect_int(args, 1, "bytesSliceToString")?;
+    let length = expect_int(args, 2, "bytesSliceToString")?;
+    let slice = {
+        let source_ref = bytes_ref(ctx, source_id, "bytesSliceToString")?;
+        let source = ctx.interpreter.heap.bytes_value(source_id, source_ref);
+        let start = clamp_byte_index(start, source.len());
+        let length = usize::try_from(length).unwrap_or(0);
+        let end = start.saturating_add(length).min(source.len());
+        let Some(slice) = source.get(start..end) else {
+            solveig_base::ice!("clamped UTF-8 byte slice was outside its source")
+        };
+        slice.to_vec()
+    };
+    decode_utf8_result(ctx, slice, "bytesSliceToString")
+}
+
+fn clamp_byte_index(index: i64, length: usize) -> usize {
+    usize::try_from(index).unwrap_or(0).min(length)
+}
+
+fn byte_index_value(index: usize, builtin: &str) -> Result<Value, RuntimeError> {
+    i64::try_from(index)
+        .map(Value::Int)
+        .map_err(|_error| RuntimeError::builtin(format!("{builtin} result does not fit in Int")))
+}
+
+fn expect_bytes_id(
+    ctx: &VmCtx<'_, '_>,
+    args: &[Value],
+    index: usize,
+    builtin: &str,
+) -> Result<ObjId, RuntimeError> {
+    match expect_value(args, index, builtin)? {
+        Value::Obj(id) if matches!(ctx.interpreter.heap.get(id), HeapObject::Bytes { .. }) => {
+            Ok(id)
+        }
+        _ => Err(RuntimeError::builtin(format!(
+            "{builtin} expects Bytes argument {}",
+            index + 1
+        ))),
+    }
+}
+
+fn bytes_ref(
+    ctx: &VmCtx<'_, '_>,
+    id: ObjId,
+    builtin: &str,
+) -> Result<crate::heap::ByteRef, RuntimeError> {
+    match ctx.interpreter.heap.get(id) {
+        HeapObject::Bytes { bytes } => Ok(*bytes),
+        _ => Err(RuntimeError::builtin(format!(
+            "{builtin} expected a validated Bytes object"
+        ))),
+    }
 }
 
 pub(super) fn expect_string_owned(

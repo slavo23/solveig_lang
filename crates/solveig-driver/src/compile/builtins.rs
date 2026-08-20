@@ -90,6 +90,10 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let chan_a = Ty::make_app(Ty::make_con_id(PRIM_TYS.chan), a.clone());
     let maybe_a = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), a.clone());
     let maybe_int = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), int.clone());
+    let maybe_string = Ty::make_app(
+        Ty::make_con_id(prelude_maybe_tycon_id(names)),
+        string.clone(),
+    );
     let result_io_string = Ty::make_app(
         Ty::make_app(
             Ty::make_con_id(prelude_result_tycon_id(names)),
@@ -325,7 +329,19 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "charCompare",
             BUILTIN_CHAR_COMPARE,
             2,
-            binary(char_ty, ordering),
+            binary(char_ty.clone(), ordering),
+        ),
+        prim_spec(
+            "charToCodePoint",
+            BUILTIN_CHAR_TO_CODE_POINT,
+            1,
+            unary(char_ty, int.clone()),
+        ),
+        prim_spec(
+            "codePointToString",
+            BUILTIN_CODE_POINT_TO_STRING,
+            1,
+            unary(int.clone(), maybe_string),
         ),
         prim_spec(
             "stringToChars",
@@ -349,7 +365,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "bytesToString",
             BUILTIN_BYTES_TO_STRING,
             1,
-            unary(bytes.clone(), result_io_string),
+            unary(bytes.clone(), result_io_string.clone()),
         ),
         prim_spec(
             "bytesLength",
@@ -373,7 +389,40 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "bytesAppend",
             BUILTIN_BYTES_APPEND,
             2,
-            binary(bytes, Ty::make_con_id(PRIM_TYS.bytes)),
+            binary(bytes.clone(), Ty::make_con_id(PRIM_TYS.bytes)),
+        ),
+        prim_spec(
+            "bytesSpanAny",
+            BUILTIN_BYTES_SPAN_ANY,
+            3,
+            arr(&[bytes.clone(), int.clone(), bytes.clone()], int.clone()),
+        ),
+        prim_spec(
+            "bytesFindAny",
+            BUILTIN_BYTES_FIND_ANY,
+            3,
+            arr(&[bytes.clone(), int.clone(), bytes.clone()], int.clone()),
+        ),
+        prim_spec(
+            "bytesFindBelow",
+            BUILTIN_BYTES_FIND_BELOW,
+            3,
+            arr(&[bytes.clone(), int.clone(), int.clone()], int.clone()),
+        ),
+        prim_spec(
+            "bytesSpanRange",
+            BUILTIN_BYTES_SPAN_RANGE,
+            4,
+            arr(
+                &[bytes.clone(), int.clone(), int.clone(), int.clone()],
+                int.clone(),
+            ),
+        ),
+        prim_spec(
+            "bytesSliceToString",
+            BUILTIN_BYTES_SLICE_TO_STRING,
+            3,
+            arr(&[bytes, int.clone(), int.clone()], result_io_string),
         ),
         prim_spec(
             "connect",

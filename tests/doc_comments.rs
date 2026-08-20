@@ -100,4 +100,30 @@ fn checked_project_docs_include_importable_declarations() {
                 .to_string()
         )
     );
+
+    let json_project = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/run/json");
+    let docs = solveig_driver::checked_project_docs(&json_project)
+        .expect("JSON documentation fixture should check");
+
+    assert_eq!(
+        docs.get("std.json.JsonNumber"),
+        Some(
+            &"An exact RFC 8259 number spelling.\n\nThe representation retains decimal digits and exponent text rather than\nrounding through Float. Use the smart constructors; renderJsonWith rejects\na directly forged invalid spelling. A future BigInt constructor can be\nadded without changing Json's number case."
+                .to_string()
+        )
+    );
+    assert_eq!(
+        docs.get("std.json.Decoder"),
+        Some(
+            &"A direct JSON decoder that parses only the requested representation.\n\nDecoders operate on the same ByteInput parser semantics as Json values.\nPrimitive, array, and homogeneous-object decoders avoid allocating an\nintermediate Json tree."
+                .to_string()
+        )
+    );
+    assert_eq!(
+        docs.get("std.json.decodeJson"),
+        Some(
+            &"Runs one direct decoder on complete bounded UTF-8 JSON bytes.\n\nLeading and trailing JSON whitespace are accepted. The returned\nParseReply retains structured position, expected-set, and custom errors."
+                .to_string()
+        )
+    );
 }

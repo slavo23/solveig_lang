@@ -23,6 +23,7 @@ const STD_CHANNEL_SRC: &str = include_str!("../../../lib/std/src/std/channel.sv"
 const STD_ENV_SRC: &str = include_str!("../../../lib/std/src/std/env.sv");
 const STD_FS_SRC: &str = include_str!("../../../lib/std/src/std/fs.sv");
 const STD_IO_SRC: &str = include_str!("../../../lib/std/src/std/io.sv");
+const STD_JSON_SRC: &str = include_str!("../../../lib/std/src/std/json.sv");
 const STD_LIST_SRC: &str = include_str!("../../../lib/std/src/std/list.sv");
 const STD_NET_SRC: &str = include_str!("../../../lib/std/src/std/net.sv");
 const STD_PARSER_SRC: &str = include_str!("../../../lib/std/src/std/parser.sv");
@@ -55,6 +56,7 @@ pub(crate) fn embedded_library_source(module: &str) -> Option<&'static str> {
         "std.env" => Some(STD_ENV_SRC),
         "std.fs" => Some(STD_FS_SRC),
         "std.io" => Some(STD_IO_SRC),
+        "std.json" => Some(STD_JSON_SRC),
         "std.list" => Some(STD_LIST_SRC),
         "std.net" => Some(STD_NET_SRC),
         "std.parser" => Some(STD_PARSER_SRC),
@@ -94,6 +96,7 @@ pub(crate) fn embedded_library_modules(package: &str) -> &'static [&'static str]
             "std/env.sv",
             "std/fs.sv",
             "std/io.sv",
+            "std/json.sv",
             "std/list.sv",
             "std/net.sv",
             "std/parser.sv",

@@ -1,0 +1,21 @@
+round trip: {"a":"snowman ☃ / pair 🚀","z":[true,null,-12.50e+2]}
+large exact: 123456789012345678901234567890.0001e-99
+duplicate: line 1, column 11 (offset 10): parse failed; duplicate JSON object key "x"
+leading zero: line 1, column 2 (offset 1): unexpected 49; expected end of input
+bad surrogate: line 1, column 2 (offset 1): parse failed; invalid JSON Unicode escape
+unescaped control: line 1, column 6 (offset 5): parse failed; unescaped control byte 10 in JSON string
+invalid UTF-8 JSON: line 1, column 3 (offset 2): parse failed; invalid UTF-8 in JSON string: incomplete utf-8 byte sequence from index 0
+number grammar: [True, True, True, True, True, False, False, False, False, False, False]
+string limit: line 1, column 6 (offset 5): parse failed; JSON string exceeds maximum 3 raw bytes
+depth limit: line 1, column 2 (offset 1): unexpected 91; expected ]; JSON nesting exceeds maximum depth 1
+input limit: line 1, column 1 (offset 0): parse failed; JSON input/output has 4 bytes; maximum is 2
+number limit: line 1, column 4 (offset 3): parse failed; JSON number exceeds maximum 2 bytes
+container limit: line 1, column 5 (offset 4): parse failed; JSON container exceeds maximum 1 items
+direct strings: ["one", "two"]
+direct object: ["a", "b"] => [True, False]
+render escapes: {"flag":true,"line\n":"tab\tquote\""}
+render round trip: {"flag":true,"line\n":"tab\tquote\""}
+forged number: invalid JSON number "NaN"
+bulk scans: [3, 3, 4, 5]
+UTF-8 slice: ☃
+invalid UTF-8 slice: invalid UTF-8
