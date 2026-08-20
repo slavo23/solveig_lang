@@ -73,7 +73,22 @@ pub(super) fn get_args(ctx: &mut VmCtx<'_, '_>, _args: &[Value]) -> Result<Value
 
 pub(super) fn read_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let path = expect_value(args, 0, "readFile")?;
-    Ok(ctx.alloc_io_action(IoAction::ReadFile { path }))
+    Ok(ctx.alloc_io_action(IoAction::ReadFile {
+        path,
+        maximum: None,
+    }))
+}
+
+pub(super) fn read_file_limited(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let path = expect_value(args, 0, "readFileLimited")?;
+    let maximum = expect_int(args, 1, "readFileLimited")?;
+    Ok(ctx.alloc_io_action(IoAction::ReadFile {
+        path,
+        maximum: Some(maximum),
+    }))
 }
 
 pub(super) fn read_file_bytes(
@@ -81,7 +96,22 @@ pub(super) fn read_file_bytes(
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
     let path = expect_value(args, 0, "readFileBytes")?;
-    Ok(ctx.alloc_io_action(IoAction::ReadFileBytes { path }))
+    Ok(ctx.alloc_io_action(IoAction::ReadFileBytes {
+        path,
+        maximum: None,
+    }))
+}
+
+pub(super) fn read_file_bytes_limited(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let path = expect_value(args, 0, "readFileBytesLimited")?;
+    let maximum = expect_int(args, 1, "readFileBytesLimited")?;
+    Ok(ctx.alloc_io_action(IoAction::ReadFileBytes {
+        path,
+        maximum: Some(maximum),
+    }))
 }
 
 pub(super) fn write_file(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {

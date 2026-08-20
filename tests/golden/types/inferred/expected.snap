@@ -129,6 +129,8 @@ prelude.prim.randomInt : StdGen -> Pair Int StdGen
 prelude.prim.randomRange : Int -> Int -> StdGen -> Pair Int StdGen
 prelude.prim.readFile : String -> IO IOError String
 prelude.prim.readFileBytes : String -> IO IOError Bytes
+prelude.prim.readFileBytesLimited : String -> Int -> IO IOError Bytes
+prelude.prim.readFileLimited : String -> Int -> IO IOError String
 prelude.prim.readLine : IO IOError String
 prelude.prim.recv : forall a. Chan a -> IO IOError a
 prelude.prim.recvBytes : Socket -> Int -> IO IOError Bytes
@@ -227,6 +229,8 @@ std.io.hSetBuffering : Handle -> BufferMode -> IO IOError ()
 std.io.openFile : String -> IOMode -> IO IOError Handle
 std.io.readFile : String -> IO IOError String
 std.io.readFileBytes : String -> IO IOError Bytes
+std.io.readFileBytesLimited : String -> Int -> IO IOError Bytes
+std.io.readFileLimited : String -> Int -> IO IOError String
 std.io.stderr : Handle
 std.io.stdin : Handle
 std.io.stdout : Handle

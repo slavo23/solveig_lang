@@ -630,13 +630,20 @@ Use whole-file functions when the complete value comfortably fits memory:
 
 ```solveig
 readFile : String -> Task String
+readFileLimited : String -> Int -> Task String
 writeFile : String -> String -> Task ()
 appendFile : String -> String -> Task ()
 readFileBytes : String -> Task Bytes
+readFileBytesLimited : String -> Int -> Task Bytes
 writeFileBytes : String -> Bytes -> Task ()
 ```
 
-Text operations require UTF-8. Byte operations preserve arbitrary bytes.
+Text operations require UTF-8. Byte operations preserve arbitrary bytes. The
+plain readers allocate the complete input with no library size limit. For an
+input whose size is not already trusted, use a limited reader: the limit is in
+bytes (including for UTF-8 text), and a larger input produces
+`ReadFileError`. The runtime reads at most one byte beyond the limit to detect
+overflow; it does not inspect metadata and then race a growing file.
 
 Use handles for incremental IO, explicit buffering, or a resource that must
 remain open across several operations:

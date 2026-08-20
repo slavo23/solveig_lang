@@ -304,6 +304,12 @@ impl Interpreter<'_> {
                 &source.to_string(),
                 "readFile",
             ),
+            IoFailure::ReadFileTooLarge { path, maximum } => self.alloc_io_error2(
+                CtorRuntimeRole::PreludeIoErrorReadFile,
+                &path.display().to_string(),
+                &format!("file exceeds the configured limit of {maximum} bytes"),
+                "readFileLimited",
+            ),
             IoFailure::WriteFile {
                 path,
                 append,

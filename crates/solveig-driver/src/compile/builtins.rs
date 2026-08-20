@@ -547,6 +547,15 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             unary(string.clone(), io_of(io_error.clone(), string.clone())),
         ),
         prim_spec(
+            "readFileLimited",
+            BUILTIN_READ_FILE_LIMITED,
+            2,
+            arr(
+                &[string.clone(), int.clone()],
+                io_of(io_error.clone(), string.clone()),
+            ),
+        ),
+        prim_spec(
             "writeFile",
             BUILTIN_WRITE_FILE,
             2,

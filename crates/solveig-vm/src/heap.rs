@@ -144,9 +144,11 @@ pub enum IoAction {
     },
     ReadFile {
         path: Value,
+        maximum: Option<i64>,
     },
     ReadFileBytes {
         path: Value,
+        maximum: Option<i64>,
     },
     WriteFile {
         path: Value,

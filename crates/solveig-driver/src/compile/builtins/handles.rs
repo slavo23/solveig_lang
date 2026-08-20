@@ -92,6 +92,12 @@ pub(super) fn handle_builtin_specs(
             unary(string.clone(), task(bytes.clone())),
         ),
         prim_spec(
+            "readFileBytesLimited",
+            BUILTIN_READ_FILE_BYTES_LIMITED,
+            2,
+            arr(&[string.clone(), int.clone()], task(bytes.clone())),
+        ),
+        prim_spec(
             "writeFileBytes",
             BUILTIN_WRITE_FILE_BYTES,
             2,

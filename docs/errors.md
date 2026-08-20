@@ -30,7 +30,9 @@ invariant failure into an ordinary program value.
 `IO e a` describes an action that can either fail with an ordinary value of
 type `e` or succeed with a value of type `a`. The Prelude alias
 `Task a = IO IOError a` is the conventional type for executable programs.
-`IOError` is closed and names the operation that failed:
+`IOError` is closed and names the operation that failed. `ReadFileError` also
+reports an invalid or exceeded limit from `readFileLimited` and
+`readFileBytesLimited`:
 
 ```solveig
 data IOError =

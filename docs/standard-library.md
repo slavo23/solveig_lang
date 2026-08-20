@@ -41,7 +41,7 @@ import std.text(stringToChars, charsToString, intToString)
 `std.list` provides `take`, `drop`, `takeWhile`, `dropWhile`, `zip`,
 `zipWith`, `reverse`, and inclusive-or-exclusive integer `range`. These are
 separate from the universally imported traversal operations such as `map` and
-`foldl`.
+`foldl`. `take` treats a non-positive count as empty; `drop` treats it as zero.
 
 ## Persistent collections
 
@@ -128,7 +128,15 @@ import std.io
 
 `std.io` owns `IOMode`, `BufferMode`, the standard handles, incremental handle
 operations, `withFile`, and the strict whole-file functions `readFile`,
-`readFileBytes`, `writeFile`, `writeFileBytes`, and `appendFile`.
+`readFileLimited`, `readFileBytes`, `readFileBytesLimited`, `writeFile`,
+`writeFileBytes`, and `appendFile`.
+
+The unrestricted readers allocate the complete input. Prefer
+`readFileLimited path maximumBytes` or
+`readFileBytesLimited path maximumBytes` when input size is not already
+trusted; they fail with `ReadFileError` after reading at most one byte beyond
+the bound. Text limits count encoded UTF-8 bytes. Use handles for genuinely
+streaming input.
 
 ```solveig
 copyText : String -> String -> Task ()

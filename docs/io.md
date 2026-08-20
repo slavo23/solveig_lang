@@ -150,17 +150,38 @@ behavior regardless of redirection. Direct `hPutStr` calls retain full control
 over buffering. Failures use `ReadHandleError` or `WriteHandleError`, including
 when the corresponding standard handle was explicitly closed.
 
+## Whole-file text input
+
+```solveig
+readFile : String -> Task String
+readFileLimited : String -> Int -> Task String
+```
+
+Both operations strictly decode UTF-8 before succeeding. `readFile` has no
+library size bound and should be used only when the complete input comfortably
+fits memory. `readFileLimited path maximum` counts encoded bytes, reads at most
+`maximum + 1`, and raises `ReadFileError path message` when the input is larger
+or the maximum is invalid. This is a runtime-enforced bound, not a metadata
+pre-check that can race with file growth.
+
 ## Byte input and output
 
 ```solveig
 readFileBytes : String -> Task Bytes
+readFileBytesLimited : String -> Int -> Task Bytes
 writeFileBytes : String -> Bytes -> Task ()
 hGetBytes : Handle -> Int -> Task Bytes
 hPutBytes : Handle -> Bytes -> Task ()
 ```
 
 These operations transfer arbitrary bytes without encoding or newline
-translation. `readFileBytes` strictly reads and allocates the entire file;
+translation. `readFileBytes` strictly reads and allocates the entire file with
+no library size bound. `readFileBytesLimited path maximum` reads at most the
+non-negative byte limit and raises `ReadFileError path message` if the file has
+even one more byte; the runtime reads no more than `maximum + 1` bytes to make
+that decision, so it does not rely on racy file metadata. A negative or
+host-unrepresentable maximum also raises `ReadFileError`.
+
 `writeFileBytes` creates or replaces a file just like `writeFile`, but writes
 the supplied bytes unchanged. They bypass handle buffering and raise
 `ReadFileError path message` or `WriteFileError path message` on host failure.

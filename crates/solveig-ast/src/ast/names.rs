@@ -502,3 +502,5 @@ pub const BUILTIN_NEW_STD_GEN: BuiltinId = BuiltinId(111);
 pub const BUILTIN_RANDOM_INT: BuiltinId = BuiltinId(112);
 pub const BUILTIN_RANDOM_RANGE: BuiltinId = BuiltinId(113);
 pub const BUILTIN_FLOAT_TOTAL_COMPARE: BuiltinId = BuiltinId(114);
+pub const BUILTIN_READ_FILE_LIMITED: BuiltinId = BuiltinId(115);
+pub const BUILTIN_READ_FILE_BYTES_LIMITED: BuiltinId = BuiltinId(116);

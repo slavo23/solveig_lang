@@ -426,23 +426,39 @@ impl Interpreter<'_> {
                     }
                     return self.block_on_io(IoRequest::CloseSocket(socket));
                 }
-                IoAction::ReadFile { path } => {
-                    let path = self.expect_string_value(path, "readFile")?;
+                IoAction::ReadFile { path, maximum } => {
+                    let builtin = if maximum.is_some() {
+                        "readFileLimited"
+                    } else {
+                        "readFile"
+                    };
+                    let path = self.expect_string_value(path, builtin)?;
                     let resolved = self.io.resolve_path(&path);
                     if let Some(interruption) = self.accept_pending_interruption_at_block() {
                         self.resume_io_interruption(program, interruption)?;
                         continue;
                     }
-                    return self.block_on_io(IoRequest::ReadFile(resolved));
+                    return self.block_on_io(IoRequest::ReadFile {
+                        path: resolved,
+                        maximum,
+                    });
                 }
-                IoAction::ReadFileBytes { path } => {
-                    let path = self.expect_string_value(path, "readFileBytes")?;
+                IoAction::ReadFileBytes { path, maximum } => {
+                    let builtin = if maximum.is_some() {
+                        "readFileBytesLimited"
+                    } else {
+                        "readFileBytes"
+                    };
+                    let path = self.expect_string_value(path, builtin)?;
                     let resolved = self.io.resolve_path(&path);
                     if let Some(interruption) = self.accept_pending_interruption_at_block() {
                         self.resume_io_interruption(program, interruption)?;
                         continue;
                     }
-                    return self.block_on_io(IoRequest::ReadFileBytes(resolved));
+                    return self.block_on_io(IoRequest::ReadFileBytes {
+                        path: resolved,
+                        maximum,
+                    });
                 }
                 IoAction::WriteFile {
                     path,

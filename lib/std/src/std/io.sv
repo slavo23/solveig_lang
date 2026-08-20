@@ -74,13 +74,21 @@ hSetBuffering handle mode = prelude.prim.hSetBuffering handle mode
 withFile : forall a. String -> IOMode -> (Handle -> Task a) -> Task a
 withFile path mode use = bracket (openFile path mode) hClose use
 
--- | Reads a file as text.
+-- | Strictly reads an entire file as text without a library size limit.
 readFile : String -> Task String
 readFile path = prelude.prim.readFile path
 
--- | Reads an entire file as arbitrary bytes.
+-- | Strictly reads at most maximum bytes as text and fails if the file is larger.
+readFileLimited : String -> Int -> Task String
+readFileLimited path maximum = prelude.prim.readFileLimited path maximum
+
+-- | Strictly reads an entire file as arbitrary bytes without a library size limit.
 readFileBytes : String -> Task Bytes
 readFileBytes path = prelude.prim.readFileBytes path
+
+-- | Strictly reads at most maximum arbitrary bytes and fails if the file is larger.
+readFileBytesLimited : String -> Int -> Task Bytes
+readFileBytesLimited path maximum = prelude.prim.readFileBytesLimited path maximum
 
 -- | Writes text to a file, replacing its previous contents.
 writeFile : String -> String -> Task ()

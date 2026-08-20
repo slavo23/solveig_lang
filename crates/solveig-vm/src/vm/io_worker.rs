@@ -7,7 +7,7 @@ use crate::handle::{
     FIRST_FILE_HANDLE, FileMode, HandleFailure, HandleId, HandleOutput, HandleRequest, HandleTable,
 };
 use std::fs::{self, OpenOptions};
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::net::ToSocketAddrs;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, mpsc};
@@ -27,8 +27,14 @@ const IO_WORKER_COUNT: usize = 4;
 pub(super) enum IoRequest {
     Print(String),
     ReadLine,
-    ReadFile(PathBuf),
-    ReadFileBytes(PathBuf),
+    ReadFile {
+        path: PathBuf,
+        maximum: Option<i64>,
+    },
+    ReadFileBytes {
+        path: PathBuf,
+        maximum: Option<i64>,
+    },
     WriteFile {
         path: PathBuf,
         contents: String,
@@ -82,6 +88,10 @@ pub(super) enum IoFailure {
     ReadFile {
         path: PathBuf,
         source: io::Error,
+    },
+    ReadFileTooLarge {
+        path: PathBuf,
+        maximum: i64,
     },
     WriteFile {
         path: PathBuf,
@@ -261,8 +271,8 @@ impl IoSubsystem {
                         RuntimeError::builtin(format!("unknown Handle identity {}", handle.0))
                     })?
             }
-            IoRequest::ReadFile(_)
-            | IoRequest::ReadFileBytes(_)
+            IoRequest::ReadFile { .. }
+            | IoRequest::ReadFileBytes { .. }
             | IoRequest::WriteFile { .. }
             | IoRequest::WriteFileBytes { .. }
             | IoRequest::Filesystem(_)
@@ -511,14 +521,8 @@ fn perform_request(
     match request {
         IoRequest::Print(text) => write_stdout(stdout, &text),
         IoRequest::ReadLine => perform_read_line(stdin),
-        IoRequest::ReadFile(path) => match fs::read_to_string(&path) {
-            Ok(contents) => IoResult::Text(contents),
-            Err(source) => IoResult::Failed(IoFailure::ReadFile { path, source }),
-        },
-        IoRequest::ReadFileBytes(path) => match fs::read(&path) {
-            Ok(contents) => IoResult::Bytes(contents),
-            Err(source) => IoResult::Failed(IoFailure::ReadFile { path, source }),
-        },
+        IoRequest::ReadFile { path, maximum } => perform_read_file(path, maximum, true),
+        IoRequest::ReadFileBytes { path, maximum } => perform_read_file(path, maximum, false),
         IoRequest::WriteFile {
             path,
             contents,
@@ -552,6 +556,74 @@ fn perform_request(
             solveig_base::ice!("socket request reached the blocking worker pool")
         }
     }
+}
+
+fn perform_read_file(path: PathBuf, maximum: Option<i64>, text: bool) -> IoResult {
+    let contents = match maximum {
+        None => fs::read(&path).map_err(|source| IoFailure::ReadFile {
+            path: path.clone(),
+            source,
+        }),
+        Some(maximum) => read_file_limited(&path, maximum),
+    };
+    let contents = match contents {
+        Ok(contents) => contents,
+        Err(failure) => return IoResult::Failed(failure),
+    };
+    if !text {
+        return IoResult::Bytes(contents);
+    }
+    match String::from_utf8(contents) {
+        Ok(contents) => IoResult::Text(contents),
+        Err(error) => IoResult::Failed(IoFailure::ReadFile {
+            path,
+            source: io::Error::new(io::ErrorKind::InvalidData, error),
+        }),
+    }
+}
+
+fn read_file_limited(path: &Path, maximum: i64) -> Result<Vec<u8>, IoFailure> {
+    if maximum < 0 {
+        return Err(IoFailure::ReadFile {
+            path: path.to_path_buf(),
+            source: io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "maximum byte count must be non-negative",
+            ),
+        });
+    }
+    let maximum = usize::try_from(maximum).map_err(|_out_of_range| IoFailure::ReadFile {
+        path: path.to_path_buf(),
+        source: io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "maximum byte count is not representable by this host",
+        ),
+    })?;
+    let read_limit = maximum.checked_add(1).ok_or_else(|| IoFailure::ReadFile {
+        path: path.to_path_buf(),
+        source: io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "maximum byte count is not representable by this host",
+        ),
+    })?;
+    let file = fs::File::open(path).map_err(|source| IoFailure::ReadFile {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let mut contents = Vec::new();
+    file.take(read_limit as u64)
+        .read_to_end(&mut contents)
+        .map_err(|source| IoFailure::ReadFile {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    if contents.len() > maximum {
+        return Err(IoFailure::ReadFileTooLarge {
+            path: path.to_path_buf(),
+            maximum: maximum as i64,
+        });
+    }
+    Ok(contents)
 }
 
 fn validate_environment_name(name: &str) -> Result<(), String> {

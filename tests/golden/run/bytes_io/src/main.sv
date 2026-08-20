@@ -18,6 +18,12 @@ reportNegative ioError =
         ReadHandleError message => pureIO "negative-read"
         | _ => pureIO "wrong-negative-error";
 
+reportFileLimit : String -> IOError -> Task String;
+reportFileLimit expected ioError =
+    case ioError of
+        ReadFileError _ _ => pureIO expected
+        | _ => pureIO "wrong-file-limit-error";
+
 readChunks : Handle -> Task ();
 readChunks input = do
     first <- hGetBytes input 2
@@ -55,6 +61,22 @@ main = do
     writeFileBytes "generated.bin" payload
     whole <- readFileBytes "generated.bin"
     printBytes whole
+    limitedBytes <- readFileBytesLimited "generated.bin" 5
+    printBytes limitedBytes
+    limitedText <- readFileLimited "generated.bin" 5
+    printLine (show (bytesLength (stringToBytes limitedText)))
+    tooLarge <- catchError
+        (bindIO
+            (readFileBytesLimited "generated.bin" 4)
+            (fun bytes => pureIO "wrong-file-limit-success"))
+        (reportFileLimit "file-too-large")
+    negativeLimit <- catchError
+        (bindIO
+            (readFileLimited "generated.bin" (0 - 1))
+            (fun text => pureIO "wrong-negative-limit-success"))
+        (reportFileLimit "negative-file-limit")
+    printLine tooLarge
+    printLine negativeLimit
     read <- withFile "generated.bin" ReadMode readChunks
     mixed <- withFile "generated.bin" ReadMode readMixed
     wrote <- withFile "generated.bin" WriteMode (writeChunks payload)

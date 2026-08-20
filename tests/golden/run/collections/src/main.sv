@@ -1,4 +1,5 @@
 import std.map
+import std.list
 import std.queue
 import std.set
 import std.vector
@@ -57,3 +58,5 @@ main = do
     printLine (show (std.set.toAscList (std.set.difference first second)))
     printLine (show (std.queue.length queueExample))
     printDequeued queueExample
+    printLine (show (std.list.take (0 - 1) [1, 2, 3]))
+    printLine (show (std.list.drop (0 - 1) [1, 2, 3]))

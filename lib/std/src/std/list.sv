@@ -1,14 +1,20 @@
 -- | Takes at most n elements from the beginning of a list.
 take : forall a. Int -> [a] -> [a]
-take 0 _ = []
-take _ [] = []
-take count (x :: xs) = x :: take (count - 1) xs
+take count xs =
+    if count <= 0 then []
+    else
+        case xs of
+            [] => []
+            | x :: rest => x :: take (count - 1) rest
 
 -- | Drops at most n elements from the beginning of a list.
 drop : forall a. Int -> [a] -> [a]
-drop 0 xs = xs
-drop _ [] = []
-drop count (x :: xs) = drop (count - 1) xs
+drop count xs =
+    if count <= 0 then xs
+    else
+        case xs of
+            [] => []
+            | _ :: rest => drop (count - 1) rest
 
 -- | Takes elements while the predicate is true.
 takeWhile : forall a. (a -> Bool) -> [a] -> [a]
