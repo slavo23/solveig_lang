@@ -13,7 +13,8 @@ use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session,
 use solveig_check::inference::type_infer::CheckedModule;
 use solveig_package::{PackageId, PackageKind};
 use solveig_syntax::ast::{
-    DocComment, Fixity, ImportDecl, ImportSpec, ModuleName, ParsedModule, SurfaceDefinition,
+    DocComment, Fixity, ImportDecl, ImportSpec, InstanceMethod, ModuleName, ParsedModule,
+    SurfaceDefinition,
 };
 
 mod api_build;
@@ -27,7 +28,7 @@ mod tests;
 
 pub use api_build::*;
 pub use diagnostics::*;
-pub use equations::function_equation_group_indices;
+pub use equations::{function_equation_group_indices, instance_method_equation_group_indices};
 pub use graph::*;
 pub use imports::*;
 pub(crate) use module_api::local_def_id;

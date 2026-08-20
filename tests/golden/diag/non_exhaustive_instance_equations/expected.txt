@@ -1,0 +1,16 @@
+[TC0015] Error: type mismatch in instance method `pick` of `main.Pick`
+   ╭─[ $WORKSPACE/tests/golden/diag/non_exhaustive_instance_equations/src/main.sv:7:5 ]
+   │
+ 7 │     pick O O = 0
+   │     ──────┬─────
+   │           ╰─────── this case expression does not cover all values of type `Bit, Bit`
+   │
+   │ Note 1: scrutinee type: `Bit, Bit`
+   │         missing pattern examples:
+   │           I, O
+   │           O, I
+   │           I, I
+   │
+   │ Note 2: the class requires `Bit -> Bit -> Int`
+───╯
+type error

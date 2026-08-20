@@ -286,11 +286,15 @@ fn push_surface_local_candidates(
             }
             SurfaceDefinition::InstanceDef { methods, .. } => {
                 for method in methods {
+                    let mut binders = Vec::new();
                     for param in &method.params {
+                        collect_pattern_binders(param, &mut binders);
+                    }
+                    for binder in binders {
                         push_local_candidate(
                             session,
                             module_file.parsed.file,
-                            param.0,
+                            binder,
                             method.body.1,
                             out,
                         );

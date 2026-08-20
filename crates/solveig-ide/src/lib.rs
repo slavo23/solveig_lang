@@ -4,9 +4,9 @@
 
 use solveig_ast::ast::{
     ClassDefinition, ClassId, ClassInfo, ClassTable, CtorId, CtorTable, DataDefinition, DefId,
-    InstanceDefinition, Kind, ModuleId, Names, PRELUDE_LIST_NAME, PRIM_TYS, Pattern, PatternNode,
-    Predicate, Pretty, PrettyTables, Scheme, TermDefinition, TermExpr, TermExprNode, Ty,
-    TyConDefinition, TyConId, TyConInfo, TyConTable, TyVarId, VarRef,
+    InstanceDefinition, InstanceMethodDef, Kind, ModuleId, Names, PRELUDE_LIST_NAME, PRIM_TYS,
+    Pattern, PatternNode, Predicate, Pretty, PrettyTables, Scheme, TermDefinition, TermExpr,
+    TermExprNode, Ty, TyConDefinition, TyConId, TyConInfo, TyConTable, TyVarId, VarRef,
     compiler_bool_data_definition,
 };
 use solveig_base::{
@@ -20,11 +20,11 @@ use solveig_package::{PackageId, PackageKind};
 use solveig_resolve::project::{
     EffectiveImport, ModuleApi, ModuleFile, ParsedProject, Project, ResolveError, ResolveNameKind,
     SharedModuleApi, SharedTypedModuleApi, TypeAlias, TypedModuleApi, build_module_api,
-    effective_imports, function_equation_group_indices,
+    effective_imports, function_equation_group_indices, instance_method_equation_group_indices,
 };
 use solveig_syntax::ast::{
-    ClassMethod, DocComment, ImportDecl, ImportSpec, ModuleName, ParsedModule, Spanned,
-    SurfaceConstructor, SurfaceDefinition, SurfaceDoStmt, SurfaceExpr, SurfacePattern,
+    ClassMethod, DocComment, ImportDecl, ImportSpec, InstanceMethod, ModuleName, ParsedModule,
+    Spanned, SurfaceConstructor, SurfaceDefinition, SurfaceDoStmt, SurfaceExpr, SurfacePattern,
     SurfacePredicate, SurfaceTy,
 };
 use std::cell::RefCell;

@@ -270,7 +270,7 @@ the access pattern.
 
 ## 6. Multiple equations and pattern-directed functions
 
-Top-level functions can use several equations:
+Top-level functions and explicit instance methods can use several equations:
 
 ```solveig
 sum : [Int] -> Int
@@ -284,7 +284,8 @@ describeStatus (Rejected reason) = appendString "rejected: " reason
 ```
 
 Equations are tried from top to bottom. Keep specific patterns before broad
-ones. All equations for one function must be contiguous and agree on arity.
+ones. All equations for one function or instance method must be contiguous and
+agree on arity.
 
 ## 7. Modules and imports
 
@@ -382,11 +383,15 @@ class Render a where
 data Priority = Low | High
 
 instance Render Priority where
-    render priority =
-        case priority of
-            Low => "low"
-            | High => "high"
+    render Low = "low"
+    render High = "high"
 ```
+
+An instance method's equations are checked together, so Solveig reports
+non-exhaustive or unreachable patterns just as it does for a top-level
+function. The method's type remains declared once in the class; instance-local
+method signatures are not part of the language yet. Class default bodies are
+still single definitions.
 
 Constraints appear before `=>`:
 
@@ -404,10 +409,8 @@ resolution is static; there is no runtime reflection or method lookup by text.
 
 ```solveig
 instance Show Priority where
-    show priority =
-        case priority of
-            Low => "Low"
-            | High => "High"
+    show Low = "Low"
+    show High = "High"
 ```
 
 Do not make every domain type printable merely for debugging. A deliberate

@@ -334,7 +334,7 @@ fn push_local_binders(
                     push_type_binders(&method.ty, file, out);
                 }
                 for default in defaults {
-                    push_value_params(&default.params, file, out);
+                    push_function_params(&default.params, file, out);
                     push_expr_binders(&default.body, file, out);
                 }
             }
@@ -351,7 +351,7 @@ fn push_local_binders(
                     push_type_binders(arg, file, out);
                 }
                 for method in methods {
-                    push_value_params(&method.params, file, out);
+                    push_function_params(&method.params, file, out);
                     push_expr_binders(&method.body, file, out);
                 }
             }
@@ -483,12 +483,6 @@ fn push_predicate_type_binders(
 ) {
     for arg in &predicate.0.args {
         push_type_binders(arg, file, out);
-    }
-}
-
-fn push_value_params(params: &[Spanned<Symbol>], file: FileId, out: &mut Vec<SourceSemanticToken>) {
-    for param in params {
-        push_param(*param, file, out);
     }
 }
 

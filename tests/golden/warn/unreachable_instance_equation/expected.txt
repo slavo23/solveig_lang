@@ -1,0 +1,8 @@
+1
+[TC0017] Warning: unreachable pattern
+   ╭─[ $WORKSPACE/tests/golden/warn/unreachable_instance_equation/src/main.sv:8:11 ]
+   │
+ 8 │     value On = 2
+   │           ─┬  
+   │            ╰── this pattern is already covered by earlier case arms
+───╯

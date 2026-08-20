@@ -2,6 +2,12 @@
 
 use super::*;
 
+mod instance_equations;
+
+use instance_equations::{
+    collect_instance_method_group_inlay_hints, collect_instance_method_group_local_hovers,
+};
+
 type CheckedExpr = TermExprNode<TcMetadata, Range<usize>>;
 
 #[derive(Clone, Copy)]
@@ -203,8 +209,13 @@ fn collect_module_inlay_hints(
             continue;
         };
 
-        for method in methods {
-            let method_name = session.str(method.name.0);
+        let method_groups =
+            instance_method_equation_group_indices(parsed.file, methods).unwrap_or_default();
+        for group in method_groups {
+            let Some(first_method) = group.first().and_then(|index| methods.get(*index)) else {
+                continue;
+            };
+            let method_name = session.str(first_method.name.0);
             let Some(checked_method) = checked_instance
                 .methods
                 .iter()
@@ -214,27 +225,18 @@ fn collect_module_inlay_hints(
             };
             drop(method_name);
 
-            let checked_body = collect_function_param_hints(
-                session,
-                parsed.file,
-                &method.params,
-                &checked_method.body,
-                tables,
-                out,
-            )
-            .unwrap_or_else(|| {
-                checked_body_without_function_params(&checked_method.body, method.params.len())
-            });
-
-            collect_expr_inlay_hints(
-                session,
-                parsed.file,
-                &method.body,
-                checked_body,
-                tables,
+            collect_instance_method_group_inlay_hints(
+                InlayGroupContext {
+                    session,
+                    source,
+                    parsed,
+                    tables,
+                },
+                methods,
+                &group,
+                checked_method,
                 out,
             );
-            collect_textual_let_hints(parsed.file, source, checked_body, tables, out);
         }
     }
 }
@@ -247,8 +249,6 @@ fn collect_module_local_hovers(
     out: &mut Vec<HoverInfo>,
 ) {
     let session = cx.session;
-    let file = cx.file;
-    let tables = cx.tables;
     let checked_defs = checked
         .func_defs
         .iter()
@@ -286,8 +286,13 @@ fn collect_module_local_hovers(
             continue;
         };
 
-        for method in methods {
-            let method_name = session.str(method.name.0);
+        let method_groups =
+            instance_method_equation_group_indices(parsed.file, methods).unwrap_or_default();
+        for group in method_groups {
+            let Some(first_method) = group.first().and_then(|index| methods.get(*index)) else {
+                continue;
+            };
+            let method_name = session.str(first_method.name.0);
             let Some(checked_method) = checked_instance
                 .methods
                 .iter()
@@ -297,34 +302,7 @@ fn collect_module_local_hovers(
             };
             drop(method_name);
 
-            push_local_hover(
-                file,
-                method.name.1,
-                &checked_method.name,
-                &checked_method.body.anno.inferred_type,
-                tables,
-                out,
-            );
-
-            let mut param_facts = Vec::new();
-            let checked_body = collect_function_param_hovers(
-                session,
-                file,
-                &method.params,
-                &checked_method.body,
-                tables,
-                &mut param_facts,
-                out,
-            )
-            .unwrap_or_else(|| {
-                checked_body_without_function_params(&checked_method.body, method.params.len())
-            });
-
-            for (symbol, name, ty) in &param_facts {
-                push_expr_reference_hovers(file, &method.body, *symbol, name, ty, tables, out);
-            }
-
-            collect_expr_local_hovers(cx, &method.body, checked_body, out);
+            collect_instance_method_group_local_hovers(cx, methods, &group, checked_method, out);
         }
     }
 }

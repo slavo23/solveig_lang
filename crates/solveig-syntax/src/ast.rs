@@ -138,7 +138,7 @@ pub struct ClassMethod {
 #[derive(Debug, Clone)]
 pub struct InstanceMethod {
     pub name: Spanned<Symbol>,
-    pub params: Vec<Spanned<Symbol>>,
+    pub params: Vec<Spanned<SurfacePattern>>,
     pub body: Spanned<SurfaceExpr>,
     pub cst_id: CstId,
 }

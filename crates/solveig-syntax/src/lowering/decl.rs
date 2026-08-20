@@ -502,10 +502,24 @@ impl CstToAst<'_> {
                     *index += 1;
                     break;
                 }
+                NodeOrToken::Node(pattern) if self.node_is_pattern_like(pattern) => {
+                    params.push(self.lower_pattern(pattern)?);
+                    *index += 1;
+                }
                 NodeOrToken::Token(token)
-                    if matches!(self.cst.token(token).kind, Token::Ident | Token::Underscore) =>
+                    if has_default_keyword
+                        && matches!(
+                            self.cst.token(token).kind,
+                            Token::Ident | Token::Underscore
+                        ) =>
                 {
-                    params.push(self.binder_span_from_token(token, owner));
+                    let binder = self.binder_span_from_token(token, owner);
+                    let pattern = if self.cst.token(token).kind == Token::Underscore {
+                        SurfacePattern::Wild
+                    } else {
+                        SurfacePattern::Var(binder.0)
+                    };
+                    params.push((pattern, binder.1, binder.2));
                     *index += 1;
                 }
                 _ => *index += 1,

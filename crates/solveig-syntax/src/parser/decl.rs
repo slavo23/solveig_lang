@@ -226,8 +226,8 @@ impl Parser<'_> {
                     break;
                 }
                 parser.expect_value_name()?;
-                while matches!(parser.current_kind(), Token::Ident | Token::Underscore) {
-                    parser.expect_binder_span()?;
+                while parser.is_pattern_arg_start() {
+                    parser.parse_pattern_arg()?;
                 }
                 parser.expect(&Token::Eq)?;
                 parser.parse_expr()?;

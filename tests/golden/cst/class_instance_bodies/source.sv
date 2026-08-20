@@ -4,6 +4,8 @@ class TinyEq a where
         if tinyEq x y then False else True
 
 instance TinyEq Int where
-    tinyEq x y = x == y
+    tinyEq 0 0 = True
+    tinyEq (x) _ = x == 0
+    tinyEq _ y = y == 0
 
 main = tinyEq 1 1

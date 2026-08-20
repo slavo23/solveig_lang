@@ -10,6 +10,10 @@ use solveig_syntax::ast::{SurfaceOpOperand, SurfaceOpSegment};
 use solveig_syntax::cst::{CstId, SyntaxTree, TokenId};
 use solveig_syntax::lexer::Token;
 
+mod instance_equations;
+
+use instance_equations::collect_instance_method_group_position_facts;
+
 type CheckedExpr = TermExprNode<TcMetadata, Range<usize>>;
 type CheckedExprRef<'a> = &'a CheckedExpr;
 
@@ -251,6 +255,9 @@ impl PositionIndex {
                 }
                 for default in defaults {
                     self.mark_ast_node(default.cst_id);
+                    for param in &default.params {
+                        self.mark_pattern_ast_nodes(param);
+                    }
                     self.mark_expr_ast_nodes(&default.body);
                 }
             }
@@ -271,6 +278,9 @@ impl PositionIndex {
                 }
                 for method in methods {
                     self.mark_ast_node(method.cst_id);
+                    for param in &method.params {
+                        self.mark_pattern_ast_nodes(param);
+                    }
                     self.mark_expr_ast_nodes(&method.body);
                 }
             }
@@ -765,8 +775,13 @@ fn collect_module_position_facts(
             continue;
         };
 
-        for method in methods {
-            let method_name = session.str(method.name.0);
+        let method_groups =
+            instance_method_equation_group_indices(parsed.file, methods).unwrap_or_default();
+        for group in method_groups {
+            let Some(first_method) = group.first().and_then(|index| methods.get(*index)) else {
+                continue;
+            };
+            let method_name = session.str(first_method.name.0);
             let Some(checked_method) = checked_instance
                 .methods
                 .iter()
@@ -776,15 +791,11 @@ fn collect_module_position_facts(
             };
             drop(method_name);
 
-            let checked_body =
-                checked_body_without_function_params(&checked_method.body, method.params.len());
-            collect_expr_position_facts(
-                &method.body,
-                checked_body,
-                cx.snapshot,
-                cx.docs,
-                cx.ctor_table,
-                cx.tables,
+            collect_instance_method_group_position_facts(
+                methods,
+                &group,
+                checked_method,
+                cx,
                 index,
             );
         }

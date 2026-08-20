@@ -690,46 +690,44 @@ impl<'a> Resolver<'a> {
     }
     fn resolve_equation_group_body(
         &mut self,
-        defs: &[&SpannedWrapper<SurfaceDefinition>],
+        equations: &[SurfaceEquation<'_>],
         sig: Option<&Scheme>,
         name: SpannedWrapper<Symbol>,
         cx: &ModuleContext,
         local: &LocalResolverEnv,
     ) -> TermExprNode<Span> {
-        let first_def = defs
+        let first_equation = equations
             .first()
             .expect("ICE: equation group must have a first definition");
-        let last_def = defs
+        let last_equation = equations
             .last()
             .expect("ICE: equation group must have a last definition");
-        let group_source_span = SourceSpan::new(first_def.1.start, last_def.1.end);
+        let group_source_span =
+            SourceSpan::new(first_equation.2.start, last_equation.2.end);
         let group_span = to_core_span(group_source_span);
+        let &(params, first_body, _) = first_equation;
 
-        let SurfaceDefinition::FunDef { params, .. } = &first_def.0 else {
-            solveig_base::ice!("equation group contained a non-function definition");
-        };
-
-        if defs.len() == 1 {
+        if equations.len() == 1 {
             let mut pattern_bound_terms = FxHashSet::default();
             for param in params {
                 self.collect_surface_pattern_binders(param, cx, &mut pattern_bound_terms);
             }
         }
 
-        if defs.len() == 1
+        if equations.len() == 1
             && let Some(simple_params) = self.simple_variable_params(params)
         {
             return match sig {
                 Some(sig) => self.wrap_function_body_with_signature_in_module(
                     sig,
-                    function_body(first_def),
+                    first_body,
                     &simple_params,
                     name,
                     cx,
                     local,
                 ),
                 None => self.wrap_function_body_without_signature_in_module(
-                    function_body(first_def),
+                    first_body,
                     &simple_params,
                     cx,
                     local,
@@ -761,17 +759,9 @@ impl<'a> Resolver<'a> {
             })
             .collect::<Vec<_>>();
 
-        let mut arms = Vec::with_capacity(defs.len());
+        let mut arms = Vec::with_capacity(equations.len());
 
-        for def in defs {
-            let SurfaceDefinition::FunDef {
-                params,
-                body,
-                ..
-            } = &def.0
-            else {
-                solveig_base::ice!("equation group contained a non-function definition");
-            };
+        for &(params, body, equation_span) in equations {
 
             let mut pattern_bound_terms = FxHashSet::default();
             for param in params {
@@ -786,7 +776,7 @@ impl<'a> Resolver<'a> {
                 .collect::<Vec<_>>();
             let resolved_body =
                 self.resolve_surface_expr_in_module(body, cx, local, &body_bound_terms);
-            let pattern_span = equation_pattern_span(name.1, params, def.1);
+            let pattern_span = equation_pattern_span(name.1, params, equation_span);
 
             arms.push(MatchArmNode::new(
                 MatchArm {
@@ -867,8 +857,19 @@ impl<'a> Resolver<'a> {
                 let fn_id = self.local_def_id(cx, *name);
                 let fn_name = self.qualified_def_name(fn_id);
                 let sig = func_schemes.get(&fn_id).cloned();
+                let equations = defs
+                    .iter()
+                    .map(|def| {
+                        let SurfaceDefinition::FunDef { params, body, .. } = &def.0 else {
+                            solveig_base::ice!(
+                                "equation group contained a non-function definition"
+                            );
+                        };
+                        (params.as_slice(), body, def.1)
+                    })
+                    .collect::<Vec<_>>();
                 let body = self.resolve_equation_group_body(
-                    &defs,
+                    &equations,
                     sig.as_ref(),
                     *spanned_name,
                     cx,
@@ -885,13 +886,6 @@ impl<'a> Resolver<'a> {
             })
             .collect()
     }
-}
-
-fn function_body(def: &SpannedWrapper<SurfaceDefinition>) -> &SpannedWrapper<SurfaceExpr> {
-    let SurfaceDefinition::FunDef { body, .. } = &def.0 else {
-        solveig_base::ice!("expected function definition");
-    };
-    body
 }
 
 fn equation_pattern_span(

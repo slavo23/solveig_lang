@@ -28,10 +28,15 @@ use solveig_syntax::fixity::{FixityError, resolve_op_seq};
 
 use crate::project::{
     ModuleContext, ModuleTable, ResolveError, ResolveNameKind, TypeAlias,
-    function_equation_group_indices,
+    function_equation_group_indices, instance_method_equation_group_indices,
 };
 
 type Span = Range<usize>;
+type SurfaceEquation<'a> = (
+    &'a [SpannedWrapper<SurfacePattern>],
+    &'a SpannedWrapper<SurfaceExpr>,
+    SourceSpan,
+);
 
 fn to_core_span(span: SourceSpan) -> Span {
     span.to_usize_range()

@@ -138,3 +138,90 @@ main = bad O O
         "TC0016",
     ));
 }
+
+#[test]
+fn instance_method_equations_preserve_patterns_order_and_recursion() {
+    let project_root = temp_root("instance_methods");
+    let file = project_root.join("src/main.sv");
+    let source = r#"data Bag = Bag [Int]
+
+class Total a where
+    total : a -> Int -> Int
+
+instance Total Bag where
+    total (Bag []) bonus = bonus
+    total (Bag (value :: rest)) bonus = value + total (Bag rest) bonus
+
+main = total (Bag [1, 2, 3]) 4
+"#;
+    write_source(&file, source);
+
+    let mut compilation = Compilation::new(&project_root);
+    let output = compilation
+        .run_project_capture("main")
+        .expect("instance equation group fixture should run");
+
+    assert_eq!(output, "10");
+}
+
+#[test]
+fn instance_method_equation_diagnostics_cover_group_shape_and_patterns() {
+    assert!(diagnostics_include_code(
+        r#"class Choose a where
+    choose : a -> Int -> Int
+
+instance Choose Int where
+    choose 0 = 0
+    choose value fallback = value + fallback
+
+main = choose 1 2
+"#,
+        "RES0015",
+    ));
+
+    assert!(diagnostics_include_code(
+        r#"class Choose a where
+    choose : a -> Int
+    other : a -> Int
+
+instance Choose Int where
+    choose 0 = 0
+    other value = value
+    choose value = value
+
+main = choose 1
+"#,
+        "RES0016",
+    ));
+
+    assert!(diagnostics_include_code(
+        r#"data PairInt = PairInt Int Int
+
+class Choose a where
+    choose : a -> Int
+
+instance Choose PairInt where
+    choose (PairInt value value) = value
+
+main = choose (PairInt 1 1)
+"#,
+        "RES0017",
+    ));
+}
+
+#[test]
+fn instance_method_equations_use_multi_column_exhaustiveness() {
+    assert!(diagnostics_include_code(
+        r#"data Bit = O | I
+
+class Pick a where
+    pick : a -> a -> Int
+
+instance Pick Bit where
+    pick O O = 0
+
+main = pick O O
+"#,
+        "TC0015",
+    ));
+}

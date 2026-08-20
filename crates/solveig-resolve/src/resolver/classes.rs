@@ -306,9 +306,13 @@ impl<'a> Resolver<'a> {
                                     .iter()
                                     .find(|default| default.name.0 == method.name.0)
                                     .map(|default| {
-                                        self.wrap_function_body_without_signature_in_module(
-                                            &default.body,
-                                            &default.params,
+                                        self.resolve_equation_group_body(
+                                            &[(&default.params, &default.body, SourceSpan::new(
+                                                default.name.1.start,
+                                                default.body.1.end,
+                                            ))],
+                                            None,
+                                            default.name,
                                             cx,
                                             local,
                                         )
@@ -535,16 +539,48 @@ impl<'a> Resolver<'a> {
                 std::slice::from_ref(&checked_head),
             );
 
-            let resolved_methods = methods
-                .iter()
-                .map(|method| InstanceMethodDef {
-                    name: self.symbol_text(method.name.0),
-                    body: self.wrap_function_body_without_signature_in_module(
-                        &method.body,
-                        &method.params,
-                        cx,
-                        local,
-                    ),
+            let method_groups = match instance_method_equation_group_indices(parsed.file, methods) {
+                Ok(groups) => groups,
+                Err(error) => {
+                    self.errors.push(error);
+                    continue;
+                }
+            };
+            let resolved_methods = method_groups
+                .into_iter()
+                .map(|group| {
+                    let group_methods = group
+                        .iter()
+                        .map(|index| {
+                            methods
+                                .get(*index)
+                                .expect("ICE: instance method equation index out of bounds")
+                        })
+                        .collect::<Vec<_>>();
+                    let first_method = group_methods
+                        .first()
+                        .expect("ICE: instance method equation group must not be empty");
+                    let equations = group_methods
+                        .iter()
+                        .map(|method| {
+                            (
+                                method.params.as_slice(),
+                                &method.body,
+                                SourceSpan::new(method.name.1.start, method.body.1.end),
+                            )
+                        })
+                        .collect::<Vec<_>>();
+
+                    InstanceMethodDef {
+                        name: self.symbol_text(first_method.name.0),
+                        body: self.resolve_equation_group_body(
+                            &equations,
+                            None,
+                            first_method.name,
+                            cx,
+                            local,
+                        ),
+                    }
                 })
                 .collect::<Vec<_>>();
 
