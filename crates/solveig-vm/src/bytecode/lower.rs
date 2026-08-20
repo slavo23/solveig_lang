@@ -225,14 +225,10 @@ impl BytecodeLowerer {
             CCExpr::Char(ch) => builder.emit(Instr::PushChar(*ch)),
             CCExpr::StrConst(index) => builder.emit(Instr::PushStr(*index)),
 
-            CCExpr::Local(index) => {
-                let slot = env.lookup(*index);
-                builder.emit(Instr::LoadLocal(slot));
-            }
-
-            CCExpr::Capture(index) => {
-                let slot = u16::try_from(*index)
-                    .unwrap_or_else(|_| solveig_base::ice!("capture index {index} does not fit in u16"));
+            CCExpr::Local(_) | CCExpr::Capture(_) => {
+                let Some(slot) = expression_local_slot(expr, env) else {
+                    solveig_base::ice!("local bytecode expression lost its stack slot");
+                };
                 builder.emit(Instr::LoadLocal(slot));
             }
 
@@ -255,9 +251,26 @@ impl BytecodeLowerer {
             }
 
             CCExpr::BinaryOp(op, lhs, rhs) => {
-                self.compile_expr(builder, env, lhs);
-                self.compile_expr(builder, env, rhs);
-                builder.emit(Instr::Binary(*op));
+                // Ertl and Gregg's superinstruction technique is applied only
+                // to the operand shapes selected by O5's dynamic profile.
+                if let Some(local) = expression_local_slot(lhs, env)
+                    && let CCExpr::Int(rhs) = unlocated_expression(rhs)
+                {
+                    builder.emit(Instr::BinaryLocalInt {
+                        op: *op,
+                        local,
+                        rhs: *rhs,
+                    });
+                } else if let (Some(lhs), Some(rhs)) = (
+                    expression_local_slot(lhs, env),
+                    expression_local_slot(rhs, env),
+                ) {
+                    builder.emit(Instr::BinaryLocals { op: *op, lhs, rhs });
+                } else {
+                    self.compile_expr(builder, env, lhs);
+                    self.compile_expr(builder, env, rhs);
+                    builder.emit(Instr::Binary(*op));
+                }
             }
 
             CCExpr::MakeClosure { func, captures } => {
@@ -302,10 +315,6 @@ impl BytecodeLowerer {
             }
 
             CCExpr::CallKnown { func, args } => {
-                for arg in args {
-                    self.compile_expr(builder, env, arg);
-                }
-
                 let chunk = self.function_chunk_id(*func);
                 let chunk = u32::try_from(chunk)
                     .unwrap_or_else(|_| solveig_base::ice!("chunk id {chunk} does not fit in u32"));
@@ -313,7 +322,39 @@ impl BytecodeLowerer {
                     solveig_base::ice!("arg count {} does not fit in u16", args.len())
                 });
 
-                builder.emit(Instr::CallKnown { chunk, arg_count });
+                // The same O5 profile selected one- and two-local suffixes of
+                // known calls. Earlier arguments retain their evaluation order.
+                if let Some((last, prefix)) = args.split_last()
+                    && let Some(local) = expression_local_slot(last, env)
+                {
+                    if let Some((penultimate, earlier)) = prefix.split_last()
+                        && let Some(first) = expression_local_slot(penultimate, env)
+                    {
+                        for arg in earlier {
+                            self.compile_expr(builder, env, arg);
+                        }
+                        builder.emit(Instr::CallKnownLocals {
+                            chunk,
+                            arg_count,
+                            first,
+                            second: local,
+                        });
+                    } else {
+                        for arg in prefix {
+                            self.compile_expr(builder, env, arg);
+                        }
+                        builder.emit(Instr::CallKnownLocal {
+                            chunk,
+                            arg_count,
+                            local,
+                        });
+                    }
+                } else {
+                    for arg in args {
+                        self.compile_expr(builder, env, arg);
+                    }
+                    builder.emit(Instr::CallKnown { chunk, arg_count });
+                }
             }
 
             CCExpr::CallBuiltin { id, args } => {
@@ -413,6 +454,41 @@ impl BytecodeLowerer {
                 builder.patch_match(match_pos, compiled_arms.into_boxed_slice(), else_target);
             }
         }
+    }
+}
+
+fn unlocated_expression(mut expr: &CCExpr) -> &CCExpr {
+    while let CCExpr::Located(_, inner) = expr {
+        expr = inner;
+    }
+    expr
+}
+
+fn expression_local_slot(expr: &CCExpr, env: &LocalEnv) -> Option<u16> {
+    match unlocated_expression(expr) {
+        CCExpr::Local(index) => Some(env.lookup(*index)),
+        CCExpr::Capture(index) => Some(u16::try_from(*index).unwrap_or_else(|_| {
+            solveig_base::ice!("capture index {index} does not fit in u16")
+        })),
+        CCExpr::Located(..)
+        | CCExpr::Unit
+        | CCExpr::Int(_)
+        | CCExpr::Float(_)
+        | CCExpr::Char(_)
+        | CCExpr::StrConst(_)
+        | CCExpr::Global(_)
+        | CCExpr::CtorFn { .. }
+        | CCExpr::CallBuiltin { .. }
+        | CCExpr::UnaryOp(..)
+        | CCExpr::BinaryOp(..)
+        | CCExpr::MakeClosure { .. }
+        | CCExpr::FunctionRef { .. }
+        | CCExpr::Call { .. }
+        | CCExpr::CallKnown { .. }
+        | CCExpr::Let(..)
+        | CCExpr::Pack { .. }
+        | CCExpr::Case { .. }
+        | CCExpr::IfThenElse { .. } => None,
     }
 }
 

@@ -44,10 +44,8 @@ main = addGeneric 1 2
     let instructions = chunk_instructions(&chunk);
 
     insta::assert_snapshot!(instructions, @r"
-    0000 LoadLocal 0
-    0001 LoadLocal 1
-    0002 Binary Plus
-    0003 Return
+    0000 BinaryLocals Plus lhs=0 rhs=1
+    0001 Return
     ");
 }
 

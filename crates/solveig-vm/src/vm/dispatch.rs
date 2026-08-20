@@ -6,7 +6,7 @@ use crate::builtins;
 use crate::bytecode::{BytecodeProgram, Instr, MatchArm};
 use crate::heap::{Heap, HeapObject};
 use crate::values::Value;
-use solveig_ast::ast::Literal;
+use solveig_ast::ast::{BinOp, Literal};
 use solveig_lower::LowerPattern;
 
 impl Interpreter<'_> {
@@ -276,22 +276,18 @@ impl Interpreter<'_> {
                 Instr::Binary(op) => {
                     let rhs = self.pop_int();
                     let lhs = self.pop_int();
-                    let result = match op {
-                        solveig_ast::ast::BinOp::Plus => Value::Int(lhs.wrapping_add(rhs)),
-                        solveig_ast::ast::BinOp::Minus => Value::Int(lhs.wrapping_sub(rhs)),
-                        solveig_ast::ast::BinOp::Mult => Value::Int(lhs.wrapping_mul(rhs)),
-                        solveig_ast::ast::BinOp::Div => {
-                            Value::Int(builtins::int_div_or_defect(lhs, rhs)?)
-                        }
-                        solveig_ast::ast::BinOp::Less => self.bool_value(lhs < rhs),
-                        solveig_ast::ast::BinOp::Greater => self.bool_value(lhs > rhs),
-                        solveig_ast::ast::BinOp::LessOrEqual => self.bool_value(lhs <= rhs),
-                        solveig_ast::ast::BinOp::GreaterOrEqual => self.bool_value(lhs >= rhs),
-                        solveig_ast::ast::BinOp::Equal => self.bool_value(lhs == rhs),
-                        solveig_ast::ast::BinOp::Mod => {
-                            Value::Int(builtins::int_mod_or_defect(lhs, rhs)?)
-                        }
-                    };
+                    let result = self.evaluate_binary(op, lhs, rhs)?;
+                    self.push(result);
+                }
+                Instr::BinaryLocalInt { op, local, rhs } => {
+                    let lhs = self.load_int(local);
+                    let result = self.evaluate_binary(op, lhs, rhs)?;
+                    self.push(result);
+                }
+                Instr::BinaryLocals { op, lhs, rhs } => {
+                    let lhs = self.load_int(lhs);
+                    let rhs = self.load_int(rhs);
+                    let result = self.evaluate_binary(op, lhs, rhs)?;
                     self.push(result);
                 }
                 Instr::CallBuiltin { id, arg_count } => {
@@ -343,6 +339,47 @@ impl Interpreter<'_> {
 
                 Instr::CallKnown { chunk, arg_count } => {
                     self.safe_point();
+                    let chunk_id = chunk as usize;
+                    let n = arg_count as usize;
+
+                    if let Some(val) =
+                        self.invoke_known_function(program, InvokeMode::Call, chunk_id, n)
+                    {
+                        self.push(val);
+                    }
+
+                    (code, code_len) = self.instruction_window();
+                }
+                Instr::CallKnownLocal {
+                    chunk,
+                    arg_count,
+                    local,
+                } => {
+                    self.safe_point();
+                    let argument = self.load(local);
+                    self.push(argument);
+                    let chunk_id = chunk as usize;
+                    let n = arg_count as usize;
+
+                    if let Some(val) =
+                        self.invoke_known_function(program, InvokeMode::Call, chunk_id, n)
+                    {
+                        self.push(val);
+                    }
+
+                    (code, code_len) = self.instruction_window();
+                }
+                Instr::CallKnownLocals {
+                    chunk,
+                    arg_count,
+                    first,
+                    second,
+                } => {
+                    self.safe_point();
+                    let first = self.load(first);
+                    let second = self.load(second);
+                    self.push(first);
+                    self.push(second);
                     let chunk_id = chunk as usize;
                     let n = arg_count as usize;
 
@@ -429,6 +466,22 @@ impl Interpreter<'_> {
             solveig_base::ice!("bytecode chunk {} disappeared at runtime", self.chunk);
         };
         (code.as_ptr(), code.len())
+    }
+
+    #[inline(always)]
+    fn evaluate_binary(&self, op: BinOp, lhs: i64, rhs: i64) -> Result<Value, RuntimeError> {
+        Ok(match op {
+            BinOp::Plus => Value::Int(lhs.wrapping_add(rhs)),
+            BinOp::Minus => Value::Int(lhs.wrapping_sub(rhs)),
+            BinOp::Mult => Value::Int(lhs.wrapping_mul(rhs)),
+            BinOp::Div => Value::Int(builtins::int_div_or_defect(lhs, rhs)?),
+            BinOp::Less => self.bool_value(lhs < rhs),
+            BinOp::Greater => self.bool_value(lhs > rhs),
+            BinOp::LessOrEqual => self.bool_value(lhs <= rhs),
+            BinOp::GreaterOrEqual => self.bool_value(lhs >= rhs),
+            BinOp::Equal => self.bool_value(lhs == rhs),
+            BinOp::Mod => Value::Int(builtins::int_mod_or_defect(lhs, rhs)?),
+        })
     }
 
     pub(super) fn resource_defect(&mut self) -> Option<RuntimeError> {

@@ -145,6 +145,29 @@ new regression workload compared a controlled allocating variant at
 closure allocations. Only these focused cases ran; the full suite remains
 reserved for the Phase O exit gate.
 
+O5 first profiled one correctness-validation execution of every VM and
+language case, counting only dynamically consecutive instruction offsets in
+the same chunk. The dominant fusible triples were local/integer/binary
+(3,780,255 executions), two-local/binary (910,000), and
+two-local/known-call (450,008); local/known-call pairs occurred 1,508,697
+times. The retained instruction set covers exactly those shapes. Lower-volume
+generic, builtin, and tail-call combinations were not fused.
+
+Focused same-session measurements before and after O5 were:
+
+| Benchmark | Before | After | Point-estimate reduction |
+|---|---:|---:|---:|
+| `vm/arithmetic_dispatch` | 15.141–15.200 ms (15.167 ms) | 8.182–8.199 ms (8.191 ms) | 46.00% |
+| `language/arithmetic` | 47.508–47.802 ms (47.631 ms) | 41.497–41.714 ms (41.599 ms) | 12.66% |
+| `language/patterns` | 68.896–69.134 ms (69.012 ms) | 64.506–64.835 ms (64.665 ms) | 6.30% |
+
+A controlled subtraction build kept the binary fusions but disabled the two
+known-call forms. `language/patterns` then measured 66.838–67.579 ms (67.166
+ms), a statistically detected 3.87% regression from the combined result, so
+the call family independently earns its opcode surface. As with O2–O4, only
+the affected statistical filters ran after profiling; the full statistical
+suite remains reserved for the Phase O exit gate.
+
 ## Capacity and whole-program checks
 
 Capacity checks answer a different question from microbenchmarks and are run

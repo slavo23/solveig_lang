@@ -94,6 +94,73 @@ fn tail_recursive_countdown_uses_bounded_vm_stack() {
 }
 
 #[test]
+fn profile_selected_superinstructions_are_emitted_and_execute() {
+    let increment = function(0, "increment", 1, bin(BinOp::Plus, local(0), int(1)));
+    let add = function(1, "add", 2, bin(BinOp::Plus, local(1), local(0)));
+    let combine = function(
+        2,
+        "combine",
+        2,
+        bin(
+            BinOp::Plus,
+            call_known(0, vec![local(1)]),
+            call_known(1, vec![local(1), local(0)]),
+        ),
+    );
+    let program = program(
+        vec![global("main", call_known(2, vec![int(4), int(5)]))],
+        vec![increment, add, combine],
+        &[],
+    );
+
+    let bytecode = lower_to_bytecode(&program);
+    let increment = bytecode
+        .chunks
+        .iter()
+        .find(|chunk| chunk.name == "increment")
+        .expect("increment chunk should be lowered");
+    let add = bytecode
+        .chunks
+        .iter()
+        .find(|chunk| chunk.name == "add")
+        .expect("add chunk should be lowered");
+    let combine = bytecode
+        .chunks
+        .iter()
+        .find(|chunk| chunk.name == "combine")
+        .expect("combine chunk should be lowered");
+
+    assert!(matches!(
+        increment.code.first(),
+        Some(Instr::BinaryLocalInt {
+            op: BinOp::Plus,
+            rhs: 1,
+            ..
+        })
+    ));
+    assert!(matches!(
+        add.code.first(),
+        Some(Instr::BinaryLocals {
+            op: BinOp::Plus,
+            ..
+        })
+    ));
+    assert!(
+        combine
+            .code
+            .iter()
+            .any(|instr| matches!(instr, Instr::CallKnownLocal { .. }))
+    );
+    assert!(
+        combine
+            .code
+            .iter()
+            .any(|instr| matches!(instr, Instr::CallKnownLocals { .. }))
+    );
+    assert_eq!(run_main(&program), "14");
+}
+
+#[test]
 fn call_safe_points_yield_and_resume_with_consistent_process_state() {
     let countdown = function(
         0,

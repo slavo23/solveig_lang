@@ -38,6 +38,16 @@ pub enum Instr {
     },
     Unary(UnOp),
     Binary(BinOp),
+    BinaryLocalInt {
+        op: BinOp,
+        local: u16,
+        rhs: i64,
+    },
+    BinaryLocals {
+        op: BinOp,
+        lhs: u16,
+        rhs: u16,
+    },
     CallBuiltin {
         id: BuiltinId,
         arg_count: u16,
@@ -54,6 +64,17 @@ pub enum Instr {
     CallKnown {
         chunk: u32,
         arg_count: u16,
+    },
+    CallKnownLocal {
+        chunk: u32,
+        arg_count: u16,
+        local: u16,
+    },
+    CallKnownLocals {
+        chunk: u32,
+        arg_count: u16,
+        first: u16,
+        second: u16,
     },
     TailCallN {
         arg_count: u16,

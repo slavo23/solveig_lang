@@ -30,6 +30,16 @@ impl Interpreter<'_> {
         }
     }
 
+    #[inline(always)]
+    pub(super) fn load_int(&self, slot: u16) -> i64 {
+        match self.load(slot) {
+            Value::Int(n) => n,
+            // SAFETY: Integer superinstructions are emitted only after type
+            // checking and lowering have proved the local operand is Int.
+            _ => unsafe { std::hint::unreachable_unchecked() },
+        }
+    }
+
     #[inline]
     pub(super) fn pop_payload(&mut self, n: usize) -> PayloadRef {
         self.heap

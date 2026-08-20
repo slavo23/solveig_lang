@@ -167,6 +167,12 @@ fn format_instr(instr: &Instr) -> String {
         }
         Instr::Unary(op) => format!("Unary {op:?}"),
         Instr::Binary(op) => format!("Binary {op:?}"),
+        Instr::BinaryLocalInt { op, local, rhs } => {
+            format!("BinaryLocalInt {op:?} local={local} rhs={rhs}")
+        }
+        Instr::BinaryLocals { op, lhs, rhs } => {
+            format!("BinaryLocals {op:?} lhs={lhs} rhs={rhs}")
+        }
         Instr::CallBuiltin { id, arg_count } => {
             format!("CallBuiltin id={} arg_count={arg_count}", id.0)
         }
@@ -180,6 +186,19 @@ fn format_instr(instr: &Instr) -> String {
         Instr::CallKnown { chunk, arg_count } => {
             format!("CallKnown chunk={chunk} arg_count={arg_count}")
         }
+        Instr::CallKnownLocal {
+            chunk,
+            arg_count,
+            local,
+        } => format!("CallKnownLocal chunk={chunk} arg_count={arg_count} local={local}"),
+        Instr::CallKnownLocals {
+            chunk,
+            arg_count,
+            first,
+            second,
+        } => format!(
+            "CallKnownLocals chunk={chunk} arg_count={arg_count} first={first} second={second}"
+        ),
         Instr::Return => "Return".to_string(),
         Instr::Jump(target) => format!("Jump {}", format_target(*target)),
         Instr::JumpIfFalse(target) => format!("JumpIfFalse {}", format_target(*target)),
