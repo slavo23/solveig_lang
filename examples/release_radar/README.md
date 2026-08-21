@@ -25,9 +25,8 @@ cargo run -- --project-root examples/release_radar
 
 ## GitHub authentication
 
-Unauthenticated GitHub API access is limited to 60 requests per hour per IP.
-For the normal authenticated allowance, copy the value-free template and put a
-read-only personal access token in the ignored file:
+GitHub rate-limits API access. For authenticated requests, copy the value-free
+template and put a read-only personal access token in the ignored file:
 
 ```console
 cp examples/release_radar/.env.example examples/release_radar/.env
@@ -71,7 +70,5 @@ of sequential execution.
 - `release_radar/fixture.sv` owns the delayed loopback service used by the
   interactive performance demonstration.
 
-This application is deliberately not registered as a golden or integration
-test. The automated HTTP suite uses its own hermetic protocol fixture and never
-contacts the internet or reads `.env`; Release Radar's `--live` network access
-occurs only when you request it explicitly.
+The default mode is local. Release Radar contacts GitHub and reads live
+credentials only when you request `--live` explicitly.

@@ -1,113 +1,128 @@
-# Solveig Language Server
+# Solveig language server
 
-Solveig editor support is provided by the `solveig lsp` command. Editors start
-this command in the background and send it the text of open `.sv` files. The
-server then answers editor requests such as diagnostics, hover, completion, and
-go-to-definition.
+The `solveig lsp` command provides editor intelligence over the Language Server
+Protocol. The bundled VS Code extension starts it automatically for `.sv`
+files.
 
-## Current Features
+## Install the VS Code extension
 
-- Diagnostics for parser, resolver, kind, type, hole, and core checks.
-- Hover for functions, constructors, types, classes, methods, modules, local
-  variables, function parameters, nested lambda/`let`/do/case pattern binders,
-  tuple delimiters and elements, literals, parenthesized expressions, `::`, and
-  `[]`.
-- Go-to-definition and find-references for resolved project declarations.
-- Document outline and workspace symbol search.
-- Semantic highlighting with full and delta token responses.
-- Completion for locals, imports, project declarations, Prelude items, methods,
-  constructors, modules, and keywords.
-- Inlay hints for inferred signatures and inferred parameter/local types.
-- Code actions for typed holes, missing imports, missing instance methods, and
-  inferred signature insertion.
-- Document highlights, folding ranges, selection expansion, signature help,
-  rename, and clickable module imports.
+First install the `solveig` executable as described in the
+[README](../README.md). Then build the extension from the repository:
 
-## Correctness Plan
+```sh
+cd solveig_vscode
+npm install
+npx vsce package --out solveig.vsix
+code --install-extension solveig.vsix --force
+```
 
-The server should be correct at three layers:
+If VS Code cannot find `solveig` on its inherited `PATH`, set
+`solveig.server.path` to the executable's absolute path. Use **Solveig: Restart
+Server** after changing that setting.
 
-1. Source facts in `solveig-driver`.
-   Driver APIs own semantic information in file spans and byte offsets. Tests
-   should verify these facts directly before they are converted into any editor
-   protocol shape.
+## Editor features
 
-2. LSP conversion in `solveig-lsp`.
-   LSP tests should verify UTF-8/UTF-16 position conversion, protocol ranges,
-   Markdown hover rendering, semantic-token delta encoding, workspace edits, and
-   advertised capabilities.
+The current server provides:
 
-3. Editor wiring in `solveig_vscode`.
-   The VS Code extension should stay thin: it starts `solveig lsp`, contributes
-   snippets and a shallow TextMate grammar, and avoids duplicating semantic
-   language logic in JavaScript.
+- diagnostics from parsing, name resolution, kind checking, type checking,
+  exhaustiveness checking, typed holes, and core verification;
+- hover types and documentation for declarations, locals, pattern binders,
+  literals, tuple delimiters and elements, list syntax, and operators;
+- completion for local bindings, imports, modules, declarations, constructors,
+  methods, Prelude names, and keywords;
+- go to definition, find references, document highlights, document symbols,
+  workspace symbols, and clickable module imports;
+- signature help, selection ranges, and folding ranges;
+- semantic highlighting with incremental updates;
+- optional inlay hints for inferred signatures and local types;
+- code actions for typed holes, missing imports, missing instance methods, and
+  inserting an inferred top-level signature;
+- semantic rename for supported resolved declarations.
 
-## Robustness Plan
+Formatting is not provided by the current language server.
 
-The H23 robustness harness should grow in this order:
+## Project discovery
 
-1. Token sweeps over real projects.
-   For `examples/scry` and `examples/smoke_suite`, lex every user file and query
-   hover, definition, references, document highlights, selection ranges,
-   signature help, completion, semantic tokens, folding ranges, document links,
-   and inlay hints. Assert that requests do not panic, spans are valid, semantic
-   tokens do not overlap, generated helper names do not leak, and syntax-only
-   tokens do not show misleading hover popups.
+For an opened `.sv` file, the server walks upward and uses the nearest directory
+containing `solveig.toml`. This makes nested packages independent even when a
+broader parent directory is open in VS Code.
 
-2. Focused golden snapshots.
-   Pin token-by-token hover output for tricky areas, especially nested `case`
-   expressions, nested patterns, do-blocks, imports, and qualified names. These
-   snapshots make regressions readable.
+A bare file with no manifest is analyzed as a scratch project rooted at its
+directory. Use a manifest for normal applications and libraries so entry
+modules, dependencies, and package-qualified imports are unambiguous.
 
-3. Realistic editing sessions.
-   Drive the in-process LSP server through open, change, save, and close cycles.
-   Include temporarily broken source, incomplete `case` arms, partial imports,
-   typed holes, and nested project roots. Assert no stale diagnostics remain
-   after fixes and no request panics while the file is invalid.
+When a file changes in the editor, the server analyzes the in-memory text. You
+do not have to save before diagnostics, hover, or completion update.
 
-4. Random edit survivability.
-   Apply deterministic pseudo-random edits to small and medium source files.
-   After each edit, request diagnostics plus a representative set of editor
-   features. The pass condition is not "the edited program is valid"; it is "the
-   server responds and diagnostics stay tied to current text."
+## Library source and edit ownership
 
-5. Budget and growth checks.
-   Run a long edit loop, around 1000 changes, and track retained source files,
-   semantic-token result cache size, diagnostics, and resident editor state.
-   The goal is bounded growth for a normal editing session.
+Path dependencies, Prelude, and standard-library source are available for
+navigation. Hover, completion, definition, and references can cross package
+boundaries.
 
-## Findings From The First Sweep
+Editor-generated mutations are more conservative:
 
-The first `scry`, `smoke_suite`, and quiz-game sweeps found and fixed several
-concrete issues:
+- rename is refused when completing it would require editing non-local source;
+- code actions do not return edits for dependency or compiler-library files.
 
-- Hover on keywords and separators such as `case`, `of`, `=>`, and `fun`
-  could show the type of a nearby expression. These now stay quiet.
-- Hover inside a string such as `"/"` or `"> "` could be mistaken for an
-  operator hover. String, char, number, and float literals now report their own
-  literal type.
-- Hover on opening or closing parentheses now reports the type of the
-  expression inside those parentheses.
-- Hover on `::` now reports the list constructor, and hover on `[]` now reports
-  the empty-list constructor.
-- Hover on import punctuation could show `module ...` because module hover used
-  the whole import line. Module hover now uses only the module path span.
-- Some repeated source-map entries caused editor lookup to choose a file id
-  without retained semantic artifacts. File lookup now prefers artifact-backed
-  file ids.
-- Empty generated expression spans could produce zero-width hover ranges. Those
-  generated spans are traversed but no longer offered as hover results.
+This is an IDE ownership rule, not a filesystem permission. You can update a
+library on disk. Open an ordinary path dependency as its own project when you
+want local refactors there. The shipped Prelude and `std` source remain
+protected from generated edits and can be changed manually in a checkout or a
+custom `SOLVEIG_LIB` tree.
 
-## Unsupported Or Incomplete
+## Settings
 
-- Formatting is not implemented yet.
-- Rename is semantic for resolved declarations; local-variable rename is not a
-  full feature yet.
-- The TextMate grammar is intentionally shallow. It provides fallback coloring
-  for comments, keywords, literals, declarations, and operators. Semantic
-  highlighting from the language server provides the accurate coloring.
-- The robustness harness currently sweeps driver APIs and selected in-process
-  LSP paths. The next expansion is a longer LSP lifecycle test with many edits.
-- Hover inside class declarations is still best for names and method
-  signatures. Ordinary functions and explicit instance method bodies currently
-  have more complete local-variable hover coverage.
+`solveig.server.path`
+: Absolute path to the `solveig` executable. Leave empty to use `PATH`.
+
+`solveig.inlayHints.enabled`
+: Shows inline inferred types. It is off by default; hover and diagnostics are
+  unaffected.
+
+`solveig.diagnostics.inferredSignatures.enabled`
+: Shows hints for top-level definitions without written signatures and offers
+  an insertion action when available. It is on by default.
+
+## Useful commands
+
+- **Solveig: Restart Server** restarts the language-server process.
+- **Solveig: Show Output** opens extension and server status output.
+- **Solveig: Show Trace** opens the language-server trace log.
+- **Solveig: Show Type at Cursor** requests the type at the active position.
+
+By default the server trace file is `solveig-lsp.log` in the operating system's
+temporary directory. Set `SOLVEIG_LSP_LOG` before starting VS Code to choose a
+different path.
+
+## Troubleshooting
+
+**The extension activates but language features do not appear**
+
+Run `solveig --help` in a terminal, then use **Solveig: Show Output**. If VS Code
+has a different `PATH`, set `solveig.server.path` explicitly and restart the
+server.
+
+**Imports or dependencies are missing**
+
+Check which `solveig.toml` is nearest to the open file. Confirm that dependency
+paths are relative to that manifest and that imports use each dependency's
+declared package name.
+
+**Prelude or `std` navigation opens unexpected source**
+
+Check `SOLVEIG_LIB`. It must point to the directory containing both
+`prelude/solveig.toml` and `std/solveig.toml`. Without the override, an installed
+`lib/` beside the executable wins; otherwise the binary's embedded source is
+used.
+
+**Rename is refused**
+
+The declaration has references in source the current project does not own, or
+the declaration itself is non-local. Open an ordinary dependency as its own
+project or perform the cross-package edit manually.
+
+**A hover is less detailed inside a class declaration**
+
+Class names and method signatures have semantic hover. Local-variable hover is
+most complete in ordinary function and explicit instance-method bodies.

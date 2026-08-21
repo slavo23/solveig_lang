@@ -24,8 +24,8 @@ This is deliberately a minimal HTTP/1.0 demo. It downloads public, untrusted
 content over unencrypted HTTP and does not implement TLS, redirects, chunked
 transfer decoding, or a production HTTP client.
 
-For a deterministic offline run, pass `--local` to start the original
-in-program loopback server. The golden suite uses this mode through `args.txt`:
+For a deterministic offline run, pass `--local` to start the in-program
+loopback server:
 
 ```sh
 cargo run -- --project-root examples/concurrent_downloader -- --local

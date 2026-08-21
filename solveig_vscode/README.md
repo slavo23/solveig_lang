@@ -35,14 +35,14 @@ binary. After installation, the command you use is `solveig`.
 To install the latest Solveig command from the repository:
 
 ```bash
-cargo install --git https://github.com/slavo23/lang_experiments.git
+cargo install --git https://github.com/slavo23/solveig_lang.git
 ```
 
 To install Solveig from a local checkout instead:
 
 ```bash
-git clone https://github.com/slavo23/lang_experiments.git
-cd lang_experiments
+git clone https://github.com/slavo23/solveig_lang.git
+cd solveig_lang
 cargo install --path .
 ```
 
@@ -185,7 +185,7 @@ To update a Cargo-installed Solveig command, run the same install command again
 with `--force`:
 
 ```bash
-cargo install --git https://github.com/slavo23/lang_experiments.git --force
+cargo install --git https://github.com/slavo23/solveig_lang.git --force
 ```
 
 For a local checkout:
@@ -246,7 +246,7 @@ Path** to the debug binary:
 
 ```json
 {
-  "solveig.server.path": "/Users/gorborukovstanislav/Desktop/code/rust/lang_experiments/target/debug/solveig"
+  "solveig.server.path": "/Users/gorborukovstanislav/Desktop/code/rust/solveig_lang/target/debug/solveig"
 }
 ```
 
@@ -261,15 +261,10 @@ this also works:
 
 After rebuilding with `cargo build`, run **Solveig: Restart Server**.
 
-For a local full install from this repository:
+For a complete local installation, including the editable Prelude and standard
+library source layout, follow the repository's [installation
+guide](../README.md#install-from-source). To remove a Cargo-installed command:
 
 ```bash
-just install
-```
-
-To remove that local install:
-
-```bash
-just uninstall
 cargo uninstall solveig
 ```

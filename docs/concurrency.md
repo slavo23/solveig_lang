@@ -279,19 +279,13 @@ contain only opaque identities: descriptors never live in the moving heap, GC
 never closes sockets, and ids are not reused. Use `bracket` or `finally` with
 `closeSocket`.
 
-The low-level surface is TCP plus basic IPv4 resolution. `std.http` now adds
-bounded HTTP/1.1, chunked decoding, redirects, and platform-verified HTTPS on
-the blocking worker pool. UDP and general IPv6 selection are not implemented.
-The older concurrent downloader intentionally demonstrates raw socket
-machinery; `examples/release_radar` demonstrates the production-facing client.
-Release Radar uses `std.task.mapConcurrentlyBounded`, which scopes a fixed
-worker group and restores input order after completion. Its default loopback
-mode runs equal sequential and concurrent workloads with deterministic
-request-derived delays. Each worker prints when it starts and completes, so
-completion order is visible even though the final report is restored to
-configuration order. The example rejects a local run where the concurrent path
-is not faster. It is not part of the automated test suite, and live GitHub
-access is always explicit.
+The low-level surface is TCP plus basic IPv4 resolution. `std.http` adds bounded
+HTTP/1.1, chunked decoding, redirects, and platform-verified HTTPS on the
+blocking worker pool. UDP and general IPv6 selection are not provided.
+
+The [networking tutorial](tutorial/07-networking-and-http.md) combines a local
+TCP service with bounded concurrent HTTP clients. It also explains why stable
+input-order results do not imply sequential execution.
 
 ## Determinism and fairness guarantees
 
@@ -318,46 +312,22 @@ depends on ordering. Do not use elapsed-time guesses as synchronization.
 
 ## Testing concurrent programs
 
-Repository concurrency tests use exact events, not timing luck:
+Test protocols through exact events rather than timing luck:
 
-1. Set `SOLVEIG_SCHED_DETERMINISTIC=1`, or use the capture/golden harness that
-   selects deterministic execution.
-2. Coordinate processes with typed channels, bounded backpressure, or explicit
-   handshakes.
-3. Use virtual `sleep` only to test timer ordering and timeout semantics. Never
-   call a host sleep or assert elapsed wall time.
-4. Use an in-program IPv4 loopback server on port zero for socket tests. Never
-   depend on external DNS or internet access in a test.
-5. Exercise channel mutation and parked sender roots under
-   `SOLVEIG_GC_STRESS=1`.
-6. Assert exact output or exact conserved values, not whichever interleaving
-   happened on one machine.
+1. Coordinate tasks with typed channels or explicit handshakes.
+2. Assert conserved values or a final ordered result, not one accidental
+   interleaving.
+3. Use `sleep` only when timer behavior is what the test is checking.
+4. Use a loopback listener on port zero for networking tests instead of public
+   DNS or internet access.
+5. Close channels and resources explicitly so every blocked loop has a defined
+   termination path.
+6. Test failure and cancellation as well as successful completion.
 
-The downloader follows the same rule: normal execution contacts the internet,
-while its checked-in `args.txt` selects `--local` for the golden suite. Its
-loopback server, fixed resource set, and exact summary make CI hermetic.
+`SOLVEIG_SCHED_DETERMINISTIC=1` selects the runtime's deterministic scheduler
+mode when a test needs reproducible scheduling. It does not turn a racy protocol
+into a correct one; messages and ownership should still define the program's
+observable result.
 
-The Phase L [`log_audit`](../examples/log_audit) example applies the same
-discipline to host file IO. Workers never print completion-order events;
-instead, one collector combines fixed-count results into a commutative summary
-and writes a report after all inputs are accounted for. Its capacity-two job
-and result channels demonstrate backpressure without relying on scheduler or
-filesystem timing.
-
-For runtime or concurrency changes, run:
-
-```sh
-cargo build --workspace
-cargo test --workspace
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets -- -D warnings
-SOLVEIG_GC_STRESS=1 cargo test -p solveig-vm
-SOLVEIG_GC_STRESS=1 cargo run -- --project-root examples/concurrent_downloader -- --local
-```
-
-The focused golden cases under `tests/golden/run/` cover channel FIFO and
-closure, bounded backpressure, interruption at runnable and blocked states,
-masking and cleanup, timer ordering, every structured combinator, socket
-cancellation, loopback echo, connection failure, and many simultaneous
-clients. [vm.md](vm.md) documents the runtime representations, GC roots, write
-barriers, scheduler transitions, and host-boundary invariants in detail.
+The [VM implementation reference](vm.md) documents scheduler, heap, and host
+boundary details for compiler contributors.

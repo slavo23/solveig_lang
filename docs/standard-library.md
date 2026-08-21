@@ -30,7 +30,7 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.channel` | Typed channel creation and communication |
 | `std.thread` | Raw lightweight-thread creation and interruption |
 | `std.task` | Cleanup, masking, structured concurrency, and bounded concurrent mapping |
-| `std.testing` | Small pure assertion values for ordinary golden and unit programs |
+| `std.testing` | Small pure assertion values for checks in ordinary programs |
 | `std.time` | Sleeping, clock readings, and monotonic measurement |
 | `std.random` | Explicit deterministic pseudorandom state |
 | `std.net` | TCP sockets and hostname resolution |
@@ -75,10 +75,9 @@ changed : Maybe (std.vector.Vector Int)
 changed = std.vector.update numbers 2 99
 ```
 
-This is an immutable functional vector, not a contiguous mutable array. The
-tree representation is deliberate: it provides predictable persistent updates
-using language-level algebraic data today. A future native wide-branch vector
-may lower the constant factor without changing the safe API.
+This is an immutable functional vector, not a contiguous mutable array. Its
+tree representation provides predictable persistent updates with structural
+sharing.
 
 `Map` and `Set` use persistent AVL trees and therefore require `Ord` keys or
 elements. Lookup, insertion, and deletion are logarithmic; `size` is constant
@@ -179,11 +178,8 @@ incremental backtracking needs the explicit input adapter.
 
 Every public parser operation has an API doc comment describing its behavior,
 including failure, consumption, backtracking, and streaming details where they
-apply. In an editor,
-hover the operation you are using; the method documentation is intended to be
-the primary learning path. The complete configuration grammar in
-`tests/golden/run/parser_config` demonstrates nesting, custom errors,
-deliberate backtracking, and parsing across inconvenient chunk boundaries.
+apply. In an editor, hover the operation you are using; the method documentation
+complements the [parser tutorial](tutorial/08-parsers-and-json.md).
 
 ## JSON
 
@@ -208,8 +204,7 @@ so rendering is deterministic regardless of insertion order.
 `JsonNumber` retains a validated decimal spelling instead of rounding through
 `Float`. Construct it with `jsonNumberFromInt`, `jsonNumberFromString`, or
 `jsonNumberFromFloat`; the float constructor rejects NaN and infinities.
-Rendering revalidates even a directly constructed `JsonNumber`, preserving a
-clean future path to a `BigInt` representation.
+Rendering revalidates even a directly constructed `JsonNumber`.
 
 Use `parseJson` when the whole `Json` tree is useful. Use `decodeJson` with
 `stringDecoder`, `boolDecoder`, `numberDecoder`, `nullDecoder`,
@@ -339,7 +334,7 @@ small CPU-only transformations where scheduling would add overhead.
 `std.testing` provides pure `assert`, `assertEqual`, `checkAll`, and
 `failureMessage` operations returning `Result TestFailure`. It deliberately
 does not introduce another test runner, global registry, or exception path.
-Use the ordinary golden harness or a program's `main` to render the result:
+Use a program's `main` to render the result:
 
 ```solveig
 checks : Result std.testing.TestFailure ()
@@ -380,8 +375,7 @@ owned sockets after success, typed errors, defects, or interruption.
 
 The low-level `std.net` layer is TCP-oriented and byte-based. Use `std.http`
 for bounded HTTP/1.1 and verified HTTPS rather than hand-building wire frames.
-Streaming subprocess pipes, UDP, and general IPv6 selection remain future
-library work.
+Streaming subprocess pipes, UDP, and general IPv6 selection are not provided.
 
 ### HTTP and HTTPS
 
@@ -411,7 +405,6 @@ list of bounded pieces is convenient, or `foldBodyChunks` to process those
 pieces without allocating that list.
 
 Header validation rejects invalid names and newline injection. Header lookup
-is ASCII case-insensitive. `examples/release_radar` demonstrates authenticated
-bounded concurrent mapping, completion-order progress, JSON decoding, stable
-final ordering, rate-limit diagnostics, ETag merging, and a single overwritten
-cache file. See [HTTP and HTTPS](http.md) for policies and complete examples.
+is ASCII case-insensitive. The [networking tutorial](tutorial/07-networking-and-http.md)
+demonstrates typed failures and bounded concurrent fetches against a local
+service. See [HTTP and HTTPS](http.md) for the complete client policy.

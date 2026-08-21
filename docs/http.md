@@ -86,10 +86,8 @@ disabling verification. Redirects are bounded and failures are typed.
 For ETag caching, retain the response's `ETag` header and send it later as
 `If-None-Match`. Treat status 304 as a successful cache validation. Prefer one
 bounded, overwritten cache file or a bounded key set; do not create a new file
-on every request. `examples/release_radar` is the complete reference. Its
-default mode compares equal sequential and four-worker workloads against a
-deterministic local service whose request-derived delays make completion order
-visible. `--live` loads optional GitHub authentication, checks the allowance
-before fan-out, reports primary and secondary throttling separately, and merges
-ETags without discarding prior successes when another repository fails. The
-application is not an automated test fixture.
+on every request.
+
+The [networking and HTTP tutorial](tutorial/07-networking-and-http.md) includes
+a runnable loopback service and concurrent clients without requiring internet
+access.

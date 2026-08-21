@@ -1,6 +1,6 @@
 # Concurrent log audit
 
-This Phase L capstone is a practical bounded worker pool. Three scoped green
+This application is a practical bounded worker pool. Three scoped green
 threads read five requested log files. One path is deliberately absent; its
 `ReadFileError` is handled locally with `catchError` and becomes a normal
 `MissingLog` result instead of aborting the batch.
@@ -18,7 +18,7 @@ producer and collector together so bounded backpressure cannot deadlock them.
 The final report always replaces `output/report.txt`, whose directory ignores
 that generated file. Repeated runs neither create additional files nor grow
 the output without bound. The program reads the report back and prints it,
-letting the golden suite verify the actual written contents.
+making the actual written contents visible after every run.
 
 Run it from the repository root:
 

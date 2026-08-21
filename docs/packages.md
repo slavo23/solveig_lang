@@ -5,7 +5,7 @@ directory containing a strict `solveig.toml` manifest and a `src/` tree. The
 compiler discovers all `.sv` files below `src/`, assigns them names beneath the
 package namespace, and loads path dependencies recursively.
 
-This page is the complete package reference for the current implementation.
+This page is the complete package reference.
 
 ## Start a package
 
@@ -306,8 +306,9 @@ only when it contains both package manifests. The selected root and whether it
 came from the environment, executable layout, or embedded fallback are written
 to tracing output.
 
-`just install` builds the compiler and copies `lib/prelude` and `lib/std`
-beside the installed executable. Packagers should preserve the same layout.
+After `cargo install --path .`, copy `lib/prelude` and `lib/std` beside the
+installed executable when you want navigation into editable library source.
+Packagers should preserve the same layout.
 The embedded fallback keeps a copied bare binary usable, but an installed
 on-disk library is preferable because editor navigation can open the actual
 Prelude and standard-library source files.
@@ -331,20 +332,16 @@ IDE-generated mutations are limited to the local package:
 
 - rename refuses the whole operation if any declaration or reference that
   would change belongs to a dependency or implicit library;
-- code actions never return edits for dependency or implicit-library files;
-- formatting will use the same rule when Phase T adds it.
+- code actions never return edits for dependency or implicit-library files.
 
 This is an editor safety boundary, not a filesystem permission. You can edit a
 library file manually or update a path dependency on disk. Opening an ordinary
 path dependency's directory as the local project enables package-wide rename,
-code actions, and future formatting for that dependency.
+code actions for that dependency.
 
 The shipped `prelude` and `std` trees retain their compiler-library roles even
 when opened directly, so IDE-generated edits remain protected there today.
-Edit those sources manually in a checkout or custom `SOLVEIG_LIB` tree. A
-future package-model refinement will separate compiler import role from editor
-ownership so a deliberately opened compiler library can opt into local
-refactoring safely.
+Edit those sources manually in a checkout or custom `SOLVEIG_LIB` tree.
 
 ## What is deliberately absent
 
@@ -357,9 +354,7 @@ The current package system has no:
 
 Versions are recorded but do not participate in resolution. Every external
 dependency is an explicit local path, so reproducibility is currently the
-responsibility of the containing repository or workspace. Registry design,
-version solving, and lockfiles are backlog work rather than partially
-implemented features.
+responsibility of the containing repository or workspace.
 
 ## Troubleshooting
 

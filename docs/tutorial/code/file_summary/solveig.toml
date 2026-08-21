@@ -1,0 +1,6 @@
+[package]
+name = "file_summary"
+version = "0.1.0"
+
+[language]
+entry = "main"

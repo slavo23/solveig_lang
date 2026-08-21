@@ -309,8 +309,8 @@ runtime match exception is needed for either case.
 - If a caller can reasonably recover, return a typed error.
 - If a program invariant is broken, raise or allow a defect and catch it only
   at a deliberate isolation boundary.
-- If work must be cancelled externally, use the structured interruption API
-  introduced by Phase J rather than encoding cancellation as an error value.
+- If work must be cancelled externally, use structured interruption rather
+  than encoding cancellation as an error value.
 - If the whole program should terminate with a status, request program exit
   from `main`; do not encode it as a typed error or defect.
 - If the VM reports an infrastructure failure, treat it as an implementation
