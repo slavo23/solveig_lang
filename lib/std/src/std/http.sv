@@ -53,7 +53,7 @@ fetch : String -> IO HttpError Response
 fetch spelling = fetchWith defaultHttpLimits [] spelling
 
 -- | Performs a bounded GET from a URL string with validated string-pair headers.
-fetchWith : HttpLimits -> [Pair String String] -> String -> IO HttpError Response
+fetchWith : HttpLimits -> [(String, String)] -> String -> IO HttpError Response
 fetchWith limits rawHeaders spelling =
     case urlFromString spelling of
         Err urlError => failIO urlError
@@ -146,28 +146,18 @@ request limits requestValue =
                         responseFromRaw
                         (mapError HttpIoError
                             (prelude.prim.httpRequestRaw
-                                (MkPair
-                                    (methodText method)
-                                    (MkPair
-                                        url
-                                        (MkPair
-                                            (map headerToRaw headers)
-                                            body)))
-                                (MkPair
-                                    maximumHeaders
-                                    (MkPair
-                                        maximumBody
-                                        (MkPair timeout (redirectCount redirects))))))
+                                (methodText method, url, map headerToRaw headers, body)
+                                (maximumHeaders, maximumBody, timeout, redirectCount redirects)))
 
-responseFromRaw : Pair Int (Pair [Pair String String] Bytes) -> Response
-responseFromRaw (MkPair code (MkPair rawHeaders body)) =
+responseFromRaw : (Int, [(String, String)], Bytes) -> Response
+responseFromRaw (code, rawHeaders, body) =
     Response (Status code) (map headerFromRaw rawHeaders) body
 
-headerToRaw : Header -> Pair String String
-headerToRaw (Header name value) = MkPair name value
+headerToRaw : Header -> (String, String)
+headerToRaw (Header name value) = (name, value)
 
-headerFromRaw : Pair String String -> Header
-headerFromRaw (MkPair name value) = Header name value
+headerFromRaw : (String, String) -> Header
+headerFromRaw (name, value) = Header name value
 
 -- | Performs a GET with default limits.
 getUrl : Url -> IO HttpError Response
@@ -356,9 +346,9 @@ validHeaderValueChars (character :: rest) =
         (and (point /= 0) (validHeaderValueChars rest))
 
 -- | Validates ordinary string-pair headers for use with the low-level request API.
-headersFromList : [Pair String String] -> Result HttpError [Header]
+headersFromList : [(String, String)] -> Result HttpError [Header]
 headersFromList [] = Ok []
-headersFromList (MkPair name value :: rest) =
+headersFromList ((name, value) :: rest) =
     case header name value of
         Err headerError => Err headerError
         | Ok checked =>

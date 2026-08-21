@@ -21,10 +21,26 @@ data Result e a =
   | -- | Holds an expected failure.
     Err e
 
--- | A pair of two values.
-data Pair a b =
-    -- | Builds a pair from its first and second values.
-    MkPair a b
+-- | A heterogeneous product of two values, written `(a, b)`.
+data Tuple2 a b = MkTuple2 a b
+
+-- | A heterogeneous product of three values, written `(a, b, c)`.
+data Tuple3 a b c = MkTuple3 a b c
+
+-- | A heterogeneous product of four values, written `(a, b, c, d)`.
+data Tuple4 a b c d = MkTuple4 a b c d
+
+-- | A heterogeneous product of five values, written `(a, b, c, d, e)`.
+data Tuple5 a b c d e = MkTuple5 a b c d e
+
+-- | A heterogeneous product of six values, written `(a, b, c, d, e, f)`.
+data Tuple6 a b c d e f = MkTuple6 a b c d e f
+
+-- | A heterogeneous product of seven values, written `(a, b, c, d, e, f, g)`.
+data Tuple7 a b c d e f g = MkTuple7 a b c d e f g
+
+-- | A heterogeneous product of eight values, written `(a, b, c, d, e, f, g, h)`.
+data Tuple8 a b c d e f g h = MkTuple8 a b c d e f g h
 
 -- | An error type with no possible values.
 data Never

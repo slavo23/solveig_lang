@@ -4,30 +4,30 @@ import std.text(stringToChars, charsToString)
 
 data QuizCard = QuizCard String String
 
-data State s a = State (s -> Pair a s)
+data State s a = State (s -> (a, s))
 
-runState : forall s a. State s a -> s -> Pair a s
+runState : forall s a. State s a -> s -> (a, s)
 runState action state =
     case action of
         State run => run state
 
 statePure : forall s a. a -> State s a
-statePure value = State (fun state => MkPair value state)
+statePure value = State (fun state => (value, state))
 
 stateBind : forall s a b. State s a -> (a -> State s b) -> State s b
 stateBind action continuation =
     State (fun state =>
         case runState action state of
-            MkPair value nextState => runState (continuation value) nextState)
+            (value, nextState) => runState (continuation value) nextState)
 
 modifyState : forall s. (s -> s) -> State s ()
-modifyState f = State (fun state => MkPair () (f state))
+modifyState f = State (fun state => ((), f state))
 
 instance Functor (State s) where
     fmap f action =
         State (fun state =>
             case runState action state of
-                MkPair value nextState => MkPair (f value) nextState)
+                (value, nextState) => (f value, nextState))
 
 instance Applicative (State s) where
     pure value = statePure value
@@ -57,28 +57,28 @@ splitLinesChars chars current =
             else
                 splitLinesChars rest (c :: current)
 
-splitQuestionAnswer : String -> Pair String String
+splitQuestionAnswer : String -> (String, String)
 splitQuestionAnswer line = splitQuestionAnswerChars (stringToChars line) []
 
-splitQuestionAnswerChars : [Char] -> [Char] -> Pair String String
+splitQuestionAnswerChars : [Char] -> [Char] -> (String, String)
 splitQuestionAnswerChars chars question =
     case chars of
-        [] => MkPair (charsToString (reverse question)) ""
+        [] => (charsToString (reverse question), "")
         | c :: rest =>
             if c == '|' then
-                MkPair (charsToString (reverse question)) (charsToString rest)
+                (charsToString (reverse question), charsToString rest)
             else
                 splitQuestionAnswerChars rest (c :: question)
 
 parseCard : String -> QuizCard
 parseCard line =
     case splitQuestionAnswer line of
-        MkPair question answer => QuizCard question answer
+        (question, answer) => QuizCard question answer
 
 parseQuiz : String -> [QuizCard]
 parseQuiz contents = map parseCard (splitLines contents)
 
-askCard : QuizCard -> Task (Pair QuizCard String)
+askCard : QuizCard -> Task (QuizCard, String)
 askCard card =
     case card of
         QuizCard question expected =>
@@ -86,15 +86,15 @@ askCard card =
                 printLine question
                 printStr "> "
                 answer <- readLine
-                pure (MkPair card answer)
+                pure (card, answer)
 
-askCards : [QuizCard] -> Task [Pair QuizCard String]
+askCards : [QuizCard] -> Task [(QuizCard, String)]
 askCards cards = mapM askCard cards
 
-scoreResponse : Pair QuizCard String -> State Int ()
+scoreResponse : (QuizCard, String) -> State Int ()
 scoreResponse response =
     case response of
-        MkPair card answer =>
+        (card, answer) =>
             case card of
                 QuizCard question expected =>
                     if answer == expected then
@@ -102,7 +102,7 @@ scoreResponse response =
                     else
                         statePure ()
 
-scoreResponses : [Pair QuizCard String] -> State Int ()
+scoreResponses : [(QuizCard, String)] -> State Int ()
 scoreResponses responses =
     case responses of
         [] => statePure ()
@@ -111,10 +111,10 @@ scoreResponses responses =
                 scoreResponse response
                 scoreResponses rest
 
-scoreQuiz : [Pair QuizCard String] -> Int
+scoreQuiz : [(QuizCard, String)] -> Int
 scoreQuiz responses =
     case runState (scoreResponses responses) 0 of
-        MkPair ignored score => score
+        (ignored, score) => score
 
 lengthCards : [QuizCard] -> Int
 lengthCards cards =

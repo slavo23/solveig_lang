@@ -34,8 +34,8 @@ zipWith combine (x :: xs) (y :: ys) = combine x y :: zipWith combine xs ys
 zipWith combine _ _ = []
 
 -- | Pairs corresponding elements until either input is exhausted.
-zip : forall a b. [a] -> [b] -> [Pair a b]
-zip = zipWith MkPair
+zip : forall a b. [a] -> [b] -> [(a, b)]
+zip = zipWith (,)
 
 -- | Reverses the order of the elements in a list.
 reverse : forall a. [a] -> [a]

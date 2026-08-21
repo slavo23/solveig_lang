@@ -46,8 +46,8 @@ use solveig_ast::ast::{
     Names, PRIM_TYS, PrettyTables, Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId,
     TyConTable, TyVarId, VarRef, prelude_defect_tycon_id, prelude_io_error_tycon_id,
     prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
-    prelude_pair_tycon_id, prelude_result_tycon_id, std_buffer_mode_tycon_id, std_io_mode_tycon_id,
-    std_process_result_tycon_id,
+    prelude_result_tycon_id, prelude_tuple_tycon_id, std_buffer_mode_tycon_id,
+    std_io_mode_tycon_id, std_process_result_tycon_id,
 };
 use solveig_base::{Diagnostic, Severity, TypeError};
 use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap};

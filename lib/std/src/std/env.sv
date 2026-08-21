@@ -37,7 +37,7 @@ setEnv : String -> String -> Task ()
 setEnv name value = prelude.prim.setEnv name value
 
 -- | Returns the runtime environment sorted by variable name.
-getEnvironment : Task [Pair String String]
+getEnvironment : Task [(String, String)]
 getEnvironment = prelude.prim.getEnvironment
 
 -- | Returns the current Solveig project's directory name.
@@ -50,7 +50,7 @@ getProgName = prelude.prim.getProgName
 -- | prefix and matching single or double quotes around values are accepted.
 -- | Duplicate names and invalid ASCII environment names are rejected without
 -- | retaining the possibly secret source line in the error.
-parseEnvFile : String -> Result EnvError [Pair String String]
+parseEnvFile : String -> Result EnvError [(String, String)]
 parseEnvFile text =
     parseEnvLines (std.text.lines text) 1 std.map.empty []
 
@@ -82,7 +82,7 @@ describeEnvError (MissingEnv name) = "missing environment variable " <> name
 describeEnvError (InvalidEnvLine line reason) =
     "invalid environment file line " <> show line <> ": " <> reason
 
-parseEnvLines : [String] -> Int -> std.map.Map String () -> [Pair String String] -> Result EnvError [Pair String String]
+parseEnvLines : [String] -> Int -> std.map.Map String () -> [(String, String)] -> Result EnvError [(String, String)]
 parseEnvLines [] _ _ reversedEntries = Ok (reverse reversedEntries)
 parseEnvLines (sourceLine :: rest) lineNumber names reversedEntries =
     let line = std.text.trimAscii sourceLine in
@@ -94,7 +94,7 @@ parseEnvLines (sourceLine :: rest) lineNumber names reversedEntries =
             | Just exported => std.text.trimAscii exported
         in case std.text.splitOnce '=' assignment of
             Nothing => Err (InvalidEnvLine lineNumber "expected NAME=VALUE")
-            | Just (MkPair rawName rawValue) =>
+            | Just (rawName, rawValue) =>
                 let name = std.text.trimAscii rawName in
                 if not (validEnvName name) then
                     Err (InvalidEnvLine lineNumber "invalid variable name")
@@ -107,7 +107,7 @@ parseEnvLines (sourceLine :: rest) lineNumber names reversedEntries =
                             rest
                             (lineNumber + 1)
                             (std.map.insert name () names)
-                            (MkPair name value :: reversedEntries)
+                            ((name, value) :: reversedEntries)
 
 validEnvName : String -> Bool
 validEnvName name =
@@ -148,9 +148,9 @@ quotedEnvValue lineNumber quote characters =
             else Err (InvalidEnvLine lineNumber "unterminated quoted value")
         | [] => Err (InvalidEnvLine lineNumber "unterminated quoted value")
 
-setMissingEntries : [Pair String String] -> IO EnvError ()
+setMissingEntries : [(String, String)] -> IO EnvError ()
 setMissingEntries [] = pureIO ()
-setMissingEntries (MkPair name value :: rest) = do
+setMissingEntries ((name, value) :: rest) = do
     existing <- mapError EnvIoError (getEnv name)
     case existing of
         Nothing => mapError EnvIoError (setEnv name value)

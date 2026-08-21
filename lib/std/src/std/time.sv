@@ -14,9 +14,9 @@ getSystemTime = prelude.prim.getSystemTime
 
 -- | Runs an IO operation and returns its monotonic elapsed nanoseconds with its
 -- | result.
-measure : forall a. Task a -> Task (Pair Int a)
+measure : forall a. Task a -> Task (Int, a)
 measure operation = do
     started <- getMonotonicTime
     value <- operation
     finished <- getMonotonicTime
-    prelude.prim.pureIO (MkPair (finished - started) value)
+    prelude.prim.pureIO (finished - started, value)

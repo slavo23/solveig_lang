@@ -1,6 +1,5 @@
 import std.list
-data Pair a b = Pair a b;
-data State s a = State (s -> Pair a s);
+data State s a = State (s -> (a, s));
 
 data BF
     = MoveL
@@ -13,38 +12,38 @@ data BF
 
 data BFState = BFState [Int] Int [Int] [Int] [Int];
 
-fstPair : forall a b. Pair a b -> a;
+fstPair : forall a b. (a, b) -> a;
 fstPair p =
     case p of
-        Pair x _ => x;
+        (x, _) => x;
 
-sndPair : forall a b. Pair a b -> b;
+sndPair : forall a b. (a, b) -> b;
 sndPair p =
     case p of
-        Pair _ y => y;
+        (_, y) => y;
 
-runState : forall s a. State s a -> s -> Pair a s;
+runState : forall s a. State s a -> s -> (a, s);
 runState st s =
     case st of
         State f => f s;
 
 pureState : forall s a. a -> State s a;
 pureState x =
-    State (fun s => Pair x s);
+    State (fun s => (x, s));
 
 bindState : forall s a b. State s a -> (a -> State s b) -> State s b;
 bindState st f =
     State
         (fun s =>
             case runState st s of
-                Pair x s1 => runState (f x) s1);
+                (x, s1) => runState (f x) s1);
 
 instance Functor (State s) where
     fmap f st =
         State
             (fun s =>
                 case runState st s of
-                    Pair x s1 => Pair (f x) s1);
+                    (x, s1) => (f x, s1));
 
 instance Applicative (State s) where
     pure x = pureState x;
@@ -59,15 +58,15 @@ instance Monad (State s) where
 
 getState : forall s. State s s;
 getState =
-    State (fun s => Pair s s);
+    State (fun s => (s, s));
 
 putState : forall s. s -> State s ();
 putState newState =
-    State (fun _ => Pair () newState);
+    State (fun _ => ((), newState));
 
 modifyState : forall s. (s -> s) -> State s ();
 modifyState f =
-    State (fun s => Pair () (f s));
+    State (fun s => ((), f s));
 
 initialBFState : [Int] -> BFState;
 initialBFState input =
@@ -91,9 +90,9 @@ moveRightState =
                 BFState left cur right input output =>
                     case right of
                         [] =>
-                            Pair () (BFState (cur :: left) 0 [] input output)
+                            ((), BFState (cur :: left) 0 [] input output)
                       | x :: xs =>
-                            Pair () (BFState (cur :: left) x xs input output));
+                            ((), BFState (cur :: left) x xs input output));
 
 moveLeftState : State BFState ();
 moveLeftState =
@@ -103,9 +102,9 @@ moveLeftState =
                 BFState left cur right input output =>
                     case left of
                         [] =>
-                            Pair () (BFState [] 0 (cur :: right) input output)
+                            ((), BFState [] 0 (cur :: right) input output)
                       | x :: xs =>
-                            Pair () (BFState xs x (cur :: right) input output));
+                            ((), BFState xs x (cur :: right) input output));
 
 incCellState : State BFState ();
 incCellState =
@@ -113,7 +112,7 @@ incCellState =
         (fun st =>
             case st of
                 BFState left cur right input output =>
-                    Pair () (BFState left (cur + 1) right input output));
+                    ((), BFState left (cur + 1) right input output));
 
 decCellState : State BFState ();
 decCellState =
@@ -121,7 +120,7 @@ decCellState =
         (fun st =>
             case st of
                 BFState left cur right input output =>
-                    Pair () (BFState left (cur - 1) right input output));
+                    ((), BFState left (cur - 1) right input output));
 
 readInState : State BFState ();
 readInState =
@@ -131,9 +130,9 @@ readInState =
                 BFState left _ right input output =>
                     case input of
                         [] =>
-                            Pair () (BFState left 0 right [] output)
+                            ((), BFState left 0 right [] output)
                       | x :: xs =>
-                            Pair () (BFState left x right xs output));
+                            ((), BFState left x right xs output));
 
 writeOutState : State BFState ();
 writeOutState =
@@ -141,7 +140,7 @@ writeOutState =
         (fun st =>
             case st of
                 BFState left cur right input output =>
-                    Pair () (BFState left cur right input (cur :: output)));
+                    ((), BFState left cur right input (cur :: output)));
 
 execLoop : [BF] -> State BFState ();
 execLoop body =

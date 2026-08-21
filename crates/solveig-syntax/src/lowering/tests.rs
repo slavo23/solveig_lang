@@ -92,6 +92,53 @@ fn function_definition_pattern_parameters_stay_separate() {
 }
 
 #[test]
+fn tuple_types_lower_as_constructor_applications_in_instance_heads() {
+    let parsed = lower_test_source("instance Eq (a, b, c) where\n    (==) _ _ = True\n");
+    let SurfaceDefinition::InstanceDef { args, .. } = &parsed.defs[0].0 else {
+        panic!("expected instance definition");
+    };
+    let [tuple] = args.as_slice() else {
+        panic!("expected one instance-head argument, got {args:?}");
+    };
+
+    let SurfaceTy::App(two_args, third) = &tuple.0 else {
+        panic!("expected Tuple3 application, got {:?}", tuple.0);
+    };
+    assert!(matches!(third.0, SurfaceTy::Var(_)));
+    let SurfaceTy::App(one_arg, second) = &two_args.0 else {
+        panic!("expected second Tuple3 application, got {:?}", two_args.0);
+    };
+    assert!(matches!(second.0, SurfaceTy::Var(_)));
+    let SurfaceTy::App(constructor, first) = &one_arg.0 else {
+        panic!("expected first Tuple3 application, got {:?}", one_arg.0);
+    };
+    assert!(matches!(first.0, SurfaceTy::Var(_)));
+    assert!(matches!(constructor.0, SurfaceTy::Con(_)));
+}
+
+#[test]
+fn tuple_elements_accept_unparenthesized_constructor_patterns() {
+    let parsed = lower_test_source("same (Atom a, Atom b) = a\n");
+    let SurfaceDefinition::FunDef { params, .. } = &parsed.defs[0].0 else {
+        panic!("expected function definition");
+    };
+    let [tuple] = params.as_slice() else {
+        panic!("expected one tuple parameter, got {params:?}");
+    };
+    let SurfacePattern::Con(_, elements) = &tuple.0 else {
+        panic!("expected tuple constructor pattern, got {:?}", tuple.0);
+    };
+    assert_eq!(elements.len(), 2);
+    for element in elements {
+        assert!(matches!(
+            &element.0,
+            SurfacePattern::Con(_, args)
+                if args.len() == 1 && matches!(args[0].0, SurfacePattern::Var(_))
+        ));
+    }
+}
+
+#[test]
 fn constructor_less_data_definition_lowers_with_no_constructors() {
     let parsed = lower_test_source("data Never\n");
     let SurfaceDefinition::DataDef {

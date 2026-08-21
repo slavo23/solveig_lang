@@ -60,7 +60,7 @@ runLocalAgainst repositories base = do
     sequential <- time.measure
         (fetchSequential base Nothing release_radar.cache.empty repositories)
     case sequential of
-        MkPair sequentialNanos _ => do
+        (sequentialNanos, _) => do
             concurrent <- time.measure
                 (fetchConcurrentObserved
                     workerCount
@@ -69,7 +69,7 @@ runLocalAgainst repositories base = do
                     release_radar.cache.empty
                     repositories)
             case concurrent of
-                MkPair concurrentNanos results =>
+                (concurrentNanos, results) =>
                     reportLocalComparison repositories sequentialNanos results concurrentNanos
 
 runLocal : [String] -> Task ()
@@ -118,7 +118,7 @@ runLive cache repositories = do
                     cache
                     repositories)
             case measured of
-                MkPair elapsed results => do
+                (elapsed, results) => do
                     printLine ("live requests completed in " <> show (milliseconds elapsed) <> " ms")
                     printSummary repositories results
                     writeCache cachePath (updateCache cache results)

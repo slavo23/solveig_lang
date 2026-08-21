@@ -70,7 +70,7 @@ runPipeline jobs results =
                         (produce jobs)
                         (collect results 4 0)
                     case completed of
-                        MkPair produced accepted => pureIO accepted))
+                        (produced, accepted) => pureIO accepted))
 
 main : Task ()
 main = do

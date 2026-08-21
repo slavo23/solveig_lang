@@ -1065,6 +1065,14 @@ fn collect_pattern_local_hovers(
             push_local_hover(file, surface.1, "_", expected_type, tables, sink.out);
         }
         (SurfacePattern::Con(_, surface_args), Pattern::Con(ctor_id, args)) => {
+            if tuple_ctor_arity_from_name(&tables.names.ctor_display_name(*ctor_id)).is_some() {
+                sink.out.push(HoverInfo::new(
+                    file,
+                    surface.1.to_usize_range(),
+                    expected_type.pretty_with_tables(tables),
+                    None,
+                ));
+            }
             let field_types = ctor_table
                 .get(*ctor_id)
                 .and_then(|info| {

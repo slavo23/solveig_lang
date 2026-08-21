@@ -11,6 +11,8 @@ impl CstToAst<'_> {
             SyntaxKind::TypeArrow => self.lower_type_arrow(node),
             SyntaxKind::TypeApp => self.lower_type_app(node),
             SyntaxKind::TypeAtom => self.lower_type_atom(node),
+            SyntaxKind::TupleType => self.lower_tuple_type(node),
+            SyntaxKind::TupleConstructor => self.lower_tuple_constructor_type(node),
             SyntaxKind::NamePath => self.lower_type_name_path(node),
             _ => Err(self.error_at_node(node, "expected type")),
         }
@@ -135,6 +137,20 @@ impl CstToAst<'_> {
         let start = self.node_span(node).start as usize;
         let end = self.node_span(node).end as usize;
 
+        if self.node_has_token(node, Token::LBrack) {
+            let elem =
+                self.required_child(node, self.first_type_child(node), "expected list type")?;
+            let elem = self.lower_type(elem)?;
+            return Ok(list_ty(self, elem, start, end, node));
+        }
+
+        if let Some(tuple) = self.first_child_of_kind(node, SyntaxKind::TupleType) {
+            return self.lower_tuple_type(tuple);
+        }
+        if let Some(constructor) = self.first_child_of_kind(node, SyntaxKind::TupleConstructor) {
+            return self.lower_tuple_constructor_type(constructor);
+        }
+
         if self.node_has_token(node, Token::LParen) {
             let Some(inner) = self.first_type_child(node) else {
                 return Ok(self.sp_between(node, SurfaceTy::Unit, start, end));
@@ -143,18 +159,41 @@ impl CstToAst<'_> {
             return Ok(self.sp_between(node, inner.0, start, end));
         }
 
-        if self.node_has_token(node, Token::LBrack) {
-            let elem =
-                self.required_child(node, self.first_type_child(node), "expected list type")?;
-            let elem = self.lower_type(elem)?;
-            return Ok(list_ty(self, elem, start, end, node));
-        }
-
         if let Some(name) = self.first_child_of_kind(node, SyntaxKind::NamePath) {
             return self.lower_type_name_path(name);
         }
 
         Err(self.error_at_node(node, "expected type"))
+    }
+
+    fn lower_tuple_type(&mut self, node: CstId) -> Result<Spanned<SurfaceTy>, ParseError> {
+        let start = self.node_span(node).start as usize;
+        let end = self.node_span(node).end as usize;
+        let children = self
+            .child_nodes(node)
+            .into_iter()
+            .filter(|child| self.node_is_type_like(*child))
+            .collect::<Vec<_>>();
+        let elems = children
+            .into_iter()
+            .map(|child| self.lower_type(child))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(tuple_ty(self, elems, start, end, node))
+    }
+
+    fn lower_tuple_constructor_type(
+        &mut self,
+        node: CstId,
+    ) -> Result<Spanned<SurfaceTy>, ParseError> {
+        let start = self.node_span(node).start as usize;
+        let end = self.node_span(node).end as usize;
+        let arity = self
+            .direct_meaningful_tokens(node)
+            .into_iter()
+            .filter(|token| self.cst.token(*token).kind == Token::Comma)
+            .count()
+            + 1;
+        Ok(tuple_constructor_ty(self, arity, start, end, node))
     }
 
     fn lower_type_name_path(&mut self, node: CstId) -> Result<Spanned<SurfaceTy>, ParseError> {

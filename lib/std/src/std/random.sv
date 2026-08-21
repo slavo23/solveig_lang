@@ -9,12 +9,12 @@ newStdGen : Task StdGen
 newStdGen = prelude.prim.newStdGen
 
 -- | Produces a signed random integer and the next immutable generator state.
-randomInt : StdGen -> Pair Int StdGen
+randomInt : StdGen -> (Int, StdGen)
 randomInt generator = prelude.prim.randomInt generator
 
 -- | Produces an unbiased integer in inclusive bounds when they are ordered.
 -- This is not cryptographic.
-randomRange : Int -> Int -> StdGen -> Maybe (Pair Int StdGen)
+randomRange : Int -> Int -> StdGen -> Maybe (Int, StdGen)
 randomRange lower upper generator =
     if lower > upper then Nothing
     else Just (prelude.prim.randomRange lower upper generator)

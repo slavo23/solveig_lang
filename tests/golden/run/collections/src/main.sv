@@ -39,7 +39,7 @@ printDequeued : std.queue.Queue Int -> Task ()
 printDequeued queue =
     case std.queue.dequeue queue of
         Nothing => printLine "empty"
-        | Just (MkPair value rest) => do
+        | Just (value, rest) => do
             printLine (show value)
             printLine (show (std.queue.toList rest))
 

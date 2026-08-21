@@ -12,6 +12,8 @@ impl CstToAst<'_> {
             SyntaxKind::Pattern => self.lower_pattern_node(node),
             SyntaxKind::PatternHead => self.lower_pattern_head(node),
             SyntaxKind::PatternArg => self.lower_pattern_arg(node),
+            SyntaxKind::TuplePattern => self.lower_tuple_pattern(node),
+            SyntaxKind::TupleConstructor => self.lower_tuple_constructor_pattern(node),
             SyntaxKind::NamePath => self.lower_pattern_name_path(node),
             _ => Err(self.error_at_node(node, "expected pattern")),
         }
@@ -81,6 +83,29 @@ impl CstToAst<'_> {
     }
 
     fn lower_pattern_head(&mut self, node: CstId) -> Result<Spanned<SurfacePattern>, ParseError> {
+        if let Some(constructor) = self.first_child_of_kind(node, SyntaxKind::TupleConstructor) {
+            let arity = self
+                .direct_meaningful_tokens(constructor)
+                .into_iter()
+                .filter(|token| self.cst.token(*token).kind == Token::Comma)
+                .count()
+                + 1;
+            let arg_nodes = self
+                .child_nodes(node)
+                .into_iter()
+                .filter(|child| self.node_is_pattern_like(*child) && *child != constructor)
+                .collect::<Vec<_>>();
+            let args = arg_nodes
+                .into_iter()
+                .map(|child| self.lower_pattern(child))
+                .collect::<Result<Vec<_>, _>>()?;
+            let start = self.node_span(node).start as usize;
+            let end = self.node_span(node).end as usize;
+            return Ok(tuple_constructor_pattern(
+                self, arity, args, start, end, node,
+            ));
+        }
+
         if let Some(name_node) = self.first_child_of_kind(node, SyntaxKind::NamePath) {
             let name_ref = self.lower_name_path(name_node)?;
             if is_ctor_like(self.name_ref_last_source_text(&name_ref)) {
@@ -110,21 +135,9 @@ impl CstToAst<'_> {
     }
 
     fn lower_pattern_arg(&mut self, node: CstId) -> Result<Spanned<SurfacePattern>, ParseError> {
-        if let Some(name) = self.first_child_of_kind(node, SyntaxKind::NamePath) {
-            return self.lower_pattern_name_path(name);
-        }
-
         let tokens = self.direct_meaningful_tokens(node);
         let start = self.node_span(node).start as usize;
         let end = self.node_span(node).end as usize;
-
-        if self.node_has_token(node, Token::LParen) {
-            let Some(inner) = self.child_patterns(node).first().copied() else {
-                return Err(self.error_at_node(node, "unit pattern `()` is not supported yet"));
-            };
-            let inner = self.lower_pattern(inner)?;
-            return Ok(self.sp_between(node, inner.0, start, end));
-        }
 
         if self.node_has_token(node, Token::LBrack) {
             let elems = self
@@ -136,6 +149,28 @@ impl CstToAst<'_> {
                 return Ok(list_nil_pattern(self, start, end, node));
             }
             return Ok(list_pattern(self, elems, start, end, node));
+        }
+
+        if self.cst.node(node).kind() == SyntaxKind::TupleConstructor {
+            return self.lower_tuple_constructor_pattern(node);
+        }
+        if let Some(constructor) = self.first_child_of_kind(node, SyntaxKind::TupleConstructor) {
+            return self.lower_tuple_constructor_pattern(constructor);
+        }
+        if let Some(tuple) = self.first_child_of_kind(node, SyntaxKind::TuplePattern) {
+            return self.lower_tuple_pattern(tuple);
+        }
+
+        if let Some(name) = self.first_child_of_kind(node, SyntaxKind::NamePath) {
+            return self.lower_pattern_name_path(name);
+        }
+
+        if self.node_has_token(node, Token::LParen) {
+            let Some(inner) = self.child_patterns(node).first().copied() else {
+                return Err(self.error_at_node(node, "unit pattern `()` is not supported yet"));
+            };
+            let inner = self.lower_pattern(inner)?;
+            return Ok(self.sp_between(node, inner.0, start, end));
         }
 
         let first = self.required_token(node, tokens.first().copied(), "expected pattern")?;
@@ -185,6 +220,39 @@ impl CstToAst<'_> {
                 format!("expected pattern, got {}", self.describe_token(first)),
             )),
         }
+    }
+
+    fn lower_tuple_constructor_pattern(
+        &mut self,
+        node: CstId,
+    ) -> Result<Spanned<SurfacePattern>, ParseError> {
+        let start = self.node_span(node).start as usize;
+        let end = self.node_span(node).end as usize;
+        let arity = self
+            .direct_meaningful_tokens(node)
+            .into_iter()
+            .filter(|token| self.cst.token(*token).kind == Token::Comma)
+            .count()
+            + 1;
+        Ok(tuple_constructor_pattern(
+            self,
+            arity,
+            Vec::new(),
+            start,
+            end,
+            node,
+        ))
+    }
+
+    fn lower_tuple_pattern(&mut self, node: CstId) -> Result<Spanned<SurfacePattern>, ParseError> {
+        let start = self.node_span(node).start as usize;
+        let end = self.node_span(node).end as usize;
+        let elems = self
+            .child_patterns(node)
+            .into_iter()
+            .map(|child| self.lower_pattern(child))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(tuple_pattern(self, elems, start, end, node))
     }
 
     fn lower_negative_pattern(

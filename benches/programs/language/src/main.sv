@@ -218,16 +218,16 @@ mapEntries (value :: rest) = std.map.Entry value (value * 2) :: mapEntries rest
 benchmarkMap : std.map.Map Int Int
 benchmarkMap = std.map.fromList (mapEntries benchmarkValues)
 
-associationLookup : Int -> [Pair Int Int] -> Maybe Int
+associationLookup : Int -> [(Int, Int)] -> Maybe Int
 associationLookup key [] = Nothing
-associationLookup key (MkPair entryKey value :: rest) =
+associationLookup key ((entryKey, value) :: rest) =
     if key == entryKey then Just value else associationLookup key rest
 
-associationEntries : [Int] -> [Pair Int Int]
+associationEntries : [Int] -> [(Int, Int)]
 associationEntries [] = []
-associationEntries (value :: rest) = MkPair value (value * 2) :: associationEntries rest
+associationEntries (value :: rest) = (value, value * 2) :: associationEntries rest
 
-benchmarkAssociations : [Pair Int Int]
+benchmarkAssociations : [(Int, Int)]
 benchmarkAssociations = associationEntries benchmarkValues
 
 mapLookupMain : Int
@@ -246,7 +246,7 @@ drainQueue : std.queue.Queue Int -> Int -> Int
 drainQueue queue total =
     case std.queue.dequeue queue of
         Nothing => total
-        | Just (MkPair value rest) => drainQueue rest (total + value)
+        | Just (value, rest) => drainQueue rest (total + value)
 
 queueMain : Int
 queueMain = drainQueue (fillQueue 1000 std.queue.empty) 0

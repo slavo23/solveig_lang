@@ -28,6 +28,7 @@ pub enum SyntaxKind {
     AppExpr,
     AtomExpr,
     ParenExpr,
+    TupleExpr,
     ListExpr,
     LambdaExpr,
     LetExpr,
@@ -39,11 +40,14 @@ pub enum SyntaxKind {
     Pattern,
     PatternHead,
     PatternArg,
+    TuplePattern,
     Type,
     QualifiedType,
     TypeArrow,
     TypeApp,
     TypeAtom,
+    TupleType,
+    TupleConstructor,
     Error,
 }
 

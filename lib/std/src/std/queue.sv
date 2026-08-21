@@ -39,12 +39,12 @@ peek queue =
         | MkQueue _ (value :: _) _ => Just value
 
 -- | Removes and returns the front element when one exists.
-dequeue : forall a. Queue a -> Maybe (Pair a (Queue a))
+dequeue : forall a. Queue a -> Maybe (a, (Queue a))
 dequeue queue =
     case normalize queue of
         MkQueue _ [] _ => Nothing
         | MkQueue count (value :: front) rear =>
-            Just (MkPair value (normalize (MkQueue (count - 1) front rear)))
+            Just (value, (normalize (MkQueue (count - 1) front rear)))
 
 -- | Builds a queue in linear time.
 fromList : forall a. [a] -> Queue a

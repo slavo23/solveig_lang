@@ -65,14 +65,14 @@ fn check_case_table_driven_witnesses() {
             expected_missing: vec!["_"],
         },
         ExhaustivenessCase {
-            name: "pair_of_bools_missing_false_false",
-            scrutinee_type: pair_ty(bool_ty(), bool_ty()),
+            name: "tuple_of_bools_missing_false_false",
+            scrutinee_type: tuple2_ty(bool_ty(), bool_ty()),
             patterns: vec![
-                con("MkPair", vec![con("True", vec![]), con("True", vec![])]),
-                con("MkPair", vec![con("True", vec![]), con("False", vec![])]),
-                con("MkPair", vec![con("False", vec![]), con("True", vec![])]),
+                con("MkTuple2", vec![con("True", vec![]), con("True", vec![])]),
+                con("MkTuple2", vec![con("True", vec![]), con("False", vec![])]),
+                con("MkTuple2", vec![con("False", vec![]), con("True", vec![])]),
             ],
-            expected_missing: vec!["MkPair False False"],
+            expected_missing: vec!["MkTuple2 False False"],
         },
         ExhaustivenessCase {
             name: "wildcard_first_covers_all",
@@ -399,20 +399,23 @@ fn test_constructor_fixtures() -> TestConstructorFixtures {
             ],
         },
         DataDefinition {
-            name: "Pair".to_string(),
-            short_name: "Pair".to_string(),
+            name: "Tuple2".to_string(),
+            short_name: "Tuple2".to_string(),
             ty_params: vec![(TyVarId(0), Kind::Star), (TyVarId(1), Kind::Star)],
             tycon_kind: binary_kind(),
             constructors: vec![ConstructorDef {
-                id: ctor_id("MkPair"),
-                name: "MkPair".to_string(),
-                short_name: "MkPair".to_string(),
+                id: ctor_id("MkTuple2"),
+                name: "MkTuple2".to_string(),
+                short_name: "MkTuple2".to_string(),
                 fields: vec![tyvar("a"), tyvar("b")],
                 full_type: forall(
                     "a",
                     forall(
                         "b",
-                        arr(tyvar("a"), arr(tyvar("b"), pair_ty(tyvar("a"), tyvar("b")))),
+                        arr(
+                            tyvar("a"),
+                            arr(tyvar("b"), tuple2_ty(tyvar("a"), tyvar("b"))),
+                        ),
                     ),
                 ),
             }],
@@ -543,8 +546,8 @@ fn list_ty(arg: Ty) -> Ty {
     app(tycon("List"), arg)
 }
 
-fn pair_ty(left: Ty, right: Ty) -> Ty {
-    app(app(tycon("Pair"), left), right)
+fn tuple2_ty(left: Ty, right: Ty) -> Ty {
+    app(app(tycon("Tuple2"), left), right)
 }
 
 fn tycon(name: &str) -> Ty {
@@ -557,7 +560,7 @@ fn tycon_id(name: &str) -> TyConId {
         "Int" => PRIM_TYS.int,
         "Maybe" => TyConId(100),
         "List" => TyConId(101),
-        "Pair" => TyConId(102),
+        "Tuple2" => TyConId(102),
         "Never" => TyConId(103),
         other => solveig_base::ice!("unknown test type constructor `{other}`"),
     }
@@ -571,7 +574,7 @@ fn ctor_id(name: &str) -> CtorId {
         "Just" => CtorId(101),
         "Nil" => CtorId(102),
         "Cons" => CtorId(103),
-        "MkPair" => CtorId(104),
+        "MkTuple2" => CtorId(104),
         other => solveig_base::ice!("unknown test constructor `{other}`"),
     }
 }

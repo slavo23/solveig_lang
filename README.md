@@ -486,7 +486,7 @@ Deterministic pseudorandom values use explicit immutable state:
 import std.random(randomRange, mkStdGen)
 
 case randomRange 1 6 (mkStdGen 42) of
-    MkPair die nextGenerator => die
+    (die, nextGenerator) => die
 ```
 
 Use `newStdGen : Task StdGen` when a runtime-local clock seed is wanted, then

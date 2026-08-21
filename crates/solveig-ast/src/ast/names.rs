@@ -387,8 +387,44 @@ pub const PRELUDE_DEFECT_HEAP_EXHAUSTED_NAME: &str = "prelude.builtins.HeapExhau
 pub const PRELUDE_LIST_NAME: &str = "prelude.list.List";
 pub const PRELUDE_LIST_NIL_NAME: &str = "prelude.list.Nil";
 pub const PRELUDE_LIST_CONS_NAME: &str = "prelude.list.Cons";
-pub const PRELUDE_PAIR_MKPAIR_NAME: &str = "prelude.builtins.MkPair";
-pub const PRELUDE_PAIR_NAME: &str = "prelude.builtins.Pair";
+pub const PRELUDE_TUPLE_CTOR_NAMES: [&str; 7] = [
+    "prelude.builtins.MkTuple2",
+    "prelude.builtins.MkTuple3",
+    "prelude.builtins.MkTuple4",
+    "prelude.builtins.MkTuple5",
+    "prelude.builtins.MkTuple6",
+    "prelude.builtins.MkTuple7",
+    "prelude.builtins.MkTuple8",
+];
+pub const PRELUDE_TUPLE_TYCON_NAMES: [&str; 7] = [
+    "prelude.builtins.Tuple2",
+    "prelude.builtins.Tuple3",
+    "prelude.builtins.Tuple4",
+    "prelude.builtins.Tuple5",
+    "prelude.builtins.Tuple6",
+    "prelude.builtins.Tuple7",
+    "prelude.builtins.Tuple8",
+];
+
+pub fn tuple_ctor_arity_from_name(name: &str) -> Option<usize> {
+    PRELUDE_TUPLE_CTOR_NAMES
+        .iter()
+        .position(|candidate| *candidate == name)
+        .map(|index| index + 2)
+}
+
+pub fn tuple_tycon_arity_from_name(name: &str) -> Option<usize> {
+    PRELUDE_TUPLE_TYCON_NAMES
+        .iter()
+        .position(|candidate| *candidate == name)
+        .map(|index| index + 2)
+}
+
+pub fn tuple_constructor_spelling(arity: usize) -> Option<String> {
+    (2..=8)
+        .contains(&arity)
+        .then(|| format!("({})", ",".repeat(arity - 1)))
+}
 pub const PRELUDE_ORDERING_NAME: &str = "prelude.typeclasses.Ordering";
 pub const PRELUDE_ORDERING_LT_NAME: &str = "prelude.typeclasses.LT";
 pub const PRELUDE_ORDERING_EQ_NAME: &str = "prelude.typeclasses.EQ";

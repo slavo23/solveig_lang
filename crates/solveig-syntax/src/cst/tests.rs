@@ -43,6 +43,62 @@ fn session_free_cst_parse_keeps_structural_expr_nodes_and_drops_empty_imports() 
 }
 
 #[test]
+fn cst_retains_tuple_expression_pattern_type_and_constructor_nodes() {
+    let source = "\
+pick : (Int, (String, Bool)) -> String
+pick (count, (name, active)) = name
+makeTriple = (,,)
+main = (1, (\"nested\", True))
+";
+    let (tree, diagnostics) = parse_cst(FileId(0), source).expect("tuple CST fixture should lex");
+
+    assert!(diagnostics.is_empty(), "unexpected tuple parse diagnostics");
+    assert_eq!(tree.reconstruct_text(source), source);
+    for kind in [
+        SyntaxKind::TupleExpr,
+        SyntaxKind::TuplePattern,
+        SyntaxKind::TupleType,
+        SyntaxKind::TupleConstructor,
+    ] {
+        assert!(
+            tree.nodes().any(|(_, node)| node.kind() == kind),
+            "tuple CST should retain {kind:?}"
+        );
+    }
+    assert_eq!(
+        tree.nodes()
+            .filter(|(_, node)| node.kind() == SyntaxKind::TupleExpr)
+            .count(),
+        2,
+        "nested tuple expressions should retain both tuple nodes"
+    );
+    assert_eq!(
+        tree.nodes()
+            .filter(|(_, node)| node.kind() == SyntaxKind::TuplePattern)
+            .count(),
+        2,
+        "nested tuple patterns should retain both tuple nodes"
+    );
+}
+
+#[test]
+fn tuple_syntax_reports_omissions_and_arities_above_eight() {
+    for source in [
+        "main = (1, 2, 3, 4, 5, 6, 7, 8, 9)\n",
+        "bad : (Int, Int, Int, Int, Int, Int, Int, Int, Int)\n",
+        "pick (a, b, c, d, e, f, g, h, i) = a\n",
+        "main = (1,)\n",
+    ] {
+        let (_, diagnostics) =
+            parse_cst(FileId(0), source).expect("invalid tuple fixture should still lex");
+        assert!(
+            !diagnostics.is_empty(),
+            "invalid tuple syntax should report a diagnostic: {source}"
+        );
+    }
+}
+
+#[test]
 fn lexing_many_identifiers_does_not_touch_session_interner() {
     let source = (0..10_000)
         .map(|index| format!("name{index} = {index}\n"))
@@ -144,13 +200,12 @@ fn cst_parent_links_match_child_edges() {
 
 #[test]
 fn cst_node_spans_exclude_leading_trivia() {
-    let source = "type Score a = Pair String a\n\nmain : Score Int\nmain = MkPair \"ok\" 1\n";
+    let source = "type Score a = (String, a)\n\nmain : Score Int\nmain = (\"ok\", 1)\n";
     let parsed = parse_test_source(source);
     let tree = &parsed.cst;
 
     assert_eq!(tree.reconstruct_text(source), source);
 
-    assert_node_span_text(tree, source, SyntaxKind::NamePath, "Pair", "Pair");
     assert_node_span_text(tree, source, SyntaxKind::NamePath, "String", "String");
     assert_node_span_text(tree, source, SyntaxKind::NamePath, "Int", "Int");
     assert_node_span_text(tree, source, SyntaxKind::AtomExpr, "\"ok\"", "\"ok\"");

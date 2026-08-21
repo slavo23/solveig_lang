@@ -196,12 +196,21 @@ impl<'a> SourceSignaturePrinter<'a> {
     }
 
     fn ty(&mut self, ty: &Ty, parent_precedence: u8) -> String {
-        let current_precedence = if self.list_arg(ty).is_some() {
+        let current_precedence = if self.list_arg(ty).is_some() || self.tuple_args(ty).is_some() {
             PRECEDENCE_ATOM
         } else {
             type_precedence(ty)
         };
-        let text = if let Some(list_arg) = self.list_arg(ty) {
+        let text = if let Some(tuple_args) = self.tuple_args(ty) {
+            format!(
+                "({})",
+                tuple_args
+                    .into_iter()
+                    .map(|arg| self.ty(arg, PRECEDENCE_LOOSE))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        } else if let Some(list_arg) = self.list_arg(ty) {
             format!("[{}]", self.ty(list_arg, PRECEDENCE_LOOSE))
         } else {
             match ty {
@@ -279,6 +288,22 @@ impl<'a> SourceSignaturePrinter<'a> {
             self.tables.names.symbol_display_name(info.name) == PRELUDE_LIST_NAME
         }) || self.tables.names.tycon_display_name(*id) == PRELUDE_LIST_NAME
     }
+
+    fn tuple_args<'b>(&self, ty: &'b Ty) -> Option<Vec<&'b Ty>> {
+        let mut args = Vec::new();
+        let mut head = ty;
+        while let Ty::TyApp(func, arg) = head {
+            args.push(arg.as_ref());
+            head = func;
+        }
+        args.reverse();
+
+        let Ty::TyCon(id) = head else {
+            return None;
+        };
+        let arity = source_tuple_tycon_arity(*id, self.tables)?;
+        (args.len() == arity).then_some(args)
+    }
 }
 
 fn type_precedence(ty: &Ty) -> u8 {
@@ -336,10 +361,22 @@ fn fallback_tyvar_name(index: usize) -> String {
 }
 
 fn source_tycon_name(id: TyConId, tables: PrettyTables<'_>) -> String {
+    if let Some(arity) = source_tuple_tycon_arity(id, tables) {
+        return tuple_constructor_spelling(arity)
+            .expect("ICE: Prelude tuple type constructor has a supported arity");
+    }
     tables.tycons.get(id).map_or_else(
         || tables.names.tycon_display_name(id),
         |info| tables.names.symbol_display_name(info.short_name),
     )
+}
+
+fn source_tuple_tycon_arity(id: TyConId, tables: PrettyTables<'_>) -> Option<usize> {
+    tables
+        .tycons
+        .get(id)
+        .and_then(|info| tuple_tycon_arity_from_name(&tables.names.symbol_display_name(info.name)))
+        .or_else(|| tuple_tycon_arity_from_name(&tables.names.tycon_display_name(id)))
 }
 
 fn source_class_name(id: ClassId, tables: PrettyTables<'_>) -> String {

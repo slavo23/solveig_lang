@@ -44,12 +44,13 @@ impl Interpreter<'_> {
         limits: Value,
     ) -> Result<HttpRequest, RuntimeError> {
         let builtin = "httpRequestRaw";
-        let (method, request_tail) = self.expect_http_pair(request)?;
-        let (url, request_tail) = self.expect_http_pair(request_tail)?;
-        let (headers, body) = self.expect_http_pair(request_tail)?;
-        let (maximum_headers, limits_tail) = self.expect_http_pair(limits)?;
-        let (maximum_body, limits_tail) = self.expect_http_pair(limits_tail)?;
-        let (timeout_milliseconds, maximum_redirects) = self.expect_http_pair(limits_tail)?;
+        let [method, url, headers, body] = self.expect_http_tuple::<4>(request)?;
+        let [
+            maximum_headers,
+            maximum_body,
+            timeout_milliseconds,
+            maximum_redirects,
+        ] = self.expect_http_tuple::<4>(limits)?;
         let maximum_headers = expect_http_int(maximum_headers, "header limit")?;
         let maximum_body = expect_http_int(maximum_body, "body limit")?;
         let timeout_milliseconds = expect_http_int(timeout_milliseconds, "timeout")?;
@@ -70,25 +71,42 @@ impl Interpreter<'_> {
         })
     }
 
-    fn expect_http_pair(&mut self, value: Value) -> Result<(Value, Value), RuntimeError> {
+    fn expect_http_tuple<const N: usize>(
+        &mut self,
+        value: Value,
+    ) -> Result<[Value; N], RuntimeError> {
         let builtin = "httpRequestRaw";
-        let pair_tag =
-            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludePair, 2, builtin)?;
-        let Value::Obj(id) = value else {
-            return Err(RuntimeError::builtin(
-                "httpRequestRaw expected a Pair payload".to_string(),
-            ));
+        let Ok(role_arity) = u8::try_from(N) else {
+            solveig_base::ice!("HTTP tuple arity does not fit in the runtime role");
         };
-        match self.heap.get(id) {
+        let Ok(field_arity) = u16::try_from(N) else {
+            solveig_base::ice!("HTTP tuple arity does not fit in a constructor tag");
+        };
+        let tag = VmCtx::new(self).ctor_tag_with_arity(
+            CtorRuntimeRole::PreludeTuple(role_arity),
+            field_arity,
+            builtin,
+        )?;
+        let Value::Obj(id) = value else {
+            return Err(RuntimeError::builtin(format!(
+                "httpRequestRaw expected a {N}-tuple payload"
+            )));
+        };
+        let result = match self.heap.get(id) {
             HeapObject::Data2 {
-                tag,
+                tag: actual_tag,
                 field0,
                 field1,
-            } if *tag == pair_tag => Ok((*field0, *field1)),
-            _ => Err(RuntimeError::builtin(
-                "httpRequestRaw expected a Pair payload".to_string(),
-            )),
-        }
+            } if N == 2 && *actual_tag == tag => vec![*field0, *field1],
+            HeapObject::DataN {
+                tag: actual_tag,
+                fields,
+            } if N > 2 && *actual_tag == tag => self.heap.payload_slice(id, *fields).to_vec(),
+            _ => Vec::new(),
+        };
+        result.try_into().map_err(|_values| {
+            RuntimeError::builtin(format!("httpRequestRaw expected a {N}-tuple payload"))
+        })
     }
 
     fn expect_http_headers(
@@ -101,13 +119,13 @@ impl Interpreter<'_> {
         let cons_tag =
             VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludeListCons, 2, builtin)?;
         let pair_tag =
-            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludePair, 2, builtin)?;
+            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludeTuple(2), 2, builtin)?;
         let mut headers = Vec::new();
 
         loop {
             let Value::Obj(id) = current else {
                 return Err(RuntimeError::builtin(
-                    "httpRequestRaw expected a [Pair String String] header list".to_string(),
+                    "httpRequestRaw expected a [(String, String)] header list".to_string(),
                 ));
             };
             match self.heap.get(id) {
@@ -143,7 +161,7 @@ impl Interpreter<'_> {
                 }
                 _ => {
                     return Err(RuntimeError::builtin(
-                        "httpRequestRaw expected a [Pair String String] header list".to_string(),
+                        "httpRequestRaw expected a [(String, String)] header list".to_string(),
                     ));
                 }
             }

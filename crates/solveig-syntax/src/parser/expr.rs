@@ -98,6 +98,10 @@ impl Parser<'_> {
                 Ok(())
             }
             Token::LParen => {
+                if parser.tuple_constructor_arity().is_some() {
+                    return parser.parse_tuple_constructor();
+                }
+
                 if parser.starts_parenthesized_operator_name() {
                     parser.parse_parenthesized_operator_name()?;
                     return Ok(());
@@ -111,13 +115,28 @@ impl Parser<'_> {
                     return parser.parse_operator_left_section();
                 }
 
-                parser.node(SyntaxKind::ParenExpr, |parser| {
+                let kind = if parser.parenthesized_has_top_level_comma() {
+                    SyntaxKind::TupleExpr
+                } else {
+                    SyntaxKind::ParenExpr
+                };
+                parser.node(kind, |parser| {
                     parser.advance();
                     if parser.at(&Token::RParen) {
                         parser.advance();
                         return Ok(());
                     }
                     parser.parse_expr()?;
+                    let mut arity = 1usize;
+                    while parser.at(&Token::Comma) {
+                        parser.advance();
+                        arity += 1;
+                        parser.check_tuple_arity(arity)?;
+                        if parser.at(&Token::RParen) {
+                            return Err(parser.error("tuple elements may not be omitted"));
+                        }
+                        parser.parse_expr()?;
+                    }
                     parser.expect(&Token::RParen)?;
                     Ok(())
                 })

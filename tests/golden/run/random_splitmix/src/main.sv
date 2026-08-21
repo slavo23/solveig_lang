@@ -8,7 +8,7 @@ printInts remaining generator =
         pureIO ()
     else
         case randomInt generator of
-            MkPair value next => do
+            (value, next) => do
                 printLine (intToString value)
                 printInts (remaining - 1) next
 
@@ -19,14 +19,14 @@ printRanges remaining generator =
     else
         case randomRange (-10) 10 generator of
             Nothing => printLine "unexpected invalid range"
-            | Just (MkPair value next) => do
+            | Just (value, next) => do
                 printLine (intToString value)
                 printRanges (remaining - 1) next
 
 printFresh : StdGen -> Task ()
 printFresh generator =
     case randomInt generator of
-        MkPair value next => printLine (intToString value)
+        (value, next) => printLine (intToString value)
 
 printInvalidRange : Task ()
 printInvalidRange =

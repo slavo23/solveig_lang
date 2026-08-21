@@ -71,12 +71,12 @@ withFixture : forall a. (String -> Task a) -> Task a
 withFixture action =
     std.net.withListener 0 (fun listenerInfo =>
         case listenerInfo of
-            MkPair listener port =>
+            (listener, port) =>
                 std.task.withThread
                     (serveOnce listener)
                     (fun _ => action ("http://127.0.0.1:" <> show port)))
 
-fetchNames : String -> Task (Result std.testing.TestFailure (Pair Int (std.vector.Vector String)))
+fetchNames : String -> Task (Result std.testing.TestFailure (Int, (std.vector.Vector String)))
 fetchNames base = do
     response <- mapError httpAsIOError (std.http.fetch (base <> "/names"))
     let status = std.http.statusCode (std.http.responseStatus response)
@@ -87,12 +87,12 @@ fetchNames base = do
             (fun _ _ _ => Err (TestFailure "HTTP JSON requested more input"))
             (std.json.parseJson std.json.defaultJsonLimits (std.http.responseBody response)))
 
-namesFromJson : Int -> std.json.Json -> Result std.testing.TestFailure (Pair Int (std.vector.Vector String))
+namesFromJson : Int -> std.json.Json -> Result std.testing.TestFailure (Int, (std.vector.Vector String))
 namesFromJson status (JsonObject object) =
     case std.map.lookup "names" object of
         Just (JsonArray values) =>
             case jsonStrings (std.vector.toList values) of
-                Just names => Ok (MkPair status (std.vector.fromList names))
+                Just names => Ok (status, (std.vector.fromList names))
                 | Nothing => Err (TestFailure "names array contains a non-string")
         | _ => Err (TestFailure "JSON object has no names array")
 namesFromJson _ _ = Err (TestFailure "HTTP JSON is not an object")
@@ -129,7 +129,7 @@ main = do
     typedInvalid <- invalidUrlIsTyped
     cancelled <- std.task.timeout 5 (std.time.sleep 100)
     case response of
-        MkPair status names =>
+        (status, names) =>
             resultOrExit
                 (std.testing.checkAll
                     [ std.testing.assertEqual "worker count" 4 workers

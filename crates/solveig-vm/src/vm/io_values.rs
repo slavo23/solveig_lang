@@ -24,7 +24,7 @@ impl Interpreter<'_> {
             IoResult::Listener { socket, port } => {
                 self.safe_point();
                 VmCtx::new(self).alloc_data2_ctor(
-                    CtorRuntimeRole::PreludePair,
+                    CtorRuntimeRole::PreludeTuple(2),
                     Value::SocketId(socket.0),
                     Value::Int(i64::from(port)),
                     "listen",
@@ -114,7 +114,7 @@ impl Interpreter<'_> {
                 .copied()
                 .expect("ICE: HTTP header value root disappeared");
             let pair = VmCtx::new(self).alloc_data2_ctor(
-                CtorRuntimeRole::PreludePair,
+                CtorRuntimeRole::PreludeTuple(2),
                 name,
                 value,
                 "httpRequestRaw",
@@ -143,24 +143,11 @@ impl Interpreter<'_> {
             .get(checkpoint + 1)
             .copied()
             .expect("ICE: HTTP body root disappeared");
-        let payload = VmCtx::new(self).alloc_data2_ctor(
-            CtorRuntimeRole::PreludePair,
+        let result = VmCtx::new(self).alloc_data3_ctor(
+            CtorRuntimeRole::PreludeTuple(3),
+            Value::Int(response.status),
             headers,
             body,
-            "httpRequestRaw",
-        )?;
-        self.temporary_roots.truncate(checkpoint);
-        self.temporary_roots.push(payload);
-        self.safe_point();
-        let payload = self
-            .temporary_roots
-            .get(checkpoint)
-            .copied()
-            .expect("ICE: HTTP response payload root disappeared");
-        let result = VmCtx::new(self).alloc_data2_ctor(
-            CtorRuntimeRole::PreludePair,
-            Value::Int(response.status),
-            payload,
             "httpRequestRaw",
         );
         self.temporary_roots.truncate(checkpoint);
@@ -206,7 +193,7 @@ impl Interpreter<'_> {
                 .last()
                 .expect("ICE: environment value root disappeared");
             let pair = VmCtx::new(self).alloc_data2_ctor(
-                CtorRuntimeRole::PreludePair,
+                CtorRuntimeRole::PreludeTuple(2),
                 name,
                 value,
                 "getEnvironment",

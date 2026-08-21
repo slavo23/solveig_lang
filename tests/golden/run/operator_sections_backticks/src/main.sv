@@ -1,6 +1,8 @@
 infixr 8 `raise`
 infixl 6 `mix`
 
+data Joined a b = Joined a b
+
 raise : Int -> Int -> Int
 raise x y = x * 100 + y
 
@@ -33,8 +35,8 @@ mixedFixity = 2 + 3 `raise` 4
 
 patternBacktick : Int
 patternBacktick =
-    case MkPair 7 8 of
-        left `MkPair` right => left + right
+    case Joined 7 8 of
+        left `Joined` right => left + right
 
 main : Int
 main =

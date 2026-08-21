@@ -268,7 +268,7 @@ runLocal = do
     address <- resolveHost "localhost"
     listenerInfo <- listen 0
     case listenerInfo of
-        MkPair listener port => runLocalExample address listener port
+        (listener, port) => runLocalExample address listener port
 
 runInternet : Task ()
 runInternet = do

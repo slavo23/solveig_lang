@@ -82,7 +82,7 @@ withFixture : forall a. Int -> (String -> Task a) -> Task a
 withFixture requestCount action = do
     listenerInfo <- std.net.listen 0
     case listenerInfo of
-        MkPair listener port =>
+        (listener, port) =>
             std.task.finally
                 (std.task.withThread
                     (serveFixture listener requestCount)

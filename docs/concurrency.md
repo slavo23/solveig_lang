@@ -138,7 +138,7 @@ main = do
     values <- newBoundedChan 1
     result <- concurrently (produce values) (consumeTwo values)
     case result of
-        MkPair produced total => printLine (show total)
+        (produced, total) => printLine (show total)
 ```
 
 The first send fills the queue; the second may park until the consumer makes
@@ -189,7 +189,7 @@ idempotent.
 ```solveig
 withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
 race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
-concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
+concurrently : forall e a b. IO e a -> IO e b -> IO e (a, b)
 timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 ```
 
@@ -202,7 +202,7 @@ These functions are implemented in `std.task` using Solveig, `bracket`,
 - `race left right` returns the first completed value as `Left value` or
   `Right value` and interrupts the loser. If the first outcome is a typed error
   or defect, it propagates that exact value and cancels the peer.
-- `concurrently left right` returns `MkPair leftValue rightValue` after both
+- `concurrently left right` returns `(leftValue, rightValue)` after both
   succeed. The first typed error or defect cancels the other action and
   propagates unchanged.
 - `timeout milliseconds action` races a timer against the action, returning
@@ -251,26 +251,26 @@ different sockets without exhausting a thread pool.
 ```solveig
 resolveHost : String -> Task String
 connect : String -> Int -> Task Socket
-listen : Int -> Task (Pair Socket Int)
+listen : Int -> Task (Socket, Int)
 accept : Socket -> Task Socket
 sendBytes : Socket -> Bytes -> Task ()
 recvBytes : Socket -> Int -> Task Bytes
 closeSocket : Socket -> Task ()
-closeListener : Pair Socket Int -> Task ()
+closeListener : (Socket, Int) -> Task ()
 withConnection : String -> Int -> (Socket -> Task a) -> Task a
-withListener : Int -> (Pair Socket Int -> Task a) -> Task a
+withListener : Int -> ((Socket, Int) -> Task a) -> Task a
 withAcceptedConnection : Socket -> (Socket -> Task a) -> Task a
 ```
 
 `resolveHost` performs blocking standard-library DNS on the worker pool and
 returns one IPv4 literal. `connect` accepts that literal or `localhost`; it
 does not perform DNS itself. `listen` binds IPv4 loopback, and port zero asks
-the OS to choose a free port returned as `MkPair listener actualPort`.
+the OS to choose a free port returned as `(listener, actualPort)`.
 
 Prefer `withConnection`, `withListener`, and `withAcceptedConnection` for
 owned sockets. They use `bracket`, so the resource closes after success, a
 typed error, a defect, or interruption. `closeListener` closes the socket in
-the `Pair` returned by `listen`; raw `closeSocket` remains available when
+the tuple returned by `listen`; raw `closeSocket` remains available when
 ownership must cross a larger scope.
 
 `sendBytes` completes after the whole buffer is sent. `recvBytes` returns at

@@ -10,5 +10,5 @@ chooseChar c =
         '\t' => c
       | _ => '?'
 
-main : Pair String Char
-main = MkPair (chooseText "line\nquote\"") (chooseChar '\t')
+main : (String, Char)
+main = ((chooseText "line\nquote\""), (chooseChar '\t'))

@@ -33,11 +33,11 @@ unifyTerm : Term -> Term -> [Binding] -> Maybe [Binding]
 unifyTerm left right bindings =
     let walkedLeft = walk bindings left in
     let walkedRight = walk bindings right in
-        case MkPair walkedLeft walkedRight of
-            MkPair (Atom a) (Atom b) =>
+        case (walkedLeft, walkedRight) of
+            (Atom a, Atom b) =>
                 if a == b then Just bindings else Nothing
-            | MkPair (Var name) term => bindVar name term bindings
-            | MkPair term (Var name) => bindVar name term bindings
+            | (Var name, term) => bindVar name term bindings
+            | (term, Var name) => bindVar name term bindings
 
 unifyArgs : [Term] -> [Term] -> [Binding] -> Maybe [Binding]
 unifyArgs left right bindings =

@@ -72,7 +72,7 @@ main = do
     catchError
         (std.http.fetchWith
             (std.http.HttpLimits 65536 1024 1000 std.http.NoRedirects)
-            [MkPair "Accept" "text/plain"]
+            [("Accept", "text/plain")]
             (base <> "/chunked")
             >>= printResponse "fetch")
         (fun error => printLine ("fetch:" <> showHttpError error))

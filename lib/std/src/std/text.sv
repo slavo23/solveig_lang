@@ -84,13 +84,13 @@ linesFrom (character :: rest) reversedLine =
         linesFrom rest (character :: reversedLine)
 
 -- | Splits text around the first occurrence of a delimiter.
-splitOnce : Char -> String -> Maybe (Pair String String)
+splitOnce : Char -> String -> Maybe (String, String)
 splitOnce delimiter text = splitOnceFrom delimiter (stringToChars text) []
 
-splitOnceFrom : Char -> [Char] -> [Char] -> Maybe (Pair String String)
+splitOnceFrom : Char -> [Char] -> [Char] -> Maybe (String, String)
 splitOnceFrom _ [] _ = Nothing
 splitOnceFrom delimiter (character :: rest) reversedLeft =
     if character == delimiter then
-        Just (MkPair (charsToString (reverse reversedLeft)) (charsToString rest))
+        Just (charsToString (reverse reversedLeft), charsToString rest)
     else
         splitOnceFrom delimiter rest (character :: reversedLeft)

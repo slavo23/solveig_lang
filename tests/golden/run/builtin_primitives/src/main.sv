@@ -45,23 +45,7 @@ stringResults =
     ]
 
 stringDetails =
-    MkPair
-        (MkPair (stringLength "hello") (stringToChars "Az"))
-        (MkPair
-            (stringCharAt "abc" 1)
-            (MkPair
-                (stringCharAt "abc" 9)
-                (MkPair
-                    (stringEq "a" "a")
-                    (MkPair
-                        (intCompare 1 2)
-                        (MkPair
-                            (stringCompare "a" "b")
-                            (MkPair (charEq 'x' 'x') (charCompare 'b' 'a')))))))
+    (((stringLength "hello"), (stringToChars "Az")), ((stringCharAt "abc" 1), ((stringCharAt "abc" 9), ((stringEq "a" "a"), ((intCompare 1 2), ((stringCompare "a" "b"), ((charEq 'x' 'x'), (charCompare 'b' 'a'))))))))
 
 main =
-    MkPair
-        (MkPair intResults intChecks)
-        (MkPair
-            (MkPair floatResults floatChecks)
-            (MkPair stringResults stringDetails))
+    ((intResults, intChecks), ((floatResults, floatChecks), (stringResults, stringDetails)))

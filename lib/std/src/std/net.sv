@@ -10,7 +10,7 @@ resolveHost : String -> Task String
 resolveHost host = prelude.prim.resolveHost host
 
 -- | Binds a loopback TCP listener and returns its actual port.
-listen : Int -> Task (Pair Socket Int)
+listen : Int -> Task (Socket, Int)
 listen port = prelude.prim.listen port
 
 -- | Accepts the next connection from a TCP listener.
@@ -34,11 +34,11 @@ withConnection : forall a. String -> Int -> (Socket -> Task a) -> Task a
 withConnection host port use = bracket (connect host port) closeSocket use
 
 -- | Closes the listener in a result returned by listen.
-closeListener : Pair Socket Int -> Task ()
-closeListener (MkPair listener _) = closeSocket listener
+closeListener : (Socket, Int) -> Task ()
+closeListener (listener, _) = closeSocket listener
 
 -- | Binds and closes a TCP listener around a use action.
-withListener : forall a. Int -> (Pair Socket Int -> Task a) -> Task a
+withListener : forall a. Int -> ((Socket, Int) -> Task a) -> Task a
 withListener port use = bracket (listen port) closeListener use
 
 -- | Accepts and closes one TCP connection around a use action.

@@ -102,65 +102,19 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         string.clone(),
     );
     let resolve_host = unary(string.clone(), io_of(io_error.clone(), string.clone()));
-    let listener_result = Ty::make_app(
-        Ty::make_app(
-            Ty::make_con_id(prelude_pair_tycon_id(names)),
-            socket.clone(),
-        ),
-        int.clone(),
-    );
-    let header = Ty::make_app(
-        Ty::make_app(
-            Ty::make_con_id(prelude_pair_tycon_id(names)),
-            string.clone(),
-        ),
-        string.clone(),
-    );
+    let listener_result = tuple(names, &[socket.clone(), int.clone()]);
+    let header = tuple(names, &[string.clone(), string.clone()]);
     let headers = Ty::make_app(list, header);
     let maybe_bytes = Ty::make_app(
         Ty::make_con_id(prelude_maybe_tycon_id(names)),
         bytes.clone(),
     );
-    let request_body = Ty::make_app(
-        Ty::make_app(
-            Ty::make_con_id(prelude_pair_tycon_id(names)),
-            headers.clone(),
-        ),
-        maybe_bytes,
+    let http_request = tuple(
+        names,
+        &[string.clone(), string.clone(), headers.clone(), maybe_bytes],
     );
-    let request_url = Ty::make_app(
-        Ty::make_app(
-            Ty::make_con_id(prelude_pair_tycon_id(names)),
-            string.clone(),
-        ),
-        request_body,
-    );
-    let http_request = Ty::make_app(
-        Ty::make_app(
-            Ty::make_con_id(prelude_pair_tycon_id(names)),
-            string.clone(),
-        ),
-        request_url,
-    );
-    let redirect_limits = Ty::make_app(
-        Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), int.clone()),
-        int.clone(),
-    );
-    let body_limits = Ty::make_app(
-        Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), int.clone()),
-        redirect_limits,
-    );
-    let http_limits = Ty::make_app(
-        Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), int.clone()),
-        body_limits,
-    );
-    let http_response = Ty::make_app(
-        Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), int.clone()),
-        Ty::make_app(
-            Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), headers),
-            bytes.clone(),
-        ),
-    );
+    let http_limits = tuple(names, &[int.clone(), int.clone(), int.clone(), int.clone()]);
+    let http_response = tuple(names, &[int.clone(), headers, bytes.clone()]);
     let handle_specs =
         handles::handle_builtin_specs(names, &int, &string, &bytes, &bool_ty, &io_error);
     let os_specs = os::os_builtin_specs(names, &int, &string, &bool_ty, &io_error);

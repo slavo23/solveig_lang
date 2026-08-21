@@ -129,7 +129,7 @@ race left right =
 -- Control.Concurrent.Async's `concurrently` waits for both scoped children but
 -- cancels the peer as soon as one child fails:
 -- https://hackage.haskell.org/package/async/docs/Control-Concurrent-Async.html#v:concurrently
-concurrently : forall e a b. IO e a -> IO e b -> IO e (Pair a b)
+concurrently : forall e a b. IO e a -> IO e b -> IO e (a, b)
 concurrently left right =
     bindIO newChan (fun outcomes =>
         withThread
@@ -178,22 +178,22 @@ concurrently left right =
                                             (fun channelError =>
                                                 error "structured concurrency internal channel closed"))
                                         (fun second =>
-                                            case MkPair firstValue second of
-                                                MkPair (Left leftValue) (Right (Left defect)) =>
+                                            case (firstValue, second) of
+                                                (Left leftValue, Right (Left defect)) =>
                                                     prelude.prim.raiseDefectIO defect
-                                                | MkPair (Left leftValue) (Right (Right (Left typedError))) =>
+                                                | (Left leftValue, Right (Right (Left typedError))) =>
                                                     failIO typedError
-                                                | MkPair (Left leftValue) (Right (Right (Right rightValue))) =>
-                                                    pureIO (MkPair leftValue rightValue)
-                                                | MkPair (Right rightValue) (Left (Left defect)) =>
+                                                | (Left leftValue, Right (Right (Right rightValue))) =>
+                                                    pureIO (leftValue, rightValue)
+                                                | (Right rightValue, Left (Left defect)) =>
                                                     prelude.prim.raiseDefectIO defect
-                                                | MkPair (Right rightValue) (Left (Right (Left typedError))) =>
+                                                | (Right rightValue, Left (Right (Left typedError))) =>
                                                     failIO typedError
-                                                | MkPair (Right rightValue) (Left (Right (Right leftValue))) =>
-                                                    pureIO (MkPair leftValue rightValue)
-                                                | MkPair (Left leftValue) (Left duplicate) =>
+                                                | (Right rightValue, Left (Right (Right leftValue))) =>
+                                                    pureIO (leftValue, rightValue)
+                                                | (Left leftValue, Left duplicate) =>
                                                     error "structured child sent more than one outcome"
-                                                | MkPair (Right rightValue) (Right duplicate) =>
+                                                | (Right rightValue, Right duplicate) =>
                                                     error "structured child sent more than one outcome"))))))
 
 -- | Runs an action until its millisecond deadline and returns Nothing on expiry.
@@ -239,14 +239,14 @@ mapConcurrentlyBounded concurrency transform values =
                 outcomes
                 (runPooled jobs outcomes values total)
 
-runPooled : forall a b. Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> [a] -> Int -> Task [b]
+runPooled : forall a b. Chan (Int, a) -> Chan (Int, (Either IOError b)) -> [a] -> Int -> Task [b]
 runPooled jobs outcomes values total = do
     enqueuePooled jobs values 0
     ordered <- collectPooled outcomes total std.map.empty
     std.channel.closeChan outcomes
     finishPooled (std.map.values ordered)
 
-withPooledWorkers : forall a b result. Int -> (a -> Task b) -> Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> Task result -> Task result
+withPooledWorkers : forall a b result. Int -> (a -> Task b) -> Chan (Int, a) -> Chan (Int, (Either IOError b)) -> Task result -> Task result
 withPooledWorkers count transform jobs outcomes body =
     if count == 0 then body
     else
@@ -254,36 +254,36 @@ withPooledWorkers count transform jobs outcomes body =
             (pooledWorker transform jobs outcomes)
             (fun worker => withPooledWorkers (count - 1) transform jobs outcomes body)
 
-pooledWorker : forall a b. (a -> Task b) -> Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> Task ()
+pooledWorker : forall a b. (a -> Task b) -> Chan (Int, a) -> Chan (Int, (Either IOError b)) -> Task ()
 pooledWorker transform jobs outcomes =
     catchError
         (pooledWorkerLoop transform jobs outcomes)
         (fun channelClosed => pureIO ())
 
-pooledWorkerLoop : forall a b. (a -> Task b) -> Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> Task ()
+pooledWorkerLoop : forall a b. (a -> Task b) -> Chan (Int, a) -> Chan (Int, (Either IOError b)) -> Task ()
 pooledWorkerLoop transform jobs outcomes = do
     job <- std.channel.recv jobs
     case job of
-        MkPair index value => do
+        (index, value) => do
             outcome <- catchError
                 (fmap Right (transform value))
                 (fun operationError => pureIO (Left operationError))
-            std.channel.send outcomes (MkPair index outcome)
+            std.channel.send outcomes (index, outcome)
             pooledWorkerLoop transform jobs outcomes
 
-enqueuePooled : forall a. Chan (Pair Int a) -> [a] -> Int -> Task ()
+enqueuePooled : forall a. Chan (Int, a) -> [a] -> Int -> Task ()
 enqueuePooled jobs [] _ = std.channel.closeChan jobs
 enqueuePooled jobs (value :: rest) index = do
-    std.channel.send jobs (MkPair index value)
+    std.channel.send jobs (index, value)
     enqueuePooled jobs rest (index + 1)
 
-collectPooled : forall a. Chan (Pair Int (Either IOError a)) -> Int -> std.map.Map Int (Either IOError a) -> Task (std.map.Map Int (Either IOError a))
+collectPooled : forall a. Chan (Int, (Either IOError a)) -> Int -> std.map.Map Int (Either IOError a) -> Task (std.map.Map Int (Either IOError a))
 collectPooled outcomes remaining ordered =
     if remaining == 0 then pureIO ordered
     else do
         indexed <- std.channel.recv outcomes
         case indexed of
-            MkPair index outcome =>
+            (index, outcome) =>
                 collectPooled
                     outcomes
                     (remaining - 1)

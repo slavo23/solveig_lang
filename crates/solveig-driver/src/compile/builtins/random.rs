@@ -5,7 +5,10 @@ use super::*;
 pub(super) fn random_builtin_specs(names: &mut Names, int: &Ty) -> Vec<PrimitiveBuiltinSpec> {
     let std_gen = Ty::make_con_id(PRIM_TYS.std_gen);
     let pair_int_gen = Ty::make_app(
-        Ty::make_app(Ty::make_con_id(prelude_pair_tycon_id(names)), int.clone()),
+        Ty::make_app(
+            Ty::make_con_id(prelude_tuple_tycon_id(names, 2)),
+            int.clone(),
+        ),
         std_gen.clone(),
     );
     let e_id = names.fresh_tyvar("e");

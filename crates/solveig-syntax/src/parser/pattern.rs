@@ -34,7 +34,13 @@ impl Parser<'_> {
 
     pub(super) fn parse_pattern_head(&mut self) -> Result<(), ParseError> {
         self.node(SyntaxKind::PatternHead, |parser| {
-            if matches!(parser.current_kind(), Token::UpperIdent) {
+            if parser.tuple_constructor_arity().is_some() {
+                parser.parse_tuple_constructor()?;
+                while parser.is_pattern_arg_start() {
+                    parser.parse_pattern_arg()?;
+                }
+                Ok(())
+            } else if matches!(parser.current_kind(), Token::UpperIdent) {
                 parser.parse_name_path()?;
                 while parser.is_pattern_arg_start() {
                     parser.parse_pattern_arg()?;
@@ -82,6 +88,35 @@ impl Parser<'_> {
                     Ok(())
                 }
                 Token::LParen => {
+                    if parser.tuple_constructor_arity().is_some() {
+                        return parser.parse_tuple_constructor();
+                    }
+                    let kind = if parser.parenthesized_has_top_level_comma() {
+                        SyntaxKind::TuplePattern
+                    } else {
+                        SyntaxKind::PatternArg
+                    };
+                    if kind == SyntaxKind::TuplePattern {
+                        return parser.node(kind, |parser| {
+                            parser.advance();
+                            parser.parse_pattern()?;
+                            let mut arity = 1usize;
+                            while parser.at(&Token::Comma) {
+                                parser.advance();
+                                arity += 1;
+                                parser.check_tuple_arity(arity)?;
+                                if parser.at(&Token::RParen) {
+                                    return Err(
+                                        parser.error("tuple patterns may not omit elements")
+                                    );
+                                }
+                                parser.parse_pattern()?;
+                            }
+                            parser.expect(&Token::RParen)?;
+                            Ok(())
+                        });
+                    }
+
                     parser.advance();
 
                     if parser.at(&Token::RParen) {

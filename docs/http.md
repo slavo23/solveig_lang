@@ -22,13 +22,13 @@ showPage spelling = do
 
 `fetchWith limits headers spelling` keeps the same one-call shape when an
 application needs tighter resource policy or request headers. Headers are
-ordinary `Pair String String` values and are validated before network work:
+ordinary `(String, String)` values and are validated before network work:
 
 ```solveig
 response <- std.http.fetchWith
     (std.http.HttpLimits 65536 1048576 5000 std.http.NoRedirects)
-    [ MkPair "Accept" "application/json"
-    , MkPair "Authorization" ("Bearer " <> token)
+    [ ("Accept", "application/json")
+    , ("Authorization", "Bearer " <> token)
     ]
     "https://api.example.test/releases"
 ```

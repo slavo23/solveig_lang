@@ -21,4 +21,4 @@ main : Task ()
 main = do
     listenerInfo <- listen 0
     case listenerInfo of
-        MkPair listener port => connectAfterClose listener port
+        (listener, port) => connectAfterClose listener port

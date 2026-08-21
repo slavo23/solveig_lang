@@ -1,4 +1,4 @@
-type Score a = Pair String a
+type Score a = (String, a)
 
 main : Score Int
-main = MkPair "ok" 1
+main = ("ok", 1)

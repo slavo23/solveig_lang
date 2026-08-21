@@ -21,8 +21,8 @@ const NIL_TAG: u16 = 2;
 const CONS_TAG: u16 = 3;
 const PRELUDE_NIL_TAG: u16 = 4;
 const PRELUDE_CONS_TAG: u16 = 5;
-const PRELUDE_PAIR_TAG: u16 = 6;
-const USER_PAIR_TAG: u16 = 7;
+const PRELUDE_TUPLE2_TAG: u16 = 6;
+const USER_PRODUCT_TAG: u16 = 7;
 
 #[test]
 fn bytecode_offsets_retain_nested_source_locations() {
@@ -1452,7 +1452,7 @@ fn display_fallback_prints_structural_constructors_for_prelude_roles() {
             ),
         ],
     );
-    let pair = pack(PRELUDE_PAIR_TAG, 2, vec![int(1), int(2)]);
+    let pair = pack(PRELUDE_TUPLE2_TAG, 2, vec![int(1), int(2)]);
 
     let program = program_with_ctors(
         vec![global("listMain", list), global("pairMain", pair)],
@@ -1476,10 +1476,10 @@ fn display_fallback_prints_structural_constructors_for_prelude_roles() {
             ),
             ctor_spec(
                 CtorId(102),
-                CtorRuntimeRole::PreludePair,
+                CtorRuntimeRole::PreludeTuple(2),
                 "renamed.pair.Tuple",
                 "Tuple",
-                PRELUDE_PAIR_TAG,
+                PRELUDE_TUPLE2_TAG,
                 2,
             ),
         ],
@@ -1490,21 +1490,24 @@ fn display_fallback_prints_structural_constructors_for_prelude_roles() {
 }
 
 #[test]
-fn display_does_not_tuple_user_pair_by_name() {
+fn display_does_not_tuple_an_ordinary_user_product() {
     let program = program_with_ctors(
-        vec![global("main", pack(USER_PAIR_TAG, 2, vec![int(1), int(2)]))],
+        vec![global(
+            "main",
+            pack(USER_PRODUCT_TAG, 2, vec![int(1), int(2)]),
+        )],
         Vec::new(),
         &[ctor_spec(
             CtorId(200),
             CtorRuntimeRole::Ordinary,
-            "main.MkPair",
-            "MkPair",
-            USER_PAIR_TAG,
+            "main.Join",
+            "Join",
+            USER_PRODUCT_TAG,
             2,
         )],
     );
 
-    assert_eq!(run_main(&program), "MkPair 1 2");
+    assert_eq!(run_main(&program), "Join 1 2");
 }
 
 #[test]

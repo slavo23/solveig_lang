@@ -2,9 +2,9 @@ import std.env
 import std.fs
 import std.io
 import std.list(length)
-lookupEnvironment : String -> [Pair String String] -> Maybe String;
+lookupEnvironment : String -> [(String, String)] -> Maybe String;
 lookupEnvironment name [] = Nothing;
-lookupEnvironment name (MkPair key value :: rest) =
+lookupEnvironment name ((key, value) :: rest) =
     if name == key then Just value else lookupEnvironment name rest;
 
 printMaybe : Maybe String -> Task ();
@@ -30,7 +30,7 @@ missingEnvFile envError = do
     printLine (describeEnvError envError)
     pureIO False;
 
-printEnvParse : Result EnvError [Pair String String] -> Task ();
+printEnvParse : Result EnvError [(String, String)] -> Task ();
 printEnvParse (Ok entries) = printLine ("env entries " <> show (length entries));
 printEnvParse (Err envError) = printLine (describeEnvError envError);
 

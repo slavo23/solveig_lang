@@ -109,6 +109,7 @@ pub(crate) struct PositionIndex {
     references: FxHashMap<Span, DefTarget>,
     modules: FxHashMap<Span, ModuleTarget>,
     local_hovers: FxHashMap<Span, HoverInfo>,
+    tuple_pattern_nodes: FxHashMap<Span, CstId>,
     expression_hovers: Vec<Option<HoverInfo>>,
     signature_call_sites: Vec<Option<SignatureCallSite>>,
 }
@@ -116,6 +117,13 @@ pub(crate) struct PositionIndex {
 impl PositionIndex {
     fn new(parsed: &ParsedModule) -> Self {
         let node_count = parsed.cst.nodes().count();
+        let tuple_pattern_nodes = parsed
+            .cst
+            .nodes()
+            .filter_map(|(id, node)| {
+                (node.kind() == SyntaxKind::TuplePattern).then_some((node.span(), id))
+            })
+            .collect();
         let mut index = Self {
             file: parsed.file,
             cst: parsed.cst.clone(),
@@ -124,6 +132,7 @@ impl PositionIndex {
             references: FxHashMap::default(),
             modules: FxHashMap::default(),
             local_hovers: FxHashMap::default(),
+            tuple_pattern_nodes,
             expression_hovers: vec![None; node_count],
             signature_call_sites: vec![None; node_count],
         };
@@ -503,8 +512,11 @@ impl PositionIndex {
 
     fn insert_local_hover(&mut self, hover: &HoverInfo) {
         if hover.file_span().file == self.file {
-            self.local_hovers
-                .insert(hover.file_span().span, hover.clone());
+            let span = hover.file_span().span;
+            self.local_hovers.insert(span, hover.clone());
+            if let Some(ast) = self.tuple_pattern_nodes.get(&span).copied() {
+                self.insert_expression_hover(ast, hover.clone());
+            }
         }
     }
 

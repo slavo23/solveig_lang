@@ -96,6 +96,18 @@ impl<'a> TypePrinter<'a> {
     }
 
     fn ty(&mut self, ty: &Ty, parent_precedence: u8) -> String {
+        if let Some(tuple_args) = self.tuple_args(ty) {
+            let text = format!(
+                "({})",
+                tuple_args
+                    .into_iter()
+                    .map(|arg| self.ty(arg, PRECEDENCE_LOOSE))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            return self.parenthesize(PRECEDENCE_ATOM, parent_precedence, text);
+        }
+
         if let Some(list_arg) = self.list_arg(ty) {
             let text = format!("[{}]", self.ty(list_arg, PRECEDENCE_LOOSE));
             return self.parenthesize(PRECEDENCE_ATOM, parent_precedence, text);
@@ -313,10 +325,42 @@ impl<'a> TypePrinter<'a> {
     }
 
     fn tycon_name(&self, id: TyConId) -> String {
+        if let Some(arity) = self.tuple_tycon_arity(id) {
+            return tuple_constructor_spelling(arity)
+                .expect("ICE: Prelude tuple type constructor has a supported arity");
+        }
         self.tables.map_or_else(
             || tycon_fallback_name(id),
             |tables| tycon_pretty_name(id, tables),
         )
+    }
+
+    fn tuple_args<'b>(&self, ty: &'b Ty) -> Option<Vec<&'b Ty>> {
+        let mut args = Vec::new();
+        let mut head = ty;
+        while let Ty::TyApp(func, arg) = head {
+            args.push(arg.as_ref());
+            head = func;
+        }
+        args.reverse();
+
+        let Ty::TyCon(id) = head else {
+            return None;
+        };
+        let arity = self.tuple_tycon_arity(*id)?;
+        (args.len() == arity).then_some(args)
+    }
+
+    fn tuple_tycon_arity(&self, id: TyConId) -> Option<usize> {
+        self.tables.and_then(|tables| {
+            tables
+                .tycons
+                .get(id)
+                .and_then(|info| {
+                    tuple_tycon_arity_from_name(&tables.names.symbol_display_name(info.name))
+                })
+                .or_else(|| tuple_tycon_arity_from_name(&tables.names.tycon_display_name(id)))
+        })
     }
 
     fn class_name(&self, id: ClassId) -> String {

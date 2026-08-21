@@ -616,7 +616,7 @@ cross the worker pool.
 `StdGen` is an immediate opaque `Value` carrying one SplitMix64 seed. A pure
 `randomInt` transition adds the fixed golden-gamma increment, applies the
 published `mix64` permutation, and returns the signed output with the new
-generator in a Prelude `Pair`. The public `std.random.randomRange` returns
+generator in a Prelude 2-tuple. The public `std.random.randomRange` returns
 `Nothing` for reversed bounds before its primitive maps a word into inclusive
 bounds using multiply-high rejection sampling rather than biased modulo. A
 valid draw may advance through more than one word.

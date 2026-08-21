@@ -71,12 +71,12 @@ main = do
             (concurrently leftSuccess rightSuccess)
             (fun unexpected => error "unexpected concurrent failure")
     case pair of
-        MkPair leftValue rightValue =>
+        (leftValue, rightValue) =>
             printLine (appendString "pair=7," rightValue)
     pooled <- mapConcurrentlyBounded 2 pooledWork [1, 2, 3, 4]
     printLine ("pooled=" <> show pooled)
     expectPooledFailure
     measured <- std.time.measure (pureIO 42)
     case measured of
-        MkPair elapsed value =>
+        (elapsed, value) =>
             printLine ("measured=" <> show (elapsed >= 0) <> ":" <> show value)

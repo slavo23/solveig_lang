@@ -133,7 +133,7 @@ runAudit jobs results =
                                 (enqueueJobs jobs)
                                 (collectResults results 5 emptySummary)
                             case completed of
-                                MkPair produced summary => pureIO summary)))
+                                (produced, summary) => pureIO summary)))
 
 main : Task ()
 main = do

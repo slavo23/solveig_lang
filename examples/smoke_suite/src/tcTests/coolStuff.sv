@@ -153,25 +153,25 @@ safePipeline : Int -> Maybe Int
 safePipeline = composeK safeHalf safeIncrementBelowLimit
 
 
-choosePair : [Int] -> [Int] -> [Pair Int Int]
+choosePair : [Int] -> [Int] -> [(Int, Int)]
 choosePair xs ys = do
     x <- xs
     y <- ys
-    pure (MkPair x y)
+    pure (x, y)
 
 
-orderedPairs : [Int] -> [Pair Int Int]
+orderedPairs : [Int] -> [(Int, Int)]
 orderedPairs xs = do
     x <- xs
     y <- xs
-    if less x y then [MkPair x y] else []
+    if less x y then [(x, y)] else []
 
 
-pythagoreanTiny : [Pair Int Int]
+pythagoreanTiny : [(Int, Int)]
 pythagoreanTiny = do
     x <- [3, 4, 5, 6]
     y <- [3, 4, 5, 6]
-    if eq (x * x + y * y) 25 then [MkPair x y] else []
+    if eq (x * x + y * y) 25 then [(x, y)] else []
 
 
 allBooleanAssignments3 : [[Bool]]
@@ -221,12 +221,12 @@ sumListsMonoid =
     mconcat [[1, 2], [3], [], [4, 5]]
 
 
-pairMonoidAggregation : Pair [Int] [Int]
+pairMonoidAggregation : ([Int], [Int])
 pairMonoidAggregation =
     mconcat [
-        MkPair [1] [10],
-        MkPair [2, 3] [],
-        MkPair [] [20, 30]
+        ([1], [10]),
+        ([2, 3], []),
+        ([], [20, 30])
     ]
 
 
@@ -348,18 +348,18 @@ checkSafePipelineRejectedByLimit =
 checkChoosePair : Bool
 checkChoosePair =
     eq (choosePair [1, 2] [10, 20])
-       [MkPair 1 10, MkPair 1 20, MkPair 2 10, MkPair 2 20]
+       [(1, 10), (1, 20), (2, 10), (2, 20)]
 
 
 checkOrderedPairs : Bool
 checkOrderedPairs =
     eq (orderedPairs [1, 2, 3])
-       [MkPair 1 2, MkPair 1 3, MkPair 2 3]
+       [(1, 2), (1, 3), (2, 3)]
 
 
 checkPythagoreanTiny : Bool
 checkPythagoreanTiny =
-    eq pythagoreanTiny [MkPair 3 4, MkPair 4 3]
+    eq pythagoreanTiny [(3, 4), (4, 3)]
 
 
 checkBooleanAssignments : Bool
@@ -417,7 +417,7 @@ checkSumListsMonoid =
 
 checkPairMonoidAggregation : Bool
 checkPairMonoidAggregation =
-    eq pairMonoidAggregation (MkPair [1, 2, 3] [10, 20, 30])
+    eq pairMonoidAggregation ([1, 2, 3], [10, 20, 30])
 
 
 checkClampedInts : Bool

@@ -52,7 +52,7 @@ main : Task ()
 main = do
     listenerInfo <- listen 0
     case listenerInfo of
-        MkPair listener port =>
+        (listener, port) =>
             withThread
                 (serveClients listener 16)
                 (fun thread => runClients listener port)

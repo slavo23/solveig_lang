@@ -16,7 +16,7 @@ pub(super) fn os_builtin_specs(
     );
     let string_pair = Ty::make_app(
         Ty::make_app(
-            Ty::make_con_id(prelude_pair_tycon_id(names)),
+            Ty::make_con_id(prelude_tuple_tycon_id(names, 2)),
             string.clone(),
         ),
         string.clone(),

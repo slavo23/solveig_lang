@@ -7,7 +7,8 @@ use solveig_ast::ast::{
     InstanceDefinition, InstanceMethodDef, Kind, ModuleId, Names, PRELUDE_LIST_NAME, PRIM_TYS,
     Pattern, PatternNode, Predicate, Pretty, PrettyTables, Scheme, TermDefinition, TermExpr,
     TermExprNode, Ty, TyConDefinition, TyConId, TyConInfo, TyConTable, TyVarId, VarRef,
-    compiler_bool_data_definition,
+    compiler_bool_data_definition, tuple_constructor_spelling, tuple_ctor_arity_from_name,
+    tuple_tycon_arity_from_name,
 };
 use solveig_base::{
     FileId, FileSpan, FxHashMap, FxHashSet, PositionEncoding, Session, SourceFile, SourceMap,
@@ -27,6 +28,7 @@ use solveig_syntax::ast::{
     Spanned, SurfaceConstructor, SurfaceDefinition, SurfaceDoStmt, SurfaceExpr, SurfacePattern,
     SurfacePredicate, SurfaceTy,
 };
+use solveig_syntax::syntax::SyntaxKind;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::hash_map::DefaultHasher;

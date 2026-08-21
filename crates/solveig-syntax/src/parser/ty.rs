@@ -111,6 +111,34 @@ impl Parser<'_> {
                 Ok(())
             }
             Token::LParen => {
+                if parser.tuple_constructor_arity().is_some() {
+                    return parser.parse_tuple_constructor();
+                }
+
+                let kind = if parser.parenthesized_has_top_level_comma() {
+                    SyntaxKind::TupleType
+                } else {
+                    SyntaxKind::TypeAtom
+                };
+                if kind == SyntaxKind::TupleType {
+                    return parser.node(kind, |parser| {
+                        parser.advance();
+                        parser.parse_type()?;
+                        let mut arity = 1usize;
+                        while parser.at(&Token::Comma) {
+                            parser.advance();
+                            arity += 1;
+                            parser.check_tuple_arity(arity)?;
+                            if parser.at(&Token::RParen) {
+                                return Err(parser.error("tuple types may not omit elements"));
+                            }
+                            parser.parse_type()?;
+                        }
+                        parser.expect(&Token::RParen)?;
+                        Ok(())
+                    });
+                }
+
                 parser.advance();
                 if parser.at(&Token::RParen) {
                     parser.advance();

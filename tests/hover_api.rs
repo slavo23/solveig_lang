@@ -645,6 +645,111 @@ main = score (Face 3) 0
 }
 
 #[test]
+fn hover_covers_nested_tuple_delimiters_and_elements() {
+    let project_root = temp_root("nested_tuple_hovers");
+    let file = project_root.join("src/main.sv");
+    let source = r#"value : (Int, (String, Bool))
+value = (1, ("nested", True))
+
+inspect : (Int, (String, Bool)) -> Int
+inspect (count, (name, active)) = count
+
+class Marker a where
+    marker : a -> Int
+
+instance Marker (Int, (String, Bool)) where
+    marker (count, (name, active)) = count
+
+fromCase : (Int, (String, Bool)) -> String
+fromCase value =
+    case value of
+        (count, (name, active)) => name
+
+main = (inspect value, marker value, fromCase value)
+"#;
+    write_source(&file, source);
+
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation
+        .check(true)
+        .expect("nested tuple hover fixture should check");
+    assert!(
+        result.success(),
+        "nested tuple hover diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    let value_line = "value = (1, (\"nested\", True))";
+    for (needle, expected) in [
+        ("(1", "(Int, (String, Bool))"),
+        (")", "(Int, (String, Bool))"),
+        ("(\"nested", "(String, Bool)"),
+        ("\"nested\"", "String"),
+        ("True", "True : Bool"),
+    ] {
+        let offset = if needle == ")" {
+            offset_in_line_last(source, value_line, needle)
+        } else {
+            offset_in_line(source, value_line, needle)
+        };
+        let hover = compilation
+            .hover_info(&file, offset)
+            .unwrap_or_else(|| panic!("expression tuple token `{needle}` should hover"));
+        assert_eq!(hover.signature(), expected, "expression token `{needle}`");
+    }
+    let inner_value_close = offset_in_line(source, value_line, "True)") + "True".len();
+    assert_eq!(
+        compilation
+            .hover_info(&file, inner_value_close)
+            .expect("inner expression closing parenthesis should hover")
+            .signature(),
+        "(String, Bool)"
+    );
+
+    for pattern_line in [
+        "inspect (count, (name, active)) = count",
+        "    marker (count, (name, active)) = count",
+        "        (count, (name, active)) => name",
+    ] {
+        let outer_open = offset_in_line(source, pattern_line, "(count");
+        let outer_close = offset_in_line_last(source, pattern_line, ")");
+        let inner_open = offset_in_line(source, pattern_line, "(name");
+        let inner_close = offset_in_line(source, pattern_line, "active)") + "active".len();
+
+        for (offset, expected) in [
+            (outer_open, "(Int, (String, Bool))"),
+            (outer_close, "(Int, (String, Bool))"),
+            (inner_open, "(String, Bool)"),
+            (inner_close, "(String, Bool)"),
+        ] {
+            assert_eq!(
+                compilation
+                    .hover_info(&file, offset)
+                    .unwrap_or_else(|| panic!("tuple delimiter in `{pattern_line}` should hover"))
+                    .signature(),
+                expected
+            );
+        }
+
+        for (needle, expected) in [
+            ("count", "count : Int"),
+            ("name", "name : String"),
+            ("active", "active : Bool"),
+        ] {
+            assert_eq!(
+                compilation
+                    .hover_info(&file, offset_in_line(source, pattern_line, needle))
+                    .unwrap_or_else(|| panic!("tuple element `{needle}` should hover"))
+                    .signature(),
+                expected
+            );
+        }
+    }
+
+    drop(project_root);
+}
+
+#[test]
 fn hole_diagnostics_and_hovers_survive_incremental_recheck() {
     let project_root = fixture_root("examples/smoke_suite");
     let file = project_root.join("src/main.sv");
@@ -1040,7 +1145,7 @@ fn hover_info_covers_local_declaration_sites() {
         result.diagnostics()
     );
 
-    let lambda_line = "statePure value = State (fun state => MkPair value state)";
+    let lambda_line = "statePure value = State (fun state => (value, state))";
     let lambda_offset = {
         let line_start = quiz_source
             .find(lambda_line)
@@ -1061,7 +1166,7 @@ fn hover_info_covers_local_declaration_sites() {
             &quiz_file,
             offset_in_line(
                 &quiz_source,
-                "        MkPair question answer => QuizCard question answer",
+                "        (question, answer) => QuizCard question answer",
                 "question",
             ),
         )
@@ -1073,7 +1178,7 @@ fn hover_info_covers_local_declaration_sites() {
             &quiz_file,
             offset_in_line(
                 &quiz_source,
-                "        MkPair question answer => QuizCard question answer",
+                "        (question, answer) => QuizCard question answer",
                 "answer",
             ),
         )
@@ -1213,7 +1318,7 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
             &quiz_file,
             offset_in_line(
                 &quiz_source,
-                "                MkPair value nextState => MkPair (f value) nextState",
+                "                (value, nextState) => (f value, nextState)",
                 "f",
             ),
         )
@@ -1405,7 +1510,7 @@ fn hover_covers_direct_prelude_imported_references() {
     for (line, needle, expected) in [
         ("instance Eq a => Eq (List a) where", "a =>", "a : *"),
         ("instance Eq a => Eq (List a) where", "a)", "a : *"),
-        ("instance Functor (Pair e) where", "e)", "e : *"),
+        ("instance Functor ((,) e) where", "e)", "e : *"),
         (
             "    compare x y = intCompare x y",
             "intCompare",
@@ -1456,9 +1561,9 @@ fn hover_audits_quiz_game_sensitive_tokens() {
         &quiz_file,
         &quiz_source,
         &[
-            "statePure value = State (fun state => MkPair value state)",
+            "statePure value = State (fun state => (value, state))",
             "askCards cards = mapM askCard cards",
-            "        MkPair question answer => QuizCard question answer",
+            "        (question, answer) => QuizCard question answer",
             "        responses <- askCards cards",
         ],
     );
@@ -1469,31 +1574,35 @@ fn hover_audits_quiz_game_sensitive_tokens() {
         " 15:1   `statePure` => statePure : forall s a. a -> State s a\n",
         " 15:11  `value` => value : a\n",
         " 15:17  `=` => <none>\n",
-        " 15:19  `State` => State : forall s a. (s -> Pair a s) -> State s a\n",
-        " 15:25  `(` => s -> Pair a s\n",
+        " 15:19  `State` => State : forall s a. (s -> (a, s)) -> State s a\n",
+        " 15:25  `(` => s -> (a, s)\n",
         " 15:26  `fun` => <none>\n",
         " 15:30  `state` => state : s\n",
         " 15:36  `=>` => <none>\n",
-        " 15:39  `MkPair` => MkPair : forall a b. a -> b -> Pair a b\n",
-        " 15:46  `value` => value : a\n",
-        " 15:52  `state` => state : s\n",
-        " 15:57  `)` => s -> Pair a s\n",
-        " 76:9   `MkPair` => MkPair : forall a b. a -> b -> Pair a b\n",
-        " 76:16  `question` => question : String\n",
-        " 76:25  `answer` => answer : String\n",
-        " 76:32  `=>` => <none>\n",
-        " 76:35  `QuizCard` => QuizCard : String -> String -> QuizCard\n",
-        " 76:44  `question` => question : String\n",
-        " 76:53  `answer` => answer : String\n",
-        " 92:1   `askCards` => askCards : [QuizCard] -> Task [Pair QuizCard String]\n",
+        " 15:39  `(` => (a, s)\n",
+        " 15:40  `value` => value : a\n",
+        " 15:45  `,` => <none>\n",
+        " 15:47  `state` => state : s\n",
+        " 15:52  `)` => (a, s)\n",
+        " 15:53  `)` => s -> (a, s)\n",
+        " 76:9   `(` => (String, String)\n",
+        " 76:10  `question` => question : String\n",
+        " 76:18  `,` => <none>\n",
+        " 76:20  `answer` => answer : String\n",
+        " 76:26  `)` => (String, String)\n",
+        " 76:28  `=>` => <none>\n",
+        " 76:31  `QuizCard` => QuizCard : String -> String -> QuizCard\n",
+        " 76:40  `question` => question : String\n",
+        " 76:49  `answer` => answer : String\n",
+        " 92:1   `askCards` => askCards : [QuizCard] -> Task [(QuizCard, String)]\n",
         " 92:10  `cards` => cards : [QuizCard]\n",
         " 92:16  `=` => <none>\n",
         " 92:18  `mapM` => mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]\n",
-        " 92:23  `askCard` => askCard : QuizCard -> Task (Pair QuizCard String)\n",
+        " 92:23  `askCard` => askCard : QuizCard -> Task (QuizCard, String)\n",
         " 92:31  `cards` => cards : [QuizCard]\n",
-        "138:9   `responses` => responses : [Pair QuizCard String]\n",
+        "138:9   `responses` => responses : [(QuizCard, String)]\n",
         "138:19  `<-` => <none>\n",
-        "138:22  `askCards` => askCards : [QuizCard] -> Task [Pair QuizCard String]\n",
+        "138:22  `askCards` => askCards : [QuizCard] -> Task [(QuizCard, String)]\n",
         "138:31  `cards` => cards : [QuizCard]\n",
     );
 

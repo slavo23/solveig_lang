@@ -210,7 +210,7 @@ replacing malformed input.
 ```solveig
 getEnv : String -> Task (Maybe String)
 setEnv : String -> String -> Task ()
-getEnvironment : Task [Pair String String]
+getEnvironment : Task [(String, String)]
 getProgName : Task String
 ```
 
@@ -253,8 +253,8 @@ keeping the same action and scheduler paths as normal execution.
 ```solveig
 mkStdGen : Int -> StdGen
 newStdGen : Task StdGen
-randomInt : StdGen -> Pair Int StdGen
-randomRange : Int -> Int -> StdGen -> Maybe (Pair Int StdGen)
+randomInt : StdGen -> (Int, StdGen)
+randomRange : Int -> Int -> StdGen -> Maybe (Int, StdGen)
 ```
 
 `StdGen` is opaque, immutable SplitMix64 state. `mkStdGen` makes a repeatable
@@ -266,12 +266,12 @@ state through later draws:
 ```solveig
 case randomRange 1 6 (mkStdGen 42) of
     Nothing => Nothing
-    | Just (MkPair die next) => randomRange 1 6 next
+    | Just (die, next) => randomRange 1 6 next
 ```
 
 `randomInt` covers the complete signed `Int` range. `randomRange lower upper`
 uses inclusive bounds and unbiased rejection sampling. It returns `Nothing`
-when the bounds are reversed and `Just (MkPair value nextGenerator)` otherwise.
+when the bounds are reversed and `Just (value, nextGenerator)` otherwise.
 Because rejection may consume another word, callers must treat the returned
 generator—not a guessed step count—as the next state.
 

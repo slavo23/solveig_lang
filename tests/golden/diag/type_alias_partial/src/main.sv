@@ -1,6 +1,6 @@
-type PairWith a = Pair a
+type TupleWith a = (,) a
 
-bad : PairWith
-bad = MkPair 1
+bad : TupleWith
+bad = (,) 1
 
 main = 0

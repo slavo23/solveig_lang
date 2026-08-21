@@ -259,8 +259,8 @@ addConsumption previous (Awaiting current suspended continue) =
         (fun input => addConsumption previous (continue input))
 
 -- | Sequences two parsers and keeps both results in a pair.
-pair : forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom (Pair a b)
-pair left right = andThen left (fun a => mapResult (fun b => MkPair a b) right)
+pair : forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom (a, b)
+pair left right = andThen left (fun a => mapResult (fun b => (a, b)) right)
 
 -- | Sequences two parsers and keeps only the result of the second.
 keepRight : forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom b

@@ -7,26 +7,26 @@ import release_radar.model
 httpLimits : std.http.HttpLimits
 httpLimits = std.http.HttpLimits 65536 1048576 10000 std.http.NoRedirects
 
-commonHeaders : [Pair String String]
+commonHeaders : [(String, String)]
 commonHeaders =
-    [ MkPair "User-Agent" "solveig-release-radar/0.1"
-    , MkPair "Accept" "application/vnd.github+json"
-    , MkPair "X-GitHub-Api-Version" "2022-11-28"
+    [ ("User-Agent", "solveig-release-radar/0.1")
+    , ("Accept", "application/vnd.github+json")
+    , ("X-GitHub-Api-Version", "2022-11-28")
     ]
 
-requestHeaders : Maybe String -> release_radar.cache.Cache -> String -> [Pair String String]
+requestHeaders : Maybe String -> release_radar.cache.Cache -> String -> [(String, String)]
 requestHeaders token cache repository =
     tokenHeader token (etagHeader (release_radar.cache.etagFor repository cache) commonHeaders)
 
-tokenHeader : Maybe String -> [Pair String String] -> [Pair String String]
+tokenHeader : Maybe String -> [(String, String)] -> [(String, String)]
 tokenHeader Nothing headers = headers
-tokenHeader (Just token) headers = MkPair "Authorization" ("Bearer " <> token) :: headers
+tokenHeader (Just token) headers = ("Authorization", ("Bearer " <> token)) :: headers
 
-etagHeader : Maybe String -> [Pair String String] -> [Pair String String]
+etagHeader : Maybe String -> [(String, String)] -> [(String, String)]
 etagHeader Nothing headers = headers
-etagHeader (Just etag) headers = MkPair "If-None-Match" etag :: headers
+etagHeader (Just etag) headers = ("If-None-Match", etag) :: headers
 
-accessHeaders : Maybe String -> [Pair String String]
+accessHeaders : Maybe String -> [(String, String)]
 accessHeaders token = tokenHeader token commonHeaders
 
 checkAccess : String -> Maybe String -> Task release_radar.model.GitHubAccess
@@ -64,7 +64,7 @@ fetchObserved base token cache repository = do
     printLine ("[start] " <> repository)
     measured <- std.time.measure (fetchRelease base token cache repository)
     case measured of
-        MkPair elapsed result => do
+        (elapsed, result) => do
             printLine
                 ("[done "
                     <> show (milliseconds elapsed)

@@ -208,12 +208,24 @@ pub fn prelude_list_cons_ctor_id(names: &mut Names) -> CtorId {
     names.ctor_id(PRELUDE_LIST_CONS_NAME)
 }
 
-pub fn prelude_pair_mkpair_ctor_id(names: &mut Names) -> CtorId {
-    names.ctor_id(PRELUDE_PAIR_MKPAIR_NAME)
+pub fn prelude_tuple_ctor_id(names: &mut Names, arity: usize) -> CtorId {
+    let Some(index) = arity.checked_sub(2) else {
+        solveig_base::ice!("tuple constructor arity {arity} is below two");
+    };
+    let Some(name) = PRELUDE_TUPLE_CTOR_NAMES.get(index) else {
+        solveig_base::ice!("tuple constructor arity {arity} exceeds the supported bound");
+    };
+    names.ctor_id(name)
 }
 
-pub fn prelude_pair_tycon_id(names: &mut Names) -> TyConId {
-    names.tycon_id(PRELUDE_PAIR_NAME)
+pub fn prelude_tuple_tycon_id(names: &mut Names, arity: usize) -> TyConId {
+    let Some(index) = arity.checked_sub(2) else {
+        solveig_base::ice!("tuple type arity {arity} is below two");
+    };
+    let Some(name) = PRELUDE_TUPLE_TYCON_NAMES.get(index) else {
+        solveig_base::ice!("tuple type arity {arity} exceeds the supported bound");
+    };
+    names.tycon_id(name)
 }
 
 pub fn prelude_ordering_tycon_id(names: &mut Names) -> TyConId {
@@ -245,12 +257,18 @@ pub fn std_process_result_tycon_id(names: &mut Names) -> TyConId {
 }
 
 pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
-    match names.ctor_display_name(ctor).as_str() {
+    let display_name = names.ctor_display_name(ctor);
+    if let Some(arity) = tuple_ctor_arity_from_name(&display_name) {
+        let Ok(arity) = u8::try_from(arity) else {
+            solveig_base::ice!("recognized tuple constructor arity does not fit in u8");
+        };
+        return CtorRuntimeRole::PreludeTuple(arity);
+    }
+    match display_name.as_str() {
         PRELUDE_MAYBE_JUST_NAME => CtorRuntimeRole::PreludeMaybeJust,
         PRELUDE_MAYBE_NOTHING_NAME => CtorRuntimeRole::PreludeMaybeNothing,
         PRELUDE_LIST_NIL_NAME => CtorRuntimeRole::PreludeListNil,
         PRELUDE_LIST_CONS_NAME => CtorRuntimeRole::PreludeListCons,
-        PRELUDE_PAIR_MKPAIR_NAME => CtorRuntimeRole::PreludePair,
         PRELUDE_ORDERING_LT_NAME => CtorRuntimeRole::PreludeOrderingLt,
         PRELUDE_ORDERING_EQ_NAME => CtorRuntimeRole::PreludeOrderingEq,
         PRELUDE_ORDERING_GT_NAME => CtorRuntimeRole::PreludeOrderingGt,
@@ -424,11 +442,14 @@ fn insert_data_definition_identity(
     );
 
     for ctor_def in &data_def.constructors {
+        let short_name = tuple_ctor_arity_from_name(&ctor_def.name)
+            .and_then(tuple_constructor_spelling)
+            .unwrap_or_else(|| ctor_def.short_name.clone());
         ctor_table.insert_with_id(
             ctor_def.id,
             CtorInfo {
                 name: names.symbol(&ctor_def.name),
-                short_name: names.symbol(&ctor_def.short_name),
+                short_name: names.symbol(&short_name),
                 tycon: tycon_id,
                 fields: ctor_def.fields.clone(),
                 full_type: ctor_def.full_type.clone(),
@@ -535,7 +556,7 @@ pub enum CtorRuntimeRole {
     PreludeMaybeNothing,
     PreludeListNil,
     PreludeListCons,
-    PreludePair,
+    PreludeTuple(u8),
     PreludeOrderingLt,
     PreludeOrderingEq,
     PreludeOrderingGt,

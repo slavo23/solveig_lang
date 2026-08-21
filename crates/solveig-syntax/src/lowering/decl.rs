@@ -284,7 +284,7 @@ impl CstToAst<'_> {
             .collect::<Vec<_>>();
         let mut params = Vec::new();
         for param in param_nodes {
-            params.push(self.lower_type_atom(param)?);
+            params.push(self.lower_type(param)?);
         }
         let trailing_docs = self.doc_comment_after_node(node);
 
@@ -416,7 +416,7 @@ impl CstToAst<'_> {
                     break;
                 }
                 NodeOrToken::Node(ty) if seen_class && self.node_is_type_like(*ty) => {
-                    args.push(self.lower_type_atom(*ty)?);
+                    args.push(self.lower_type(*ty)?);
                 }
                 _ => {}
             }

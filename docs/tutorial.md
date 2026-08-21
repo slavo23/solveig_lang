@@ -360,7 +360,7 @@ Type aliases name an existing type without creating a runtime wrapper:
 
 ```solveig
 type UserId = Int
-type Named a = Pair String a
+type Named a = (String, a)
 type UserScores = Named [Int]
 ```
 
@@ -371,8 +371,8 @@ Solveig also supports higher-rank arguments. Parentheses make the inner
 quantifier's scope explicit:
 
 ```solveig
-useAtTwoTypes : (forall a. a -> a) -> Pair Int Bool
-useAtTwoTypes transform = MkPair (transform 7) (transform True)
+useAtTwoTypes : (forall a. a -> a) -> (Int, Bool)
+useAtTwoTypes transform = (transform 7, transform True)
 ```
 
 The caller must provide one function that works for every `a`; it cannot pass
@@ -402,8 +402,8 @@ still single definitions.
 Constraints appear before `=>`:
 
 ```solveig
-renderPair : forall a b. (Render a, Render b) => Pair a b -> String
-renderPair (MkPair left right) =
+renderPair : forall a b. (Render a, Render b) => (a, b) -> String
+renderPair (left, right) =
     appendString (render left) (appendString " / " (render right))
 ```
 
@@ -541,7 +541,7 @@ readTwoClocks : Task ()
 readTwoClocks = do
     pair <- concurrently getMonotonicTime getSystemTime
     case pair of
-        MkPair monotonic system => printLine (show monotonic)
+        (monotonic, system) => printLine (show monotonic)
 ```
 
 Use `mapM` when every input produces an output, and `mapIO_` when only
@@ -930,7 +930,7 @@ runPipeline jobs results =
                         (produce jobs)
                         (collect results 4 0)
                     case completed of
-                        MkPair produced accepted => pureIO accepted))
+                        (produced, accepted) => pureIO accepted))
 
 main : Task ()
 main = do
@@ -970,7 +970,7 @@ Structured combinators connect a child's lifetime to a lexical scope:
 
 ```solveig
 withThread : IO e a -> (ThreadId -> IO e b) -> IO e b
-concurrently : IO e a -> IO e b -> IO e (Pair a b)
+concurrently : IO e a -> IO e b -> IO e (a, b)
 race : IO e a -> IO e b -> IO e (Either a b)
 timeout : Int -> IO e a -> IO e (Maybe a)
 ```
@@ -978,7 +978,7 @@ timeout : Int -> IO e a -> IO e (Maybe a)
 ### Run independent work and keep both values
 
 ```solveig
-loadDashboard : Task (Pair String String)
+loadDashboard : Task (String, String)
 loadDashboard = concurrently
     (readFile "cache/customers.txt")
     (readFile "cache/orders.txt")
@@ -1083,21 +1083,21 @@ Pseudorandom state is explicit:
 ```solveig
 mkStdGen : Int -> StdGen
 newStdGen : Task StdGen
-randomRange : Int -> Int -> StdGen -> Maybe (Pair Int StdGen)
+randomRange : Int -> Int -> StdGen -> Maybe (Int, StdGen)
 ```
 
 Thread the returned generator:
 
 ```solveig
-rollTwoDice : StdGen -> Maybe (Pair (Pair Int Int) StdGen)
+rollTwoDice : StdGen -> Maybe ((Int, Int), StdGen)
 rollTwoDice generator =
     case randomRange 1 6 generator of
         Nothing => Nothing
-        | Just (MkPair first afterFirst) =>
+        | Just (first, afterFirst) =>
             case randomRange 1 6 afterFirst of
                 Nothing => Nothing
-                | Just (MkPair second afterSecond) =>
-                    Just (MkPair (MkPair first second) afterSecond)
+                | Just (second, afterSecond) =>
+                    Just ((first, second), afterSecond)
 ```
 
 `mkStdGen` makes tests reproducible. `newStdGen` is the only fresh seeding IO.
@@ -1123,7 +1123,7 @@ getEnv : String -> Task (Maybe String)
 getEnvOr : String -> String -> Task String
 requireEnv : String -> IO EnvError String
 setEnv : String -> String -> Task ()
-getEnvironment : Task [Pair String String]
+getEnvironment : Task [(String, String)]
 getCurrentDirectory : Task String
 setCurrentDirectory : String -> Task ()
 listDirectory : String -> Task [String]
@@ -1201,12 +1201,12 @@ The TCP surface is byte-oriented:
 ```solveig
 resolveHost : String -> Task String
 connect : String -> Int -> Task Socket
-listen : Int -> Task (Pair Socket Int)
+listen : Int -> Task (Socket, Int)
 accept : Socket -> Task Socket
 sendBytes : Socket -> Bytes -> Task ()
 recvBytes : Socket -> Int -> Task Bytes
 withConnection : String -> Int -> (Socket -> Task a) -> Task a
-withListener : Int -> (Pair Socket Int -> Task a) -> Task a
+withListener : Int -> ((Socket, Int) -> Task a) -> Task a
 withAcceptedConnection : Socket -> (Socket -> Task a) -> Task a
 closeSocket : Socket -> Task ()
 ```

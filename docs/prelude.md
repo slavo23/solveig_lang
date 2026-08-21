@@ -51,13 +51,16 @@ and consumed through the appropriate explicit standard-library module.
 data Maybe a = Just a | Nothing
 data Either a b = Left a | Right b
 data Result e a = Ok a | Err e
-data Pair a b = MkPair a b
 data Never
 ```
 
 `Maybe` represents absence. `Result` represents a pure expected failure.
-`Either` carries one of two alternatives. `Pair` is the small positional
-product used by APIs that return two values.
+`Either` carries one of two alternatives. Positional products use tuple syntax:
+`(left, right)`, `(a, b, c)`, and so on through 8-tuples. The same syntax works
+in types and patterns, including nesting. Tuple constructors are ordinary
+values spelled `(,)`, `(,,)`, through `(,,,,,,,)`, so point-free code such as
+`zipWith (,)` remains available without exposing the Prelude's internal data
+constructor names.
 
 ## Typed IO and defects
 

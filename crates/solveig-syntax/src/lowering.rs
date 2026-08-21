@@ -16,6 +16,10 @@ use lists::{
     cons_pattern, int_pattern, list_expr, list_nil_expr, list_nil_pattern, list_pattern, list_ty,
     literal_pattern,
 };
+use tuples::{
+    tuple_constructor_expr, tuple_constructor_pattern, tuple_constructor_ty, tuple_expr,
+    tuple_pattern, tuple_ty,
+};
 
 type NameSpan = (Symbol, usize, usize, CstId);
 type LambdaParam = (Spanned<Symbol>, Option<Spanned<SurfaceTy>>);
@@ -138,6 +142,8 @@ impl<'a> CstToAst<'a> {
                 | SyntaxKind::TypeArrow
                 | SyntaxKind::TypeApp
                 | SyntaxKind::TypeAtom
+                | SyntaxKind::TupleType
+                | SyntaxKind::TupleConstructor
                 | SyntaxKind::NamePath
         )
     }
@@ -156,6 +162,8 @@ impl<'a> CstToAst<'a> {
                 | SyntaxKind::AppExpr
                 | SyntaxKind::AtomExpr
                 | SyntaxKind::ParenExpr
+                | SyntaxKind::TupleExpr
+                | SyntaxKind::TupleConstructor
                 | SyntaxKind::ListExpr
                 | SyntaxKind::OperatorSection
                 | SyntaxKind::NamePath
@@ -168,6 +176,7 @@ impl<'a> CstToAst<'a> {
             SyntaxKind::Pattern
                 | SyntaxKind::PatternHead
                 | SyntaxKind::PatternArg
+                | SyntaxKind::TuplePattern
                 | SyntaxKind::NamePath
         )
     }
@@ -462,6 +471,7 @@ mod operators;
 mod pattern;
 #[cfg(test)]
 mod tests;
+mod tuples;
 mod ty;
 
 pub fn lower(session: &Session, parsed: &ParsedCst, source: &str) -> ParsedModule {

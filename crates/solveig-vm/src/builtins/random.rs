@@ -16,7 +16,7 @@ pub(super) fn random_int(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Valu
     let generator = expect_std_gen(args, 0, "randomInt")?;
     let (value, next) = generator.next_int();
     ctx.alloc_data2_ctor(
-        CtorRuntimeRole::PreludePair,
+        CtorRuntimeRole::PreludeTuple(2),
         Value::Int(value),
         Value::StdGen(next),
         "randomInt",
@@ -33,7 +33,7 @@ pub(super) fn random_range(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Va
         )));
     };
     ctx.alloc_data2_ctor(
-        CtorRuntimeRole::PreludePair,
+        CtorRuntimeRole::PreludeTuple(2),
         Value::Int(value),
         Value::StdGen(next),
         "randomRange",

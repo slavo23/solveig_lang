@@ -19,7 +19,7 @@ insertCacheLine : std.map.Map String String -> String -> std.map.Map String Stri
 insertCacheLine entries line =
     case std.text.splitOnce '\t' line of
         Nothing => entries
-        | Just (MkPair repository etag) => std.map.insert repository etag entries
+        | Just (repository, etag) => std.map.insert repository etag entries
 
 loadCache : String -> Task Cache
 loadCache path = do

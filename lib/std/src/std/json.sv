@@ -448,7 +448,7 @@ scanStringAt limits bytes contentStart offset reversed =
                     | Just 92 =>
                         case decodeEscape bytes (boundary + 1) of
                             Err error => consumedRejectJson boundaryInput error
-                            | Ok (MkPair escaped next) =>
+                            | Ok (escaped, next) =>
                                 scanStringAt limits bytes contentStart next
                                     (prependReversed (std.text.stringToChars escaped) accumulated)
                     | Just byte => consumedRejectJson boundaryInput (JsonUnescapedControl byte)
@@ -461,22 +461,22 @@ prependReversedInto [] reversed = reversed
 prependReversedInto (value :: rest) reversed =
     prependReversedInto rest (value :: reversed)
 
-decodeEscape : Bytes -> Int -> Result JsonError (Pair String Int)
+decodeEscape : Bytes -> Int -> Result JsonError (String, Int)
 decodeEscape bytes offset =
     case std.bytes.bytesIndex bytes offset of
         Nothing => Err JsonUnterminatedString
-        | Just 34 => Ok (MkPair "\"" (offset + 1))
-        | Just 92 => Ok (MkPair "\\" (offset + 1))
-        | Just 47 => Ok (MkPair "/" (offset + 1))
-        | Just 98 => Ok (MkPair "\u{8}" (offset + 1))
-        | Just 102 => Ok (MkPair "\u{c}" (offset + 1))
-        | Just 110 => Ok (MkPair "\n" (offset + 1))
-        | Just 114 => Ok (MkPair "\u{d}" (offset + 1))
-        | Just 116 => Ok (MkPair "\t" (offset + 1))
+        | Just 34 => Ok ("\"", (offset + 1))
+        | Just 92 => Ok ("\\", (offset + 1))
+        | Just 47 => Ok ("/", (offset + 1))
+        | Just 98 => Ok ("\u{8}", (offset + 1))
+        | Just 102 => Ok ("\u{c}", (offset + 1))
+        | Just 110 => Ok ("\n", (offset + 1))
+        | Just 114 => Ok ("\u{d}", (offset + 1))
+        | Just 116 => Ok ("\t", (offset + 1))
         | Just 117 => decodeUnicodeEscape bytes (offset + 1)
         | Just byte => Err (JsonInvalidEscape ("byte " <> show byte))
 
-decodeUnicodeEscape : Bytes -> Int -> Result JsonError (Pair String Int)
+decodeUnicodeEscape : Bytes -> Int -> Result JsonError (String, Int)
 decodeUnicodeEscape bytes offset =
     case readHex4 bytes offset of
         Nothing => Err JsonInvalidUnicodeEscape
@@ -496,10 +496,10 @@ decodeUnicodeEscape bytes offset =
                 Err JsonInvalidUnicodeEscape
             else scalarString high (offset + 4)
 
-scalarString : Int -> Int -> Result JsonError (Pair String Int)
+scalarString : Int -> Int -> Result JsonError (String, Int)
 scalarString codePoint next =
     case std.text.codePointToString codePoint of
-        Just text => Ok (MkPair text next)
+        Just text => Ok (text, next)
         | Nothing => Err JsonInvalidUnicodeEscape
 
 readHex4 : Bytes -> Int -> Maybe Int

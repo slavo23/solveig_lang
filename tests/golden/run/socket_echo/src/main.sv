@@ -19,7 +19,7 @@ main : Task ()
 main =
     withListener 0 (fun listenerInfo =>
         case listenerInfo of
-            MkPair listener port =>
+            (listener, port) =>
                 withThread
                     (withAcceptedConnection listener echoConnection)
                     (fun thread => runClient port))

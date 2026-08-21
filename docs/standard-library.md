@@ -102,7 +102,7 @@ are amortized constant time, `length` is constant time, and `toList` is linear.
 `dequeue` returns both the oldest value and the persistent remainder:
 
 ```solveig
-next : Maybe (Pair String (std.queue.Queue String))
+next : Maybe (String, std.queue.Queue String)
 next =
     std.queue.dequeue
         (std.queue.enqueue (std.queue.enqueue std.queue.empty "first") "second")
@@ -323,7 +323,7 @@ finally : IO e a -> IO e b -> IO e a
 bracket : IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
 mask : IO e a -> IO e a
 withThread : IO e a -> (ThreadId -> IO e b) -> IO e b
-concurrently : IO e a -> IO e b -> IO e (Pair a b)
+concurrently : IO e a -> IO e b -> IO e (a, b)
 race : IO e a -> IO e b -> IO e (Either a b)
 timeout : Int -> IO e a -> IO e (Maybe a)
 mapConcurrentlyBounded : Int -> (a -> Task b) -> [a] -> Task [b]
@@ -357,13 +357,13 @@ import std.random
 ```
 
 `sleep` and `timeout` use milliseconds. `getMonotonicTime` and
-`getSystemTime` return nanoseconds. `measure task` returns `Pair elapsedNanos
-value`, using the monotonic clock around the complete task.
+`getSystemTime` return nanoseconds. `measure task` returns `(elapsedNanos,
+value)`, using the monotonic clock around the complete task.
 
 Random draws use explicit immutable `StdGen` state. `mkStdGen` is reproducible;
 `newStdGen` obtains a runtime-local clock seed. `randomInt` returns
-`Pair value nextGenerator`; inclusive `randomRange` returns `Nothing` for
-reversed bounds and `Just (MkPair value nextGenerator)` otherwise. This
+`(value, nextGenerator)`; inclusive `randomRange` returns `Nothing` for
+reversed bounds and `Just (value, nextGenerator)` otherwise. This
 generator is not cryptographically secure.
 
 ## Networking
@@ -392,7 +392,7 @@ fetchRelease : String -> IO std.http.HttpError std.http.Response
 fetchRelease repository =
     std.http.fetchWith
         (std.http.HttpLimits 65536 1048576 5000 std.http.NoRedirects)
-        [MkPair "Accept" "application/json"]
+        [("Accept", "application/json")]
         ("https://api.example.test/repos/" <> repository <> "/release")
 ```
 

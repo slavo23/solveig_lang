@@ -54,3 +54,8 @@ pub(super) fn poly(vars: &[TyVarId], ty: Ty) -> Scheme {
 pub(super) fn io_of(error: Ty, value: Ty) -> Ty {
     Ty::make_app(Ty::make_app(Ty::make_con_id(PRIM_TYS.io), error), value)
 }
+
+pub(super) fn tuple(names: &mut Names, elements: &[Ty]) -> Ty {
+    let constructor = Ty::make_con_id(prelude_tuple_tycon_id(names, elements.len()));
+    elements.iter().cloned().fold(constructor, Ty::make_app)
+}

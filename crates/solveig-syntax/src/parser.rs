@@ -9,6 +9,8 @@ use crate::cst::SyntaxTree;
 use crate::lexer::{LexError, PosToken, Token};
 use crate::syntax::{Event, SyntaxKind};
 
+pub const MAX_TUPLE_ARITY: usize = 8;
+
 mod decl;
 mod expr;
 mod module;
@@ -427,6 +429,85 @@ impl<'source> Parser<'source> {
         }) && self
             .peek_kind(2)
             .is_some_and(|kind| matches!(kind, Token::RParen))
+    }
+
+    fn tuple_constructor_arity(&self) -> Option<usize> {
+        if !self.at(&Token::LParen) {
+            return None;
+        }
+
+        let mut offset = 1usize;
+        let mut commas = 0usize;
+        while self
+            .peek_kind(offset)
+            .is_some_and(|kind| matches!(kind, Token::Comma))
+        {
+            commas += 1;
+            offset += 1;
+        }
+
+        (commas > 0
+            && self
+                .peek_kind(offset)
+                .is_some_and(|kind| matches!(kind, Token::RParen)))
+        .then_some(commas + 1)
+    }
+
+    fn parse_tuple_constructor(&mut self) -> Result<(), ParseError> {
+        self.node(SyntaxKind::TupleConstructor, |parser| {
+            let arity = parser
+                .tuple_constructor_arity()
+                .ok_or_else(|| parser.error("expected tuple constructor"))?;
+            if arity > MAX_TUPLE_ARITY {
+                return Err(parser.error(format!(
+                    "tuple arity {arity} exceeds the supported maximum of {MAX_TUPLE_ARITY}"
+                )));
+            }
+            parser.expect(&Token::LParen)?;
+            for _ in 1..arity {
+                parser.expect(&Token::Comma)?;
+            }
+            parser.expect(&Token::RParen)?;
+            Ok(())
+        })
+    }
+
+    fn parenthesized_has_top_level_comma(&self) -> bool {
+        if !self.at(&Token::LParen) {
+            return false;
+        }
+
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        for token in self.tokens.iter().skip(self.current_index()) {
+            if token.kind.is_trivia() {
+                continue;
+            }
+            match token.kind {
+                Token::LParen => paren_depth += 1,
+                Token::RParen => {
+                    paren_depth = paren_depth.saturating_sub(1);
+                    if paren_depth == 0 {
+                        return false;
+                    }
+                }
+                Token::LBrack => bracket_depth += 1,
+                Token::RBrack => bracket_depth = bracket_depth.saturating_sub(1),
+                Token::Comma if paren_depth == 1 && bracket_depth == 0 => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn check_tuple_arity(&self, arity: usize) -> Result<(), ParseError> {
+        if arity > MAX_TUPLE_ARITY {
+            Err(self.error(format!(
+                "tuple arity {arity} exceeds the supported maximum of {MAX_TUPLE_ARITY}"
+            )))
+        } else {
+            Ok(())
+        }
     }
 
     fn expect_value_name(&mut self) -> Result<(), ParseError> {

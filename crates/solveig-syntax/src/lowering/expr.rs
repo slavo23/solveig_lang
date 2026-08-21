@@ -30,6 +30,8 @@ impl CstToAst<'_> {
             SyntaxKind::AppExpr => self.lower_app(node),
             SyntaxKind::AtomExpr
             | SyntaxKind::ParenExpr
+            | SyntaxKind::TupleExpr
+            | SyntaxKind::TupleConstructor
             | SyntaxKind::ListExpr
             | SyntaxKind::OperatorSection
             | SyntaxKind::NamePath => self.lower_atom(node),
@@ -238,6 +240,8 @@ impl CstToAst<'_> {
         match self.cst.node(node).kind() {
             SyntaxKind::NamePath => return self.lower_name_expr(node),
             SyntaxKind::ParenExpr => return self.lower_paren_expr(node),
+            SyntaxKind::TupleExpr => return self.lower_tuple_expr(node),
+            SyntaxKind::TupleConstructor => return self.lower_tuple_constructor_expr(node),
             SyntaxKind::ListExpr => return self.lower_list_expr(node),
             SyntaxKind::OperatorSection => return self.lower_operator_section(node),
             SyntaxKind::LambdaExpr
@@ -256,7 +260,11 @@ impl CstToAst<'_> {
         if let Some(child) = self.child_nodes(node).into_iter().find(|child| {
             matches!(
                 self.cst.node(*child).kind(),
-                SyntaxKind::ParenExpr | SyntaxKind::ListExpr | SyntaxKind::OperatorSection
+                SyntaxKind::ParenExpr
+                    | SyntaxKind::TupleExpr
+                    | SyntaxKind::TupleConstructor
+                    | SyntaxKind::ListExpr
+                    | SyntaxKind::OperatorSection
             )
         }) {
             return self.lower_atom(child);
@@ -375,6 +383,32 @@ impl CstToAst<'_> {
         };
         let inner = self.lower_expr(inner)?;
         Ok(self.sp_between(node, inner.0, start, end))
+    }
+
+    fn lower_tuple_expr(&mut self, node: CstId) -> Result<Spanned<SurfaceExpr>, ParseError> {
+        let start = self.node_span(node).start as usize;
+        let end = self.node_span(node).end as usize;
+        let elems = self
+            .child_exprs(node)
+            .into_iter()
+            .map(|child| self.lower_expr(child))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(tuple_expr(self, elems, start, end, node))
+    }
+
+    fn lower_tuple_constructor_expr(
+        &mut self,
+        node: CstId,
+    ) -> Result<Spanned<SurfaceExpr>, ParseError> {
+        let start = self.node_span(node).start as usize;
+        let end = self.node_span(node).end as usize;
+        let arity = self
+            .direct_meaningful_tokens(node)
+            .into_iter()
+            .filter(|token| self.cst.token(*token).kind == Token::Comma)
+            .count()
+            + 1;
+        Ok(tuple_constructor_expr(self, arity, start, end, node))
     }
 
     fn lower_list_expr(&mut self, node: CstId) -> Result<Spanned<SurfaceExpr>, ParseError> {
