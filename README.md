@@ -166,7 +166,10 @@ solveig --project-root examples/release_radar
 ```
 
 Pass `-- --live` to run the configured repository set through four concurrent,
-certificate-verified GitHub HTTPS workers.
+certificate-verified GitHub HTTPS workers. Live mode reads `GITHUB_TOKEN` from
+the process environment or the example's ignored `.env`, checks the current
+allowance before fan-out, and prints requests in actual completion order before
+the deterministic final report.
 
 ## Command Line
 

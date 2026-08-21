@@ -6,29 +6,37 @@ chunk-oriented body consumption. The VM owns blocking host execution and TLS.
 
 ## Safe request flow
 
-Construct URLs and headers through their validating functions, choose explicit
-limits, and treat non-2xx statuses as ordinary data:
+The common GET path accepts a URL string directly and retains the bounded
+response, including status and headers:
 
 ```solveig
 import std.http
-import std.bytes
 
-fetch : String -> IO std.http.HttpError String
-fetch spelling =
-    case std.http.urlFromString spelling of
-        Err error => failIO error
-        | Ok url => do
-            response <- std.http.request
-                (std.http.HttpLimits
-                    65536
-                    1048576
-                    5000
-                    (std.http.FollowRedirects 3))
-                (std.http.get url)
-            case std.http.responseText response of
-                Ok text => pureIO text
-                | Err error => failIO error
+showPage : String -> IO std.http.HttpError String
+showPage spelling = do
+    response <- std.http.fetch spelling
+    case std.http.responseText response of
+        Ok text => pureIO text
+        | Err error => failIO error
 ```
+
+`fetchWith limits headers spelling` keeps the same one-call shape when an
+application needs tighter resource policy or request headers. Headers are
+ordinary `Pair String String` values and are validated before network work:
+
+```solveig
+response <- std.http.fetchWith
+    (std.http.HttpLimits 65536 1048576 5000 std.http.NoRedirects)
+    [ MkPair "Accept" "application/json"
+    , MkPair "Authorization" ("Bearer " <> token)
+    ]
+    "https://api.example.test/releases"
+```
+
+For other methods, bodies, or staged construction, the explicit layer remains:
+validate with `urlFromString` and `header`, build with
+`get`/`post`/`withHeader`/`withHeaders`/`withBody`/`withTextBody`, then call
+`send` for default limits or `request` for explicit limits.
 
 The four `HttpLimits` fields are maximum response-header bytes, maximum body
 bytes, a whole-request timeout in milliseconds, and redirect policy. Header
@@ -78,7 +86,10 @@ disabling verification. Redirects are bounded and failures are typed.
 For ETag caching, retain the response's `ETag` header and send it later as
 `If-None-Match`. Treat status 304 as a successful cache validation. Prefer one
 bounded, overwritten cache file or a bounded key set; do not create a new file
-on every request. `examples/release_radar` is the complete reference: its
+on every request. `examples/release_radar` is the complete reference. Its
 default mode compares equal sequential and four-worker workloads against a
-deterministic delayed local service, while `--live` explicitly opts into the
-GitHub Releases API. The application is not an automated test fixture.
+deterministic local service whose request-derived delays make completion order
+visible. `--live` loads optional GitHub authentication, checks the allowance
+before fan-out, reports primary and secondary throttling separately, and merges
+ETags without discarding prior successes when another repository fails. The
+application is not an automated test fixture.

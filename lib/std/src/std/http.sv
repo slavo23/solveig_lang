@@ -48,6 +48,24 @@ data HttpError =
 defaultHttpLimits : HttpLimits
 defaultHttpLimits = HttpLimits 65536 8388608 15000 (FollowRedirects 5)
 
+-- | Performs a bounded GET from a URL string with practical default limits.
+fetch : String -> IO HttpError Response
+fetch spelling = fetchWith defaultHttpLimits [] spelling
+
+-- | Performs a bounded GET from a URL string with validated string-pair headers.
+fetchWith : HttpLimits -> [Pair String String] -> String -> IO HttpError Response
+fetchWith limits rawHeaders spelling =
+    case urlFromString spelling of
+        Err urlError => failIO urlError
+        | Ok url =>
+            case headersFromList rawHeaders of
+                Err headerError => failIO headerError
+                | Ok headers => request limits (withHeaders headers (get url))
+
+-- | Performs a prepared request with practical default limits.
+send : Request -> IO HttpError Response
+send requestValue = request defaultHttpLimits requestValue
+
 -- | Validates an absolute URL. Only http and https schemes are accepted.
 urlFromString : String -> Result HttpError Url
 urlFromString text =
@@ -93,6 +111,15 @@ delete url = Request Delete url [] Nothing
 withHeader : Header -> Request -> Request
 withHeader value (Request method url headers body) =
     Request method url (value :: headers) body
+
+-- | Adds validated headers in list order before a request's existing headers.
+withHeaders : [Header] -> Request -> Request
+withHeaders headers requestValue = foldr withHeader requestValue headers
+
+-- | Replaces a request body with UTF-8 text bytes.
+withTextBody : String -> Request -> Request
+withTextBody text requestValue =
+    withBody (std.bytes.stringToBytes text) requestValue
 
 -- | Replaces the request body with bytes.
 withBody : Bytes -> Request -> Request
@@ -254,8 +281,8 @@ methodText Options = "OPTIONS"
 validUrlText : String -> Bool
 validUrlText text =
     let start =
-        if startsWith "https://" text then 8
-        else if startsWith "http://" text then 7
+        if std.text.startsWith "https://" text then 8
+        else if std.text.startsWith "http://" text then 7
         else -1
     in and
         (start >= 0)
@@ -289,13 +316,6 @@ validUrlChars (character :: rest) =
     and
         (and (point > 32) (point < 127))
         (and (character /= '#') (validUrlChars rest))
-
-startsWith : String -> String -> Bool
-startsWith prefix text =
-    let prefixLength = prelude.prim.stringLength prefix in
-    and
-        (prelude.prim.stringLength text >= prefixLength)
-        (prelude.prim.stringSlice text 0 prefixLength == prefix)
 
 validHeaderName : String -> Bool
 validHeaderName name =
@@ -334,6 +354,17 @@ validHeaderValueChars (character :: rest) =
     and
         (and (point /= 13) (point /= 10))
         (and (point /= 0) (validHeaderValueChars rest))
+
+-- | Validates ordinary string-pair headers for use with the low-level request API.
+headersFromList : [Pair String String] -> Result HttpError [Header]
+headersFromList [] = Ok []
+headersFromList (MkPair name value :: rest) =
+    case header name value of
+        Err headerError => Err headerError
+        | Ok checked =>
+            case headersFromList rest of
+                Err restError => Err restError
+                | Ok headers => Ok (checked :: headers)
 
 asciiStringEqual : String -> String -> Bool
 asciiStringEqual left right =

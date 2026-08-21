@@ -2,6 +2,9 @@ os_environment_filesystem
 missing
 violet
 violet
+fallback
+violet
+missing environment variable SOLVEIG_L3_GOLDEN_MISSING_9D42
 cwd
 True
 False
@@ -9,6 +12,13 @@ True
 3
 modified
 data.txt
+violet
+azure
+
+False
+env entries 2
+invalid environment file line 1: invalid variable name
+invalid environment file line 2: duplicate variable name
 False
 True
 False

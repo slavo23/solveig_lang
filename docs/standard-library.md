@@ -22,14 +22,15 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.bytes` | UTF-8 conversion and immutable byte operations |
 | `std.parser` | Generic parser combinators with structured errors and streaming input |
 | `std.json` | Bounded byte-level JSON, exact numbers, deterministic rendering, and direct decoders |
-| `std.http` | Bounded HTTP/HTTPS requests, verified TLS, redirects, status/header access, and chunk folds |
+| `std.http` | Convenient bounded GETs plus explicit HTTP/HTTPS requests, verified TLS, statuses, headers, and chunk folds |
 | `std.io` | Handles, buffering, and whole-file IO |
 | `std.fs` | Directory, path, and file-metadata operations |
-| `std.env` | Arguments, environment, and program identity |
+| `std.env` | Arguments, environment lookup, bounded dotenv loading, and program identity |
 | `std.process` | Child processes and structured program exit |
 | `std.channel` | Typed channel creation and communication |
 | `std.thread` | Raw lightweight-thread creation and interruption |
 | `std.task` | Cleanup, masking, structured concurrency, and bounded concurrent mapping |
+| `std.testing` | Small pure assertion values for ordinary golden and unit programs |
 | `std.time` | Sleeping, clock readings, and monotonic measurement |
 | `std.random` | Explicit deterministic pseudorandom state |
 | `std.net` | TCP sockets and hostname resolution |
@@ -276,8 +277,19 @@ import std.env
 import std.process
 ```
 
-`std.env` provides `getArgs`, `getEnv`, `setEnv`, `getEnvironment`, and
-`getProgName`. `std.process` owns `ProcessResult`, its three accessors,
+`std.env` provides `getArgs`, `getEnv`, `getEnvOr`, `requireEnv`, `setEnv`,
+`getEnvironment`, and `getProgName`. `requireEnv` uses the typed `EnvError`
+rather than turning a missing setting into a defect.
+
+`loadEnvFile` reads at most 64 KiB; `loadEnvFileLimited` accepts an explicit
+bound; and `loadEnvFileIfExists` reports whether the file was present. Existing
+process variables win over file assignments. The strict dotenv grammar accepts
+blank lines, full-line comments, `NAME=VALUE`, optional `export `, and matching
+single or double quotes. It deliberately performs no interpolation or shell
+evaluation. Invalid errors retain a line number and reason, never the source
+line that may contain a secret.
+
+`std.process` owns `ProcessResult`, its three accessors,
 `runProcess`, `runProcessLimited`, and
 `exitWith`/`exitSuccess`/`exitFailure`.
 
@@ -322,6 +334,21 @@ operations, and returns results in input order even when completion order
 differs. Use it for independent `Task` operations; keep sequential `mapM` for
 small CPU-only transformations where scheduling would add overhead.
 
+## Testing helpers
+
+`std.testing` provides pure `assert`, `assertEqual`, `checkAll`, and
+`failureMessage` operations returning `Result TestFailure`. It deliberately
+does not introduce another test runner, global registry, or exception path.
+Use the ordinary golden harness or a program's `main` to render the result:
+
+```solveig
+checks : Result std.testing.TestFailure ()
+checks = std.testing.checkAll
+    [ std.testing.assert "queue is non-empty" (not (std.queue.isEmpty queue))
+    , std.testing.assertEqual "queue length" 2 (std.queue.length queue)
+    ]
+```
+
 ## Time and randomness
 
 ```solveig
@@ -361,25 +388,30 @@ library work.
 ```solveig
 import std.http
 
-fetch : String -> IO std.http.HttpError std.http.Response
-fetch spelling =
-    case std.http.urlFromString spelling of
-        Err error => failIO error
-        | Ok url => std.http.request std.http.defaultHttpLimits (std.http.get url)
+fetchRelease : String -> IO std.http.HttpError std.http.Response
+fetchRelease repository =
+    std.http.fetchWith
+        (std.http.HttpLimits 65536 1048576 5000 std.http.NoRedirects)
+        [MkPair "Accept" "application/json"]
+        ("https://api.example.test/repos/" <> repository <> "/release")
 ```
 
-`std.http.request` always applies response-header, response-body, timeout, and
-redirect bounds. Statuses such as 404 remain ordinary `Response` values;
+Use `fetch spelling` for a bounded GET with practical defaults, and
+`fetchWith limits headers spelling` when policy or headers differ. Both
+validate URL and header strings before performing IO. The lower-level
+`Url`/`Header`/`Request` builders and `request` remain available for other
+methods and bodies; `send` applies default limits to a prepared request.
+
+Every request applies response-header, response-body, timeout, and redirect
+bounds. Statuses such as 404 remain ordinary `Response` values;
 transport, certificate/TLS, timeout, redirect, and size failures are typed.
 HTTPS verifies certificates through the host platform policy. Response bodies
 are fully bounded before entering the Solveig heap. Use `bodyChunks` when a
 list of bounded pieces is convenient, or `foldBodyChunks` to process those
 pieces without allocating that list.
 
-Header constructors reject invalid names and newline injection. Header lookup
-is ASCII case-insensitive. `examples/release_radar` demonstrates bounded
-concurrent mapping, JSON decoding, stable result ordering, ETag request headers,
-and a single overwritten cache file. Its default local mode measures the same
-delayed workload sequentially and concurrently and fails if concurrency does
-not improve elapsed time. See [HTTP and HTTPS](http.md) for policies and
-complete examples.
+Header validation rejects invalid names and newline injection. Header lookup
+is ASCII case-insensitive. `examples/release_radar` demonstrates authenticated
+bounded concurrent mapping, completion-order progress, JSON decoding, stable
+final ordering, rate-limit diagnostics, ETag merging, and a single overwritten
+cache file. See [HTTP and HTTPS](http.md) for policies and complete examples.

@@ -27,16 +27,23 @@ loadCache path = do
     if exists then fmap parseCache (std.io.readFileLimited path 65536)
     else pureIO empty
 
-cacheText : [release_radar.model.ReleaseResult] -> String
-cacheText = foldr appendCacheLine ""
+updateCache : Cache -> [release_radar.model.ReleaseResult] -> Cache
+updateCache (Cache entries) results = Cache (foldl updateEntry entries results)
 
-appendCacheLine : release_radar.model.ReleaseResult -> String -> String
-appendCacheLine (ReleaseFound repository _ _ _ etag) rest =
-    if std.text.isEmpty etag then rest
-    else repository <> "\t" <> etag <> "\n" <> rest
-appendCacheLine (ReleaseUnchanged repository etag) rest =
+updateEntry : std.map.Map String String -> release_radar.model.ReleaseResult -> std.map.Map String String
+updateEntry entries (ReleaseFound repository _ _ _ etag) =
+    if std.text.isEmpty etag then entries
+    else std.map.insert repository etag entries
+updateEntry entries (ReleaseUnchanged repository etag) =
+    std.map.insert repository etag entries
+updateEntry entries (ReleaseFailed _ _) = entries
+
+cacheText : Cache -> String
+cacheText (Cache entries) = foldr appendCacheEntry "" (std.map.toAscList entries)
+
+appendCacheEntry : std.map.Entry String String -> String -> String
+appendCacheEntry (Entry repository etag) rest =
     repository <> "\t" <> etag <> "\n" <> rest
-appendCacheLine (ReleaseFailed _ _) rest = rest
 
-writeCache : String -> [release_radar.model.ReleaseResult] -> Task ()
+writeCache : String -> Cache -> Task ()
 writeCache path = std.io.writeFile path . cacheText

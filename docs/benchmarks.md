@@ -300,6 +300,56 @@ lowering, VM startup, and teardown, so this is conservative evidence for the
 scanner choice rather than a claim about isolated byte throughput. The full
 benchmark suite remains reserved for U5.
 
+## Phase U exit: 2026-08-21
+
+The complete statistical suite ran once at the U5 phase gate with the same
+machine, toolchain, Criterion configuration, and correctness policy as the
+Phase O exit. This is an exit snapshot, not an optimization claim: Phase U
+substantially enlarged the shipped Prelude and standard library, and every
+language benchmark includes the public check-to-run path.
+
+| Benchmark | Phase U exit time |
+|---|---:|
+| `vm/arithmetic_dispatch` | 8.353–8.371 ms (8.361 ms estimate) |
+| `vm/allocation_gc` | 8.291–8.637 ms (8.467 ms estimate) |
+| `vm/global_load` | 15.317–15.411 ms (15.367 ms estimate) |
+| `language/compiler_pipeline` | 222.56–223.33 ms (222.91 ms estimate) |
+| `language/allocation` | 80.546–80.893 ms (80.717 ms estimate) |
+| `language/arithmetic` | 104.92–105.34 ms (105.10 ms estimate) |
+| `language/constraint_generic` | 90.713–91.209 ms (90.943 ms estimate) |
+| `language/constraint_concrete` | 90.752–90.948 ms (90.849 ms estimate) |
+| `language/closures` | 94.117–94.354 ms (94.238 ms estimate) |
+| `language/static_closures` | 92.113–92.361 ms (92.240 ms estimate) |
+| `language/patterns` | 119.83–120.11 ms (119.97 ms estimate) |
+| `language/string_bytes` | 89.271–90.487 ms (89.870 ms estimate) |
+| `language/vector_index` | 84.380–84.623 ms (84.498 ms estimate) |
+| `language/list_index` | 212.85–214.90 ms (213.62 ms estimate) |
+| `language/map_lookup` | 94.868–95.139 ms (95.002 ms estimate) |
+| `language/association_lookup` | 196.94–197.49 ms (197.20 ms estimate) |
+| `language/queue` | 75.513–79.084 ms (76.797 ms estimate) |
+| `language/naive_queue` | 124.44–124.89 ms (124.64 ms estimate) |
+| `language/json_scan_bulk` | 74.677–74.899 ms (74.785 ms estimate) |
+| `language/json_scan_scalar` | 146.78–147.38 ms (147.04 ms estimate) |
+| `language/file_io` | 75.327–75.607 ms (75.467 ms estimate) |
+| `language/channels` | 86.095–86.453 ms (86.265 ms estimate) |
+
+The representation choices remain useful after their shared front-end cost:
+Vector indexed reads are 2.53x faster than list indexing, ordered Map lookup
+is 2.08x faster than association-list lookup, Queue is 1.62x faster than the
+append-list FIFO, and bulk JSON scanning is 1.97x faster than scalar scanning
+by point estimate. The VM-only cases are close to the Phase O exit: arithmetic
+has no detected change, global loading is within the configured noise
+threshold, and allocation is 3.42% slower by point estimate with a wide
+interval and three severe outliers.
+
+The cold compiler pipeline, however, is 3.41x the Phase O point estimate, and
+the other language cases show a large mostly fixed increase. Phase U added
+many source-library modules and declarations, so this result is evidence that
+checking/lowering the enlarged implicit library surface needs profiling and a
+more selective or prechecked-library strategy. It is not evidence that the VM
+kernels themselves regressed, and no runtime throughput improvement is claimed
+from this exit run.
+
 ## Phase O comparison policy
 
 Every optimization records its exact before and after commands and confidence

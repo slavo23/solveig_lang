@@ -47,12 +47,18 @@ readRequestHeaders connection accumulated =
             else readRequestHeaders connection (std.bytes.bytesAppend accumulated chunk)
 
 sendFixtureResponse : Socket -> Bytes -> Task ()
-sendFixtureResponse connection request =
-    case std.bytes.bytesToString request of
-        Err decodeError => failIO decodeError
-        | Ok _ => do
-            std.time.sleep 40
-            std.net.sendBytes connection (std.bytes.stringToBytes fixtureResponse)
+sendFixtureResponse connection request = do
+    std.time.sleep (requestDelay request)
+    std.net.sendBytes connection (std.bytes.stringToBytes fixtureResponse)
+
+requestDelay : Bytes -> Int
+requestDelay request = 30 + mod (byteSum request 0 0) 170
+
+byteSum : Bytes -> Int -> Int -> Int
+byteSum bytes index total =
+    case std.bytes.bytesIndex bytes index of
+        Nothing => total
+        | Just value => byteSum bytes (index + 1) (total + value)
 
 serveOne : Socket -> Int -> Task ()
 serveOne listener _ =

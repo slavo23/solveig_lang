@@ -1,6 +1,7 @@
 import std.env
 import std.fs
 import std.io
+import std.list(length)
 lookupEnvironment : String -> [Pair String String] -> Maybe String;
 lookupEnvironment name [] = Nothing;
 lookupEnvironment name (MkPair key value :: rest) =
@@ -11,6 +12,27 @@ printMaybe value =
     case value of
         Just text => printLine text
         | Nothing => printLine "missing";
+
+printRequired : String -> Task ();
+printRequired name =
+    catchError
+        (bindIO (requireEnv name) (mapError EnvIoError . printLine))
+        (fun envError => printLine (describeEnvError envError));
+
+loadSettings : String -> Task ();
+loadSettings path =
+    catchError
+        (loadEnvFile path)
+        (fun envError => printLine (describeEnvError envError));
+
+missingEnvFile : EnvError -> Task Bool;
+missingEnvFile envError = do
+    printLine (describeEnvError envError)
+    pureIO False;
+
+printEnvParse : Result EnvError [Pair String String] -> Task ();
+printEnvParse (Ok entries) = printLine ("env entries " <> show (length entries));
+printEnvParse (Err envError) = printLine (describeEnvError envError);
 
 ignoreExistingDirectory : IOError -> Task ();
 ignoreExistingDirectory ioError =
@@ -46,6 +68,10 @@ main = do
     printMaybe color
     environment <- getEnvironment
     printMaybe (lookupEnvironment "SOLVEIG_L3_COLOR" environment)
+    fallback <- getEnvOr "SOLVEIG_L3_GOLDEN_MISSING_9D42" "fallback"
+    printLine fallback
+    printRequired "SOLVEIG_L3_COLOR"
+    printRequired "SOLVEIG_L3_GOLDEN_MISSING_9D42"
 
     cwd <- getCurrentDirectory
     cwdExists <- doesDirectoryExist cwd
@@ -65,6 +91,25 @@ main = do
     if modified > 0 then printLine "modified" else printLine "wrong-time"
     entries <- listDirectory "generated"
     mapIO_ printLine entries
+
+    writeFile
+        "generated/settings.env"
+        "# application settings\nSOLVEIG_L3_COLOR=red\nexport SOLVEIG_L3_FROM_FILE='azure'\nSOLVEIG_L3_EMPTY=\n"
+    loadSettings "generated/settings.env"
+    loadedColor <- getEnv "SOLVEIG_L3_COLOR"
+    printMaybe loadedColor
+    loadedFile <- getEnv "SOLVEIG_L3_FROM_FILE"
+    printMaybe loadedFile
+    loadedEmpty <- getEnv "SOLVEIG_L3_EMPTY"
+    printMaybe loadedEmpty
+    missingDotEnv <- catchError
+        (loadEnvFileIfExists "generated/missing.env")
+        missingEnvFile
+    printLine (show missingDotEnv)
+    printEnvParse (parseEnvFile "GOOD=one\nSECOND=two\n")
+    printEnvParse (parseEnvFile "BAD-NAME=value\n")
+    printEnvParse (parseEnvFile "DUP=one\nDUP=two\n")
+    removeFile "generated/settings.env"
     renameFile "generated/data.txt" "generated/renamed.txt"
     oldExists <- doesFileExist "generated/data.txt"
     printLine (show oldExists)

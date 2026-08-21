@@ -32,6 +32,41 @@ length text = prelude.prim.stringLength text
 isEmpty : String -> Bool
 isEmpty text = length text == 0
 
+-- | Reports whether text begins with an exact prefix.
+startsWith : String -> String -> Bool
+startsWith prefix text =
+    let prefixLength = length prefix in
+    and
+        (length text >= prefixLength)
+        (prelude.prim.stringSlice text 0 prefixLength == prefix)
+
+-- | Removes an exact prefix when it is present.
+stripPrefix : String -> String -> Maybe String
+stripPrefix prefix text =
+    if startsWith prefix text then
+        let prefixLength = length prefix in
+        Just (prelude.prim.stringSlice text prefixLength (length text - prefixLength))
+    else Nothing
+
+-- | Removes ASCII spaces, tabs, carriage returns, and newlines at both ends.
+trimAscii : String -> String
+trimAscii text =
+    charsToString
+        (reverse
+            (trimAsciiStart
+                (reverse (trimAsciiStart (stringToChars text)))))
+
+trimAsciiStart : [Char] -> [Char]
+trimAsciiStart [] = []
+trimAsciiStart (character :: rest) =
+    if isAsciiWhitespace character then trimAsciiStart rest
+    else character :: rest
+
+isAsciiWhitespace : Char -> Bool
+isAsciiWhitespace character =
+    let point = charToCodePoint character in
+    or (point == 32) (or (point == 9) (or (point == 10) (point == 13)))
+
 -- | Splits text at newline characters without retaining the separators.
 -- |
 -- | A trailing newline does not add a final empty line; empty lines elsewhere

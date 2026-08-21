@@ -1,7 +1,8 @@
-import std.env(getArgs)
+import std.env
 import std.io
 import std.list(length, isEmpty)
-import std.text(lines)
+import std.process(exitFailure)
+import std.text(lines, trimAscii, startsWith)
 import std.time
 import release_radar.cache
 import release_radar.client
@@ -17,8 +18,14 @@ cachePath = ".release-radar-cache"
 workerCount : Int
 workerCount = 4
 
+envPath : String
+envPath = ".env"
+
 repositoriesFromText : String -> [String]
-repositoriesFromText = filter ((/=) "") . std.text.lines
+repositoriesFromText = filter repositoryLine . map trimAscii . lines
+
+repositoryLine : String -> Bool
+repositoryLine line = and (line /= "") (not (startsWith "#" line))
 
 milliseconds : Int -> Int
 milliseconds nanoseconds = div nanoseconds 1000000
@@ -31,8 +38,7 @@ printSummary repositories results = do
             <> " repositories with a bounded "
             <> show workerCount
             <> "-worker pool")
-    release_radar.client.printResults results
-    release_radar.cache.writeCache cachePath results
+    printResults results
 
 reportLocalComparison : [String] -> Int -> [release_radar.model.ReleaseResult] -> Int -> Task ()
 reportLocalComparison repositories sequentialNanos results concurrentNanos =
@@ -49,36 +55,73 @@ reportLocalComparison repositories sequentialNanos results concurrentNanos =
                 <> "x faster)")
         printSummary repositories results
 
-runLocalAgainst : release_radar.cache.Cache -> [String] -> String -> Task ()
-runLocalAgainst cache repositories base = do
-    sequential <- std.time.measure
-        (release_radar.client.fetchSequential base release_radar.cache.empty repositories)
+runLocalAgainst : [String] -> String -> Task ()
+runLocalAgainst repositories base = do
+    sequential <- time.measure
+        (fetchSequential base Nothing release_radar.cache.empty repositories)
     case sequential of
         MkPair sequentialNanos _ => do
-            concurrent <- std.time.measure
-                (release_radar.client.fetchConcurrent workerCount base cache repositories)
+            concurrent <- time.measure
+                (fetchConcurrentObserved
+                    workerCount
+                    base
+                    Nothing
+                    release_radar.cache.empty
+                    repositories)
             case concurrent of
                 MkPair concurrentNanos results =>
                     reportLocalComparison repositories sequentialNanos results concurrentNanos
 
-runLocal : release_radar.cache.Cache -> [String] -> Task ()
-runLocal cache repositories =
-    release_radar.fixture.withFixture
+runLocal : [String] -> Task ()
+runLocal repositories =
+    fixture.withFixture
         (2 * std.list.length repositories)
-        (runLocalAgainst cache repositories)
+        (runLocalAgainst repositories)
+
+liveToken : IO std.env.EnvError (Maybe String)
+liveToken = do
+    _ <- std.env.loadEnvFileIfExists envPath
+    fmap usableToken (mapError std.env.EnvIoError (std.env.getEnv "GITHUB_TOKEN"))
+
+usableToken : Maybe String -> Maybe String
+usableToken Nothing = Nothing
+usableToken (Just token) =
+    let cleaned = trimAscii token in
+    if cleaned == "" then Nothing else Just cleaned
+
+tokenOrExit : Task (Maybe String)
+tokenOrExit =
+    catchError
+        liveToken
+        (fun envError => do
+            printLine ("release radar configuration error: " <> std.env.describeEnvError envError)
+            exitFailure)
 
 runLive : release_radar.cache.Cache -> [String] -> Task ()
 runLive cache repositories = do
-    measured <- std.time.measure
-        (release_radar.client.fetchConcurrent
-            workerCount
-            "https://api.github.com"
-            cache
-            repositories)
-    case measured of
-        MkPair elapsed results => do
-            printLine ("live requests completed in " <> show (milliseconds elapsed) <> " ms")
-            printSummary repositories results
+    token <- tokenOrExit
+    case token of
+        Nothing => printLine "GitHub authentication: anonymous (60 requests/hour)"
+        | Just _ => printLine "GitHub authentication: GITHUB_TOKEN"
+    access <- release_radar.client.checkAccess "https://api.github.com" token
+    case access of
+        GitHubAccessFailed failure => do
+            printLine ("GitHub access check failed: " <> describeFailure failure)
+            exitFailure
+        | GitHubAccessReady rate => do
+            printLine ("GitHub API: " <> describeRateInfo rate)
+            measured <- std.time.measure
+                (release_radar.client.fetchConcurrentObserved
+                    workerCount
+                    "https://api.github.com"
+                    token
+                    cache
+                    repositories)
+            case measured of
+                MkPair elapsed results => do
+                    printLine ("live requests completed in " <> show (milliseconds elapsed) <> " ms")
+                    printSummary repositories results
+                    writeCache cachePath (updateCache cache results)
 
 liveMode : [String] -> Bool
 liveMode ("--live" :: _) = True
@@ -86,16 +129,16 @@ liveMode _ = False
 
 main : Task ()
 main = do
-    repositoryText <- std.io.readFileLimited repositoryPath 65536
+    repositoryText <- readFileLimited repositoryPath 65536
     let repositories = repositoriesFromText repositoryText
     if std.list.isEmpty repositories then
         error "repos.txt must contain at least one repository"
     else do
-        cache <- release_radar.cache.loadCache cachePath
         args <- getArgs
         if liveMode args then do
             printLine "release radar: live GitHub HTTPS"
+            cache <- loadCache cachePath
             runLive cache repositories
         else do
             printLine "release radar: deterministic local concurrency comparison"
-            runLocal cache repositories
+            runLocal repositories

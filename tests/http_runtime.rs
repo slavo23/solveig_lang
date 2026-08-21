@@ -34,7 +34,8 @@ fn bounded_http_handles_framing_redirects_status_limits_and_cancellation() {
 
     assert_eq!(
         output,
-        "chunked:200:Just \"fixture-v1\":hello world\n\
+        "fetch:200:Just \"fixture-v1\":hello world\n\
+         chunked:200:Just \"fixture-v1\":hello world\n\
          redirect:200:Just \"redirected\":arrived\n\
          status:404:Nothing:missing\n\
          body-limit:body-too-large:4\n\

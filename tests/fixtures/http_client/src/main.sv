@@ -69,6 +69,13 @@ main = do
     args <- getArgs
     let base = baseArgument args
     let tlsBase = tlsArgument args
+    catchError
+        (std.http.fetchWith
+            (std.http.HttpLimits 65536 1024 1000 std.http.NoRedirects)
+            [MkPair "Accept" "text/plain"]
+            (base <> "/chunked")
+            >>= printResponse "fetch")
+        (fun error => printLine ("fetch:" <> showHttpError error))
     fetch "chunked" (std.http.HttpLimits 65536 1024 1000 (std.http.FollowRedirects 2)) (base <> "/chunked")
     fetch "redirect" (std.http.HttpLimits 65536 1024 1000 (std.http.FollowRedirects 2)) (base <> "/redirect")
     fetch "status" (std.http.HttpLimits 65536 1024 1000 std.http.NoRedirects) (base <> "/missing")

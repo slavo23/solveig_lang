@@ -32,6 +32,7 @@ const STD_PROCESS_SRC: &str = include_str!("../../../lib/std/src/std/process.sv"
 const STD_RANDOM_SRC: &str = include_str!("../../../lib/std/src/std/random.sv");
 const STD_TASK_SRC: &str = include_str!("../../../lib/std/src/std/task.sv");
 const STD_TEXT_SRC: &str = include_str!("../../../lib/std/src/std/text.sv");
+const STD_TESTING_SRC: &str = include_str!("../../../lib/std/src/std/testing.sv");
 const STD_THREAD_SRC: &str = include_str!("../../../lib/std/src/std/thread.sv");
 const STD_TIME_SRC: &str = include_str!("../../../lib/std/src/std/time.sv");
 const PRELUDE_MANIFEST: &str = include_str!("../../../lib/prelude/solveig.toml");
@@ -66,6 +67,7 @@ pub(crate) fn embedded_library_source(module: &str) -> Option<&'static str> {
         "std.random" => Some(STD_RANDOM_SRC),
         "std.task" => Some(STD_TASK_SRC),
         "std.text" => Some(STD_TEXT_SRC),
+        "std.testing" => Some(STD_TESTING_SRC),
         "std.thread" => Some(STD_THREAD_SRC),
         "std.time" => Some(STD_TIME_SRC),
         _ => None,
@@ -107,6 +109,7 @@ pub(crate) fn embedded_library_modules(package: &str) -> &'static [&'static str]
             "std/random.sv",
             "std/task.sv",
             "std/text.sv",
+            "std/testing.sv",
             "std/thread.sv",
             "std/time.sv",
         ],

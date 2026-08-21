@@ -1120,6 +1120,8 @@ Environment and filesystem state are runtime-local where host APIs permit:
 
 ```solveig
 getEnv : String -> Task (Maybe String)
+getEnvOr : String -> String -> Task String
+requireEnv : String -> IO EnvError String
 setEnv : String -> String -> Task ()
 getEnvironment : Task [Pair String String]
 getCurrentDirectory : Task String
@@ -1130,6 +1132,21 @@ listDirectory : String -> Task [String]
 `getEnvironment` and `listDirectory` are sorted for deterministic iteration.
 Use existence checks for ordinary optional paths; other failures retain their
 operation-specific `IOError` constructor.
+
+For local development, a program can load a bounded dotenv file before reading
+its settings:
+
+```solveig
+loadToken : IO EnvError String
+loadToken = do
+    _ <- loadEnvFileIfExists ".env"
+    requireEnv "API_TOKEN"
+```
+
+The host process environment takes precedence over file assignments. Dotenv
+loading does not expand variables or execute shell syntax, and parse errors do
+not retain the source line. Keep `.env` ignored and commit a value-free
+`.env.example` instead.
 
 `runProcess` uses an argument list directly, without a shell:
 
@@ -1200,9 +1217,11 @@ or interruption. Use raw acquisition and `closeSocket` only when ownership
 must cross a larger scope. The low-level API remains TCP with basic IPv4
 resolution. For HTTP, use `std.http`: it handles content length, chunked
 transfer, redirect policy, verified HTTPS, typed failures, and configurable
-response bounds. `examples/release_radar` combines that client with structured
-concurrency, JSON decoding, and an ETag cache. General IPv6 selection remains
-outside the current surface.
+response bounds. A basic request is `std.http.fetch url`; use
+`std.http.fetchWith limits headers url` when policy or authentication differs.
+`examples/release_radar` combines that client with structured concurrency,
+completion-order progress, JSON decoding, rate-limit diagnostics, and a merged
+ETag cache. General IPv6 selection remains outside the current surface.
 
 ## 21. Testing IO and concurrent programs
 
@@ -1219,6 +1238,20 @@ For ordinary projects:
    contents.
 5. Exercise typed failure explicitly—include a missing path or closed channel
    and assert the recovery result.
+
+`std.testing` supplies small pure assertions without adding a second runner:
+
+```solveig
+checks : Result TestFailure ()
+checks = checkAll
+    [ assertEqual "decoded items" 4 (std.vector.length items)
+    , assert "request cancelled" (isNothing timedResult)
+    ]
+```
+
+The repository's existing golden harness executes an ordinary project and
+compares its output. `std.testing` only helps that project construct a precise
+failure value; it has no global registry or hidden IO.
 
 For concurrency:
 

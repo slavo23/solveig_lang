@@ -214,11 +214,25 @@ std.channel.newChan : forall e a. IO e (Chan a)
 std.channel.recv : forall a. Chan a -> IO IOError a
 std.channel.send : forall a. Chan a -> a -> IO IOError ()
 std.channel.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
+std.env.allValidEnvNameChars : [Char] -> Bool
+std.env.describeEnvError : EnvError -> String
+std.env.envValue : Int -> String -> Result EnvError String
 std.env.getArgs : forall e. IO e [String]
 std.env.getEnv : String -> IO IOError (Maybe String)
+std.env.getEnvOr : String -> String -> IO IOError String
 std.env.getEnvironment : IO IOError [Pair String String]
 std.env.getProgName : IO IOError String
+std.env.loadEnvFile : String -> IO EnvError ()
+std.env.loadEnvFileIfExists : String -> IO EnvError Bool
+std.env.loadEnvFileLimited : String -> Int -> IO EnvError ()
+std.env.parseEnvFile : String -> Result EnvError [Pair String String]
+std.env.parseEnvLines : [String] -> Int -> Map String () -> [Pair String String] -> Result EnvError [Pair String String]
+std.env.quotedEnvValue : Int -> Char -> [Char] -> Result EnvError String
+std.env.requireEnv : String -> IO EnvError String
 std.env.setEnv : String -> String -> IO IOError ()
+std.env.setMissingEntries : [Pair String String] -> IO EnvError ()
+std.env.validEnvName : String -> Bool
+std.env.validEnvNameStart : Char -> Bool
 std.fs.createDirectory : String -> IO IOError ()
 std.fs.doesDirectoryExist : String -> IO IOError Bool
 std.fs.doesFileExist : String -> IO IOError Bool
@@ -238,6 +252,8 @@ std.http.chunksFrom : Int -> Bytes -> Int -> [Bytes]
 std.http.containsCodePoint : Int -> [Int] -> Bool
 std.http.defaultHttpLimits : HttpLimits
 std.http.delete : Url -> Request
+std.http.fetch : String -> IO HttpError Response
+std.http.fetchWith : HttpLimits -> [Pair String String] -> String -> IO HttpError Response
 std.http.findHeader : String -> Response -> Maybe String
 std.http.findHeaderIn : String -> [Header] -> Maybe String
 std.http.foldBodyChunks : forall state. Int -> (state -> Bytes -> state) -> state -> Response -> Result HttpError state
@@ -248,6 +264,7 @@ std.http.head : Url -> Request
 std.http.header : String -> String -> Result HttpError Header
 std.http.headerFromRaw : Pair String String -> Header
 std.http.headerToRaw : Header -> Pair String String
+std.http.headersFromList : [Pair String String] -> Result HttpError [Header]
 std.http.isHeaderNameChar : Char -> Bool
 std.http.isSuccessful : Status -> Bool
 std.http.methodText : Method -> String
@@ -261,7 +278,7 @@ std.http.responseFromRaw : Pair Int (Pair [Pair String String] Bytes) -> Respons
 std.http.responseHeaders : Response -> [Header]
 std.http.responseStatus : Response -> Status
 std.http.responseText : Response -> Result HttpError String
-std.http.startsWith : String -> String -> Bool
+std.http.send : Request -> IO HttpError Response
 std.http.statusCode : Status -> Int
 std.http.urlFromString : String -> Result HttpError Url
 std.http.urlToString : Url -> String
@@ -277,6 +294,8 @@ std.http.validateRequest : HttpLimits -> Request -> Result HttpError Request
 std.http.validateRequestFields : Request -> Result HttpError Request
 std.http.withBody : Bytes -> Request -> Request
 std.http.withHeader : Header -> Request -> Request
+std.http.withHeaders : [Header] -> Request -> Request
+std.http.withTextBody : String -> Request -> Request
 std.http.withoutBody : Request -> Request
 std.io.appendFile : String -> String -> IO IOError ()
 std.io.hClose : Handle -> IO IOError ()
@@ -565,17 +584,26 @@ std.task.runPooled : forall a b. Chan (Pair Int a) -> Chan (Pair Int (Either IOE
 std.task.timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 std.task.withPooledWorkers : forall a b result. Int -> (a -> IO IOError b) -> Chan (Pair Int a) -> Chan (Pair Int (Either IOError b)) -> IO IOError result -> IO IOError result
 std.task.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
+std.testing.assert : String -> Bool -> Result TestFailure ()
+std.testing.assertEqual : forall a. (Eq a, Show a) => String -> a -> a -> Result TestFailure ()
+std.testing.checkAll : [Result TestFailure ()] -> Result TestFailure ()
+std.testing.failureMessage : TestFailure -> String
 std.text.charToCodePoint : Char -> Int
 std.text.charsToString : [Char] -> String
 std.text.codePointToString : Int -> Maybe String
 std.text.intToString : Int -> String
+std.text.isAsciiWhitespace : Char -> Bool
 std.text.isEmpty : String -> Bool
 std.text.length : String -> Int
 std.text.lines : String -> [String]
 std.text.linesFrom : [Char] -> [Char] -> [String]
 std.text.splitOnce : Char -> String -> Maybe (Pair String String)
 std.text.splitOnceFrom : Char -> [Char] -> [Char] -> Maybe (Pair String String)
+std.text.startsWith : String -> String -> Bool
 std.text.stringToChars : String -> [Char]
+std.text.stripPrefix : String -> String -> Maybe String
+std.text.trimAscii : String -> String
+std.text.trimAsciiStart : [Char] -> [Char]
 std.thread.killThread : ThreadId -> IO IOError ()
 std.thread.spawn : forall childError e. IO childError () -> IO e ThreadId
 std.time.getMonotonicTime : IO IOError Int
