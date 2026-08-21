@@ -9,9 +9,9 @@ go-to-definition.
 
 - Diagnostics for parser, resolver, kind, type, hole, and core checks.
 - Hover for functions, constructors, types, classes, methods, modules, local
-  variables, function parameters, lambda parameters, `let` binders, do-block
-  binders, case-pattern variables, literals, parenthesized expressions, `::`,
-  and `[]`.
+  variables, function parameters, nested lambda/`let`/do/case pattern binders,
+  tuple delimiters and elements, literals, parenthesized expressions, `::`, and
+  `[]`.
 - Go-to-definition and find-references for resolved project declarations.
 - Document outline and workspace symbol search.
 - Semantic highlighting with full and delta token responses.

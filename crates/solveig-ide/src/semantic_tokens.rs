@@ -367,7 +367,7 @@ fn push_expr_binders(
         }
         SurfaceExpr::Abs(params, body) => {
             for (param, annotation) in params {
-                push_param(*param, file, out);
+                push_pattern_binders(param, file, out);
                 if let Some(ty) = annotation {
                     push_type_binders(ty, file, out);
                 }
@@ -379,7 +379,7 @@ fn push_expr_binders(
             push_type_binders(ty, file, out);
         }
         SurfaceExpr::Let(binder, value, body) => {
-            push_param(*binder, file, out);
+            push_pattern_binders(binder, file, out);
             push_expr_binders(value, file, out);
             push_expr_binders(body, file, out);
         }
@@ -393,8 +393,9 @@ fn push_expr_binders(
         SurfaceExpr::Do(statements) => {
             for statement in statements {
                 match &statement.0 {
-                    SurfaceDoStmt::Bind { binder, expr } | SurfaceDoStmt::Let { binder, expr } => {
-                        push_param(*binder, file, out);
+                    SurfaceDoStmt::Bind { pattern, expr }
+                    | SurfaceDoStmt::Let { pattern, expr } => {
+                        push_pattern_binders(pattern, file, out);
                         push_expr_binders(expr, file, out);
                     }
                     SurfaceDoStmt::Expr(expr) => push_expr_binders(expr, file, out),

@@ -500,6 +500,34 @@ impl<'source> Parser<'source> {
         false
     }
 
+    fn parenthesized_has_top_level_colon(&self) -> bool {
+        if !self.at(&Token::LParen) {
+            return false;
+        }
+
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
+        for token in self.tokens.iter().skip(self.current_index()) {
+            if token.kind.is_trivia() {
+                continue;
+            }
+            match token.kind {
+                Token::LParen => paren_depth += 1,
+                Token::RParen => {
+                    paren_depth = paren_depth.saturating_sub(1);
+                    if paren_depth == 0 {
+                        return false;
+                    }
+                }
+                Token::LBrack => bracket_depth += 1,
+                Token::RBrack => bracket_depth = bracket_depth.saturating_sub(1),
+                Token::Colon if paren_depth == 1 && bracket_depth == 0 => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
     fn check_tuple_arity(&self, arity: usize) -> Result<(), ParseError> {
         if arity > MAX_TUPLE_ARITY {
             Err(self.error(format!(

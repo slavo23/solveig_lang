@@ -484,61 +484,29 @@ impl CstToAst<'_> {
         });
         let arrow_index = arrow_index.unwrap_or(children.len());
         let mut params: Vec<LambdaParam> = Vec::new();
-        let mut index = 0usize;
-
-        while index < arrow_index {
-            self.skip_trivia_children(&children, &mut index);
-            let Some(child) = children.get(index).copied() else {
-                break;
+        for child in children.iter().take(arrow_index) {
+            let NodeOrToken::Node(param) = child else {
+                continue;
             };
-
-            match child {
-                NodeOrToken::Token(token) if self.cst.token(token).kind == Token::Fun => {
-                    index += 1;
-                }
-                NodeOrToken::Token(token) if self.cst.token(token).kind == Token::LParen => {
-                    let param_end = children
-                        .iter()
-                        .enumerate()
-                        .skip(index + 1)
-                        .find(|(_, child)| {
-                            matches!(child, NodeOrToken::Token(token) if self.cst.token(*token).kind == Token::RParen)
-                        })
-                        .map_or(arrow_index, |(index, _)| index);
-                    let parameter_children = children
-                        .get(index + 1..param_end)
-                        .expect("ICE: function parameter child range must be in bounds");
-                    let name = parameter_children.iter().find_map(|child| match child {
-                        NodeOrToken::Token(token)
-                            if matches!(
-                                self.cst.token(*token).kind,
-                                Token::Ident | Token::Underscore
-                            ) =>
-                        {
-                            Some(*token)
-                        }
-                        _ => None,
-                    });
-                    let name = self.required_token(node, name, "expected binder")?;
-                    let ty = parameter_children.iter().find_map(|child| match child {
-                        NodeOrToken::Node(ty) if self.node_is_type_like(*ty) => Some(*ty),
-                        _ => None,
-                    });
-                    let ty = self.required_child(node, ty, "expected parameter type")?;
-                    params.push((
-                        self.binder_span_from_token(name, node),
-                        Some(self.lower_type(ty)?),
-                    ));
-                    index = param_end.saturating_add(1);
-                }
-                NodeOrToken::Token(token)
-                    if matches!(self.cst.token(token).kind, Token::Ident | Token::Underscore) =>
-                {
-                    params.push((self.binder_span_from_token(token, node), None));
-                    index += 1;
-                }
-                _ => index += 1,
+            if self.cst.node(*param).kind() != SyntaxKind::LambdaParam {
+                continue;
             }
+
+            let pattern = self.required_child(
+                *param,
+                self.child_patterns(*param).first().copied(),
+                "expected lambda parameter pattern",
+            )?;
+            let ty = self.node_has_token(*param, Token::Colon).then(|| {
+                self.child_nodes(*param)
+                    .into_iter()
+                    .rev()
+                    .find(|child| self.node_is_type_like(*child))
+            });
+            params.push((
+                self.lower_pattern(pattern)?,
+                ty.flatten().map(|ty| self.lower_type(ty)).transpose()?,
+            ));
         }
 
         let body = children
@@ -556,11 +524,11 @@ impl CstToAst<'_> {
     }
 
     fn lower_let(&mut self, node: CstId) -> Result<Spanned<SurfaceExpr>, ParseError> {
-        let name = self
-            .direct_meaningful_tokens(node)
-            .into_iter()
-            .find(|token| self.cst.token(*token).kind == Token::Ident);
-        let name = self.required_token(node, name, "expected let binder")?;
+        let pattern = self.required_child(
+            node,
+            self.child_patterns(node).first().copied(),
+            "expected let pattern",
+        )?;
         let exprs = self.child_exprs(node);
         let binding = self.required_child(node, exprs.first().copied(), "expected let binding")?;
         let body = self.required_child(node, exprs.get(1).copied(), "expected let body")?;
@@ -568,14 +536,11 @@ impl CstToAst<'_> {
         let body = self.lower_expr(body)?;
         let start = self.node_span(node).start as usize;
         let end = span_end(&body);
+        let pattern = self.lower_pattern(pattern)?;
 
         Ok(self.sp_between(
             node,
-            SurfaceExpr::Let(
-                self.symbol_span_from_token(name, node),
-                Box::new(binding),
-                Box::new(body),
-            ),
+            SurfaceExpr::Let(pattern, Box::new(binding), Box::new(body)),
             start,
             end,
         ))

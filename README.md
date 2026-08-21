@@ -591,9 +591,9 @@ scope.
 
 ## Current Limitations
 
-- `do` notation supports variable binds, `_` binds, local `let` statements, and
-  expression statements. Pattern binds are reserved for a later failure-semantics
-  decision.
+- `do` notation supports exhaustive nested patterns in `<-` binds and local
+  `let` statements, plus expression statements. Refutable patterns are rejected
+  statically; use `case` when every constructor needs separate behavior.
 - Captured subprocess output is strict UTF-8 and held in memory; streaming
   subprocess IO is not implemented yet.
 - Open handles require explicit `hClose` or `withFile`; GC does not close host

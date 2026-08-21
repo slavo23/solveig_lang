@@ -320,14 +320,22 @@ fn collect_surface_expr_locals(
 ) {
     match &expr.0 {
         SurfaceExpr::Abs(params, body) => {
-            for (param, _) in params {
-                push_local_candidate(session, file, param.0, body.1, out);
+            let mut binders = Vec::new();
+            for (pattern, _) in params {
+                collect_pattern_binders(pattern, &mut binders);
+            }
+            for binder in binders {
+                push_local_candidate(session, file, binder, body.1, out);
             }
             collect_surface_expr_locals(session, file, body, out);
         }
-        SurfaceExpr::Let(name, binder, in_expr) => {
+        SurfaceExpr::Let(pattern, binder, in_expr) => {
             collect_surface_expr_locals(session, file, binder, out);
-            push_local_candidate(session, file, name.0, in_expr.1, out);
+            let mut binders = Vec::new();
+            collect_pattern_binders(pattern, &mut binders);
+            for binder in binders {
+                push_local_candidate(session, file, binder, in_expr.1, out);
+            }
             collect_surface_expr_locals(session, file, in_expr, out);
         }
         SurfaceExpr::App(lhs, rhs) | SurfaceExpr::OperatorApply(lhs, _, rhs) => {
@@ -371,17 +379,21 @@ fn collect_surface_expr_locals(
             for (index, statement) in statements.iter().enumerate() {
                 let scope_end = statements.last().map_or(expr.1.end, |last| last.1.end);
                 match &statement.0 {
-                    SurfaceDoStmt::Bind { binder, .. } | SurfaceDoStmt::Let { binder, .. } => {
+                    SurfaceDoStmt::Bind { pattern, .. } | SurfaceDoStmt::Let { pattern, .. } => {
                         let scope_start = statements
                             .get(index + 1)
                             .map_or(statement.1.end, |next| next.1.start);
-                        push_local_candidate(
-                            session,
-                            file,
-                            binder.0,
-                            Span::new(scope_start, scope_end),
-                            out,
-                        );
+                        let mut binders = Vec::new();
+                        collect_pattern_binders(pattern, &mut binders);
+                        for binder in binders {
+                            push_local_candidate(
+                                session,
+                                file,
+                                binder,
+                                Span::new(scope_start, scope_end),
+                                out,
+                            );
+                        }
                     }
                     SurfaceDoStmt::Expr(_) => {}
                 }

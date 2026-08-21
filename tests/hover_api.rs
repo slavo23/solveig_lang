@@ -750,6 +750,118 @@ main = (inspect value, marker value, fromCase value)
 }
 
 #[test]
+fn hover_covers_patterns_in_lambdas_lets_and_do_blocks() {
+    let project_root = temp_root("local_pattern_binder_hovers");
+    let file = project_root.join("src/main.sv");
+    let source = r#"data User = User String Int
+data Box a = Box a
+
+fromLambda : Box (String, Int) -> Int
+fromLambda = fun (Box (name, count)) => count
+
+fromLet : Int
+fromLet =
+    let (title, User name age) = ("admin", User "Ada" 42) in
+    age
+
+fromDo : Maybe Int
+fromDo = do
+    (label, Box amount) <- Just ("total", Box 7)
+    let User userName userAge = User label amount
+    pure (amount + userAge)
+
+main = fromLambda (Box ("items", 1)) + fromLet
+"#;
+    write_source(&file, source);
+
+    let mut compilation = Compilation::new(&project_root);
+    let result = compilation
+        .check(true)
+        .expect("local pattern binder hover fixture should check");
+    assert!(
+        result.success(),
+        "local pattern binder hover diagnostics: {:?}",
+        result.diagnostics()
+    );
+
+    for (line, needle, expected) in [
+        (
+            "fromLambda = fun (Box (name, count)) => count",
+            "name",
+            "name : String",
+        ),
+        (
+            "fromLambda = fun (Box (name, count)) => count",
+            "count",
+            "count : Int",
+        ),
+        (
+            "    let (title, User name age) = (\"admin\", User \"Ada\" 42) in",
+            "title",
+            "title : String",
+        ),
+        (
+            "    let (title, User name age) = (\"admin\", User \"Ada\" 42) in",
+            "age",
+            "age : Int",
+        ),
+        (
+            "    (label, Box amount) <- Just (\"total\", Box 7)",
+            "amount",
+            "amount : Int",
+        ),
+        (
+            "    let User userName userAge = User label amount",
+            "userAge",
+            "userAge : Int",
+        ),
+    ] {
+        let hover = compilation
+            .hover_info(&file, offset_in_line(source, line, needle))
+            .unwrap_or_else(|| panic!("local pattern binder `{needle}` should hover"));
+        assert_eq!(hover.signature(), expected, "binder `{needle}`");
+    }
+
+    for (line, needle, expected) in [
+        (
+            "fromLambda = fun (Box (name, count)) => count",
+            "=> count",
+            "count : Int",
+        ),
+        ("    age", "age", "age : Int"),
+        ("    pure (amount + userAge)", "amount", "amount : Int"),
+        ("    pure (amount + userAge)", "userAge", "userAge : Int"),
+    ] {
+        let token = needle.strip_prefix("=> ").unwrap_or(needle);
+        let offset = if needle.starts_with("=> ") {
+            offset_in_line(source, line, needle) + 3
+        } else {
+            offset_in_line(source, line, needle)
+        };
+        let hover = compilation
+            .hover_info(&file, offset)
+            .unwrap_or_else(|| panic!("local pattern reference `{token}` should hover"));
+        assert_eq!(hover.signature(), expected, "reference `{token}`");
+    }
+
+    let lambda_line = "fromLambda = fun (Box (name, count)) => count";
+    for offset in [
+        offset_in_line(source, lambda_line, "(name"),
+        offset_in_line(source, lambda_line, "count)") + "count".len(),
+    ] {
+        assert_eq!(
+            compilation
+                .hover_info(&file, offset)
+                .expect("nested lambda tuple delimiter should hover")
+                .signature(),
+            "(String, Int)"
+        );
+    }
+
+    drop(project_root);
+}
+
+#[test]
 fn hole_diagnostics_and_hovers_survive_incremental_recheck() {
     let project_root = fixture_root("examples/smoke_suite");
     let file = project_root.join("src/main.sv");

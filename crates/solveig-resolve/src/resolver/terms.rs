@@ -299,23 +299,23 @@ impl<'a> Resolver<'a> {
                 SurfaceDoStmt::Expr(action) => {
                     self.surface_call2("thenM", action.clone(), body, statement.1, statement.2)
                 }
-                SurfaceDoStmt::Bind { binder, expr } => {
-                    if self.symbol_text(binder.0) == "_" {
+                SurfaceDoStmt::Bind { pattern, expr } => {
+                    if matches!(pattern.0, SurfacePattern::Wild) {
                         self.surface_call2("thenM", expr.clone(), body, statement.1, statement.2)
                     } else {
-                        let lambda_span = SourceSpan::new(binder.1.start, body.1.end);
+                        let lambda_span = SourceSpan::new(pattern.1.start, body.1.end);
                         let lambda = (
-                            SurfaceExpr::Abs(vec![(*binder, None)], Box::new(body)),
+                            SurfaceExpr::Abs(vec![(pattern.clone(), None)], Box::new(body)),
                             lambda_span,
                             statement.2,
                         );
                         self.surface_call2("bind", expr.clone(), lambda, statement.1, statement.2)
                     }
                 }
-                SurfaceDoStmt::Let { binder, expr } => {
+                SurfaceDoStmt::Let { pattern, expr } => {
                     let span = SourceSpan::new(statement.1.start, body.1.end);
                     (
-                        SurfaceExpr::Let(*binder, Box::new(expr.clone()), Box::new(body)),
+                        SurfaceExpr::Let(pattern.clone(), Box::new(expr.clone()), Box::new(body)),
                         span,
                         statement.2,
                     )
@@ -468,23 +468,52 @@ impl<'a> Resolver<'a> {
             ),
 
             SurfaceExpr::Abs(params, body) => {
-                let mut body_bound_terms = bound_terms.clone();
+                let mut pattern_bound_terms = FxHashSet::default();
 
-                for (param_name, _) in params {
-                    body_bound_terms.insert(param_name.0);
+                for (pattern, _) in params {
+                    self.collect_surface_pattern_binders(pattern, cx, &mut pattern_bound_terms);
                 }
+
+                let mut body_bound_terms = bound_terms.clone();
+                body_bound_terms.extend(pattern_bound_terms);
 
                 let mut body_node =
                     self.resolve_surface_expr_in_module(body, cx, local, &body_bound_terms);
 
-                for (param_name, param_ty_anno) in params.iter().rev() {
+                for (pattern, param_ty_anno) in params.iter().rev() {
                     let param_ty = param_ty_anno
                         .as_ref()
                         .map(|ty| self.resolve_surface_type_in_module(ty, cx, local));
 
+                    let binder_name = match pattern.0 {
+                        SurfacePattern::Var(name) => self.symbol_text(name),
+                        SurfacePattern::Wild => "_".to_string(),
+                        _ => format!("$lambda_pattern{}", pattern.2.index()),
+                    };
+
+                    if !matches!(pattern.0, SurfacePattern::Var(_) | SurfacePattern::Wild) {
+                        let binder_symbol = self.names.symbol(&binder_name);
+                        self.names.register_symbol(binder_symbol, &binder_name);
+                        let scrutinee = TermExprNode::new(
+                            TermExpr::Var(VarRef::Local(binder_symbol)),
+                            to_core_span(pattern.1),
+                        );
+                        let arm = CaseArmNode::new(
+                            CaseArm {
+                                pattern: self.resolve_surface_pattern_in_module(pattern, cx),
+                                expr: body_node,
+                            },
+                            to_core_span(pattern.1),
+                        );
+                        body_node = TermExprNode::new(
+                            TermExpr::Case(Box::new(scrutinee), vec![arm]),
+                            to_core_span(pattern.1),
+                        );
+                    }
+
                     body_node = TermExprNode::new(
                         TermExpr::Abs(
-                            self.symbol_text(param_name.0),
+                            binder_name,
                             param_ty,
                             Box::new(body_node),
                         ),
@@ -532,21 +561,35 @@ impl<'a> Resolver<'a> {
                 TermExpr::App(Box::new(op_node), Box::new(rhs))
             }
 
-            SurfaceExpr::Let(binder_name, binder_expr, in_expr) => {
+            SurfaceExpr::Let(pattern, binder_expr, in_expr) => {
                 let resolved_binder =
                     self.resolve_surface_expr_in_module(binder_expr, cx, local, bound_terms);
 
+                let mut pattern_bound_terms = FxHashSet::default();
+                self.collect_surface_pattern_binders(pattern, cx, &mut pattern_bound_terms);
                 let mut body_bound_terms = bound_terms.clone();
-                body_bound_terms.insert(binder_name.0);
+                body_bound_terms.extend(pattern_bound_terms);
 
                 let resolved_in_expr =
                     self.resolve_surface_expr_in_module(in_expr, cx, local, &body_bound_terms);
 
-                TermExpr::Let(
-                    self.symbol_text(binder_name.0),
-                    Box::new(resolved_binder),
-                    Box::new(resolved_in_expr),
-                )
+                match pattern.0 {
+                    SurfacePattern::Var(name) => TermExpr::Let(
+                        self.symbol_text(name),
+                        Box::new(resolved_binder),
+                        Box::new(resolved_in_expr),
+                    ),
+                    _ => TermExpr::Case(
+                        Box::new(resolved_binder),
+                        vec![CaseArmNode::new(
+                            CaseArm {
+                                pattern: self.resolve_surface_pattern_in_module(pattern, cx),
+                                expr: resolved_in_expr,
+                            },
+                            to_core_span(pattern.1),
+                        )],
+                    ),
+                }
             }
 
             SurfaceExpr::OperatorApply(lhs, op, rhs) => self.lower_operator_application(

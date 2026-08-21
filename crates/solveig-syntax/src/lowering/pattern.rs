@@ -9,6 +9,14 @@ impl CstToAst<'_> {
         node: CstId,
     ) -> Result<Spanned<SurfacePattern>, ParseError> {
         match self.cst.node(node).kind() {
+            SyntaxKind::PatternBinder => {
+                let child = self.required_child(
+                    node,
+                    self.child_patterns(node).first().copied(),
+                    "expected binder pattern",
+                )?;
+                self.lower_pattern(child)
+            }
             SyntaxKind::Pattern => self.lower_pattern_node(node),
             SyntaxKind::PatternHead => self.lower_pattern_head(node),
             SyntaxKind::PatternArg => self.lower_pattern_arg(node),

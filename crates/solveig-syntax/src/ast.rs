@@ -255,11 +255,11 @@ pub struct SurfaceMatchArm {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SurfaceDoStmt {
     Bind {
-        binder: Spanned<Symbol>,
+        pattern: Spanned<SurfacePattern>,
         expr: Spanned<SurfaceExpr>,
     },
     Let {
-        binder: Spanned<Symbol>,
+        pattern: Spanned<SurfacePattern>,
         expr: Spanned<SurfaceExpr>,
     },
     Expr(Spanned<SurfaceExpr>),
@@ -300,12 +300,12 @@ pub enum SurfaceExpr {
     Var(Spanned<NameRef>),
     App(Box<Spanned<SurfaceExpr>>, Box<Spanned<SurfaceExpr>>),
     Abs(
-        Vec<(Spanned<Symbol>, Option<Spanned<SurfaceTy>>)>,
+        Vec<(Spanned<SurfacePattern>, Option<Spanned<SurfaceTy>>)>,
         Box<Spanned<SurfaceExpr>>,
     ),
     Ann(Box<Spanned<SurfaceExpr>>, Spanned<SurfaceTy>),
     Let(
-        Spanned<Symbol>,
+        Spanned<SurfacePattern>,
         Box<Spanned<SurfaceExpr>>,
         Box<Spanned<SurfaceExpr>>,
     ),

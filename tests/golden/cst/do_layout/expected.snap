@@ -1,6 +1,5 @@
 ---
 source: tests/snapshot_support.rs
-assertion_line: 11
 expression: actual
 ---
 Module @0..138
@@ -41,7 +40,9 @@ Module @0..138
         Whitespace @47..51 line=3 col=0 text="    "
         VSemi @51..51 line=3 col=4 synthetic text=""
         DoStmt @51..67
-          Ident @51..55 line=3 col=4 text="name"
+          PatternBinder @51..55
+            NamePath @51..55
+              Ident @51..55 line=3 col=4 text="name"
           Whitespace @55..56 line=3 col=8 text=" "
           BindArrow @56..58 line=3 col=9 text="<-"
           Whitespace @58..59 line=3 col=11 text=" "
@@ -53,7 +54,9 @@ Module @0..138
         DoStmt @72..114
           Let @72..75 line=4 col=4 text="let"
           Whitespace @75..76 line=4 col=7 text=" "
-          Ident @76..84 line=4 col=8 text="greeting"
+          PatternBinder @76..84
+            NamePath @76..84
+              Ident @76..84 line=4 col=8 text="greeting"
           Whitespace @84..85 line=4 col=16 text=" "
           Eq @85..86 line=4 col=17 text="="
           Whitespace @86..87 line=4 col=18 text=" "

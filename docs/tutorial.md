@@ -124,6 +124,35 @@ Solveig is strict: function arguments and local bindings are evaluated before
 the function body needs them. This matters for performance, defects, and IO
 error boundaries later.
 
+Local binders accept the same nested patterns as function equations and `case`:
+
+```solveig
+data User = User String String
+
+emailOf : User -> String
+emailOf = fun (User _ email) => email
+
+summarize : (Int, User) -> String
+summarize input =
+    let (count, User name _) = input in
+    appendString name (show count)
+```
+
+Parentheses make a constructor or tuple pattern one lambda parameter, so
+`fun (User name email) => email` takes one `User`. Use `fun _ => ()` when an
+argument is intentionally ignored. An annotation applies to the whole pattern:
+
+```solveig
+sumNested = fun ((first, (second, third)) : (Int, (Int, Int))) =>
+    first + second + third
+```
+
+Local patterns must be exhaustive for their inferred type. Tuples and a
+single-constructor type such as `User` are safe; `fun (Just value) => value` is
+rejected because `Nothing` is possible. Use an explicit `case` when different
+constructors require different behavior. Strict lets evaluate the right-hand
+side exactly once before matching it.
+
 Use `appendString`, not `+`, for text:
 
 ```solveig

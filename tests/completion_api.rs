@@ -136,6 +136,25 @@ main = do
 }
 
 #[test]
+fn completion_lists_every_name_from_local_patterns() {
+    let items = completion_items(
+        r#"data User = User String Int
+data Box a = Box a
+
+main : Maybe Int
+main = do
+    (label, Box amount) <- Just ("total", Box 7)
+    let User name age = User label amount
+    pure ($COMPLETEamount + age)
+"#,
+    );
+
+    for name in ["label", "amount", "name", "age"] {
+        assert_item(&items, name, SourceCompletionItemKind::Variable);
+    }
+}
+
+#[test]
 fn completion_survives_mid_edit_parse_errors() {
     let items = completion_items(
         r#"main : Int

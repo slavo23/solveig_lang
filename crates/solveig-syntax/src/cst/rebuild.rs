@@ -4,7 +4,9 @@
 use la_arena::Arena;
 use solveig_base::ice;
 
-use super::{CstId, NodeOrToken, PosToken, SyntaxNode, SyntaxTree, TokenId, token_is_meaningful};
+use super::{
+    CstId, NodeOrToken, PosToken, SyntaxKind, SyntaxNode, SyntaxTree, TokenId, token_is_meaningful,
+};
 
 pub(super) fn collapse_trivial_wrappers(tree: &mut SyntaxTree) {
     let old_nodes = std::mem::replace(&mut tree.nodes, Arena::new());
@@ -104,6 +106,17 @@ impl CstRebuilder<'_> {
         let old = &self.old_nodes[old_id.0];
 
         if !old.diagnostics.is_empty() {
+            return false;
+        }
+
+        // Lambda parameters are semantically significant separators even when
+        // an unannotated parameter contains only one otherwise-trivial pattern
+        // child. Keeping this node lets lowering distinguish `fun x y => ...`
+        // as two parameters after wrapper normalization.
+        if matches!(
+            old.kind,
+            SyntaxKind::LambdaParam | SyntaxKind::PatternBinder
+        ) {
             return false;
         }
 

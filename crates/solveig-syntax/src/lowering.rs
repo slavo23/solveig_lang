@@ -22,7 +22,7 @@ use tuples::{
 };
 
 type NameSpan = (Symbol, usize, usize, CstId);
-type LambdaParam = (Spanned<Symbol>, Option<Spanned<SurfaceTy>>);
+type LambdaParam = (Spanned<SurfacePattern>, Option<Spanned<SurfaceTy>>);
 
 fn mk_span(start: usize, end: usize) -> Span {
     Span::from_usize_range(start..end)
@@ -173,7 +173,8 @@ impl<'a> CstToAst<'a> {
     fn node_is_pattern_like(&self, node: CstId) -> bool {
         matches!(
             self.cst.node(node).kind(),
-            SyntaxKind::Pattern
+            SyntaxKind::PatternBinder
+                | SyntaxKind::Pattern
                 | SyntaxKind::PatternHead
                 | SyntaxKind::PatternArg
                 | SyntaxKind::TuplePattern

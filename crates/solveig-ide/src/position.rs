@@ -304,7 +304,8 @@ impl PositionIndex {
                 self.mark_expr_ast_nodes(rhs);
             }
             SurfaceExpr::Abs(params, body) => {
-                for (_, ty) in params {
+                for (pattern, ty) in params {
+                    self.mark_pattern_ast_nodes(pattern);
                     if let Some(ty) = ty {
                         self.mark_type_ast_nodes(ty);
                     }
@@ -315,7 +316,8 @@ impl PositionIndex {
                 self.mark_expr_ast_nodes(value);
                 self.mark_type_ast_nodes(ty);
             }
-            SurfaceExpr::Let(_, binder, body) => {
+            SurfaceExpr::Let(pattern, binder, body) => {
+                self.mark_pattern_ast_nodes(pattern);
                 self.mark_expr_ast_nodes(binder);
                 self.mark_expr_ast_nodes(body);
             }
@@ -331,9 +333,12 @@ impl PositionIndex {
                 for statement in statements {
                     self.mark_ast_node(statement.2);
                     match &statement.0 {
-                        SurfaceDoStmt::Bind { expr, .. }
-                        | SurfaceDoStmt::Let { expr, .. }
-                        | SurfaceDoStmt::Expr(expr) => self.mark_expr_ast_nodes(expr),
+                        SurfaceDoStmt::Bind { pattern, expr }
+                        | SurfaceDoStmt::Let { pattern, expr } => {
+                            self.mark_pattern_ast_nodes(pattern);
+                            self.mark_expr_ast_nodes(expr);
+                        }
+                        SurfaceDoStmt::Expr(expr) => self.mark_expr_ast_nodes(expr),
                     }
                 }
             }
@@ -910,7 +915,7 @@ fn collect_expr_position_facts(
 
     match (&surface.0, &checked.node) {
         (SurfaceExpr::Abs(params, body), _) => {
-            if let Some(checked_body) = checked_body_after_lambda_params(params.len(), checked) {
+            if let Some(checked_body) = checked_body_after_lambda_params(params, checked) {
                 collect_expr_position_facts(
                     body,
                     checked_body,
@@ -935,6 +940,31 @@ fn collect_expr_position_facts(
             collect_expr_position_facts(
                 body,
                 checked_body,
+                snapshot,
+                docs,
+                ctor_table,
+                tables,
+                index,
+            );
+        }
+        (SurfaceExpr::Let(_, binder, body), TermExpr::Case(checked_binder, checked_arms))
+            if checked_arms.len() == 1 =>
+        {
+            let Some(checked_arm) = checked_arms.first() else {
+                return;
+            };
+            collect_expr_position_facts(
+                binder,
+                checked_binder,
+                snapshot,
+                docs,
+                ctor_table,
+                tables,
+                index,
+            );
+            collect_expr_position_facts(
+                body,
+                &checked_arm.node.expr,
                 snapshot,
                 docs,
                 ctor_table,
@@ -1335,7 +1365,7 @@ fn collect_do_position_facts(
         (SurfaceDoStmt::Expr(expr), true) => {
             collect_expr_position_facts(expr, checked, snapshot, docs, ctor_table, tables, index);
         }
-        (SurfaceDoStmt::Expr(expr), false) | (SurfaceDoStmt::Bind { expr, .. }, false) => {
+        (SurfaceDoStmt::Expr(expr), false) => {
             if let Some((checked_expr, checked_rest)) = checked_do_application_parts(checked) {
                 collect_expr_position_facts(
                     expr,
@@ -1348,7 +1378,7 @@ fn collect_do_position_facts(
                 );
                 collect_do_position_facts(
                     rest,
-                    checked_do_rest_after_continuation(checked_rest),
+                    checked_rest,
                     snapshot,
                     docs,
                     ctor_table,
@@ -1357,7 +1387,29 @@ fn collect_do_position_facts(
                 );
             }
         }
-        (SurfaceDoStmt::Let { expr, .. }, false) => {
+        (SurfaceDoStmt::Bind { pattern, expr }, false) => {
+            if let Some((checked_expr, checked_rest)) = checked_do_application_parts(checked) {
+                collect_expr_position_facts(
+                    expr,
+                    checked_expr,
+                    snapshot,
+                    docs,
+                    ctor_table,
+                    tables,
+                    index,
+                );
+                collect_do_position_facts(
+                    rest,
+                    checked_do_rest_after_continuation(checked_rest, pattern),
+                    snapshot,
+                    docs,
+                    ctor_table,
+                    tables,
+                    index,
+                );
+            }
+        }
+        (SurfaceDoStmt::Let { pattern: _, expr }, false) => {
             if let TermExpr::Let(_, checked_expr, checked_rest) = &checked.node {
                 collect_expr_position_facts(
                     expr,
@@ -1371,6 +1423,30 @@ fn collect_do_position_facts(
                 collect_do_position_facts(
                     rest,
                     checked_rest,
+                    snapshot,
+                    docs,
+                    ctor_table,
+                    tables,
+                    index,
+                );
+            } else if let TermExpr::Case(checked_expr, checked_arms) = &checked.node
+                && checked_arms.len() == 1
+            {
+                let Some(checked_arm) = checked_arms.first() else {
+                    return;
+                };
+                collect_expr_position_facts(
+                    expr,
+                    checked_expr,
+                    snapshot,
+                    docs,
+                    ctor_table,
+                    tables,
+                    index,
+                );
+                collect_do_position_facts(
+                    rest,
+                    &checked_arm.node.expr,
                     snapshot,
                     docs,
                     ctor_table,
@@ -1396,29 +1472,46 @@ fn checked_do_application_parts(
     Some((checked_expr, checked_rest))
 }
 
-fn checked_do_rest_after_continuation(
-    checked: &TermExprNode<TcMetadata, Range<usize>>,
-) -> &TermExprNode<TcMetadata, Range<usize>> {
+fn checked_do_rest_after_continuation<'a>(
+    checked: &'a TermExprNode<TcMetadata, Range<usize>>,
+    pattern: &Spanned<SurfacePattern>,
+) -> &'a TermExprNode<TcMetadata, Range<usize>> {
     let checked = strip_checked_wrappers(checked);
     if let TermExpr::Abs(_, _, body) = &checked.node {
-        return strip_checked_wrappers(body);
+        let body = strip_checked_wrappers(body);
+        if !matches!(pattern.0, SurfacePattern::Var(_) | SurfacePattern::Wild)
+            && let TermExpr::Case(_, arms) = &body.node
+            && let [arm] = arms.as_slice()
+        {
+            return strip_checked_wrappers(&arm.node.expr);
+        }
+        return body;
     }
 
     checked
 }
 
-fn checked_body_after_lambda_params(
-    param_count: usize,
-    checked: &CheckedExpr,
-) -> Option<&CheckedExpr> {
+fn checked_body_after_lambda_params<'a>(
+    params: &[(Spanned<SurfacePattern>, Option<Spanned<SurfaceTy>>)],
+    checked: &'a CheckedExpr,
+) -> Option<&'a CheckedExpr> {
     let mut current = checked;
 
-    for _ in 0..param_count {
+    for (pattern, _) in params {
         current = strip_checked_wrappers(current);
         let TermExpr::Abs(_, _, body) = &current.node else {
             return None;
         };
         current = body;
+        if !matches!(pattern.0, SurfacePattern::Var(_) | SurfacePattern::Wild) {
+            let TermExpr::Case(_, arms) = &strip_checked_wrappers(current).node else {
+                return None;
+            };
+            let [arm] = arms.as_slice() else {
+                return None;
+            };
+            current = &arm.node.expr;
+        }
     }
 
     Some(strip_checked_wrappers(current))

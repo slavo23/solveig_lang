@@ -47,45 +47,38 @@ impl CstToAst<'_> {
             .first()
             .is_some_and(|token| self.cst.token(*token).kind == Token::Let)
         {
-            let binder = tokens
-                .iter()
-                .copied()
-                .find(|token| self.cst.token(*token).kind == Token::Ident);
-            let binder = self.required_token(node, binder, "expected let binder")?;
+            let pattern = self.required_child(
+                node,
+                self.child_patterns(node).first().copied(),
+                "expected let pattern",
+            )?;
             let expr = self.required_child(
                 node,
                 self.child_exprs(node).first().copied(),
                 "expected let expression",
             )?;
             return Ok(SurfaceDoStmt::Let {
-                binder: self.symbol_span_from_token(binder, node),
+                pattern: self.lower_pattern(pattern)?,
                 expr: self.lower_expr(expr)?,
             });
         }
 
-        if let Some(arrow_pos) = tokens
+        if tokens
             .iter()
-            .position(|token| self.cst.token(*token).kind == Token::BindArrow)
+            .any(|token| self.cst.token(*token).kind == Token::BindArrow)
         {
-            let binder = tokens
-                .get(..arrow_pos)
-                .expect("ICE: do bind arrow position must be in token range")
-                .iter()
-                .copied()
-                .find(|token| {
-                    matches!(
-                        self.cst.token(*token).kind,
-                        Token::Ident | Token::Underscore
-                    )
-                });
-            let binder = self.required_token(node, binder, "expected binder")?;
+            let pattern = self.required_child(
+                node,
+                self.child_patterns(node).first().copied(),
+                "expected bind pattern",
+            )?;
             let expr = self.required_child(
                 node,
                 self.child_exprs(node).first().copied(),
                 "expected bind expression",
             )?;
             return Ok(SurfaceDoStmt::Bind {
-                binder: self.binder_span_from_token(binder, node),
+                pattern: self.lower_pattern(pattern)?,
                 expr: self.lower_expr(expr)?,
             });
         }

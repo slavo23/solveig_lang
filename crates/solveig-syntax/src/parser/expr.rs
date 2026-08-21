@@ -303,15 +303,18 @@ impl Parser<'_> {
             parser.expect(&Token::Fun)?;
 
             while !parser.at(&Token::FatArrow) {
-                if parser.at(&Token::LParen) {
-                    parser.advance();
-                    parser.expect_binder_span()?;
-                    parser.expect(&Token::Colon)?;
-                    parser.parse_type()?;
-                    parser.expect(&Token::RParen)?;
-                } else {
-                    parser.expect_binder_span()?;
-                }
+                parser.node(SyntaxKind::LambdaParam, |parser| {
+                    if parser.parenthesized_has_top_level_colon() {
+                        parser.expect(&Token::LParen)?;
+                        parser.parse_pattern()?;
+                        parser.expect(&Token::Colon)?;
+                        parser.parse_type()?;
+                        parser.expect(&Token::RParen)?;
+                        Ok(())
+                    } else {
+                        parser.parse_pattern_arg()
+                    }
+                })?;
             }
 
             parser.expect(&Token::FatArrow)?;
@@ -322,7 +325,7 @@ impl Parser<'_> {
     pub(super) fn parse_let(&mut self) -> Result<(), ParseError> {
         self.node(SyntaxKind::LetExpr, |parser| {
             parser.expect(&Token::Let)?;
-            parser.expect_ident_span()?;
+            parser.node(SyntaxKind::PatternBinder, |parser| parser.parse_pattern())?;
             parser.expect(&Token::Eq)?;
             parser.parse_expr()?;
             parser.expect(&Token::In)?;
@@ -402,7 +405,7 @@ impl Parser<'_> {
 
             if parser.at(&Token::Let) {
                 parser.advance();
-                parser.expect_ident_span()?;
+                parser.node(SyntaxKind::PatternBinder, |parser| parser.parse_pattern())?;
                 parser.expect(&Token::Eq)?;
                 parser.parse_expr()?;
                 return Ok(DoStatementFacts {
@@ -414,12 +417,8 @@ impl Parser<'_> {
                 });
             }
 
-            if matches!(parser.current_kind(), Token::Ident | Token::Underscore)
-                && parser
-                    .peek_kind(1)
-                    .is_some_and(|kind| matches!(kind, Token::BindArrow))
-            {
-                parser.expect_binder_span()?;
+            if parser.do_statement_has_top_level_bind_arrow() {
+                parser.node(SyntaxKind::PatternBinder, |parser| parser.parse_pattern())?;
                 parser.expect(&Token::BindArrow)?;
                 parser.parse_expr()?;
                 return Ok(DoStatementFacts {
@@ -440,6 +439,32 @@ impl Parser<'_> {
                     .map_or(statement_start, PosToken::end),
             })
         })
+    }
+
+    fn do_statement_has_top_level_bind_arrow(&self) -> bool {
+        let mut paren_depth = 0usize;
+        let mut bracket_depth = 0usize;
+
+        for token in self.tokens.iter().skip(self.current_index()) {
+            if token.kind.is_trivia() {
+                continue;
+            }
+            match token.kind {
+                Token::LParen => paren_depth += 1,
+                Token::RParen => paren_depth = paren_depth.saturating_sub(1),
+                Token::LBrack => bracket_depth += 1,
+                Token::RBrack => bracket_depth = bracket_depth.saturating_sub(1),
+                Token::BindArrow if paren_depth == 0 && bracket_depth == 0 => return true,
+                Token::Semicolon | Token::VSemi | Token::VClose
+                    if paren_depth == 0 && bracket_depth == 0 =>
+                {
+                    return false;
+                }
+                _ => {}
+            }
+        }
+
+        false
     }
 
     pub(super) fn parse_case(&mut self) -> Result<(), ParseError> {
