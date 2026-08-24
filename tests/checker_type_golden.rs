@@ -10,7 +10,7 @@ use std::process::Command;
 
 use solveig_driver::{ProjectSchemes, checked_project_schemes};
 
-mod snapshot_support;
+use crate::snapshot_support;
 
 #[test]
 fn checker_api_golden_types() {

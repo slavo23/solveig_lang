@@ -14,7 +14,7 @@ use solveig_driver::{
     Compilation, CompileOptions, run_project_capture, run_project_capture_with_stdin,
 };
 
-mod support;
+use crate::support;
 
 fn project_run_lock() -> MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();

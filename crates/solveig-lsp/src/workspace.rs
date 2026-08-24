@@ -721,6 +721,11 @@ pub(crate) mod tests {
 
     const BROKEN_PRELUDE_CHILD: &str = "SOLVEIG_S2_BROKEN_PRELUDE_CHILD";
     const BROKEN_PRELUDE_PROJECT: &str = "SOLVEIG_S2_BROKEN_PRELUDE_PROJECT";
+    // Four compiler instances overlap fixture checks without excessive peak memory.
+    const DIAGNOSTIC_SHARD_COUNT: usize = 4;
+    // Ten replacements exercise retained-state reuse while keeping the default gate focused.
+    const DEFAULT_RETAINED_STATE_EDITS: usize = 10;
+    const STRESS_RETAINED_STATE_EDITS: usize = 1_000;
 
     fn workspace_root() -> PathBuf {
         Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -833,8 +838,40 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn golden_diagnostic_cases_convert_codes_and_ranges() {
-        for case_root in golden_cases() {
+    fn golden_diagnostic_cases_convert_codes_and_ranges_shard_1_of_4() {
+        assert_golden_diagnostic_shard(0);
+    }
+
+    #[test]
+    fn golden_diagnostic_cases_convert_codes_and_ranges_shard_2_of_4() {
+        assert_golden_diagnostic_shard(1);
+    }
+
+    #[test]
+    fn golden_diagnostic_cases_convert_codes_and_ranges_shard_3_of_4() {
+        assert_golden_diagnostic_shard(2);
+    }
+
+    #[test]
+    fn golden_diagnostic_cases_convert_codes_and_ranges_shard_4_of_4() {
+        assert_golden_diagnostic_shard(3);
+    }
+
+    fn assert_golden_diagnostic_shard(shard_index: usize) {
+        let cases = golden_cases()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(index, case)| {
+                (index % DIAGNOSTIC_SHARD_COUNT == shard_index).then_some(case)
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            !cases.is_empty(),
+            "LSP diagnostic shard {} is empty",
+            shard_index + 1
+        );
+
+        for case_root in cases {
             let case_name = case_root
                 .file_name()
                 .and_then(|name| name.to_str())
@@ -917,7 +954,26 @@ main = 1
 
     #[test]
     fn repeated_document_edits_keep_retained_lsp_state_bounded() {
-        let project_root = temp_root("bounded_edits");
+        assert_repeated_document_edits_keep_retained_lsp_state_bounded(
+            "bounded_edits",
+            DEFAULT_RETAINED_STATE_EDITS,
+        );
+    }
+
+    #[test]
+    #[ignore = "stress tier: run explicitly after changes to retained LSP or compilation state"]
+    fn repeated_document_edits_keep_retained_lsp_state_bounded_stress() {
+        assert_repeated_document_edits_keep_retained_lsp_state_bounded(
+            "bounded_edits_stress",
+            STRESS_RETAINED_STATE_EDITS,
+        );
+    }
+
+    fn assert_repeated_document_edits_keep_retained_lsp_state_bounded(
+        fixture_name: &str,
+        edit_count: usize,
+    ) {
+        let project_root = temp_root(fixture_name);
         let source = project_root.join("scratch.sv");
         let initial = "main : Int\nmain = 0\n";
         write_source(&source, initial);
@@ -932,7 +988,7 @@ main = 1
         );
         let baseline = retained_lsp_counts(&state, &uri);
 
-        for edit_index in 0..1_000 {
+        for edit_index in 0..edit_count {
             let edited = format!("main : Int\nmain = {}\n", edit_index % 97);
             state.change_document(&uri, edited);
             let publications = state.check_all();

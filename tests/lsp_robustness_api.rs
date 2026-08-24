@@ -11,18 +11,41 @@ use solveig_driver::Compilation;
 use solveig_ide::{CompilationIdeExt, SourceInlayHintConfig, SourceSelectionRange, SourceSymbol};
 use solveig_syntax::lexer::{Token, lex};
 
+// Four retained compilations cap peak memory while distributing the exhaustive token audit.
+const TOKEN_SWEEP_SHARD_COUNT: usize = 4;
+
 fn fixture_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
 }
 
 #[test]
-fn editor_queries_survive_scry_and_smoke_suite_token_sweeps() {
+fn editor_queries_survive_project_token_sweeps_shard_1_of_4() {
+    assert_editor_queries_survive_token_sweep_shard(0);
+}
+
+#[test]
+fn editor_queries_survive_project_token_sweeps_shard_2_of_4() {
+    assert_editor_queries_survive_token_sweep_shard(1);
+}
+
+#[test]
+fn editor_queries_survive_project_token_sweeps_shard_3_of_4() {
+    assert_editor_queries_survive_token_sweep_shard(2);
+}
+
+#[test]
+fn editor_queries_survive_project_token_sweeps_shard_4_of_4() {
+    assert_editor_queries_survive_token_sweep_shard(3);
+}
+
+fn assert_editor_queries_survive_token_sweep_shard(shard_index: usize) {
     for project in ["examples/scry", "examples/smoke_suite"] {
-        let anomalies = audit_project(&fixture_root(project));
+        let anomalies = audit_project_shard(&fixture_root(project), shard_index);
 
         assert!(
             anomalies.is_empty(),
-            "editor audit found anomalies in `{project}`:\n{}",
+            "editor audit shard {} found anomalies in `{project}`:\n{}",
+            shard_index + 1,
             anomalies.join("\n")
         );
     }
@@ -198,7 +221,7 @@ fn case_hover_snapshots_cover_scry_and_smoke_examples() {
     }
 }
 
-fn audit_project(project_root: &Path) -> Vec<String> {
+fn audit_project_shard(project_root: &Path, shard_index: usize) -> Vec<String> {
     let mut compilation = Compilation::new(project_root);
     let result = compilation
         .check(true)
@@ -225,10 +248,22 @@ fn audit_project(project_root: &Path) -> Vec<String> {
         })
         .map(|source| source.path.clone())
         .collect::<Vec<_>>();
-    for file in &project_files {
+    for file in project_files
+        .iter()
+        .enumerate()
+        .filter_map(|(index, file)| {
+            (index % TOKEN_SWEEP_SHARD_COUNT == shard_index).then_some(file)
+        })
+    {
         audit_file(&mut compilation, file, &mut anomalies);
     }
-    for file in solveig_sources(&project_root.join("src")) {
+    for file in solveig_sources(&project_root.join("src"))
+        .into_iter()
+        .enumerate()
+        .filter_map(|(index, file)| {
+            (index % TOKEN_SWEEP_SHARD_COUNT == shard_index).then_some(file)
+        })
+    {
         if project_files.contains(&file) {
             continue;
         }

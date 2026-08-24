@@ -2,7 +2,7 @@ use std::fs;
 
 use solveig_driver::Compilation;
 
-mod support;
+use crate::support;
 
 #[test]
 fn empty_case_over_constructor_less_data_checks() {

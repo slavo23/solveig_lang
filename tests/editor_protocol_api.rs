@@ -9,7 +9,7 @@ use solveig_ide::{CompilationIdeExt, SourceDocumentHighlightKind, SourceFoldingR
 use std::fs;
 use std::path::Path;
 
-mod support;
+use crate::support;
 
 fn temp_root(name: &str) -> support::TestRoot {
     support::temp_root("solveig_editor_protocol", name)

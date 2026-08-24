@@ -13,7 +13,7 @@ use solveig_syntax::cst::{CstId, NodeOrToken, SyntaxTree, TokenId};
 use solveig_syntax::lexer::{PosToken, Token};
 use solveig_syntax::lowering::parse_source;
 
-mod snapshot_support;
+use crate::snapshot_support;
 
 #[test]
 fn golden_cst_cases() {

@@ -11,7 +11,7 @@ use solveig_ide::{
 use std::fs;
 use std::path::Path;
 
-mod support;
+use crate::support;
 
 fn temp_root(name: &str) -> support::TestRoot {
     support::temp_root("solveig_inlay_hints", name)

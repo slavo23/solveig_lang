@@ -31,10 +31,10 @@ bracket acquire release use =
                 (release resource)))
 
 -- | Runs a child action within a scope and waits for its cancellation on exit.
--- Peyton Jones, Gordon, and Finne, "Concurrent Haskell" (POPL 1996), section
--- 3.2, derives coordination abstractions from a private typed channel.
--- Control.Concurrent.Async documents `withAsync` as bracketed spawn and cancel:
--- https://hackage.haskell.org/package/async/docs/Control-Concurrent-Async.html
+-- | Peyton Jones, Gordon, and Finne, "Concurrent Haskell" (POPL 1996), section
+-- | 3.2, derives coordination abstractions from a private typed channel.
+-- | Control.Concurrent.Async documents `withAsync` as bracketed spawn and cancel:
+-- | https://hackage.haskell.org/package/async/docs/Control-Concurrent-Async.html
 withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
 withThread action body =
     bindIO newChan (fun started =>
@@ -126,9 +126,9 @@ race left right =
                                                 | Right value => pureIO (Right value)))))
 
 -- | Runs two actions and returns both results, cancelling either after failure.
--- Control.Concurrent.Async's `concurrently` waits for both scoped children but
--- cancels the peer as soon as one child fails:
--- https://hackage.haskell.org/package/async/docs/Control-Concurrent-Async.html#v:concurrently
+-- | Control.Concurrent.Async's `concurrently` waits for both scoped children but
+-- | cancels the peer as soon as one child fails:
+-- | https://hackage.haskell.org/package/async/docs/Control-Concurrent-Async.html#v:concurrently
 concurrently : forall e a b. IO e a -> IO e b -> IO e (a, b)
 concurrently left right =
     bindIO newChan (fun outcomes =>

@@ -5,7 +5,7 @@ use std::fs;
 
 use solveig_driver::Compilation;
 
-mod support;
+use crate::support;
 
 fn temp_project_root(name: &str) -> support::TestRoot {
     support::temp_root("solveig_overlay", name)

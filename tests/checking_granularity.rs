@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use solveig_base::Severity;
 use solveig_driver::{CheckResult, Compilation};
 
-mod support;
+use crate::support;
 
 fn temp_project_root(name: &str) -> support::TestRoot {
     support::temp_root("solveig_checking", name)

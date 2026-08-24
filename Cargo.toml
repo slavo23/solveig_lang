@@ -2,6 +2,7 @@
 name = "solveig"
 version = "0.1.0"
 edition = "2024"
+autotests = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -31,6 +32,10 @@ harness = false
 [[bench]]
 name = "vm"
 harness = false
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
 
 [lints]
 workspace = true

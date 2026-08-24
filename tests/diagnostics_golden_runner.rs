@@ -10,20 +10,41 @@ use std::path::{Path, PathBuf};
 use solveig_driver::Compilation;
 use solveig_report::render_diagnostics_no_color;
 
-mod snapshot_support;
+use crate::fixture_shards;
+use crate::snapshot_support;
 
 #[test]
-fn golden_diagnostic_cases() {
+fn golden_diagnostic_cases_shard_1_of_4() {
+    run_diagnostic_shard(0);
+}
+
+#[test]
+fn golden_diagnostic_cases_shard_2_of_4() {
+    run_diagnostic_shard(1);
+}
+
+#[test]
+fn golden_diagnostic_cases_shard_3_of_4() {
+    run_diagnostic_shard(2);
+}
+
+#[test]
+fn golden_diagnostic_cases_shard_4_of_4() {
+    run_diagnostic_shard(3);
+}
+
+fn run_diagnostic_shard(shard_index: usize) {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/diag");
     let update = env::var("UPDATE_GOLDEN").is_ok_and(|value| value == "1");
 
     let mut cases = golden_cases(&root);
     cases.sort();
+    let cases = fixture_shards::select_fixture_shard(cases, shard_index);
 
     assert!(
         !cases.is_empty(),
-        "no golden diagnostic cases found under {}",
-        root.display()
+        "golden diagnostic shard {} is empty",
+        shard_index + 1
     );
 
     for case_root in cases {

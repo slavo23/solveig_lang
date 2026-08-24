@@ -10,7 +10,7 @@ use solveig_ide::{
     CompilationIdeExt, SourceSemanticToken, SourceSemanticTokenKind, SourceSemanticTokenModifier,
 };
 
-mod snapshot_support;
+use crate::snapshot_support;
 
 #[derive(Debug)]
 struct DecodedToken {

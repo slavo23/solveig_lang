@@ -6,7 +6,7 @@
 use std::fs;
 use std::process::Command;
 
-mod support;
+use crate::support;
 
 #[test]
 fn concrete_int_arithmetic_uses_primitive_bytecode_without_dictionary_projection() {

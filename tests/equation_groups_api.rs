@@ -3,7 +3,7 @@ use std::path::Path;
 
 use solveig_driver::Compilation;
 
-mod support;
+use crate::support;
 
 fn temp_root(name: &str) -> support::TestRoot {
     support::temp_root("solveig_equation_groups", name)

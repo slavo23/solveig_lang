@@ -11,10 +11,30 @@ use std::process::Command;
 
 use solveig_driver::run_project_capture_with_stdin_and_args;
 
-mod snapshot_support;
+use crate::fixture_shards;
+use crate::snapshot_support;
 
 #[test]
-fn golden_run_cases() {
+fn golden_run_cases_shard_1_of_4() {
+    run_golden_shard(0);
+}
+
+#[test]
+fn golden_run_cases_shard_2_of_4() {
+    run_golden_shard(1);
+}
+
+#[test]
+fn golden_run_cases_shard_3_of_4() {
+    run_golden_shard(2);
+}
+
+#[test]
+fn golden_run_cases_shard_4_of_4() {
+    run_golden_shard(3);
+}
+
+fn run_golden_shard(shard_index: usize) {
     let manifest_root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let root = manifest_root.join("tests/golden/run");
     let update = env::var("UPDATE_GOLDEN").is_ok_and(|value| value == "1");
@@ -23,11 +43,12 @@ fn golden_run_cases() {
     cases.push(manifest_root.join("examples/concurrent_downloader"));
     cases.push(manifest_root.join("examples/log_audit"));
     cases.sort();
+    let cases = fixture_shards::select_fixture_shard(cases, shard_index);
 
     assert!(
         !cases.is_empty(),
-        "no golden run cases found under {}",
-        root.display()
+        "golden run shard {} is empty",
+        shard_index + 1
     );
 
     for case_root in cases {

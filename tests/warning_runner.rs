@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-mod snapshot_support;
+use crate::snapshot_support;
 
 #[test]
 fn warning_golden_cases() {

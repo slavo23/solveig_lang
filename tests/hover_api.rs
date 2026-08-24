@@ -10,7 +10,7 @@ use solveig_driver::Compilation;
 use solveig_ide::CompilationIdeExt;
 use solveig_syntax::lexer::lex;
 
-mod support;
+use crate::support;
 
 fn fixture_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)

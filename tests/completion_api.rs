@@ -11,7 +11,7 @@ use std::path::Path;
 
 const MARKER: &str = "$COMPLETE";
 
-mod support;
+use crate::support;
 
 fn temp_root(name: &str) -> support::TestRoot {
     support::temp_root("solveig_completion", name)

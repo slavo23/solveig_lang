@@ -6,7 +6,7 @@ use solveig_driver::Compilation;
 use solveig_syntax::ast::{SurfaceDefinition, SurfaceDoStmt, SurfaceExpr, SurfacePattern};
 use solveig_syntax::lowering::parse_source;
 
-mod support;
+use crate::support;
 
 fn temp_root(name: &str) -> support::TestRoot {
     support::temp_root("solveig_pattern_binders", name)
