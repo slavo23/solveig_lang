@@ -25,6 +25,8 @@ fn node<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> BoundedDocument
         SyntaxKind::ClassDef | SyntaxKind::InstanceDef | SyntaxKind::DoExpr => {
             layout_block(tree, source, id)
         }
+        SyntaxKind::FunctionDef | SyntaxKind::DoStmt => layout_expression_parent(tree, source, id)
+            .unwrap_or_else(|| joined_node(tree, source, id)),
         SyntaxKind::CaseExpr => case_expression(tree, source, id),
         SyntaxKind::ParenExpr
         | SyntaxKind::TupleExpr
@@ -32,13 +34,54 @@ fn node<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> BoundedDocument
         | SyntaxKind::TupleType
         | SyntaxKind::ListExpr
         | SyntaxKind::OperatorSection => delimited(tree, source, id),
-        _ => joined_children(tree, source, id, tree.children(id))
-            .0
-            .nest(INDENT)
-            .group(),
+        _ => joined_node(tree, source, id),
     };
     let (first, last) = node_boundaries(tree, id);
     (document, first, last)
+}
+
+fn joined_node<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> Document<'a> {
+    joined_children(tree, source, id, tree.children(id))
+        .0
+        .nest(INDENT)
+        .group()
+}
+
+fn layout_expression_parent<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+) -> Option<Document<'a>> {
+    let children = tree.children(id);
+    let layout = children.iter().position(|child| {
+        matches!(
+            child,
+            NodeOrToken::Node(child) if tree.node(*child).kind() == SyntaxKind::DoExpr
+        )
+    })?;
+    let prefix = joined_children(tree, source, id, slice_to(children, layout));
+    let body = match children.get(layout) {
+        Some(NodeOrToken::Node(body)) => node(tree, source, *body),
+        _ => return None,
+    };
+    let suffix = joined_children(tree, source, id, children.get(layout + 1..).unwrap_or(&[]));
+
+    let mut document = if let Some(previous) = prefix.2 {
+        let join = if matches!(tree.token(previous).kind, Token::Eq | Token::BindArrow) {
+            BoxDoc::space()
+        } else {
+            separator(tree, tree.node(id).kind(), previous, body.1?)
+        };
+        prefix.0.append(join).append(body.0)
+    } else {
+        body.0
+    };
+    if let (Some(previous), Some(next)) = (body.2, suffix.1) {
+        document = document
+            .append(separator(tree, tree.node(id).kind(), previous, next))
+            .append(suffix.0);
+    }
+    Some(document)
 }
 
 fn block<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> Document<'a> {

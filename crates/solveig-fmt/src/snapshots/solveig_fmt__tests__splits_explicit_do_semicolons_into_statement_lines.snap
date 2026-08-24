@@ -1,0 +1,8 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"main=do printLine \\\"one\\\";printLine \\\"two\\\";pure ()\\n\", 100,)"
+---
+main = do
+    printLine "one"
+    printLine "two"
+    pure ()

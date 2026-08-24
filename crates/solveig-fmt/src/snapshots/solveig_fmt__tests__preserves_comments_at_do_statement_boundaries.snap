@@ -1,0 +1,9 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"main=do\\n -- before first\\n printLine \\\"one\\\" -- after first\\n -- before second\\n printLine \\\"two\\\"\\n\",\n100,)"
+---
+main = do
+    -- before first
+    printLine "one" -- after first
+    -- before second
+    printLine "two"

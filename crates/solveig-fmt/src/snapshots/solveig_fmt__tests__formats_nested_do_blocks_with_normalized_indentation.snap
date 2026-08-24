@@ -1,0 +1,16 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"nested=do\\n first<-do\\n      x<-Just 1\\n      pure x\\n second<-do\\n      y<-Just 2\\n      pure y\\n pure(first+second)\\nstandalone=do\\n do\\n      printLine \\\"nested\\\"\\n      pure ()\\n\",\n100,)"
+---
+nested = do
+    first <- do
+        x <- Just 1
+        pure x
+    second <- do
+        y <- Just 2
+        pure y
+    pure (first + second)
+standalone = do
+    do
+        printLine "nested"
+        pure ()

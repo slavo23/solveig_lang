@@ -1,0 +1,10 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"class Render a where render:a->String;default render x=\\\"value\\\"\\ninstance Render Int where render 0=\\\"zero\\\";render _=\\\"other\\\"\\n\",\n100,)"
+---
+class Render a where
+    render : a -> String
+    default render x = "value"
+instance Render Int where
+    render 0 = "zero"
+    render _ = "other"

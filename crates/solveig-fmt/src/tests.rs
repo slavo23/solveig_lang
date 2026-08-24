@@ -86,6 +86,38 @@ fn formats_do_blocks_one_statement_per_line() {
 }
 
 #[test]
+fn formats_nested_do_blocks_with_normalized_indentation() {
+    insta::assert_snapshot!(format_source(
+        "nested=do\n first<-do\n      x<-Just 1\n      pure x\n second<-do\n      y<-Just 2\n      pure y\n pure(first+second)\nstandalone=do\n do\n      printLine \"nested\"\n      pure ()\n",
+        100,
+    ));
+}
+
+#[test]
+fn splits_explicit_do_semicolons_into_statement_lines() {
+    insta::assert_snapshot!(format_source(
+        "main=do printLine \"one\";printLine \"two\";pure ()\n",
+        100,
+    ));
+}
+
+#[test]
+fn splits_explicit_class_and_instance_semicolons_into_declaration_lines() {
+    insta::assert_snapshot!(format_source(
+        "class Render a where render:a->String;default render x=\"value\"\ninstance Render Int where render 0=\"zero\";render _=\"other\"\n",
+        100,
+    ));
+}
+
+#[test]
+fn preserves_comments_at_do_statement_boundaries() {
+    insta::assert_snapshot!(format_source(
+        "main=do\n -- before first\n printLine \"one\" -- after first\n -- before second\n printLine \"two\"\n",
+        100,
+    ));
+}
+
+#[test]
 fn formats_mixed_operator_chains() {
     insta::assert_snapshot!(format_source("main=1+2*3==7\n", 12));
 }
