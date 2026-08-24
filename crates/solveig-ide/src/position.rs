@@ -104,6 +104,7 @@ struct PositionFactContext<'a> {
 pub(crate) struct PositionIndex {
     file: FileId,
     cst: SyntaxTree,
+    top_level_definitions: Vec<CstId>,
     ast_nodes: Vec<bool>,
     definitions: FxHashMap<Span, DefTarget>,
     references: FxHashMap<Span, DefTarget>,
@@ -127,6 +128,7 @@ impl PositionIndex {
         let mut index = Self {
             file: parsed.file,
             cst: parsed.cst.clone(),
+            top_level_definitions: parsed.defs.iter().map(|definition| definition.2).collect(),
             ast_nodes: vec![false; node_count],
             definitions: FxHashMap::default(),
             references: FxHashMap::default(),
@@ -163,6 +165,35 @@ impl PositionIndex {
             ast_span,
             kind,
         })
+    }
+
+    pub(crate) fn syntax_tree(&self) -> &SyntaxTree {
+        &self.cst
+    }
+
+    pub(crate) fn is_format_safe(&self) -> bool {
+        !self
+            .cst
+            .nodes()
+            .any(|(_, node)| node.kind() == SyntaxKind::Error)
+    }
+
+    pub(crate) fn top_level_definition_intersecting(&self, range: Span) -> Option<CstId> {
+        let mut matches = self
+            .top_level_definitions
+            .iter()
+            .copied()
+            .filter(|definition| {
+                let definition = self.cst.node(*definition).span();
+                if range.is_empty() {
+                    definition.start <= range.start && range.start < definition.end
+                } else {
+                    definition.start < range.end && range.start < definition.end
+                }
+            });
+        let definition = matches.next()?;
+
+        matches.next().is_none().then_some(definition)
     }
 
     pub(crate) fn local_hover(&self, target: PositionTarget) -> Option<&HoverInfo> {

@@ -115,6 +115,22 @@ pub(crate) fn lsp_workspace_edit(
     })
 }
 
+pub(crate) fn lsp_text_edits(
+    edits: &[SourceTextEdit],
+    source_map: &SourceMap,
+    encoding: PositionEncoding,
+) -> Vec<TextEdit> {
+    edits
+        .iter()
+        .map(|edit| {
+            TextEdit::new(
+                lsp_range(source_map, edit.file_span(), encoding),
+                edit.new_text().to_string(),
+            )
+        })
+        .collect()
+}
+
 pub(crate) fn lsp_document_links(
     links: &[SourceDocumentLink],
     source_map: &SourceMap,

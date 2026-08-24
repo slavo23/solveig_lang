@@ -120,6 +120,14 @@ fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
         capabilities.document_highlight_provider,
         Some(OneOf::Left(true))
     );
+    assert_eq!(
+        capabilities.document_formatting_provider,
+        Some(OneOf::Left(true))
+    );
+    assert_eq!(
+        capabilities.document_range_formatting_provider,
+        Some(OneOf::Left(true))
+    );
     let completion = capabilities
         .completion_provider
         .expect("completion provider should be advertised");
@@ -218,6 +226,22 @@ fn source_edit_refusals_are_clear_lsp_request_failures() {
             .contains("open that package as the local project"),
         "{error}"
     );
+}
+
+#[test]
+fn formatter_line_width_uses_one_custom_option_with_a_safe_default() {
+    let mut options = FormattingOptions::default();
+    assert_eq!(formatting_width(&options), DEFAULT_FORMAT_WIDTH);
+
+    options
+        .properties
+        .insert("lineWidth".to_string(), FormattingProperty::Number(72));
+    assert_eq!(formatting_width(&options), 72);
+
+    options
+        .properties
+        .insert("lineWidth".to_string(), FormattingProperty::Number(0));
+    assert_eq!(formatting_width(&options), DEFAULT_FORMAT_WIDTH);
 }
 
 #[test]

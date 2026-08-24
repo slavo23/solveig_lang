@@ -1,7 +1,7 @@
 use solveig_base::Session;
 use solveig_syntax::lowering::parse_source;
 
-use super::format;
+use super::{format, format_subtree};
 
 fn format_source(source: &str, width: usize) -> String {
     let session = Session::new();
@@ -144,6 +144,29 @@ fn emits_comments_once_and_collapses_blank_line_runs() {
         "-- | identity\nid x=x\n\n\n-- ordinary\nmain=id 1\n",
         100,
     ));
+}
+
+#[test]
+fn formats_one_definition_without_consuming_the_next_definition() {
+    let source = "-- | docs\nfirst   x=x+1 -- result\n\nsecond   y=y\n";
+    let session = Session::new();
+    let file = session.add_file("format.sv", source);
+    let parsed = parse_source(&session, file, source);
+    assert!(session.diagnostics().is_empty());
+
+    let definition = parsed.defs[0].2;
+    let (range, formatted) =
+        format_subtree(&parsed.cst, source, definition, 100).expect("definition has source text");
+
+    let original = source
+        .get(range)
+        .expect("formatter-owned range should slice its source");
+    assert_eq!(original, "first   x=x+1");
+    assert_eq!(formatted, "first x = x + 1");
+    assert_eq!(
+        source.replacen(original, &formatted, 1),
+        "-- | docs\nfirst x = x + 1 -- result\n\nsecond   y=y\n"
+    );
 }
 
 #[test]

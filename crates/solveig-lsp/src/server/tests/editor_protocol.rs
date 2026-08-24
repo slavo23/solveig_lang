@@ -1,7 +1,8 @@
 use async_lsp::lsp_types::{
-    DidOpenTextDocumentParams, DocumentHighlightKind, DocumentHighlightParams, DocumentLinkParams,
-    FoldingRangeKind, FoldingRangeParams, PartialResultParams, Position, PrepareRenameResponse,
-    RenameParams, SelectionRangeParams, SignatureHelpParams, TextDocumentIdentifier,
+    DidOpenTextDocumentParams, DocumentFormattingParams, DocumentHighlightKind,
+    DocumentHighlightParams, DocumentLinkParams, DocumentRangeFormattingParams, FoldingRangeKind,
+    FoldingRangeParams, FormattingOptions, PartialResultParams, Position, PrepareRenameResponse,
+    Range, RenameParams, SelectionRangeParams, SignatureHelpParams, TextDocumentIdentifier,
     TextDocumentItem, TextDocumentPositionParams, Url, WorkDoneProgressParams,
 };
 use async_lsp::{ClientSocket, LanguageServer};
@@ -27,6 +28,87 @@ fn position_in_line(source: &str, line: &str, needle: &str) -> Position {
         u32::try_from(line_number).expect("test line number should fit in u32"),
         u32::try_from(needle_offset).expect("test character offset should fit in u32"),
     )
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn document_and_range_formatting_return_structural_text_edits() {
+    let project_root = temp_root("server_formatting");
+    let source = project_root.join("scratch.sv");
+    let text = "first   x=x+1\n\nsecond   y=y\n";
+    write_source(&source, "first x = x + 1\n\nsecond y = y\n");
+    let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+    let root_uri =
+        Url::from_directory_path(&project_root).expect("test root should become a file URI");
+    let mut server = LspServer::new(ClientSocket::new_closed());
+
+    server
+        .initialize(initialize_params(root_uri))
+        .await
+        .expect("initialize should succeed");
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
+
+    let document_edits = server
+        .formatting(DocumentFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            options: FormattingOptions::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("formatting request should succeed")
+        .expect("formatting response should exist");
+    assert_eq!(document_edits.len(), 1);
+    assert_eq!(
+        document_edits[0].range,
+        Range::new(Position::new(0, 0), Position::new(3, 0))
+    );
+    assert_eq!(
+        document_edits[0].new_text,
+        "first x = x + 1\n\nsecond y = y\n"
+    );
+
+    let range_edits = server
+        .range_formatting(DocumentRangeFormattingParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 2), Position::new(0, 10)),
+            options: FormattingOptions::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("range-formatting request should succeed")
+        .expect("range-formatting response should exist");
+    assert_eq!(range_edits.len(), 1);
+    assert_eq!(
+        range_edits[0].range,
+        Range::new(Position::new(0, 0), Position::new(0, 13))
+    );
+    assert_eq!(range_edits[0].new_text, "first x = x + 1");
+
+    let crossing_edits = server
+        .range_formatting(DocumentRangeFormattingParams {
+            text_document: TextDocumentIdentifier { uri },
+            range: Range::new(Position::new(0, 0), Position::new(2, 4)),
+            options: FormattingOptions::default(),
+            work_done_progress_params: WorkDoneProgressParams::default(),
+        })
+        .await
+        .expect("cross-definition request should succeed")
+        .expect("range-formatting response should exist");
+    assert!(crossing_edits.is_empty());
+
+    server.shutdown(()).await.expect("shutdown should succeed");
+    drop(project_root);
 }
 
 #[tokio::test(flavor = "current_thread")]

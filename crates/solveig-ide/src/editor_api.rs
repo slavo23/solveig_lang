@@ -59,6 +59,23 @@ pub trait CompilationIdeExt {
     /// Checks whether mutating editor features may edit a source file.
     fn ensure_source_editable(&mut self, file: impl AsRef<Path>) -> Result<(), SourceEditError>;
 
+    /// Checks the current project and formats one complete source document.
+    fn format_document(
+        &mut self,
+        file: impl AsRef<Path>,
+        width: usize,
+    ) -> Result<Vec<SourceTextEdit>, SourceEditError>;
+
+    /// Checks the current project and formats one top-level definition touched by a range.
+    fn format_range(
+        &mut self,
+        file: impl AsRef<Path>,
+        start: SourcePosition,
+        end: SourcePosition,
+        encoding: PositionEncoding,
+        width: usize,
+    ) -> Result<Vec<SourceTextEdit>, SourceEditError>;
+
     /// Checks the current project and returns code actions visible for an editor range.
     fn code_actions_at_range(
         &mut self,
@@ -287,6 +304,45 @@ impl<'a> ProjectSnapshotView<'a> {
     /// Checks whether mutating editor features, including formatting, may edit a source file.
     pub fn ensure_source_editable(&self, file: impl AsRef<Path>) -> Result<(), SourceEditError> {
         source_edit::ensure_source_editable(&self.snapshot.project, self.source_map, file.as_ref())
+    }
+
+    /// Formats one complete source document using its retained lossless CST.
+    pub fn format_document(
+        &self,
+        file: impl AsRef<Path>,
+        width: usize,
+    ) -> Result<Vec<SourceTextEdit>, SourceEditError> {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
+            format_document_in_artifacts(
+                artifacts,
+                &self.snapshot.project,
+                self.source_map,
+                file.as_ref(),
+                width,
+            )
+        })
+    }
+
+    /// Formats the sole top-level definition touched by an editor range.
+    pub fn format_range(
+        &self,
+        file: impl AsRef<Path>,
+        start: SourcePosition,
+        end: SourcePosition,
+        encoding: PositionEncoding,
+        width: usize,
+    ) -> Result<Vec<SourceTextEdit>, SourceEditError> {
+        with_artifacts_for_snapshot(self.session, self.snapshot, |artifacts| {
+            format_range_in_artifacts(
+                artifacts,
+                &self.snapshot.project,
+                self.source_map,
+                file.as_ref(),
+                (start, end),
+                encoding,
+                width,
+            )
+        })
     }
 
     /// Returns all retained source-level code actions.
@@ -603,6 +659,41 @@ impl CompilationIdeExt for Compilation {
         };
 
         view.ensure_source_editable(path)
+    }
+
+    fn format_document(
+        &mut self,
+        file: impl AsRef<Path>,
+        width: usize,
+    ) -> Result<Vec<SourceTextEdit>, SourceEditError> {
+        let _result = self.ensure_checked(false);
+        let path = file.as_ref();
+        let Some(view) = project_snapshot_view(self, true) else {
+            return Err(SourceEditError::UnknownSource {
+                path: path.to_path_buf(),
+            });
+        };
+
+        view.format_document(path, width)
+    }
+
+    fn format_range(
+        &mut self,
+        file: impl AsRef<Path>,
+        start: SourcePosition,
+        end: SourcePosition,
+        encoding: PositionEncoding,
+        width: usize,
+    ) -> Result<Vec<SourceTextEdit>, SourceEditError> {
+        let _result = self.ensure_checked(false);
+        let path = file.as_ref();
+        let Some(view) = project_snapshot_view(self, true) else {
+            return Err(SourceEditError::UnknownSource {
+                path: path.to_path_buf(),
+            });
+        };
+
+        view.format_range(path, start, end, encoding, width)
     }
 
     fn code_actions_at_range(

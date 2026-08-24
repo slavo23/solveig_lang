@@ -72,6 +72,75 @@ fn source_text(source_map: &SourceMap, span: FileSpan) -> &str {
         .expect("span should slice retained source")
 }
 
+#[test]
+fn formatting_queries_return_whole_document_and_structural_range_edits() {
+    let project_root = temp_root("formatting_queries");
+    let source_path = project_root.join("Main.sv");
+    let source = "-- | first docs\nfirst   x=x+1\n\nsecond   y=y\n";
+    write_source(&source_path, source);
+
+    let mut compilation = Compilation::for_source_file(&source_path);
+    let document_edits = compilation
+        .format_document(&source_path, 100)
+        .expect("standalone local source should be editable");
+    assert_eq!(document_edits.len(), 1);
+    assert_eq!(document_edits[0].span().to_usize_range(), 0..source.len());
+    assert_eq!(
+        document_edits[0].new_text(),
+        "-- | first docs\nfirst x = x + 1\n\nsecond y = y\n"
+    );
+
+    let first_edits = compilation
+        .format_range(
+            &source_path,
+            SourcePosition::new(1, 2),
+            SourcePosition::new(1, 8),
+            PositionEncoding::Utf8,
+            100,
+        )
+        .expect("the first definition should be formatable");
+    assert_eq!(first_edits.len(), 1);
+    assert_eq!(
+        source_text(compilation.source_map(), first_edits[0].file_span()),
+        "first   x=x+1"
+    );
+    assert_eq!(first_edits[0].new_text(), "first x = x + 1");
+
+    let crossing_edits = compilation
+        .format_range(
+            &source_path,
+            SourcePosition::new(1, 0),
+            SourcePosition::new(3, 5),
+            PositionEncoding::Utf8,
+            100,
+        )
+        .expect("a local range request should remain valid");
+    assert!(
+        crossing_edits.is_empty(),
+        "a range touching two definitions must not be formatted"
+    );
+
+    drop(project_root);
+}
+
+#[test]
+fn formatting_parse_errors_returns_no_edits() {
+    let project_root = temp_root("formatting_parse_error");
+    let source_path = project_root.join("Main.sv");
+    write_source(&source_path, "broken :\nmain=1\n");
+
+    let mut compilation = Compilation::for_source_file(&source_path);
+    assert!(
+        compilation
+            .format_document(&source_path, 100)
+            .expect("the source is local")
+            .is_empty(),
+        "formatting must not edit a CST containing a parser error"
+    );
+
+    drop(project_root);
+}
+
 fn signature_label_at(
     compilation: &mut Compilation,
     file: &Path,
@@ -480,6 +549,10 @@ entry = "core"
             .contains("open that package as the local project"),
         "{formatting_error}"
     );
+    let dependency_formatting_error = compilation
+        .format_document(&dependency_canonical, 100)
+        .expect_err("document formatting must use the dependency edit boundary");
+    assert_eq!(dependency_formatting_error, formatting_error);
     let prelude = compilation
         .source_map()
         .files()
@@ -497,6 +570,16 @@ entry = "core"
             .contains("implicit library source"),
         "{implicit_error}"
     );
+    let implicit_formatting_error = compilation
+        .format_range(
+            &prelude,
+            SourcePosition::new(0, 0),
+            SourcePosition::new(0, 1),
+            PositionEncoding::Utf8,
+            100,
+        )
+        .expect_err("range formatting must use the implicit-library edit boundary");
+    assert_eq!(implicit_formatting_error, implicit_error);
 
     let prepare_error = compilation
         .prepare_rename_at_position(&app, reference, PositionEncoding::Utf8)

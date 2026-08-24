@@ -14,9 +14,10 @@ use async_lsp::lsp_types::{
     CodeActionProviderCapability, CodeActionResponse, CompletionOptions, CompletionParams,
     CompletionResponse, DidChangeTextDocumentParams, DidChangeWatchedFilesParams,
     DidCloseTextDocumentParams, DidOpenTextDocumentParams, DidSaveTextDocumentParams,
-    DocumentHighlight, DocumentHighlightParams, DocumentLink, DocumentLinkOptions,
-    DocumentLinkParams, DocumentSymbolParams, DocumentSymbolResponse, FileChangeType, FoldingRange,
-    FoldingRangeParams, FoldingRangeProviderCapability, GotoDefinitionParams,
+    DocumentFormattingParams, DocumentHighlight, DocumentHighlightParams, DocumentLink,
+    DocumentLinkOptions, DocumentLinkParams, DocumentRangeFormattingParams, DocumentSymbolParams,
+    DocumentSymbolResponse, FileChangeType, FoldingRange, FoldingRangeParams,
+    FoldingRangeProviderCapability, FormattingOptions, FormattingProperty, GotoDefinitionParams,
     GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
     InitializeResult, InitializedParams, InlayHint, InlayHintOptions, InlayHintParams,
     InlayHintServerCapabilities, Location, LogMessageParams, MessageType, OneOf,
@@ -25,8 +26,8 @@ use async_lsp::lsp_types::{
     SelectionRangeProviderCapability, SemanticTokensFullOptions, SemanticTokensOptions,
     SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
     ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, WorkspaceEdit,
-    WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit,
+    WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use async_lsp::router::Router;
 use async_lsp::{ClientSocket, ErrorCode, LanguageServer, MainLoop, ResponseError};
@@ -37,6 +38,7 @@ use crate::semantic_tokens::semantic_tokens_legend;
 use crate::workspace::{ServerConfig, ServerState, WorkspaceSnapshot, check_workspaces};
 
 const CHECK_DEBOUNCE: Duration = Duration::from_millis(150);
+const DEFAULT_FORMAT_WIDTH: usize = 100;
 
 type LspResult<T> = Result<T, ResponseError>;
 type LspFuture<T> = Pin<Box<dyn Future<Output = LspResult<T>> + Send + 'static>>;
@@ -310,6 +312,37 @@ impl LanguageServer for LspServer {
         )
     }
 
+    fn formatting(&mut self, params: DocumentFormattingParams) -> LspFuture<Option<Vec<TextEdit>>> {
+        let width = formatting_width(&params.options);
+
+        snapshot_result_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| {
+                snapshot
+                    .format_document(&path, encoding, width)
+                    .map_err(source_edit_response_error)
+            },
+        )
+    }
+
+    fn range_formatting(
+        &mut self,
+        params: DocumentRangeFormattingParams,
+    ) -> LspFuture<Option<Vec<TextEdit>>> {
+        let width = formatting_width(&params.options);
+
+        snapshot_result_response(
+            &self.state,
+            &params.text_document.uri,
+            move |path, encoding, _, snapshot| {
+                snapshot
+                    .format_range(&path, params.range, encoding, width)
+                    .map_err(source_edit_response_error)
+            },
+        )
+    }
+
     fn completion(&mut self, params: CompletionParams) -> LspFuture<Option<CompletionResponse>> {
         let params = params.text_document_position;
         let position = params.position;
@@ -575,6 +608,8 @@ fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
         definition_provider: Some(OneOf::Left(true)),
         references_provider: Some(OneOf::Left(true)),
         document_highlight_provider: Some(OneOf::Left(true)),
+        document_formatting_provider: Some(OneOf::Left(true)),
+        document_range_formatting_provider: Some(OneOf::Left(true)),
         completion_provider: Some(CompletionOptions {
             resolve_provider: Some(false),
             trigger_characters: Some(vec![".".to_string()]),
@@ -616,6 +651,15 @@ fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
             },
         )),
         ..ServerCapabilities::default()
+    }
+}
+
+fn formatting_width(options: &FormattingOptions) -> usize {
+    match options.properties.get("lineWidth") {
+        Some(FormattingProperty::Number(width)) if *width > 0 => {
+            usize::try_from(*width).unwrap_or(DEFAULT_FORMAT_WIDTH)
+        }
+        _ => DEFAULT_FORMAT_WIDTH,
     }
 }
 

@@ -8,6 +8,7 @@ solveig-ast = { path = "../solveig-ast", version = "0.1.0" }
 solveig-base = { path = "../solveig-base", version = "0.1.0" }
 solveig-check = { path = "../solveig-check", version = "0.1.0" }
 solveig-driver = { path = "../solveig-driver", version = "0.1.0" }
+solveig-fmt = { path = "../solveig-fmt", version = "0.1.0" }
 solveig-package = { path = "../solveig-package", version = "0.1.0" }
 solveig-resolve = { path = "../solveig-resolve", version = "0.1.0" }
 solveig-syntax = { path = "../solveig-syntax", version = "0.1.0" }

@@ -4,7 +4,7 @@ use std::path::Path;
 
 use async_lsp::lsp_types::{
     DocumentHighlight, DocumentLink, FoldingRange, Position, PrepareRenameResponse, SelectionRange,
-    SignatureHelp, WorkspaceEdit,
+    SignatureHelp, TextEdit, WorkspaceEdit,
 };
 use solveig_base::{PositionEncoding, SourcePosition};
 use solveig_ide::SourceEditError;
@@ -12,10 +12,49 @@ use solveig_ide::SourceEditError;
 use super::{WorkspaceSnapshot, guarded};
 use crate::editor_features::{
     lsp_document_highlights, lsp_document_links, lsp_folding_ranges, lsp_prepare_rename,
-    lsp_selection_ranges, lsp_signature_help, lsp_workspace_edit,
+    lsp_selection_ranges, lsp_signature_help, lsp_text_edits, lsp_workspace_edit,
 };
 
 impl WorkspaceSnapshot {
+    pub(crate) fn format_document(
+        &self,
+        path: &Path,
+        encoding: PositionEncoding,
+        width: usize,
+    ) -> Result<Option<Vec<TextEdit>>, SourceEditError> {
+        guarded("document-formatting request", || {
+            self.view()
+                .format_document(path, width)
+                .map(|edits| Some(lsp_text_edits(&edits, &self.source_map, encoding)))
+        })
+        .ok()
+        .transpose()
+        .map(Option::flatten)
+    }
+
+    pub(crate) fn format_range(
+        &self,
+        path: &Path,
+        range: async_lsp::lsp_types::Range,
+        encoding: PositionEncoding,
+        width: usize,
+    ) -> Result<Option<Vec<TextEdit>>, SourceEditError> {
+        guarded("range-formatting request", || {
+            self.view()
+                .format_range(
+                    path,
+                    SourcePosition::new(range.start.line, range.start.character),
+                    SourcePosition::new(range.end.line, range.end.character),
+                    encoding,
+                    width,
+                )
+                .map(|edits| Some(lsp_text_edits(&edits, &self.source_map, encoding)))
+        })
+        .ok()
+        .transpose()
+        .map(Option::flatten)
+    }
+
     pub(crate) fn document_highlights(
         &self,
         path: &Path,

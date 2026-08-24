@@ -10,14 +10,19 @@ use solveig_syntax::{
 const INDENT: isize = 4;
 const INDENT_WIDTH: usize = 4;
 
-type Document<'a> = BoxDoc<'a>;
-type BoundedDocument<'a> = (Document<'a>, Option<TokenId>, Option<TokenId>);
+pub(super) type Document<'a> = BoxDoc<'a>;
+pub(super) type BoundedDocument<'a> = (Document<'a>, Option<TokenId>, Option<TokenId>);
 
 pub(super) fn root<'a>(tree: &'a SyntaxTree, source: &'a str, width: usize) -> Document<'a> {
     node(tree, source, tree.root(), width).0
 }
 
-fn node<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usize) -> BoundedDocument<'a> {
+pub(super) fn node<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+    width: usize,
+) -> BoundedDocument<'a> {
     let kind = tree.node(id).kind();
     let document = match kind {
         SyntaxKind::Module | SyntaxKind::ImportList | SyntaxKind::DefinitionList => {
