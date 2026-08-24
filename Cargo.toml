@@ -7,9 +7,14 @@ autotests = false
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+solveig-base = { path = "crates/solveig-base", version = "0.1.0" }
 solveig-driver = { path = "crates/solveig-driver", version = "0.1.0" }
+solveig-fmt = { path = "crates/solveig-fmt", version = "0.1.0" }
+solveig-ide = { path = "crates/solveig-ide", version = "0.1.0" }
 solveig-lsp = { path = "crates/solveig-lsp", version = "0.1.0" }
+solveig-package = { path = "crates/solveig-package", version = "0.1.0" }
 solveig-report = { path = "crates/solveig-report", version = "0.1.0" }
+solveig-syntax = { path = "crates/solveig-syntax", version = "0.1.0" }
 clap = { version = "4.6.0", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
@@ -19,9 +24,6 @@ criterion = "0.7"
 insta = "1"
 pretty_assertions = "1"
 solveig-ast = { path = "crates/solveig-ast", version = "0.1.0" }
-solveig-base = { path = "crates/solveig-base", version = "0.1.0" }
-solveig-ide = { path = "crates/solveig-ide", version = "0.1.0" }
-solveig-syntax = { path = "crates/solveig-syntax", version = "0.1.0" }
 solveig-vm = { path = "crates/solveig-vm", version = "0.1.0" }
 tempfile = "3"
 

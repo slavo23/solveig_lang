@@ -23,6 +23,7 @@ mod doc_comments;
 mod editor_protocol_api;
 mod empty_data;
 mod equation_groups_api;
+mod format_cli;
 mod hover_api;
 mod inlay_hints_api;
 mod navigation_api;

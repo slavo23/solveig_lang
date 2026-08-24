@@ -6,6 +6,8 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+mod format_command;
+
 #[derive(Debug, Parser)]
 #[command(version, about, long_about = None)]
 struct Cli {
@@ -19,11 +21,26 @@ struct Cli {
 enum Command {
     /// Start the Solveig language server over stdio.
     Lsp,
+    /// Format Solveig source files.
+    Fmt {
+        /// Print changes and exit unsuccessfully instead of writing files.
+        #[arg(long)]
+        check: bool,
+        /// Read one source from standard input and write it to standard output.
+        #[arg(long, conflicts_with = "paths")]
+        stdin: bool,
+        /// Set the maximum formatted line width.
+        #[arg(long, default_value_t = 100)]
+        width: usize,
+        /// Files or directories to format; defaults to the local package.
+        #[arg(value_name = "PATH")]
+        paths: Vec<PathBuf>,
+    },
 }
 
 #[derive(Debug, Parser)]
 struct RunArgs {
-    #[arg(long, default_value = ".")]
+    #[arg(long, default_value = ".", global = true)]
     project_root: PathBuf,
     #[arg(short, long, default_value = "main")]
     entry: String,
@@ -39,13 +56,32 @@ struct RunArgs {
 
 fn main() {
     let cli = Cli::parse();
-    if let Some(Command::Lsp) = cli.command {
-        init_lsp_tracing();
-        if let Err(err) = solveig_lsp::run_stdio_blocking() {
-            eprintln!("failed to start Solveig language server: {err}");
-            std::process::exit(1);
+    match cli.command {
+        Some(Command::Lsp) => {
+            init_lsp_tracing();
+            if let Err(err) = solveig_lsp::run_stdio_blocking() {
+                eprintln!("failed to start Solveig language server: {err}");
+                std::process::exit(1);
+            }
+            return;
         }
-        return;
+        Some(Command::Fmt {
+            check,
+            stdin,
+            width,
+            paths,
+        }) => {
+            let success = if stdin {
+                format_command::run_stdin(check, width)
+            } else {
+                format_command::run_files(&cli.run.project_root, &paths, check, width)
+            };
+            if !success {
+                std::process::exit(1);
+            }
+            return;
+        }
+        None => {}
     }
 
     trace_compiler_library();
