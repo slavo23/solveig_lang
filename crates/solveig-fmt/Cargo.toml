@@ -9,6 +9,7 @@ solveig-syntax = { path = "../solveig-syntax", version = "0.1.0" }
 
 [dev-dependencies]
 insta = "1"
+proptest = { workspace = true }
 solveig-base = { path = "../solveig-base", version = "0.1.0" }
 
 [lints]

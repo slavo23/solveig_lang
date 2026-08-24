@@ -8,42 +8,59 @@ use solveig_syntax::{
 };
 
 const INDENT: isize = 4;
+const INDENT_WIDTH: usize = 4;
 
 type Document<'a> = BoxDoc<'a>;
 type BoundedDocument<'a> = (Document<'a>, Option<TokenId>, Option<TokenId>);
 
-pub(super) fn root<'a>(tree: &'a SyntaxTree, source: &'a str) -> Document<'a> {
-    node(tree, source, tree.root()).0
+pub(super) fn root<'a>(tree: &'a SyntaxTree, source: &'a str, width: usize) -> Document<'a> {
+    node(tree, source, tree.root(), width).0
 }
 
-fn node<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> BoundedDocument<'a> {
+fn node<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usize) -> BoundedDocument<'a> {
     let kind = tree.node(id).kind();
     let document = match kind {
         SyntaxKind::Module | SyntaxKind::ImportList | SyntaxKind::DefinitionList => {
-            block(tree, source, id)
+            block(tree, source, id, width)
         }
         SyntaxKind::ClassDef | SyntaxKind::InstanceDef | SyntaxKind::DoExpr => {
-            layout_block(tree, source, id)
+            layout_block(tree, source, id, width)
         }
-        SyntaxKind::FunctionDef | SyntaxKind::DoStmt => layout_expression_parent(tree, source, id)
-            .unwrap_or_else(|| joined_node(tree, source, id)),
-        SyntaxKind::CaseExpr => case_expression(tree, source, id),
+        SyntaxKind::FunctionDef | SyntaxKind::DoStmt => {
+            layout_expression_parent(tree, source, id, width)
+                .unwrap_or_else(|| joined_node(tree, source, id, width))
+        }
+        SyntaxKind::CaseExpr => case_expression(tree, source, id, width),
         SyntaxKind::ParenExpr
         | SyntaxKind::TupleExpr
         | SyntaxKind::TuplePattern
         | SyntaxKind::TupleType
         | SyntaxKind::ListExpr
-        | SyntaxKind::OperatorSection => delimited(tree, source, id),
-        _ => joined_node(tree, source, id),
+        | SyntaxKind::OperatorSection => delimited(tree, source, id, width),
+        _ => joined_node(tree, source, id, width),
     };
     let (first, last) = node_boundaries(tree, id);
     (document, first, last)
 }
 
-fn joined_node<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> Document<'a> {
-    joined_children(tree, source, id, tree.children(id))
+fn joined_node<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usize) -> Document<'a> {
+    let kind = tree.node(id).kind();
+    let flattened = tree.parent(id).is_some_and(|parent| {
+        let parent = tree.node(parent).kind();
+        kind == parent && (breakable_application(kind) || matches!(kind, SyntaxKind::LetExpr))
+    });
+    let layout_statement = matches!(kind, SyntaxKind::DoStmt | SyntaxKind::CaseArm);
+    let maximum_generic_indent = (width / 4).max(INDENT_WIDTH * 2);
+    let indent = if flattened
+        || (!layout_statement && generic_nesting(tree, id) * INDENT_WIDTH >= maximum_generic_indent)
+    {
+        0
+    } else {
+        INDENT
+    };
+    joined_children(tree, source, id, tree.children(id), width)
         .0
-        .nest(INDENT)
+        .nest(indent)
         .group()
 }
 
@@ -51,6 +68,7 @@ fn layout_expression_parent<'a>(
     tree: &'a SyntaxTree,
     source: &'a str,
     id: CstId,
+    width: usize,
 ) -> Option<Document<'a>> {
     let children = tree.children(id);
     let layout = children.iter().position(|child| {
@@ -59,12 +77,18 @@ fn layout_expression_parent<'a>(
             NodeOrToken::Node(child) if tree.node(*child).kind() == SyntaxKind::DoExpr
         )
     })?;
-    let prefix = joined_children(tree, source, id, slice_to(children, layout));
+    let prefix = joined_children(tree, source, id, slice_to(children, layout), width);
     let body = match children.get(layout) {
-        Some(NodeOrToken::Node(body)) => node(tree, source, *body),
+        Some(NodeOrToken::Node(body)) => node(tree, source, *body, width),
         _ => return None,
     };
-    let suffix = joined_children(tree, source, id, children.get(layout + 1..).unwrap_or(&[]));
+    let suffix = joined_children(
+        tree,
+        source,
+        id,
+        children.get(layout + 1..).unwrap_or(&[]),
+        width,
+    );
 
     let mut document = if let Some(previous) = prefix.2 {
         let join = if matches!(tree.token(previous).kind, Token::Eq | Token::BindArrow) {
@@ -84,13 +108,13 @@ fn layout_expression_parent<'a>(
     Some(document)
 }
 
-fn block<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> Document<'a> {
+fn block<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usize) -> Document<'a> {
     let kind = tree.node(id).kind();
     let mut document = BoxDoc::nil();
     let mut previous = None;
 
     for child in tree.children(id) {
-        let Some((next, first, last)) = element(tree, source, *child) else {
+        let Some((next, first, last)) = element(tree, source, *child, width) else {
             continue;
         };
 
@@ -104,23 +128,57 @@ fn block<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> Document<'a> {
     document
 }
 
-fn layout_block<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> Document<'a> {
+fn layout_block<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+    width: usize,
+) -> Document<'a> {
     let children = tree.children(id);
+    let part_indent = matches!(
+        tree.node(id).kind(),
+        SyntaxKind::ClassDef | SyntaxKind::InstanceDef
+    )
+    .then_some(INDENT)
+    .unwrap_or(0);
     let Some(open) = token_position(tree, children, Token::VOpen) else {
-        return joined_children(tree, source, id, children)
+        return joined_children(tree, source, id, children, width)
             .0
             .nest(INDENT)
             .group();
     };
     let close =
         token_position_after(tree, children, Token::VClose, open + 1).unwrap_or(children.len());
+    let body_indent = children
+        .get(open + 1..close)
+        .unwrap_or(&[])
+        .iter()
+        .find_map(|child| first_boundary(tree, *child))
+        .map_or(0, |token| tree.token(token).col);
+    let trailing_start = children
+        .get(open + 1..close)
+        .unwrap_or(&[])
+        .iter()
+        .enumerate()
+        .find_map(|(offset, child)| match child {
+            NodeOrToken::Token(token)
+                if matches!(
+                    tree.token(*token).kind,
+                    Token::LineComment | Token::BlockComment
+                ) && tree.token(*token).col < body_indent =>
+            {
+                Some(open + 1 + offset)
+            }
+            _ => None,
+        });
+    let body_end = trailing_start.unwrap_or(close);
     let header_end = last_header_element(tree, children, open);
-    let header = joined_children(tree, source, id, slice_to(children, header_end)).0;
+    let header = joined_children(tree, source, id, slice_to(children, header_end), width).0;
 
     let mut body_parts = Vec::new();
     let mut start = header_end;
     for (offset, child) in children
-        .get(header_end..close)
+        .get(header_end..body_end)
         .unwrap_or(&[])
         .iter()
         .enumerate()
@@ -133,82 +191,164 @@ fn layout_block<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> Documen
                     source,
                     id,
                     slice(children, start, header_end + offset),
+                    width,
                 ),
+                part_indent,
             );
             start = header_end + offset + 1;
         }
     }
     push_nonempty_part(
         &mut body_parts,
-        joined_children(tree, source, id, slice(children, start, close)),
+        joined_children(tree, source, id, slice(children, start, body_end), width),
+        part_indent,
     );
 
-    if body_parts.is_empty() {
-        header.group()
+    let header = header.nest(INDENT).group();
+    let mut document = if body_parts.is_empty() {
+        header
     } else {
         header.append(
             BoxDoc::hardline()
                 .append(BoxDoc::intersperse(body_parts, BoxDoc::hardline()))
                 .nest(INDENT),
         )
+    };
+
+    let trailing_start = trailing_start.unwrap_or_else(|| close.saturating_add(1));
+    let trailing = joined_children(
+        tree,
+        source,
+        id,
+        children.get(trailing_start..).unwrap_or(&[]),
+        width,
+    );
+    if let (Some(previous), Some(next)) = (
+        last_emitted_in(tree, slice_to(children, body_end)),
+        trailing.1,
+    ) {
+        document = document.append(absolute_indent(
+            block_separator(tree, tree.node(id).kind(), previous, next).append(trailing.0),
+            tree.token(next).col,
+        ));
     }
+    document
 }
 
-fn case_expression<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> Document<'a> {
+fn case_expression<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+    width: usize,
+) -> Document<'a> {
     let children = tree.children(id);
-    let first_arm = children.iter().position(|child| {
-        matches!(
-            child,
-            NodeOrToken::Node(child) if tree.node(*child).kind() == SyntaxKind::CaseArm
-        )
-    });
-    let Some(first_arm) = first_arm else {
-        return joined_children(tree, source, id, children)
+    let close = token_position(tree, children, Token::VClose).unwrap_or(children.len());
+    let arm_starts = children
+        .iter()
+        .enumerate()
+        .take(close)
+        .filter_map(|(index, child)| {
+            matches!(
+                child,
+                NodeOrToken::Node(child) if tree.node(*child).kind() == SyntaxKind::CaseArm
+            )
+            .then_some(index)
+        })
+        .collect::<Vec<_>>();
+    let Some(first_arm) = arm_starts.first().copied() else {
+        return joined_children(tree, source, id, children, width)
             .0
             .nest(INDENT)
             .group();
     };
+    let arm_indent = children
+        .get(first_arm)
+        .and_then(|child| first_boundary(tree, *child))
+        .map_or(0, |token| tree.token(token).col);
+    let trailing_start = arm_starts.last().copied().and_then(|last_arm| {
+        children
+            .iter()
+            .enumerate()
+            .take(close)
+            .skip(last_arm + 1)
+            .find_map(|(index, child)| match child {
+                NodeOrToken::Token(token)
+                    if matches!(
+                        tree.token(*token).kind,
+                        Token::LineComment | Token::BlockComment
+                    ) && tree.token(*token).col < arm_indent =>
+                {
+                    Some(index)
+                }
+                _ => None,
+            })
+    });
+    let body_end = trailing_start.unwrap_or(close);
 
     let header_end = last_header_element(tree, children, first_arm);
-    let header = joined_children(tree, source, id, slice_to(children, header_end)).0;
-    let leading = joined_children(tree, source, id, slice(children, header_end, first_arm));
+    let header = joined_children(tree, source, id, slice_to(children, header_end), width).0;
+    let leading = joined_children(
+        tree,
+        source,
+        id,
+        slice(children, header_end, first_arm),
+        width,
+    );
     let mut arms = Vec::new();
     if leading.1.is_some() {
         arms.push(leading.0);
     }
-    arms.extend(
-        children
-            .get(first_arm..)
-            .unwrap_or(&[])
-            .iter()
-            .filter_map(|child| match child {
-                NodeOrToken::Node(child) if tree.node(*child).kind() == SyntaxKind::CaseArm => {
-                    Some(node(tree, source, *child).0)
-                }
-                _ => None,
-            }),
-    );
+    for (position, start) in arm_starts.iter().copied().enumerate() {
+        let end = arm_starts.get(position + 1).copied().unwrap_or(body_end);
+        push_nonempty_part(
+            &mut arms,
+            joined_children(tree, source, id, slice(children, start, end), width),
+            0,
+        );
+    }
 
-    header.group().append(
+    let mut document = header.group().append(
         BoxDoc::hardline()
             .append(BoxDoc::intersperse(arms, BoxDoc::hardline()))
             .nest(INDENT),
-    )
+    );
+    let trailing_start = trailing_start.unwrap_or_else(|| close.saturating_add(1));
+    let trailing = joined_children(
+        tree,
+        source,
+        id,
+        children.get(trailing_start..).unwrap_or(&[]),
+        width,
+    );
+    if let (Some(previous), Some(next)) = (
+        last_emitted_in(tree, slice_to(children, body_end)),
+        trailing.1,
+    ) {
+        document = document.append(absolute_indent(
+            block_separator(tree, SyntaxKind::CaseExpr, previous, next).append(trailing.0),
+            tree.token(next).col,
+        ));
+    }
+    document
 }
 
-fn delimited<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId) -> Document<'a> {
+fn delimited<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usize) -> Document<'a> {
     let children = tree.children(id);
+    let indent = matches!(tree.node(id).kind(), SyntaxKind::ParenExpr)
+        .then_some(0)
+        .unwrap_or(INDENT);
     let first = first_emitted_child(tree, children);
     let last = last_emitted_child(tree, children);
 
     match (first, last) {
         (Some(first), Some(last)) if first < last => {
-            let open = joined_children(tree, source, id, slice(children, first, first + 1)).0;
-            let body = joined_children(tree, source, id, slice(children, first + 1, last)).0;
-            let close = joined_children(tree, source, id, slice(children, last, last + 1)).0;
-            open.append(body.nest(INDENT)).append(close).group()
+            let open =
+                joined_children(tree, source, id, slice(children, first, first + 1), width).0;
+            let body = joined_children(tree, source, id, slice(children, first + 1, last), width).0;
+            let close = joined_children(tree, source, id, slice(children, last, last + 1), width).0;
+            open.append(body.nest(indent)).append(close).group()
         }
-        _ => joined_children(tree, source, id, children).0.group(),
+        _ => joined_children(tree, source, id, children, width).0.group(),
     }
 }
 
@@ -217,22 +357,33 @@ fn joined_children<'a>(
     source: &'a str,
     parent: CstId,
     children: &[NodeOrToken],
+    width: usize,
 ) -> BoundedDocument<'a> {
     let parent_kind = tree.node(parent).kind();
     let mut document = BoxDoc::nil();
     let mut first_boundary = None;
     let mut previous = None;
+    let mut previous_element = None;
 
     for child in children {
-        let Some((next, first, last)) = element(tree, source, *child) else {
+        let Some((next, first, last)) = element(tree, source, *child, width) else {
             continue;
         };
         if let (Some(previous), Some(first)) = (previous, first) {
-            document = document.append(separator(tree, parent_kind, previous, first));
+            let join = if parent_kind == SyntaxKind::AppExpr
+                && tree.token(previous).kind == Token::RParen
+                && previous_element.is_some_and(|element| contains_layout(tree, element))
+            {
+                BoxDoc::space()
+            } else {
+                separator(tree, parent_kind, previous, first)
+            };
+            document = document.append(join);
         }
         document = document.append(next);
         first_boundary = first_boundary.or(first);
         previous = last.or(previous);
+        previous_element = Some(*child);
     }
 
     (document, first_boundary, previous)
@@ -242,10 +393,11 @@ fn element<'a>(
     tree: &'a SyntaxTree,
     source: &'a str,
     child: NodeOrToken,
+    width: usize,
 ) -> Option<BoundedDocument<'a>> {
     match child {
         NodeOrToken::Node(id) => {
-            let document = node(tree, source, id);
+            let document = node(tree, source, id, width);
             document.1.is_some().then_some(document)
         }
         NodeOrToken::Token(id) => token_document(tree, source, id),
@@ -303,7 +455,7 @@ fn separator<'a>(
             BoxDoc::nil()
         }
         (_, Token::Backtick) if parent == SyntaxKind::OpChain => BoxDoc::space(),
-        (Token::Backtick, _) if parent == SyntaxKind::OpChain => BoxDoc::line(),
+        (Token::Backtick | Token::Dot, _) if parent == SyntaxKind::OpChain => BoxDoc::line(),
         (Token::Comma, _) | (_, Token::Pipe) | (_, Token::In | Token::Then | Token::Else) => {
             BoxDoc::line()
         }
@@ -362,6 +514,28 @@ fn breakable_application(kind: SyntaxKind) -> bool {
     )
 }
 
+fn generic_nesting(tree: &SyntaxTree, id: CstId) -> usize {
+    let mut nesting = 0;
+    let mut current = tree.parent(id);
+    while let Some(node) = current {
+        if matches!(
+            tree.node(node).kind(),
+            SyntaxKind::FunctionDef
+                | SyntaxKind::DoStmt
+                | SyntaxKind::CaseArm
+                | SyntaxKind::AppExpr
+                | SyntaxKind::LambdaExpr
+                | SyntaxKind::LetExpr
+                | SyntaxKind::IfExpr
+                | SyntaxKind::OpChain
+        ) {
+            nesting += 1;
+        }
+        current = tree.parent(node);
+    }
+    nesting
+}
+
 fn node_boundaries(tree: &SyntaxTree, id: CstId) -> (Option<TokenId>, Option<TokenId>) {
     let first = tree
         .children(id)
@@ -393,6 +567,21 @@ fn last_boundary(tree: &SyntaxTree, child: NodeOrToken) -> Option<TokenId> {
             .rev()
             .find_map(|child| last_boundary(tree, *child)),
         NodeOrToken::Token(id) => is_emitted_token(tree, id).then_some(id),
+    }
+}
+
+fn contains_layout(tree: &SyntaxTree, child: NodeOrToken) -> bool {
+    match child {
+        NodeOrToken::Node(id) => {
+            matches!(
+                tree.node(id).kind(),
+                SyntaxKind::CaseExpr | SyntaxKind::DoExpr
+            ) || tree
+                .children(id)
+                .iter()
+                .any(|child| contains_layout(tree, *child))
+        }
+        NodeOrToken::Token(_) => false,
     }
 }
 
@@ -463,6 +652,13 @@ fn last_emitted_child(tree: &SyntaxTree, children: &[NodeOrToken]) -> Option<usi
         .rposition(|child| last_boundary(tree, *child).is_some())
 }
 
+fn last_emitted_in(tree: &SyntaxTree, children: &[NodeOrToken]) -> Option<TokenId> {
+    children
+        .iter()
+        .rev()
+        .find_map(|child| last_boundary(tree, *child))
+}
+
 fn comment_document(text: &str) -> Document<'_> {
     let mut blank = false;
     let lines = text.lines().filter(|line| {
@@ -474,9 +670,19 @@ fn comment_document(text: &str) -> Document<'_> {
     BoxDoc::intersperse(lines.map(BoxDoc::text), BoxDoc::hardline())
 }
 
-fn push_nonempty_part<'a>(parts: &mut Vec<Document<'a>>, document: BoundedDocument<'a>) {
+fn absolute_indent(document: Document<'_>, column: u32) -> Document<'_> {
+    let column = isize::try_from(column)
+        .expect("ICE: source indentation must fit the formatter nesting type");
+    document.nest(column).nest(-isize::MAX)
+}
+
+fn push_nonempty_part<'a>(
+    parts: &mut Vec<Document<'a>>,
+    document: BoundedDocument<'a>,
+    indent: isize,
+) {
     if document.1.is_some() {
-        parts.push(document.0.group());
+        parts.push(document.0.nest(indent).group());
     }
 }
 
