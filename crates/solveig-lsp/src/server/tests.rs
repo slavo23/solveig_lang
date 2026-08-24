@@ -1,14 +1,17 @@
 use super::*;
+use crate::server_config::{formatting_width, server_config_from_initialize};
+use crate::workspace::DEFAULT_FORMAT_LINE_WIDTH;
 use async_lsp::lsp_types::{
     CodeActionContext, CodeActionKind, CodeActionOrCommand, CodeActionParams,
     CodeActionProviderCapability, CompletionItemKind, CompletionParams, CompletionResponse,
-    DidSaveTextDocumentParams, FoldingRangeProviderCapability, GeneralClientCapabilities,
-    HoverContents, InlayHintKind, InlayHintLabel, InlayHintParams, InlayHintServerCapabilities,
-    PartialResultParams, Position, Range, SelectionRangeProviderCapability, SemanticTokenType,
-    SemanticTokensFullOptions, SemanticTokensParams, SemanticTokensResult,
-    SemanticTokensServerCapabilities, TextDocumentContentChangeEvent, TextDocumentIdentifier,
-    TextDocumentItem, TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier,
-    WorkDoneProgressParams, WorkspaceFolder,
+    DidSaveTextDocumentParams, FoldingRangeProviderCapability, FormattingOptions,
+    FormattingProperty, GeneralClientCapabilities, HoverContents, InlayHintKind, InlayHintLabel,
+    InlayHintParams, InlayHintServerCapabilities, PartialResultParams, Position, Range,
+    SelectionRangeProviderCapability, SemanticTokenType, SemanticTokensFullOptions,
+    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
+    TextDocumentContentChangeEvent, TextDocumentIdentifier, TextDocumentItem,
+    TextDocumentPositionParams, Url, VersionedTextDocumentIdentifier, WorkDoneProgressParams,
+    WorkspaceFolder,
 };
 use async_lsp::{ClientSocket, LanguageServer};
 use std::fs;
@@ -231,17 +234,24 @@ fn source_edit_refusals_are_clear_lsp_request_failures() {
 #[test]
 fn formatter_line_width_uses_one_custom_option_with_a_safe_default() {
     let mut options = FormattingOptions::default();
-    assert_eq!(formatting_width(&options), DEFAULT_FORMAT_WIDTH);
+    assert_eq!(
+        formatting_width(&options, DEFAULT_FORMAT_LINE_WIDTH),
+        DEFAULT_FORMAT_LINE_WIDTH
+    );
+    assert_eq!(formatting_width(&options, 88), 88);
 
     options
         .properties
         .insert("lineWidth".to_string(), FormattingProperty::Number(72));
-    assert_eq!(formatting_width(&options), 72);
+    assert_eq!(formatting_width(&options, DEFAULT_FORMAT_LINE_WIDTH), 72);
 
     options
         .properties
         .insert("lineWidth".to_string(), FormattingProperty::Number(0));
-    assert_eq!(formatting_width(&options), DEFAULT_FORMAT_WIDTH);
+    assert_eq!(
+        formatting_width(&options, DEFAULT_FORMAT_LINE_WIDTH),
+        DEFAULT_FORMAT_LINE_WIDTH
+    );
 }
 
 #[test]
@@ -249,6 +259,7 @@ fn initialize_options_configure_editor_hints() {
     let default_config = server_config_from_initialize(&InitializeParams::default());
     assert!(default_config.inlay_hints_enabled);
     assert!(!default_config.inferred_signature_hints_enabled);
+    assert_eq!(default_config.format_line_width, DEFAULT_FORMAT_LINE_WIDTH);
 
     let configured = server_config_from_initialize(&InitializeParams {
         initialization_options: Some(serde_json::json!({
@@ -259,6 +270,9 @@ fn initialize_options_configure_editor_hints() {
                 "inferredSignatures": {
                     "enabled": true
                 }
+            },
+            "formatting": {
+                "lineWidth": 72
             }
         })),
         ..InitializeParams::default()
@@ -266,6 +280,7 @@ fn initialize_options_configure_editor_hints() {
 
     assert!(!configured.inlay_hints_enabled);
     assert!(configured.inferred_signature_hints_enabled);
+    assert_eq!(configured.format_line_width, 72);
 }
 
 #[tokio::test(flavor = "current_thread")]

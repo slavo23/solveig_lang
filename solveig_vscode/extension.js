@@ -15,10 +15,12 @@ const SERVER_PATH_SETTING = "server.path";
 const INLAY_HINTS_SETTING = "inlayHints.enabled";
 const INFERRED_SIGNATURE_HINTS_SETTING =
   "diagnostics.inferredSignatures.enabled";
+const FORMAT_LINE_WIDTH_SETTING = "formatting.lineWidth";
 const RESTART_SETTINGS = [
   SERVER_PATH_SETTING,
   INLAY_HINTS_SETTING,
   INFERRED_SIGNATURE_HINTS_SETTING,
+  FORMAT_LINE_WIDTH_SETTING,
 ];
 
 let client;
@@ -45,6 +47,7 @@ function activate(context) {
       traceChannel.show(true)
     ),
     vscode.commands.registerCommand("solveig.showTypeAtCursor", showTypeAtCursor),
+    vscode.commands.registerCommand("solveig.formatDocument", formatDocument),
     vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         RESTART_SETTINGS.some((setting) =>
@@ -156,6 +159,9 @@ function resolveInitializationOptions() {
       inferredSignatures: {
         enabled: config.get(INFERRED_SIGNATURE_HINTS_SETTING, true),
       },
+    },
+    formatting: {
+      lineWidth: config.get(FORMAT_LINE_WIDTH_SETTING, 100),
     },
   };
 }
@@ -305,6 +311,16 @@ async function showTypeAtCursor() {
   outputChannel.appendLine(`Type at ${editor.document.fileName}:${editor.selection.active.line + 1}`);
   outputChannel.appendLine(text);
   outputChannel.show(true);
+}
+
+async function formatDocument() {
+  const editor = vscode.window.activeTextEditor;
+  if (!editor || editor.document.languageId !== LANGUAGE_ID) {
+    vscode.window.showInformationMessage("Open a Solveig file first.");
+    return;
+  }
+
+  await vscode.commands.executeCommand("editor.action.formatDocument");
 }
 
 function formatHoverContents(hovers) {

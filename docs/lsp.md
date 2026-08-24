@@ -37,9 +37,9 @@ The current server provides:
 - optional inlay hints for inferred signatures and local types;
 - code actions for typed holes, missing imports, missing instance methods, and
   inserting an inferred top-level signature;
-- semantic rename for supported resolved declarations.
-
-Formatting is not provided by the current language server.
+- semantic rename for supported resolved declarations;
+- whole-document formatting and structural range formatting through the
+  canonical Solveig formatter.
 
 ## Project discovery
 
@@ -63,6 +63,7 @@ boundaries.
 Editor-generated mutations are more conservative:
 
 - rename is refused when completing it would require editing non-local source;
+- formatting is refused for dependency and compiler-library files;
 - code actions do not return edits for dependency or compiler-library files.
 
 This is an IDE ownership rule, not a filesystem permission. You can update a
@@ -84,12 +85,23 @@ custom `SOLVEIG_LIB` tree.
 : Shows hints for top-level definitions without written signatures and offers
   an insertion action when available. It is on by default.
 
+`solveig.formatting.lineWidth`
+: Sets the formatter's maximum line width. It defaults to 100 and is the only
+  formatter style option.
+
 ## Useful commands
 
 - **Solveig: Restart Server** restarts the language-server process.
 - **Solveig: Show Output** opens extension and server status output.
 - **Solveig: Show Trace** opens the language-server trace log.
 - **Solveig: Show Type at Cursor** requests the type at the active position.
+- **Solveig: Format Document** runs the standard VS Code document-formatting
+  action for the active Solveig file.
+
+VS Code's `editor.formatOnSave` setting works with the advertised formatting
+provider; the extension does not implement a separate save hook. See the
+[formatting guide](formatting.md) for editor configuration, range behavior,
+and CI usage.
 
 By default the server trace file is `solveig-lsp.log` in the operating system's
 temporary directory. Set `SOLVEIG_LSP_LOG` before starting VS Code to choose a
@@ -121,6 +133,12 @@ used.
 The declaration has references in source the current project does not own, or
 the declaration itself is non-local. Open an ordinary dependency as its own
 project or perform the cross-package edit manually.
+
+**Formatting returns no edits**
+
+The source is already canonical, has a parser error, is non-local, or a range
+selection does not touch exactly one top-level definition. See the Problems
+panel and [formatting guide](formatting.md).
 
 **A hover is less detailed inside a class declaration**
 

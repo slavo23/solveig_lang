@@ -157,6 +157,7 @@ Reference documentation:
 - [Errors and defects](docs/errors.md)
 - [Concurrency](docs/concurrency.md)
 - [HTTP and HTTPS](docs/http.md)
+- [Formatting](docs/formatting.md)
 - [Language server](docs/lsp.md)
 - [Diagnostics](docs/diagnostics.md)
 
@@ -165,6 +166,7 @@ Reference documentation:
 ```text
 solveig [OPTIONS] [-- PROGRAM_ARGUMENTS...]
 solveig lsp
+solveig fmt [--check] [--stdin] [--width N] [PATH]...
 ```
 
 Useful options:
@@ -175,13 +177,18 @@ Useful options:
 - `--verify-core` enables extra internal verification while compiling.
 - Arguments after `--` are available through `std.env.getArgs`.
 
+`solveig fmt` formats a local package or selected files. Use `solveig fmt
+--check` in CI to report differences without writing them. The formatter
+preserves comments, refuses parser errors and non-local package source, and has
+one style option: line width, defaulting to 100.
+
 There is no interactive REPL command in the current CLI.
 
 ## VS Code support
 
 The extension provides diagnostics, hover types, completion, definition and
 reference navigation, rename, code actions, semantic highlighting, inlay hints,
-and signature help.
+signature help, and formatting.
 
 Build and install it from the checkout:
 
@@ -194,6 +201,10 @@ code --install-extension solveig.vsix --force
 
 If the `solveig` command is not on VS Code's `PATH`, set
 `solveig.server.path` to the executable's absolute path.
+
+Run **Solveig: Format Document** for explicit formatting. VS Code's own
+`editor.formatOnSave` setting also uses the Solveig formatter; configure the
+maximum width with `solveig.formatting.lineWidth`.
 
 ## Current boundaries
 

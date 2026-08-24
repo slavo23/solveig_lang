@@ -17,17 +17,16 @@ use async_lsp::lsp_types::{
     DocumentFormattingParams, DocumentHighlight, DocumentHighlightParams, DocumentLink,
     DocumentLinkOptions, DocumentLinkParams, DocumentRangeFormattingParams, DocumentSymbolParams,
     DocumentSymbolResponse, FileChangeType, FoldingRange, FoldingRangeParams,
-    FoldingRangeProviderCapability, FormattingOptions, FormattingProperty, GotoDefinitionParams,
-    GotoDefinitionResponse, Hover, HoverParams, HoverProviderCapability, InitializeParams,
-    InitializeResult, InitializedParams, InlayHint, InlayHintOptions, InlayHintParams,
-    InlayHintServerCapabilities, Location, LogMessageParams, MessageType, OneOf,
-    PositionEncodingKind, PrepareRenameResponse, PublishDiagnosticsParams, ReferenceParams,
-    RenameOptions, RenameParams, SelectionRange, SelectionRangeParams,
-    SelectionRangeProviderCapability, SemanticTokensFullOptions, SemanticTokensOptions,
-    SemanticTokensParams, SemanticTokensResult, SemanticTokensServerCapabilities,
-    ServerCapabilities, SignatureHelp, SignatureHelpOptions, SignatureHelpParams,
-    TextDocumentPositionParams, TextDocumentSyncCapability, TextDocumentSyncKind, TextEdit,
-    WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
+    FoldingRangeProviderCapability, GotoDefinitionParams, GotoDefinitionResponse, Hover,
+    HoverParams, HoverProviderCapability, InitializeParams, InitializeResult, InitializedParams,
+    InlayHint, InlayHintOptions, InlayHintParams, InlayHintServerCapabilities, Location,
+    LogMessageParams, MessageType, OneOf, PositionEncodingKind, PrepareRenameResponse,
+    PublishDiagnosticsParams, ReferenceParams, RenameOptions, RenameParams, SelectionRange,
+    SelectionRangeParams, SelectionRangeProviderCapability, SemanticTokensFullOptions,
+    SemanticTokensOptions, SemanticTokensParams, SemanticTokensResult,
+    SemanticTokensServerCapabilities, ServerCapabilities, SignatureHelp, SignatureHelpOptions,
+    SignatureHelpParams, TextDocumentPositionParams, TextDocumentSyncCapability,
+    TextDocumentSyncKind, TextEdit, WorkspaceEdit, WorkspaceSymbolParams, WorkspaceSymbolResponse,
 };
 use async_lsp::router::Router;
 use async_lsp::{ClientSocket, ErrorCode, LanguageServer, MainLoop, ResponseError};
@@ -35,10 +34,10 @@ use solveig_base::PositionEncoding;
 use solveig_ide::SourceEditError;
 
 use crate::semantic_tokens::semantic_tokens_legend;
+use crate::server_config::{formatting_width, server_config_from_initialize};
 use crate::workspace::{ServerConfig, ServerState, WorkspaceSnapshot, check_workspaces};
 
 const CHECK_DEBOUNCE: Duration = Duration::from_millis(150);
-const DEFAULT_FORMAT_WIDTH: usize = 100;
 
 type LspResult<T> = Result<T, ResponseError>;
 type LspFuture<T> = Pin<Box<dyn Future<Output = LspResult<T>> + Send + 'static>>;
@@ -313,12 +312,11 @@ impl LanguageServer for LspServer {
     }
 
     fn formatting(&mut self, params: DocumentFormattingParams) -> LspFuture<Option<Vec<TextEdit>>> {
-        let width = formatting_width(&params.options);
-
         snapshot_result_response(
             &self.state,
             &params.text_document.uri,
-            move |path, encoding, _, snapshot| {
+            move |path, encoding, config, snapshot| {
+                let width = formatting_width(&params.options, config.format_line_width);
                 snapshot
                     .format_document(&path, encoding, width)
                     .map_err(source_edit_response_error)
@@ -330,12 +328,11 @@ impl LanguageServer for LspServer {
         &mut self,
         params: DocumentRangeFormattingParams,
     ) -> LspFuture<Option<Vec<TextEdit>>> {
-        let width = formatting_width(&params.options);
-
         snapshot_result_response(
             &self.state,
             &params.text_document.uri,
-            move |path, encoding, _, snapshot| {
+            move |path, encoding, config, snapshot| {
+                let width = formatting_width(&params.options, config.format_line_width);
                 snapshot
                     .format_range(&path, params.range, encoding, width)
                     .map_err(source_edit_response_error)
@@ -572,33 +569,6 @@ fn lock_state(state: &Mutex<ServerState>) -> MutexGuard<'_, ServerState> {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-fn server_config_from_initialize(params: &InitializeParams) -> ServerConfig {
-    let mut config = ServerConfig::default();
-
-    if let Some(value) = params
-        .initialization_options
-        .as_ref()
-        .and_then(|options| options.get("inlayHints"))
-        .and_then(|options| options.get("enabled"))
-        .and_then(|enabled| enabled.as_bool())
-    {
-        config.inlay_hints_enabled = value;
-    }
-
-    if let Some(value) = params
-        .initialization_options
-        .as_ref()
-        .and_then(|options| options.get("diagnostics"))
-        .and_then(|options| options.get("inferredSignatures"))
-        .and_then(|options| options.get("enabled"))
-        .and_then(|enabled| enabled.as_bool())
-    {
-        config.inferred_signature_hints_enabled = value;
-    }
-
-    config
-}
-
 fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
     ServerCapabilities {
         position_encoding: Some(encoding),
@@ -651,15 +621,6 @@ fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
             },
         )),
         ..ServerCapabilities::default()
-    }
-}
-
-fn formatting_width(options: &FormattingOptions) -> usize {
-    match options.properties.get("lineWidth") {
-        Some(FormattingProperty::Number(width)) if *width > 0 => {
-            usize::try_from(*width).unwrap_or(DEFAULT_FORMAT_WIDTH)
-        }
-        _ => DEFAULT_FORMAT_WIDTH,
     }
 }
 

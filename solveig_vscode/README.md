@@ -122,7 +122,8 @@ Optional editor settings:
 ```json
 {
   "solveig.inlayHints.enabled": false,
-  "solveig.diagnostics.inferredSignatures.enabled": true
+  "solveig.diagnostics.inferredSignatures.enabled": true,
+  "solveig.formatting.lineWidth": 100
 }
 ```
 
@@ -153,6 +154,7 @@ You should then get:
 - signature help
 - module links for imports
 - quick fixes, including adding an inferred type signature when available
+- document formatting and structural selection formatting
 
 Useful commands:
 
@@ -160,6 +162,25 @@ Useful commands:
 - **Solveig: Show Output**
 - **Solveig: Show Trace**
 - **Solveig: Show Type at Cursor**
+- **Solveig: Format Document**
+
+To format Solveig files when VS Code saves them, use the editor's own
+language-scoped setting:
+
+```json
+{
+  "[solveig]": {
+    "editor.defaultFormatter": "solveig-lang.solveig",
+    "editor.formatOnSave": true
+  }
+}
+```
+
+The extension does not add another save hook. **Format Selection** formats the
+single top-level definition touched by the selection and returns no edit when a
+selection crosses definitions. The repository's
+[formatting guide](../docs/formatting.md) covers CLI, CI, editor, and read-only
+package behavior.
 
 If the status bar shows an error, run **Solveig: Show Output**. The most common
 fix is either installing the `solveig` command or setting **Solveig: Server

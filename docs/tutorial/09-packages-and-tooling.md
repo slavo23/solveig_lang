@@ -109,9 +109,22 @@ Read them with `std.env.getArgs`. The CLI also accepts `--dump-bytecode`,
 `--dump-evidence`, and `--verify-core`; these are diagnostic compiler options,
 not requirements for normal execution.
 
-The current CLI runs packages and starts the language server with `solveig
-lsp`. It does not provide a REPL, formatter command, package manager, or test
-runner command.
+The CLI also starts the language server with `solveig lsp` and formats source
+with `solveig fmt`. Format a local package in place with:
+
+```sh
+solveig fmt --project-root path/to/project
+```
+
+Check formatting without writing files with:
+
+```sh
+solveig fmt --check --project-root path/to/project
+```
+
+The formatter's only style option is `--width`, which defaults to 100. A parse
+error leaves the complete selected file set unchanged. The current CLI does
+not provide a REPL, package manager, or test-runner command.
 
 ## Scratch files
 
@@ -140,7 +153,25 @@ Current editor capabilities include:
 - completion and signature help;
 - go to definition, find references, document symbols, and workspace symbols;
 - semantic highlighting and optional inlay hints;
-- rename and code actions when the affected source is locally owned.
+- rename and code actions when the affected source is locally owned;
+- canonical document formatting and structural selection formatting.
+
+Run **Solveig: Format Document** from the Command Palette. To use VS Code's
+format-on-save support only for Solveig files:
+
+```json
+{
+  "[solveig]": {
+    "editor.defaultFormatter": "solveig-lang.solveig",
+    "editor.formatOnSave": true
+  },
+  "solveig.formatting.lineWidth": 100
+}
+```
+
+Format-on-save is a VS Code setting rather than an extension-specific save
+hook. Selection formatting expands to one complete top-level definition; a
+selection crossing two definitions is left unchanged.
 
 Dependency and compiler-library source is readable and navigable. IDE-generated
 mutations are restricted to local source, so a rename that would edit a loaded
@@ -163,8 +194,9 @@ Useful checks are:
 6. If `SOLVEIG_LIB` is set, does it point at the directory containing both
    shipped packages?
 
-The [package reference](../packages.md), [diagnostics reference](../diagnostics.md),
-and [language-server guide](../lsp.md) provide the detailed lookup tables.
+The [package reference](../packages.md), [formatting guide](../formatting.md),
+[diagnostics reference](../diagnostics.md), and [language-server guide](../lsp.md)
+provide the detailed lookup tables.
 
 ## Where to go next
 

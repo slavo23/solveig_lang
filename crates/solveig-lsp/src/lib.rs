@@ -10,6 +10,7 @@ mod inlay_hints;
 mod navigation;
 mod semantic_tokens;
 mod server;
+mod server_config;
 mod workspace;
 
 pub use server::{LspServer, run_stdio, run_stdio_blocking};

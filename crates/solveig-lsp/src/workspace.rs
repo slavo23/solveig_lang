@@ -31,6 +31,8 @@ use crate::semantic_tokens::lsp_semantic_tokens;
 
 mod editor_features;
 
+pub(crate) const DEFAULT_FORMAT_LINE_WIDTH: usize = 100;
+
 pub(crate) struct ServerState {
     workspaces: BTreeMap<PathBuf, Arc<Mutex<Workspace>>>,
     roots: Vec<PathBuf>,
@@ -79,6 +81,7 @@ enum LspFailure {
 pub(crate) struct ServerConfig {
     pub(crate) inlay_hints_enabled: bool,
     pub(crate) inferred_signature_hints_enabled: bool,
+    pub(crate) format_line_width: usize,
 }
 
 impl Default for ServerConfig {
@@ -86,6 +89,7 @@ impl Default for ServerConfig {
         Self {
             inlay_hints_enabled: true,
             inferred_signature_hints_enabled: false,
+            format_line_width: DEFAULT_FORMAT_LINE_WIDTH,
         }
     }
 }

@@ -6,3 +6,4 @@
 .vscode-test/**
 npm-debug.log
 README_PLAN.md
+test/**
