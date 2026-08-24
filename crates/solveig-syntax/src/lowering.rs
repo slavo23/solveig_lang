@@ -496,6 +496,7 @@ pub fn lower(session: &Session, parsed: &ParsedCst, source: &str) -> ParsedModul
     ParsedModule {
         file: parsed.file,
         cst,
+        directives: ModuleDirectives::default(),
         imports,
         defs,
     }
@@ -518,6 +519,7 @@ pub fn parse_source(session: &Session, file: FileId, source: &str) -> ParsedModu
             return ParsedModule {
                 file,
                 cst,
+                directives: ModuleDirectives::default(),
                 imports: Vec::new(),
                 defs: Vec::new(),
             };

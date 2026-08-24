@@ -8,6 +8,15 @@ fn lower_test_source(source: &str) -> ParsedModule {
 }
 
 #[test]
+fn modules_without_visibility_syntax_retain_empty_directives() {
+    let parsed = lower_test_source("identity x = x\n");
+
+    assert!(parsed.directives.exports.is_none());
+    assert!(parsed.directives.private.is_empty());
+    assert!(parsed.directives.reexports.is_empty());
+}
+
+#[test]
 fn lowered_ast_nodes_point_into_cst_arena() {
     let parsed = lower_test_source("main : Task ()\nmain = do\n    printLine \"ok\"\n");
     let signature = &parsed.defs[0];

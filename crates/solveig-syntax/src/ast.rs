@@ -99,6 +99,45 @@ pub struct ImportDecl {
     pub cst_id: CstId,
 }
 
+/// Controls whether a selected data type exposes its constructors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EntityExposure {
+    Opaque,
+    Constructors,
+}
+
+/// Names one entity in a module directive or selective import.
+#[derive(Debug, Clone)]
+pub struct ModuleEntity {
+    pub name: Spanned<Symbol>,
+    pub exposure: EntityExposure,
+    pub rename: Option<Spanned<Symbol>>,
+}
+
+/// Selects every visible entity or a precise entity list.
+#[derive(Debug, Clone)]
+pub enum ModuleSelection {
+    All,
+    Only(Vec<ModuleEntity>),
+}
+
+/// Republishes selected entities from one source module.
+#[derive(Debug, Clone)]
+pub struct ReexportDecl {
+    pub module: ModuleName,
+    pub selection: ModuleSelection,
+    pub span: Span,
+    pub cst_id: CstId,
+}
+
+/// Retains the centralized visibility directives at the start of a module.
+#[derive(Debug, Clone, Default)]
+pub struct ModuleDirectives {
+    pub exports: Option<Vec<ModuleEntity>>,
+    pub private: Vec<ModuleEntity>,
+    pub reexports: Vec<ReexportDecl>,
+}
+
 /// Documentation text attached to a surface declaration.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocComment {
@@ -117,6 +156,7 @@ impl DocComment {
 pub struct ParsedModule {
     pub file: FileId,
     pub cst: SyntaxTree,
+    pub directives: ModuleDirectives,
     pub imports: Vec<ImportDecl>,
     pub defs: SurfaceProgram,
 }
