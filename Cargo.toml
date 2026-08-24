@@ -46,6 +46,7 @@ members = [
     "crates/solveig-base",
     "crates/solveig-check",
     "crates/solveig-driver",
+    "crates/solveig-fmt",
     "crates/solveig-ide",
     "crates/solveig-lsp",
     "crates/solveig-lower",
@@ -61,6 +62,7 @@ camino = { version = "1.2.1", features = ["serde1"] }
 ena = "0.14.4"
 la-arena = "0.3.1"
 petgraph = "0.8.3"
+pretty = "0.12.5"
 rustc-hash = "2.1.1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1.15.2"

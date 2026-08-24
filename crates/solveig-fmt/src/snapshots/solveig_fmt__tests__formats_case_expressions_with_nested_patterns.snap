@@ -1,0 +1,9 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"data User=User String String\\nemail user=case user of\\n User name address=>address\\n | _=>\\\"unknown\\\"\\n\",\n100,)"
+---
+data User = User String String
+email user =
+    case user of
+        User name address => address
+        | _ => "unknown"

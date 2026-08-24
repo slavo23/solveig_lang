@@ -1,0 +1,8 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"choose x=let y=fun value=>value in if x then y 1 else y 2\\n\",\n36,)"
+---
+choose x =
+    let y =
+        fun value => value
+        in if x then y 1 else y 2

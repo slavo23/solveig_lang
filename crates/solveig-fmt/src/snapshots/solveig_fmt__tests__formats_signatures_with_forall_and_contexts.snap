@@ -1,0 +1,5 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"render:forall a.(Show a,Eq a)=>a->String\\n\", 100,)"
+---
+render : forall a. (Show a, Eq a) => a -> String

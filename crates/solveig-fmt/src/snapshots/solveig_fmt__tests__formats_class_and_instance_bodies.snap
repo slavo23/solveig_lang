@@ -1,0 +1,10 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"class Eq a where\\n eq:a->a->Bool\\n default eq x y=True\\ninstance Eq Int where\\n eq 0 0=True\\n eq _ _=False\\n\",\n100,)"
+---
+class Eq a where
+    eq : a -> a -> Bool
+    default eq x y = True
+instance Eq Int where
+    eq 0 0 = True
+    eq _ _ = False

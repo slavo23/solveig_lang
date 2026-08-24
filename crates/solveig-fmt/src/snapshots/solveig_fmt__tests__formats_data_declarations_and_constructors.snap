@@ -1,0 +1,7 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"data Tree a=Leaf a|Branch (Tree a) (Tree a)\\n\", 32,)"
+---
+data Tree a =
+    Leaf a
+    | Branch (Tree a) (Tree a)

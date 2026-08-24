@@ -1,0 +1,15 @@
+[package]
+name = "solveig-fmt"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+pretty = { workspace = true }
+solveig-syntax = { path = "../solveig-syntax", version = "0.1.0" }
+
+[dev-dependencies]
+insta = "1"
+solveig-base = { path = "../solveig-base", version = "0.1.0" }
+
+[lints]
+workspace = true

@@ -1,0 +1,9 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"main=do\\n name<-readLine\\n let greeting=appendString \\\"hello, \\\" name\\n printLine greeting\\n\",\n100,)"
+---
+main =
+    do
+        name <- readLine
+        let greeting = appendString "hello, " name
+        printLine greeting

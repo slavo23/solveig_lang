@@ -1,0 +1,10 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"mix x y=(x,[y,2],(1+),(`mix` y),1 `mix` y)\\n\", 28,)"
+---
+mix x y =
+    (x,
+        [y, 2],
+        (1 +),
+        (`mix` y),
+        1 `mix` y)

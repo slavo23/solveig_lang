@@ -1,0 +1,15 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"-- | choice docs\\ndata Choice=\\n -- | first choice\\n First\\n | -- | second choice\\n Second\\n\\n-- | class docs\\nclass Describe a where\\n -- | method docs\\n describe:a->String\\n\",\n100,)"
+---
+-- | choice docs
+data Choice =
+    -- | first choice
+    First
+    | -- | second choice
+    Second
+
+-- | class docs
+class Describe a where
+    -- | method docs
+    describe : a -> String

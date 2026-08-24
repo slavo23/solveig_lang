@@ -1,0 +1,8 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"greet   name=appendString   \\\"hello, \\\" name\\n\", 30,)"
+---
+greet name =
+    appendString
+        "hello, "
+        name

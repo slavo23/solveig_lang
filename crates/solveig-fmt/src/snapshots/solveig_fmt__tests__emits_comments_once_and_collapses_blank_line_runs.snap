@@ -1,0 +1,9 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"-- | identity\\nid x=x\\n\\n\\n-- ordinary\\nmain=id 1\\n\", 100,)"
+---
+-- | identity
+id x = x
+
+-- ordinary
+main = id 1
