@@ -33,6 +33,418 @@ fn insert_docs(api: &mut ModuleApi, def_id: DefId, docs: Option<&DocComment>) {
     }
 }
 
+fn directive_error(file: FileId, entity: &ModuleEntity, message: String) -> ResolveError {
+    ResolveError::InvalidModuleDirective {
+        span: FileSpan::new(file, entity.name.1),
+        message,
+    }
+}
+
+fn select_entity(
+    api: &ModuleApi,
+    file: FileId,
+    entity: &ModuleEntity,
+    names: &mut ApiNames,
+) -> Result<(), ResolveError> {
+    if entity.rename.is_some() {
+        return Err(directive_error(
+            file,
+            entity,
+            "renames are not allowed in export or private directives".to_string(),
+        ));
+    }
+
+    let name = entity.name.0;
+    let matches = usize::from(api.terms.contains_key(&name))
+        + usize::from(api.types.contains_key(&name))
+        + usize::from(api.type_aliases.contains_key(&name))
+        + usize::from(api.classes.contains_key(&name));
+    if matches == 0 {
+        return Err(directive_error(
+            file,
+            entity,
+            "module directive names no local term, type, alias, or class".to_string(),
+        ));
+    }
+    if matches > 1 {
+        return Err(directive_error(
+            file,
+            entity,
+            "module directive name is ambiguous across namespaces".to_string(),
+        ));
+    }
+
+    if api.terms.contains_key(&name) {
+        if api
+            .class_methods
+            .values()
+            .any(|methods| methods.contains(&name))
+        {
+            return Err(directive_error(
+                file,
+                entity,
+                "a class method is exposed by selecting its owning class".to_string(),
+            ));
+        }
+        if entity.exposure == EntityExposure::Constructors {
+            return Err(directive_error(
+                file,
+                entity,
+                "only a data type can expose constructors with `(..)`".to_string(),
+            ));
+        }
+        names.terms.insert(name);
+    } else if api.types.contains_key(&name) {
+        names.types.insert(name);
+        if entity.exposure == EntityExposure::Constructors {
+            names.constructors.extend(
+                api.data_constructors
+                    .get(&name)
+                    .into_iter()
+                    .flatten()
+                    .copied(),
+            );
+        }
+    } else if api.type_aliases.contains_key(&name) {
+        if entity.exposure == EntityExposure::Constructors {
+            return Err(directive_error(
+                file,
+                entity,
+                "a type alias has no constructors to expose".to_string(),
+            ));
+        }
+        names.type_aliases.insert(name);
+    } else if api.classes.contains_key(&name) {
+        if entity.exposure == EntityExposure::Constructors {
+            return Err(directive_error(
+                file,
+                entity,
+                "a class has no constructors to expose".to_string(),
+            ));
+        }
+        names.classes.insert(name);
+        names
+            .terms
+            .extend(api.class_methods.get(&name).into_iter().flatten().copied());
+    }
+    Ok(())
+}
+
+/// Applies centralized local export/private declarations after compiler-owned
+/// Prelude entries have been seeded into the module API.
+pub fn apply_module_visibility(
+    parsed: &ParsedModule,
+    api: &mut ModuleApi,
+) -> Result<(), ResolveError> {
+    if let [_, duplicate, ..] = parsed.directives.exports.as_slice() {
+        return Err(ResolveError::InvalidModuleDirective {
+            span: FileSpan::new(parsed.file, duplicate.span),
+            message: "a module may contain only one export directive".to_string(),
+        });
+    }
+    if let [_, duplicate, ..] = parsed.directives.private.as_slice() {
+        return Err(ResolveError::InvalidModuleDirective {
+            span: FileSpan::new(parsed.file, duplicate.span),
+            message: "a module may contain only one private directive".to_string(),
+        });
+    }
+
+    if let Some(exports) = parsed.directives.exports.first() {
+        let mut external = ApiNames::default();
+        for entity in &exports.entities {
+            select_entity(api, parsed.file, entity, &mut external)?;
+        }
+        api.external = external;
+    }
+    if let Some(private) = parsed.directives.private.first() {
+        let mut private_names = ApiNames::default();
+        for entity in &private.entities {
+            select_entity(api, parsed.file, entity, &mut private_names)?;
+        }
+        api.private = private_names;
+    }
+
+    let exported_private = api
+        .external
+        .terms
+        .intersection(&api.private.terms)
+        .next()
+        .or_else(|| api.external.types.intersection(&api.private.types).next())
+        .or_else(|| {
+            api.external
+                .type_aliases
+                .intersection(&api.private.type_aliases)
+                .next()
+        })
+        .or_else(|| {
+            api.external
+                .constructors
+                .intersection(&api.private.constructors)
+                .next()
+        })
+        .or_else(|| {
+            api.external
+                .classes
+                .intersection(&api.private.classes)
+                .next()
+        });
+    if exported_private.is_some() {
+        return Err(ResolveError::InvalidModuleDirective {
+            span: FileSpan::new(
+                parsed.file,
+                parsed
+                    .directives
+                    .private
+                    .first()
+                    .expect("ICE: exported private name requires private directive")
+                    .span,
+            ),
+            message: "the same entity cannot be both exported and private".to_string(),
+        });
+    }
+
+    Ok(())
+}
+
+fn copy_doc(source: &ModuleApi, target: &mut ModuleApi, id: DefId) {
+    if let Some(docs) = source.docs.get(&id) {
+        target.docs.insert(id, docs.clone());
+    }
+}
+
+fn reexport_collision(file: FileId, reexport: &ReexportDecl, name: Symbol) -> ResolveError {
+    ResolveError::ReexportConflict {
+        span: FileSpan::new(file, reexport.span),
+        name,
+    }
+}
+
+fn insert_reexported(
+    target: &mut FxHashMap<Symbol, DefId>,
+    name: Symbol,
+    id: DefId,
+    file: FileId,
+    reexport: &ReexportDecl,
+) -> Result<(), ResolveError> {
+    if let Some(previous) = target.insert(name, id)
+        && previous != id
+    {
+        return Err(reexport_collision(file, reexport, name));
+    }
+    Ok(())
+}
+
+fn project_reexport_entity(
+    source: &ModuleApi,
+    out: &mut ModuleApi,
+    file: FileId,
+    reexport: &ReexportDecl,
+    entity: &ModuleEntity,
+) -> Result<(), ResolveError> {
+    let name = entity.name.0;
+    let public_name = entity.rename.map_or(name, |rename| rename.0);
+    let matches = usize::from(source.terms.contains_key(&name))
+        + usize::from(source.types.contains_key(&name))
+        + usize::from(source.type_aliases.contains_key(&name))
+        + usize::from(source.classes.contains_key(&name));
+    if matches == 0 {
+        return Err(directive_error(
+            file,
+            entity,
+            "re-export names no visible term, type, alias, or class".to_string(),
+        ));
+    }
+    if matches > 1 {
+        return Err(directive_error(
+            file,
+            entity,
+            "re-export name is ambiguous across namespaces".to_string(),
+        ));
+    }
+
+    if let Some(id) = source.terms.get(&name).copied() {
+        if source
+            .class_methods
+            .values()
+            .any(|methods| methods.contains(&name))
+        {
+            return Err(directive_error(
+                file,
+                entity,
+                "a class method is re-exported by selecting its owning class".to_string(),
+            ));
+        }
+        if entity.exposure == EntityExposure::Constructors {
+            return Err(directive_error(
+                file,
+                entity,
+                "only a data type can expose constructors with `(..)`".to_string(),
+            ));
+        }
+        insert_reexported(&mut out.terms, public_name, id, file, reexport)?;
+        copy_doc(source, out, id);
+        if let Some(fixity) = source.fixities.get(&name) {
+            out.fixities.insert(public_name, *fixity);
+        }
+        return Ok(());
+    }
+
+    if let Some(id) = source.types.get(&name).copied() {
+        insert_reexported(&mut out.types, public_name, id, file, reexport)?;
+        copy_doc(source, out, id);
+        if entity.exposure == EntityExposure::Constructors {
+            let constructors = source
+                .data_constructors
+                .get(&name)
+                .cloned()
+                .unwrap_or_default();
+            for constructor in &constructors {
+                let constructor_id = source
+                    .constructors
+                    .get(constructor)
+                    .copied()
+                    .unwrap_or_else(|| solveig_base::ice!("data API names a missing constructor"));
+                insert_reexported(
+                    &mut out.constructors,
+                    *constructor,
+                    constructor_id,
+                    file,
+                    reexport,
+                )?;
+                copy_doc(source, out, constructor_id);
+            }
+            out.data_constructors.insert(public_name, constructors);
+        }
+        return Ok(());
+    }
+
+    if let Some(id) = source.type_aliases.get(&name).copied() {
+        if entity.exposure == EntityExposure::Constructors {
+            return Err(directive_error(
+                file,
+                entity,
+                "a type alias has no constructors to expose".to_string(),
+            ));
+        }
+        insert_reexported(&mut out.type_aliases, public_name, id, file, reexport)?;
+        copy_doc(source, out, id);
+        return Ok(());
+    }
+
+    let id = source.classes.get(&name).copied().unwrap_or_else(|| {
+        solveig_base::ice!("re-export entity matched a class but no class was present")
+    });
+    if entity.exposure == EntityExposure::Constructors {
+        return Err(directive_error(
+            file,
+            entity,
+            "a class has no constructors to expose".to_string(),
+        ));
+    }
+    insert_reexported(&mut out.classes, public_name, id, file, reexport)?;
+    copy_doc(source, out, id);
+    let methods = source.class_methods.get(&name).cloned().unwrap_or_default();
+    for method in &methods {
+        let method_id = source
+            .terms
+            .get(method)
+            .copied()
+            .unwrap_or_else(|| solveig_base::ice!("class API names a missing method term"));
+        insert_reexported(&mut out.terms, *method, method_id, file, reexport)?;
+        copy_doc(source, out, method_id);
+        if let Some(fixity) = source.fixities.get(method) {
+            out.fixities.insert(*method, *fixity);
+        }
+    }
+    out.class_methods.insert(public_name, methods);
+    Ok(())
+}
+
+fn projected_reexport(
+    source: &ModuleApi,
+    file: FileId,
+    reexport: &ReexportDecl,
+) -> Result<ModuleApi, ResolveError> {
+    match &reexport.selection {
+        ModuleSelection::All => Ok(source.clone()),
+        ModuleSelection::Only(entities) => {
+            let mut out = ModuleApi::new(source.package);
+            for entity in entities {
+                project_reexport_entity(source, &mut out, file, reexport, entity)?;
+            }
+            Ok(out)
+        }
+    }
+}
+
+fn merge_reexport(
+    api: &mut ModuleApi,
+    projected: &ModuleApi,
+    file: FileId,
+    reexport: &ReexportDecl,
+) -> Result<(), ResolveError> {
+    for (name, id) in &projected.terms {
+        insert_reexported(&mut api.terms, *name, *id, file, reexport)?;
+        api.external.terms.insert(*name);
+        api.reexported.terms.insert(*name);
+    }
+    for (name, id) in &projected.types {
+        insert_reexported(&mut api.types, *name, *id, file, reexport)?;
+        api.external.types.insert(*name);
+        api.reexported.types.insert(*name);
+    }
+    for (name, id) in &projected.type_aliases {
+        insert_reexported(&mut api.type_aliases, *name, *id, file, reexport)?;
+        api.external.type_aliases.insert(*name);
+        api.reexported.type_aliases.insert(*name);
+    }
+    for (name, id) in &projected.constructors {
+        insert_reexported(&mut api.constructors, *name, *id, file, reexport)?;
+        api.external.constructors.insert(*name);
+        api.reexported.constructors.insert(*name);
+    }
+    for (name, id) in &projected.classes {
+        insert_reexported(&mut api.classes, *name, *id, file, reexport)?;
+        api.external.classes.insert(*name);
+        api.reexported.classes.insert(*name);
+    }
+    api.fixities.extend(projected.fixities.clone());
+    api.docs.extend(projected.docs.clone());
+    api.class_methods.extend(projected.class_methods.clone());
+    api.data_constructors
+        .extend(projected.data_constructors.clone());
+    Ok(())
+}
+
+/// Resolves and composes all centralized re-export declarations after local API
+/// construction. Module order is dependency-first, so every source API is ready.
+pub fn apply_module_reexports(
+    parsed: &ParsedModule,
+    api: &mut ModuleApi,
+    dependencies: &FxHashMap<ModuleName, SharedModuleApi>,
+) -> Result<(), ResolveError> {
+    let mut seen_modules = FxHashSet::default();
+    for reexport in &parsed.directives.reexports {
+        if !seen_modules.insert(reexport.module.clone()) {
+            return Err(ResolveError::InvalidModuleDirective {
+                span: FileSpan::new(parsed.file, reexport.span),
+                message: "a source module may be re-exported only once".to_string(),
+            });
+        }
+        let source =
+            dependencies
+                .get(&reexport.module)
+                .ok_or_else(|| ResolveError::UnknownModule {
+                    span: FileSpan::new(parsed.file, reexport.span),
+                    module: reexport.module.clone(),
+                })?;
+        let visible = source.visible_to(api.package);
+        let projected = projected_reexport(&visible, parsed.file, reexport)?;
+        merge_reexport(api, &projected, parsed.file, reexport)?;
+    }
+    Ok(())
+}
+
 pub fn build_module_api(
     package: PackageId,
     module_id: ModuleId,
@@ -124,6 +536,10 @@ pub fn build_module_api(
 
                     let ctor_id = local_def_id(module_id, ctor.0.name.0);
                     api.constructors.insert(ctor.0.name.0, ctor_id);
+                    api.data_constructors
+                        .entry(name.0)
+                        .or_default()
+                        .push(ctor.0.name.0);
                     insert_docs(&mut api, ctor_id, ctor.0.docs.as_ref());
                 }
             }

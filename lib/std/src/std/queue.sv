@@ -1,3 +1,5 @@
+export (Queue, empty, singleton, length, isEmpty, enqueue, peek, dequeue, fromList, toList)
+
 import std.list(reverse)
 
 -- | An immutable FIFO queue with amortized constant-time ends.

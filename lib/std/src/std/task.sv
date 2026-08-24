@@ -1,3 +1,8 @@
+export (
+    catchDefect, mask, finally, bracket, withThread, race, concurrently, timeout,
+    mapConcurrentlyBounded
+)
+
 import prelude.prim(catchDefectIO, maskIO, finallyIO, restoreMaskIO, raiseDefectIO)
 import std.channel
 import std.list

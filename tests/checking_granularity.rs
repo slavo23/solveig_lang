@@ -345,7 +345,9 @@ main = answer
     );
     write_source(
         &library.join("src/core.sv"),
-        r#"answer : Int
+        r#"export (answer)
+
+answer : Int
 answer = 41
 "#,
     );

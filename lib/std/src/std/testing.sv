@@ -1,3 +1,5 @@
+export (TestFailure(..), assert, assertEqual, checkAll, failureMessage)
+
 -- | A failed assertion with a stable user-provided label and optional detail.
 data TestFailure = TestFailure String
 

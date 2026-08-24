@@ -87,6 +87,21 @@ import std.io(readFile)
 import std.text(lines)
 ```
 
+Library modules publish a deliberate external API while keeping unlisted
+definitions reusable inside their package:
+
+```solveig
+export (Config, loadConfig)
+private (validateRawConfig)
+
+import std.io(readFile)
+```
+
+Use `Config(..)` when constructors are public, and build facade modules with
+precise `reexport package.module(...)` declarations. The
+[package and module reference](docs/packages.md) covers visibility, opaque
+types, re-exports, and path dependencies.
+
 ## A small language tour
 
 Equations and patterns are ordinary ways to define functions:

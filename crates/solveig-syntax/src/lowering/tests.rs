@@ -11,9 +11,57 @@ fn lower_test_source(source: &str) -> ParsedModule {
 fn modules_without_visibility_syntax_retain_empty_directives() {
     let parsed = lower_test_source("identity x = x\n");
 
-    assert!(parsed.directives.exports.is_none());
+    assert!(parsed.directives.exports.is_empty());
     assert!(parsed.directives.private.is_empty());
     assert!(parsed.directives.reexports.is_empty());
+}
+
+#[test]
+fn module_directives_retain_exposure_renames_and_reexport_selection() {
+    let parsed = lower_test_source(
+        "export (Widget(..), visible, (<+>))\n\
+         private (helper)\n\
+         reexport other.api(value as renamed, PublicType)\n\
+         data Widget = MkWidget\n\
+         visible = 1\n\
+         helper = 2\n\
+         infixl 6 <+>\n\
+         (<+>) x y = x + y\n",
+    );
+
+    assert_eq!(parsed.directives.exports.len(), 1);
+    assert_eq!(parsed.directives.exports[0].entities.len(), 3);
+    assert_eq!(
+        parsed.directives.exports[0].entities[0].exposure,
+        EntityExposure::Constructors
+    );
+    assert_eq!(parsed.directives.private.len(), 1);
+    assert_eq!(parsed.directives.reexports.len(), 1);
+    assert_eq!(parsed.directives.reexports[0].module.0.len(), 2);
+    let ModuleSelection::Only(entities) = &parsed.directives.reexports[0].selection else {
+        panic!("expected precise re-export selection");
+    };
+    assert!(entities[0].rename.is_some());
+}
+
+#[test]
+fn multiline_module_entity_lists_lower() {
+    let source = "export (\n    alpha, Beta(..),\n    (<+>)\n)\nalpha = 1\ndata Beta = MkBeta\n(<+>) x y = x + y\n";
+    let parsed = lower_test_source(source);
+
+    assert_eq!(parsed.directives.exports.len(), 1);
+    assert_eq!(parsed.directives.exports[0].entities.len(), 3);
+}
+
+#[test]
+fn compiler_primitive_export_surface_lowers() {
+    let source = include_str!("../../../../lib/prelude/src/prelude/prim.sv");
+    let session = Session::new();
+    let file = session.add_file("prim.sv", source);
+    let parsed = parse_source(&session, file, source);
+
+    assert_eq!(parsed.directives.exports.len(), 1);
+    assert!(parsed.directives.exports[0].entities.len() > 100);
 }
 
 #[test]

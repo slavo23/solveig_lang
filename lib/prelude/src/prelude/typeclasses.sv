@@ -1,3 +1,10 @@
+export (
+    Ordering(..), Eq, eq, notEq, PartialOrd, Ord, less, lessEq, greater, greaterEq,
+    minOrd, maxOrd, clampOrd, totalCompareFloat, Num, div, mod, subtract, Fractional,
+    Functor, (<$>), Applicative, (<*>), liftA2, applyRight, applyLeft, (<*), (*>),
+    Monad, (>>=), thenM, (>>), Show, Semigroup, (<>), Monoid, mconcat
+)
+
 import prelude.builtins
 import prelude.list
 import prelude.prim

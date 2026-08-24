@@ -62,14 +62,14 @@ use solveig_lower::closure_lower::lower_to_closure_ir;
 use solveig_lower::lowering::lower_module;
 use solveig_package::{Manifest, PackageId, find_nearest_manifest};
 use solveig_resolve::project::{
-    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleContext, ModuleTable,
-    ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi, TypeAlias,
-    TypedDisplayMaps, build_module_api, build_typed_module_api, compiler_builtin_api,
-    compiler_prelude_prim_module, effective_imports, module_order_checked,
-    seed_compiler_prelude_module_api,
+    BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleApi, ModuleContext,
+    ModuleTable, ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi,
+    TypeAlias, TypedDisplayMaps, apply_module_reexports, apply_module_visibility, build_module_api,
+    build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module, effective_imports,
+    module_order_checked, seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
-use solveig_syntax::ast::{ImportSpec, ModuleName};
+use solveig_syntax::ast::{ImportSpec, ModuleName, ModuleSelection, ParsedModule};
 use solveig_vm::vm::{ExitStatus, Machine};
 
 use crate::DriverError;

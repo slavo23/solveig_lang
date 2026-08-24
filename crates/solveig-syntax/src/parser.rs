@@ -615,6 +615,9 @@ impl<'source> Parser<'source> {
                 | Token::Class
                 | Token::Instance
                 | Token::Import
+                | Token::Export
+                | Token::Private
+                | Token::Reexport
                 | Token::Infixl
                 | Token::Infixr
                 | Token::Infix

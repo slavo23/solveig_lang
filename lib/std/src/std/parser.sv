@@ -1,3 +1,17 @@
+export (
+    Position, positionOffset, positionLine, positionColumn, Consumption(..),
+    InputStep(..), InputOps(..), nextInput, inputPosition, restoreInput,
+    describeInputToken, ParseError, errorPosition, errorUnexpected, errorExpected,
+    errorContexts, errorCustom, errorReason, ParseReply(..), Parser, foldReply, runParser,
+    resume, runComplete, succeed, mapResult, andThen, applyParser, pair, keepRight, keepLeft,
+    choice, attempt, cut, label, (<?>), context, expected, customFailure, defer,
+    anyToken, satisfy, token, tokens, tokensExact, endOfInput, manyFold, many, some,
+    skipMany, optional, between, separatedBy, ListInput, listInput, listInputOps,
+    TextInput, textInput, textInputOps, ByteInput, byteInput, byteInputOps, StreamInput,
+    streamInput, streamInputOps, feedStream, finishStream, supply, finishReply,
+    renderError
+)
+
 import std.bytes
 import std.list
 import std.set

@@ -162,6 +162,9 @@ fn syntax_token_kind(kind: &Token) -> Option<SourceSemanticTokenKind> {
         | Token::Where
         | Token::Default
         | Token::Import
+        | Token::Export
+        | Token::Private
+        | Token::Reexport
         | Token::As
         | Token::Infixl
         | Token::Infixr

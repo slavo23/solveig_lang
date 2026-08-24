@@ -3,95 +3,15 @@
 
 use super::*;
 
-#[derive(Debug, Clone)]
-pub struct ModuleTable {
-    names: Vec<ModuleName>,
-    packages: Vec<PackageId>,
-    ids: FxHashMap<ModuleName, ModuleId>,
-}
+include!("module_api/module_table.rs");
 
-impl ModuleTable {
-    pub fn new(
-        session: &Session,
-        modules: impl IntoIterator<Item = (ModuleName, PackageId)>,
-    ) -> Self {
-        let mut entries = modules.into_iter().collect::<Vec<_>>();
-        entries.sort_by_key(|(module, _)| module.as_string(session));
-        entries.dedup_by(|(left, _), (right, _)| left == right);
-
-        let names = entries
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>();
-        let packages = entries
-            .iter()
-            .map(|(_, package)| *package)
-            .collect::<Vec<_>>();
-
-        let ids = names
-            .iter()
-            .enumerate()
-            .map(|(index, name)| {
-                let id = ModuleId(
-                    u32::try_from(index).expect("ICE: module table exceeded u32 capacity"),
-                );
-                (name.clone(), id)
-            })
-            .collect();
-
-        Self {
-            names,
-            packages,
-            ids,
-        }
-    }
-
-    pub fn id(&self, module: &ModuleName) -> Option<ModuleId> {
-        self.ids.get(module).copied()
-    }
-
-    pub fn name(&self, id: ModuleId) -> &ModuleName {
-        self.names
-            .get(id.0 as usize)
-            .expect("ICE: ModuleId not present in ModuleTable")
-    }
-
-    pub fn package(&self, id: ModuleId) -> PackageId {
-        *self
-            .packages
-            .get(id.0 as usize)
-            .expect("ICE: ModuleId package not present in ModuleTable")
-    }
-
-    pub fn package_for_name(&self, module: &ModuleName) -> Option<PackageId> {
-        self.id(module).map(|id| self.package(id))
-    }
-
-    pub fn def_path(&self, def: DefId) -> DefPath<'_> {
-        DefPath {
-            module: self.name(def.module),
-            name: def.name,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct DefPath<'a> {
-    module: &'a ModuleName,
-    name: Symbol,
-}
-
-impl DefPath<'_> {
-    pub fn render(self, session: &Session) -> String {
-        if self.module.0.is_empty() {
-            return session.str(self.name).to_string();
-        }
-
-        let mut rendered = self.module.as_string(session);
-        rendered.push('.');
-        rendered.push_str(&session.str(self.name));
-        rendered
-    }
+#[derive(Debug, Clone, Default)]
+pub struct ApiNames {
+    pub terms: FxHashSet<Symbol>,
+    pub types: FxHashSet<Symbol>,
+    pub type_aliases: FxHashSet<Symbol>,
+    pub constructors: FxHashSet<Symbol>,
+    pub classes: FxHashSet<Symbol>,
 }
 
 #[derive(Debug, Clone)]
@@ -106,6 +26,10 @@ pub struct ModuleApi {
     pub docs: FxHashMap<DefId, DocComment>,
 
     pub class_methods: FxHashMap<Symbol, Vec<Symbol>>,
+    pub data_constructors: FxHashMap<Symbol, Vec<Symbol>>,
+    pub external: ApiNames,
+    pub private: ApiNames,
+    pub reexported: ApiNames,
 }
 impl ModuleApi {
     pub fn new(package: PackageId) -> Self {
@@ -119,6 +43,10 @@ impl ModuleApi {
             fixities: FxHashMap::default(),
             docs: FxHashMap::default(),
             class_methods: FxHashMap::default(),
+            data_constructors: FxHashMap::default(),
+            external: ApiNames::default(),
+            private: ApiNames::default(),
+            reexported: ApiNames::default(),
         }
     }
 
@@ -530,6 +458,11 @@ pub fn seed_compiler_prelude_module_api(
             api.constructors.insert(symbol, def_id);
             insert_compiler_doc(api, def_id, compiler_constructor_doc(name));
         }
+
+        api.data_constructors.insert(
+            session.intern("Bool"),
+            vec![session.intern("True"), session.intern("False")],
+        );
     }
 
     for builtin in &builtins.builtin_defs {
@@ -735,3 +668,5 @@ pub(crate) fn local_def_id(module_id: ModuleId, name: Symbol) -> DefId {
         name,
     }
 }
+
+include!("module_api/visibility.rs");

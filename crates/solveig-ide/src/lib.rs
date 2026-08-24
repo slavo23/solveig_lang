@@ -20,8 +20,9 @@ use solveig_driver::{Compilation, CompilationSnapshot, SourceProvider, module_na
 use solveig_package::{PackageId, PackageKind};
 use solveig_resolve::project::{
     EffectiveImport, ModuleApi, ModuleFile, ParsedProject, Project, ResolveError, ResolveNameKind,
-    SharedModuleApi, SharedTypedModuleApi, TypeAlias, TypedModuleApi, build_module_api,
-    effective_imports, function_equation_group_indices, instance_method_equation_group_indices,
+    SharedModuleApi, SharedTypedModuleApi, TypeAlias, TypedModuleApi, apply_module_visibility,
+    build_module_api, effective_imports, function_equation_group_indices,
+    instance_method_equation_group_indices,
 };
 use solveig_syntax::ast::{
     ClassMethod, DocComment, ImportDecl, ImportSpec, InstanceMethod, ModuleName, ParsedModule,

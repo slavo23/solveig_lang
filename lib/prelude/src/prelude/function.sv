@@ -1,3 +1,5 @@
+export (id, const, flip, (.), ($))
+
 infixr 9 .
 infixr 0 $
 

@@ -6,6 +6,11 @@ use solveig_base::Diagnostic;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyntaxKind {
     Module,
+    ModuleDirectiveList,
+    ExportDecl,
+    PrivateDecl,
+    ReexportDecl,
+    ModuleEntity,
     ImportList,
     ImportDecl,
     DefinitionList,

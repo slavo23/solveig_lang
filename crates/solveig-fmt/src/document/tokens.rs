@@ -128,15 +128,30 @@ pub(super) fn separator<'a>(
             | Token::Cons,
             _,
         ) => BoxDoc::line(),
-        (_, Token::Dot) if matches!(parent, SyntaxKind::NamePath | SyntaxKind::ImportDecl) => {
+        (_, Token::Dot)
+            if matches!(
+                parent,
+                SyntaxKind::NamePath | SyntaxKind::ImportDecl | SyntaxKind::ReexportDecl
+            ) =>
+        {
             BoxDoc::nil()
         }
-        (Token::Dot, _) if matches!(parent, SyntaxKind::NamePath | SyntaxKind::ImportDecl) => {
+        (Token::Dot, _)
+            if matches!(
+                parent,
+                SyntaxKind::NamePath | SyntaxKind::ImportDecl | SyntaxKind::ReexportDecl
+            ) =>
+        {
             BoxDoc::nil()
         }
         (_, Token::Dot) if parent == SyntaxKind::Type => BoxDoc::nil(),
         (Token::Dot, _) if parent == SyntaxKind::Type => BoxDoc::space(),
         (_, Token::LParen) if parent == SyntaxKind::ImportDecl => BoxDoc::nil(),
+        (_, Token::LParen)
+            if matches!(parent, SyntaxKind::ReexportDecl | SyntaxKind::ModuleEntity) =>
+        {
+            BoxDoc::nil()
+        }
         (Token::Minus, _) if matches!(parent, SyntaxKind::OpOperand | SyntaxKind::PatternArg) => {
             BoxDoc::nil()
         }

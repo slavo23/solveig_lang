@@ -45,6 +45,12 @@ enum RawToken {
     KwDefault,
     #[token("import")]
     KwImport,
+    #[token("export")]
+    KwExport,
+    #[token("private")]
+    KwPrivate,
+    #[token("reexport")]
+    KwReexport,
     #[token("as")]
     KwAs,
     #[token("infixl")]
@@ -195,6 +201,9 @@ pub enum Token {
     Where,
     Default,
     Import,
+    Export,
+    Private,
+    Reexport,
     As,
     Infixl,
     Infixr,
@@ -382,6 +391,9 @@ fn map_raw_token(raw: RawToken, slice: &str) -> Token {
         RawToken::KwWhere => Token::Where,
         RawToken::KwDefault => Token::Default,
         RawToken::KwImport => Token::Import,
+        RawToken::KwExport => Token::Export,
+        RawToken::KwPrivate => Token::Private,
+        RawToken::KwReexport => Token::Reexport,
         RawToken::KwAs => Token::As,
         RawToken::KwInfixl => Token::Infixl,
         RawToken::KwInfixr => Token::Infixr,

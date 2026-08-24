@@ -1,3 +1,9 @@
+export (
+    EnvError(..), getArgs, getEnv, getEnvOr, requireEnv, setEnv, getEnvironment,
+    getProgName, parseEnvFile, loadEnvFile, loadEnvFileLimited, loadEnvFileIfExists,
+    describeEnvError
+)
+
 import prelude.prim(getArgs, getEnv, setEnv, getEnvironment, getProgName)
 import std.fs
 import std.io

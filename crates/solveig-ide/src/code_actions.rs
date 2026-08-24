@@ -322,7 +322,8 @@ fn scanned_module_exports_name(
     .unwrap_or_else(|| session.add_file(file.to_path_buf(), source.clone()));
     let parsed = solveig_syntax::lowering::parse_source(session, file_id, &source);
 
-    let api = build_module_api(PackageId(0), ModuleId(0), &parsed).ok()?;
+    let mut api = build_module_api(PackageId(0), ModuleId(0), &parsed).ok()?;
+    apply_module_visibility(&parsed, &mut api).ok()?;
     api_exports_name_text(session, &api, name, kind).then(|| module_name.as_string(session))
 }
 

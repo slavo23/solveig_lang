@@ -1,3 +1,10 @@
+export (
+    IOMode(..), BufferMode(..), stdin, stdout, stderr, openFile, hClose, hFlush,
+    hGetLine, hGetContents, hGetBytes, hPutStr, hPutStrLn, hPutBytes, hIsEOF,
+    hSetBuffering, withFile, readFile, readFileLimited, readFileBytes,
+    readFileBytesLimited, writeFile, writeFileBytes, appendFile
+)
+
 import prelude.prim
 import std.task(bracket)
 

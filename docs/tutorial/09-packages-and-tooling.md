@@ -32,6 +32,41 @@ import report.format(renderReport)
 
 The fully qualified `weather.report.format` also works.
 
+Same-package definitions are available to sibling modules unless they are
+listed in `private`. A library must explicitly publish names for other packages:
+
+```solveig
+-- formatting/src/text.sv
+export (renderTitle, Theme)
+
+data Theme = Light | Dark
+
+renderTitle : Theme -> String -> String
+renderTitle theme title = title
+```
+
+`Theme` is opaque to clients: they can mention its type but cannot construct or
+pattern-match it. Write `Theme(..)` when all constructors are part of the API.
+Operators use their parenthesized names, such as `export ((<?>))`. A module with
+no `export` exposes nothing outside its package.
+
+Defining-module-only helpers use one centralized declaration before imports:
+
+```solveig
+export (renderTitle)
+private (escapeControlCodes)
+```
+
+For a public facade, republish exact names without wrappers:
+
+```solveig
+reexport formatting.text(renderTitle, Theme)
+reexport formatting.styles(*)
+```
+
+The first form preserves the selected type boundaries; the second republishes
+the complete visible API. A selected name can be renamed with `as`.
+
 ## Local library dependencies
 
 Suppose `app/` and `formatting/` are sibling packages. Add a path dependency to
@@ -54,6 +89,9 @@ If the dependency declares `[package].name = "formatting"`, import it with:
 ```solveig
 import formatting.text(renderTitle)
 ```
+
+This import succeeds only when `formatting.text` explicitly exports
+`renderTitle`. Package-internal helpers do not leak into dependent programs.
 
 The dependency table key is not an alias; the dependency's declared package
 name determines its module prefix. Package names in one dependency graph must

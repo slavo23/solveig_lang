@@ -1,3 +1,11 @@
+export (
+    Int, Float, Char, String, IO, Bool(..), ThreadId, Chan, Bytes, Socket, Handle, StdGen,
+    Maybe(..), Either(..), Result(..), Tuple2(..), Tuple3(..), Tuple4(..), Tuple5(..),
+    Tuple6(..), Tuple7(..), Tuple8(..), Never, IOError(..), Defect(..), Task,
+    pureIO, bindIO, failIO, error, catchError, mapError, orElse, printLine, printStr,
+    readLine, appendString, even, odd, not, and, or
+)
+
 import prelude.prim
 
 -- | A value that may be present or absent.

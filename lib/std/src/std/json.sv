@@ -1,3 +1,12 @@
+export (
+    JsonNumber(..), Json(..), JsonLimits(..), JsonError(..), Decoder, defaultJsonLimits,
+    maximumInputBytes, maximumDepth, maximumStringBytes, maximumContainerItems,
+    maximumNumberBytes, jsonNumberText, jsonNumberFromInt, jsonNumberFromString,
+    jsonNumberFromFloat, mapDecoder, stringDecoder, boolDecoder, numberDecoder,
+    nullDecoder, arrayDecoder, objectDecoder, nullableDecoder, jsonDecoder, decodeJson,
+    parseJson, renderJson, renderJsonWith, renderJsonError, decoderParser
+)
+
 import std.bytes
 import std.list
 import std.map

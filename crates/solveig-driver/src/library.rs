@@ -26,15 +26,19 @@ const STD_HTTP_SRC: &str = include_str!("../../../lib/std/src/std/http.sv");
 const STD_IO_SRC: &str = include_str!("../../../lib/std/src/std/io.sv");
 const STD_JSON_SRC: &str = include_str!("../../../lib/std/src/std/json.sv");
 const STD_LIST_SRC: &str = include_str!("../../../lib/std/src/std/list.sv");
+const STD_MAP_SRC: &str = include_str!("../../../lib/std/src/std/map.sv");
 const STD_NET_SRC: &str = include_str!("../../../lib/std/src/std/net.sv");
 const STD_PARSER_SRC: &str = include_str!("../../../lib/std/src/std/parser.sv");
 const STD_PROCESS_SRC: &str = include_str!("../../../lib/std/src/std/process.sv");
 const STD_RANDOM_SRC: &str = include_str!("../../../lib/std/src/std/random.sv");
+const STD_QUEUE_SRC: &str = include_str!("../../../lib/std/src/std/queue.sv");
+const STD_SET_SRC: &str = include_str!("../../../lib/std/src/std/set.sv");
 const STD_TASK_SRC: &str = include_str!("../../../lib/std/src/std/task.sv");
 const STD_TEXT_SRC: &str = include_str!("../../../lib/std/src/std/text.sv");
 const STD_TESTING_SRC: &str = include_str!("../../../lib/std/src/std/testing.sv");
 const STD_THREAD_SRC: &str = include_str!("../../../lib/std/src/std/thread.sv");
 const STD_TIME_SRC: &str = include_str!("../../../lib/std/src/std/time.sv");
+const STD_VECTOR_SRC: &str = include_str!("../../../lib/std/src/std/vector.sv");
 const PRELUDE_MANIFEST: &str = include_str!("../../../lib/prelude/solveig.toml");
 const STD_MANIFEST: &str = include_str!("../../../lib/std/solveig.toml");
 
@@ -61,15 +65,19 @@ pub(crate) fn embedded_library_source(module: &str) -> Option<&'static str> {
         "std.io" => Some(STD_IO_SRC),
         "std.json" => Some(STD_JSON_SRC),
         "std.list" => Some(STD_LIST_SRC),
+        "std.map" => Some(STD_MAP_SRC),
         "std.net" => Some(STD_NET_SRC),
         "std.parser" => Some(STD_PARSER_SRC),
         "std.process" => Some(STD_PROCESS_SRC),
         "std.random" => Some(STD_RANDOM_SRC),
+        "std.queue" => Some(STD_QUEUE_SRC),
+        "std.set" => Some(STD_SET_SRC),
         "std.task" => Some(STD_TASK_SRC),
         "std.text" => Some(STD_TEXT_SRC),
         "std.testing" => Some(STD_TESTING_SRC),
         "std.thread" => Some(STD_THREAD_SRC),
         "std.time" => Some(STD_TIME_SRC),
+        "std.vector" => Some(STD_VECTOR_SRC),
         _ => None,
     }
 }
@@ -103,15 +111,19 @@ pub(crate) fn embedded_library_modules(package: &str) -> &'static [&'static str]
             "std/io.sv",
             "std/json.sv",
             "std/list.sv",
+            "std/map.sv",
             "std/net.sv",
             "std/parser.sv",
             "std/process.sv",
             "std/random.sv",
+            "std/queue.sv",
+            "std/set.sv",
             "std/task.sv",
             "std/text.sv",
             "std/testing.sv",
             "std/thread.sv",
             "std/time.sv",
+            "std/vector.sv",
         ],
         _ => &[],
     }

@@ -1,3 +1,8 @@
+export (
+    Set, empty, singleton, size, member, insert, delete, fromList, toAscList, union,
+    intersection, difference
+)
+
 import std.map
 
 -- | An immutable ordered set backed by `std.map`.

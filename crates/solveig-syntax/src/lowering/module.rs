@@ -4,8 +4,23 @@
 use super::*;
 
 impl CstToAst<'_> {
-    pub(super) fn lower_module_surface(&mut self) -> (Vec<ImportDecl>, SurfaceProgram) {
+    pub(super) fn lower_module_surface(
+        &mut self,
+    ) -> (ModuleDirectives, Vec<ImportDecl>, SurfaceProgram) {
         let root = self.cst.root();
+        let directives = self
+            .first_child_of_kind(root, SyntaxKind::ModuleDirectiveList)
+            .map_or_else(ModuleDirectives::default, |node| {
+                self.lower_module_directives(node)
+            });
+        let directives = if directives.exports.is_empty()
+            && directives.private.is_empty()
+            && directives.reexports.is_empty()
+        {
+            self.lower_direct_module_directives(root)
+        } else {
+            directives
+        };
         let imports = if let Some(node) = self.first_child_of_kind(root, SyntaxKind::ImportList) {
             self.lower_imports(node)
         } else {
@@ -17,7 +32,143 @@ impl CstToAst<'_> {
             self.lower_definitions(root)
         };
 
-        (imports, defs)
+        (directives, imports, defs)
+    }
+
+    fn lower_module_directives(&mut self, node: CstId) -> ModuleDirectives {
+        let mut directives = ModuleDirectives::default();
+        for child in self.child_nodes(node) {
+            let lowered = match self.cst.node(child).kind() {
+                SyntaxKind::ExportDecl => self
+                    .lower_visibility_directive(child)
+                    .map(|decl| directives.exports.push(decl)),
+                SyntaxKind::PrivateDecl => self
+                    .lower_visibility_directive(child)
+                    .map(|decl| directives.private.push(decl)),
+                SyntaxKind::ReexportDecl => self
+                    .lower_reexport(child)
+                    .map(|decl| directives.reexports.push(decl)),
+                _ => continue,
+            };
+            if let Err(error) = lowered
+                && !self.node_has_diagnostics(child)
+            {
+                self.record_error(&error);
+            }
+        }
+        directives
+    }
+
+    fn lower_direct_module_directives(&mut self, node: CstId) -> ModuleDirectives {
+        let mut directives = ModuleDirectives::default();
+        for child in self.child_nodes(node) {
+            let lowered = match self.cst.node(child).kind() {
+                SyntaxKind::ExportDecl => self
+                    .lower_visibility_directive(child)
+                    .map(|decl| directives.exports.push(decl)),
+                SyntaxKind::PrivateDecl => self
+                    .lower_visibility_directive(child)
+                    .map(|decl| directives.private.push(decl)),
+                SyntaxKind::ReexportDecl => self
+                    .lower_reexport(child)
+                    .map(|decl| directives.reexports.push(decl)),
+                _ => continue,
+            };
+            if let Err(error) = lowered
+                && !self.node_has_diagnostics(child)
+            {
+                self.record_error(&error);
+            }
+        }
+        directives
+    }
+
+    fn lower_visibility_directive(&self, node: CstId) -> Result<VisibilityDecl, ParseError> {
+        Ok(VisibilityDecl {
+            entities: self.lower_module_entities(node)?,
+            span: self.node_span(node),
+            cst_id: node,
+        })
+    }
+
+    fn lower_reexport(&self, node: CstId) -> Result<ReexportDecl, ParseError> {
+        let children = self.children(node);
+        let mut segments = Vec::new();
+        let mut before_selection = true;
+        for child in &children {
+            let NodeOrToken::Token(token) = child else {
+                continue;
+            };
+            let token = *token;
+            match self.cst.token(token).kind {
+                Token::LParen => before_selection = false,
+                Token::Ident | Token::UpperIdent if before_selection => {
+                    segments.push(self.symbol_from_token(token));
+                }
+                _ => {}
+            }
+        }
+        if segments.is_empty() {
+            return Err(self.error_at_node(node, "expected re-exported module name"));
+        }
+
+        let selection = children.iter().find_map(|child| match child {
+            NodeOrToken::Token(token)
+                if self.cst.token(*token).kind == Token::Operator
+                    && self.token_text(*token) == "*" =>
+            {
+                Some(ModuleSelection::All)
+            }
+            _ => None,
+        });
+        let selection =
+            selection.unwrap_or(ModuleSelection::Only(self.lower_module_entities(node)?));
+
+        Ok(ReexportDecl {
+            module: ModuleName(segments),
+            selection,
+            span: self.node_span(node),
+            cst_id: node,
+        })
+    }
+
+    fn lower_module_entities(&self, node: CstId) -> Result<Vec<ModuleEntity>, ParseError> {
+        self.child_nodes_of_kind(node, SyntaxKind::ModuleEntity)
+            .into_iter()
+            .map(|entity| self.lower_module_entity(entity))
+            .collect()
+    }
+
+    fn lower_module_entity(&self, node: CstId) -> Result<ModuleEntity, ParseError> {
+        let children = self.children(node);
+        let mut index = 0;
+        let name = self.lower_import_name_from_children(node, &children, &mut index)?;
+        let exposure = if children.iter().any(|child| match child {
+            NodeOrToken::Token(token) => {
+                self.cst.token(*token).kind == Token::ReservedOp && self.token_text(*token) == ".."
+            }
+            NodeOrToken::Node(_) => false,
+        }) {
+            EntityExposure::Constructors
+        } else {
+            EntityExposure::Opaque
+        };
+        let rename = children.iter().position(|child| {
+            matches!(child, NodeOrToken::Token(token) if self.cst.token(*token).kind == Token::As)
+        });
+        let rename = if let Some(as_index) = rename {
+            let mut index = as_index + 1;
+            Some(self.lower_import_name_from_children(node, &children, &mut index)?)
+        } else {
+            None
+        };
+
+        Ok(ModuleEntity {
+            name,
+            exposure,
+            rename,
+            cst_id: node,
+        })
     }
 
     fn lower_imports(&mut self, node: CstId) -> Vec<ImportDecl> {

@@ -1,3 +1,8 @@
+export (
+    ProcessResult, processExitCode, processStdout, processStderr, runProcess,
+    runProcessLimited, exitWith, exitSuccess, exitFailure
+)
+
 import prelude.prim
 
 -- | Captured output and status from a completed child process.

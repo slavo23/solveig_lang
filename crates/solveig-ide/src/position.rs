@@ -1608,6 +1608,9 @@ fn keyword_token(token: Token) -> bool {
             | Token::Where
             | Token::Default
             | Token::Import
+            | Token::Export
+            | Token::Private
+            | Token::Reexport
             | Token::As
             | Token::Infixl
             | Token::Infixr

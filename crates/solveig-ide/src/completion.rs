@@ -9,9 +9,9 @@ pub(super) use typed::{
     typed_module_completion_candidates,
 };
 
-const KEYWORDS: [&str; 18] = [
-    "as", "case", "class", "data", "do", "else", "forall", "if", "import", "in", "infix", "infixl",
-    "infixr", "instance", "let", "of", "then", "where",
+const KEYWORDS: [&str; 21] = [
+    "as", "case", "class", "data", "do", "else", "export", "forall", "if", "import", "in", "infix",
+    "infixl", "infixr", "instance", "let", "of", "private", "reexport", "then", "where",
 ];
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]

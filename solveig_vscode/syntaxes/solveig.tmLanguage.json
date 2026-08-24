@@ -508,7 +508,7 @@
           "name": "keyword.control.lambda.solveig"
         },
         {
-          "match": "\\b(data|type|sig|class|instance|infixl|infixr|infix|default)\\b",
+          "match": "\\b(data|type|sig|class|instance|infixl|infixr|infix|default|export|private|reexport)\\b",
           "name": "keyword.declaration.solveig"
         },
         {

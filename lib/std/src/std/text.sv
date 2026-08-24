@@ -1,3 +1,8 @@
+export (
+    stringToChars, charsToString, intToString, charToCodePoint, codePointToString,
+    length, isEmpty, startsWith, stripPrefix, trimAscii, lines, splitOnce
+)
+
 import prelude.prim
 import std.list(reverse)
 

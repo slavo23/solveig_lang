@@ -112,6 +112,7 @@ pub struct ModuleEntity {
     pub name: Spanned<Symbol>,
     pub exposure: EntityExposure,
     pub rename: Option<Spanned<Symbol>>,
+    pub cst_id: CstId,
 }
 
 /// Selects every visible entity or a precise entity list.
@@ -119,6 +120,14 @@ pub struct ModuleEntity {
 pub enum ModuleSelection {
     All,
     Only(Vec<ModuleEntity>),
+}
+
+/// Retains one export or private directive with its source identity.
+#[derive(Debug, Clone)]
+pub struct VisibilityDecl {
+    pub entities: Vec<ModuleEntity>,
+    pub span: Span,
+    pub cst_id: CstId,
 }
 
 /// Republishes selected entities from one source module.
@@ -133,8 +142,8 @@ pub struct ReexportDecl {
 /// Retains the centralized visibility directives at the start of a module.
 #[derive(Debug, Clone, Default)]
 pub struct ModuleDirectives {
-    pub exports: Option<Vec<ModuleEntity>>,
-    pub private: Vec<ModuleEntity>,
+    pub exports: Vec<VisibilityDecl>,
+    pub private: Vec<VisibilityDecl>,
     pub reexports: Vec<ReexportDecl>,
 }
 

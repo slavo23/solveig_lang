@@ -33,6 +33,8 @@ runtime failures are not catchable by program code.
 | `RES0008` | Fixity conflict. Same-precedence operators with incompatible associativity were mixed without parentheses. |
 | `RES0009` | Illegal unary minus. Prefix `-` was used in a position that needs parentheses. |
 | `RES0010` | Malformed operator expression. A flat operator sequence could not be resolved into an expression tree. |
+| `RES0014` | Unknown selected import name. The source module does not expose that name to the importing package. |
+| `RES0019` | Invalid module API directive, such as a missing entity, duplicate visibility declaration, invalid constructor exposure, or re-export collision. |
 
 ## Kinds
 

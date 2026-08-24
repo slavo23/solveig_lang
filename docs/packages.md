@@ -98,6 +98,94 @@ package's declared name as their first segment.
 Two packages in one dependency graph cannot declare the same package name.
 This keeps every fully qualified module name unambiguous.
 
+## Module APIs and visibility
+
+A source file owns one centralized API header. Directives come before imports,
+and imports come before definitions:
+
+```solveig
+export (User(..), UserId, findUser, (<!>))
+private (validateCache)
+
+import std.map(Map)
+
+data User = User UserId String
+type UserId = Int
+
+findUser : UserId -> Map UserId User -> Maybe User
+findUser identifier users = std.map.lookup identifier users
+
+validateCache : Map UserId User -> Bool
+validateCache users = True
+```
+
+Top-level definitions are package-visible by default. Another module in the
+same package can import `findUser` even before it is listed in `export`, but a
+different package can see only the centralized export list. A module with no
+`export` directive therefore exposes no names outside its package. Use
+`export ()` when that empty external API is intentional, as in an
+instances-only module.
+
+There may be at most one `export` and one `private` directive in a module.
+`private` is stricter than the package boundary: a listed name is usable only
+inside its defining module. It cannot also be exported. Ordinary helper
+definitions need no annotation; leave them out of `export` when package-level
+reuse is useful, and list them in `private` only when other modules must not
+depend on them.
+
+An API entity has one of these forms:
+
+```solveig
+export (
+    parse,       -- a value or function
+    (<?>),       -- an operator, written in parentheses
+    Decoder,     -- an opaque data type; constructors stay hidden
+    Result(..),  -- a data type together with all of its constructors
+    UserId,      -- a type alias
+    Monad        -- a class together with its methods and fixities
+)
+```
+
+Solveig deliberately has no partial constructor list. `T` means an opaque type
+and `T(..)` means the type with every constructor. This keeps changes such as
+adding a constructor visible at one clear API boundary. A class is similarly
+indivisible: exporting it also exports its methods, defaults, superclass
+contract, and operator fixities.
+
+### Re-exports and facade modules
+
+A module can republish another module without introducing forwarding
+definitions:
+
+```solveig
+export (parseConfig)
+reexport config.types(Config, ConfigError(..))
+reexport config.text(parse as parseConfigText)
+import config.text(parse)
+
+parseConfig : String -> Result ConfigError Config
+parseConfig source = parse source
+```
+
+The precise form can rename an ordinary or operator name with `as`. Type
+opacity is preserved: `Config` does not expose constructors, while
+`ConfigError(..)` does. To publish the source module's complete API, use:
+
+```solveig
+reexport config.defaults(*)
+```
+
+`reexport` is a real module dependency. Its source must be in the package graph,
+module cycles are rejected, typed definitions keep their original identity,
+and instances available through the source remain available through the
+facade. Re-exported names are part of the facade's external API automatically;
+the local `export` list describes definitions owned by the facade itself. They
+are not introduced unqualified inside the facade: import a source name
+explicitly when a local definition also needs to use it.
+
+Export, private, and re-export selections reject missing or namespace-ambiguous
+names. Re-export collisions are errors rather than order-dependent shadowing.
+
 ## Manifest reference
 
 The manifest has three top-level tables. Unknown tables and keys are errors,
@@ -193,9 +281,11 @@ version = "0.1.0"
 entry = "normalize"
 ```
 
-Its `src/normalize.sv` exports a normal top-level definition:
+Its `src/normalize.sv` explicitly publishes the definition:
 
 ```solveig
+export (normalize)
+
 normalize : String -> String
 normalize text = text
 ```

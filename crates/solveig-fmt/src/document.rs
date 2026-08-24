@@ -29,9 +29,10 @@ pub(super) fn node<'a>(
 ) -> BoundedDocument<'a> {
     let kind = tree.node(id).kind();
     let document = match kind {
-        SyntaxKind::Module | SyntaxKind::ImportList | SyntaxKind::DefinitionList => {
-            block(tree, source, id, width)
-        }
+        SyntaxKind::Module
+        | SyntaxKind::ModuleDirectiveList
+        | SyntaxKind::ImportList
+        | SyntaxKind::DefinitionList => block(tree, source, id, width),
         SyntaxKind::ClassDef | SyntaxKind::InstanceDef | SyntaxKind::DoExpr => {
             layout_block(tree, source, id, width)
         }
@@ -128,14 +129,22 @@ fn layout_expression_parent<'a>(
 fn block<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usize) -> Document<'a> {
     let kind = tree.node(id).kind();
     let children = tree.children(id);
-    let last_import = if matches!(kind, SyntaxKind::Module | SyntaxKind::ImportList) {
+    let last_header = if matches!(
+        kind,
+        SyntaxKind::Module | SyntaxKind::ModuleDirectiveList | SyntaxKind::ImportList
+    ) {
         children.iter().rposition(|child| {
             matches!(
                 child,
                 NodeOrToken::Node(child)
                     if matches!(
                         tree.node(*child).kind(),
-                        SyntaxKind::ImportList | SyntaxKind::ImportDecl
+                        SyntaxKind::ModuleDirectiveList
+                            | SyntaxKind::ExportDecl
+                            | SyntaxKind::PrivateDecl
+                            | SyntaxKind::ReexportDecl
+                            | SyntaxKind::ImportList
+                            | SyntaxKind::ImportDecl
                     )
             )
         })
@@ -154,7 +163,7 @@ fn block<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usize) -> 
 
         if let (Some(previous), Some(first)) = (previous, first) {
             let separates_imports = !separated_imports
-                && last_import.is_some_and(|last_import| position > last_import)
+                && last_header.is_some_and(|last_header| position > last_header)
                 && !(matches!(
                     tree.token(first).kind,
                     Token::LineComment | Token::BlockComment

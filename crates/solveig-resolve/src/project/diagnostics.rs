@@ -46,6 +46,14 @@ pub enum ResolveError {
         module: ModuleName,
         name: Symbol,
     },
+    InvalidModuleDirective {
+        span: FileSpan,
+        message: String,
+    },
+    ReexportConflict {
+        span: FileSpan,
+        name: Symbol,
+    },
     UnknownName {
         span: FileSpan,
         kind: ResolveNameKind,
@@ -175,6 +183,21 @@ impl ResolveError {
             .with_label(Label::primary(
                 *span,
                 format!("`{}` is not exported by this module", session.str(*name)),
+            )),
+            Self::InvalidModuleDirective { span, message } => {
+                Diagnostic::error("RES0019", message.clone())
+                    .with_label(Label::primary(*span, message.clone()))
+            }
+            Self::ReexportConflict { span, name } => Diagnostic::error(
+                "RES0019",
+                format!("conflicting re-export `{}`", session.str(*name)),
+            )
+            .with_label(Label::primary(
+                *span,
+                format!(
+                    "`{}` is already provided by another visible definition",
+                    session.str(*name)
+                ),
             )),
             Self::UnknownName { span, kind, name } => {
                 Diagnostic::error("RES0003", format!("unknown {} `{}`", kind.as_str(), name))

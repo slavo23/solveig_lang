@@ -1,3 +1,5 @@
+export (sleep, getMonotonicTime, getSystemTime, measure)
+
 import prelude.prim
 
 -- | Suspends the current thread for at least the requested milliseconds.

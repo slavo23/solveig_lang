@@ -174,7 +174,8 @@ class Describe a where
     let parsed = parse_source(&session, file, source);
     let module_id = ModuleId(1);
     let package = PackageId(3);
-    let api = build_module_api(package, module_id, &parsed).expect("ICE: test API must build");
+    let mut api = build_module_api(package, module_id, &parsed).expect("ICE: test API must build");
+    apply_module_visibility(&parsed, &mut api).expect("ICE: test visibility must apply");
     assert_eq!(api.package, package);
     let documented_increment = session.intern("documentedIncrement");
     let trailing_value = session.intern("trailingValue");
@@ -233,4 +234,92 @@ class Describe a where
             .map(|docs| docs.text.as_str()),
         Some("Converts a value into a friendly label.")
     );
+}
+
+#[test]
+fn module_visibility_distinguishes_external_package_and_private_names() {
+    let session = Session::new();
+    let source = r#"export (Public(..), visible, Alias, Capability)
+private (hidden)
+
+data Public = Public Int
+data Internal = Internal
+type Alias = Int
+class Capability a where
+    capability : a -> Int
+visible = 1
+hidden = 2
+packageOnly = 3
+"#;
+    let file = session.add_file("visibility.sv", source);
+    let parsed = parse_source(&session, file, source);
+    let package = PackageId(7);
+    let mut api = build_module_api(package, ModuleId(2), &parsed).expect("API should build");
+    apply_module_visibility(&parsed, &mut api).expect("visibility should apply");
+
+    let public = session.intern("Public");
+    let public_constructor = session.intern("Public");
+    let visible = session.intern("visible");
+    let alias = session.intern("Alias");
+    let capability = session.intern("Capability");
+    let capability_method = session.intern("capability");
+    let hidden = session.intern("hidden");
+    let package_only = session.intern("packageOnly");
+
+    let package_view = api.visible_to(package);
+    assert!(package_view.terms.contains_key(&visible));
+    assert!(package_view.terms.contains_key(&package_only));
+    assert!(!package_view.terms.contains_key(&hidden));
+
+    let external_view = api.visible_to(PackageId(8));
+    assert!(external_view.types.contains_key(&public));
+    assert!(external_view.constructors.contains_key(&public_constructor));
+    assert!(external_view.terms.contains_key(&visible));
+    assert!(external_view.type_aliases.contains_key(&alias));
+    assert!(external_view.classes.contains_key(&capability));
+    assert!(external_view.terms.contains_key(&capability_method));
+    assert!(!external_view.terms.contains_key(&package_only));
+    assert!(!external_view.terms.contains_key(&hidden));
+}
+
+#[test]
+fn reexports_preserve_opaque_types_open_types_and_renamed_terms() {
+    let session = Session::new();
+    let origin_source = r#"export (Widget(..), value)
+data Widget = MkWidget Int
+value = 41
+"#;
+    let origin_file = session.add_file("origin.sv", origin_source);
+    let origin_parsed = parse_source(&session, origin_file, origin_source);
+    let package = PackageId(3);
+    let origin_id = ModuleId(1);
+    let mut origin = build_module_api(package, origin_id, &origin_parsed).expect("origin API");
+    apply_module_visibility(&origin_parsed, &mut origin).expect("origin visibility");
+    let origin_name = ModuleName(vec![session.intern("library"), session.intern("origin")]);
+    let dependencies = FxHashMap::from_iter([(origin_name, Arc::new(origin))]);
+
+    let facade_source = r#"reexport library.origin(Widget, value as answer)
+"#;
+    let facade_file = session.add_file("facade.sv", facade_source);
+    let facade_parsed = parse_source(&session, facade_file, facade_source);
+    let mut facade = build_module_api(package, ModuleId(2), &facade_parsed).expect("facade API");
+    apply_module_visibility(&facade_parsed, &mut facade).expect("facade visibility");
+    apply_module_reexports(&facade_parsed, &mut facade, &dependencies).expect("facade re-export");
+
+    let widget = session.intern("Widget");
+    let constructor = session.intern("MkWidget");
+    let value = session.intern("value");
+    let answer = session.intern("answer");
+    assert!(facade.external.types.contains(&widget));
+    assert!(!facade.external.constructors.contains(&constructor));
+    assert!(!facade.terms.contains_key(&value));
+    assert_eq!(facade.terms[&answer], local_def_id(origin_id, value));
+
+    let open_source = "reexport library.origin(Widget(..))\n";
+    let open_file = session.add_file("open.sv", open_source);
+    let open_parsed = parse_source(&session, open_file, open_source);
+    let mut open = build_module_api(package, ModuleId(3), &open_parsed).expect("open API");
+    apply_module_visibility(&open_parsed, &mut open).expect("open visibility");
+    apply_module_reexports(&open_parsed, &mut open, &dependencies).expect("open re-export");
+    assert!(open.external.constructors.contains(&constructor));
 }

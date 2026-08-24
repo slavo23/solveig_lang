@@ -1,3 +1,12 @@
+export (
+    Url, Method(..), Header(..), Request, Status(..), Response(..), RedirectPolicy(..), HttpLimits(..),
+    HttpError(..), defaultHttpLimits, fetch, fetchWith, send, urlFromString, urlToString,
+    header, get, head, post, put, patch, delete, withHeader, withHeaders, withTextBody,
+    withBody, withoutBody, request, getUrl, responseStatus, statusCode, isSuccessful,
+    responseHeaders, responseBody, findHeader, responseText, bodyChunks, foldBodyChunks,
+    headersFromList
+)
+
 import prelude.prim(httpRequestRaw, stringLength, stringSlice)
 import std.bytes
 import std.text

@@ -1,3 +1,8 @@
+export (
+    connect, resolveHost, listen, accept, sendBytes, recvBytes, closeSocket,
+    withConnection, withListener, withAcceptedConnection
+)
+
 import prelude.prim
 import std.task(bracket)
 

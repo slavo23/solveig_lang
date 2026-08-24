@@ -481,10 +481,10 @@ pub fn lower(session: &Session, parsed: &ParsedCst, source: &str) -> ParsedModul
     }
 
     let cst = parsed.cst.clone();
-    let (imports, defs, diagnostics) = {
+    let (directives, imports, defs, diagnostics) = {
         let mut lowerer = CstToAst::new(session, parsed.file, source, &cst);
-        let (imports, defs) = lowerer.lower_module_surface();
-        (imports, defs, lowerer.diagnostics)
+        let (directives, imports, defs) = lowerer.lower_module_surface();
+        (directives, imports, defs, lowerer.diagnostics)
     };
 
     if parsed.diagnostics.is_empty() {
@@ -496,7 +496,7 @@ pub fn lower(session: &Session, parsed: &ParsedCst, source: &str) -> ParsedModul
     ParsedModule {
         file: parsed.file,
         cst,
-        directives: ModuleDirectives::default(),
+        directives,
         imports,
         defs,
     }

@@ -1,3 +1,8 @@
+export (
+    stringToBytes, bytesToString, bytesLength, bytesIndex, bytesSlice, bytesAppend,
+    bytesSpanAny, bytesFindAny, bytesFindBelow, bytesSpanRange, bytesSliceToString
+)
+
 import prelude.prim
 
 -- | Encodes text as UTF-8 bytes.

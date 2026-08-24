@@ -455,7 +455,9 @@ fn dependency_sources_stay_queryable_but_mutating_features_refuse_them() {
 
 main = answer
 "#;
-    let dependency_source = r#"-- | The dependency answer.
+    let dependency_source = r#"export (answer)
+
+-- | The dependency answer.
 answer = 42
 "#;
 

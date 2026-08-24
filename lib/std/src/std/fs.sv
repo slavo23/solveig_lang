@@ -1,3 +1,9 @@
+export (
+    getCurrentDirectory, setCurrentDirectory, doesFileExist, doesDirectoryExist,
+    listDirectory, createDirectory, removeFile, renameFile, getFileSize,
+    getModificationTime
+)
+
 import prelude.prim
 
 -- | Returns the runtime's current working directory.

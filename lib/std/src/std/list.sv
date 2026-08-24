@@ -1,3 +1,8 @@
+export (
+    take, drop, takeWhile, dropWhile, zipWith, zip, reverse, range, rangeInclusive,
+    length, isEmpty
+)
+
 -- | Takes at most n elements from the beginning of a list.
 take : forall a. Int -> [a] -> [a]
 take count xs =

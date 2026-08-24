@@ -38,6 +38,17 @@ fn formats_signatures_with_forall_and_contexts() {
 }
 
 #[test]
+fn formats_module_visibility_and_reexports_as_a_header_block() {
+    assert_eq!(
+        format_source(
+            "export(Widget(..),visible)\nprivate(helper)\nreexport other.api(value as renamed)\nimport other.api\nvisible=1\n",
+            100,
+        ),
+        "export (Widget(..), visible)\nprivate (helper)\nreexport other.api(value as renamed)\nimport other.api\n\nvisible = 1\n"
+    );
+}
+
+#[test]
 fn aligns_every_broken_function_type_at_one_continuation_indent() {
     insta::assert_snapshot!(format_source(
         "runPool:(String->Int->String->String->Task (Maybe Bytes))->String->Int->String->(Chan DownloadJob->Task ())->Task ()\n",

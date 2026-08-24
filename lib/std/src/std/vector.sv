@@ -1,3 +1,5 @@
+export (Vector, empty, singleton, length, isEmpty, snoc, index, update, fromList, toList)
+
 -- | An immutable sequence with logarithmic indexing, updates, and right append.
 -- |
 -- | The balanced tree is persistent: updates share every untouched branch.

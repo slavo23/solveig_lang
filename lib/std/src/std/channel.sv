@@ -1,3 +1,5 @@
+export (newChan, newBoundedChan, send, recv, tryRecv, closeChan)
+
 import prelude.prim(newChan, newBoundedChan, send, recv, tryRecv, closeChan)
 
 -- | Creates an unbounded typed channel.

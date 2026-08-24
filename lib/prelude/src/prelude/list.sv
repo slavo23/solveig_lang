@@ -1,3 +1,5 @@
+export (List(..), map, filter, foldr, foldl, concat, append, (++))
+
 import prelude.builtins
 import prelude.prim
 

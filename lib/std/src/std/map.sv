@@ -1,3 +1,8 @@
+export (
+    Entry(..), Map, empty, singleton, size, lookup, member, insert, delete, fromList,
+    toAscList, keys, values
+)
+
 -- | A key-value pair used by ordered map traversal and construction.
 data Entry k v = Entry k v
 

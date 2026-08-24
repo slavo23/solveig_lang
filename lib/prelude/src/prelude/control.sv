@@ -1,3 +1,5 @@
+export (join, composeK, mapM, sequence, filterM, seqIO, mapIO_)
+
 import prelude.builtins
 import prelude.list
 import prelude.typeclasses

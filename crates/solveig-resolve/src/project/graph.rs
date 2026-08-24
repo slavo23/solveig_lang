@@ -129,6 +129,20 @@ pub fn build_module_graph(
             graph.add_edge(from, to, ());
             import_spans.insert((module_name.clone(), imp.module), imp.span);
         }
+
+        for reexport in &module_file.parsed.directives.reexports {
+            let to = *indices
+                .get(&reexport.module)
+                .ok_or_else(|| ResolveError::UnknownModule {
+                    span: FileSpan::new(module_file.parsed.file, reexport.span),
+                    module: reexport.module.clone(),
+                })?;
+            graph.add_edge(from, to, ());
+            import_spans.insert(
+                (module_name.clone(), reexport.module.clone()),
+                FileSpan::new(module_file.parsed.file, reexport.span),
+            );
+        }
     }
 
     Ok(ModuleGraph {

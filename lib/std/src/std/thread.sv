@@ -1,3 +1,5 @@
+export (spawn, killThread)
+
 import prelude.prim
 
 -- | Starts an IO action in a new lightweight thread.

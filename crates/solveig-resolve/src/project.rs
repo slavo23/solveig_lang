@@ -13,8 +13,8 @@ use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session,
 use solveig_check::inference::type_infer::CheckedModule;
 use solveig_package::{PackageId, PackageKind};
 use solveig_syntax::ast::{
-    DocComment, Fixity, ImportDecl, ImportSpec, InstanceMethod, ModuleName, ParsedModule,
-    SurfaceDefinition,
+    DocComment, EntityExposure, Fixity, ImportDecl, ImportSpec, InstanceMethod, ModuleEntity,
+    ModuleName, ModuleSelection, ParsedModule, ReexportDecl, SurfaceDefinition,
 };
 
 mod api_build;

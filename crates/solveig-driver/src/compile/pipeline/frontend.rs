@@ -110,7 +110,14 @@ impl<'a> FrontendState<'a> {
                         &builtins,
                         &mut api,
                     );
-                    apis.insert(module_name.clone(), Arc::new(api));
+                    let parsed_module = parsed.get(session, module_name);
+                    if let Err(error) = apply_module_visibility(parsed_module, &mut api)
+                        .and_then(|()| apply_module_reexports(parsed_module, &mut api, &apis))
+                    {
+                        errors.push(error);
+                    } else {
+                        apis.insert(module_name.clone(), Arc::new(api));
+                    }
                 }
                 Err(error) => errors.push(error),
             }
@@ -291,6 +298,11 @@ impl<'a> FrontendState<'a> {
             if imports
                 .iter()
                 .any(|import| failed_modules.contains(&import.module))
+                || parsed
+                    .directives
+                    .reexports
+                    .iter()
+                    .any(|reexport| failed_modules.contains(&reexport.module))
             {
                 failed_modules.insert(module_name.clone());
                 continue;
@@ -313,7 +325,7 @@ impl<'a> FrontendState<'a> {
                 )
             });
 
-            let typed_api = Arc::new(build_typed_module_api(
+            let mut typed_api = build_typed_module_api(
                 self.session,
                 self.names,
                 module_id,
@@ -323,7 +335,17 @@ impl<'a> FrontendState<'a> {
                     .remove(&module_id)
                     .unwrap_or_default(),
                 module_api,
-            ));
+            );
+            typed_api.include_reexports(
+                module_api,
+                parsed
+                    .directives
+                    .reexports
+                    .iter()
+                    .filter_map(|reexport| self.typed_apis.get(&reexport.module))
+                    .map(Arc::as_ref),
+            );
+            let typed_api = Arc::new(typed_api);
 
             self.typed_apis.insert(module_name.clone(), typed_api);
             self.module_files.insert(module_id, parsed.file);
@@ -339,12 +361,17 @@ impl<'a> FrontendState<'a> {
     fn collect_imported_class_param_kind_ids(
         &self,
         imports: &[EffectiveImport],
+        package: PackageId,
     ) -> FxHashMap<ClassId, Vec<solveig_ast::ast::Kind>> {
         let mut out = FxHashMap::default();
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
-                for class_def in api.filtered(&imp.spec).class_defs.values() {
+                let module_api = self.apis.get(&imp.module).unwrap_or_else(|| {
+                    solveig_base::ice!("typed imported API missing its module API")
+                });
+                let visible = api.imported_view(module_api, package, &imp.spec);
+                for class_def in visible.class_defs.values() {
                     out.insert(
                         class_def.id,
                         class_def
@@ -368,35 +395,33 @@ impl<'a> FrontendState<'a> {
             .module_table
             .id(module_name)
             .expect("ICE: module check referenced unknown module");
+        let package = self.project.module_table.package(module_id);
         let imports = effective_imports(self.project, module_name, &parsed.imports, file);
 
-        let imported_apis = self.build_imported_apis(&imports);
+        let imported_apis = self.build_imported_apis(&imports, package);
+        let local_api = self.apis.get(module_name).unwrap_or_else(|| {
+            solveig_base::ice!(
+                "module API missing during resolve for {}",
+                module_name.as_string(self.session)
+            )
+        });
         let cx = ModuleContext {
             module: module_name.clone(),
             module_id,
             file,
-            local_api: self
-                .apis
-                .get(module_name)
-                .unwrap_or_else(|| {
-                    solveig_base::ice!(
-                        "module API missing during resolve for {}",
-                        module_name.as_string(self.session)
-                    )
-                })
-                .clone(),
+            local_api: Arc::new(local_api.local_view()),
             imported_apis,
             builtins: self.builtins.clone(),
         };
 
         let resolver_imports = ResolverImports {
-            tycon_kind_ids: self.collect_imported_kind_ids(&imports),
-            class_param_kind_ids: self.collect_imported_class_param_kind_ids(&imports),
-            type_aliases: self.collect_imported_type_aliases(&imports),
+            tycon_kind_ids: self.collect_imported_kind_ids(&imports, package),
+            class_param_kind_ids: self.collect_imported_class_param_kind_ids(&imports, package),
+            type_aliases: self.collect_imported_type_aliases(&imports, package),
         };
 
         let resolver = Resolver::new(self.session, self.names, &self.project.module_table);
-        let resolved_info =
+        let mut resolved_info =
             match resolver.resolve_module(module_name, parsed, &cx, &resolver_imports) {
                 Ok(resolved) => resolved,
                 Err(ResolverError::Resolve(errors)) => {
@@ -412,6 +437,9 @@ impl<'a> FrontendState<'a> {
                     return Err(FrontendPhase::Kind);
                 }
             };
+        resolved_info
+            .resolutions
+            .extend(self.module_directive_resolutions(parsed, local_api, package));
         self.resolutions
             .insert(module_id, resolved_info.resolutions.clone());
         self.resolved_type_aliases
@@ -419,7 +447,7 @@ impl<'a> FrontendState<'a> {
         let mut resolved = resolved_info.module;
         self.stamp_instance_ids(&mut resolved);
 
-        let imported_typed = self.build_imported_typed_apis(&imports);
+        let imported_typed = self.build_imported_typed_apis(&imports, package);
         let ImportedTypeInfo {
             func_schemes,
             tycon_kinds,
@@ -519,81 +547,6 @@ impl<'a> FrontendState<'a> {
         }
     }
 
-    fn build_imported_apis(&self, imports: &[EffectiveImport]) -> Vec<ImportedApi> {
-        imports
-            .iter()
-            .map(|imp| ImportedApi {
-                alias: imp.alias,
-                module: imp.module.clone(),
-                api: Arc::new(
-                    self.apis
-                        .get(&imp.module)
-                        .unwrap_or_else(|| {
-                            solveig_base::ice!(
-                                "imported module API missing for {}",
-                                imp.module.as_string(self.session)
-                            )
-                        })
-                        .filtered(&imp.spec),
-                ),
-                spec: imp.spec.clone(),
-            })
-            .collect()
-    }
-
-    fn build_imported_typed_apis(&self, imports: &[EffectiveImport]) -> Vec<ImportedTypedApi> {
-        imports
-            .iter()
-            .filter_map(|imp| {
-                self.typed_apis
-                    .get(&imp.module)
-                    .map(|api| ImportedTypedApi {
-                        alias: imp.alias,
-                        module: imp.module.clone(),
-                        api: api.clone(),
-                        spec: imp.spec.clone(),
-                    })
-            })
-            .collect()
-    }
-
-    fn collect_imported_kind_ids(
-        &self,
-        imports: &[EffectiveImport],
-    ) -> FxHashMap<TyConId, solveig_ast::ast::Kind> {
-        let mut out = FxHashMap::default();
-
-        for imp in imports {
-            if let Some(api) = self.typed_apis.get(&imp.module) {
-                let filtered = api.filtered(&imp.spec);
-                for (sym, kind) in &filtered.type_kinds {
-                    let id = filtered
-                        .type_ids
-                        .get(sym)
-                        .copied()
-                        .expect("ICE: imported type kind missing typed API TyConId");
-                    out.insert(id, kind.clone());
-                }
-            }
-        }
-
-        out
-    }
-
-    fn collect_imported_type_aliases(
-        &self,
-        imports: &[EffectiveImport],
-    ) -> FxHashMap<DefId, TypeAlias> {
-        let mut out = FxHashMap::default();
-
-        for imp in imports {
-            if let Some(api) = self.typed_apis.get(&imp.module) {
-                out.extend(api.filtered(&imp.spec).type_aliases);
-            }
-        }
-
-        out
-    }
 }
 
 fn module_names_as_strings(session: &Session, modules: &[ModuleName]) -> Vec<String> {
@@ -617,6 +570,7 @@ fn validate_selected_import_names(
             let Some(api) = apis.get(&import.module) else {
                 continue;
             };
+            let api = api.visible_to(module_file.package);
 
             for selected_name in &import.selected_names {
                 if !api.exports_name(selected_name.0) {
@@ -634,3 +588,4 @@ fn validate_selected_import_names(
 }
 
 include!("frontend/imported_type_info.rs");
+include!("frontend/imports.rs");
