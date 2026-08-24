@@ -9,21 +9,19 @@ data RateInfo = RateInfo (Maybe String) (Maybe String) (Maybe String)
 
 data ReleaseFailure =
     InvalidCredentials
-  | PrimaryRateLimited (Maybe String) String
-  | SecondaryRateLimited (Maybe String) String
-  | NoPublishedRelease
-  | HttpFailure Int String
-  | InvalidReleaseJson String
-  | RequestFailure String
+    | PrimaryRateLimited (Maybe String) String
+    | SecondaryRateLimited (Maybe String) String
+    | NoPublishedRelease
+    | HttpFailure Int String
+    | InvalidReleaseJson String
+    | RequestFailure String
 
-data GitHubAccess =
-    GitHubAccessReady RateInfo
-  | GitHubAccessFailed ReleaseFailure
+data GitHubAccess = GitHubAccessReady RateInfo | GitHubAccessFailed ReleaseFailure
 
 data ReleaseResult =
     ReleaseFound String String String String String
-  | ReleaseUnchanged String String
-  | ReleaseFailed String ReleaseFailure
+    | ReleaseUnchanged String String
+    | ReleaseFailed String ReleaseFailure
 
 rateInfo : std.http.Response -> RateInfo
 rateInfo response =
@@ -34,30 +32,33 @@ rateInfo response =
 
 decodeAccess : std.http.Response -> GitHubAccess
 decodeAccess response =
-    let code = std.http.statusCode (std.http.responseStatus response) in
-    if code == 200 then
-        case rateInfo response of
+    let code =
+        std.http.statusCode (std.http.responseStatus response)
+    in if code == 200
+        then case rateInfo response of
             RateInfo _ (Just "0") reset =>
-                GitHubAccessFailed
-                    (PrimaryRateLimited reset (responseMessage response))
+                GitHubAccessFailed (PrimaryRateLimited reset (responseMessage response))
             | info => GitHubAccessReady info
-    else GitHubAccessFailed (failureForStatus response code)
+        else GitHubAccessFailed (failureForStatus response code)
 
 decodeResponse : String -> Maybe String -> std.http.Response -> ReleaseResult
 decodeResponse repository cached response =
-    let code = std.http.statusCode (std.http.responseStatus response) in
-    if code == 304 then
-        case cached of
+    let code =
+        std.http.statusCode (std.http.responseStatus response)
+    in if code == 304
+        then case cached of
             Just etag => ReleaseUnchanged repository etag
-            | Nothing => ReleaseFailed repository
-                (InvalidReleaseJson "server returned 304 without a cached ETag")
-    else if code /= 200 then
-        ReleaseFailed repository (failureForStatus response code)
-    else
-        let etag = case std.http.findHeader "etag" response of
-            Just value => value
-            | Nothing => ""
-        in decodeReleaseJson repository etag (std.http.responseBody response)
+            | Nothing =>
+                ReleaseFailed
+                    repository
+                    (InvalidReleaseJson "server returned 304 without a cached ETag")
+        else if code /= 200
+            then ReleaseFailed repository (failureForStatus response code)
+            else let etag =
+                case std.http.findHeader "etag" response of
+                    Just value => value
+                    | Nothing => ""
+            in decodeReleaseJson repository etag (std.http.responseBody response)
 
 decodeReleaseJson : String -> String -> Bytes -> ReleaseResult
 decodeReleaseJson repository etag body =
@@ -76,7 +77,8 @@ releaseFromJson repository etag (JsonObject object) =
                 Nothing => ReleaseFailed repository (InvalidReleaseJson "JSON has no published_at")
                 | Just published =>
                     case stringField "html_url" object of
-                        Nothing => ReleaseFailed repository (InvalidReleaseJson "JSON has no html_url")
+                        Nothing =>
+                            ReleaseFailed repository (InvalidReleaseJson "JSON has no html_url")
                         | Just url => ReleaseFound repository tag published url etag
 releaseFromJson repository _ _ =
     ReleaseFailed repository (InvalidReleaseJson "release JSON is not an object")
@@ -90,8 +92,8 @@ stringField name object =
 failureForStatus : std.http.Response -> Int -> ReleaseFailure
 failureForStatus _ 401 = InvalidCredentials
 failureForStatus response code =
-    if or (code == 403) (code == 429) then
-        case std.http.findHeader "x-ratelimit-remaining" response of
+    if or (code == 403) (code == 429)
+        then case std.http.findHeader "x-ratelimit-remaining" response of
             Just "0" =>
                 PrimaryRateLimited
                     (std.http.findHeader "x-ratelimit-reset" response)
@@ -100,8 +102,7 @@ failureForStatus response code =
                 SecondaryRateLimited
                     (std.http.findHeader "retry-after" response)
                     (responseMessage response)
-    else if code == 404 then NoPublishedRelease
-    else HttpFailure code (responseMessage response)
+        else if code == 404 then NoPublishedRelease else HttpFailure code (responseMessage response)
 
 responseMessage : std.http.Response -> String
 responseMessage response =
@@ -145,8 +146,7 @@ describeFailure (PrimaryRateLimited reset message) =
 describeFailure (SecondaryRateLimited retryAfter message) =
     "GitHub secondary throttling" <> retrySuffix retryAfter <> messageSuffix message
 describeFailure NoPublishedRelease = "repository missing or has no published release"
-describeFailure (HttpFailure code message) =
-    "HTTP " <> show code <> messageSuffix message
+describeFailure (HttpFailure code message) = "HTTP " <> show code <> messageSuffix message
 describeFailure (InvalidReleaseJson message) = message
 describeFailure (RequestFailure message) = message
 
@@ -155,8 +155,7 @@ retrySuffix Nothing = ""
 retrySuffix (Just seconds) = "; retry after " <> seconds <> " seconds"
 
 messageSuffix : String -> String
-messageSuffix message =
-    if std.text.isEmpty message then "" else ": " <> message
+messageSuffix message = if std.text.isEmpty message then "" else ": " <> message
 
 renderResult : ReleaseResult -> String
 renderResult (ReleaseFound repository tag published url _) =

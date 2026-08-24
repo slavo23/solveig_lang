@@ -38,6 +38,14 @@ fn formats_signatures_with_forall_and_contexts() {
 }
 
 #[test]
+fn aligns_every_broken_function_type_at_one_continuation_indent() {
+    insta::assert_snapshot!(format_source(
+        "runPool:(String->Int->String->String->Task (Maybe Bytes))->String->Int->String->(Chan DownloadJob->Task ())->Task ()\n",
+        76,
+    ));
+}
+
+#[test]
 fn formats_function_definitions_and_application_chains() {
     insta::assert_snapshot!(format_source(
         "greet   name=appendString   \"hello, \" name\n",
@@ -131,11 +139,38 @@ fn formats_parentheses_lists_tuples_sections_and_backticks() {
 }
 
 #[test]
+fn broken_nested_delimiters_indent_contents_and_place_closers_consistently() {
+    insta::assert_snapshot!(format_source(
+        "nested value=(value,(appendString \"a long prefix\" value),[value,appendString \"another prefix\" value])\n",
+        44,
+    ));
+}
+
+#[test]
 fn formats_imports_fixities_and_type_aliases() {
     insta::assert_snapshot!(format_source(
         "import std.http as Http(fetch,Response)\ninfixl 5 +++,`append`\ntype Handler e a=IO e (Result e a)\n",
         40,
     ));
+}
+
+#[test]
+fn separates_imports_without_detaching_declaration_comments() {
+    insta::assert_snapshot!(format_source(
+        "import std.io\nimport std.list\n-- | Runs the program.\nmain:Task ()\nmain=pure ()\n",
+        100,
+    ));
+}
+
+#[test]
+fn keeps_trailing_import_comments_with_the_import_block() {
+    assert_eq!(
+        format_source(
+            "import std.io -- required by main\nmain:Task ()\nmain=pure ()\n",
+            100,
+        ),
+        "import std.io -- required by main\n\nmain : Task ()\nmain = pure ()\n"
+    );
 }
 
 #[test]

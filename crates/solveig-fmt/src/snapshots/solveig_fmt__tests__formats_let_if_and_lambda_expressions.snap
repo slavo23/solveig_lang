@@ -5,4 +5,4 @@ expression: "format_source(\"choose x=let y=fun value=>value in if x then y 1 el
 choose x =
     let y =
         fun value => value
-        in if x then y 1 else y 2
+    in if x then y 1 else y 2

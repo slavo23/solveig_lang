@@ -13,6 +13,14 @@ class or instance declarations on separate lines, collapses repeated blank
 lines to one blank line, preserves every comment, and ends a complete file with
 one newline.
 
+Imports form one compact block followed by exactly one blank line before the
+first declaration or its leading comments. When a function type must wrap, all
+continuation arrows use the same four-space indentation instead of drifting
+rightward. Broken tuples and lists place their contents one level inside
+aligned opening and closing delimiters; ordinary grouping parentheses stay
+compact, while a multiline lambda or layout expression gets an aligned closing
+parenthesis.
+
 For example:
 
 ```solveig

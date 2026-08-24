@@ -1,0 +1,7 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"runPool:(String->Int->String->String->Task (Maybe Bytes))->String->Int->String->(Chan DownloadJob->Task ())->Task ()\\n\",\n76,)"
+---
+runPool :
+    (String -> Int -> String -> String -> Task (Maybe Bytes)) ->
+    String -> Int -> String -> (Chan DownloadJob -> Task ()) -> Task ()

@@ -1,0 +1,17 @@
+---
+source: crates/solveig-fmt/src/tests.rs
+expression: "format_source(\"nested value=(value,(appendString \\\"a long prefix\\\" value),[value,appendString \\\"another prefix\\\" value])\\n\",\n44,)"
+---
+nested value =
+    (
+        value,
+        (appendString
+            "a long prefix"
+            value),
+        [
+            value,
+            appendString
+                "another prefix"
+                value
+        ]
+    )

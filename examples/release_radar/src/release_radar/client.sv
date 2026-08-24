@@ -9,9 +9,10 @@ httpLimits = std.http.HttpLimits 65536 1048576 10000 std.http.NoRedirects
 
 commonHeaders : [(String, String)]
 commonHeaders =
-    [ ("User-Agent", "solveig-release-radar/0.1")
-    , ("Accept", "application/vnd.github+json")
-    , ("X-GitHub-Api-Version", "2022-11-28")
+    [
+        ("User-Agent", "solveig-release-radar/0.1"),
+        ("Accept", "application/vnd.github+json"),
+        ("X-GitHub-Api-Version", "2022-11-28")
     ]
 
 requestHeaders : Maybe String -> release_radar.cache.Cache -> String -> [(String, String)]
@@ -35,10 +36,14 @@ checkAccess base token =
         (fmap
             release_radar.model.decodeAccess
             (std.http.fetchWith httpLimits (accessHeaders token) (base <> "/rate_limit")))
-        (pureIO . release_radar.model.GitHubAccessFailed
-            . release_radar.model.RequestFailure . describeHttpError)
+        (pureIO .
+            release_radar.model.GitHubAccessFailed .
+            release_radar.model.RequestFailure .
+            describeHttpError)
 
-fetchRelease : String -> Maybe String -> release_radar.cache.Cache -> String -> Task release_radar.model.ReleaseResult
+fetchRelease :
+    String ->
+    Maybe String -> release_radar.cache.Cache -> String -> Task release_radar.model.ReleaseResult
 fetchRelease base token cache repository =
     catchError
         (fmap
@@ -49,30 +54,42 @@ fetchRelease base token cache repository =
                 httpLimits
                 (requestHeaders token cache repository)
                 (base <> "/repos/" <> repository <> "/releases/latest")))
-        (pureIO . release_radar.model.ReleaseFailed repository
-            . release_radar.model.RequestFailure . describeHttpError)
+        (pureIO .
+            release_radar.model.ReleaseFailed repository .
+            release_radar.model.RequestFailure .
+            describeHttpError)
 
-fetchSequential : String -> Maybe String -> release_radar.cache.Cache -> [String] -> Task [release_radar.model.ReleaseResult]
+fetchSequential :
+    String ->
+    Maybe String ->
+    release_radar.cache.Cache -> [String] -> Task [release_radar.model.ReleaseResult]
 fetchSequential base token cache = mapM (fetchRelease base token cache)
 
-fetchConcurrentObserved : Int -> String -> Maybe String -> release_radar.cache.Cache -> [String] -> Task [release_radar.model.ReleaseResult]
+fetchConcurrentObserved :
+    Int ->
+    String ->
+    Maybe String ->
+    release_radar.cache.Cache -> [String] -> Task [release_radar.model.ReleaseResult]
 fetchConcurrentObserved workers base token cache =
     std.task.mapConcurrentlyBounded workers (fetchObserved base token cache)
 
-fetchObserved : String -> Maybe String -> release_radar.cache.Cache -> String -> Task release_radar.model.ReleaseResult
+fetchObserved :
+    String ->
+    Maybe String -> release_radar.cache.Cache -> String -> Task release_radar.model.ReleaseResult
 fetchObserved base token cache repository = do
     printLine ("[start] " <> repository)
     measured <- std.time.measure (fetchRelease base token cache repository)
     case measured of
-        (elapsed, result) => do
-            printLine
-                ("[done "
-                    <> show (milliseconds elapsed)
-                    <> " ms] "
-                    <> release_radar.model.releaseRepository result
-                    <> " — "
-                    <> release_radar.model.completionLabel result)
-            pureIO result
+        (elapsed, result) =>
+            do
+                printLine
+                    ("[done " <>
+                        show (milliseconds elapsed) <>
+                        " ms] " <>
+                        release_radar.model.releaseRepository result <>
+                        " — " <>
+                        release_radar.model.completionLabel result)
+                pureIO result
 
 milliseconds : Int -> Int
 milliseconds nanoseconds = div nanoseconds 1000000

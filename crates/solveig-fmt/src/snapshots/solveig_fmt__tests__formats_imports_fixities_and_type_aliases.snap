@@ -3,5 +3,6 @@ source: crates/solveig-fmt/src/tests.rs
 expression: "format_source(\"import std.http as Http(fetch,Response)\\ninfixl 5 +++,`append`\\ntype Handler e a=IO e (Result e a)\\n\",\n40,)"
 ---
 import std.http as Http(fetch, Response)
+
 infixl 5 +++, `append`
 type Handler e a = IO e (Result e a)
