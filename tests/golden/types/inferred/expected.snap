@@ -39,9 +39,11 @@ prelude.list.++ : forall a. [a] -> [a] -> [a]
 prelude.list.append : forall a. [a] -> [a] -> [a]
 prelude.list.concat : forall a. [[a]] -> [a]
 prelude.list.filter : forall a. (a -> Bool) -> [a] -> [a]
-prelude.list.foldl : forall a b. (b -> a -> b) -> b -> [a] -> b
-prelude.list.foldr : forall a b. (a -> b -> b) -> b -> [a] -> b
+prelude.list.foldlList : forall a b. (b -> a -> b) -> b -> [a] -> b
+prelude.list.foldrList : forall a b. (a -> b -> b) -> b -> [a] -> b
 prelude.list.map : forall a b. (a -> b) -> [a] -> [b]
+prelude.list.reverseList : forall a. [a] -> [a]
+prelude.list.reverseListInto : forall a. [a] -> [a] -> [a]
 prelude.prim.accept : Socket -> IO IOError Socket
 prelude.prim.appendFile : String -> String -> IO IOError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
@@ -184,16 +186,20 @@ prelude.typeclasses.applyRight : forall f a b. Applicative f => f a -> f b -> f 
 prelude.typeclasses.clampOrd : forall a. Ord a => a -> a -> a -> a
 prelude.typeclasses.div : Int -> Int -> Int
 prelude.typeclasses.eq : forall a. Eq a => a -> a -> Bool
+prelude.typeclasses.foldMap : forall t a m. (Foldable t, Monoid m) => (a -> m) -> t a -> m
 prelude.typeclasses.greater : forall a. PartialOrd a => a -> a -> Bool
 prelude.typeclasses.greaterEq : forall a. PartialOrd a => a -> a -> Bool
+prelude.typeclasses.hash : forall a. Hashable a => a -> Int
 prelude.typeclasses.less : forall a. PartialOrd a => a -> a -> Bool
 prelude.typeclasses.lessEq : forall a. PartialOrd a => a -> a -> Bool
 prelude.typeclasses.liftA2 : forall f a b c. Applicative f => (a -> b -> c) -> f a -> f b -> f c
 prelude.typeclasses.maxOrd : forall a. Ord a => a -> a -> a
 prelude.typeclasses.mconcat : forall a. Monoid a => [a] -> a
 prelude.typeclasses.minOrd : forall a. Ord a => a -> a -> a
+prelude.typeclasses.mixHash : Int -> Int -> Int
 prelude.typeclasses.mod : Int -> Int -> Int
 prelude.typeclasses.notEq : forall a. Eq a => a -> a -> Bool
+prelude.typeclasses.sequenceA : forall t f a. (Traversable t, Applicative f) => t (f a) -> f (t a)
 prelude.typeclasses.subtract : forall a. Num a => a -> a -> a
 prelude.typeclasses.thenM : forall m a b. Monad m => m a -> m b -> m b
 prelude.typeclasses.totalCompareFloat : Float -> Float -> Ordering

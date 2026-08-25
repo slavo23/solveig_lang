@@ -18,15 +18,11 @@ composeK f g x = do
 
 -- | Maps a function that returns monadic results over a list.
 mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]
-mapM f [] = pure []
-mapM f (y :: ys) = do
-    z <- f y
-    zs <- mapM f ys
-    pure (z :: zs)
+mapM f values = traverse f values
 
 -- | Turns a list of monadic computations into one computation producing a list.
 sequence : forall m a. Monad m => [m a] -> m [a]
-sequence xs = mapM (fun x => x) xs
+sequence values = sequenceA values
 
 -- | Filters a list with a predicate that returns monadic results.
 filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]

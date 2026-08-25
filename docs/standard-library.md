@@ -45,8 +45,9 @@ import std.text(lines, splitOnce, stringToChars, charsToString, intToString)
 `std.list` provides `length`, `isEmpty`, `take`, `drop`, `takeWhile`,
 `dropWhile`, `zip`, `zipWith`, `reverse`, half-open integer `range`, and
 explicit `rangeInclusive`. These are separate from the universally imported
-traversal operations such as `map` and `foldl`. `take` treats a non-positive
-count as empty; `drop` treats it as zero.
+traversal operations such as `map` and the generic `Foldable` methods `foldl`
+and `foldr`. `take` treats a non-positive count as empty; `drop` treats it as
+zero.
 
 `std.text.length` counts Unicode scalar values and `isEmpty` avoids needless
 conversion. `lines` removes newline separators, preserves interior empty

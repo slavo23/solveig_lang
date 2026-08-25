@@ -1,0 +1,14 @@
+ok: Foldable order
+ok: Foldable containers
+ok: Traversable identity and failure
+ok: Traversable naturality
+ok: Traversable composition
+ok: Traversable Either
+ok: Hashable primitives
+ok: Hashable containers
+ok: stack-safe folds
+ok: stack-safe traversal
+visit 1
+visit 2
+visit 3
+ok: IO traversal order

@@ -12,4 +12,5 @@ implicit = [
     "prelude.control",
     "prelude.show",
     "prelude.instances",
+    "prelude.algebra_instances",
 ]

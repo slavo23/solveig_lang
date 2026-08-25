@@ -1594,7 +1594,7 @@ fn hover_covers_direct_prelude_imported_references() {
         (
             "mconcat xs = foldr combine empty xs",
             "foldr",
-            "foldr : forall a b. (a -> b -> b) -> b -> [a] -> b",
+            "class Foldable t\nfoldr : forall a b. (a -> b -> b) -> b -> t a -> b",
         ),
     ] {
         let hover = compilation

@@ -2,7 +2,8 @@ export (
     Ordering(..), Eq, eq, notEq, PartialOrd, Ord, less, lessEq, greater, greaterEq,
     minOrd, maxOrd, clampOrd, totalCompareFloat, Num, div, mod, subtract, Fractional,
     Functor, (<$>), Applicative, (<*>), liftA2, applyRight, applyLeft, (<*), (*>),
-    Monad, (>>=), thenM, (>>), Show, Semigroup, (<>), Monoid, mconcat
+    Monad, (>>=), thenM, (>>), Show, Semigroup, (<>), Monoid, mconcat,
+    Foldable, foldMap, Traversable, sequenceA, Hashable, hash
 )
 
 import prelude.builtins(*)
@@ -230,3 +231,49 @@ class Semigroup a => Monoid a where
 -- | Combines all values in a list.
 mconcat : forall a. Monoid a => [a] -> a
 mconcat xs = foldr combine empty xs
+
+-- | Containers whose finite contents can be reduced to one value.
+-- |
+-- | Solveig is strict, so `foldl` is always a strict left fold; there is no
+-- | separate `foldl'`. Instances must preserve the container's logical order.
+class Foldable t where
+    -- | Folds from right to left without requiring a recursive user stack.
+    foldr : forall a b. (a -> b -> b) -> b -> t a -> b
+    -- | Strictly folds from left to right.
+    foldl : forall a b. (b -> a -> b) -> b -> t a -> b
+
+-- | Maps every element to a monoid and combines the results in logical order.
+foldMap : forall t a m. (Foldable t, Monoid m) => (a -> m) -> t a -> m
+foldMap transform values = foldr (fun value acc => combine (transform value) acc) empty values
+
+-- | Functors whose elements can be visited through an Applicative effect.
+-- |
+-- | Traversal follows the same left-to-right order as `foldl`. For `IO`, that
+-- | means effects are deterministic and sequential; traversal never adds
+-- | concurrency implicitly.
+class (Functor t, Foldable t) => Traversable t where
+    -- | Applies an effectful transformation to every element.
+    traverse : forall f a b. Applicative f => (a -> f b) -> t a -> f (t b)
+
+-- | Turns a traversable container of effects into one effectful container.
+sequenceA : forall t f a. (Traversable t, Applicative f) => t (f a) -> f (t a)
+sequenceA values = traverse (fun value => value) values
+
+-- | Values that can contribute to a deterministic machine-sized hash.
+-- |
+-- | Instances must obey: if `x == y`, then `hashWithSalt salt x ==
+-- | hashWithSalt salt y`. Exact numeric hashes are not a serialization format
+-- | and may change between Solveig releases. Float deliberately has no
+-- | instance because its equality is not reflexive for NaN.
+class Eq a => Hashable a where
+    -- | Mixes a value into an existing salt.
+    hashWithSalt : Int -> a -> Int
+
+-- | Hashes a value from the standard initial salt.
+hash : forall a. Hashable a => a -> Int
+hash value = hashWithSalt 0 value
+
+-- Package-internal deterministic mixing primitive. Int overflow is the
+-- language's defined wrapping arithmetic and is intentional here.
+mixHash : Int -> Int -> Int
+mixHash salt value = salt * 16777619 + value

@@ -112,8 +112,8 @@ The always-available operations are the common traversal vocabulary:
 ```solveig
 map : forall a b. (a -> b) -> [a] -> [b]
 filter : forall a. (a -> Bool) -> [a] -> [a]
-foldr : forall a b. (a -> b -> b) -> b -> [a] -> b
-foldl : forall a b. (b -> a -> b) -> b -> [a] -> b
+foldr : forall t a b. Foldable t => (a -> b -> b) -> b -> t a -> b
+foldl : forall t a b. Foldable t => (b -> a -> b) -> b -> t a -> b
 concat : forall a. [[a]] -> [a]
 append : forall a. [a] -> [a] -> [a]
 (++) : forall a. [a] -> [a] -> [a]
@@ -154,7 +154,25 @@ resolves through `bind` and `thenM`. Their common combinators include `fmap`,
 `>>=`, and `>>`. Function composition and low-precedence application are `(.)`
 and `($)`.
 
-`Semigroup` and `Monoid` currently remain here with `combine`, `empty`, and
+`Foldable` generalizes strict finite folds over `Maybe`, `List`, `Either`, and
+the last element of tuples. Because Solveig is strict, `foldl` is already the
+strict left fold—there is no separate `foldl'`. `foldMap` combines mapped
+values through a `Monoid`.
+
+`Traversable` visits those same containers from left to right with an
+`Applicative` effect. Use `traverse transform values` or `sequenceA values`.
+With `IO`, effects are deterministic and sequential; traversal never introduces
+concurrency. The List implementation is stack-safe and preserves element
+order.
+
+`Hashable` provides `hashWithSalt` and `hash` for equality-respecting hashes.
+Equal values always hash equally. The Prelude supplies instances for `Int`,
+`Char`, `String`, `()`, `Bool`, `Ordering`, `Maybe`, finite lists, tuples, and
+`Either`. `Float` intentionally has no instance because NaN is not equal to
+itself. Exact numeric hashes may change between Solveig releases and must not
+be serialized.
+
+`Semigroup` and `Monoid` remain here with `combine`, `empty`, and
 `mconcat`; `(<>)` is the operator alias for `combine`. They are stable
 general-purpose abstractions rather than host-domain operations.
 

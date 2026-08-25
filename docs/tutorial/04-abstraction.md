@@ -116,7 +116,9 @@ Common Prelude classes include:
 - `Num` and `Fractional` for numeric operations;
 - `Show` for programmer-oriented text;
 - `Semigroup` and `Monoid` for combination;
-- `Functor`, `Applicative`, and `Monad` for structured computation.
+- `Functor`, `Applicative`, and `Monad` for structured computation;
+- `Foldable` and `Traversable` for finite container-wide operations;
+- `Hashable` for equality-respecting hashes.
 
 ## Functor, Applicative, and Monad
 
@@ -141,6 +143,37 @@ readAndPrint = do
 ```
 
 It is not specific to IO; any `Monad` instance can use the same notation.
+
+## Foldable, Traversable, and Hashable
+
+`foldl` is a strict, stack-safe left fold over any `Foldable` container. Unlike
+lazy Haskell, strict Solveig does not need a second `foldl'` name:
+
+```solveig
+sum : [Int] -> Int
+sum = foldl (+) 0
+```
+
+`traverse` applies an `Applicative` effect from left to right while retaining
+the container's shape:
+
+```solveig
+positive : Int -> Either String Int
+positive value =
+    if value > 0 then Right value else Left "expected a positive number"
+
+validateAll : [Int] -> Either String [Int]
+validateAll = traverse positive
+```
+
+For `IO`, the actions run sequentially in input order. Use the explicit
+structured-concurrency operations from `std.task` when work should overlap.
+`sequenceA` is `traverse id` for a container that already holds effects.
+
+`hash value` is available for `Hashable` values. Equal values are guaranteed to
+hash equally, but the exact integer is not a storage or wire format. `Float`
+has no `Hashable` instance because NaN makes ordinary floating equality
+non-reflexive.
 
 ## Point-free style
 

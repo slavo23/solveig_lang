@@ -129,7 +129,8 @@ positiveSquares values =
     map (fun value => value * value) (filter (fun value => value > 0) values)
 ```
 
-Prelude supplies `map`, `filter`, `foldl`, `foldr`, `append`, and `(++)`.
+Prelude supplies `map`, `filter`, generic strict `foldl`, stack-safe `foldr`,
+`append`, and `(++)`.
 `std.list` adds `take`, `drop`, `zip`, `zipWith`, `reverse`, ranges, and
 `length`.
 
