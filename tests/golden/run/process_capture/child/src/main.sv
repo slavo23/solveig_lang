@@ -1,5 +1,6 @@
-import std.env
-import std.io
+import std.env(*)
+import std.io(*)
+
 printMaybe : Maybe String -> Task ()
 printMaybe value =
     case value of

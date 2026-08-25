@@ -1,4 +1,4 @@
-import std.list
+import std.list(*)
 import nQueens(solveNQueensCount)
 import sudoku(solveBoard, samplePuzzle)
 import binaryTree(sampleTree)
@@ -8,7 +8,7 @@ import stressTestTwo(runStressTestTwo)
 import quicksort(sampleSortedQuickSort)
 import mergesort(sampleSortedMergeSort)
 import knapsack(sampleTreeDp)
-import treeMap(fromList, Map, Entry, size)
+import treeMap(fromList, Map, Entry(..), size)
 import tcTests.classes(advancedTypeclassRegressionMain)
 import tcTests.tcStressTest(typeclassSuperclassSuccessMain);
 import tcTests.tcImportClient(importSmokeMain)

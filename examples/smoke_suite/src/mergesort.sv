@@ -1,4 +1,5 @@
-import std.list
+import std.list(*)
+
 data Split a = Split [a] [a];
 
 reverseAppend : forall a. [a] -> [a] -> [a];

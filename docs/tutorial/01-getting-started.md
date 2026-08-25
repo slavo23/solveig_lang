@@ -142,7 +142,7 @@ cleanLength text = length (trimAscii text)
 Import a whole module when several names make the code clearer:
 
 ```solveig
-import std.text
+import std.text(*)
 
 cleanLength : String -> Int
 cleanLength text = std.text.length (std.text.trimAscii text)

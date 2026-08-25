@@ -1,4 +1,5 @@
-import std.task
+import std.task(*)
+
 reportDefect : Defect -> Task ()
 reportDefect defect =
     case defect of

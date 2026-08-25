@@ -263,7 +263,39 @@ fn semantic_reference_span_has_one_token(source_file: &SourceFile, span: Span) -
         return false;
     };
 
-    !text.is_empty() && !text.chars().any(char::is_whitespace)
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    if first.is_alphabetic() || first == '_' {
+        return chars
+            .all(|character| character.is_alphanumeric() || character == '_' || character == '\'');
+    }
+
+    text.chars().all(|character| {
+        matches!(
+            character,
+            '!' | '#'
+                | '$'
+                | '%'
+                | '&'
+                | '*'
+                | '+'
+                | '.'
+                | '/'
+                | ':'
+                | '<'
+                | '='
+                | '>'
+                | '?'
+                | '@'
+                | '\\'
+                | '^'
+                | '|'
+                | '-'
+                | '~'
+        )
+    })
 }
 
 fn push_symbol_declarations(symbol: &SourceSymbol, file_id: FileId, out: &mut Vec<TokenCandidate>) {

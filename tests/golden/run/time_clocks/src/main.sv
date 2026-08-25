@@ -1,4 +1,4 @@
-import std.time
+import std.time(*)
 import std.text(intToString)
 
 main : Task ()

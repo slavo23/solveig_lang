@@ -59,6 +59,35 @@ fn completion_items(source: &str) -> Vec<SourceCompletionItem> {
     items
 }
 
+fn package_completion_items(test_name: &str, source: &str) -> Vec<SourceCompletionItem> {
+    let root = temp_root(test_name);
+    let source_path = root.join("src/main.sv");
+    let (source, position) = source_without_marker(source);
+
+    write_source(
+        &root.join("solveig.toml"),
+        "[package]\nname = \"completion_pkg\"\nversion = \"0.1.0\"\n\n[language]\nentry = \"main\"\n",
+    );
+    write_source(
+        &root.join("src/core.sv"),
+        r#"export (Widget(..), value, other)
+
+data Widget = MkWidget Int
+
+value = 1
+other = 2
+"#,
+    );
+    write_source(&source_path, &source);
+
+    let mut compilation = Compilation::new(&root);
+    let items =
+        compilation.completion_items_at_position(&source_path, position, PositionEncoding::Utf8);
+
+    drop(root);
+    items
+}
+
 fn find_item<'a>(
     items: &'a [SourceCompletionItem],
     label: &str,
@@ -108,16 +137,81 @@ main = increment 1
 }
 
 #[test]
-fn qualified_prelude_completion_lists_imported_exports() {
-    let items = completion_items(
+fn qualified_prelude_completion_steps_through_modules_then_exports() {
+    let modules = completion_items(
         r#"main : Bool
 main = prelude.$COMPLETEbuiltins.True
 "#,
     );
 
-    assert_item(&items, "builtins", SourceCompletionItemKind::Module);
-    assert_item(&items, "Bool", SourceCompletionItemKind::Type);
-    assert_item(&items, "True", SourceCompletionItemKind::Constructor);
+    assert_item(&modules, "builtins", SourceCompletionItemKind::Module);
+    assert!(find_item(&modules, "Bool").is_none());
+
+    let exports = completion_items(
+        r#"main : Bool
+main = prelude.builtins.$COMPLETETrue
+"#,
+    );
+    assert_item(&exports, "Bool", SourceCompletionItemKind::Type);
+    assert_item(&exports, "True", SourceCompletionItemKind::Constructor);
+}
+
+#[test]
+fn project_completion_respects_import_selection_qualification_and_aliases() {
+    let unqualified = package_completion_items(
+        "selected_imports",
+        r#"import completion_pkg.core(value as answer, Widget)
+
+main = $COMPLETEanswer
+"#,
+    );
+    assert_item(&unqualified, "answer", SourceCompletionItemKind::Function);
+    assert_item(&unqualified, "Widget", SourceCompletionItemKind::Type);
+    for hidden in ["value", "other", "MkWidget"] {
+        assert!(
+            find_item(&unqualified, hidden).is_none(),
+            "selection leaked `{hidden}` into unqualified completion: {unqualified:#?}"
+        );
+    }
+
+    let qualified = package_completion_items(
+        "qualified_imports",
+        r#"import completion_pkg.core(value as answer, Widget)
+
+main = core.$COMPLETEvalue
+"#,
+    );
+    assert_item(&qualified, "value", SourceCompletionItemKind::Function);
+    assert_item(&qualified, "other", SourceCompletionItemKind::Function);
+    assert_item(&qualified, "Widget", SourceCompletionItemKind::Type);
+    assert_item(
+        &qualified,
+        "MkWidget",
+        SourceCompletionItemKind::Constructor,
+    );
+    assert!(find_item(&qualified, "answer").is_none());
+
+    let alias = package_completion_items(
+        "aliased_imports",
+        r#"import completion_pkg.core as Model
+
+main = Model.$COMPLETEvalue
+"#,
+    );
+    assert_item(&alias, "value", SourceCompletionItemKind::Function);
+    assert_item(&alias, "other", SourceCompletionItemKind::Function);
+
+    let suppressed = package_completion_items(
+        "suppressed_import_qualifier",
+        r#"import completion_pkg.core as Model
+
+main = core.$COMPLETEvalue
+"#,
+    );
+    assert!(
+        suppressed.is_empty(),
+        "an explicit alias must suppress the original qualifier: {suppressed:#?}"
+    );
 }
 
 #[test]

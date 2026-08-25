@@ -5,9 +5,9 @@ export (
     Monad, (>>=), thenM, (>>), Show, Semigroup, (<>), Monoid, mconcat
 )
 
-import prelude.builtins
-import prelude.list
-import prelude.prim
+import prelude.builtins(*)
+import prelude.list(*)
+import prelude.prim(*)
 
 infix 4 ==, /=, <, <=, >, >=
 infixl 6 +, -

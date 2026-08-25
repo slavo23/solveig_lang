@@ -5,7 +5,7 @@ export (
     readFileBytesLimited, writeFile, writeFileBytes, appendFile
 )
 
-import prelude.prim
+import prelude.prim(*)
 import std.task(bracket)
 
 -- | How a file is opened.

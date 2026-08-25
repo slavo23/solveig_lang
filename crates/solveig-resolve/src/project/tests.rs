@@ -151,7 +151,7 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
 }
 
 #[test]
-fn module_api_filtered_imports_retain_docs() {
+fn module_selection_projection_retains_docs() {
     let session = Session::new();
     let source = r#"-- | Adds one to an integer.
 documentedIncrement : Int -> Int
@@ -184,13 +184,22 @@ class Describe a where
     let describe_class = session.intern("Describe");
     let describe_method = session.intern("describe");
 
-    let filtered = api.filtered(&ImportSpec::Only(vec![
-        documented_increment,
-        trailing_value,
-        documented,
-        mk_documented,
-        describe_class,
-    ]));
+    let import_source =
+        "import docs(documentedIncrement, trailingValue, Documented(..), Describe)\n";
+    let import_file = session.add_file("<import>", import_source);
+    let import = parse_source(&session, import_file, import_source);
+    let selection = &import
+        .imports
+        .first()
+        .expect("test import must lower")
+        .selection;
+    let filtered = project_module_selection(
+        &api,
+        import_file,
+        &ModuleName(vec![session.intern("docs")]),
+        selection,
+    )
+    .expect("test selection must project");
 
     assert_eq!(
         filtered

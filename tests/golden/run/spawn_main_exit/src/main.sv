@@ -1,4 +1,5 @@
-import std.thread
+import std.thread(*)
+
 main : Task ()
 main = do
     _ <- spawn (printLine "child")

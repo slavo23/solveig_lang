@@ -3,7 +3,7 @@ export (
     length, isEmpty, startsWith, stripPrefix, trimAscii, lines, splitOnce
 )
 
-import prelude.prim
+import prelude.prim(*)
 import std.list(reverse)
 
 -- | Converts a string to its Unicode scalar values.

@@ -1,6 +1,7 @@
-import std.net
-import std.bytes
-import std.task
+import std.net(*)
+import std.bytes(*)
+import std.task(*)
+
 echoConnection : Socket -> Task ()
 echoConnection connection = do
     request <- recvBytes connection 1024

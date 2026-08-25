@@ -6,18 +6,19 @@ use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
 
 use solveig_ast::ast::{
-    BuiltinDefinition, ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Kind,
-    ModuleId, Names, PRIM_TYS, Ty, TyConId, TyConTable, TyVarId,
+    BuiltinDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Kind, ModuleId, Names,
+    PRIM_TYS, Ty, TyConId, TyConTable, TyVarId,
 };
 use solveig_base::{Diagnostic, FileId, FileSpan, IntoDiagnostic, Label, Session, Span, Symbol};
 use solveig_check::inference::type_infer::CheckedModule;
 use solveig_package::{PackageId, PackageKind};
 use solveig_syntax::ast::{
-    DocComment, EntityExposure, Fixity, ImportDecl, ImportSpec, InstanceMethod, ModuleEntity,
-    ModuleName, ModuleSelection, ParsedModule, ReexportDecl, SurfaceDefinition,
+    DocComment, EntityExposure, Fixity, ImportDecl, InstanceMethod, ModuleEntity, ModuleName,
+    ModuleSelection, ParsedModule, ReexportDecl, SurfaceDefinition,
 };
 
 mod api_build;
+mod api_selection;
 mod diagnostics;
 mod equations;
 mod graph;
@@ -27,6 +28,7 @@ mod module_api;
 mod tests;
 
 pub use api_build::*;
+pub use api_selection::{project_module_selection, project_module_selection_diagnostics};
 pub use diagnostics::*;
 pub use equations::{function_equation_group_indices, instance_method_equation_group_indices};
 pub use graph::*;

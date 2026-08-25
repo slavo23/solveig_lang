@@ -3,7 +3,7 @@ export (
     intersection, difference
 )
 
-import std.map
+import std.map(*)
 
 -- | An immutable ordered set backed by `std.map`.
 data Set a = MkSet (std.map.Map a ())

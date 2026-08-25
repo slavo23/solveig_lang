@@ -43,7 +43,7 @@ impl<'a> Resolver<'a> {
                 let mut candidates = Vec::new();
 
                 for imp in &cx.imported_apis {
-                    if let Some(sym) = imp.api.constructors.get(name)
+                    if let Some(sym) = imp.unqualified.constructors.get(name)
                         && !candidates.contains(sym)
                     {
                         candidates.push(*sym);

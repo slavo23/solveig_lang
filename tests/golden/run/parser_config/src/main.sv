@@ -1,6 +1,6 @@
-import std.bytes
-import std.parser
-import std.text
+import std.bytes(*)
+import std.parser(*)
+import std.text(*)
 
 data ConfigError = ReservedName String
 

@@ -158,15 +158,7 @@ impl Parser<'_> {
             }
 
             if parser.at(&Token::LParen) {
-                parser.advance();
-                while !parser.at(&Token::RParen) {
-                    parser.parse_import_name()?;
-                    if !parser.at(&Token::Comma) {
-                        break;
-                    }
-                    parser.advance();
-                }
-                parser.expect(&Token::RParen)?;
+                parser.parse_module_selection(true, true)?;
             }
 
             Ok(())

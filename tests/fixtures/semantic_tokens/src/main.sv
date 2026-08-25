@@ -1,4 +1,4 @@
-import semanticLib(Documented, MkDocumented, Describe, describe, documentedIncrement)
+import semanticLib(Documented(..), Describe, documentedIncrement)
 
 -- semantic coverage comment
 data LocalBox a = MkLocalBox a

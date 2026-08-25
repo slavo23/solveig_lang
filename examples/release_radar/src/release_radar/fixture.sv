@@ -1,8 +1,8 @@
-import std.bytes
-import std.list
-import std.net
-import std.task
-import std.time
+import std.bytes(*)
+import std.list(*)
+import std.net(*)
+import std.task(*)
+import std.time(*)
 
 emptyBytes : Bytes
 emptyBytes = std.bytes.stringToBytes ""

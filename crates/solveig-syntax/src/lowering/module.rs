@@ -243,7 +243,7 @@ impl CstToAst<'_> {
         }
 
         let module = ModuleName(segments);
-        let mut alias = module.default_alias();
+        let mut alias = None;
 
         self.skip_trivia_children(&children, &mut index);
         if matches!(
@@ -262,55 +262,36 @@ impl CstToAst<'_> {
                     ),
                 ));
             }
-            alias = self.symbol_from_token(alias_token);
+            alias = Some((
+                self.symbol_from_token(alias_token),
+                self.token_span(alias_token),
+                node,
+            ));
             index += 1;
         }
-
-        let mut names = Vec::new();
-        let mut selected_names = Vec::new();
 
         self.skip_trivia_children(&children, &mut index);
-        if matches!(
+        let has_selection = matches!(
             children.get(index),
             Some(NodeOrToken::Token(token)) if self.cst.token(*token).kind == Token::LParen
-        ) {
-            index += 1;
-            loop {
-                self.skip_trivia_children(&children, &mut index);
-                if matches!(
-                    children.get(index),
-                    Some(NodeOrToken::Token(token)) if self.cst.token(*token).kind == Token::RParen
-                ) {
-                    break;
+        );
+        let imports_all = has_selection
+            && children.iter().any(|child| match child {
+                NodeOrToken::Token(token) => {
+                    self.cst.token(*token).kind == Token::Operator && self.token_text(*token) == "*"
                 }
-
-                let selected = self.lower_import_name_from_children(node, &children, &mut index)?;
-                names.push(selected.0);
-                selected_names.push(selected);
-
-                self.skip_trivia_children(&children, &mut index);
-                if matches!(
-                    children.get(index),
-                    Some(NodeOrToken::Token(token)) if self.cst.token(*token).kind == Token::Comma
-                ) {
-                    index += 1;
-                } else {
-                    break;
-                }
-            }
-        }
-
-        let spec = if names.is_empty() {
-            ImportSpec::All
+                NodeOrToken::Node(_) => false,
+            });
+        let selection = if imports_all {
+            ModuleSelection::All
         } else {
-            ImportSpec::Only(names)
+            ModuleSelection::Only(self.lower_module_entities(node)?)
         };
 
         Ok(ImportDecl {
             module,
             alias,
-            spec,
-            selected_names,
+            selection,
             span: mk_span(
                 self.node_span(node).start as usize,
                 self.following_significant_start_after_node(node),

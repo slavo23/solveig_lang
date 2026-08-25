@@ -1,11 +1,11 @@
 export ()
 
-import prelude.builtins
-import prelude.control
-import prelude.list
-import prelude.prim
-import prelude.show
-import prelude.typeclasses
+import prelude.builtins(*)
+import prelude.control(*)
+import prelude.list(*)
+import prelude.prim(*)
+import prelude.show(*)
+import prelude.typeclasses(*)
 
 instance Eq Int where
     (==) x y = intEq x y

@@ -3,7 +3,7 @@ export (
     runProcessLimited, exitWith, exitSuccess, exitFailure
 )
 
-import prelude.prim
+import prelude.prim(*)
 
 -- | Captured output and status from a completed child process.
 data ProcessResult =

@@ -1,9 +1,9 @@
-import std.bytes
-import std.http
-import std.json
-import std.map
-import std.parser
-import std.text
+import std.bytes(*)
+import std.http(*)
+import std.json(*)
+import std.map(*)
+import std.parser(*)
+import std.text(*)
 
 data RateInfo = RateInfo (Maybe String) (Maybe String) (Maybe String)
 

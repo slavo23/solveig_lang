@@ -72,7 +72,7 @@ Select names to keep the local namespace small, or import the module and use a
 qualified reference:
 
 ```solveig
-import std.list
+import std.list(*)
 
 firstThree : forall a. [a] -> [a]
 firstThree = std.list.take 3

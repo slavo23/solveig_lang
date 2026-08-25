@@ -1,6 +1,6 @@
 export (spawn, killThread)
 
-import prelude.prim
+import prelude.prim(*)
 
 -- | Starts an IO action in a new lightweight thread.
 spawn : forall childError e. IO childError () -> IO e ThreadId

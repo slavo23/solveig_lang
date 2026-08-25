@@ -84,17 +84,10 @@ impl ModuleName {
 }
 
 #[derive(Debug, Clone)]
-pub enum ImportSpec {
-    All,
-    Only(Vec<Symbol>),
-}
-
-#[derive(Debug, Clone)]
 pub struct ImportDecl {
     pub module: ModuleName,
-    pub alias: Symbol,
-    pub spec: ImportSpec,
-    pub selected_names: Vec<Spanned<Symbol>>,
+    pub alias: Option<Spanned<Symbol>>,
+    pub selection: ModuleSelection,
     pub span: Span,
     pub cst_id: CstId,
 }

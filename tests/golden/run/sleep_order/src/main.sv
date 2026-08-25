@@ -1,6 +1,7 @@
-import std.time
-import std.thread
-import std.channel
+import std.time(*)
+import std.thread(*)
+import std.channel(*)
+
 worker : Int -> String -> Chan () -> Task ()
 worker delay label done = do
     sleep delay

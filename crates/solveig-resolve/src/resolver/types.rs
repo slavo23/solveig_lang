@@ -107,13 +107,13 @@ impl<'a> Resolver<'a> {
                 let mut alias_candidates = Vec::new();
 
                 for imp in &cx.imported_apis {
-                    if let Some(def_id) = imp.api.types.get(name)
+                    if let Some(def_id) = imp.unqualified.types.get(name)
                         && !type_candidates.contains(def_id)
                     {
                         type_candidates.push(*def_id);
                     }
 
-                    if let Some(def_id) = imp.api.type_aliases.get(name)
+                    if let Some(def_id) = imp.unqualified.type_aliases.get(name)
                         && !alias_candidates.contains(def_id)
                     {
                         alias_candidates.push(*def_id);
@@ -185,7 +185,7 @@ impl<'a> Resolver<'a> {
                 let mut candidates = cx
                     .imported_apis
                     .iter()
-                    .filter_map(|imp| imp.api.type_aliases.get(name).copied())
+                    .filter_map(|imp| imp.unqualified.type_aliases.get(name).copied())
                     .collect::<Vec<_>>();
                 candidates.sort_unstable();
                 candidates.dedup();
@@ -328,7 +328,7 @@ impl<'a> Resolver<'a> {
                 let mut candidates = Vec::new();
 
                 for imp in &cx.imported_apis {
-                    if let Some(sym) = imp.api.types.get(name)
+                    if let Some(sym) = imp.unqualified.types.get(name)
                         && !candidates.contains(sym)
                     {
                         candidates.push(*sym);

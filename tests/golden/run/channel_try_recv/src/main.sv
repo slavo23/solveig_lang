@@ -1,4 +1,5 @@
-import std.channel
+import std.channel(*)
+
 report : Maybe Int -> Task ()
 report Nothing = printLine "empty"
 report (Just value) = printLine (show value)

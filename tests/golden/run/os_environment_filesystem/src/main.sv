@@ -1,7 +1,8 @@
-import std.env
-import std.fs
-import std.io
+import std.env(*)
+import std.fs(*)
+import std.io(*)
 import std.list(length)
+
 lookupEnvironment : String -> [(String, String)] -> Maybe String;
 lookupEnvironment name [] = Nothing;
 lookupEnvironment name ((key, value) :: rest) =

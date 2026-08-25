@@ -14,7 +14,7 @@ implementing the server side yourself.
 The common path does not ask the caller to configure limits:
 
 ```solveig
-import std.http
+import std.http(*)
 
 downloadText : String -> IO HttpError String
 downloadText url = do
@@ -69,7 +69,7 @@ unbounded streaming API.
 For staged request construction:
 
 ```solveig
-import std.http
+import std.http(*)
 
 postJson : String -> String -> IO HttpError Response
 postJson spelling body =
@@ -145,8 +145,8 @@ remove the service's usage policy; handle status and rate-limit headers.
 `withConnection host port body` owns an outgoing socket:
 
 ```solveig
-import std.bytes
-import std.net
+import std.bytes(*)
+import std.net(*)
 
 echo : String -> Int -> String -> Task String
 echo host port message =

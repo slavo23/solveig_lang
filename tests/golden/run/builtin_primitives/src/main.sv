@@ -1,4 +1,4 @@
-import prelude.prim
+import prelude.prim(*)
 
 intResults =
     [ intAdd 40 2

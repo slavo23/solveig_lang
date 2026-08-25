@@ -1,8 +1,8 @@
-import std.bytes
-import std.json
-import std.map
-import std.parser
-import std.vector
+import std.bytes(*)
+import std.json(*)
+import std.map(*)
+import std.parser(*)
+import std.vector(*)
 
 replyText : forall a. (a -> String) -> std.parser.ParseReply std.parser.ByteInput std.json.JsonError a -> String
 replyText showValue reply =

@@ -46,6 +46,11 @@ pub enum ResolveError {
         module: ModuleName,
         name: Symbol,
     },
+    AmbiguousModuleQualifier {
+        span: FileSpan,
+        qualifier: Symbol,
+        modules: Vec<ModuleName>,
+    },
     InvalidModuleDirective {
         span: FileSpan,
         message: String,
@@ -184,6 +189,32 @@ impl ResolveError {
                 *span,
                 format!("`{}` is not exported by this module", session.str(*name)),
             )),
+            Self::AmbiguousModuleQualifier {
+                span,
+                qualifier,
+                modules,
+            } => Diagnostic::error(
+                "RES0020",
+                format!(
+                    "ambiguous module qualifier `{}`",
+                    session.str(*qualifier)
+                ),
+            )
+            .with_label(Label::primary(
+                *span,
+                format!(
+                    "`{}` already qualifies another imported module",
+                    session.str(*qualifier)
+                ),
+            ))
+            .with_notes(vec![format!(
+                "conflicting modules: {}",
+                modules
+                    .iter()
+                    .map(|module| module.as_string(session))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )]),
             Self::InvalidModuleDirective { span, message } => {
                 Diagnostic::error("RES0019", message.clone())
                     .with_label(Label::primary(*span, message.clone()))

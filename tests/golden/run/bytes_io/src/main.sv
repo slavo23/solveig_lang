@@ -1,5 +1,6 @@
-import std.bytes
-import std.io
+import std.bytes(*)
+import std.io(*)
+
 showByte : Maybe Int -> String;
 showByte byte =
     case byte of

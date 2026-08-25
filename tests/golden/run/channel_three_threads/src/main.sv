@@ -1,5 +1,6 @@
-import std.thread
-import std.channel
+import std.thread(*)
+import std.channel(*)
+
 worker : Chan Int -> Chan () -> Chan String -> String -> Task ()
 worker channel ready replies label = do
     send ready ()

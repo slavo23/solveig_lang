@@ -1,13 +1,13 @@
-import std.env
-import std.io
+import std.env(*)
+import std.io(*)
 import std.list(length, isEmpty)
 import std.process(exitFailure)
 import std.text(lines, trimAscii, startsWith)
-import std.time
-import release_radar.cache
-import release_radar.client
-import release_radar.fixture
-import release_radar.model
+import std.time(*)
+import release_radar.cache(*)
+import release_radar.client(*)
+import release_radar.fixture(*)
+import release_radar.model(*)
 
 repositoryPath : String
 repositoryPath = "repos.txt"

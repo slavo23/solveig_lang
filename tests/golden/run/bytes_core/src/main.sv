@@ -1,4 +1,5 @@
-import std.bytes
+import std.bytes(*)
+
 printByte : Maybe Int -> Task ()
 printByte maybeByte =
     case maybeByte of

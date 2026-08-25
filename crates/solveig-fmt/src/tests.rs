@@ -160,7 +160,7 @@ fn broken_nested_delimiters_indent_contents_and_place_closers_consistently() {
 #[test]
 fn formats_imports_fixities_and_type_aliases() {
     insta::assert_snapshot!(format_source(
-        "import std.http as Http(fetch,Response)\ninfixl 5 +++,`append`\ntype Handler e a=IO e (Result e a)\n",
+        "import std.http\nimport std.io(*)\nimport pkg.model as Model(User(..) as Account,fetch as load,(+++) as (<+>))\ninfixl 5 +++,`append`\ntype Handler e a=IO e (Result e a)\n",
         40,
     ));
 }

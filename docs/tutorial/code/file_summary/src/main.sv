@@ -1,4 +1,4 @@
-import std.io
+import std.io(*)
 import std.list(length)
 import std.text(lines, trimAscii)
 

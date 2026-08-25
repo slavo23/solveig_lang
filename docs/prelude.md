@@ -177,8 +177,8 @@ conversion is in `std.bytes`.
 Import a whole module when most of its vocabulary is relevant:
 
 ```solveig
-import std.io
-import std.task
+import std.io(*)
+import std.task(*)
 ```
 
 Prefer selective imports in modules with a narrow purpose:

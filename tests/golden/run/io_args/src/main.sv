@@ -1,4 +1,5 @@
-import std.env
+import std.env(*)
+
 main : Task ()
 main = do
     args <- getArgs

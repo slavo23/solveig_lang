@@ -12,11 +12,11 @@ export (
     renderError
 )
 
-import std.bytes
-import std.list
-import std.set
-import std.text
-import std.vector
+import std.bytes(*)
+import std.list(*)
+import std.set(*)
+import std.text(*)
+import std.vector(*)
 
 infix 0 <?>
 

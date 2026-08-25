@@ -147,6 +147,7 @@ pub(super) fn separator<'a>(
         (_, Token::Dot) if parent == SyntaxKind::Type => BoxDoc::nil(),
         (Token::Dot, _) if parent == SyntaxKind::Type => BoxDoc::space(),
         (_, Token::LParen) if parent == SyntaxKind::ImportDecl => BoxDoc::nil(),
+        (Token::As, Token::LParen) if parent == SyntaxKind::ModuleEntity => BoxDoc::space(),
         (_, Token::LParen)
             if matches!(parent, SyntaxKind::ReexportDecl | SyntaxKind::ModuleEntity) =>
         {

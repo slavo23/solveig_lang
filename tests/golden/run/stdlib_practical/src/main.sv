@@ -1,15 +1,15 @@
-import std.bytes
-import std.http
-import std.io
-import std.json
-import std.map
-import std.net
-import std.parser
-import std.task
-import std.testing
-import std.text
-import std.time
-import std.vector
+import std.bytes(*)
+import std.http(*)
+import std.io(*)
+import std.json(*)
+import std.map(*)
+import std.net(*)
+import std.parser(*)
+import std.task(*)
+import std.testing(*)
+import std.text(*)
+import std.time(*)
+import std.vector(*)
 
 fixtureBody : String
 fixtureBody = "{\"names\":[\"Ada\",\"Grace\",\"Linus\",\"Margaret\"]}"

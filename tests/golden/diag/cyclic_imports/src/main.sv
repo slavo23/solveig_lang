@@ -1,3 +1,3 @@
-import other
+import other(*)
 
 main = otherValue

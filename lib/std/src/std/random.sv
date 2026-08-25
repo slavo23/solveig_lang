@@ -1,6 +1,6 @@
 export (mkStdGen, newStdGen, randomInt, randomRange)
 
-import prelude.prim
+import prelude.prim(*)
 
 -- | Creates a deterministic immutable random generator from a chosen seed.
 mkStdGen : Int -> StdGen

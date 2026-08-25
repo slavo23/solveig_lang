@@ -969,7 +969,7 @@ fn hover_info_covers_h13_semantic_targets() {
             &main_file,
             offset_in_line(
                 &main_source,
-                "import hoverLib(documentedIncrement, Documented, MkDocumented, Describe)",
+                "import hoverLib(documentedIncrement, Documented(..), Describe)",
                 "documentedIncrement",
             ),
         )
@@ -1176,7 +1176,7 @@ fn hover_info_covers_h13_semantic_targets() {
             &main_file,
             offset_in_line(
                 &main_source,
-                "import hoverLib(documentedIncrement, Documented, MkDocumented, Describe)",
+                "import hoverLib(documentedIncrement, Documented(..), Describe)",
                 "hoverLib",
             ),
         )

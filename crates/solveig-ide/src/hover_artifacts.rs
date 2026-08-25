@@ -806,13 +806,31 @@ fn collect_hover_import_name_resolutions(
                 continue;
             };
 
-            for selected_name in &import.selected_names {
-                for def_id in typed_import_def_ids_for_name(imported_api, selected_name.0) {
+            let ModuleSelection::Only(entities) = &import.selection else {
+                continue;
+            };
+            for entity in entities {
+                for def_id in typed_import_def_ids_for_name(imported_api, entity.name.0) {
                     out.push((
                         module_id,
-                        FileSpan::new(module_file.parsed.file, selected_name.1),
+                        FileSpan::new(module_file.parsed.file, entity.name.1),
                         def_id,
                     ));
+                    out.push((
+                        module_id,
+                        FileSpan::new(
+                            module_file.parsed.file,
+                            module_file.parsed.cst.node(entity.cst_id).span(),
+                        ),
+                        def_id,
+                    ));
+                    if let Some(rename) = entity.rename {
+                        out.push((
+                            module_id,
+                            FileSpan::new(module_file.parsed.file, rename.1),
+                            def_id,
+                        ));
+                    }
                 }
             }
         }

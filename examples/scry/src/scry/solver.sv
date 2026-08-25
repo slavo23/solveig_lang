@@ -1,5 +1,5 @@
-import scry.ast
-import scry.util
+import scry.ast(*)
+import scry.util(*)
 
 data Binding = Binding String Term
 

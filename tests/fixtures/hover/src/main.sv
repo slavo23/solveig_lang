@@ -1,4 +1,4 @@
-import hoverLib(documentedIncrement, Documented, MkDocumented, Describe)
+import hoverLib(documentedIncrement, Documented(..), Describe)
 
 localValue : Int
 localValue =

@@ -1,6 +1,7 @@
-import std.task
-import std.thread
-import std.channel
+import std.task(*)
+import std.thread(*)
+import std.channel(*)
+
 pause : Int -> Task ()
 pause remaining =
     if remaining == 0 then pureIO ()

@@ -40,7 +40,7 @@ impl Parser<'_> {
                     parser.parse_pattern_arg()?;
                 }
                 Ok(())
-            } else if matches!(parser.current_kind(), Token::UpperIdent) {
+            } else if parser.current_name_path_is_constructor() {
                 parser.parse_name_path()?;
                 while parser.is_pattern_arg_start() {
                     parser.parse_pattern_arg()?;
@@ -74,7 +74,7 @@ impl Parser<'_> {
                 }
                 Token::Ident => {
                     let name_path = parser.parse_name_path()?;
-                    if name_path.segment_count == 1 {
+                    if name_path.segment_count == 1 || is_ctor_like(&name_path.last_segment) {
                         Ok(())
                     } else {
                         Err(parser.error(format!(

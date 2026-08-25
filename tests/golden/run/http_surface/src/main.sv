@@ -1,5 +1,5 @@
-import std.http
-import std.bytes
+import std.http(*)
+import std.bytes(*)
 
 main : Task ()
 main =

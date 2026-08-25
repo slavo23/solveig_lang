@@ -4,9 +4,9 @@ import std.env(getArgs)
 import std.io(readFileBytes)
 import std.text(charsToString, stringToChars)
 import std.thread(spawn)
-import std.map
-import std.queue
-import std.vector
+import std.map(*)
+import std.queue(*)
+import std.vector(*)
 
 compilerPipelineMain : Int
 compilerPipelineMain = 0

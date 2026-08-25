@@ -1,3 +1,3 @@
-import missing.module
+import missing.module(*)
 
 main = 0

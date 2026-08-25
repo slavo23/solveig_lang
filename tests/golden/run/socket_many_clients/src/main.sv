@@ -1,8 +1,9 @@
-import std.net
-import std.bytes
-import std.task
-import std.thread
-import std.channel
+import std.net(*)
+import std.bytes(*)
+import std.task(*)
+import std.thread(*)
+import std.channel(*)
+
 serveClients : Socket -> Int -> Task ()
 serveClients listener remaining =
     if remaining == 0 then

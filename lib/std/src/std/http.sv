@@ -8,8 +8,8 @@ export (
 )
 
 import prelude.prim(httpRequestRaw, stringLength, stringSlice)
-import std.bytes
-import std.text
+import std.bytes(*)
+import std.text(*)
 
 -- | An absolute HTTP or HTTPS URL validated by urlFromString.
 data Url = Url String

@@ -1,5 +1,6 @@
-import std.thread
-import std.channel
+import std.thread(*)
+import std.channel(*)
+
 closedRecv : IOError -> Task Int
 closedRecv ChannelClosed = pureIO 42
 closedRecv _ = pureIO (-1)

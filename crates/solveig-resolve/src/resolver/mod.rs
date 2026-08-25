@@ -241,11 +241,11 @@ impl<'a> Resolver<'a> {
 
         cx.imported_apis
             .iter()
-            .find(|import| import.alias == *first)
+            .find(|import| import.qualifies && import.qualifier == *first)
             .or_else(|| {
-                cx.imported_apis
-                    .iter()
-                    .find(|import| import.module.0.as_slice() == r.prefix())
+                cx.imported_apis.iter().find(|import| {
+                    import.accepts_module_name && import.module.0.as_slice() == r.prefix()
+                })
             })
     }
     fn report_unknown_name(

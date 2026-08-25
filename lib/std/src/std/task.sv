@@ -4,9 +4,9 @@ export (
 )
 
 import prelude.prim(catchDefectIO, maskIO, finallyIO, restoreMaskIO, raiseDefectIO)
-import std.channel
-import std.list
-import std.map
+import std.channel(*)
+import std.list(*)
+import std.map(*)
 import std.time(sleep)
 import std.thread(spawn, killThread)
 

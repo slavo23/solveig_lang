@@ -315,7 +315,7 @@ main = prelude.builtins.True
     );
     flush_checks(&server);
 
-    let completion = server
+    let module_completion = server
         .completion(CompletionParams {
             text_document_position: TextDocumentPositionParams {
                 text_document: TextDocumentIdentifier { uri: uri.clone() },
@@ -328,25 +328,42 @@ main = prelude.builtins.True
         .await
         .expect("completion request should succeed")
         .expect("completion response should exist");
-    let CompletionResponse::Array(items) = completion else {
+    let CompletionResponse::Array(module_items) = module_completion else {
+        panic!("completion should return an item array");
+    };
+    assert!(
+        module_items
+            .iter()
+            .any(|item| item.label == "builtins" && item.kind == Some(CompletionItemKind::MODULE))
+    );
+
+    let export_completion = server
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri: uri.clone() },
+                position: Position::new(1, 24),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .expect("completion request should succeed")
+        .expect("completion response should exist");
+    let CompletionResponse::Array(export_items) = export_completion else {
         panic!("completion should return an item array");
     };
 
-    let true_item = items
+    let true_item = export_items
         .iter()
         .find(|item| item.label == "True")
-        .unwrap_or_else(|| panic!("missing True completion: {items:#?}"));
+        .unwrap_or_else(|| panic!("missing True completion: {export_items:#?}"));
     assert_eq!(true_item.kind, Some(CompletionItemKind::CONSTRUCTOR));
     assert!(
         true_item
             .detail
             .as_ref()
             .is_some_and(|detail| detail.contains("Bool"))
-    );
-    assert!(
-        items
-            .iter()
-            .any(|item| item.label == "builtins" && item.kind == Some(CompletionItemKind::MODULE))
     );
 
     server.shutdown(()).await.expect("shutdown should succeed");

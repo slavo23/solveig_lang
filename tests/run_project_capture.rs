@@ -162,8 +162,8 @@ fn byte_file_and_handle_io_preserves_invalid_utf8() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "binary_io",
-        r#"import std.bytes
-import std.io
+        r#"import std.bytes(*)
+import std.io(*)
 
 readBytes : Handle -> Task Bytes;
 readBytes input = hGetBytes input 64;
@@ -353,7 +353,7 @@ fn file_io_reads_writes_and_appends_project_relative_text() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "file_io",
-        r#"import std.io
+        r#"import std.io(*)
 
 main : Task ()
 main = do
@@ -417,7 +417,7 @@ fn cli_exit_flushes_an_open_file_and_propagates_its_status() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "cli_exit_flush",
-        r#"import std.io
+        r#"import std.io(*)
 import std.process(exitWith)
 
 main : Task ()

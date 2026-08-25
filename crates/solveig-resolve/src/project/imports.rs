@@ -2,9 +2,11 @@ use super::*;
 
 #[derive(Debug, Clone)]
 pub struct EffectiveImport {
-    pub alias: Symbol,
+    pub qualifier: Symbol,
+    pub qualifies: bool,
+    pub accepts_module_name: bool,
     pub module: ModuleName,
-    pub spec: ImportSpec,
+    pub selection: ModuleSelection,
     pub span: FileSpan,
 }
 
@@ -17,9 +19,13 @@ pub fn effective_imports(
     let mut out = explicit
         .iter()
         .map(|imp| EffectiveImport {
-            alias: imp.alias,
+            qualifier: imp
+                .alias
+                .map_or_else(|| imp.module.default_alias(), |alias| alias.0),
+            qualifies: true,
+            accepts_module_name: imp.alias.is_none(),
             module: imp.module.clone(),
-            spec: imp.spec.clone(),
+            selection: imp.selection.clone(),
             span: FileSpan::new(file, imp.span),
         })
         .collect::<Vec<_>>();
@@ -35,9 +41,11 @@ pub fn effective_imports(
 
     for implicit in project.implicit_modules() {
         out.push(EffectiveImport {
-            alias: implicit.default_alias(),
+            qualifier: implicit.default_alias(),
+            qualifies: false,
+            accepts_module_name: true,
             module: implicit.clone(),
-            spec: ImportSpec::All,
+            selection: ModuleSelection::All,
             span: FileSpan::new(file, Span::new(0, 0)),
         });
     }

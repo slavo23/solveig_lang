@@ -70,7 +70,7 @@ impl<'a> Resolver<'a> {
         let mut candidates = Vec::new();
 
         for imp in &cx.imported_apis {
-            if let Some(sym) = imp.api.classes.get(name)
+            if let Some(sym) = imp.unqualified.classes.get(name)
                 && !candidates.contains(sym)
             {
                 candidates.push(*sym);
@@ -398,7 +398,7 @@ impl<'a> Resolver<'a> {
                     let mut candidates = cx
                         .imported_apis
                         .iter()
-                        .filter_map(|imp| imp.api.types.get(name).copied())
+                        .filter_map(|imp| imp.unqualified.types.get(name).copied())
                         .collect::<Vec<_>>();
                     candidates.sort_unstable();
                     candidates.dedup();

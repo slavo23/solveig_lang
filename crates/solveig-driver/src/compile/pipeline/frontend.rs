@@ -126,11 +126,6 @@ impl<'a> FrontendState<'a> {
         if !errors.is_empty() {
             return Err(errors);
         }
-        errors.extend(validate_selected_import_names(project, &apis));
-        if !errors.is_empty() {
-            return Err(errors);
-        }
-
         let mut typed_apis = FxHashMap::default();
         let mut checked = FxHashMap::default();
         let mut module_files = FxHashMap::default();
@@ -370,7 +365,7 @@ impl<'a> FrontendState<'a> {
                 let module_api = self.apis.get(&imp.module).unwrap_or_else(|| {
                     solveig_base::ice!("typed imported API missing its module API")
                 });
-                let visible = api.imported_view(module_api, package, &imp.spec);
+                let visible = api.visible_to(module_api, package);
                 for class_def in visible.class_defs.values() {
                     out.insert(
                         class_def.id,
@@ -398,13 +393,24 @@ impl<'a> FrontendState<'a> {
         let package = self.project.module_table.package(module_id);
         let imports = effective_imports(self.project, module_name, &parsed.imports, file);
 
-        let imported_apis = self.build_imported_apis(&imports, package);
+        let imported_apis = match self.build_imported_apis(&imports, package) {
+            Ok(imported) => imported,
+            Err(errors) => {
+                self.resolve_errors.push(ModuleResolveErrors {
+                    module: module_name.clone(),
+                    errors: errors.clone(),
+                });
+                push_resolve_errors(self.session, Some(&self.project.module_table), errors);
+                return Err(FrontendPhase::Resolve);
+            }
+        };
         let local_api = self.apis.get(module_name).unwrap_or_else(|| {
             solveig_base::ice!(
                 "module API missing during resolve for {}",
                 module_name.as_string(self.session)
             )
         });
+        let imported_typed = self.build_imported_typed_apis(&imports, &imported_apis, package);
         let cx = ModuleContext {
             module: module_name.clone(),
             module_id,
@@ -447,7 +453,6 @@ impl<'a> FrontendState<'a> {
         let mut resolved = resolved_info.module;
         self.stamp_instance_ids(&mut resolved);
 
-        let imported_typed = self.build_imported_typed_apis(&imports, package);
         let ImportedTypeInfo {
             func_schemes,
             tycon_kinds,
@@ -554,37 +559,6 @@ fn module_names_as_strings(session: &Session, modules: &[ModuleName]) -> Vec<Str
         .iter()
         .map(|module| module.as_string(session))
         .collect()
-}
-
-fn validate_selected_import_names(
-    project: &Project,
-    apis: &FxHashMap<ModuleName, SharedModuleApi>,
-) -> Vec<ResolveError> {
-    let mut errors = Vec::new();
-
-    for module_file in project.modules.values() {
-        for import in &module_file.imports {
-            let ImportSpec::Only(_) = &import.spec else {
-                continue;
-            };
-            let Some(api) = apis.get(&import.module) else {
-                continue;
-            };
-            let api = api.visible_to(module_file.package);
-
-            for selected_name in &import.selected_names {
-                if !api.exports_name(selected_name.0) {
-                    errors.push(ResolveError::UnknownImportName {
-                        span: FileSpan::new(module_file.parsed.file, selected_name.1),
-                        module: import.module.clone(),
-                        name: selected_name.0,
-                    });
-                }
-            }
-        }
-    }
-
-    errors
 }
 
 include!("frontend/imported_type_info.rs");

@@ -31,9 +31,7 @@ fn collect_imported_type_info(imports: &[ImportedTypedApi]) -> ImportedTypeInfo 
             instance_defs: &mut instance_defs,
         };
 
-        imp.api
-            .filtered(&imp.spec)
-            .extend_display_maps(&mut display_maps);
+        imp.api.extend_display_maps(&mut display_maps);
     }
 
     ImportedTypeInfo {

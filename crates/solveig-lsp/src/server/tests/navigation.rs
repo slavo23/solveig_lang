@@ -14,7 +14,7 @@ async fn text_document_navigation_returns_locations_and_symbols() {
     let project_root = temp_root("server_navigation");
     let main = project_root.join("src/main.sv");
     let lib = project_root.join("src/navLib.sv");
-    let main_text = r#"import navLib(Box, MkBox, unwrap)
+    let main_text = r#"import navLib(Box(..), unwrap)
 
 main : Int
 main = unwrap (MkBox 41)

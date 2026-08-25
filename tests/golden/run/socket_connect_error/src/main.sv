@@ -1,4 +1,5 @@
-import std.net
+import std.net(*)
+
 reportConnect : IOError -> Task ()
 reportConnect (ConnectError message) = printLine "connect-refused"
 reportConnect _ = printLine "unexpected-error"

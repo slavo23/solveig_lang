@@ -50,7 +50,7 @@ use solveig_ast::ast::{
     std_io_mode_tycon_id, std_process_result_tycon_id,
 };
 use solveig_base::{Diagnostic, Severity, TypeError};
-use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap};
+use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap, Symbol};
 use solveig_check::core_lint::{CoreLintEnv, lint_checked_module};
 use solveig_check::inference::holes::{HoleInfo, hole_diagnostics};
 use solveig_check::inference::type_infer::{
@@ -66,10 +66,10 @@ use solveig_resolve::project::{
     ModuleTable, ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi,
     TypeAlias, TypedDisplayMaps, apply_module_reexports, apply_module_visibility, build_module_api,
     build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module, effective_imports,
-    module_order_checked, seed_compiler_prelude_module_api,
+    module_order_checked, project_module_selection_diagnostics, seed_compiler_prelude_module_api,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
-use solveig_syntax::ast::{ImportSpec, ModuleName, ModuleSelection, ParsedModule};
+use solveig_syntax::ast::{ModuleName, ModuleSelection, ParsedModule};
 use solveig_vm::vm::{ExitStatus, Machine};
 
 use crate::DriverError;

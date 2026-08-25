@@ -31,12 +31,12 @@ impl<'a> Resolver<'a> {
         let mut imported_fixity = None;
 
         for imp in &cx.imported_apis {
-            if let Some(def_id) = imp.api.terms.get(&op.0)
+            if let Some(def_id) = imp.unqualified.terms.get(&op.0)
                 && !candidates.contains(def_id)
             {
                 candidates.push(*def_id);
                 if imported_fixity.is_none() {
-                    imported_fixity = imp.api.fixities.get(&op.0).copied();
+                    imported_fixity = imp.unqualified.fixities.get(&op.0).copied();
                 }
             }
         }
@@ -345,7 +345,7 @@ impl<'a> Resolver<'a> {
                 let mut candidates = Vec::new();
 
                 for imp in &cx.imported_apis {
-                    if let Some(sym) = imp.api.terms.get(name)
+                    if let Some(sym) = imp.unqualified.terms.get(name)
                         && !candidates.contains(sym)
                     {
                         candidates.push(*sym);

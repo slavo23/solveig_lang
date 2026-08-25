@@ -49,83 +49,6 @@ impl ModuleApi {
             reexported: ApiNames::default(),
         }
     }
-
-    fn include_doc(&self, out: &mut Self, def_id: DefId) {
-        if let Some(doc) = self.docs.get(&def_id) {
-            out.docs.insert(def_id, doc.clone());
-        }
-    }
-
-    pub fn exports_name(&self, name: Symbol) -> bool {
-        self.terms.contains_key(&name)
-            || self.types.contains_key(&name)
-            || self.type_aliases.contains_key(&name)
-            || self.constructors.contains_key(&name)
-            || self.classes.contains_key(&name)
-    }
-
-    pub fn filtered(&self, spec: &ImportSpec) -> Self {
-        match spec {
-            ImportSpec::All => self.clone(),
-
-            ImportSpec::Only(names) => {
-                let mut out = Self::new(self.package);
-
-                for name in names {
-                    if let Some(sym) = self.terms.get(name) {
-                        out.terms.insert(*name, *sym);
-                        self.include_doc(&mut out, *sym);
-                        if let Some(fixity) = self.fixities.get(name) {
-                            out.fixities.insert(*name, *fixity);
-                        }
-                    }
-
-                    if let Some(sym) = self.types.get(name) {
-                        out.types.insert(*name, *sym);
-                        self.include_doc(&mut out, *sym);
-                    }
-
-                    if let Some(sym) = self.type_aliases.get(name) {
-                        out.type_aliases.insert(*name, *sym);
-                        self.include_doc(&mut out, *sym);
-                    }
-
-                    if let Some(sym) = self.constructors.get(name) {
-                        out.constructors.insert(*name, *sym);
-                        self.include_doc(&mut out, *sym);
-                    }
-
-                    if let Some(sym) = self.classes.get(name) {
-                        out.classes.insert(*name, *sym);
-                        self.include_doc(&mut out, *sym);
-
-                        // Solveig's current simple import rule is:
-                        //
-                        //   import M(Eq)
-                        //
-                        // makes the class and its methods available. We do not have
-                        // Haskell-style C / C(..) / C(method) import syntax yet, so
-                        // selecting a class imports all of its method terms.
-                        if let Some(method_names) = self.class_methods.get(name) {
-                            out.class_methods.insert(*name, method_names.clone());
-
-                            for method_name in method_names {
-                                if let Some(method_sym) = self.terms.get(method_name) {
-                                    out.terms.insert(*method_name, *method_sym);
-                                    self.include_doc(&mut out, *method_sym);
-                                    if let Some(fixity) = self.fixities.get(method_name) {
-                                        out.fixities.insert(*method_name, *fixity);
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                out
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -215,96 +138,6 @@ impl TypedModuleApi {
         }
     }
 
-    fn include_class_methods(&self, out: &mut Self, class_def: &ClassDefinition) {
-        for method in &class_def.methods {
-            if let Some(scheme) = self.term_schemes.get(&method.id) {
-                out.term_schemes.insert(method.id, scheme.clone());
-                self.include_doc(out, method.id);
-            }
-        }
-    }
-
-    pub fn filtered(&self, spec: &ImportSpec) -> Self {
-        match spec {
-            ImportSpec::All => self.clone(),
-
-            ImportSpec::Only(names) => {
-                let mut out = Self::new(self.package);
-                out.tycon_table = self.tycon_table.clone();
-                out.ctor_table = self.ctor_table.clone();
-                out.class_table = self.class_table.clone();
-
-                for name in names {
-                    for (sym, scheme) in &self.term_schemes {
-                        if &sym.name == name {
-                            out.term_schemes.insert(*sym, scheme.clone());
-                            self.include_doc(&mut out, *sym);
-                        }
-                    }
-
-                    for (sym, kind) in &self.type_kinds {
-                        if &sym.name == name {
-                            out.type_kinds.insert(*sym, kind.clone());
-                            self.include_doc(&mut out, *sym);
-                            if let Some(id) = self.type_ids.get(sym) {
-                                out.type_ids.insert(*sym, *id);
-                            }
-                        }
-                    }
-
-                    for (sym, alias) in &self.type_aliases {
-                        if &sym.name == name {
-                            out.type_aliases.insert(*sym, alias.clone());
-                            self.include_doc(&mut out, *sym);
-                        }
-                    }
-
-                    for (sym, ty) in &self.constructor_types {
-                        if &sym.name == name {
-                            out.constructor_types.insert(*sym, ty.clone());
-                            self.include_doc(&mut out, *sym);
-                            if let Some(id) = self.constructor_ids.get(sym) {
-                                out.constructor_ids.insert(*sym, *id);
-                            }
-                        }
-                    }
-                }
-
-                let mut selected_classes = Vec::<(DefId, bool)>::new();
-
-                for (sym, class_def) in &self.class_defs {
-                    let class_selected = names.iter().any(|name| name == &sym.name);
-
-                    let method_selected = class_def
-                        .methods
-                        .iter()
-                        .any(|method| names.iter().any(|name| name == &method.id.name));
-
-                    if class_selected || method_selected {
-                        // If the class itself was selected, expose its method terms too.
-                        // If only one method was selected, keep the owning class definition
-                        // internally, but do not implicitly expose the rest of the methods.
-                        selected_classes.push((*sym, class_selected));
-                    }
-                }
-
-                for (sym, include_methods) in selected_classes {
-                    self.include_class_with_superclasses(&mut out, &sym);
-
-                    if include_methods && let Some(class_def) = self.class_defs.get(&sym) {
-                        self.include_class_methods(&mut out, class_def);
-                    }
-                }
-
-                // Importing a module makes its instances available. The explicit
-                // import list controls names, not instance availability.
-                out.instance_defs = self.instance_defs.clone();
-
-                out
-            }
-        }
-    }
-
     pub fn extend_display_maps(&self, out: &mut TypedDisplayMaps<'_>) {
         for (sym, scheme) in &self.term_schemes {
             out.func_schemes.insert(*sym, scheme.clone());
@@ -375,10 +208,12 @@ pub type SharedTypedModuleApi = Arc<TypedModuleApi>;
 
 #[derive(Debug, Clone)]
 pub struct Imported<T> {
-    pub alias: Symbol,
+    pub qualifier: Symbol,
+    pub qualifies: bool,
+    pub accepts_module_name: bool,
     pub module: ModuleName,
     pub api: Arc<T>,
-    pub spec: ImportSpec,
+    pub unqualified: T,
 }
 
 pub type ImportedApi = Imported<ModuleApi>;

@@ -1,9 +1,9 @@
 export ()
 
-import prelude.builtins
-import prelude.list
-import prelude.prim
-import prelude.typeclasses
+import prelude.builtins(*)
+import prelude.list(*)
+import prelude.prim(*)
+import prelude.typeclasses(*)
 
 -- | Escapes a character for display inside character literals.
 showCharPayload : Char -> String

@@ -22,10 +22,10 @@ use solveig_resolve::project::{
     EffectiveImport, ModuleApi, ModuleFile, ParsedProject, Project, ResolveError, ResolveNameKind,
     SharedModuleApi, SharedTypedModuleApi, TypeAlias, TypedModuleApi, apply_module_visibility,
     build_module_api, effective_imports, function_equation_group_indices,
-    instance_method_equation_group_indices,
+    instance_method_equation_group_indices, project_module_selection,
 };
 use solveig_syntax::ast::{
-    ClassMethod, DocComment, ImportDecl, ImportSpec, InstanceMethod, ModuleName, ParsedModule,
+    ClassMethod, DocComment, ImportDecl, InstanceMethod, ModuleName, ModuleSelection, ParsedModule,
     Spanned, SurfaceConstructor, SurfaceDefinition, SurfaceDoStmt, SurfaceExpr, SurfacePattern,
     SurfacePredicate, SurfaceTy,
 };
@@ -440,6 +440,7 @@ fn build_completion_candidates_for_snapshot(
                 imports: &imports,
                 local_api,
                 local_typed_api,
+                module_apis: &snapshot.apis,
                 typed_apis: &snapshot.typed_apis,
             },
         ));

@@ -17,12 +17,12 @@ Concurrency capabilities are explicit standard-library imports. A typical
 networked program starts with the modules it actually needs:
 
 ```solveig
-import std.channel
-import std.thread
-import std.task
-import std.time
-import std.bytes
-import std.net
+import std.channel(*)
+import std.thread(*)
+import std.task(*)
+import std.time(*)
+import std.bytes(*)
+import std.net(*)
 ```
 
 The design follows the lightweight-thread and typed-channel model of Peyton

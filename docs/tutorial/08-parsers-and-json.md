@@ -20,8 +20,8 @@ streams. A custom checkpointable input can use the same combinators by defining
 This parser accepts one or more lowercase ASCII letters:
 
 ```solveig
-import std.parser
-import std.text
+import std.parser(*)
+import std.text(*)
 
 isLower : Char -> Bool
 isLower character = and (character >= 'a') (character <= 'z')
@@ -124,8 +124,8 @@ adapter owns checkpoint restoration, so parsers do not assume that input is a
 `std.json` parses RFC 8259 bytes and returns the generic parser reply:
 
 ```solveig
-import std.bytes
-import std.json
+import std.bytes(*)
+import std.json(*)
 
 reply =
     parseJson
@@ -151,8 +151,8 @@ When the full `Json` tree is unnecessary, a decoder can construct the requested
 representation directly:
 
 ```solveig
-import std.json
-import std.vector
+import std.json(*)
+import std.vector(*)
 
 namesDecoder : Decoder (std.vector.Vector String)
 namesDecoder = arrayDecoder stringDecoder

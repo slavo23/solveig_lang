@@ -87,6 +87,11 @@ import std.io(readFile)
 import std.text(lines)
 ```
 
+A bare import is qualified-only (`import std.text` gives
+`text.trimAscii` and `std.text.trimAscii`). A precise list adds exactly those
+unqualified names, while `import std.text(*)` deliberately opens the complete
+visible API.
+
 Library modules publish a deliberate external API while keeping unlisted
 definitions reusable inside their package:
 
@@ -99,8 +104,8 @@ import std.io(readFile)
 
 Use `Config(..)` when constructors are public, and build facade modules with
 precise `reexport package.module(...)` declarations. The
-[package and module reference](docs/packages.md) covers visibility, opaque
-types, re-exports, and path dependencies.
+[package and module reference](docs/packages.md) covers import qualification,
+visibility, opaque types, re-exports, and path dependencies.
 
 ## A small language tour
 

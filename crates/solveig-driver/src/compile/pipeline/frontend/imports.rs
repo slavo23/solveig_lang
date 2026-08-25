@@ -5,46 +5,86 @@ impl FrontendState<'_> {
         &self,
         imports: &[EffectiveImport],
         package: PackageId,
-    ) -> Vec<ImportedApi> {
-        imports
-            .iter()
-            .map(|import| ImportedApi {
-                alias: import.alias,
+    ) -> Result<Vec<ImportedApi>, Vec<ResolveError>> {
+        let mut projected = Vec::with_capacity(imports.len());
+        let mut qualifiers = FxHashMap::<Symbol, (ModuleName, FileSpan)>::default();
+        let mut errors = Vec::new();
+        for import in imports {
+            if import.qualifies {
+                if let Some((previous, _)) = qualifiers.get(&import.qualifier)
+                    && previous != &import.module
+                {
+                    errors.push(ResolveError::AmbiguousModuleQualifier {
+                        span: import.span,
+                        qualifier: import.qualifier,
+                        modules: vec![previous.clone(), import.module.clone()],
+                    });
+                }
+                qualifiers
+                    .entry(import.qualifier)
+                    .or_insert_with(|| (import.module.clone(), import.span));
+            }
+            let api = self
+                .apis
+                .get(&import.module)
+                .unwrap_or_else(|| {
+                    solveig_base::ice!(
+                        "imported module API missing for {}",
+                        import.module.as_string(self.session)
+                    )
+                })
+                .visible_to(package);
+            let unqualified = match project_module_selection_diagnostics(
+                &api,
+                import.span.file,
+                &import.module,
+                &import.selection,
+            ) {
+                Ok(projected) => projected,
+                Err(mut import_errors) => {
+                    errors.append(&mut import_errors);
+                    continue;
+                }
+            };
+            projected.push(ImportedApi {
+                qualifier: import.qualifier,
+                qualifies: import.qualifies,
+                accepts_module_name: import.accepts_module_name,
                 module: import.module.clone(),
-                api: Arc::new(
-                    self.apis
-                        .get(&import.module)
-                        .unwrap_or_else(|| {
-                            solveig_base::ice!(
-                                "imported module API missing for {}",
-                                import.module.as_string(self.session)
-                            )
-                        })
-                        .visible_to(package)
-                        .filtered(&import.spec),
-                ),
-                spec: import.spec.clone(),
-            })
-            .collect()
+                api: Arc::new(api),
+                unqualified,
+            });
+        }
+        if errors.is_empty() {
+            Ok(projected)
+        } else {
+            Err(errors)
+        }
     }
 
     fn build_imported_typed_apis(
         &self,
         imports: &[EffectiveImport],
+        imported_apis: &[ImportedApi],
         package: PackageId,
     ) -> Vec<ImportedTypedApi> {
         imports
             .iter()
-            .filter_map(|import| {
+            .zip(imported_apis)
+            .filter_map(|(import, imported_api)| {
                 self.typed_apis.get(&import.module).map(|api| {
                     let module_api = self.apis.get(&import.module).unwrap_or_else(|| {
                         solveig_base::ice!("typed imported API missing its module API")
                     });
+                    let api = api.visible_to(module_api, package);
+                    let unqualified = api.selected_by_api(&imported_api.unqualified);
                     ImportedTypedApi {
-                        alias: import.alias,
+                        qualifier: import.qualifier,
+                        qualifies: import.qualifies,
+                        accepts_module_name: import.accepts_module_name,
                         module: import.module.clone(),
-                        api: Arc::new(api.imported_view(module_api, package, &import.spec)),
-                        spec: ImportSpec::All,
+                        api: Arc::new(api),
+                        unqualified,
                     }
                 })
             })
@@ -110,9 +150,9 @@ impl FrontendState<'_> {
                 let module_api = self.apis.get(&import.module).unwrap_or_else(|| {
                     solveig_base::ice!("typed imported API missing its module API")
                 });
-                let filtered = api.imported_view(module_api, package, &import.spec);
-                for (definition, kind) in &filtered.type_kinds {
-                    let id = filtered
+                let visible = api.visible_to(module_api, package);
+                for (definition, kind) in &visible.type_kinds {
+                    let id = visible
                         .type_ids
                         .get(definition)
                         .copied()
@@ -137,7 +177,7 @@ impl FrontendState<'_> {
                 let module_api = self.apis.get(&import.module).unwrap_or_else(|| {
                     solveig_base::ice!("typed imported API missing its module API")
                 });
-                aliases.extend(api.imported_view(module_api, package, &import.spec).type_aliases);
+                aliases.extend(api.visible_to(module_api, package).type_aliases);
             }
         }
 

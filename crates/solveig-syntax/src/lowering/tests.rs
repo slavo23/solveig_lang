@@ -45,6 +45,36 @@ fn module_directives_retain_exposure_renames_and_reexport_selection() {
 }
 
 #[test]
+fn imports_retain_qualifiers_exact_selections_and_entity_details() {
+    let parsed = lower_test_source(
+        "import alpha.beta\n\
+         import alpha.beta as Beta\n\
+         import alpha.beta(*)\n\
+         import alpha.beta(value as answer, Widget(..) as Boxed, (<+>) as (<^>))\n\
+         main = 0\n",
+    );
+
+    assert_eq!(parsed.imports.len(), 4);
+    assert!(parsed.imports[0].alias.is_none());
+    assert!(matches!(
+        &parsed.imports[0].selection,
+        ModuleSelection::Only(entities) if entities.is_empty()
+    ));
+    assert!(parsed.imports[1].alias.is_some());
+    assert!(matches!(parsed.imports[2].selection, ModuleSelection::All));
+
+    let ModuleSelection::Only(entities) = &parsed.imports[3].selection else {
+        panic!("expected an exact import selection");
+    };
+    assert_eq!(entities.len(), 3);
+    assert_eq!(entities[0].exposure, EntityExposure::Opaque);
+    assert!(entities[0].rename.is_some());
+    assert_eq!(entities[1].exposure, EntityExposure::Constructors);
+    assert!(entities[1].rename.is_some());
+    assert!(entities[2].rename.is_some());
+}
+
+#[test]
 fn multiline_module_entity_lists_lower() {
     let source = "export (\n    alpha, Beta(..),\n    (<+>)\n)\nalpha = 1\ndata Beta = MkBeta\n(<+>) x y = x + y\n";
     let parsed = lower_test_source(source);

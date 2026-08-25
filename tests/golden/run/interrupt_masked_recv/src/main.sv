@@ -1,6 +1,7 @@
-import std.task
-import std.thread
-import std.channel
+import std.task(*)
+import std.thread(*)
+import std.channel(*)
+
 waitMasked : Chan Int -> Chan () -> Task ()
 waitMasked values ready =
     mask

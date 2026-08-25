@@ -1,4 +1,4 @@
-import std.channel
+import std.channel(*)
 
 report : String -> IOError -> Task ()
 report expected (InvalidChannelCapacity _) = printLine expected

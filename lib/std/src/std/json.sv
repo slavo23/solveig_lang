@@ -7,12 +7,12 @@ export (
     parseJson, renderJson, renderJsonWith, renderJsonError, decoderParser
 )
 
-import std.bytes
-import std.list
-import std.map
-import std.parser
-import std.text
-import std.vector
+import std.bytes(*)
+import std.list(*)
+import std.map(*)
+import std.parser(*)
+import std.text(*)
+import std.vector(*)
 
 -- | An exact RFC 8259 number spelling.
 -- |

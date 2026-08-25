@@ -1,5 +1,5 @@
-import a(Box, MkBox, Need, value)
-import b(Box, MkBox, Need, value)
+import a(Box(..), Need, value)
+import b(Box(..), Need, value)
 
 data Box = MkBox Int
 

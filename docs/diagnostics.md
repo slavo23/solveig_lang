@@ -35,6 +35,7 @@ runtime failures are not catchable by program code.
 | `RES0010` | Malformed operator expression. A flat operator sequence could not be resolved into an expression tree. |
 | `RES0014` | Unknown selected import name. The source module does not expose that name to the importing package. |
 | `RES0019` | Invalid module API directive, such as a missing entity, duplicate visibility declaration, invalid constructor exposure, or re-export collision. |
+| `RES0020` | Ambiguous module qualifier. Two explicit imports claim the same short qualifier; give one an `as` alias. |
 
 ## Kinds
 

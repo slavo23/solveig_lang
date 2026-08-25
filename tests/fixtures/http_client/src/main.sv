@@ -1,6 +1,6 @@
-import std.bytes
+import std.bytes(*)
 import std.env(getArgs)
-import std.http
+import std.http(*)
 import std.task(timeout)
 
 showHttpError : std.http.HttpError -> String

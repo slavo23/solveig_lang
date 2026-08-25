@@ -152,6 +152,68 @@ adding a constructor visible at one clear API boundary. A class is similarly
 indivisible: exporting it also exports its methods, defaults, superclass
 contract, and operator fixities.
 
+### Imports and qualification
+
+Imports are qualified by default. This keeps a dependency from silently adding
+hundreds of short names to a module:
+
+```solveig
+import std.text
+
+clean = text.trimAscii "  ready  "
+alsoClean = std.text.trimAscii "  ready  "
+```
+
+The final module segment is the convenient default qualifier, and the complete
+module path remains valid. An explicit alias replaces both:
+
+```solveig
+import std.text as Text
+
+clean = Text.trimAscii "  ready  "
+```
+
+With the alias present, `text.trimAscii` and `std.text.trimAscii` are not in
+scope. This makes renames decisive instead of introducing a third spelling.
+
+Parentheses choose the exact names that are also available unqualified. They
+do not limit the qualified API:
+
+```solveig
+import std.text(lines, trimAscii as trim)
+
+clean = trim "  ready  "
+rows = lines (std.text.toUpperAscii clean)
+```
+
+Use `(*)` only when the complete visible API should be unqualified:
+
+```solveig
+import std.text(*)
+```
+
+Import entities use the same rules as module APIs:
+
+```solveig
+import data.model(
+    User,                  -- opaque type
+    Result(..) as Outcome, -- renamed type plus every original constructor
+    Parser,                -- class together with every method and fixity
+    (<?>) as (<||>)        -- renamed operator
+)
+```
+
+Constructors are selected through their owning type with `T(..)`, never one by
+one, and class methods are selected through their class. A rename changes only
+the unqualified binding. The original name remains available through the
+module qualifier, and opening a renamed type does not rename its constructors.
+
+There is no hiding form. If two imports provide the same unqualified name,
+using that name is an ambiguity error unless both routes lead to the same
+definition. Qualifier collisions are reported at the import itself. Prelude
+modules are the sole automatic exception: their visible API is imported
+unqualified exactly once, while `std` and every user library remain explicit.
+
 ### Re-exports and facade modules
 
 A module can republish another module without introducing forwarding

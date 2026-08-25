@@ -3,7 +3,7 @@ export (
     withConnection, withListener, withAcceptedConnection
 )
 
-import prelude.prim
+import prelude.prim(*)
 import std.task(bracket)
 
 -- | Opens a TCP connection to an IP address or localhost.

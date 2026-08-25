@@ -1,4 +1,5 @@
-import std.channel
+import std.channel(*)
+
 closedRecv : IOError -> Task Int
 closedRecv ChannelClosed = do
     printLine "recv-closed"

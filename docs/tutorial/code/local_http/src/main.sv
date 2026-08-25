@@ -1,9 +1,9 @@
-import std.bytes
-import std.channel
-import std.http
+import std.bytes(*)
+import std.channel(*)
+import std.http(*)
 import std.list(length)
-import std.net
-import std.task
+import std.net(*)
+import std.task(*)
 
 responseBody : String
 responseBody = "{\"message\":\"hello from Solveig\"}"

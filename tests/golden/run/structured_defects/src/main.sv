@@ -1,5 +1,5 @@
-import std.task
-import std.time
+import std.task(*)
+import std.time(*)
 import prelude.prim(raiseDefectIO)
 
 raiseInChild : Defect -> Task ()

@@ -11,6 +11,7 @@ pub(crate) struct TypedModuleCompletionInput<'a> {
     pub(crate) imports: &'a [EffectiveImport],
     pub(crate) local_api: &'a ModuleApi,
     pub(crate) local_typed_api: &'a TypedModuleApi,
+    pub(crate) module_apis: &'a FxHashMap<ModuleName, SharedModuleApi>,
     pub(crate) typed_apis: &'a FxHashMap<ModuleName, SharedTypedModuleApi>,
 }
 
@@ -25,6 +26,7 @@ pub(crate) fn typed_module_completion_candidates(
         imports,
         local_api,
         local_typed_api,
+        module_apis,
         typed_apis,
     } = input;
     let mut out = Vec::new();
@@ -32,10 +34,12 @@ pub(crate) fn typed_module_completion_candidates(
         completion_display_tables(session, names, local_typed_api, typed_apis);
     let tables = PrettyTables::new(names, &tycon_table, &class_table);
 
+    let local_api = local_api.local_view();
+    let local_typed_api = local_typed_api.selected_by_api(&local_api);
     out.extend(typed_api_candidates(
         session,
-        local_api,
-        local_typed_api,
+        &local_api,
+        &local_typed_api,
         parsed.file,
         None,
         tables,
@@ -45,13 +49,25 @@ pub(crate) fn typed_module_completion_candidates(
         let Some(typed_api) = typed_apis.get(&import.module) else {
             continue;
         };
-        let filtered = typed_api.filtered(&import.spec);
-        let module_api = api_from_typed_api(&filtered);
+        let Some(source_module_api) = module_apis.get(&import.module) else {
+            continue;
+        };
+        let module_api = source_module_api.visible_to(local_api.package);
+        let typed_api = typed_api.visible_to(source_module_api, local_api.package);
+        let Ok(unqualified_api) = project_module_selection(
+            &module_api,
+            import.span.file,
+            &import.module,
+            &import.selection,
+        ) else {
+            continue;
+        };
+        let unqualified_typed = typed_api.selected_by_api(&unqualified_api);
 
         out.extend(typed_api_candidates(
             session,
-            &module_api,
-            &filtered,
+            &unqualified_api,
+            &unqualified_typed,
             parsed.file,
             None,
             tables,
@@ -61,7 +77,7 @@ pub(crate) fn typed_module_completion_candidates(
             out.extend(typed_api_candidates(
                 session,
                 &module_api,
-                &filtered,
+                &typed_api,
                 parsed.file,
                 Some(&qualifier),
                 tables,
@@ -311,29 +327,6 @@ fn extend_completion_display_tables(
     }
 }
 
-fn api_from_typed_api(typed_api: &TypedModuleApi) -> ModuleApi {
-    let mut api = ModuleApi::new(typed_api.package);
-
-    for def_id in typed_api.term_schemes.keys() {
-        api.terms.insert(def_id.name, *def_id);
-    }
-    for def_id in typed_api.type_kinds.keys() {
-        api.types.insert(def_id.name, *def_id);
-    }
-    for def_id in typed_api.type_aliases.keys() {
-        api.type_aliases.insert(def_id.name, *def_id);
-    }
-    for def_id in typed_api.constructor_types.keys() {
-        api.constructors.insert(def_id.name, *def_id);
-    }
-    for def_id in typed_api.class_defs.keys() {
-        api.classes.insert(def_id.name, *def_id);
-    }
-    api.docs = typed_api.docs.clone();
-
-    api
-}
-
 fn scoped_completion_candidate(
     item: SourceCompletionItem,
     file: FileId,
@@ -392,18 +385,15 @@ fn pretty_ty_detail(ty: &Ty, tables: PrettyTables<'_>) -> Option<String> {
 
 fn import_qualifiers(
     session: &Session,
-    current_module: &ModuleName,
+    _current_module: &ModuleName,
     import: &EffectiveImport,
 ) -> Vec<String> {
-    let mut qualifiers = vec![
-        session.str(import.alias).to_string(),
-        import.module.as_string(session),
-    ];
-
-    if import.module.0.first() != current_module.0.first()
-        && let Some(first) = import.module.0.first()
-    {
-        qualifiers.push(session.str(*first).to_string());
+    let mut qualifiers = Vec::new();
+    if import.qualifies {
+        qualifiers.push(session.str(import.qualifier).to_string());
+    }
+    if import.accepts_module_name {
+        qualifiers.push(import.module.as_string(session));
     }
 
     qualifiers.sort();

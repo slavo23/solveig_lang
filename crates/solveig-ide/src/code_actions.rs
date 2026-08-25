@@ -372,11 +372,13 @@ fn missing_import_list_action(
     import: &ImportDecl,
     name: &str,
 ) -> Option<SourceCodeAction> {
-    let ImportSpec::Only(names) = &import.spec else {
+    let ModuleSelection::Only(entities) = &import.selection else {
         return None;
     };
     let name_symbol = session.intern(name);
-    if names.contains(&name_symbol) {
+    if entities.iter().any(|entity| {
+        entity.name.0 == name_symbol || entity.rename.is_some_and(|rename| rename.0 == name_symbol)
+    }) {
         return None;
     }
 

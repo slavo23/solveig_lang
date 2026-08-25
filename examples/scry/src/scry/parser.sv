@@ -1,7 +1,6 @@
-import std.list
+import std.list(*)
 import std.text(stringToChars, charsToString)
-import scry.ast
-
+import scry.ast(*)
 
 isWhitespace : Char -> Bool
 isWhitespace c =

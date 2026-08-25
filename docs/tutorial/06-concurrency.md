@@ -135,7 +135,7 @@ by itself. Prefer `withThread` so lifetime and cleanup remain visible.
 A `Chan a` carries values of one type. Channels provide FIFO message order:
 
 ```solveig
-import std.channel
+import std.channel(*)
 import std.task(withThread)
 
 produce : Chan Int -> Task ()

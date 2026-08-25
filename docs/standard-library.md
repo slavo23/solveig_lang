@@ -56,10 +56,10 @@ returns the text before and after the first requested character.
 ## Persistent collections
 
 ```solveig
-import std.vector
-import std.map
-import std.set
-import std.queue
+import std.vector(*)
+import std.map(*)
+import std.set(*)
+import std.queue(*)
 ```
 
 `Vector` is a persistent height-balanced sequence tree. `length` is constant
@@ -114,7 +114,7 @@ operations above so cached balance and size invariants remain valid.
 ## Bytes
 
 ```solveig
-import std.bytes
+import std.bytes(*)
 ```
 
 ```solveig
@@ -139,8 +139,8 @@ format.
 ## Parser combinators
 
 ```solveig
-import std.parser
-import std.text
+import std.parser(*)
+import std.text(*)
 ```
 
 `Parser input customError value` is generic over the cursor it consumes, the
@@ -184,10 +184,10 @@ complements the [parser tutorial](tutorial/08-parsers-and-json.md).
 ## JSON
 
 ```solveig
-import std.bytes
-import std.json
-import std.parser
-import std.vector
+import std.bytes(*)
+import std.json(*)
+import std.parser(*)
+import std.vector(*)
 
 reply : std.parser.ParseReply std.parser.ByteInput std.json.JsonError std.json.Json
 reply =
@@ -228,7 +228,7 @@ the same structured `std.parser.ParseReply`. Render custom failures with
 ## Handles and files
 
 ```solveig
-import std.io
+import std.io(*)
 ```
 
 `std.io` owns `IOMode`, `BufferMode`, the standard handles, incremental handle
@@ -258,7 +258,7 @@ interruption.
 Filesystem metadata and directory operations are separate:
 
 ```solveig
-import std.fs
+import std.fs(*)
 ```
 
 This module provides `getCurrentDirectory`, `setCurrentDirectory`,
@@ -268,8 +268,8 @@ This module provides `getCurrentDirectory`, `setCurrentDirectory`,
 ## Environment and processes
 
 ```solveig
-import std.env
-import std.process
+import std.env(*)
+import std.process(*)
 ```
 
 `std.env` provides `getArgs`, `getEnv`, `getEnvOr`, `requireEnv`, `setEnv`,
@@ -299,9 +299,9 @@ terminates and reaps its direct child.
 ## Channels, threads, and structured tasks
 
 ```solveig
-import std.channel
-import std.thread
-import std.task
+import std.channel(*)
+import std.thread(*)
+import std.task(*)
 import std.time(sleep)
 ```
 
@@ -347,8 +347,8 @@ checks = std.testing.checkAll
 ## Time and randomness
 
 ```solveig
-import std.time
-import std.random
+import std.time(*)
+import std.random(*)
 ```
 
 `sleep` and `timeout` use milliseconds. `getMonotonicTime` and
@@ -364,8 +364,8 @@ generator is not cryptographically secure.
 ## Networking
 
 ```solveig
-import std.bytes
-import std.net
+import std.bytes(*)
+import std.net(*)
 ```
 
 `std.net` provides `connect`, `resolveHost`, `listen`, `accept`, `sendBytes`,
@@ -380,7 +380,7 @@ Streaming subprocess pipes, UDP, and general IPv6 selection are not provided.
 ### HTTP and HTTPS
 
 ```solveig
-import std.http
+import std.http(*)
 
 fetchRelease : String -> IO std.http.HttpError std.http.Response
 fetchRelease repository =

@@ -1,4 +1,4 @@
-import docsLib(documentedIncrement, trailingValue, Documented, MkDocumented, Describe)
+import docsLib(documentedIncrement, trailingValue, Documented(..), Describe)
 
 main : Int
 main = documentedIncrement 41

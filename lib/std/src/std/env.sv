@@ -5,11 +5,11 @@ export (
 )
 
 import prelude.prim(getArgs, getEnv, setEnv, getEnvironment, getProgName)
-import std.fs
-import std.io
+import std.fs(*)
+import std.io(*)
 import std.list(reverse)
-import std.map
-import std.text
+import std.map(*)
+import std.text(*)
 
 -- | A failure while resolving or loading application environment settings.
 data EnvError =

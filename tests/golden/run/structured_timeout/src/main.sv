@@ -1,5 +1,6 @@
-import std.task
-import std.time
+import std.task(*)
+import std.time(*)
+
 slow : Task String
 slow =
     finally

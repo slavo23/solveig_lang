@@ -1,5 +1,5 @@
-import std.list
-import std.random
+import std.list(*)
+import std.random(*)
 import std.text(intToString)
 
 printInts : Int -> StdGen -> Task ()

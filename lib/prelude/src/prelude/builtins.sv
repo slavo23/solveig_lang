@@ -6,7 +6,7 @@ export (
     readLine, appendString, even, odd, not, and, or
 )
 
-import prelude.prim
+import prelude.prim(*)
 
 -- | A value that may be present or absent.
 data Maybe a =

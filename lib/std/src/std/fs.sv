@@ -4,7 +4,7 @@ export (
     getModificationTime
 )
 
-import prelude.prim
+import prelude.prim(*)
 
 -- | Returns the runtime's current working directory.
 getCurrentDirectory : Task String

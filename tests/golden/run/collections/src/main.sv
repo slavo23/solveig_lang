@@ -1,9 +1,9 @@
-import std.map
+import std.map(*)
 import std.list(take, drop, range, rangeInclusive, length, isEmpty)
-import std.queue
-import std.set
+import std.queue(*)
+import std.set(*)
 import std.text(lines, splitOnce)
-import std.vector
+import std.vector(*)
 
 vectorExample : std.vector.Vector Int
 vectorExample = std.vector.fromList [10, 20, 30, 40, 50]

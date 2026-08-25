@@ -1,5 +1,6 @@
-import std.thread
-import std.channel
+import std.thread(*)
+import std.channel(*)
+
 reportClosed : Chan String -> IOError -> Task ()
 reportClosed result ChannelClosed = send result "sender-closed"
 reportClosed result _ = send result "unexpected-error"

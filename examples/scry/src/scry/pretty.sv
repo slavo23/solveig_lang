@@ -1,6 +1,6 @@
-import scry.ast
-import scry.solver
-import scry.util
+import scry.ast(*)
+import scry.solver(*)
+import scry.util(*)
 
 renderTerm : Term -> String
 renderTerm term =

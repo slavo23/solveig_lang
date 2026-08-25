@@ -1,9 +1,9 @@
-import std.net
-import std.bytes
-import std.task
-import std.channel
-import std.env
-import std.io
+import std.net(*)
+import std.bytes(*)
+import std.task(*)
+import std.channel(*)
+import std.env(*)
+import std.io(*)
 
 data DownloadJob = DownloadJob String String
 

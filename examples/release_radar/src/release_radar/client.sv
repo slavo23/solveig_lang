@@ -1,8 +1,8 @@
-import std.http
-import std.task
-import std.time
-import release_radar.cache
-import release_radar.model
+import std.http(*)
+import std.task(*)
+import std.time(*)
+import release_radar.cache(*)
+import release_radar.model(*)
 
 httpLimits : std.http.HttpLimits
 httpLimits = std.http.HttpLimits 65536 1048576 10000 std.http.NoRedirects

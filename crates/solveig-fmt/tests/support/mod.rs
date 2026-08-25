@@ -1,8 +1,9 @@
 use solveig_base::{Session, Symbol};
 use solveig_syntax::ast::{
-    ClassMethod, ImportDecl, ImportSpec, InstanceMethod, NameRef, ParsedModule, SurfaceConstructor,
-    SurfaceDefinition, SurfaceDoStmt, SurfaceExpr, SurfaceLiteral, SurfaceMatchArm,
-    SurfaceOpOperand, SurfaceOpSegment, SurfacePattern, SurfacePredicate, SurfaceTy,
+    ClassMethod, EntityExposure, ImportDecl, InstanceMethod, ModuleEntity, ModuleSelection,
+    NameRef, ParsedModule, SurfaceConstructor, SurfaceDefinition, SurfaceDoStmt, SurfaceExpr,
+    SurfaceLiteral, SurfaceMatchArm, SurfaceOpOperand, SurfaceOpSegment, SurfacePattern,
+    SurfacePredicate, SurfaceTy,
 };
 
 pub(super) fn normalized_ast(session: &Session, module: &ParsedModule) -> String {
@@ -41,24 +42,41 @@ fn name(session: &Session, value: &NameRef) -> String {
 }
 
 fn import_shape(session: &Session, import: &ImportDecl) -> String {
-    let spec = match &import.spec {
-        ImportSpec::All => "all".to_string(),
-        ImportSpec::Only(names) => format!(
+    let selection = match &import.selection {
+        ModuleSelection::All => "all".to_string(),
+        ModuleSelection::Only(entities) => format!(
             "only({})",
-            joined(names.iter().map(|name| symbol(session, *name)))
+            joined(
+                entities
+                    .iter()
+                    .map(|entity| import_entity_shape(session, entity))
+            )
         ),
     };
+    let alias = import
+        .alias
+        .map_or_else(|| "default".to_string(), |alias| symbol(session, alias.0));
     format!(
-        "import({} as {} {spec})",
+        "import({} as {alias} {selection})",
         joined(
             import
                 .module
                 .0
                 .iter()
                 .map(|segment| symbol(session, *segment))
-        ),
-        symbol(session, import.alias)
+        )
     )
+}
+
+fn import_entity_shape(session: &Session, entity: &ModuleEntity) -> String {
+    let exposure = match entity.exposure {
+        EntityExposure::Opaque => "",
+        EntityExposure::Constructors => "(..)",
+    };
+    let rename = entity.rename.map_or_else(String::new, |rename| {
+        format!(" as {}", symbol(session, rename.0))
+    });
+    format!("{}{exposure}{rename}", symbol(session, entity.name.0))
 }
 
 fn definition_shape(session: &Session, definition: &SurfaceDefinition) -> String {

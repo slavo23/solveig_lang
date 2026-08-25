@@ -38,7 +38,7 @@ a computation does not turn it into IO or force it eagerly.
 The normal API is deliberately small:
 
 ```solveig
-import std.io
+import std.io(*)
 
 copyText : String -> String -> Task ()
 copyText source destination = do
@@ -69,7 +69,7 @@ The tutorial's [`file_summary`](code/file_summary/) project reads four lines,
 writes a summary, and prints it:
 
 ```solveig
-import std.io
+import std.io(*)
 import std.list(length)
 import std.text(lines, trimAscii)
 
@@ -100,7 +100,7 @@ Whole-file helpers are best for small and medium strict inputs. Handles support
 incremental reads, appending, and explicit buffering:
 
 ```solveig
-import std.io
+import std.io(*)
 
 writeLog : String -> Task ()
 writeLog message =
@@ -182,7 +182,7 @@ missing file as an error. Do not print secrets read from the environment.
 returns its exit code, stdout, and stderr:
 
 ```solveig
-import std.process
+import std.process(*)
 
 main : Task ()
 main = do

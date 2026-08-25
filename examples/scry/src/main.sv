@@ -1,9 +1,9 @@
-import std.io
-import scry.ast
-import scry.parser
-import scry.pretty
-import scry.solver
-import scry.util
+import std.io(*)
+import scry.ast(*)
+import scry.parser(*)
+import scry.pretty(*)
+import scry.solver(*)
+import scry.util(*)
 
 helpText : String
 helpText =

@@ -1,4 +1,5 @@
-import std.list
+import std.list(*)
+
 data State s a = State (s -> (a, s));
 
 data BF

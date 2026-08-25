@@ -1,6 +1,7 @@
-import std.task
-import std.thread
-import std.channel
+import std.task(*)
+import std.thread(*)
+import std.channel(*)
+
 child : Chan () -> Task ()
 child gate =
     finally

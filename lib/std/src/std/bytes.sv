@@ -3,7 +3,7 @@ export (
     bytesSpanAny, bytesFindAny, bytesFindBelow, bytesSpanRange, bytesSliceToString
 )
 
-import prelude.prim
+import prelude.prim(*)
 
 -- | Encodes text as UTF-8 bytes.
 stringToBytes : String -> Bytes

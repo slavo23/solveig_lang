@@ -1,7 +1,7 @@
 export (List(..), map, filter, foldr, foldl, concat, append, (++))
 
-import prelude.builtins
-import prelude.prim
+import prelude.builtins(*)
+import prelude.prim(*)
 
 -- | A finite sequence of values.
 data List a =

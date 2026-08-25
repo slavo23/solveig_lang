@@ -10,7 +10,7 @@ The common GET path accepts a URL string directly and retains the bounded
 response, including status and headers:
 
 ```solveig
-import std.http
+import std.http(*)
 
 showPage : String -> IO std.http.HttpError String
 showPage spelling = do

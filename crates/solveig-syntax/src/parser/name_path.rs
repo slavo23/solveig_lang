@@ -3,6 +3,32 @@
 use super::*;
 
 impl Parser<'_> {
+    pub(super) fn current_name_path_is_constructor(&self) -> bool {
+        let mut current = self.current_index();
+        if !matches!(self.token(current).kind, Token::Ident | Token::UpperIdent) {
+            return false;
+        }
+
+        while let Some(dot_index) = self.significant_index_from(current + 1, 0) {
+            let Some(next_index) = self.significant_index_from(dot_index + 1, 0) else {
+                break;
+            };
+            let previous = self.token(current);
+            let dot = self.token(dot_index);
+            let next = self.token(next_index);
+            if dot.kind != Token::Dot
+                || previous.end() != dot.start()
+                || dot.end() != next.start()
+                || !matches!(next.kind, Token::Ident | Token::UpperIdent)
+            {
+                break;
+            }
+            current = next_index;
+        }
+
+        self.token(current).kind == Token::UpperIdent
+    }
+
     pub(super) fn parse_name_path(&mut self) -> Result<NamePathFacts, ParseError> {
         self.node(SyntaxKind::NamePath, |parser| {
             let start = parser.current_start();

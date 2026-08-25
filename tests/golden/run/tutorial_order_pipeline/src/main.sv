@@ -1,6 +1,7 @@
-import std.task
-import std.time
-import std.channel
+import std.task(*)
+import std.time(*)
+import std.channel(*)
+
 data Order = Order Int Int
 
 data Fulfilment =

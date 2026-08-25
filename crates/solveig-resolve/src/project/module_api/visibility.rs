@@ -176,17 +176,6 @@ impl TypedModuleApi {
         self.retain_for_api(selected)
     }
 
-    /// Projects typed definitions through the exact untyped name selection.
-    pub fn imported_view(
-        &self,
-        module_api: &ModuleApi,
-        package: PackageId,
-        spec: &ImportSpec,
-    ) -> Self {
-        let selected = module_api.visible_to(package).filtered(spec);
-        self.retain_for_api(&selected)
-    }
-
     /// Adds typed definitions republished by `module_api` from dependency APIs.
     pub fn include_reexports<'a>(
         &mut self,

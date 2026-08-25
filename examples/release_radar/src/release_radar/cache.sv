@@ -1,8 +1,8 @@
-import std.fs
-import std.io
-import std.map
-import std.text
-import release_radar.model
+import std.fs(*)
+import std.io(*)
+import std.map(*)
+import std.text(*)
+import release_radar.model(*)
 
 data Cache = Cache (std.map.Map String String)
 
