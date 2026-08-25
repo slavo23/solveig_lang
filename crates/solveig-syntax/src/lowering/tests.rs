@@ -75,6 +75,40 @@ fn imports_retain_qualifiers_exact_selections_and_entity_details() {
 }
 
 #[test]
+fn alternating_module_header_groups_lower_into_one_module_api() {
+    let session = Session::new();
+    let source = "import alpha\n\
+                  export (main)\n\
+                  import beta\n\
+                  private (helper)\n\
+                  reexport gamma(*)\n\
+                  main = 0\n\
+                  helper = 1\n";
+    let file = session.add_file("header.sv", source);
+    let parsed = parse_source(&session, file, source);
+
+    assert!(session.diagnostics().is_empty());
+    assert_eq!(parsed.imports.len(), 2);
+    assert_eq!(parsed.directives.exports.len(), 1);
+    assert_eq!(parsed.directives.private.len(), 1);
+    assert_eq!(parsed.directives.reexports.len(), 1);
+    assert_eq!(parsed.defs.len(), 2);
+}
+
+#[test]
+fn late_header_items_do_not_enter_the_lowered_module_api() {
+    let session = Session::new();
+    let source = "main = 0\nexport (main)\nhelper = 1\n";
+    let file = session.add_file("late-header.sv", source);
+    let parsed = parse_source(&session, file, source);
+    let diagnostics = session.diagnostics();
+
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    assert!(parsed.directives.exports.is_empty());
+    assert_eq!(parsed.defs.len(), 2);
+}
+
+#[test]
 fn multiline_module_entity_lists_lower() {
     let source = "export (\n    alpha, Beta(..),\n    (<+>)\n)\nalpha = 1\ndata Beta = MkBeta\n(<+>) x y = x + y\n";
     let parsed = lower_test_source(source);

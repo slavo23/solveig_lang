@@ -76,6 +76,72 @@ fn parser_emits_error_event_and_node_during_recovery() {
 }
 
 #[test]
+fn module_header_groups_retain_flexible_source_order() {
+    let source = "import alpha\n\
+                  export (main)\n\
+                  import beta\n\
+                  private (helper)\n\
+                  reexport gamma(*)\n\
+                  main = 0\n\
+                  helper = 1\n";
+    let (tree, diagnostics) = parse_cst(FileId(0), source).expect("header fixture should lex");
+
+    assert!(diagnostics.is_empty(), "{diagnostics:#?}");
+    assert_eq!(tree.reconstruct_text(source), source);
+    let mut header_kinds = Vec::new();
+    for child in tree.children(tree.root()) {
+        let crate::cst::NodeOrToken::Node(child) = child else {
+            continue;
+        };
+        if matches!(
+            tree.node(*child).kind(),
+            SyntaxKind::ImportList | SyntaxKind::ModuleDirectiveList
+        ) {
+            header_kinds.extend(
+                tree.children(*child)
+                    .iter()
+                    .filter_map(|child| match child {
+                        crate::cst::NodeOrToken::Node(child) => Some(tree.node(*child).kind()),
+                        crate::cst::NodeOrToken::Token(_) => None,
+                    }),
+            );
+        } else if matches!(
+            tree.node(*child).kind(),
+            SyntaxKind::ImportDecl
+                | SyntaxKind::ExportDecl
+                | SyntaxKind::PrivateDecl
+                | SyntaxKind::ReexportDecl
+        ) {
+            header_kinds.push(tree.node(*child).kind());
+        }
+    }
+    assert_eq!(
+        header_kinds,
+        vec![
+            SyntaxKind::ImportDecl,
+            SyntaxKind::ExportDecl,
+            SyntaxKind::ImportDecl,
+            SyntaxKind::PrivateDecl,
+            SyntaxKind::ReexportDecl,
+        ]
+    );
+}
+
+#[test]
+fn module_header_item_after_a_declaration_is_a_precise_error() {
+    let source = "main = 0\nexport (main)\nhelper = 1\n";
+    let (tree, diagnostics) = parse_cst(FileId(0), source).expect("late header fixture should lex");
+
+    assert_eq!(tree.reconstruct_text(source), source);
+    assert_eq!(diagnostics.len(), 1, "{diagnostics:#?}");
+    assert_eq!(diagnostics[0].code, "PAR0001");
+    assert_eq!(
+        diagnostics[0].labels[0].message,
+        "module header items must appear before the first declaration"
+    );
+}
+
+#[test]
 fn parser_events_cover_every_token_for_repository_sources() {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()

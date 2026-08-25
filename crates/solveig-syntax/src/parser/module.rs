@@ -9,8 +9,7 @@ impl Parser<'_> {
                 parser.advance();
             }
 
-            parser.parse_module_directives();
-            parser.parse_imports();
+            parser.parse_module_header();
             parser.parse_definitions();
 
             if parser.at(&Token::VClose) {
@@ -19,6 +18,18 @@ impl Parser<'_> {
 
             parser.emit_remaining_tokens();
         });
+    }
+
+    fn parse_module_header(&mut self) {
+        loop {
+            match self.current_kind() {
+                Token::Export | Token::Private | Token::Reexport => {
+                    self.parse_module_directives();
+                }
+                Token::Import => self.parse_imports(),
+                _ => break,
+            }
+        }
     }
 
     fn parse_module_directives(&mut self) {
@@ -183,6 +194,9 @@ impl Parser<'_> {
 
     pub(super) fn parse_definition(&mut self) -> Result<(), ParseError> {
         match self.current_kind() {
+            Token::Import | Token::Export | Token::Private | Token::Reexport => {
+                Err(self.error("module header items must appear before the first declaration"))
+            }
             Token::Data => self.parse_data_def(),
             Token::Type => self.parse_type_alias_def(),
             Token::Class => self.parse_class_def(),

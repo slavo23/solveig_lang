@@ -100,14 +100,15 @@ This keeps every fully qualified module name unambiguous.
 
 ## Module APIs and visibility
 
-A source file owns one centralized API header. Directives come before imports,
-and imports come before definitions:
+A source file owns one centralized API header. Imports, exports, private-name
+lists, and re-exports may appear in any order in that header. The first ordinary
+declaration ends it:
 
 ```solveig
+import std.map(Map)
+
 export (User(..), UserId, findUser, (<!>))
 private (validateCache)
-
-import std.map(Map)
 
 data User = User UserId String
 type UserId = Int
@@ -118,6 +119,11 @@ findUser identifier users = std.map.lookup identifier users
 validateCache : Map UserId User -> Bool
 validateCache users = True
 ```
+
+The formatter preserves the order you chose and leaves one blank line before
+the first declaration. A header item cannot appear later among definitions:
+its meaning is module-wide, so such placement would misleadingly resemble a
+lexical import or export scope.
 
 Top-level definitions are package-visible by default. Another module in the
 same package can import `findUser` even before it is listed in `export`, but a

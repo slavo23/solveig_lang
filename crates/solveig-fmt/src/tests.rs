@@ -49,6 +49,17 @@ fn formats_module_visibility_and_reexports_as_a_header_block() {
 }
 
 #[test]
+fn preserves_interleaved_module_header_order_and_comments() {
+    assert_eq!(
+        format_source(
+            "import std.io -- used by main\n-- public API\nexport(main)\nimport std.list(map)\nprivate(helper) -- local only\nmain=pure ()\nhelper=0\n",
+            100,
+        ),
+        "import std.io -- used by main\n-- public API\nexport (main)\nimport std.list(map)\nprivate (helper) -- local only\n\nmain = pure ()\nhelper = 0\n"
+    );
+}
+
+#[test]
 fn aligns_every_broken_function_type_at_one_continuation_indent() {
     insta::assert_snapshot!(format_source(
         "runPool:(String->Int->String->String->Task (Maybe Bytes))->String->Int->String->(Chan DownloadJob->Task ())->Task ()\n",

@@ -132,7 +132,7 @@ pub struct ReexportDecl {
     pub cst_id: CstId,
 }
 
-/// Retains the centralized visibility directives at the start of a module.
+/// Retains the centralized visibility directives from the initial module header.
 #[derive(Debug, Clone, Default)]
 pub struct ModuleDirectives {
     pub exports: Vec<VisibilityDecl>,

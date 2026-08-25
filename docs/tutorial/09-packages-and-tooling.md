@@ -50,12 +50,20 @@ pattern-match it. Write `Theme(..)` when all constructors are part of the API.
 Operators use their parenthesized names, such as `export ((<?>))`. A module with
 no `export` exposes nothing outside its package.
 
-Defining-module-only helpers use one centralized declaration before imports:
+Defining-module-only helpers use one centralized declaration in the initial
+module header. Header items may be ordered to suit the module; this imports-first
+layout is often pleasant:
 
 ```solveig
+import std.text
+
 export (renderTitle)
 private (escapeControlCodes)
 ```
+
+The first function, type, class, instance, or fixity declaration closes the
+header. Imports and visibility directives cannot appear later because their
+meaning is module-wide rather than scoped to the definitions below them.
 
 For a public facade, republish exact names without wrappers:
 

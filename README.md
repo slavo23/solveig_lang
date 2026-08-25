@@ -96,10 +96,10 @@ Library modules publish a deliberate external API while keeping unlisted
 definitions reusable inside their package:
 
 ```solveig
+import std.io(readFile)
+
 export (Config, loadConfig)
 private (validateRawConfig)
-
-import std.io(readFile)
 ```
 
 Use `Config(..)` when constructors are public, and build facade modules with

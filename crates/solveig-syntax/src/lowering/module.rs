@@ -8,24 +8,9 @@ impl CstToAst<'_> {
         &mut self,
     ) -> (ModuleDirectives, Vec<ImportDecl>, SurfaceProgram) {
         let root = self.cst.root();
-        let directives = self
-            .first_child_of_kind(root, SyntaxKind::ModuleDirectiveList)
-            .map_or_else(ModuleDirectives::default, |node| {
-                self.lower_module_directives(node)
-            });
-        let directives = if directives.exports.is_empty()
-            && directives.private.is_empty()
-            && directives.reexports.is_empty()
-        {
-            self.lower_direct_module_directives(root)
-        } else {
-            directives
-        };
-        let imports = if let Some(node) = self.first_child_of_kind(root, SyntaxKind::ImportList) {
-            self.lower_imports(node)
-        } else {
-            self.lower_direct_imports(root)
-        };
+        let header_items = self.module_header_items(root);
+        let directives = self.lower_module_directives(&header_items);
+        let imports = self.lower_imports(&header_items);
         let defs = if let Some(node) = self.first_child_of_kind(root, SyntaxKind::DefinitionList) {
             self.lower_definitions(node)
         } else {
@@ -35,47 +20,38 @@ impl CstToAst<'_> {
         (directives, imports, defs)
     }
 
-    fn lower_module_directives(&mut self, node: CstId) -> ModuleDirectives {
-        let mut directives = ModuleDirectives::default();
-        for child in self.child_nodes(node) {
-            let lowered = match self.cst.node(child).kind() {
-                SyntaxKind::ExportDecl => self
-                    .lower_visibility_directive(child)
-                    .map(|decl| directives.exports.push(decl)),
-                SyntaxKind::PrivateDecl => self
-                    .lower_visibility_directive(child)
-                    .map(|decl| directives.private.push(decl)),
-                SyntaxKind::ReexportDecl => self
-                    .lower_reexport(child)
-                    .map(|decl| directives.reexports.push(decl)),
-                _ => continue,
-            };
-            if let Err(error) = lowered
-                && !self.node_has_diagnostics(child)
-            {
-                self.record_error(&error);
+    fn module_header_items(&self, root: CstId) -> Vec<CstId> {
+        let mut items = Vec::new();
+        for child in self.child_nodes(root) {
+            if matches!(
+                self.cst.node(child).kind(),
+                SyntaxKind::ModuleDirectiveList | SyntaxKind::ImportList
+            ) {
+                items.extend(self.child_nodes(child));
+            } else {
+                items.push(child);
             }
         }
-        directives
+        items
     }
 
-    fn lower_direct_module_directives(&mut self, node: CstId) -> ModuleDirectives {
+    fn lower_module_directives(&mut self, header_items: &[CstId]) -> ModuleDirectives {
         let mut directives = ModuleDirectives::default();
-        for child in self.child_nodes(node) {
-            let lowered = match self.cst.node(child).kind() {
+        for &item in header_items {
+            let lowered = match self.cst.node(item).kind() {
                 SyntaxKind::ExportDecl => self
-                    .lower_visibility_directive(child)
+                    .lower_visibility_directive(item)
                     .map(|decl| directives.exports.push(decl)),
                 SyntaxKind::PrivateDecl => self
-                    .lower_visibility_directive(child)
+                    .lower_visibility_directive(item)
                     .map(|decl| directives.private.push(decl)),
                 SyntaxKind::ReexportDecl => self
-                    .lower_reexport(child)
+                    .lower_reexport(item)
                     .map(|decl| directives.reexports.push(decl)),
                 _ => continue,
             };
             if let Err(error) = lowered
-                && !self.node_has_diagnostics(child)
+                && !self.node_has_diagnostics(item)
             {
                 self.record_error(&error);
             }
@@ -171,27 +147,16 @@ impl CstToAst<'_> {
         })
     }
 
-    fn lower_imports(&mut self, node: CstId) -> Vec<ImportDecl> {
+    fn lower_imports(&mut self, header_items: &[CstId]) -> Vec<ImportDecl> {
         let mut imports = Vec::new();
 
-        for import in self.child_nodes_of_kind(node, SyntaxKind::ImportDecl) {
-            match self.lower_import(import) {
-                Ok(import) => imports.push(import),
-                Err(error) if !self.node_has_diagnostics(import) => self.record_error(&error),
-                Err(_) => {}
+        for &item in header_items {
+            if self.cst.node(item).kind() != SyntaxKind::ImportDecl {
+                continue;
             }
-        }
-
-        imports
-    }
-
-    fn lower_direct_imports(&mut self, node: CstId) -> Vec<ImportDecl> {
-        let mut imports = Vec::new();
-
-        for import in self.child_nodes_of_kind(node, SyntaxKind::ImportDecl) {
-            match self.lower_import(import) {
+            match self.lower_import(item) {
                 Ok(import) => imports.push(import),
-                Err(error) if !self.node_has_diagnostics(import) => self.record_error(&error),
+                Err(error) if !self.node_has_diagnostics(item) => self.record_error(&error),
                 Err(_) => {}
             }
         }

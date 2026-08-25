@@ -22,6 +22,36 @@ fn write_single_package_manifest(root: &Path, name: &str) {
 }
 
 #[test]
+fn module_header_items_may_be_interleaved_before_declarations() {
+    let project = support::temp_root("solveig_modules", "flexible_header_order");
+    write_single_package_manifest(&project, "flexible_header");
+    write_source(
+        &project.join("src/core.sv"),
+        r#"import std.list
+export (value)
+import std.text
+private (hidden)
+
+value : Int
+value = 42
+
+hidden : Int
+hidden = 0
+"#,
+    );
+    write_source(
+        &project.join("src/main.sv"),
+        "import flexible_header.core(value)\n\nmain : Int\nmain = value\n",
+    );
+
+    let mut compilation = Compilation::new(&project);
+    let result = compilation
+        .check(true)
+        .expect("flexible module header project should check");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+}
+
+#[test]
 fn imports_are_qualified_by_default_and_entity_selections_are_exact() {
     let project = support::temp_root("solveig_modules", "entity_imports");
     write_single_package_manifest(&project, "imports");
