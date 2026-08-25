@@ -176,8 +176,6 @@ impl TypedModuleApi {
         for (id, info) in self.class_table.iter() {
             out.class_table.insert_with_id(id, info.clone());
         }
-
-        out.instance_defs.extend(self.instance_defs.clone());
     }
 
     pub fn type_name(&self, names: &Names, sym: DefId) -> Option<String> {
@@ -195,12 +193,6 @@ pub struct TypedDisplayMaps<'a> {
     pub tycon_table: &'a mut TyConTable,
     pub ctor_table: &'a mut CtorTable,
     pub class_table: &'a mut ClassTable,
-    pub instance_defs: &'a mut Vec<
-        solveig_ast::ast::InstanceDefinition<
-            solveig_check::inference::type_infer::TcMetadata,
-            std::ops::Range<usize>,
-        >,
-    >,
 }
 
 pub type SharedModuleApi = Arc<ModuleApi>;

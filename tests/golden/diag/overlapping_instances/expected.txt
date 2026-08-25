@@ -1,10 +1,20 @@
-[TC0014] Error: overlapping instance for `main.Local Int`
-   ╭─[ $WORKSPACE/tests/golden/diag/overlapping_instances/src/main.sv:1:1 ]
+[RES0022] Error: overlapping instance for `Local Int`
+   ╭─[ $WORKSPACE/tests/golden/diag/overlapping_instances/src/main.sv:7:1 ]
    │
- 1 │ class Local a where
+ 7 │ ╭─▶ instance Local Int where
+   ┆ ┆
+ 9 │ ├─▶
    │ │
-   │ ╰─ duplicate instance defined here
+   │ ╰────── this instance overlaps an existing instance
    │
-   │ Note: an instance for this type already exists
+   ├─[ $WORKSPACE/tests/golden/diag/overlapping_instances/src/main.sv:7:1 ]
+   │
+ 4 │ ╭─▶ instance Local Int where
+   ┆ ┆
+ 6 │ ├─▶
+   │ │
+   │ ╰────── the other instance is defined here
+   │
+   │     Note: every visible package graph must contain at most one matching instance
 ───╯
-type error
+resolve error

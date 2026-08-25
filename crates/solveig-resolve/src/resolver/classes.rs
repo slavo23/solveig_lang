@@ -386,61 +386,33 @@ impl<'a> Resolver<'a> {
 
         Ok(kinded_class_defs)
     }
-    fn unreported_tycon_defid(&self, r: &NameRef, cx: &ModuleContext) -> Option<DefId> {
-        match r.segments.as_slice() {
-            [name] => cx
-                .builtins
-                .types
-                .get(name)
-                .or_else(|| cx.local_api.types.get(name))
-                .copied()
-                .or_else(|| {
-                    let mut candidates = cx
-                        .imported_apis
-                        .iter()
-                        .filter_map(|imp| imp.unqualified.types.get(name).copied())
-                        .collect::<Vec<_>>();
-                    candidates.sort_unstable();
-                    candidates.dedup();
-
-                    match candidates.as_slice() {
-                        [id] => Some(*id),
-                        _ => None,
-                    }
-                }),
-
-            [_first, rest @ ..] => {
-                let local_name = *rest.last()?;
-
-                if cx.module.0.as_slice() == r.prefix() {
-                    return cx.local_api.types.get(&local_name).copied();
-                }
-
-                self.imported_by_alias_or_module(r, cx)
-                    .and_then(|imp| imp.api.types.get(&local_name).copied())
-            }
-
-            [] => None,
+    fn resolved_instance_type_module(&self, ty: &Ty, cx: &ModuleContext) -> Option<ModuleId> {
+        let mut head = ty;
+        while let Ty::TyApp(func, _) = head {
+            head = func;
         }
-    }
+        let Ty::TyCon(tycon) = head else {
+            return None;
+        };
 
-    fn instance_type_head_module(
-        &self,
-        ty: &SpannedWrapper<SurfaceTy>,
-        cx: &ModuleContext,
-    ) -> Option<ModuleId> {
-        match &ty.0 {
-            SurfaceTy::Con(con) => self
-                .unreported_tycon_defid(&con.0, cx)
-                .or_else(|| self.unreported_type_alias_defid(&con.0, cx))
-                .map(|id| id.module),
-            SurfaceTy::App(lhs, _) => self.instance_type_head_module(lhs, cx),
-            SurfaceTy::Unit
-            | SurfaceTy::Var(_)
-            | SurfaceTy::Arr(_, _)
-            | SurfaceTy::ForAll(_, _)
-            | SurfaceTy::Qualified(_, _) => None,
+        if let Some((def_id, _)) = cx
+            .builtins
+            .type_ids
+            .iter()
+            .find(|(_, candidate)| candidate == &tycon)
+        {
+            return Some(def_id.module);
         }
+
+        let qualified = self.names.tycon_display_name(*tycon);
+        let (module, _) = qualified.rsplit_once('.')?;
+        let module = ModuleName(
+            module
+                .split('.')
+                .map(|segment| self.session.intern(segment))
+                .collect(),
+        );
+        self.modules.id(&module)
     }
 
     fn resolve_instance_defs(
@@ -478,10 +450,6 @@ impl<'a> Resolver<'a> {
                 }
                 None => self.unresolved_name(&class_ref),
             };
-            let type_module = args
-                .first()
-                .and_then(|arg| self.instance_type_head_module(arg, cx));
-
             self.push_tyvar_scope();
             let resolved_args = args
                 .iter()
@@ -525,6 +493,10 @@ impl<'a> Resolver<'a> {
             let (checked_context, checked_head) = self
                 .kind_check_instance_predicates(raw_context, raw_head, all_tycon_kinds, class_env)
                 .map_err(|error| error.with_span(self.file_span(cx, defn.1)))?;
+            let type_module = checked_head
+                .args
+                .first()
+                .and_then(|arg| self.resolved_instance_type_module(arg, cx));
 
             trace_predicates(
                 self.session,
@@ -593,12 +565,6 @@ impl<'a> Resolver<'a> {
                 def_module: cx.module_id,
                 class_module: class_def_id.map(|id| id.module),
                 type_module,
-                is_orphan: {
-                    let package = self.modules.package(cx.module_id);
-                    class_def_id.is_none_or(|id| self.modules.package(id.module) != package)
-                        && type_module
-                            .is_none_or(|module| self.modules.package(module) != package)
-                },
                 context: checked_context,
                 context_evidence: Vec::new(),
                 head: checked_head,

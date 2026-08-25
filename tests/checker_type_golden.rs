@@ -23,7 +23,7 @@ fn inferred_constraint_golden_types() {
 }
 
 #[test]
-fn cli_does_not_see_unimported_instances() {
+fn cli_uses_package_instance_without_importing_its_module() {
     let case_root =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/types/unimported_instance");
     let output = Command::new(env!("CARGO_BIN_EXE_solveig"))
@@ -39,11 +39,10 @@ fn cli_does_not_see_unimported_instances() {
     ));
 
     assert!(
-        !output.status.success(),
-        "unimported-instance fixture unexpectedly compiled:\n{actual}"
+        output.status.success(),
+        "package-global instance fixture failed:\n{actual}"
     );
-
-    assert_expected_file(&case_root, "unimported_instance", &actual);
+    assert_eq!(actual, "1\n");
 }
 
 fn assert_scheme_fixture(name: &str) {

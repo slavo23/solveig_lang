@@ -1,4 +1,4 @@
-import tcBoundary.defs(Need)
+import coherence.tcBoundary.defs(Need)
 
 instance Need Int where
     need x = x

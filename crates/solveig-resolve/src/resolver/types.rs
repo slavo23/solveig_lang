@@ -171,55 +171,6 @@ impl<'a> Resolver<'a> {
         }
     }
 
-    fn unreported_type_alias_defid(&self, r: &NameRef, cx: &ModuleContext) -> Option<DefId> {
-        match r.segments.as_slice() {
-            [name] => {
-                if cx.builtins.types.contains_key(name) || cx.local_api.types.contains_key(name) {
-                    return None;
-                }
-
-                if let Some(def_id) = cx.local_api.type_aliases.get(name) {
-                    return Some(*def_id);
-                }
-
-                let mut candidates = cx
-                    .imported_apis
-                    .iter()
-                    .filter_map(|imp| imp.unqualified.type_aliases.get(name).copied())
-                    .collect::<Vec<_>>();
-                candidates.sort_unstable();
-                candidates.dedup();
-
-                match candidates.as_slice() {
-                    [def_id] => Some(*def_id),
-                    _ => None,
-                }
-            }
-
-            [_first, rest @ ..] => {
-                let local_name = *rest.last()?;
-
-                if cx.module.0.as_slice() == r.prefix() {
-                    if cx.local_api.types.contains_key(&local_name) {
-                        return None;
-                    }
-
-                    return cx.local_api.type_aliases.get(&local_name).copied();
-                }
-
-                self.imported_by_alias_or_module(r, cx).and_then(|imp| {
-                    if imp.api.types.contains_key(&local_name) {
-                        None
-                    } else {
-                        imp.api.type_aliases.get(&local_name).copied()
-                    }
-                })
-            }
-
-            [] => None,
-        }
-    }
-
     fn type_application_head<'sf>(
         sf: &'sf SpannedWrapper<SurfaceTy>,
         args: &mut Vec<&'sf SpannedWrapper<SurfaceTy>>,

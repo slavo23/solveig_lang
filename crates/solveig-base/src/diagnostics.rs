@@ -216,16 +216,6 @@ pub enum TypeError {
         span: FileSpan,
         predicates: Vec<String>,
     },
-    OverlappingInstances {
-        span: FileSpan,
-        class_name: String,
-        instance_type: String,
-    },
-    OrphanInstance {
-        span: FileSpan,
-        class_name: String,
-        instance_type: String,
-    },
     UnreachablePattern {
         span: FileSpan,
     },
@@ -514,33 +504,6 @@ impl TypeError {
                 )
                 .with_note("add a type annotation to choose which instance should be used")
             }
-
-            TypeError::OverlappingInstances {
-                span,
-                class_name,
-                instance_type,
-            } => DiagnosticParts::new(
-                "TC0014",
-                format!("overlapping instance for `{class_name} {instance_type}`"),
-            )
-            .with_label(Label::primary(*span, "duplicate instance defined here"))
-            .with_note("an instance for this type already exists"),
-
-            TypeError::OrphanInstance {
-                span,
-                class_name,
-                instance_type,
-            } => DiagnosticParts::warning(
-                "TC0018",
-                format!("orphan instance for `{class_name} {instance_type}`"),
-            )
-            .with_label(Label::primary(
-                *span,
-                "this instance is defined outside both the class and type packages",
-            ))
-            .with_note(
-                "orphan instances are globally visible and can make instance selection less predictable",
-            ),
 
             TypeError::UnreachablePattern { span } => {
                 DiagnosticParts::warning("TC0017", "unreachable pattern").with_label(

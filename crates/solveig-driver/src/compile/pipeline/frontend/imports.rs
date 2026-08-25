@@ -143,7 +143,12 @@ impl FrontendState<'_> {
         imports: &[EffectiveImport],
         package: PackageId,
     ) -> FxHashMap<TyConId, solveig_ast::ast::Kind> {
-        let mut kinds = FxHashMap::default();
+        let mut kinds = self
+            .resolved
+            .values()
+            .flat_map(|module| module.tycon_kinds.iter())
+            .map(|(id, kind)| (*id, kind.clone()))
+            .collect::<FxHashMap<_, _>>();
 
         for import in imports {
             if let Some(api) = self.typed_apis.get(&import.module) {
@@ -170,7 +175,18 @@ impl FrontendState<'_> {
         imports: &[EffectiveImport],
         package: PackageId,
     ) -> FxHashMap<DefId, TypeAlias> {
-        let mut aliases = FxHashMap::default();
+        let mut aliases = self
+            .typed_apis
+            .values()
+            .flat_map(|module| module.type_aliases.iter())
+            .map(|(id, alias)| (*id, alias.clone()))
+            .collect::<FxHashMap<_, _>>();
+        aliases.extend(
+            self.resolved_type_aliases
+                .values()
+                .flat_map(|module| module.iter())
+                .map(|(id, alias)| (*id, alias.clone())),
+        );
 
         for import in imports {
             if let Some(api) = self.typed_apis.get(&import.module) {

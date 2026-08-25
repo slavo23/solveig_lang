@@ -119,12 +119,6 @@ impl<'a> TypeChecker<'a> {
     fn pretty_scheme(&self, scheme: &Scheme) -> String {
         scheme.pretty_with_tables(self.pretty_tables())
     }
-    fn display_class_name(&self, id: ClassId) -> String {
-        self.tables.class_table.get(id).map_or_else(
-            || solveig_base::ice!("type checker class table missing ClassId {id:?}"),
-            |info| self.names.symbol_display_name(info.name),
-        )
-    }
     fn display_ctor_name(&self, id: CtorId) -> String {
         self.tables.ctor_table.get(id).map_or_else(
             || solveig_base::ice!("type checker constructor table missing CtorId {id:?}"),

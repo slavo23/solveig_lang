@@ -113,7 +113,18 @@ impl Compilation {
                 });
             }
         };
-        let phase = state.check_all(&order);
+        let resolve_phase = state.resolve_all(&order);
+        let coherence_phase = resolve_phase
+            .is_none()
+            .then(|| state.validate_instance_graph(&order))
+            .flatten();
+        let check_phase = (resolve_phase.is_none() && coherence_phase.is_none())
+            .then(|| state.check_all(&order))
+            .flatten();
+        let phase = [resolve_phase, coherence_phase, check_phase]
+            .into_iter()
+            .flatten()
+            .min();
 
         let source_files = self.session.source_map().files().to_vec();
         let (snapshot, package_cache, freshly_checked_modules, reused_modules) =

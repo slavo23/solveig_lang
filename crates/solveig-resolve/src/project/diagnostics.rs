@@ -128,6 +128,17 @@ pub enum ResolveError {
         span: FileSpan,
         names: Vec<Symbol>,
     },
+    OrphanInstance {
+        span: FileSpan,
+        class_name: String,
+        instance_type: String,
+    },
+    OverlappingInstances {
+        span: FileSpan,
+        previous: FileSpan,
+        class_name: String,
+        instance_type: String,
+    },
 }
 
 impl ResolveError {
@@ -430,6 +441,36 @@ impl ResolveError {
                     .collect::<Vec<_>>()
                     .join(" -> ")
             )]),
+            Self::OrphanInstance {
+                span,
+                class_name,
+                instance_type,
+            } => Diagnostic::error(
+                "RES0021",
+                format!("orphan instance for `{class_name} {instance_type}`"),
+            )
+            .with_label(Label::primary(
+                *span,
+                "this package owns neither the class nor the outer type constructor",
+            ))
+            .with_notes(vec![
+                "define the instance in the package that owns the class or the type".to_string(),
+            ]),
+            Self::OverlappingInstances {
+                span,
+                previous,
+                class_name,
+                instance_type,
+            } => Diagnostic::error(
+                "RES0022",
+                format!("overlapping instance for `{class_name} {instance_type}`"),
+            )
+            .with_label(Label::primary(*span, "this instance overlaps an existing instance"))
+            .with_label(Label::secondary(*previous, "the other instance is defined here"))
+            .with_notes(vec![
+                "every visible package graph must contain at most one matching instance"
+                    .to_string(),
+            ]),
         }
     }
 }

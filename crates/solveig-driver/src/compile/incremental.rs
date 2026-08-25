@@ -12,6 +12,7 @@ pub(super) struct PackageCache {
     pub(super) module_files: FxHashMap<ModuleId, FileId>,
     pub(super) resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
     pub(super) non_reusable_modules: FxHashSet<ModuleName>,
+    pub(super) instance_modules: FxHashSet<ModuleName>,
     pub(super) next_instance_id: u32,
     pub(super) verified_core: bool,
 }
@@ -96,6 +97,18 @@ impl PackageCache {
             }
         }
 
+        let current_instance_modules = project
+            .modules
+            .iter()
+            .filter(|(_, module)| parsed_module_defines_instances(&module.parsed))
+            .map(|(name, _)| name.clone());
+        let instance_graph_changed = current_instance_modules
+            .chain(self.instance_modules.iter().cloned())
+            .any(|module| invalidated.contains(&module));
+        if instance_graph_changed {
+            invalidated.extend(project.modules.keys().cloned());
+        }
+
         invalidated
     }
 
@@ -110,4 +123,13 @@ impl PackageCache {
             && self.apis.contains_key(module_name)
             && self.typed_apis.contains_key(module_name)
     }
+}
+
+pub(super) fn parsed_module_defines_instances(parsed: &ParsedModule) -> bool {
+    parsed.defs.iter().any(|definition| {
+        matches!(
+            &definition.0,
+            solveig_syntax::ast::SurfaceDefinition::InstanceDef { .. }
+        )
+    })
 }

@@ -123,7 +123,6 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
     let mut imported_tycons = TyConTable::new();
     let mut imported_ctors = CtorTable::new();
     let mut imported_classes = ClassTable::new();
-    let mut instance_defs = Vec::new();
     let mut maps = TypedDisplayMaps {
         func_schemes: &mut func_schemes,
         tycon_kinds: &mut tycon_kinds,
@@ -132,7 +131,6 @@ fn typed_module_api_exports_table_backed_type_and_constructor_ids() {
         tycon_table: &mut imported_tycons,
         ctor_table: &mut imported_ctors,
         class_table: &mut imported_classes,
-        instance_defs: &mut instance_defs,
     };
 
     api.extend_display_maps(&mut maps);

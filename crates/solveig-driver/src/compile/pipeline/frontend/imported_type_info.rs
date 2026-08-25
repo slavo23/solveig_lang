@@ -3,7 +3,6 @@ struct ImportedTypeInfo {
     tycon_kinds: FxHashMap<TyConId, solveig_ast::ast::Kind>,
     constructor_types: FxHashMap<CtorId, solveig_ast::ast::Ty>,
     class_defs: FxHashMap<ClassId, ClassDefinition>,
-    instance_defs: Vec<solveig_ast::ast::InstanceDefinition<TcMetadata, Range<usize>>>,
     tycon_table: TyConTable,
     ctor_table: CtorTable,
     class_table: ClassTable,
@@ -14,7 +13,6 @@ fn collect_imported_type_info(imports: &[ImportedTypedApi]) -> ImportedTypeInfo 
     let mut tycon_kinds = FxHashMap::default();
     let mut constructor_types = FxHashMap::default();
     let mut class_defs = FxHashMap::default();
-    let mut instance_defs = Vec::new();
     let mut tycon_table = TyConTable::new();
     let mut ctor_table = CtorTable::new();
     let mut class_table = ClassTable::new();
@@ -28,7 +26,6 @@ fn collect_imported_type_info(imports: &[ImportedTypedApi]) -> ImportedTypeInfo 
             tycon_table: &mut tycon_table,
             ctor_table: &mut ctor_table,
             class_table: &mut class_table,
-            instance_defs: &mut instance_defs,
         };
 
         imp.api.extend_display_maps(&mut display_maps);
@@ -39,7 +36,6 @@ fn collect_imported_type_info(imports: &[ImportedTypedApi]) -> ImportedTypeInfo 
         tycon_kinds,
         constructor_types,
         class_defs,
-        instance_defs,
         tycon_table,
         ctor_table,
         class_table,

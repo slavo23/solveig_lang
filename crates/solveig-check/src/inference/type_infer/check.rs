@@ -194,30 +194,6 @@ impl TypeChecker<'_> {
     }
 }
 
-fn orphan_instance_warning(
-    inst: &InstanceDefinition<Span>,
-    env: &TypeCheckEnv,
-    names: &Names,
-    file: FileId,
-) -> Option<TypeError> {
-    if !inst.is_orphan {
-        return None;
-    }
-
-    let class_name = env.display_class_name(names, inst.head.class_id);
-    let instance_type = inst
-        .head
-        .args
-        .first()
-        .map_or_else(|| "_".to_string(), |ty| ty.pretty_with_tables(env.pretty_tables(names)));
-
-    Some(TypeError::OrphanInstance {
-        span: file_span(file, inst.span.clone()),
-        class_name,
-        instance_type,
-    })
-}
-
 struct FunctionDependencyGroups {
     groups: Vec<Vec<usize>>,
     adjacency: Vec<Vec<usize>>,
@@ -521,16 +497,6 @@ pub fn check_and_elab_module(
     let mut all_holes = Vec::new();
     let mut all_warnings = Vec::new();
 
-    {
-        let checker = TypeChecker::with_delta(tables, names, file, delta);
-        let overlap_errors = checker.check_instance_overlaps();
-        let (next_delta, _, _) = checker.finish();
-        delta = next_delta;
-        if !overlap_errors.is_empty() {
-            return Err(overlap_errors);
-        }
-    }
-
     for class_def in &module.class_defs {
         for method in &class_def.methods {
             let Some(default_body) = &method.default_body else {
@@ -578,12 +544,6 @@ pub fn check_and_elab_module(
             delta = next_delta;
             all_holes.extend(holes);
             all_warnings.extend(warnings);
-        }
-    }
-
-    for inst in &module.instance_defs {
-        if let Some(warning) = orphan_instance_warning(inst, env, names, file) {
-            all_warnings.push(warning);
         }
     }
 
@@ -747,7 +707,6 @@ pub fn check_and_elab_module(
             def_module: inst.def_module,
             class_module: inst.class_module,
             type_module: inst.type_module,
-            is_orphan: inst.is_orphan,
             context: inst.context.clone(),
             context_evidence,
             head: inst.head.clone(),

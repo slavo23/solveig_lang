@@ -36,6 +36,8 @@ runtime failures are not catchable by program code.
 | `RES0014` | Unknown selected import name. The source module does not expose that name to the importing package. |
 | `RES0019` | Invalid module API directive, such as a missing entity, duplicate visibility declaration, invalid constructor exposure, or re-export collision. |
 | `RES0020` | Ambiguous module qualifier. Two explicit imports claim the same short qualifier; give one an `as` alias. |
+| `RES0021` | Orphan instance. The defining package owns neither the class nor the outer type constructor after aliases are expanded. |
+| `RES0022` | Overlapping instances. Two instance heads in the visible package graph can match the same constraint. |
 
 ## Kinds
 
@@ -64,11 +66,9 @@ runtime failures are not catchable by program code.
 | `TC0011` | Error | Ill-formed type annotation. |
 | `TC0012` | Error | Case-arm result typing state became inconsistent. |
 | `TC0013` | Error | Unsatisfied typeclass constraint. For example, `"a" + "b"` needs `Num String`, and no such instance exists. |
-| `TC0014` | Error | Overlapping instance. Two visible instances match the same class/type head. |
 | `TC0015` | Error | Instance method implementation does not match the class method type. |
 | `TC0016` | Error | Non-exhaustive pattern match. |
 | `TC0017` | Warning | Unreachable pattern. Earlier arms already cover this arm. |
-| `TC0018` | Warning | Orphan instance. The instance is defined outside both the class package and type package. |
 | `TC0019` | Error | Missing instance method and no usable class default. |
 | `TC0020` | Error | Float literal pattern. Float patterns are not supported. |
 

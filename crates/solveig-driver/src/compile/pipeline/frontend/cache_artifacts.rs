@@ -29,6 +29,15 @@ impl<'a> FrontendState<'a> {
             module_files: self.module_files.clone(),
             resolutions: self.resolutions.clone(),
             non_reusable_modules: self.non_reusable_modules.clone(),
+            instance_modules: self
+                .project
+                .modules
+                .iter()
+                .filter(|(_, module)| {
+                    super::incremental::parsed_module_defines_instances(&module.parsed)
+                })
+                .map(|(name, _)| name.clone())
+                .collect(),
             next_instance_id: self.next_instance_id,
             verified_core: self.verify_core,
         }

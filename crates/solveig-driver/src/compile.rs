@@ -67,6 +67,7 @@ use solveig_resolve::project::{
     TypeAlias, TypedDisplayMaps, apply_module_reexports, apply_module_visibility, build_module_api,
     build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module, effective_imports,
     module_order_checked, project_module_selection_diagnostics, seed_compiler_prelude_module_api,
+    validate_instance_coherence,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::{ModuleName, ModuleSelection, ParsedModule};

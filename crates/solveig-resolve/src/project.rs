@@ -23,6 +23,7 @@ mod diagnostics;
 mod equations;
 mod graph;
 mod imports;
+mod instance_coherence;
 mod module_api;
 #[cfg(test)]
 mod tests;
@@ -33,5 +34,6 @@ pub use diagnostics::*;
 pub use equations::{function_equation_group_indices, instance_method_equation_group_indices};
 pub use graph::*;
 pub use imports::*;
+pub use instance_coherence::validate_instance_coherence;
 pub(crate) use module_api::local_def_id;
 pub use module_api::*;

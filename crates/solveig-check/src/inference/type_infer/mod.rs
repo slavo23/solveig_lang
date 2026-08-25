@@ -13,7 +13,7 @@ use solveig_ast::ast::{
     DefId, Ev, EvVarId, EvarId, InstanceDefinition, InstanceId, InstanceMethodDef, Kind, Literal,
     MatchArm, MatchArmNode, NameScratch, Names, PRIM_TYS, Pattern, PatternNode, Predicate,
     PrettyTables, ResolvedModule, Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId,
-    TyConTable, TyVarId, VarRef, instance_overlaps,
+    TyConTable, TyVarId, VarRef,
 };
 use solveig_base::TypeError;
 use solveig_base::{FileId, FileSpan, Span as SourceSpan};

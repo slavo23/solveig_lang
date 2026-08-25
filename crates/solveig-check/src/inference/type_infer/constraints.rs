@@ -264,21 +264,6 @@ impl TypeChecker<'_> {
             ty: specialized.ty,
         }
     }
-    fn check_instance_overlaps(&self) -> Vec<TypeError> {
-        instance_overlaps(self.tables.instance_defs)
-            .into_iter()
-            .map(|overlap| TypeError::OverlappingInstances {
-                span: self.get_file_span(0..0),
-                class_name: self.display_class_name(overlap.class),
-                instance_type: overlap
-                    .instance_args
-                    .iter()
-                    .map(|arg| self.pretty_type(arg))
-                    .collect::<Vec<_>>()
-                    .join(" "),
-            })
-            .collect()
-    }
     fn match_instance_type(
         pattern: &Ty,
         target: &Ty,

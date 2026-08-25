@@ -388,8 +388,18 @@ application source does not require rechecking an unchanged dependency.
 
 Typeclass instance ownership is package-level. An instance may live in any
 module of the package that defines its class or its outer type constructor, so
-a focused `instances` module remains coherent. An instance defined in an
-unrelated package is still an orphan and produces `TC0018`.
+a focused `instances` module remains coherent. Instances are discovered from
+the complete loaded package graph rather than import lists: a consumer imports
+the class and the values it uses, but never needs to import an `instances`
+module for its side effects. Source filenames and dependency-first tie breaks
+do not change which instances are available.
+
+An instance defined in a package that owns neither the class nor the outer type
+constructor is rejected with `RES0021`. Type aliases are expanded before that
+ownership check, so a local alias cannot make a foreign type local. Duplicate
+or unifiable instance heads anywhere in the loaded graph are rejected with
+`RES0022`, even when no expression currently needs that instance. These rules
+make dictionary selection unique and independent of module order.
 
 ## Project discovery and scratch files
 

@@ -1,0 +1,16 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0021] Error: orphan instance for `Semigroup Int`
+   ╭─[ $WORKSPACE/tests/golden/diag/orphan_instance/src/main.sv:3:1 ]
+   │
+ 3 │ ╭─▶ instance Semigroup LocalInt where
+   ┆ ┆
+ 5 │ ├─▶
+   │ │
+   │ ╰────── this package owns neither the class nor the outer type constructor
+   │
+   │     Note: define the instance in the package that owns the class or the type
+───╯
+resolve error

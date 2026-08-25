@@ -8,6 +8,8 @@ struct FrontendState<'a> {
     typed_apis: FxHashMap<ModuleName, SharedTypedModuleApi>,
     resolutions: FxHashMap<ModuleId, Vec<(FileSpan, DefId)>>,
     resolved_type_aliases: FxHashMap<ModuleId, FxHashMap<DefId, TypeAlias>>,
+    resolved: FxHashMap<ModuleId, solveig_ast::ast::ResolvedModule<Range<usize>>>,
+    instance_defs: Vec<solveig_ast::ast::InstanceDefinition<Range<usize>>>,
     checked: FxHashMap<ModuleId, CheckedModule>,
     module_files: FxHashMap<ModuleId, FileId>,
     next_instance_id: u32,
@@ -206,6 +208,8 @@ impl<'a> FrontendState<'a> {
             typed_apis,
             resolutions,
             resolved_type_aliases: FxHashMap::default(),
+            resolved: FxHashMap::default(),
+            instance_defs: Vec::new(),
             checked,
             module_files,
             next_instance_id,
@@ -273,6 +277,53 @@ impl<'a> FrontendState<'a> {
         )
     }
 
+    fn resolve_all(&mut self, order: &[ModuleName]) -> Option<FrontendPhase> {
+        let mut failed_modules = FxHashSet::default();
+        let mut first_failure: Option<FrontendPhase> = None;
+
+        for module_name in order {
+            let Some(module_id) = self.project.module_table.id(module_name) else {
+                solveig_base::ice!("resolved module order referenced unknown module");
+            };
+            if let Some(checked) = self.checked.get(&module_id) {
+                let mut expr_anno = |metadata: TcMetadata| metadata.span;
+                let mut pattern_anno = |span: Range<usize>| span;
+                self.resolved.insert(
+                    module_id,
+                    checked
+                        .clone()
+                        .map_anno(&mut expr_anno, &mut pattern_anno),
+                );
+                continue;
+            }
+
+            let parsed = self.parsed.get(self.session, module_name);
+            let imports =
+                effective_imports(self.project, module_name, &parsed.imports, parsed.file);
+            if imports
+                .iter()
+                .any(|import| failed_modules.contains(&import.module))
+                || parsed
+                    .directives
+                    .reexports
+                    .iter()
+                    .any(|reexport| failed_modules.contains(&reexport.module))
+            {
+                failed_modules.insert(module_name.clone());
+                continue;
+            }
+
+            if let Err(phase) = self.resolve_module(module_name) {
+                failed_modules.insert(module_name.clone());
+                first_failure = Some(first_failure.map_or(phase, |current| current.min(phase)));
+            }
+        }
+
+        self.rebuild_instance_defs(order);
+
+        first_failure
+    }
+
     fn check_all(&mut self, order: &[ModuleName]) -> Option<FrontendPhase> {
         let mut failed_modules = FxHashSet::default();
         let mut first_failure: Option<FrontendPhase> = None;
@@ -283,6 +334,10 @@ impl<'a> FrontendState<'a> {
             };
             if self.checked.contains_key(&module_id) {
                 self.reused_modules.push(module_name.clone());
+                continue;
+            }
+            if !self.resolved.contains_key(&module_id) {
+                failed_modules.insert(module_name.clone());
                 continue;
             }
 
@@ -358,7 +413,21 @@ impl<'a> FrontendState<'a> {
         imports: &[EffectiveImport],
         package: PackageId,
     ) -> FxHashMap<ClassId, Vec<solveig_ast::ast::Kind>> {
-        let mut out = FxHashMap::default();
+        let mut out = self
+            .resolved
+            .values()
+            .flat_map(|module| &module.class_defs)
+            .map(|class_def| {
+                (
+                    class_def.id,
+                    class_def
+                        .params
+                        .iter()
+                        .map(|(_, kind)| kind.clone())
+                        .collect(),
+                )
+            })
+            .collect::<FxHashMap<_, _>>();
 
         for imp in imports {
             if let Some(api) = self.typed_apis.get(&imp.module) {
@@ -382,17 +451,16 @@ impl<'a> FrontendState<'a> {
         out
     }
 
-    fn check_module(&mut self, module_name: &ModuleName) -> Result<ModuleCheck, FrontendPhase> {
+    fn resolve_module(&mut self, module_name: &ModuleName) -> Result<(), FrontendPhase> {
         let parsed = self.parsed.get(self.session, module_name);
         let file = parsed.file;
         let module_id = self
             .project
             .module_table
             .id(module_name)
-            .expect("ICE: module check referenced unknown module");
+            .expect("ICE: module resolution referenced unknown module");
         let package = self.project.module_table.package(module_id);
         let imports = effective_imports(self.project, module_name, &parsed.imports, file);
-
         let imported_apis = match self.build_imported_apis(&imports, package) {
             Ok(imported) => imported,
             Err(errors) => {
@@ -410,7 +478,6 @@ impl<'a> FrontendState<'a> {
                 module_name.as_string(self.session)
             )
         });
-        let imported_typed = self.build_imported_typed_apis(&imports, &imported_apis, package);
         let cx = ModuleContext {
             module: module_name.clone(),
             module_id,
@@ -419,7 +486,6 @@ impl<'a> FrontendState<'a> {
             imported_apis,
             builtins: self.builtins.clone(),
         };
-
         let resolver_imports = ResolverImports {
             tycon_kind_ids: self.collect_imported_kind_ids(&imports, package),
             class_param_kind_ids: self.collect_imported_class_param_kind_ids(&imports, package),
@@ -447,29 +513,63 @@ impl<'a> FrontendState<'a> {
             .resolutions
             .extend(self.module_directive_resolutions(parsed, local_api, package));
         self.resolutions
-            .insert(module_id, resolved_info.resolutions.clone());
+            .insert(module_id, resolved_info.resolutions);
         self.resolved_type_aliases
-            .insert(module_id, resolved_info.type_aliases.clone());
-        let mut resolved = resolved_info.module;
-        self.stamp_instance_ids(&mut resolved);
+            .insert(module_id, resolved_info.type_aliases);
+        self.stamp_instance_ids(&mut resolved_info.module);
+        self.resolved.insert(module_id, resolved_info.module);
+
+        Ok(())
+    }
+
+    fn check_module(&mut self, module_name: &ModuleName) -> Result<ModuleCheck, FrontendPhase> {
+        let parsed = self.parsed.get(self.session, module_name);
+        let file = parsed.file;
+        let module_id = self
+            .project
+            .module_table
+            .id(module_name)
+            .expect("ICE: module check referenced unknown module");
+        let package = self.project.module_table.package(module_id);
+        let imports = effective_imports(self.project, module_name, &parsed.imports, file);
+
+        let imported_apis = match self.build_imported_apis(&imports, package) {
+            Ok(imported) => imported,
+            Err(errors) => {
+                self.resolve_errors.push(ModuleResolveErrors {
+                    module: module_name.clone(),
+                    errors: errors.clone(),
+                });
+                push_resolve_errors(self.session, Some(&self.project.module_table), errors);
+                return Err(FrontendPhase::Resolve);
+            }
+        };
+        let imported_typed = self.build_imported_typed_apis(&imports, &imported_apis, package);
+        let resolved = self.resolved.get(&module_id).unwrap_or_else(|| {
+            solveig_base::ice!(
+                "resolved module missing during typecheck for {}",
+                module_name.as_string(self.session)
+            )
+        });
 
         let ImportedTypeInfo {
             func_schemes,
             tycon_kinds,
             constructor_types,
             class_defs: imported_class_defs,
-            instance_defs: imported_instance_defs,
             tycon_table: imported_tycon_table,
             ctor_table: imported_ctor_table,
             class_table: imported_class_table,
         } = collect_imported_type_info(&imported_typed);
 
-        let mut check_env = TypeCheckEnv::from_module(&resolved);
+        let mut check_env = TypeCheckEnv::from_module(resolved);
 
         check_env.func_schemes.extend(func_schemes);
         check_env.tycon_kinds.extend(tycon_kinds);
         check_env.constructor_types.extend(constructor_types);
         check_env.class_defs.extend(imported_class_defs);
+        self.extend_instance_support(&mut check_env);
+        check_env.instance_defs.clone_from(&self.instance_defs);
         for (id, info) in imported_tycon_table.iter() {
             check_env.tycon_table.insert_with_id(id, info.clone());
         }
@@ -479,13 +579,7 @@ impl<'a> FrontendState<'a> {
         for (id, info) in imported_class_table.iter() {
             check_env.class_table.insert_with_id(id, info.clone());
         }
-        check_env.instance_defs.extend(
-            imported_instance_defs
-                .into_iter()
-                .map(|inst| inst.map_anno(&mut |meta| meta.span, &mut |span| span)),
-        );
-
-        let checked_raw = match check_and_elab_module(&resolved, &check_env, self.names, file) {
+        let checked_raw = match check_and_elab_module(resolved, &check_env, self.names, file) {
             Ok(c) => c,
             Err(errors) => {
                 self.type_errors.extend(errors.clone());
@@ -563,3 +657,4 @@ fn module_names_as_strings(session: &Session, modules: &[ModuleName]) -> Vec<Str
 
 include!("frontend/imported_type_info.rs");
 include!("frontend/imports.rs");
+include!("frontend/instances.rs");

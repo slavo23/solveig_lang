@@ -36,7 +36,6 @@ pub struct InstanceDefinition<A, P = A> {
     pub def_module: ModuleId,
     pub class_module: Option<ModuleId>,
     pub type_module: Option<ModuleId>,
-    pub is_orphan: bool,
     pub context: Vec<Predicate>,
     pub context_evidence: Vec<EvVarId>,
     pub head: Predicate,
@@ -60,7 +59,6 @@ impl<A, P> InstanceDefinition<A, P> {
             def_module: self.def_module,
             class_module: self.class_module,
             type_module: self.type_module,
-            is_orphan: self.is_orphan,
             context: self.context,
             context_evidence: self.context_evidence,
             head: self.head,
@@ -128,7 +126,6 @@ impl<A, P> InstanceTable<A, P> {
             def_module,
             class_module: _,
             type_module: _,
-            is_orphan: _,
             context,
             context_evidence: _,
             head,
@@ -171,10 +168,12 @@ impl<A, P> InstanceTable<A, P> {
 }
 
 /// Returns overlapping instance heads from borrowed instance definitions.
-pub fn instance_overlaps<A, P>(definitions: &[InstanceDefinition<A, P>]) -> Vec<InstanceOverlap> {
+pub fn instance_overlaps<'a, A: 'a, P: 'a>(
+    definitions: impl IntoIterator<Item = &'a InstanceDefinition<A, P>>,
+) -> Vec<InstanceOverlap> {
     overlaps_from_heads(
         definitions
-            .iter()
+            .into_iter()
             .map(|definition| (definition.id, definition.head.class_id, &definition.head)),
     )
 }

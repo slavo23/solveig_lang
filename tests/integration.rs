@@ -26,6 +26,7 @@ mod equation_groups_api;
 mod format_cli;
 mod hover_api;
 mod inlay_hints_api;
+mod instance_coherence_api;
 mod module_visibility_api;
 mod navigation_api;
 mod pattern_binders_api;
