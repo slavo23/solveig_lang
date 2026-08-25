@@ -3,6 +3,7 @@
 
 use super::*;
 
+mod data;
 mod handles;
 mod os;
 mod random;
@@ -63,7 +64,6 @@ pub(super) struct PrimitiveBuiltinSpec {
 fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let int = Ty::make_con_id(PRIM_TYS.int);
     let float = Ty::make_con_id(PRIM_TYS.float);
-    let char_ty = Ty::make_con_id(PRIM_TYS.char);
     let string = Ty::make_con_id(PRIM_TYS.string);
     let bytes = Ty::make_con_id(PRIM_TYS.bytes);
     let bool_ty = Ty::make_con_id(PRIM_TYS.bool);
@@ -71,14 +71,8 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let socket = Ty::make_con_id(PRIM_TYS.socket);
     let defect = Ty::make_con_id(prelude_defect_tycon_id(names));
     let host_error = Ty::make_con_id(prelude_host_error_tycon_id(names));
-    let utf8_error = Ty::make_con_id(prelude_utf8_error_tycon_id(names));
     let ordering = Ty::make_con_id(prelude_ordering_tycon_id(names));
     let list = Ty::make_con_id(prelude_list_tycon_id(names));
-    let maybe_char = Ty::make_app(
-        Ty::make_con_id(prelude_maybe_tycon_id(names)),
-        char_ty.clone(),
-    );
-    let char_list = Ty::make_app(list.clone(), char_ty.clone());
     let string_list = Ty::make_app(list.clone(), string.clone());
     let e_id = names.fresh_tyvar("e");
     let f_id = names.fresh_tyvar("f");
@@ -90,15 +84,6 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let b = Ty::TyVar(b_id);
     let chan_a = Ty::make_app(Ty::make_con_id(PRIM_TYS.chan), a.clone());
     let maybe_a = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), a.clone());
-    let maybe_int = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), int.clone());
-    let maybe_string = Ty::make_app(
-        Ty::make_con_id(prelude_maybe_tycon_id(names)),
-        string.clone(),
-    );
-    let either_utf8_string = Ty::make_app(
-        Ty::make_app(Ty::make_con_id(prelude_either_tycon_id(names)), utf8_error),
-        string.clone(),
-    );
     let resolve_host = unary(string.clone(), io_of(host_error.clone(), string.clone()));
     let listener_result = tuple(names, &[socket.clone(), int.clone()]);
     let header = tuple(names, &[string.clone(), string.clone()]);
@@ -117,6 +102,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         handles::handle_builtin_specs(names, &int, &string, &bytes, &bool_ty, &host_error);
     let os_specs = os::os_builtin_specs(names, &int, &string, &bool_ty, &host_error);
     let random_specs = random::random_builtin_specs(names, &int);
+    let data_specs = data::data_builtin_specs(names);
 
     let mut specs = vec![
         prim_spec(
@@ -255,7 +241,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "floatTotalCompare",
             BUILTIN_FLOAT_TOTAL_COMPARE,
             2,
-            binary(float.clone(), ordering.clone()),
+            binary(float.clone(), ordering),
         ),
         prim_spec(
             "intToFloat",
@@ -267,167 +253,11 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "floatToInt",
             BUILTIN_FLOAT_TO_INT,
             1,
-            unary(float.clone(), int.clone()),
+            unary(float, int.clone()),
         ),
-        prim_spec(
-            "intToString",
-            BUILTIN_INT_TO_STRING,
-            1,
-            unary(int.clone(), string.clone()),
-        ),
-        prim_spec(
-            "floatToString",
-            BUILTIN_FLOAT_TO_STRING,
-            1,
-            unary(float, string.clone()),
-        ),
-        prim_spec(
-            "charToString",
-            BUILTIN_CHAR_TO_STRING,
-            1,
-            unary(char_ty.clone(), string.clone()),
-        ),
-        prim_spec(
-            "stringLength",
-            BUILTIN_STRING_LENGTH,
-            1,
-            unary(string.clone(), int.clone()),
-        ),
-        prim_spec(
-            "stringAppend",
-            BUILTIN_STRING_APPEND,
-            2,
-            binary(string.clone(), string.clone()),
-        ),
-        prim_spec(
-            "stringSlice",
-            BUILTIN_STRING_SLICE,
-            3,
-            ternary(string.clone(), int.clone(), int.clone(), string.clone()),
-        ),
-        prim_spec(
-            "stringCharAt",
-            BUILTIN_STRING_CHAR_AT,
-            2,
-            arr(&[string.clone(), int.clone()], maybe_char),
-        ),
-        prim_spec(
-            "stringEq",
-            BUILTIN_STRING_EQ,
-            2,
-            binary(string.clone(), bool_ty.clone()),
-        ),
-        prim_spec(
-            "stringCompare",
-            BUILTIN_STRING_COMPARE,
-            2,
-            binary(string.clone(), ordering.clone()),
-        ),
-        prim_spec(
-            "charEq",
-            BUILTIN_CHAR_EQ,
-            2,
-            binary(char_ty.clone(), bool_ty),
-        ),
-        prim_spec(
-            "charCompare",
-            BUILTIN_CHAR_COMPARE,
-            2,
-            binary(char_ty.clone(), ordering),
-        ),
-        prim_spec(
-            "charToCodePoint",
-            BUILTIN_CHAR_TO_CODE_POINT,
-            1,
-            unary(char_ty, int.clone()),
-        ),
-        prim_spec(
-            "codePointToString",
-            BUILTIN_CODE_POINT_TO_STRING,
-            1,
-            unary(int.clone(), maybe_string),
-        ),
-        prim_spec(
-            "stringToChars",
-            BUILTIN_STRING_TO_CHARS,
-            1,
-            unary(string.clone(), char_list.clone()),
-        ),
-        prim_spec(
-            "charsToString",
-            BUILTIN_CHARS_TO_STRING,
-            1,
-            unary(char_list, string.clone()),
-        ),
-        prim_spec(
-            "stringToBytes",
-            BUILTIN_STRING_TO_BYTES,
-            1,
-            unary(string.clone(), bytes.clone()),
-        ),
-        prim_spec(
-            "bytesToString",
-            BUILTIN_BYTES_TO_STRING,
-            1,
-            unary(bytes.clone(), either_utf8_string.clone()),
-        ),
-        prim_spec(
-            "bytesLength",
-            BUILTIN_BYTES_LENGTH,
-            1,
-            unary(bytes.clone(), int.clone()),
-        ),
-        prim_spec(
-            "bytesIndex",
-            BUILTIN_BYTES_INDEX,
-            2,
-            arr(&[bytes.clone(), int.clone()], maybe_int),
-        ),
-        prim_spec(
-            "bytesSlice",
-            BUILTIN_BYTES_SLICE,
-            3,
-            ternary(bytes.clone(), int.clone(), int.clone(), bytes.clone()),
-        ),
-        prim_spec(
-            "bytesAppend",
-            BUILTIN_BYTES_APPEND,
-            2,
-            binary(bytes.clone(), Ty::make_con_id(PRIM_TYS.bytes)),
-        ),
-        prim_spec(
-            "bytesSpanAny",
-            BUILTIN_BYTES_SPAN_ANY,
-            3,
-            arr(&[bytes.clone(), int.clone(), bytes.clone()], int.clone()),
-        ),
-        prim_spec(
-            "bytesFindAny",
-            BUILTIN_BYTES_FIND_ANY,
-            3,
-            arr(&[bytes.clone(), int.clone(), bytes.clone()], int.clone()),
-        ),
-        prim_spec(
-            "bytesFindBelow",
-            BUILTIN_BYTES_FIND_BELOW,
-            3,
-            arr(&[bytes.clone(), int.clone(), int.clone()], int.clone()),
-        ),
-        prim_spec(
-            "bytesSpanRange",
-            BUILTIN_BYTES_SPAN_RANGE,
-            4,
-            arr(
-                &[bytes.clone(), int.clone(), int.clone(), int.clone()],
-                int.clone(),
-            ),
-        ),
-        prim_spec(
-            "bytesSliceToString",
-            BUILTIN_BYTES_SLICE_TO_STRING,
-            3,
-            arr(&[bytes, int.clone(), int.clone()], either_utf8_string),
-        ),
+    ];
+    specs.extend(data_specs);
+    specs.extend([
         prim_spec(
             "connect",
             BUILTIN_CONNECT,
@@ -741,7 +571,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             1,
             poly_arr(&[e_id, a_id], &[io_of(e.clone(), a.clone())], io_of(e, a)),
         ),
-    ];
+    ]);
     specs.extend(handle_specs);
     specs.extend(os_specs);
     specs.extend(random_specs);

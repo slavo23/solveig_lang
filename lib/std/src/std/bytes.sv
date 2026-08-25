@@ -1,9 +1,12 @@
 export (
     stringToBytes, bytesToString, bytesLength, bytesIndex, bytesSlice, bytesAppend,
-    bytesSpanAny, bytesFindAny, bytesFindBelow, bytesSpanRange, bytesSliceToString
+    bytesToStringReplacing, bytesSpanAny, bytesFindAny, bytesFindBelow, bytesSpanRange,
+    bytesSliceToString, BytesBuilder, emptyBytesBuilder, bytesBuilder,
+    appendBytesBuilder, buildBytes
 )
 
 import prelude.prim(*)
+import std.list(reverse)
 
 -- | Encodes text as UTF-8 bytes.
 stringToBytes : String -> Bytes
@@ -12,6 +15,12 @@ stringToBytes text = prelude.prim.stringToBytes text
 -- | Decodes UTF-8 bytes without replacing invalid input.
 bytesToString : Bytes -> Either Utf8Error String
 bytesToString bytes = prelude.prim.bytesToString bytes
+
+-- | Decodes UTF-8 bytes, replacing each malformed sequence with U+FFFD.
+-- |
+-- | Use bytesToString when invalid input must remain an explicit error.
+bytesToStringReplacing : Bytes -> String
+bytesToStringReplacing bytes = prelude.prim.bytesToStringReplacing bytes
 
 -- | Returns the number of bytes.
 bytesLength : Bytes -> Int
@@ -66,3 +75,52 @@ bytesSpanRange bytes start lower upper =
 bytesSliceToString : Bytes -> Int -> Int -> Either Utf8Error String
 bytesSliceToString bytes start length =
     prelude.prim.bytesSliceToString bytes start length
+
+-- | A compositional plan for constructing one Bytes value without repeated copying.
+-- |
+-- | Builder concatenation takes constant time. buildBytes traverses all chunks
+-- | without consuming the call stack and allocates one packed result.
+data BytesBuilder =
+    EmptyBytesBuilder
+  | BytesChunk Bytes
+  | AppendBytesBuilder BytesBuilder BytesBuilder
+
+instance Semigroup BytesBuilder where
+    combine = appendBytesBuilder
+
+instance Monoid BytesBuilder where
+    empty = EmptyBytesBuilder
+
+-- | Returns an empty byte builder.
+emptyBytesBuilder : BytesBuilder
+emptyBytesBuilder = EmptyBytesBuilder
+
+-- | Builds a byte builder containing one existing Bytes value without copying it.
+bytesBuilder : Bytes -> BytesBuilder
+bytesBuilder bytes =
+    if bytesLength bytes == 0 then EmptyBytesBuilder else BytesChunk bytes
+
+-- | Concatenates two byte builders in constant time while preserving order.
+appendBytesBuilder : BytesBuilder -> BytesBuilder -> BytesBuilder
+appendBytesBuilder EmptyBytesBuilder right = right
+appendBytesBuilder left EmptyBytesBuilder = left
+appendBytesBuilder left right = AppendBytesBuilder left right
+
+-- | Constructs the builder's packed Bytes value in time linear in its bytes.
+-- |
+-- | The traversal is stack-safe and allocates a temporary list of chunk
+-- | references plus one result Bytes value.
+buildBytes : BytesBuilder -> Bytes
+buildBytes builder = prelude.prim.bytesConcat (builderChunks builder)
+
+builderChunks : BytesBuilder -> [Bytes]
+builderChunks builder = reverse (builderChunksInto [builder] [])
+
+builderChunksInto : [BytesBuilder] -> [Bytes] -> [Bytes]
+builderChunksInto [] reversed = reversed
+builderChunksInto (EmptyBytesBuilder :: rest) reversed =
+    builderChunksInto rest reversed
+builderChunksInto (BytesChunk bytes :: rest) reversed =
+    builderChunksInto rest (bytes :: reversed)
+builderChunksInto (AppendBytesBuilder left right :: rest) reversed =
+    builderChunksInto (left :: right :: rest) reversed

@@ -204,7 +204,7 @@ main = map (fun value => value + 1) [1, 2]
         prelude_file.display()
     );
     assert!(prelude_file.ends_with("lib/prelude/src/prelude/list.sv"));
-    assert_eq!(location.range.start.line, 13);
+    assert_eq!(location.range.start.line, 16);
 
     server.shutdown(()).await.expect("shutdown should succeed");
     drop(project_root);

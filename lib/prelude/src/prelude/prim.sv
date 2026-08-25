@@ -1,7 +1,8 @@
 export (
-    accept, appendFile, bindIO, bytesAppend, bytesFindAny, bytesFindBelow, bytesIndex,
-    bytesLength, bytesSlice, bytesSliceToString, bytesSpanAny, bytesSpanRange,
-    bytesToString, catchDefectIO, catchIO, charCompare, charEq, charToCodePoint,
+    accept, appendFile, bindIO, bytesAppend, bytesConcat, bytesFindAny, bytesFindBelow,
+    bytesIndex, bytesLength, bytesSlice, bytesSliceToString, bytesSpanAny, bytesSpanRange,
+    bytesToString, bytesToStringReplacing, catchDefectIO, catchIO, charCompare,
+    charEq, charToCodePoint,
     charToString, charsToString, closeChan, closeSocket, codePointToString, connect,
     createDirectory, doesDirectoryExist, doesFileExist, error, exitWith, failIO,
     finallyIO, floatAdd, floatDiv, floatEq, floatGe, floatGt, floatLe, floatLt,
@@ -16,7 +17,8 @@ export (
     randomRange, readFile, readFileBytes, readFileBytesLimited, readFileLimited,
     readLine, recv, recvBytes, removeFile, renameFile, resolveHost, restoreMaskIO,
     runProcess, runProcessLimited, send, sendBytes, setCurrentDirectory, setEnv, sleep,
-    spawn, stderr, stdin, stdout, stringAppend, stringCharAt, stringCompare, stringEq,
-    stringLength, stringSlice, stringToBytes, stringToChars, tryRecv, writeFile,
-    writeFileBytes
+    spawn, stderr, stdin, stdout, stringAppend, stringByteLength, stringByteSlice,
+    stringCharAt, stringCompare, stringEq, stringFindCharFrom, stringLength,
+    stringSlice, stringStartsWith, stringToBytes, stringToChars, stringTrimAscii,
+    stringsConcat, tryRecv, writeFile, writeFileBytes
 )

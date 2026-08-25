@@ -121,7 +121,10 @@ append : forall a. [a] -> [a] -> [a]
 ```
 
 Slicing, zipping, reversal, and integer ranges are in `std.list` because many
-programs never need them.
+programs never need them. `map`, `filter`, `append`, and `concat` preserve
+left-to-right order and are stack-safe for user-sized finite lists. The
+ordered-result operations use linear temporary List storage where a strict,
+immutable singly linked representation cannot build the result in place.
 
 ## Operators and typeclasses
 
@@ -188,8 +191,9 @@ and : Bool -> Bool -> Bool
 or : Bool -> Bool -> Bool
 ```
 
-Text conversion and character-list operations are in `std.text`; byte
-conversion is in `std.bytes`.
+Text conversion, packed scanning, scalar-versus-byte indexing, and
+`TextBuilder` are in `std.text`. UTF-8 conversion, packed byte scanning, and
+`BytesBuilder` are in `std.bytes`.
 
 ## Importing explicit functionality
 

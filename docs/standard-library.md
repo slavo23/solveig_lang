@@ -13,13 +13,13 @@ discovery, package manifests, and the Prelude/std boundary.
 
 | Module | Purpose |
 |---|---|
-| `std.list` | List sizing, slicing, zipping, reversal, and ranges |
+| `std.list` | Stack-safe finite List sizing, slicing, zipping, reversal, and ranges |
 | `std.vector` | Persistent indexed sequences with logarithmic updates |
 | `std.map` | Persistent ordered key-value maps |
 | `std.set` | Persistent ordered sets |
 | `std.queue` | Persistent FIFO queues |
-| `std.text` | Text sizing, line/split operations, character conversion, and integer rendering |
-| `std.bytes` | UTF-8 conversion and immutable byte operations |
+| `std.text` | Packed UTF-8 scans, explicit scalar/byte operations, and linear text construction |
+| `std.bytes` | Strict/replacement UTF-8 decoding, packed byte scans, and linear binary construction |
 | `std.parser` | Generic parser combinators with structured errors and streaming input |
 | `std.json` | Bounded byte-level JSON, exact numbers, deterministic rendering, and direct decoders |
 | `std.http` | Convenient bounded GETs plus explicit HTTP/HTTPS requests, verified TLS, statuses, headers, and chunk folds |
@@ -39,7 +39,10 @@ discovery, package manifests, and the Prelude/std boundary.
 
 ```solveig
 import std.list(length, isEmpty, take, drop, zip, reverse, range, rangeInclusive)
-import std.text(lines, splitOnce, stringToChars, charsToString, intToString)
+import std.text(
+    byteLength, byteSlice, charAt, lines, slice, splitOnce, stringToChars,
+    charsToString, intToString
+)
 ```
 
 `std.list` provides `length`, `isEmpty`, `take`, `drop`, `takeWhile`,
@@ -47,12 +50,26 @@ import std.text(lines, splitOnce, stringToChars, charsToString, intToString)
 explicit `rangeInclusive`. These are separate from the universally imported
 traversal operations such as `map` and the generic `Foldable` methods `foldl`
 and `foldr`. `take` treats a non-positive count as empty; `drop` treats it as
-zero.
+zero. Public finite List transformations—including `map`, `filter`, `append`,
+`concat`, `take`, `takeWhile`, and `zipWith`—are stack-safe. Operations that
+must preserve order use a temporary reversed list rather than consuming the VM
+call stack.
 
-`std.text.length` counts Unicode scalar values and `isEmpty` avoids needless
-conversion. `lines` removes newline separators, preserves interior empty
-lines, and does not invent an empty line after a trailing newline. `splitOnce`
-returns the text before and after the first requested character.
+`std.text.length`, `charAt`, and `slice` count Unicode scalar values.
+`byteLength` counts UTF-8 bytes, and `byteSlice` succeeds only when both byte
+endpoints are scalar boundaries. A displayed grapheme may contain several
+scalar values: for example, `std.text.length "é"` is `2`. The library does not
+label scalar indexing as grapheme indexing.
+
+`startsWith`, `trimAscii`, `lines`, and `splitOnce` scan the packed UTF-8
+representation without first constructing `[Char]`. `lines` removes newline
+separators, preserves interior empty lines, and does not invent an empty line
+after a trailing newline.
+
+`TextBuilder` avoids quadratic repeated `String` concatenation. Convert chunks
+with `textBuilder` or `charBuilder`, combine builders using `(<>)` or
+`appendTextBuilder`, and call `buildText` once. Combining is constant time;
+building is stack-safe and linear in the result's UTF-8 bytes.
 
 ## Persistent collections
 
@@ -125,10 +142,13 @@ bytesLength : Bytes -> Int
 bytesIndex : Bytes -> Int -> Maybe Int
 bytesSlice : Bytes -> Int -> Int -> Bytes
 bytesAppend : Bytes -> Bytes -> Bytes
+bytesToStringReplacing : Bytes -> String
 ```
 
 `String` is valid UTF-8; `Bytes` preserves arbitrary data. Decoding therefore
-returns `Either` instead of replacing invalid input.
+returns `Either` instead of silently replacing invalid input.
+`bytesToStringReplacing` is the explicitly named alternative that substitutes
+U+FFFD for malformed sequences.
 
 The bulk `bytesSpanAny`, `bytesFindAny`, `bytesFindBelow`, and
 `bytesSpanRange` operations scan without constructing a `Maybe` for each byte.
@@ -136,6 +156,11 @@ The bulk `bytesSpanAny`, `bytesFindAny`, `bytesFindBelow`, and
 `Bytes` value. These operations are useful when implementing byte-oriented
 formats; ordinary callers should prefer the higher-level parser for that
 format.
+
+`BytesBuilder` provides the binary counterpart to `TextBuilder`. Wrap chunks
+with `bytesBuilder`, combine them using `(<>)` or `appendBytesBuilder`, and call
+`buildBytes` once. This retains chunk values while building the plan, then
+performs one stack-safe linear packed construction.
 
 ## Parser combinators
 

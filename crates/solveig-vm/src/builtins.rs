@@ -5,9 +5,10 @@ use std::cmp::Ordering;
 
 use solveig_ast::ast::{
     BUILTIN_ACCEPT, BUILTIN_APPEND_FILE, BUILTIN_BIND_IO, BUILTIN_BYTES_APPEND,
-    BUILTIN_BYTES_FIND_ANY, BUILTIN_BYTES_FIND_BELOW, BUILTIN_BYTES_INDEX, BUILTIN_BYTES_LENGTH,
-    BUILTIN_BYTES_SLICE, BUILTIN_BYTES_SLICE_TO_STRING, BUILTIN_BYTES_SPAN_ANY,
-    BUILTIN_BYTES_SPAN_RANGE, BUILTIN_BYTES_TO_STRING, BUILTIN_CATCH_DEFECT_IO, BUILTIN_CATCH_IO,
+    BUILTIN_BYTES_CONCAT, BUILTIN_BYTES_FIND_ANY, BUILTIN_BYTES_FIND_BELOW, BUILTIN_BYTES_INDEX,
+    BUILTIN_BYTES_LENGTH, BUILTIN_BYTES_SLICE, BUILTIN_BYTES_SLICE_TO_STRING,
+    BUILTIN_BYTES_SPAN_ANY, BUILTIN_BYTES_SPAN_RANGE, BUILTIN_BYTES_TO_STRING,
+    BUILTIN_BYTES_TO_STRING_REPLACING, BUILTIN_CATCH_DEFECT_IO, BUILTIN_CATCH_IO,
     BUILTIN_CHAR_COMPARE, BUILTIN_CHAR_EQ, BUILTIN_CHAR_TO_CODE_POINT, BUILTIN_CHAR_TO_STRING,
     BUILTIN_CHARS_TO_STRING, BUILTIN_CLOSE_CHAN, BUILTIN_CLOSE_SOCKET,
     BUILTIN_CODE_POINT_TO_STRING, BUILTIN_CONNECT, BUILTIN_CREATE_DIRECTORY,
@@ -33,9 +34,11 @@ use solveig_ast::ast::{
     BUILTIN_RESOLVE_HOST, BUILTIN_RESTORE_MASK_IO, BUILTIN_RUN_PROCESS,
     BUILTIN_RUN_PROCESS_LIMITED, BUILTIN_SEND_BYTES, BUILTIN_SEND_CHAN,
     BUILTIN_SET_CURRENT_DIRECTORY, BUILTIN_SET_ENV, BUILTIN_SLEEP, BUILTIN_SPAWN, BUILTIN_STDERR,
-    BUILTIN_STDIN, BUILTIN_STDOUT, BUILTIN_STRING_APPEND, BUILTIN_STRING_CHAR_AT,
-    BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ, BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE,
-    BUILTIN_STRING_TO_BYTES, BUILTIN_STRING_TO_CHARS, BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE,
+    BUILTIN_STDIN, BUILTIN_STDOUT, BUILTIN_STRING_APPEND, BUILTIN_STRING_BYTE_LENGTH,
+    BUILTIN_STRING_BYTE_SLICE, BUILTIN_STRING_CHAR_AT, BUILTIN_STRING_COMPARE, BUILTIN_STRING_EQ,
+    BUILTIN_STRING_FIND_CHAR_FROM, BUILTIN_STRING_LENGTH, BUILTIN_STRING_SLICE,
+    BUILTIN_STRING_STARTS_WITH, BUILTIN_STRING_TO_BYTES, BUILTIN_STRING_TO_CHARS,
+    BUILTIN_STRING_TRIM_ASCII, BUILTIN_STRINGS_CONCAT, BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE,
     BUILTIN_WRITE_FILE_BYTES, BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
 };
 
@@ -43,16 +46,20 @@ use crate::heap::{HeapObject, IoAction};
 use crate::values::Value;
 use crate::vm::{DefectKind, Interpreter, RuntimeError};
 
+mod bytes;
 mod handles;
 mod io_actions;
 mod network;
+mod numbers;
 mod os;
 mod random;
 mod text;
 
+use bytes::*;
 use handles::*;
 use io_actions::*;
 use network::*;
+pub(crate) use numbers::*;
 use os::*;
 use random::*;
 use text::*;
@@ -92,6 +99,15 @@ impl<'context, 'runtime> VmCtx<'context, 'runtime> {
 
     fn alloc_bytes(&mut self, value: &[u8]) -> Value {
         self.interpreter.heap.alloc_bytes(value)
+    }
+
+    fn temporary_root(&self, index: usize, builtin: &str, label: &str) -> Value {
+        self.interpreter
+            .process
+            .temporary_roots
+            .get(index)
+            .copied()
+            .unwrap_or_else(|| solveig_base::ice!("{builtin} {label} root vanished"))
     }
 
     fn alloc_io_action(&mut self, action: IoAction) -> Value {
@@ -308,21 +324,59 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_FLOAT_TO_STRING, "floatToString", 1, float_to_string),
     builtin!(BUILTIN_CHAR_TO_STRING, "charToString", 1, char_to_string),
     builtin!(BUILTIN_STRING_LENGTH, "stringLength", 1, string_length),
+    builtin!(
+        BUILTIN_STRING_BYTE_LENGTH,
+        "stringByteLength",
+        1,
+        string_byte_length
+    ),
     builtin!(BUILTIN_STRING_APPEND, "stringAppend", 2, string_append),
     builtin!(BUILTIN_STRING_SLICE, "stringSlice", 3, string_slice),
     builtin!(BUILTIN_STRING_CHAR_AT, "stringCharAt", 2, string_char_at),
     builtin!(BUILTIN_STRING_EQ, "stringEq", 2, string_eq),
     builtin!(BUILTIN_STRING_COMPARE, "stringCompare", 2, string_compare),
+    builtin!(
+        BUILTIN_STRING_STARTS_WITH,
+        "stringStartsWith",
+        2,
+        string_starts_with
+    ),
+    builtin!(
+        BUILTIN_STRING_FIND_CHAR_FROM,
+        "stringFindCharFrom",
+        3,
+        string_find_char_from
+    ),
+    builtin!(
+        BUILTIN_STRING_BYTE_SLICE,
+        "stringByteSlice",
+        3,
+        string_byte_slice
+    ),
+    builtin!(
+        BUILTIN_STRING_TRIM_ASCII,
+        "stringTrimAscii",
+        1,
+        string_trim_ascii
+    ),
+    builtin!(BUILTIN_STRINGS_CONCAT, "stringsConcat", 1, strings_concat),
     builtin!(BUILTIN_CHAR_EQ, "charEq", 2, char_eq),
     builtin!(BUILTIN_CHAR_COMPARE, "charCompare", 2, char_compare),
     builtin!(BUILTIN_STRING_TO_CHARS, "stringToChars", 1, string_to_chars),
     builtin!(BUILTIN_CHARS_TO_STRING, "charsToString", 1, chars_to_string),
     builtin!(BUILTIN_STRING_TO_BYTES, "stringToBytes", 1, string_to_bytes),
     builtin!(BUILTIN_BYTES_TO_STRING, "bytesToString", 1, bytes_to_string),
+    builtin!(
+        BUILTIN_BYTES_TO_STRING_REPLACING,
+        "bytesToStringReplacing",
+        1,
+        bytes_to_string_replacing
+    ),
     builtin!(BUILTIN_BYTES_LENGTH, "bytesLength", 1, bytes_length),
     builtin!(BUILTIN_BYTES_INDEX, "bytesIndex", 2, bytes_index),
     builtin!(BUILTIN_BYTES_SLICE, "bytesSlice", 3, bytes_slice),
     builtin!(BUILTIN_BYTES_APPEND, "bytesAppend", 2, bytes_append),
+    builtin!(BUILTIN_BYTES_CONCAT, "bytesConcat", 1, bytes_concat),
     builtin!(BUILTIN_BYTES_SPAN_ANY, "bytesSpanAny", 3, bytes_span_any),
     builtin!(BUILTIN_BYTES_FIND_ANY, "bytesFindAny", 3, bytes_find_any),
     builtin!(
@@ -497,165 +551,6 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_SLEEP, "sleep", 1, sleep),
 ];
 
-// D3 primitive semantics:
-// - Int add/sub/mul/neg wrap on i64 overflow. Division and modulo defect on zero;
-//   i64::MIN divided/modded by -1 follows wrapping i64 behavior.
-// - Float arithmetic and comparisons delegate to f64, preserving IEEE-754 NaN
-//   and infinity behavior for arithmetic and relational predicates.
-// - String length, indexing, slicing, and char bridges use Unicode scalar values.
-//   Slicing clamps negative/out-of-range bounds instead of trapping.
-
-pub(crate) fn int_div_or_defect(lhs: i64, rhs: i64) -> Result<i64, RuntimeError> {
-    if rhs == 0 {
-        return Err(RuntimeError::defect(DefectKind::DivisionByZero));
-    }
-    if lhs == i64::MIN && rhs == -1 {
-        return Ok(i64::MIN);
-    }
-    Ok(lhs / rhs)
-}
-
-pub(crate) fn int_mod_or_defect(lhs: i64, rhs: i64) -> Result<i64, RuntimeError> {
-    if rhs == 0 {
-        return Err(RuntimeError::defect(DefectKind::DivisionByZero));
-    }
-    if lhs == i64::MIN && rhs == -1 {
-        return Ok(0);
-    }
-    Ok(lhs % rhs)
-}
-
-fn int_add(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intAdd")?;
-    Ok(Value::Int(lhs.wrapping_add(rhs)))
-}
-
-fn int_sub(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intSub")?;
-    Ok(Value::Int(lhs.wrapping_sub(rhs)))
-}
-
-fn int_mul(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intMul")?;
-    Ok(Value::Int(lhs.wrapping_mul(rhs)))
-}
-
-fn int_div(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intDiv")?;
-    Ok(Value::Int(int_div_or_defect(lhs, rhs)?))
-}
-
-fn int_mod(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intMod")?;
-    Ok(Value::Int(int_mod_or_defect(lhs, rhs)?))
-}
-
-fn int_neg(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let value = expect_int(args, 0, "intNeg")?;
-    Ok(Value::Int(value.wrapping_neg()))
-}
-
-fn int_eq(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intEq")?;
-    Ok(ctx.bool_value(lhs == rhs))
-}
-
-fn int_lt(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intLt")?;
-    Ok(ctx.bool_value(lhs < rhs))
-}
-
-fn int_le(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intLe")?;
-    Ok(ctx.bool_value(lhs <= rhs))
-}
-
-fn int_gt(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intGt")?;
-    Ok(ctx.bool_value(lhs > rhs))
-}
-
-fn int_ge(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intGe")?;
-    Ok(ctx.bool_value(lhs >= rhs))
-}
-
-fn int_compare(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_int2(args, "intCompare")?;
-    ordering_value(ctx, lhs.cmp(&rhs), "intCompare")
-}
-
-fn float_add(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_float2(args, "floatAdd")?;
-    Ok(Value::Float(lhs + rhs))
-}
-
-fn float_sub(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_float2(args, "floatSub")?;
-    Ok(Value::Float(lhs - rhs))
-}
-
-fn float_mul(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_float2(args, "floatMul")?;
-    Ok(Value::Float(lhs * rhs))
-}
-
-fn float_div(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_float2(args, "floatDiv")?;
-    Ok(Value::Float(lhs / rhs))
-}
-
-fn float_neg(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let value = expect_float(args, 0, "floatNeg")?;
-    Ok(Value::Float(-value))
-}
-
-fn float_eq(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_float2(args, "floatEq")?;
-    Ok(ctx.bool_value(lhs == rhs))
-}
-
-fn float_lt(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_float2(args, "floatLt")?;
-    Ok(ctx.bool_value(lhs < rhs))
-}
-
-fn float_le(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_float2(args, "floatLe")?;
-    Ok(ctx.bool_value(lhs <= rhs))
-}
-
-fn float_gt(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_float2(args, "floatGt")?;
-    Ok(ctx.bool_value(lhs > rhs))
-}
-
-fn float_ge(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_float2(args, "floatGe")?;
-    Ok(ctx.bool_value(lhs >= rhs))
-}
-
-fn float_total_compare(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let (lhs, rhs) = expect_float2(args, "floatTotalCompare")?;
-    ordering_value(ctx, lhs.total_cmp(&rhs), "floatTotalCompare")
-}
-
-fn int_to_float(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let value = expect_int(args, 0, "intToFloat")?;
-    Ok(Value::Float(value as f64))
-}
-
-#[expect(
-    clippy::cast_possible_truncation,
-    reason = "Solveig floatToInt is defined as Rust's saturating truncating f64-to-i64 conversion"
-)]
-fn float_to_int(_ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let value = expect_float(args, 0, "floatToInt")?;
-    // D3: truncate toward zero. Rust's f64 -> i64 cast is saturating and keeps
-    // this conversion total for NaN and out-of-range values.
-    Ok(Value::Int(value.trunc() as i64))
-}
-
 fn ordering_value(
     ctx: &VmCtx<'_, '_>,
     ordering: Ordering,
@@ -667,6 +562,16 @@ fn ordering_value(
         Ordering::Greater => CtorRuntimeRole::PreludeOrderingGt,
     };
     ctx.nullary_ctor(ctor, builtin)
+}
+
+fn clamp_byte_index(index: i64, length: usize) -> usize {
+    usize::try_from(index).unwrap_or(0).min(length)
+}
+
+fn byte_index_value(index: usize, builtin: &str) -> Result<Value, RuntimeError> {
+    i64::try_from(index)
+        .map(Value::Int)
+        .map_err(|_error| RuntimeError::builtin(format!("{builtin} result does not fit in Int")))
 }
 
 fn expect_value(args: &[Value], index: usize, builtin: &str) -> Result<Value, RuntimeError> {

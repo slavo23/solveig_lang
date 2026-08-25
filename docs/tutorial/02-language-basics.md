@@ -129,10 +129,11 @@ positiveSquares values =
     map (fun value => value * value) (filter (fun value => value > 0) values)
 ```
 
-Prelude supplies `map`, `filter`, generic strict `foldl`, stack-safe `foldr`,
-`append`, and `(++)`.
-`std.list` adds `take`, `drop`, `zip`, `zipWith`, `reverse`, ranges, and
-`length`.
+Prelude supplies stack-safe `map`, `filter`, `append`, `concat`, generic strict
+`foldl`, stack-safe `foldr`, and `(++)`. `std.list` adds stack-safe `take`,
+`takeWhile`, `zip`, and `zipWith`, plus tail-recursive `drop`, `dropWhile`,
+`reverse`, ranges, and `length`. Lists are strict finite sequences; incremental
+or unbounded input uses the streaming APIs rather than an infinite List.
 
 ## Tuples
 

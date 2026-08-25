@@ -24,13 +24,19 @@ mapM f values = traverse f values
 sequence : forall m a. Monad m => [m a] -> m [a]
 sequence values = sequenceA values
 
--- | Filters a list with a predicate that returns monadic results.
+-- | Filters a finite list with monadic tests sequenced from left to right.
+-- |
+-- | The List traversal and final flattening are stack-safe.
 filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
-filterM p [] = pure []
-filterM p (y :: ys) = do
-    keep <- p y
-    zs <- filterM p ys
-    if keep then pure (y :: zs) else pure zs
+filterM predicate values =
+    fmap
+        concat
+        (traverse
+            (fun value =>
+                fmap
+                    (fun keep => if keep then [value] else [])
+                    (predicate value))
+            values)
 
 -- | Runs two IO actions and keeps the result of the second.
 seqIO : forall e a b. IO e a -> IO e b -> IO e b

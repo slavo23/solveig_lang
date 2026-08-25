@@ -205,7 +205,8 @@ Text and byte operations can be mixed on one handle without changing its
 logical position. Text input still decodes strictly: invalid UTF-8 raises the
 operation's read error. Byte input never decodes. Convert explicitly with
 `bytesToString`; it returns `Left (InvalidUtf8 byteOffset)` rather than panicking or
-replacing malformed input.
+replacing malformed input. Use the conspicuously named
+`bytesToStringReplacing` only when substituting U+FFFD is the intended policy.
 
 ## Environment and program identity
 

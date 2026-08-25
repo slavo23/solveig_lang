@@ -1,10 +1,11 @@
-//! Text, character, and immutable byte-string primitives.
-//! This module owns conversion semantics and GC-safe construction of results.
+//! Packed text and character primitives.
+//! This module owns scalar/byte indexing, scans, and GC-safe text construction.
 
 use solveig_ast::ast::CtorRuntimeRole;
 
 use super::{
-    VmCtx, expect_char, expect_char2, expect_float, expect_int, expect_value, ordering_value,
+    VmCtx, byte_index_value, clamp_byte_index, expect_char, expect_char2, expect_float, expect_int,
+    expect_value, ordering_value,
 };
 use crate::heap::HeapObject;
 use crate::values::{ObjId, Value};
@@ -56,7 +57,7 @@ pub(super) fn code_point_to_string(
             let text = ctx.alloc_str(&character.to_string());
             ctx.interpreter.process.temporary_roots.push(text);
             ctx.interpreter.safe_point();
-            let text = temporary_root(ctx, checkpoint, "codePointToString", "text");
+            let text = ctx.temporary_root(checkpoint, "codePointToString", "text");
             let result = ctx
                 .interpreter
                 .heap
@@ -72,11 +73,22 @@ pub(super) fn string_length(
     ctx: &mut VmCtx<'_, '_>,
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let value = expect_string_owned(ctx, args, 0, "stringLength")?;
+    let id = expect_string_id(ctx, args, 0, "stringLength")?;
+    let byte_ref = string_ref(ctx, id, "stringLength")?;
+    let value = ctx.interpreter.heap.str_value(id, byte_ref);
     let len = i64::try_from(value.chars().count()).map_err(|_error| {
         RuntimeError::builtin("stringLength result does not fit in Int".to_string())
     })?;
     Ok(Value::Int(len))
+}
+
+pub(super) fn string_byte_length(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let id = expect_string_id(ctx, args, 0, "stringByteLength")?;
+    let byte_ref = string_ref(ctx, id, "stringByteLength")?;
+    byte_index_value(byte_ref.len(), "stringByteLength")
 }
 
 pub(super) fn string_append(
@@ -89,7 +101,7 @@ pub(super) fn string_append(
 }
 
 pub(super) fn string_slice(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let value = expect_string_owned(ctx, args, 0, "stringSlice")?;
+    let id = expect_string_id(ctx, args, 0, "stringSlice")?;
     let start = expect_int(args, 1, "stringSlice")?;
     let len = expect_int(args, 2, "stringSlice")?;
     let start = if start <= 0 {
@@ -102,7 +114,16 @@ pub(super) fn string_slice(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Va
     } else {
         usize::try_from(len).unwrap_or(usize::MAX)
     };
-    let sliced = value.chars().skip(start).take(len).collect::<String>();
+    let sliced = {
+        let byte_ref = string_ref(ctx, id, "stringSlice")?;
+        ctx.interpreter
+            .heap
+            .str_value(id, byte_ref)
+            .chars()
+            .skip(start)
+            .take(len)
+            .collect::<String>()
+    };
     Ok(ctx.alloc_str(&sliced))
 }
 
@@ -110,13 +131,21 @@ pub(super) fn string_char_at(
     ctx: &mut VmCtx<'_, '_>,
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let value = expect_string_owned(ctx, args, 0, "stringCharAt")?;
+    let id = expect_string_id(ctx, args, 0, "stringCharAt")?;
     let index = expect_int(args, 1, "stringCharAt")?;
     let Some(index) = usize::try_from(index).ok() else {
         return ctx.nullary_ctor(CtorRuntimeRole::PreludeMaybeNothing, "stringCharAt");
     };
 
-    match value.chars().nth(index) {
+    let character = {
+        let byte_ref = string_ref(ctx, id, "stringCharAt")?;
+        ctx.interpreter
+            .heap
+            .str_value(id, byte_ref)
+            .chars()
+            .nth(index)
+    };
+    match character {
         Some(ch) => ctx.alloc_data1_ctor(
             CtorRuntimeRole::PreludeMaybeJust,
             Value::Char(ch),
@@ -127,8 +156,12 @@ pub(super) fn string_char_at(
 }
 
 pub(super) fn string_eq(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let lhs = expect_string_owned(ctx, args, 0, "stringEq")?;
-    let rhs = expect_string_owned(ctx, args, 1, "stringEq")?;
+    let lhs_id = expect_string_id(ctx, args, 0, "stringEq")?;
+    let rhs_id = expect_string_id(ctx, args, 1, "stringEq")?;
+    let lhs_ref = string_ref(ctx, lhs_id, "stringEq")?;
+    let rhs_ref = string_ref(ctx, rhs_id, "stringEq")?;
+    let lhs = ctx.interpreter.heap.str_value(lhs_id, lhs_ref);
+    let rhs = ctx.interpreter.heap.str_value(rhs_id, rhs_ref);
     Ok(ctx.bool_value(lhs == rhs))
 }
 
@@ -136,9 +169,85 @@ pub(super) fn string_compare(
     ctx: &mut VmCtx<'_, '_>,
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let lhs = expect_string_owned(ctx, args, 0, "stringCompare")?;
-    let rhs = expect_string_owned(ctx, args, 1, "stringCompare")?;
-    ordering_value(ctx, lhs.cmp(&rhs), "stringCompare")
+    let lhs_id = expect_string_id(ctx, args, 0, "stringCompare")?;
+    let rhs_id = expect_string_id(ctx, args, 1, "stringCompare")?;
+    let lhs_ref = string_ref(ctx, lhs_id, "stringCompare")?;
+    let rhs_ref = string_ref(ctx, rhs_id, "stringCompare")?;
+    let lhs = ctx.interpreter.heap.str_value(lhs_id, lhs_ref);
+    let rhs = ctx.interpreter.heap.str_value(rhs_id, rhs_ref);
+    ordering_value(ctx, lhs.cmp(rhs), "stringCompare")
+}
+
+pub(super) fn string_starts_with(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let value_id = expect_string_id(ctx, args, 0, "stringStartsWith")?;
+    let prefix_id = expect_string_id(ctx, args, 1, "stringStartsWith")?;
+    let value_ref = string_ref(ctx, value_id, "stringStartsWith")?;
+    let prefix_ref = string_ref(ctx, prefix_id, "stringStartsWith")?;
+    let value = ctx.interpreter.heap.str_value(value_id, value_ref);
+    let prefix = ctx.interpreter.heap.str_value(prefix_id, prefix_ref);
+    Ok(ctx.bool_value(value.starts_with(prefix)))
+}
+
+pub(super) fn string_find_char_from(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let id = expect_string_id(ctx, args, 0, "stringFindCharFrom")?;
+    let start = expect_int(args, 1, "stringFindCharFrom")?;
+    let needle = expect_char(args, 2, "stringFindCharFrom")?;
+    let byte_ref = string_ref(ctx, id, "stringFindCharFrom")?;
+    let value = ctx.interpreter.heap.str_value(id, byte_ref);
+    let start = clamp_byte_index(start, value.len());
+    let index = value
+        .get(start..)
+        .and_then(|tail| tail.find(needle).map(|offset| start + offset))
+        .unwrap_or(value.len());
+    byte_index_value(index, "stringFindCharFrom")
+}
+
+pub(super) fn string_byte_slice(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let id = expect_string_id(ctx, args, 0, "stringByteSlice")?;
+    let start = expect_int(args, 1, "stringByteSlice")?;
+    let length = expect_int(args, 2, "stringByteSlice")?;
+    let byte_ref = string_ref(ctx, id, "stringByteSlice")?;
+    let value = ctx.interpreter.heap.str_value(id, byte_ref);
+    let slice = usize::try_from(start)
+        .ok()
+        .zip(usize::try_from(length).ok())
+        .and_then(|(start, length)| start.checked_add(length).map(|end| (start, end)))
+        .and_then(|(start, end)| value.get(start..end).map(str::to_owned));
+    alloc_maybe_string(ctx, slice, "stringByteSlice")
+}
+
+pub(super) fn string_trim_ascii(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let id = expect_string_id(ctx, args, 0, "stringTrimAscii")?;
+    let trimmed = {
+        let byte_ref = string_ref(ctx, id, "stringTrimAscii")?;
+        ctx.interpreter
+            .heap
+            .str_value(id, byte_ref)
+            .trim_matches(|character| matches!(character, ' ' | '\t' | '\r' | '\n'))
+            .to_owned()
+    };
+    Ok(ctx.alloc_str(&trimmed))
+}
+
+pub(super) fn strings_concat(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let values = expect_value(args, 0, "stringsConcat")?;
+    let combined = concat_string_list(ctx, values, "stringsConcat")?;
+    Ok(ctx.alloc_str(&combined))
 }
 
 pub(super) fn char_eq(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
@@ -155,8 +264,16 @@ pub(super) fn string_to_chars(
     ctx: &mut VmCtx<'_, '_>,
     args: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let value = expect_string_owned(ctx, args, 0, "stringToChars")?;
-    let chars = value.chars().map(Value::Char).collect::<Vec<_>>();
+    let id = expect_string_id(ctx, args, 0, "stringToChars")?;
+    let chars = {
+        let byte_ref = string_ref(ctx, id, "stringToChars")?;
+        ctx.interpreter
+            .heap
+            .str_value(id, byte_ref)
+            .chars()
+            .map(Value::Char)
+            .collect::<Vec<_>>()
+    };
     ctx.alloc_list_from_values(&chars, "stringToChars")
 }
 
@@ -169,44 +286,20 @@ pub(super) fn chars_to_string(
     Ok(ctx.alloc_str(&string))
 }
 
-pub(super) fn string_to_bytes(
+fn alloc_maybe_string(
     ctx: &mut VmCtx<'_, '_>,
-    args: &[Value],
-) -> Result<Value, RuntimeError> {
-    let value = expect_string_owned(ctx, args, 0, "stringToBytes")?;
-    Ok(ctx.alloc_bytes(value.as_bytes()))
-}
-
-pub(super) fn bytes_to_string(
-    ctx: &mut VmCtx<'_, '_>,
-    args: &[Value],
-) -> Result<Value, RuntimeError> {
-    let value = expect_bytes_owned(ctx, args, 0, "bytesToString")?;
-    decode_utf8_result(ctx, value, "bytesToString")
-}
-
-fn decode_utf8_result(
-    ctx: &mut VmCtx<'_, '_>,
-    value: Vec<u8>,
+    value: Option<String>,
     builtin: &str,
 ) -> Result<Value, RuntimeError> {
-    match String::from_utf8(value) {
-        Ok(text) => alloc_valid_utf8_result(ctx, &text, builtin),
-        Err(error) => alloc_invalid_utf8_result(ctx, error.utf8_error().valid_up_to(), builtin),
-    }
-}
-
-fn alloc_valid_utf8_result(
-    ctx: &mut VmCtx<'_, '_>,
-    text: &str,
-    builtin: &str,
-) -> Result<Value, RuntimeError> {
-    let tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeEitherRight, 1, builtin)?;
+    let Some(value) = value else {
+        return ctx.nullary_ctor(CtorRuntimeRole::PreludeMaybeNothing, builtin);
+    };
+    let tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeMaybeJust, 1, builtin)?;
     let checkpoint = ctx.interpreter.process.temporary_roots.len();
-    let text = ctx.alloc_str(text);
+    let text = ctx.alloc_str(&value);
     ctx.interpreter.process.temporary_roots.push(text);
     ctx.interpreter.safe_point();
-    let text = temporary_root(ctx, checkpoint, builtin, "text");
+    let text = ctx.temporary_root(checkpoint, builtin, "text");
     let result = ctx
         .interpreter
         .heap
@@ -215,246 +308,74 @@ fn alloc_valid_utf8_result(
     Ok(result)
 }
 
-fn alloc_invalid_utf8_result(
-    ctx: &mut VmCtx<'_, '_>,
-    offset: usize,
+fn concat_string_list(
+    ctx: &VmCtx<'_, '_>,
+    mut current: Value,
     builtin: &str,
-) -> Result<Value, RuntimeError> {
-    let invalid_tag =
-        ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeUtf8ErrorInvalid, 1, builtin)?;
-    let result_tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeEitherLeft, 1, builtin)?;
-    let offset = i64::try_from(offset)
-        .map_err(|_out_of_range| RuntimeError::builtin("UTF-8 offset exceeds Int".to_string()))?;
-    let checkpoint = ctx.interpreter.process.temporary_roots.len();
-    ctx.interpreter
-        .process
-        .temporary_roots
-        .push(Value::Int(offset));
-    ctx.interpreter.safe_point();
-    let offset = temporary_root(ctx, checkpoint, builtin, "error offset");
-    let invalid = ctx.interpreter.heap.alloc(HeapObject::Data1 {
-        tag: invalid_tag,
-        field: offset,
-    });
-    let root = ctx
-        .interpreter
-        .process
-        .temporary_roots
-        .get_mut(checkpoint)
-        .unwrap_or_else(|| solveig_base::ice!("{builtin} error root vanished"));
-    *root = invalid;
-    ctx.interpreter.safe_point();
-    let invalid = temporary_root(ctx, checkpoint, builtin, "Utf8Error");
-    let result = ctx.interpreter.heap.alloc(HeapObject::Data1 {
-        tag: result_tag,
-        field: invalid,
-    });
-    ctx.interpreter.process.temporary_roots.truncate(checkpoint);
-    Ok(result)
-}
+) -> Result<String, RuntimeError> {
+    let nil_tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeListNil, 0, builtin)?;
+    let cons_tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeListCons, 2, builtin)?;
+    let mut output = String::new();
 
-fn temporary_root(ctx: &VmCtx<'_, '_>, index: usize, builtin: &str, label: &str) -> Value {
-    ctx.interpreter
-        .process
-        .temporary_roots
-        .get(index)
-        .copied()
-        .unwrap_or_else(|| solveig_base::ice!("{builtin} {label} root vanished"))
-}
-
-pub(super) fn bytes_length(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let id = expect_bytes_id(ctx, args, 0, "bytesLength")?;
-    let byte_ref = bytes_ref(ctx, id, "bytesLength")?;
-    let length = i64::try_from(ctx.interpreter.heap.bytes_value(id, byte_ref).len())
-        .map_err(|_range| RuntimeError::builtin("bytesLength exceeds Int range".to_string()))?;
-    Ok(Value::Int(length))
-}
-
-pub(super) fn bytes_index(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let id = expect_bytes_id(ctx, args, 0, "bytesIndex")?;
-    let index = expect_int(args, 1, "bytesIndex")?;
-    let byte_ref = bytes_ref(ctx, id, "bytesIndex")?;
-    let byte = usize::try_from(index)
-        .ok()
-        .and_then(|index| ctx.interpreter.heap.bytes_value(id, byte_ref).get(index))
-        .copied()
-        .map(|byte| Value::Int(i64::from(byte)));
-    match byte {
-        Some(byte) => ctx.alloc_data1_ctor(CtorRuntimeRole::PreludeMaybeJust, byte, "bytesIndex"),
-        None => ctx.nullary_ctor(CtorRuntimeRole::PreludeMaybeNothing, "bytesIndex"),
+    loop {
+        let Value::Obj(list_id) = current else {
+            return Err(RuntimeError::builtin(format!(
+                "{builtin} expected [String] list spine"
+            )));
+        };
+        match ctx.interpreter.heap.get(list_id) {
+            HeapObject::Data0 { tag } if *tag == nil_tag => return Ok(output),
+            HeapObject::Data2 {
+                tag,
+                field0,
+                field1,
+            } if *tag == cons_tag => {
+                let Value::Obj(string_id) = field0 else {
+                    return Err(RuntimeError::builtin(format!(
+                        "{builtin} expected String list element"
+                    )));
+                };
+                let HeapObject::Str { bytes } = ctx.interpreter.heap.get(*string_id) else {
+                    return Err(RuntimeError::builtin(format!(
+                        "{builtin} expected String list element"
+                    )));
+                };
+                output.push_str(ctx.interpreter.heap.str_value(*string_id, *bytes));
+                current = *field1;
+            }
+            _ => {
+                return Err(RuntimeError::builtin(format!(
+                    "{builtin} expected [String] list spine"
+                )));
+            }
+        }
     }
 }
 
-pub(super) fn bytes_slice(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let id = expect_bytes_id(ctx, args, 0, "bytesSlice")?;
-    let start = expect_int(args, 1, "bytesSlice")?;
-    let length = expect_int(args, 2, "bytesSlice")?;
-    let slice = {
-        let byte_ref = bytes_ref(ctx, id, "bytesSlice")?;
-        let value = ctx.interpreter.heap.bytes_value(id, byte_ref);
-        let start = usize::try_from(start).unwrap_or(0).min(value.len());
-        let length = usize::try_from(length).unwrap_or(0);
-        let end = start.saturating_add(length).min(value.len());
-        let Some(slice) = value.get(start..end) else {
-            solveig_base::ice!("clamped byte slice was outside its source")
-        };
-        slice.to_vec()
-    };
-    Ok(ctx.alloc_bytes(&slice))
-}
-
-pub(super) fn bytes_append(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
-    let mut left = expect_bytes_owned(ctx, args, 0, "bytesAppend")?;
-    let right = expect_bytes_owned(ctx, args, 1, "bytesAppend")?;
-    left.extend_from_slice(&right);
-    Ok(ctx.alloc_bytes(&left))
-}
-
-pub(super) fn bytes_span_any(
-    ctx: &mut VmCtx<'_, '_>,
-    args: &[Value],
-) -> Result<Value, RuntimeError> {
-    let source_id = expect_bytes_id(ctx, args, 0, "bytesSpanAny")?;
-    let start = expect_int(args, 1, "bytesSpanAny")?;
-    let accepted_id = expect_bytes_id(ctx, args, 2, "bytesSpanAny")?;
-    let source_ref = bytes_ref(ctx, source_id, "bytesSpanAny")?;
-    let accepted_ref = bytes_ref(ctx, accepted_id, "bytesSpanAny")?;
-    let source = ctx.interpreter.heap.bytes_value(source_id, source_ref);
-    let accepted = ctx.interpreter.heap.bytes_value(accepted_id, accepted_ref);
-    let start = clamp_byte_index(start, source.len());
-    let tail = source
-        .get(start..)
-        .unwrap_or_else(|| solveig_base::ice!("clamped byte span start escaped its source"));
-    let offset = tail
-        .iter()
-        .position(|byte| !accepted.contains(byte))
-        .map_or(source.len(), |offset| start + offset);
-    byte_index_value(offset, "bytesSpanAny")
-}
-
-pub(super) fn bytes_find_any(
-    ctx: &mut VmCtx<'_, '_>,
-    args: &[Value],
-) -> Result<Value, RuntimeError> {
-    let source_id = expect_bytes_id(ctx, args, 0, "bytesFindAny")?;
-    let start = expect_int(args, 1, "bytesFindAny")?;
-    let needles_id = expect_bytes_id(ctx, args, 2, "bytesFindAny")?;
-    let source_ref = bytes_ref(ctx, source_id, "bytesFindAny")?;
-    let needles_ref = bytes_ref(ctx, needles_id, "bytesFindAny")?;
-    let source = ctx.interpreter.heap.bytes_value(source_id, source_ref);
-    let needles = ctx.interpreter.heap.bytes_value(needles_id, needles_ref);
-    let start = clamp_byte_index(start, source.len());
-    let tail = source
-        .get(start..)
-        .unwrap_or_else(|| solveig_base::ice!("clamped byte search start escaped its source"));
-    let offset = tail
-        .iter()
-        .position(|byte| needles.contains(byte))
-        .map_or(source.len(), |offset| start + offset);
-    byte_index_value(offset, "bytesFindAny")
-}
-
-pub(super) fn bytes_find_below(
-    ctx: &mut VmCtx<'_, '_>,
-    args: &[Value],
-) -> Result<Value, RuntimeError> {
-    let source_id = expect_bytes_id(ctx, args, 0, "bytesFindBelow")?;
-    let start = expect_int(args, 1, "bytesFindBelow")?;
-    let limit = expect_int(args, 2, "bytesFindBelow")?;
-    let source_ref = bytes_ref(ctx, source_id, "bytesFindBelow")?;
-    let source = ctx.interpreter.heap.bytes_value(source_id, source_ref);
-    let start = clamp_byte_index(start, source.len());
-    let tail = source
-        .get(start..)
-        .unwrap_or_else(|| solveig_base::ice!("clamped byte search start escaped its source"));
-    let offset = tail
-        .iter()
-        .position(|byte| i64::from(*byte) < limit)
-        .map_or(source.len(), |offset| start + offset);
-    byte_index_value(offset, "bytesFindBelow")
-}
-
-pub(super) fn bytes_span_range(
-    ctx: &mut VmCtx<'_, '_>,
-    args: &[Value],
-) -> Result<Value, RuntimeError> {
-    let source_id = expect_bytes_id(ctx, args, 0, "bytesSpanRange")?;
-    let start = expect_int(args, 1, "bytesSpanRange")?;
-    let lower = expect_int(args, 2, "bytesSpanRange")?;
-    let upper = expect_int(args, 3, "bytesSpanRange")?;
-    let source_ref = bytes_ref(ctx, source_id, "bytesSpanRange")?;
-    let source = ctx.interpreter.heap.bytes_value(source_id, source_ref);
-    let start = clamp_byte_index(start, source.len());
-    let tail = source
-        .get(start..)
-        .unwrap_or_else(|| solveig_base::ice!("clamped byte span start escaped its source"));
-    let offset = tail
-        .iter()
-        .position(|byte| {
-            let byte = i64::from(*byte);
-            byte < lower || byte > upper
-        })
-        .map_or(source.len(), |offset| start + offset);
-    byte_index_value(offset, "bytesSpanRange")
-}
-
-pub(super) fn bytes_slice_to_string(
-    ctx: &mut VmCtx<'_, '_>,
-    args: &[Value],
-) -> Result<Value, RuntimeError> {
-    let source_id = expect_bytes_id(ctx, args, 0, "bytesSliceToString")?;
-    let start = expect_int(args, 1, "bytesSliceToString")?;
-    let length = expect_int(args, 2, "bytesSliceToString")?;
-    let slice = {
-        let source_ref = bytes_ref(ctx, source_id, "bytesSliceToString")?;
-        let source = ctx.interpreter.heap.bytes_value(source_id, source_ref);
-        let start = clamp_byte_index(start, source.len());
-        let length = usize::try_from(length).unwrap_or(0);
-        let end = start.saturating_add(length).min(source.len());
-        let Some(slice) = source.get(start..end) else {
-            solveig_base::ice!("clamped UTF-8 byte slice was outside its source")
-        };
-        slice.to_vec()
-    };
-    decode_utf8_result(ctx, slice, "bytesSliceToString")
-}
-
-fn clamp_byte_index(index: i64, length: usize) -> usize {
-    usize::try_from(index).unwrap_or(0).min(length)
-}
-
-fn byte_index_value(index: usize, builtin: &str) -> Result<Value, RuntimeError> {
-    i64::try_from(index)
-        .map(Value::Int)
-        .map_err(|_error| RuntimeError::builtin(format!("{builtin} result does not fit in Int")))
-}
-
-fn expect_bytes_id(
+pub(super) fn expect_string_id(
     ctx: &VmCtx<'_, '_>,
     args: &[Value],
     index: usize,
     builtin: &str,
 ) -> Result<ObjId, RuntimeError> {
     match expect_value(args, index, builtin)? {
-        Value::Obj(id) if matches!(ctx.interpreter.heap.get(id), HeapObject::Bytes { .. }) => {
-            Ok(id)
-        }
+        Value::Obj(id) if matches!(ctx.interpreter.heap.get(id), HeapObject::Str { .. }) => Ok(id),
         _ => Err(RuntimeError::builtin(format!(
-            "{builtin} expects Bytes argument {}",
+            "{builtin} expects String argument {}",
             index + 1
         ))),
     }
 }
 
-fn bytes_ref(
+pub(super) fn string_ref(
     ctx: &VmCtx<'_, '_>,
     id: ObjId,
     builtin: &str,
 ) -> Result<crate::heap::ByteRef, RuntimeError> {
     match ctx.interpreter.heap.get(id) {
-        HeapObject::Bytes { bytes } => Ok(*bytes),
+        HeapObject::Str { bytes } => Ok(*bytes),
         _ => Err(RuntimeError::builtin(format!(
-            "{builtin} expected a validated Bytes object"
+            "{builtin} expected a validated String object"
         ))),
     }
 }
@@ -478,26 +399,6 @@ pub(super) fn expect_string_owned(
             index + 1
         ))),
     }
-}
-
-fn expect_bytes_owned(
-    ctx: &VmCtx<'_, '_>,
-    args: &[Value],
-    index: usize,
-    builtin: &str,
-) -> Result<Vec<u8>, RuntimeError> {
-    let value = expect_value(args, index, builtin)?;
-    let Value::Obj(id) = value else {
-        return Err(RuntimeError::builtin(format!(
-            "{builtin} expects Bytes argument {index}"
-        )));
-    };
-    let HeapObject::Bytes { bytes } = ctx.interpreter.heap.get(id) else {
-        return Err(RuntimeError::builtin(format!(
-            "{builtin} expects Bytes argument {index}"
-        )));
-    };
-    Ok(ctx.interpreter.heap.bytes_value(id, *bytes).to_vec())
 }
 
 fn expect_char_list(

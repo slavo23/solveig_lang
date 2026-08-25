@@ -61,15 +61,18 @@ prelude.list.++ : forall a. [a] -> [a] -> [a]
 prelude.list.append : forall a. [a] -> [a] -> [a]
 prelude.list.concat : forall a. [[a]] -> [a]
 prelude.list.filter : forall a. (a -> Bool) -> [a] -> [a]
+prelude.list.filterInto : forall a. (a -> Bool) -> [a] -> [a] -> [a]
 prelude.list.foldlList : forall a b. (b -> a -> b) -> b -> [a] -> b
 prelude.list.foldrList : forall a b. (a -> b -> b) -> b -> [a] -> b
 prelude.list.map : forall a b. (a -> b) -> [a] -> [b]
+prelude.list.mapInto : forall a b. (a -> b) -> [a] -> [b] -> [b]
 prelude.list.reverseList : forall a. [a] -> [a]
 prelude.list.reverseListInto : forall a. [a] -> [a] -> [a]
 prelude.prim.accept : Socket -> IO HostError Socket
 prelude.prim.appendFile : String -> String -> IO HostError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 prelude.prim.bytesAppend : Bytes -> Bytes -> Bytes
+prelude.prim.bytesConcat : [Bytes] -> Bytes
 prelude.prim.bytesFindAny : Bytes -> Int -> Bytes -> Int
 prelude.prim.bytesFindBelow : Bytes -> Int -> Int -> Int
 prelude.prim.bytesIndex : Bytes -> Int -> Maybe Int
@@ -79,6 +82,7 @@ prelude.prim.bytesSliceToString : Bytes -> Int -> Int -> Either Utf8Error String
 prelude.prim.bytesSpanAny : Bytes -> Int -> Bytes -> Int
 prelude.prim.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
 prelude.prim.bytesToString : Bytes -> Either Utf8Error String
+prelude.prim.bytesToStringReplacing : Bytes -> String
 prelude.prim.catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.prim.catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.prim.charCompare : Char -> Char -> Ordering
@@ -182,13 +186,19 @@ prelude.prim.stderr : Handle
 prelude.prim.stdin : Handle
 prelude.prim.stdout : Handle
 prelude.prim.stringAppend : String -> String -> String
+prelude.prim.stringByteLength : String -> Int
+prelude.prim.stringByteSlice : String -> Int -> Int -> Maybe String
 prelude.prim.stringCharAt : String -> Int -> Maybe Char
 prelude.prim.stringCompare : String -> String -> Ordering
 prelude.prim.stringEq : String -> String -> Bool
+prelude.prim.stringFindCharFrom : String -> Int -> Char -> Int
 prelude.prim.stringLength : String -> Int
 prelude.prim.stringSlice : String -> Int -> Int -> String
+prelude.prim.stringStartsWith : String -> String -> Bool
 prelude.prim.stringToBytes : String -> Bytes
 prelude.prim.stringToChars : String -> [Char]
+prelude.prim.stringTrimAscii : String -> String
+prelude.prim.stringsConcat : [String] -> String
 prelude.prim.tryRecv : forall a. Chan a -> IO HostError (Maybe a)
 prelude.prim.writeFile : String -> String -> IO HostError ()
 prelude.prim.writeFileBytes : String -> Bytes -> IO HostError ()
@@ -225,7 +235,12 @@ prelude.typeclasses.sequenceA : forall t f a. (Traversable t, Applicative f) => 
 prelude.typeclasses.subtract : forall a. Num a => a -> a -> a
 prelude.typeclasses.thenM : forall m a b. Monad m => m a -> m b -> m b
 prelude.typeclasses.totalCompareFloat : Float -> Float -> Ordering
+std.bytes.appendBytesBuilder : BytesBuilder -> BytesBuilder -> BytesBuilder
+std.bytes.buildBytes : BytesBuilder -> Bytes
+std.bytes.builderChunks : BytesBuilder -> [Bytes]
+std.bytes.builderChunksInto : [BytesBuilder] -> [Bytes] -> [Bytes]
 std.bytes.bytesAppend : Bytes -> Bytes -> Bytes
+std.bytes.bytesBuilder : Bytes -> BytesBuilder
 std.bytes.bytesFindAny : Bytes -> Int -> Bytes -> Int
 std.bytes.bytesFindBelow : Bytes -> Int -> Int -> Int
 std.bytes.bytesIndex : Bytes -> Int -> Maybe Int
@@ -235,6 +250,8 @@ std.bytes.bytesSliceToString : Bytes -> Int -> Int -> Either Utf8Error String
 std.bytes.bytesSpanAny : Bytes -> Int -> Bytes -> Int
 std.bytes.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
 std.bytes.bytesToString : Bytes -> Either Utf8Error String
+std.bytes.bytesToStringReplacing : Bytes -> String
+std.bytes.emptyBytesBuilder : BytesBuilder
 std.bytes.stringToBytes : String -> Bytes
 std.channel.closeChan : forall a. Chan a -> IO HostError ()
 std.channel.invalidCapacity : Int -> HostError
@@ -446,9 +463,12 @@ std.list.rangeInclusive : Int -> Int -> [Int]
 std.list.reverse : forall a. [a] -> [a]
 std.list.reverseInto : forall a. [a] -> [a] -> [a]
 std.list.take : forall a. Int -> [a] -> [a]
+std.list.takeInto : forall a. Int -> [a] -> [a] -> [a]
 std.list.takeWhile : forall a. (a -> Bool) -> [a] -> [a]
+std.list.takeWhileInto : forall a. (a -> Bool) -> [a] -> [a] -> [a]
 std.list.zip : forall a b. [a] -> [b] -> [(a, b)]
 std.list.zipWith : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c]
+std.list.zipWithInto : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c] -> [c]
 std.map.balance : forall k v. k -> v -> Map k v -> Map k v -> Map k v
 std.map.delete : forall k v. Ord k => k -> Map k v -> Map k v
 std.map.empty : forall k v. Map k v
@@ -657,22 +677,31 @@ std.testing.assert : String -> Bool -> Either TestFailure ()
 std.testing.assertEqual : forall a. (Eq a, Show a) => String -> a -> a -> Either TestFailure ()
 std.testing.checkAll : [Either TestFailure ()] -> Either TestFailure ()
 std.testing.failureMessage : TestFailure -> String
+std.text.appendTextBuilder : TextBuilder -> TextBuilder -> TextBuilder
+std.text.buildText : TextBuilder -> String
+std.text.builderChunks : TextBuilder -> [String]
+std.text.builderChunksInto : [TextBuilder] -> [String] -> [String]
+std.text.byteLength : String -> Int
+std.text.byteSlice : Int -> Int -> String -> Maybe String
+std.text.charAt : Int -> String -> Maybe Char
+std.text.charBuilder : Char -> TextBuilder
+std.text.charByteLength : Char -> Int
 std.text.charToCodePoint : Char -> Int
 std.text.charsToString : [Char] -> String
 std.text.codePointToString : Int -> Maybe String
+std.text.emptyTextBuilder : TextBuilder
 std.text.intToString : Int -> String
-std.text.isAsciiWhitespace : Char -> Bool
 std.text.isEmpty : String -> Bool
 std.text.length : String -> Int
 std.text.lines : String -> [String]
-std.text.linesFrom : [Char] -> [Char] -> [String]
+std.text.linesFrom : String -> Int -> [String] -> [String]
+std.text.slice : Int -> Int -> String -> String
 std.text.splitOnce : Char -> String -> Maybe (String, String)
-std.text.splitOnceFrom : Char -> [Char] -> [Char] -> Maybe (String, String)
 std.text.startsWith : String -> String -> Bool
 std.text.stringToChars : String -> [Char]
 std.text.stripPrefix : String -> String -> Maybe String
+std.text.textBuilder : String -> TextBuilder
 std.text.trimAscii : String -> String
-std.text.trimAsciiStart : [Char] -> [Char]
 std.thread.killThread : ThreadId -> IO HostError ()
 std.thread.spawn : forall childError e. IO childError () -> IO e ThreadId
 std.time.durationToMicroseconds : Duration -> Int

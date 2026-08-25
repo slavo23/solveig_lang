@@ -1,0 +1,5 @@
+ok: stack-safe List transformations
+ok: UTF-8 byte and scalar units
+ok: packed text scans
+ok: strict and replacement UTF-8 decoding
+ok: linear stack-safe builders

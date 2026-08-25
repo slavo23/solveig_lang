@@ -10,16 +10,30 @@ data List a =
   | -- | The empty list.
     Nil
 
--- | Applies a function to every element of a list.
+-- | Applies a function to every element from left to right.
+-- |
+-- | Runs in linear time and uses a linear temporary list so user-sized finite
+-- | inputs do not consume the call stack.
 map : forall a b. (a -> b) -> [a] -> [b]
-map transform [] = []
-map transform (x :: xs) = transform x :: map transform xs
+map transform values = reverseList (mapInto transform values [])
 
--- | Keeps the elements that satisfy a predicate.
+mapInto : forall a b. (a -> b) -> [a] -> [b] -> [b]
+mapInto transform [] reversed = reversed
+mapInto transform (value :: rest) reversed =
+    mapInto transform rest (transform value :: reversed)
+
+-- | Keeps the elements that satisfy a predicate, testing from left to right.
+-- |
+-- | Runs in linear time and uses a linear temporary list so user-sized finite
+-- | inputs do not consume the call stack.
 filter : forall a. (a -> Bool) -> [a] -> [a]
-filter predicate [] = []
-filter predicate (x :: xs) =
-    if predicate x then x :: filter predicate xs else filter predicate xs
+filter predicate values = reverseList (filterInto predicate values [])
+
+filterInto : forall a. (a -> Bool) -> [a] -> [a] -> [a]
+filterInto predicate [] reversed = reversed
+filterInto predicate (value :: rest) reversed =
+    if predicate value then filterInto predicate rest (value :: reversed)
+    else filterInto predicate rest reversed
 
 -- Package-internal implementation of the strict Foldable List fold.
 foldlList : forall a b. (b -> a -> b) -> b -> [a] -> b
@@ -39,14 +53,18 @@ reverseListInto : forall a. [a] -> [a] -> [a]
 reverseListInto [] reversed = reversed
 reverseListInto (value :: rest) reversed = reverseListInto rest (value :: reversed)
 
--- | Flattens a list of lists into one list.
+-- | Flattens a finite list of finite lists in linear time.
+-- |
+-- | Input order is preserved and traversal does not consume the call stack.
 concat : forall a. [[a]] -> [a]
 concat lists = foldrList append [] lists
 
--- | Appends the second list after the first.
+-- | Appends the second list after the first in time linear in the first list.
+-- |
+-- | The second list is retained. A linear temporary copy of the first list
+-- | keeps the operation stack-safe.
 append : forall a. [a] -> [a] -> [a]
-append [] ys = ys
-append (x :: xs) ys = x :: append xs ys
+append xs ys = foldlList (fun tail value => value :: tail) ys (reverseList xs)
 
 infixr 5 (++)
 

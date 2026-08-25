@@ -3,14 +3,12 @@ export (
     length, isEmpty
 )
 
--- | Takes at most n elements from the beginning of a list.
+-- | Takes at most n elements from the beginning of a finite list.
+-- |
+-- | Runs in linear time in the returned prefix and does not consume the call
+-- | stack. A non-positive count returns the empty list.
 take : forall a. Int -> [a] -> [a]
-take count xs =
-    if count <= 0 then []
-    else
-        case xs of
-            [] => []
-            | x :: rest => x :: take (count - 1) rest
+take count values = reverse (takeInto count values [])
 
 -- | Drops at most n elements from the beginning of a list.
 drop : forall a. Int -> [a] -> [a]
@@ -21,11 +19,12 @@ drop count xs =
             [] => []
             | _ :: rest => drop (count - 1) rest
 
--- | Takes elements while the predicate is true.
+-- | Takes elements while the predicate is true, testing from left to right.
+-- |
+-- | Runs in linear time in the inspected prefix and does not consume the call
+-- | stack.
 takeWhile : forall a. (a -> Bool) -> [a] -> [a]
-takeWhile predicate [] = []
-takeWhile predicate (x :: xs) =
-    if predicate x then x :: takeWhile predicate xs else []
+takeWhile predicate values = reverse (takeWhileInto predicate values [])
 
 -- | Drops elements while the predicate is true.
 dropWhile : forall a. (a -> Bool) -> [a] -> [a]
@@ -33,10 +32,11 @@ dropWhile predicate [] = []
 dropWhile predicate (x :: xs) =
     if predicate x then dropWhile predicate xs else x :: xs
 
--- | Combines corresponding elements until either input is exhausted.
+-- | Combines corresponding elements from left to right until an input ends.
+-- |
+-- | Runs in linear time and does not consume the call stack.
 zipWith : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c]
-zipWith combine (x :: xs) (y :: ys) = combine x y :: zipWith combine xs ys
-zipWith combine _ _ = []
+zipWith combine left right = reverse (zipWithInto combine left right [])
 
 -- | Pairs corresponding elements until either input is exhausted.
 zip : forall a b. [a] -> [b] -> [(a, b)]
@@ -75,6 +75,25 @@ lengthInto (_ :: rest) count = lengthInto rest (count + 1)
 isEmpty : forall a. [a] -> Bool
 isEmpty [] = True
 isEmpty _ = False
+
+takeInto : forall a. Int -> [a] -> [a] -> [a]
+takeInto count values reversed =
+    if count <= 0 then reversed
+    else
+        case values of
+            [] => reversed
+            | value :: rest => takeInto (count - 1) rest (value :: reversed)
+
+takeWhileInto : forall a. (a -> Bool) -> [a] -> [a] -> [a]
+takeWhileInto predicate [] reversed = reversed
+takeWhileInto predicate (value :: rest) reversed =
+    if predicate value then takeWhileInto predicate rest (value :: reversed)
+    else reversed
+
+zipWithInto : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c] -> [c]
+zipWithInto combine (left :: leftRest) (right :: rightRest) reversed =
+    zipWithInto combine leftRest rightRest (combine left right :: reversed)
+zipWithInto combine _ _ reversed = reversed
 
 -- | Builds an ascending range by counting down into an accumulator.
 rangeDown : Int -> Int -> [Int] -> [Int]
