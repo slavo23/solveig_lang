@@ -155,6 +155,31 @@ pub(super) fn string_char_at(
     }
 }
 
+pub(super) fn string_char_at_byte(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let id = expect_string_id(ctx, args, 0, "stringCharAtByte")?;
+    let index = expect_int(args, 1, "stringCharAtByte")?;
+    let byte_ref = string_ref(ctx, id, "stringCharAtByte")?;
+    let character = usize::try_from(index).ok().and_then(|index| {
+        ctx.interpreter
+            .heap
+            .str_value(id, byte_ref)
+            .get(index..)?
+            .chars()
+            .next()
+    });
+    match character {
+        Some(character) => ctx.alloc_data1_ctor(
+            CtorRuntimeRole::PreludeMaybeJust,
+            Value::Char(character),
+            "stringCharAtByte",
+        ),
+        None => ctx.nullary_ctor(CtorRuntimeRole::PreludeMaybeNothing, "stringCharAtByte"),
+    }
+}
+
 pub(super) fn string_eq(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let lhs_id = expect_string_id(ctx, args, 0, "stringEq")?;
     let rhs_id = expect_string_id(ctx, args, 1, "stringEq")?;

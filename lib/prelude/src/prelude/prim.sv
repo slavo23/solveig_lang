@@ -18,6 +18,7 @@ export (
     readLine, recv, recvBytes, removeFile, renameFile, resolveHost, restoreMaskIO,
     runProcess, runProcessLimited, send, sendBytes, setCurrentDirectory, setEnv, sleep,
     spawn, stderr, stdin, stdout, stringAppend, stringByteLength, stringByteSlice,
+    stringCharAtByte,
     stringCharAt, stringCompare, stringEq, stringFindCharFrom, stringLength,
     stringSlice, stringStartsWith, stringToBytes, stringToChars, stringTrimAscii,
     stringsConcat, tryRecv, writeFile, writeFileBytes

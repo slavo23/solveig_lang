@@ -38,7 +38,7 @@ fn repository_corpus_preserves_ast_trivia_width_and_idempotence() {
 
     assert_eq!(
         files.len(),
-        182,
+        184,
         "formatter corpus changed; audit the new files and update the explicit count"
     );
 

@@ -545,3 +545,4 @@ pub const BUILTIN_STRING_TRIM_ASCII: BuiltinId = BuiltinId(130);
 pub const BUILTIN_STRINGS_CONCAT: BuiltinId = BuiltinId(131);
 pub const BUILTIN_BYTES_CONCAT: BuiltinId = BuiltinId(132);
 pub const BUILTIN_BYTES_TO_STRING_REPLACING: BuiltinId = BuiltinId(133);
+pub const BUILTIN_STRING_CHAR_AT_BYTE: BuiltinId = BuiltinId(134);

@@ -174,6 +174,7 @@ Reference documentation:
 - [Prelude](docs/prelude.md)
 - [Standard library](docs/standard-library.md)
 - [IO](docs/io.md)
+- [Strict streams](docs/streaming.md)
 - [Errors and defects](docs/errors.md)
 - [Concurrency](docs/concurrency.md)
 - [HTTP and HTTPS](docs/http.md)

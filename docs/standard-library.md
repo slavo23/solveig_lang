@@ -20,6 +20,7 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.queue` | Persistent FIFO queues |
 | `std.text` | Packed UTF-8 scans, explicit scalar/byte operations, and linear text construction |
 | `std.bytes` | Strict/replacement UTF-8 decoding, packed byte scans, and linear binary construction |
+| `std.stream` | Strict pull streams, scoped resource lifetimes, bounded collection, and finite adapters |
 | `std.parser` | Generic parser combinators with structured errors and streaming input |
 | `std.json` | Bounded byte-level JSON, exact numbers, deterministic rendering, and direct decoders |
 | `std.http` | Convenient bounded GETs plus explicit HTTP/HTTPS requests, verified TLS, statuses, headers, and chunk folds |
@@ -161,6 +162,34 @@ format.
 with `bytesBuilder`, combine them using `(<>)` or `appendBytesBuilder`, and call
 `buildBytes` once. This retains chunk values while building the plan, then
 performs one stack-safe linear packed construction.
+
+## Strict streams
+
+```solveig
+import std.stream(*)
+```
+
+`Stream scope e a` is the common strict pull protocol for incremental values.
+`next` performs one pull and returns `StreamDone` or `StreamYield value rest`
+inside `IO e`; it does not run a producer ahead of demand. Always continue with
+the returned `rest` value. Resource-backed streams are single-consumer and must
+not be pulled repeatedly or concurrently from the same stream value.
+
+`map`, `filter`, `take`, `chunksOf`, `fold`, `forEach`, `toListLimited`, and
+`mapError` preserve stream order. `take` performs no pull beyond its count,
+`chunksOf size` buffers at most `size` values, and bounded collection retains at
+most its declared limit while performing one extra pull only to detect
+overflow. `fromList`,
+`fromText`, and `fromBytes` adapt finite packed values without first copying
+them to another representation.
+
+Resource producers use a rank-2 callback. For example,
+`withFileByteStream chunkSize path callback` supplies
+`forall scope. Stream scope HostError Bytes` to the callback and closes the
+file when it returns, fails, defects, or is interrupted. The fresh scope cannot
+appear in the callback result, so the stream cannot outlive its file. See the
+[strict-stream guide](streaming.md) for the pull protocol, bounded-memory rules,
+early release, and complete examples.
 
 ## Parser combinators
 

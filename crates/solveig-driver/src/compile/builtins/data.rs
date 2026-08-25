@@ -74,6 +74,18 @@ pub(super) fn data_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec>
             arr(&[string.clone(), int.clone()], maybe_char),
         ),
         prim_spec(
+            "stringCharAtByte",
+            BUILTIN_STRING_CHAR_AT_BYTE,
+            2,
+            arr(
+                &[string.clone(), int.clone()],
+                Ty::make_app(
+                    Ty::make_con_id(prelude_maybe_tycon_id(names)),
+                    char_ty.clone(),
+                ),
+            ),
+        ),
+        prim_spec(
             "stringEq",
             BUILTIN_STRING_EQ,
             2,

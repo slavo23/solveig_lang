@@ -193,6 +193,7 @@ prelude.prim.stringAppend : String -> String -> String
 prelude.prim.stringByteLength : String -> Int
 prelude.prim.stringByteSlice : String -> Int -> Int -> Maybe String
 prelude.prim.stringCharAt : String -> Int -> Maybe Char
+prelude.prim.stringCharAtByte : String -> Int -> Maybe Char
 prelude.prim.stringCompare : String -> String -> Ordering
 prelude.prim.stringEq : String -> String -> Bool
 prelude.prim.stringFindCharFrom : String -> Int -> Char -> Int
@@ -365,6 +366,8 @@ std.http.withRedirectPolicy : RedirectPolicy -> HttpLimits -> HttpLimits
 std.http.withTextBody : String -> Request -> Request
 std.http.withoutBody : Request -> Request
 std.io.appendFile : String -> String -> IO HostError ()
+std.io.fileByteStep : Int -> Handle -> () -> IO HostError (Maybe (Bytes, ()))
+std.io.fileByteStream : Int -> Handle -> Stream () HostError Bytes
 std.io.hClose : Handle -> IO HostError ()
 std.io.hFlush : Handle -> IO HostError ()
 std.io.hGetBytes : Handle -> Int -> IO HostError Bytes
@@ -384,6 +387,7 @@ std.io.stderr : Handle
 std.io.stdin : Handle
 std.io.stdout : Handle
 std.io.withFile : forall a. String -> IOMode -> (Handle -> IO HostError a) -> IO HostError a
+std.io.withFileByteStream : forall result. Int -> String -> (forall scope. Stream scope HostError Bytes -> IO HostError result) -> IO HostError result
 std.io.writeFile : String -> String -> IO HostError ()
 std.io.writeFileBytes : String -> Bytes -> IO HostError ()
 std.json.arrayDecoder : forall a. Decoder a -> Decoder (Vector a)
@@ -658,6 +662,33 @@ std.set.size : forall a. Set a -> Int
 std.set.toAscList : forall a. Set a -> [a]
 std.set.union : forall a. Ord a => Set a -> Set a -> Set a
 std.set.unionValues : forall a. Ord a => Set a -> [a] -> Set a
+std.stream.bytesStep : forall e. Bytes -> (Int, Int) -> IO e (Maybe (Int, (Int, Int)))
+std.stream.charByteLength : Char -> Int
+std.stream.chunksOf : forall scope e a. Int -> Stream scope e a -> Either StreamError (Stream scope e [a])
+std.stream.chunksOfValid : forall scope e a. Int -> Stream scope e a -> Stream scope e [a]
+std.stream.collectLimited : forall scope e a. Int -> Int -> Stream scope e a -> [a] -> IO e (Either StreamError [a])
+std.stream.empty : forall e a. Stream () e a
+std.stream.emptyScoped : forall scope e a. Stream scope e a
+std.stream.filter : forall scope e a. (a -> Bool) -> Stream scope e a -> Stream scope e a
+std.stream.filterNext : forall scope e a. (a -> Bool) -> Stream scope e a -> IO e (StreamStep scope e a)
+std.stream.fold : forall scope e a state. (state -> a -> state) -> state -> Stream scope e a -> IO e state
+std.stream.forEach : forall scope e a. (a -> IO e ()) -> Stream scope e a -> IO e ()
+std.stream.fromBytes : forall e. Bytes -> Stream () e Int
+std.stream.fromList : forall e a. [a] -> Stream () e a
+std.stream.fromText : forall e. String -> Stream () e Char
+std.stream.map : forall scope e a b. (a -> b) -> Stream scope e a -> Stream scope e b
+std.stream.mapError : forall scope e f a. (e -> f) -> Stream scope e a -> Stream scope f a
+std.stream.mapErrorStep : forall scope e f a. (e -> f) -> StreamStep scope e a -> StreamStep scope f a
+std.stream.mapStep : forall scope e a b. (a -> b) -> StreamStep scope e a -> StreamStep scope e b
+std.stream.next : forall scope e a. Stream scope e a -> IO e (StreamStep scope e a)
+std.stream.pullChunk : forall scope e a. Int -> Stream scope e a -> Int -> [a] -> IO e (StreamStep scope e [a])
+std.stream.singleton : forall e a. a -> Stream () e a
+std.stream.take : forall scope e a. Int -> Stream scope e a -> Stream scope e a
+std.stream.takeNext : forall scope e a. Int -> Stream scope e a -> IO e (StreamStep scope e a)
+std.stream.textStep : forall e. String -> (Int, Int) -> IO e (Maybe (Char, (Int, Int)))
+std.stream.toListLimited : forall scope e a. Int -> Stream scope e a -> IO e (Either StreamError [a])
+std.stream.unfold : forall e state a. (state -> IO e (Maybe (a, state))) -> state -> Stream () e a
+std.stream.unfoldStep : forall e state a. (state -> IO e (Maybe (a, state))) -> Maybe (a, state) -> StreamStep () e a
 std.task.asConcurrentInfrastructure : forall e a. IO HostError a -> IO (ConcurrentError e) a
 std.task.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
 std.task.captureWorker : forall e a b. (a -> IO e b) -> a -> IO (ConcurrentError e) (Either e b)

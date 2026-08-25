@@ -2,10 +2,12 @@ export (
     IOMode(..), BufferMode(..), stdin, stdout, stderr, openFile, hClose, hFlush,
     hGetLine, hGetContents, hGetBytes, hPutStr, hPutStrLn, hPutBytes, hIsEOF,
     hSetBuffering, withFile, readFile, readFileLimited, readFileBytes,
-    readFileBytesLimited, writeFile, writeFileBytes, appendFile
+    readFileBytesLimited, writeFile, writeFileBytes, appendFile, withFileByteStream
 )
 
 import prelude.prim(*)
+import std.bytes
+import std.stream(Stream, unfold)
 import std.task(bracket)
 
 -- | How a file is opened.
@@ -80,6 +82,41 @@ hSetBuffering handle mode = prelude.prim.hSetBuffering handle mode
 -- | Opens a file and closes it after use, including errors and interruption.
 withFile : forall a. String -> IOMode -> (Handle -> Task a) -> Task a
 withFile path mode use = bracket (openFile path mode) hClose use
+
+-- | Opens a file as a scoped stream of non-empty byte chunks.
+-- |
+-- | The positive chunk size bounds each pull; the stream performs no read
+-- | ahead. The rank-2 callback prevents the stream from escaping its Handle.
+-- | Returning early, typed failure, a defect, or interruption closes the file.
+-- |
+-- | The scoped callback follows Launchbury and Peyton Jones, "Lazy Functional
+-- | State Threads" (PLDI 1994): universal scope quantification keeps a
+-- | resource-dependent value from escaping the operation that owns it.
+withFileByteStream : forall result. Int -> String -> (forall scope. Stream scope HostError Bytes -> Task result) -> Task result
+withFileByteStream chunkSize path use =
+    if chunkSize <= 0 then
+        prelude.builtins.failIO
+            (HostError
+                InvalidArgument
+                "withFileByteStream"
+                ("chunk size must be positive, got " <> show chunkSize))
+    else
+        bracket
+            (openFile path ReadMode)
+            hClose
+            (fun handle => use (fileByteStream chunkSize handle))
+
+-- The public callback is universal in scope, so this private implementation
+-- may instantiate that erased phantom with () without weakening escape safety.
+fileByteStream : Int -> Handle -> Stream () HostError Bytes
+fileByteStream chunkSize handle =
+    unfold (fileByteStep chunkSize handle) ()
+
+fileByteStep : Int -> Handle -> () -> Task (Maybe (Bytes, ()))
+fileByteStep chunkSize handle _ = do
+    bytes <- hGetBytes handle chunkSize
+    if std.bytes.bytesLength bytes == 0 then prelude.builtins.pureIO Nothing
+    else prelude.builtins.pureIO (Just (bytes, ()))
 
 -- | Strictly reads an entire file as text without a library size limit.
 readFile : String -> Task String

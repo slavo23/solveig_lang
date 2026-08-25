@@ -118,6 +118,41 @@ Buffer modes are `NoBuffering`, `LineBuffering`, and `BlockBuffering (Maybe
 Int)`. `hGetLine` reads one line, `hGetContents` reads the remaining text,
 `hGetBytes` reads at most a requested chunk, and `hIsEOF` checks for EOF.
 
+## Stream a large file
+
+Manual handle loops are useful at a low level, but ordinary incremental
+consumers use the shared strict stream API. This example reads at most three
+chunks, counts their bytes, and closes the file immediately:
+
+```solveig
+import std.bytes(bytesLength)
+import std.io(withFileByteStream)
+import std.stream(Stream, fold, take)
+
+countThreeChunks : forall scope. Stream scope HostError Bytes -> Task Int
+countThreeChunks stream =
+    fold
+        (fun total chunk => total + bytesLength chunk)
+        0
+        (take 3 stream)
+
+main : Task ()
+main = do
+    byteCount <- withFileByteStream 65536 "archive.bin" countThreeChunks
+    printLine ("inspected " <> show byteCount <> " bytes")
+```
+
+`65536` is the maximum size of one chunk, not a maximum file size. The stream
+does no background read-ahead, and `take 3` never requests a fourth chunk. The
+callback accepts a stream with a fresh `scope`; the type checker prevents that
+stream from being returned and used after the file closes. Cleanup also runs
+if the callback returns a typed error, raises a defect, or is interrupted.
+
+A resource stream is single-consumer. Use the remaining stream returned by
+each pull—normally through `fold`, `forEach`, or another combinator—and do not
+pull the same value concurrently. The [strict-stream guide](../streaming.md)
+explains the protocol, finite adapters, buffering, failures, and cancellation.
+
 ## Recover from file errors
 
 Low-level whole-file operations fail through `HostError`, not by returning an

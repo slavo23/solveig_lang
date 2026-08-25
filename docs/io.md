@@ -23,6 +23,8 @@ import std.bytes    # byte conversion and manipulation
 The Prelude still provides `Task`, typed-error sequencing, `printLine`,
 `printStr`, and `readLine`, since they are useful in nearly every executable.
 
+Incremental data uses the shared [`std.stream`](streaming.md) pull protocol.
+
 ## Handles and ownership
 
 `Handle`, `IOMode`, and `BufferMode` are exported by `std.io`. A handle is only an opaque identity
@@ -48,6 +50,36 @@ copyText source destination =
 Using a closed handle raises `HostError ResourceVanished` with the attempted
 operation recorded in `hostErrorOperation`. Handle identities
 are not reused within a runtime, so a stale identity cannot alias a later file.
+
+## Scoped file streams
+
+Use `withFileByteStream` when the complete file should not be retained in
+memory or the consumer may stop early:
+
+```solveig
+import std.bytes(bytesLength)
+import std.io(withFileByteStream)
+import std.stream(Stream, fold, take)
+
+countPrefix : forall scope. Stream scope HostError Bytes -> Task Int
+countPrefix stream =
+    fold
+        (fun total bytes => total + bytesLength bytes)
+        0
+        (take 4 stream)
+
+main : Task ()
+main = do
+    byteCount <- withFileByteStream 8192 "input.bin" countPrefix
+    printLine (show byteCount)
+```
+
+Each pull returns at most 8 KiB in this example and there is no read-ahead.
+Returning after four chunks closes the file without draining it. The rank-2
+callback prevents the stream from escaping, and cleanup runs after success,
+typed failure, defect, or interruption. The chunk size bounds per-pull memory;
+it is not a total input limit. See [Strict streams](streaming.md) for the
+single-consumer protocol and combinator buffering guarantees.
 
 ## Opening and closing
 
