@@ -635,7 +635,7 @@ prediction.
 `Chan` heap objects. `newChan` creates an unbounded queue and quantifies its
 typed error parameter so it composes contextually with any `IO e`. The public
 `std.channel.newBoundedChan` requires a capacity from 1 through `u32::MAX` and
-raises `InvalidChannelCapacity capacity` as a typed `IOError` before creating
+raises `HostError InvalidArgument` before creating
 the primitive action.
 
 `send` hands a value directly to the oldest waiting receiver, appends it to the
@@ -647,7 +647,7 @@ parking and returns `Nothing` only for an open empty channel.
 
 `closeChan` is idempotent and retains values already queued. Once those values
 are drained, `recv` and `tryRecv` fail with `ChannelClosed`; `send` fails with
-the same typed `IOError` immediately. Closing wakes every parked sender and
+the same typed `HostError ResourceVanished` immediately. Closing wakes every parked sender and
 receiver with that failure. Sender and receiver waiter queues are independently
 FIFO, as are queued values. Wait queues live in `Runtime`, not the heap object:
 their channel keys and parked sender values are roots rewritten by collection.
@@ -674,7 +674,7 @@ this state transition:
    run queue. That process converts text into a heap string at its next
    allocation safe point on the scheduler thread. Bytes likewise become an
    immutable heap byte string only after wakeup. A host error becomes the
-   matching closed `IOError` constructor and an inert `Fail` action there; it
+   stable `HostErrorKind`, operation, and message and an inert `Fail` action there; it
    does not enter the VM defect channel.
 
 If interruption cancels a blocked request, its request-table entry becomes a

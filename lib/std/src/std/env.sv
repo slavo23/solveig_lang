@@ -1,7 +1,6 @@
 export (
     EnvError(..), getArgs, getEnv, getEnvOr, requireEnv, setEnv, getEnvironment,
-    getProgName, parseEnvFile, loadEnvFile, loadEnvFileLimited, loadEnvFileIfExists,
-    describeEnvError
+    getProgName, parseEnvFile, loadEnvFile, loadEnvFileLimited, loadEnvFileIfExists
 )
 
 import prelude.prim(getArgs, getEnv, setEnv, getEnvironment, getProgName)
@@ -13,9 +12,25 @@ import std.text(*)
 
 -- | A failure while resolving or loading application environment settings.
 data EnvError =
-    EnvIoError IOError
+    EnvHostError HostError
+  | EnvFileError FsError
   | MissingEnv String
   | InvalidEnvLine Int String
+
+instance Eq EnvError where
+    (==) (EnvHostError left) (EnvHostError right) = left == right
+    (==) (EnvFileError left) (EnvFileError right) = left == right
+    (==) (MissingEnv left) (MissingEnv right) = left == right
+    (==) (InvalidEnvLine leftLine leftReason) (InvalidEnvLine rightLine rightReason) =
+        and (leftLine == rightLine) (leftReason == rightReason)
+    (==) _ _ = False
+
+instance Show EnvError where
+    show (EnvHostError hostError) = "environment: " <> show hostError
+    show (EnvFileError fileError) = "environment file: " <> show fileError
+    show (MissingEnv name) = "missing environment variable " <> name
+    show (InvalidEnvLine line reason) =
+        "invalid environment file line " <> show line <> ": " <> reason
 
 -- | Reads the command-line arguments passed to the program.
 getArgs : forall e. IO e [String]
@@ -33,7 +48,7 @@ getEnvOr name fallback =
 -- | Reads a required environment variable or returns MissingEnv.
 requireEnv : String -> IO EnvError String
 requireEnv name = do
-    value <- mapError EnvIoError (getEnv name)
+    value <- mapError EnvHostError (getEnv name)
     case value of
         Nothing => failIO (MissingEnv name)
         | Just found => pureIO found
@@ -67,7 +82,7 @@ loadEnvFile path = loadEnvFileLimited path 65536
 -- | Loads a bounded dotenv file without replacing variables already in the process environment.
 loadEnvFileLimited : String -> Int -> IO EnvError ()
 loadEnvFileLimited path maximum = do
-    contents <- mapError EnvIoError (std.io.readFileLimited path maximum)
+    contents <- mapError EnvHostError (std.io.readFileLimited path maximum)
     case parseEnvFile contents of
         Left parseError => failIO parseError
         | Right entries => setMissingEntries entries
@@ -75,18 +90,11 @@ loadEnvFileLimited path maximum = do
 -- | Loads a dotenv file when it exists and reports whether it was present.
 loadEnvFileIfExists : String -> IO EnvError Bool
 loadEnvFileIfExists path = do
-    exists <- mapError EnvIoError (std.fs.doesFileExist path)
+    exists <- mapError EnvFileError (std.fs.doesFileExist path)
     if exists then do
         loadEnvFile path
         pureIO True
     else pureIO False
-
--- | Renders an environment error without including dotenv source contents.
-describeEnvError : EnvError -> String
-describeEnvError (EnvIoError _) = "environment IO failed"
-describeEnvError (MissingEnv name) = "missing environment variable " <> name
-describeEnvError (InvalidEnvLine line reason) =
-    "invalid environment file line " <> show line <> ": " <> reason
 
 parseEnvLines : [String] -> Int -> std.map.Map String () -> [(String, String)] -> Either EnvError [(String, String)]
 parseEnvLines [] _ _ reversedEntries = Right (reverse reversedEntries)
@@ -157,8 +165,8 @@ quotedEnvValue lineNumber quote characters =
 setMissingEntries : [(String, String)] -> IO EnvError ()
 setMissingEntries [] = pureIO ()
 setMissingEntries ((name, value) :: rest) = do
-    existing <- mapError EnvIoError (getEnv name)
+    existing <- mapError EnvHostError (getEnv name)
     case existing of
-        Nothing => mapError EnvIoError (setEnv name value)
+        Nothing => mapError EnvHostError (setEnv name value)
         | Just _ => pureIO ()
     setMissingEntries rest

@@ -6,7 +6,7 @@ world, so Solveig represents them as `IO` values.
 
 ## `Task` and `do`
 
-For ordinary system IO, use `Task a`, which is `IO IOError a`:
+For ordinary system IO, use `Task a`, which is `IO HostError a`:
 
 ```solveig
 main : Task ()
@@ -120,7 +120,8 @@ Int)`. `hGetLine` reads one line, `hGetContents` reads the remaining text,
 
 ## Recover from file errors
 
-File operations fail through `IOError`, not by returning an empty string:
+Low-level whole-file operations fail through `HostError`, not by returning an
+empty string. Match its stable kind instead of a platform-specific message:
 
 ```solveig
 import std.io(readFile)
@@ -129,10 +130,9 @@ readOrDefault : String -> String -> Task String
 readOrDefault path fallback =
     catchError
         (readFile path)
-        (fun ioError =>
-            case ioError of
-                ReadFileError failedPath message => pureIO fallback
-                | other => failIO other)
+        (fun hostError =>
+            if hostErrorKind hostError == DoesNotExist then pureIO fallback
+            else failIO hostError)
 ```
 
 Matching a constructor lets you recover only from the condition you intended.
@@ -148,8 +148,9 @@ Re-raising `other` prevents unrelated failures from being hidden.
 - `removeFile` and `renameFile`;
 - `getFileSize` and `getModificationTime`.
 
-All return `Task` values. The current directory is runtime state shared by the
-program, so changing it concurrently can make relative paths surprising. In
+They return `IO FsError a`, retaining filesystem path context around the host
+cause. The current directory is runtime state shared by the program, so
+changing it concurrently can make relative paths surprising. In
 concurrent code, prefer stable paths over frequent directory changes.
 
 ## Environment and arguments

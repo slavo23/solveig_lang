@@ -80,7 +80,7 @@ runLocal repositories =
 liveToken : IO std.env.EnvError (Maybe String)
 liveToken = do
     _ <- std.env.loadEnvFileIfExists envPath
-    fmap usableToken (mapError std.env.EnvIoError (std.env.getEnv "GITHUB_TOKEN"))
+    fmap usableToken (mapError std.env.EnvHostError (std.env.getEnv "GITHUB_TOKEN"))
 
 usableToken : Maybe String -> Maybe String
 usableToken Nothing = Nothing
@@ -94,7 +94,7 @@ tokenOrExit =
         (fun envError =>
             do
                 printLine
-                    ("release radar configuration error: " <> std.env.describeEnvError envError)
+                    ("release radar configuration error: " <> show envError)
                 exitFailure)
 
 runLive : release_radar.cache.Cache -> [String] -> Task ()

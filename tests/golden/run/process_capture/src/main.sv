@@ -1,38 +1,49 @@
 import std.process(*)
 import std.env(*)
 
-reportRunProcessError : IOError -> Task ()
-reportRunProcessError ioError =
-    case ioError of
-        RunProcessError _ _ => printLine "run-process-error"
-        | _ => printLine "wrong-error"
+processToHost : ProcessError -> HostError
+processToHost (ProcessHostError _ hostError) = hostError
 
-reportLimitedError : String -> IOError -> Task String
+runProcessTask : String -> [String] -> Task ProcessResult
+runProcessTask program arguments =
+    mapError processToHost (std.process.runProcess program arguments)
+
+runProcessLimitedTask : String -> [String] -> Int -> Task ProcessResult
+runProcessLimitedTask program arguments maximum =
+    mapError processToHost (std.process.runProcessLimited program arguments maximum)
+
+reportRunProcessError : HostError -> Task ()
+reportRunProcessError ioError =
+    if hostErrorOperation ioError == "runProcess"
+        then printLine "run-process-error"
+        else printLine "wrong-error"
+
+reportLimitedError : String -> HostError -> Task String
 reportLimitedError expected ioError =
-    case ioError of
-        RunProcessError _ _ => pureIO expected
-        | _ => pureIO "wrong-limited-error"
+    if hostErrorOperation ioError == "runProcess"
+        then pureIO expected
+        else pureIO "wrong-limited-error"
 
 runFixture : String -> Task ()
 runFixture executable = do
     setEnv "SOLVEIG_L3_CHILD_VALUE" "inherited"
-    result <- runProcess executable ["--project-root", "child", "--", "alpha", "two words"]
+    result <- runProcessTask executable ["--project-root", "child", "--", "alpha", "two words"]
     printLine (appendString "exit=" (show (processExitCode result)))
     printStr (processStdout result)
     printStr (processStderr result)
-    limited <- runProcessLimited executable ["--project-root", "child", "--", "alpha", "two words"] 26
+    limited <- runProcessLimitedTask executable ["--project-root", "child", "--", "alpha", "two words"] 26
     if and (processStdout limited == processStdout result) (processStderr limited == processStderr result) then
         printLine "limited-capture"
     else
         printLine "wrong-limited-capture"
     tooLarge <- catchError
         (bindIO
-            (runProcessLimited executable ["--project-root", "child", "--", "alpha", "two words"] 12)
+            (runProcessLimitedTask executable ["--project-root", "child", "--", "alpha", "two words"] 12)
             (fun captured => pureIO "wrong-limit-success"))
         (reportLimitedError "process-output-limit")
     negative <- catchError
         (bindIO
-            (runProcessLimited executable [] (0 - 1))
+            (runProcessLimitedTask executable [] (0 - 1))
             (fun captured => pureIO "wrong-negative-success"))
         (reportLimitedError "negative-process-limit")
     printLine tooLarge
@@ -40,7 +51,7 @@ runFixture executable = do
 
 runFailure : String -> Task ()
 runFailure executable = do
-    result <- runProcess executable ["--definitely-invalid-l3-flag"]
+    result <- runProcessTask executable ["--definitely-invalid-l3-flag"]
     printLine (appendString "failure-exit=" (show (processExitCode result)))
     if processStderr result == "" then
         printLine "missing-failure-stderr"
@@ -56,7 +67,7 @@ main = do
             runFailure executable
             catchError
                 (bindIO
-                    (runProcess "solveig-l3-command-that-does-not-exist-9d42" [])
+                    (runProcessTask "solveig-l3-command-that-does-not-exist-9d42" [])
                     (fun result => printLine "wrong-success"))
                 reportRunProcessError
         | _ => printLine "missing-test-executable"

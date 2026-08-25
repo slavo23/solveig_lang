@@ -2,25 +2,34 @@ import std.net(*)
 import std.bytes(*)
 import std.task(*)
 
+netToHost : NetError -> HostError
+netToHost (NetHostError _ hostError) = hostError
+
+netTask : forall a. IO NetError a -> Task a
+netTask = mapError netToHost
+
 echoConnection : Socket -> Task ()
 echoConnection connection = do
-    request <- recvBytes connection 1024
-    sendBytes connection request
+    request <- netTask (recvBytes connection 1024)
+    netTask (sendBytes connection request)
 
 runClient : Int -> Task ()
 runClient port =
-    withConnection "127.0.0.1" port (fun connection => do
-        sendBytes connection (stringToBytes "echo over TCP")
-        reply <- recvBytes connection 1024
-        case bytesToString reply of
-            Right text => printLine text
-            | Left error => printLine "invalid reply")
+    bracket
+        (netTask (connect "127.0.0.1" port))
+        (netTask . closeSocket)
+        (fun connection => do
+            netTask (sendBytes connection (stringToBytes "echo over TCP"))
+            reply <- netTask (recvBytes connection 1024)
+            case bytesToString reply of
+                Right text => printLine text
+                | Left error => printLine "invalid reply")
 
 main : Task ()
 main =
-    withListener 0 (fun listenerInfo =>
+    bracket (netTask (listen 0)) (fun (listener, _) => netTask (closeSocket listener)) (fun listenerInfo =>
         case listenerInfo of
             (listener, port) =>
                 withThread
-                    (withAcceptedConnection listener echoConnection)
+                    (bracket (netTask (accept listener)) (netTask . closeSocket) echoConnection)
                     (fun thread => runClient port))

@@ -33,6 +33,34 @@ instance Eq Ordering where
     (==) GT GT = True
     (==) _ _ = False
 
+instance Eq HostErrorKind where
+    (==) AlreadyExists AlreadyExists = True
+    (==) DoesNotExist DoesNotExist = True
+    (==) PermissionDenied PermissionDenied = True
+    (==) ResourceBusy ResourceBusy = True
+    (==) ResourceExhausted ResourceExhausted = True
+    (==) EndOfFile EndOfFile = True
+    (==) InvalidArgument InvalidArgument = True
+    (==) UnsupportedOperation UnsupportedOperation = True
+    (==) TimeExpired TimeExpired = True
+    (==) ResourceVanished ResourceVanished = True
+    (==) Interrupted Interrupted = True
+    (==) NetworkUnreachable NetworkUnreachable = True
+    (==) ConnectionRefused ConnectionRefused = True
+    (==) AddressInUse AddressInUse = True
+    (==) ProtocolError ProtocolError = True
+    (==) OtherError OtherError = True
+    (==) _ _ = False
+
+instance Eq HostError where
+    (==) (HostError leftKind leftOperation leftMessage) (HostError rightKind rightOperation rightMessage) =
+        and
+            (leftKind == rightKind)
+            (and (leftOperation == rightOperation) (leftMessage == rightMessage))
+
+instance Eq Utf8Error where
+    (==) (InvalidUtf8 leftOffset) (InvalidUtf8 rightOffset) = leftOffset == rightOffset
+
 instance Eq a => Eq (Maybe a) where
     (==) Nothing Nothing = True
     (==) (Just x) (Just y) = x == y
@@ -453,6 +481,31 @@ instance Show Ordering where
     show LT = "LT"
     show EQ = "EQ"
     show GT = "GT"
+
+instance Show HostErrorKind where
+    show AlreadyExists = "already exists"
+    show DoesNotExist = "does not exist"
+    show PermissionDenied = "permission denied"
+    show ResourceBusy = "resource busy"
+    show ResourceExhausted = "resource exhausted"
+    show EndOfFile = "end of file"
+    show InvalidArgument = "invalid argument"
+    show UnsupportedOperation = "unsupported operation"
+    show TimeExpired = "time expired"
+    show ResourceVanished = "resource vanished"
+    show Interrupted = "interrupted"
+    show NetworkUnreachable = "network unreachable"
+    show ConnectionRefused = "connection refused"
+    show AddressInUse = "address in use"
+    show ProtocolError = "protocol error"
+    show OtherError = "other host error"
+
+instance Show HostError where
+    show (HostError kind operation message) =
+        operation <> ": " <> show kind <> ": " <> message
+
+instance Show Utf8Error where
+    show (InvalidUtf8 offset) = "invalid UTF-8 at byte " <> show offset
 
 instance Show a => Show (Maybe a) where
     show Nothing = "Nothing"

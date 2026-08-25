@@ -1,171 +1,45 @@
-import std.net(*)
+import prelude.prim
+import std.env(EnvError(..))
+import std.fs(FsError(..))
+import std.http(HttpError(..))
+import std.net(NetError(..))
+import std.process(ProcessError(..))
 import std.task(*)
-import std.channel(*)
-import std.io(*)
 
 data DomainError = Missing
+
+instance Show DomainError where
+    show Missing = "Missing"
 
 domainFailure : IO DomainError ()
 domainFailure = failIO Missing
 
-toIOError : DomainError -> IOError
-toIOError Missing = StdinError "mapped"
+testHostError : String -> HostError
+testHostError operation = HostError OtherError operation "test failure"
 
-reportMapped : IOError -> Task ()
-reportMapped error =
-    case error of
-        StdinError _ => printLine "mapped-error"
-        | StdoutError _ => printLine "unexpected-stdout"
-        | ReadFileError _ _ => printLine "unexpected-read"
-        | WriteFileError _ _ => printLine "unexpected-write"
-        | AppendFileError _ _ => printLine "unexpected-append"
-        | ChannelClosed => printLine "unexpected-channel"
-        | InvalidChannelCapacity _ => printLine "unexpected-channel-capacity"
-        | InvalidUtf8 _ => printLine "unexpected-utf8"
-        | ResolveHostError _ => printLine "unexpected-resolve-host"
-        | ConnectError _ => printLine "unexpected-connect"
-        | ListenError _ => printLine "unexpected-listen"
-        | AcceptError _ => printLine "unexpected-accept"
-        | SendError _ => printLine "unexpected-send"
-        | RecvError _ => printLine "unexpected-recv"
-        | CloseSocketError _ => printLine "unexpected-close-socket"
-        | OpenHandleError _ _ => printLine "unexpected-open-handle"
-        | CloseHandleError _ => printLine "unexpected-close-handle"
-        | FlushHandleError _ => printLine "unexpected-flush-handle"
-        | ReadHandleError _ => printLine "unexpected-read-handle"
-        | WriteHandleError _ => printLine "unexpected-write-handle"
-        | SetBufferingError _ => printLine "unexpected-buffering"
-        | GetEnvError _ => printLine "unexpected-get-env"
-        | SetEnvError _ => printLine "unexpected-set-env"
-        | GetCurrentDirectoryError _ => printLine "unexpected-get-cwd"
-        | SetCurrentDirectoryError _ _ => printLine "unexpected-set-cwd"
-        | DoesFileExistError _ _ => printLine "unexpected-file-exists"
-        | DoesDirectoryExistError _ _ => printLine "unexpected-directory-exists"
-        | ListDirectoryError _ _ => printLine "unexpected-list-directory"
-        | CreateDirectoryError _ _ => printLine "unexpected-create-directory"
-        | RemoveFileError _ _ => printLine "unexpected-remove-file"
-        | RenameFileError _ _ _ => printLine "unexpected-rename-file"
-        | GetFileSizeError _ _ => printLine "unexpected-file-size"
-        | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
-        | RunProcessError _ _ => printLine "unexpected-run-process"
-        | _ => printLine "unexpected-http"
+toHostError : DomainError -> HostError
+toHostError Missing = testHostError "mapped"
 
-reportRead : IOError -> Task ()
-reportRead error =
-    case error of
-        ReadFileError _ _ => printLine "read-file-error"
-        | StdoutError _ => printLine "unexpected-stdout"
-        | StdinError _ => printLine "unexpected-stdin"
-        | WriteFileError _ _ => printLine "unexpected-write"
-        | AppendFileError _ _ => printLine "unexpected-append"
-        | ChannelClosed => printLine "unexpected-channel"
-        | InvalidChannelCapacity _ => printLine "unexpected-channel-capacity"
-        | InvalidUtf8 _ => printLine "unexpected-utf8"
-        | ResolveHostError _ => printLine "unexpected-resolve-host"
-        | ConnectError _ => printLine "unexpected-connect"
-        | ListenError _ => printLine "unexpected-listen"
-        | AcceptError _ => printLine "unexpected-accept"
-        | SendError _ => printLine "unexpected-send"
-        | RecvError _ => printLine "unexpected-recv"
-        | CloseSocketError _ => printLine "unexpected-close-socket"
-        | OpenHandleError _ _ => printLine "unexpected-open-handle"
-        | CloseHandleError _ => printLine "unexpected-close-handle"
-        | FlushHandleError _ => printLine "unexpected-flush-handle"
-        | ReadHandleError _ => printLine "unexpected-read-handle"
-        | WriteHandleError _ => printLine "unexpected-write-handle"
-        | SetBufferingError _ => printLine "unexpected-buffering"
-        | GetEnvError _ => printLine "unexpected-get-env"
-        | SetEnvError _ => printLine "unexpected-set-env"
-        | GetCurrentDirectoryError _ => printLine "unexpected-get-cwd"
-        | SetCurrentDirectoryError _ _ => printLine "unexpected-set-cwd"
-        | DoesFileExistError _ _ => printLine "unexpected-file-exists"
-        | DoesDirectoryExistError _ _ => printLine "unexpected-directory-exists"
-        | ListDirectoryError _ _ => printLine "unexpected-list-directory"
-        | CreateDirectoryError _ _ => printLine "unexpected-create-directory"
-        | RemoveFileError _ _ => printLine "unexpected-remove-file"
-        | RenameFileError _ _ _ => printLine "unexpected-rename-file"
-        | GetFileSizeError _ _ => printLine "unexpected-file-size"
-        | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
-        | RunProcessError _ _ => printLine "unexpected-run-process"
-        | _ => printLine "unexpected-http"
+reportOperation : String -> String -> HostError -> Task ()
+reportOperation expected label hostError =
+    if hostErrorOperation hostError == expected then printLine label
+    else printLine ("unexpected operation " <> hostErrorOperation hostError)
 
-reportWrite : IOError -> Task ()
-reportWrite error =
-    case error of
-        WriteFileError _ _ => printLine "write-file-error"
-        | StdoutError _ => printLine "unexpected-stdout"
-        | StdinError _ => printLine "unexpected-stdin"
-        | ReadFileError _ _ => printLine "unexpected-read"
-        | AppendFileError _ _ => printLine "unexpected-append"
-        | ChannelClosed => printLine "unexpected-channel"
-        | InvalidChannelCapacity _ => printLine "unexpected-channel-capacity"
-        | InvalidUtf8 _ => printLine "unexpected-utf8"
-        | ResolveHostError _ => printLine "unexpected-resolve-host"
-        | ConnectError _ => printLine "unexpected-connect"
-        | ListenError _ => printLine "unexpected-listen"
-        | AcceptError _ => printLine "unexpected-accept"
-        | SendError _ => printLine "unexpected-send"
-        | RecvError _ => printLine "unexpected-recv"
-        | CloseSocketError _ => printLine "unexpected-close-socket"
-        | OpenHandleError _ _ => printLine "unexpected-open-handle"
-        | CloseHandleError _ => printLine "unexpected-close-handle"
-        | FlushHandleError _ => printLine "unexpected-flush-handle"
-        | ReadHandleError _ => printLine "unexpected-read-handle"
-        | WriteHandleError _ => printLine "unexpected-write-handle"
-        | SetBufferingError _ => printLine "unexpected-buffering"
-        | GetEnvError _ => printLine "unexpected-get-env"
-        | SetEnvError _ => printLine "unexpected-set-env"
-        | GetCurrentDirectoryError _ => printLine "unexpected-get-cwd"
-        | SetCurrentDirectoryError _ _ => printLine "unexpected-set-cwd"
-        | DoesFileExistError _ _ => printLine "unexpected-file-exists"
-        | DoesDirectoryExistError _ _ => printLine "unexpected-directory-exists"
-        | ListDirectoryError _ _ => printLine "unexpected-list-directory"
-        | CreateDirectoryError _ _ => printLine "unexpected-create-directory"
-        | RemoveFileError _ _ => printLine "unexpected-remove-file"
-        | RenameFileError _ _ _ => printLine "unexpected-rename-file"
-        | GetFileSizeError _ _ => printLine "unexpected-file-size"
-        | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
-        | RunProcessError _ _ => printLine "unexpected-run-process"
-        | _ => printLine "unexpected-http"
+reportMapped : HostError -> Task ()
+reportMapped error = reportOperation "mapped" "mapped-error" error
 
-reportAppend : IOError -> Task ()
-reportAppend error =
-    case error of
-        AppendFileError _ _ => printLine "append-file-error"
-        | StdoutError _ => printLine "unexpected-stdout"
-        | StdinError _ => printLine "unexpected-stdin"
-        | ReadFileError _ _ => printLine "unexpected-read"
-        | WriteFileError _ _ => printLine "unexpected-write"
-        | ChannelClosed => printLine "unexpected-channel"
-        | InvalidChannelCapacity _ => printLine "unexpected-channel-capacity"
-        | InvalidUtf8 _ => printLine "unexpected-utf8"
-        | ResolveHostError _ => printLine "unexpected-resolve-host"
-        | ConnectError _ => printLine "unexpected-connect"
-        | ListenError _ => printLine "unexpected-listen"
-        | AcceptError _ => printLine "unexpected-accept"
-        | SendError _ => printLine "unexpected-send"
-        | RecvError _ => printLine "unexpected-recv"
-        | CloseSocketError _ => printLine "unexpected-close-socket"
-        | OpenHandleError _ _ => printLine "unexpected-open-handle"
-        | CloseHandleError _ => printLine "unexpected-close-handle"
-        | FlushHandleError _ => printLine "unexpected-flush-handle"
-        | ReadHandleError _ => printLine "unexpected-read-handle"
-        | WriteHandleError _ => printLine "unexpected-write-handle"
-        | SetBufferingError _ => printLine "unexpected-buffering"
-        | GetEnvError _ => printLine "unexpected-get-env"
-        | SetEnvError _ => printLine "unexpected-set-env"
-        | GetCurrentDirectoryError _ => printLine "unexpected-get-cwd"
-        | SetCurrentDirectoryError _ _ => printLine "unexpected-set-cwd"
-        | DoesFileExistError _ _ => printLine "unexpected-file-exists"
-        | DoesDirectoryExistError _ _ => printLine "unexpected-directory-exists"
-        | ListDirectoryError _ _ => printLine "unexpected-list-directory"
-        | CreateDirectoryError _ _ => printLine "unexpected-create-directory"
-        | RemoveFileError _ _ => printLine "unexpected-remove-file"
-        | RenameFileError _ _ _ => printLine "unexpected-rename-file"
-        | GetFileSizeError _ _ => printLine "unexpected-file-size"
-        | GetModificationTimeError _ _ => printLine "unexpected-modification-time"
-        | RunProcessError _ _ => printLine "unexpected-run-process"
-        | _ => printLine "unexpected-http"
+reportRead : HostError -> Task ()
+reportRead error = reportOperation "readFile" "read-file-error" error
+
+reportWrite : HostError -> Task ()
+reportWrite error = reportOperation "writeFile" "write-file-error" error
+
+reportAppend : HostError -> Task ()
+reportAppend error = reportOperation "appendFile" "append-file-error" error
+
+infrastructureError : ConcurrentError DomainError
+infrastructureError =
+    ConcurrentInfrastructure (HostError PermissionDenied "openFile" "denied")
 
 releaseResource : String -> Task ()
 releaseResource name = printLine (appendString "release " name)
@@ -174,19 +48,19 @@ useResource : String -> Task ()
 useResource name =
     bindIO
         (printLine (appendString "use " name))
-        (fun value => failIO (StdinError "use failed"))
+        (fun value => failIO (testHostError "use"))
 
 cleanupFailure : Task ()
 cleanupFailure =
     catchError
-        (finally (failIO (StdinError "body")) (printLine "cleanup-failure"))
+        (finally (failIO (testHostError "body")) (printLine "cleanup-failure"))
         (fun error => printLine "caught-failure")
 
 bodyFailure : Task ()
-bodyFailure = failIO (StdinError "body")
+bodyFailure = failIO (testHostError "body")
 
 releaseFailure : Task ()
-releaseFailure = failIO (WriteFileError "cleanup" "failed")
+releaseFailure = failIO (testHostError "writeFile")
 
 cleanupReplacesFailure : Task ()
 cleanupReplacesFailure =
@@ -201,10 +75,10 @@ bracketFailure =
         (fun error => printLine "caught-bracket")
 
 fallbackAction : Task ()
-fallbackAction = orElse (failIO (StdinError "first")) (printLine "fallback")
+fallbackAction = orElse (failIO (testHostError "first")) (printLine "fallback")
 
 stopAction : Task ()
-stopAction = failIO (StdinError "stop")
+stopAction = failIO (testHostError "stop")
 
 skippedBind : Task ()
 skippedBind =
@@ -221,11 +95,22 @@ main = do
     cleanupFailure
     cleanupReplacesFailure
     bracketFailure
-    catchError (mapError toIOError domainFailure) reportMapped
+    catchError (mapError toHostError domainFailure) reportMapped
     fallbackAction
     skippedBind
     catchError
-        (bindIO (readFile "missing.txt") (fun contents => pureIO ()))
+        (bindIO (prelude.prim.readFile "missing.txt") (fun contents => pureIO ()))
         reportRead
-    catchError (writeFile "missing/child.txt" "text") reportWrite
-    catchError (appendFile "missing/child.txt" "text") reportAppend
+    catchError (prelude.prim.writeFile "missing/child.txt" "text") reportWrite
+    catchError (prelude.prim.appendFile "missing/child.txt" "text") reportAppend
+    let denied = HostError PermissionDenied "openFile" "denied"
+    printLine (show denied)
+    printLine (show (FsHostError "settings.conf" denied))
+    printLine (show (ProcessHostError "tool" denied))
+    printLine (show (NetHostError "example.test:443" denied))
+    printLine (show (HttpHostError denied))
+    printLine (show (ResponseBodyTooLarge 1024))
+    printLine (show (InvalidResponseUtf8 (InvalidUtf8 7)))
+    printLine (show (MissingEnv "TOKEN"))
+    printLine (show infrastructureError)
+    printLine (show (ConcurrentWorker Missing))

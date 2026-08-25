@@ -16,3 +16,13 @@ bind-skipped
 read-file-error
 write-file-error
 append-file-error
+openFile: permission denied: denied
+filesystem "settings.conf": openFile: permission denied: denied
+process "tool": openFile: permission denied: denied
+network example.test:443: openFile: permission denied: denied
+HTTP: openFile: permission denied: denied
+HTTP response body exceeds 1024 bytes
+HTTP response: invalid UTF-8 at byte 7
+missing environment variable TOKEN
+concurrency infrastructure: openFile: permission denied: denied
+concurrent worker: Missing

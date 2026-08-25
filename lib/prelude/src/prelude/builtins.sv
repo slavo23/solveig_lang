@@ -1,7 +1,8 @@
 export (
     Int, Float, Char, String, IO, Bool(..), ThreadId, Chan, Bytes, Socket, Handle, StdGen,
     Maybe(..), Either(..), Tuple2(..), Tuple3(..), Tuple4(..), Tuple5(..),
-    Tuple6(..), Tuple7(..), Tuple8(..), Never, IOError(..), Defect(..), Task,
+    Tuple6(..), Tuple7(..), Tuple8(..), Never, HostErrorKind(..), HostError(..),
+    hostErrorKind, hostErrorOperation, hostErrorMessage, Utf8Error(..), Defect(..), Task,
     pureIO, bindIO, failIO, error, catchError, mapError, orElse, printLine, printStr,
     readLine, appendString, even, odd, not, and, or
 )
@@ -46,88 +47,47 @@ data Tuple8 a b c d e f g h = MkTuple8 a b c d e f g h
 -- | An error type with no possible values.
 data Never
 
--- | Failures raised by built-in IO operations.
-data IOError =
-    -- | Writing to standard output failed.
-    StdoutError String
-  | -- | Reading from standard input failed.
-    StdinError String
-  | -- | Reading a file failed, with path and host message.
-    ReadFileError String String
-  | -- | Replacing a file's contents failed, with path and host message.
-    WriteFileError String String
-  | -- | Appending to a file failed, with path and host message.
-    AppendFileError String String
-  | -- | A channel operation cannot continue because the channel is closed.
-    ChannelClosed
-  | -- | A bounded channel capacity is outside the supported positive range.
-    InvalidChannelCapacity Int
-  | -- | A byte string is not valid UTF-8 text.
-    InvalidUtf8 String
-  | -- | Resolving a host name to an IPv4 address failed.
-    ResolveHostError String
-  | -- | Opening a TCP connection failed.
-    ConnectError String
-  | -- | Binding a TCP listener failed.
-    ListenError String
-  | -- | Accepting a TCP connection failed.
-    AcceptError String
-  | -- | Sending bytes on a TCP connection failed.
-    SendError String
-  | -- | Receiving bytes from a TCP connection failed.
-    RecvError String
-  | -- | Closing a TCP resource failed.
-    CloseSocketError String
-  | -- | Opening a handle failed, with path and host message.
-    OpenHandleError String String
-  | -- | Closing a handle failed.
-    CloseHandleError String
-  | -- | Flushing buffered output failed.
-    FlushHandleError String
-  | -- | Reading from a handle failed.
-    ReadHandleError String
-  | -- | Writing to a handle failed.
-    WriteHandleError String
-  | -- | Changing a handle's buffering failed.
-    SetBufferingError String
-  | -- | Reading an environment variable failed.
-    GetEnvError String
-  | -- | Changing an environment variable failed.
-    SetEnvError String
-  | -- | Reading the runtime working directory failed.
-    GetCurrentDirectoryError String
-  | -- | Changing the runtime working directory failed.
-    SetCurrentDirectoryError String String
-  | -- | Inspecting whether a file exists failed.
-    DoesFileExistError String String
-  | -- | Inspecting whether a directory exists failed.
-    DoesDirectoryExistError String String
-  | -- | Listing a directory failed.
-    ListDirectoryError String String
-  | -- | Creating a directory failed.
-    CreateDirectoryError String String
-  | -- | Removing a file failed.
-    RemoveFileError String String
-  | -- | Renaming a file failed, with source, destination and host message.
-    RenameFileError String String String
-  | -- | Reading a file's size failed.
-    GetFileSizeError String String
-  | -- | Reading a file's modification time failed.
-    GetModificationTimeError String String
-  | -- | Starting or capturing a child process failed.
-    RunProcessError String String
-  | -- | An HTTP request failed before a valid response was received.
-    HttpTransportError String
-  | -- | HTTPS certificate verification or TLS negotiation failed.
-    HttpTlsError String
-  | -- | An HTTP request exceeded its configured deadline.
-    HttpTimeoutError String
-  | -- | An HTTP redirect could not be followed under the configured policy.
-    HttpRedirectError String
-  | -- | An HTTP response header exceeded its configured byte bound.
-    HttpHeadersTooLarge Int
-  | -- | An HTTP response body exceeded its configured byte bound.
-    HttpBodyTooLarge Int
+-- | Stable, cross-platform categories for low-level host failures.
+-- |
+-- | The categories deliberately describe causes rather than individual
+-- | operations. Domain libraries add paths, endpoints, or policy context.
+data HostErrorKind =
+    AlreadyExists
+  | DoesNotExist
+  | PermissionDenied
+  | ResourceBusy
+  | ResourceExhausted
+  | EndOfFile
+  | InvalidArgument
+  | UnsupportedOperation
+  | TimeExpired
+  | ResourceVanished
+  | Interrupted
+  | NetworkUnreachable
+  | ConnectionRefused
+  | AddressInUse
+  | ProtocolError
+  | OtherError
+
+-- | A low-level failure with a stable category, operation, and host message.
+data HostError = HostError HostErrorKind String String
+
+-- | Returns a host error's stable category.
+hostErrorKind : HostError -> HostErrorKind
+hostErrorKind (HostError kind _ _) = kind
+
+-- | Returns the low-level operation that failed.
+hostErrorOperation : HostError -> String
+hostErrorOperation (HostError _ operation _) = operation
+
+-- | Returns the platform message retained for diagnostics.
+hostErrorMessage : HostError -> String
+hostErrorMessage (HostError _ _ message) = message
+
+-- | A failure to decode strict UTF-8 text.
+data Utf8Error =
+    -- | Invalid UTF-8 beginning at the zero-based byte offset.
+    InvalidUtf8 Int
 
 -- | A defect raised by pure evaluation or a managed runtime limit.
 data Defect =
@@ -140,8 +100,8 @@ data Defect =
   | -- | The runtime exceeded the managed heap-object limit.
     HeapExhausted
 
--- | An IO action using the built-in error vocabulary.
-type Task a = IO IOError a
+-- | An IO action that can fail at the low-level host boundary.
+type Task a = IO HostError a
 
 -- | Creates an IO action that immediately returns a value.
 pureIO : forall e a. a -> IO e a

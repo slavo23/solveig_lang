@@ -49,7 +49,7 @@ data JsonError =
   | JsonStringTooLarge Int
   | JsonContainerTooLarge Int
   | JsonNumberTooLarge Int
-  | JsonInvalidUtf8 String
+  | JsonInvalidUtf8 Int
   | JsonInvalidEscape String
   | JsonInvalidUnicodeEscape
   | JsonUnescapedControl Int
@@ -232,7 +232,8 @@ renderJsonError (JsonContainerTooLarge maximum) =
     "JSON container exceeds maximum " <> show maximum <> " items"
 renderJsonError (JsonNumberTooLarge maximum) =
     "JSON number exceeds maximum " <> show maximum <> " bytes"
-renderJsonError (JsonInvalidUtf8 message) = "invalid UTF-8 in JSON string: " <> message
+renderJsonError (JsonInvalidUtf8 offset) =
+    "invalid UTF-8 in JSON string at byte " <> show offset
 renderJsonError (JsonInvalidEscape escape) = "invalid JSON escape " <> show escape
 renderJsonError JsonInvalidUnicodeEscape = "invalid JSON Unicode escape"
 renderJsonError (JsonUnescapedControl byte) =
@@ -241,6 +242,9 @@ renderJsonError JsonUnterminatedString = "unterminated JSON string"
 renderJsonError (JsonInvalidNumber number) = "invalid JSON number " <> show number
 renderJsonError (JsonDuplicateObjectKey key) = "duplicate JSON object key " <> show key
 renderJsonError JsonExpectedValue = "expected a JSON value"
+
+instance Show JsonError where
+    show error = renderJsonError error
 
 invalidLimits : JsonLimits -> Maybe JsonError
 invalidLimits limits =
@@ -412,9 +416,8 @@ finishNumber limits bytes start end =
     else
         case std.bytes.bytesSliceToString bytes start length of
             Right text => std.parser.Parsed std.parser.ConsumedInput (JsonNumber text) rest
-            | Left (InvalidUtf8 message) =>
-                consumedRejectJson rest (JsonInvalidUtf8 message)
-            | Left _ => consumedRejectJson rest (JsonInvalidNumber "number decoding failed")
+            | Left (InvalidUtf8 offset) =>
+                consumedRejectJson rest (JsonInvalidUtf8 offset)
 
 stringToken : JsonLimits -> std.parser.Parser std.parser.ByteInput JsonError String
 stringToken limits =
@@ -443,9 +446,8 @@ scanStringAt limits bytes contentStart offset reversed =
         consumedRejectJson boundaryInput (JsonUnescapedControl (byteAt bytes control))
     else
         case std.bytes.bytesSliceToString bytes offset (boundary - offset) of
-            Left (InvalidUtf8 message) =>
-                consumedRejectJson boundaryInput (JsonInvalidUtf8 message)
-            | Left _ => consumedRejectJson boundaryInput (JsonInvalidUtf8 "string decoding failed")
+            Left (InvalidUtf8 offset) =>
+                consumedRejectJson boundaryInput (JsonInvalidUtf8 offset)
             | Right chunk =>
                 let accumulated = prependReversed (std.text.stringToChars chunk) reversed in
                 case std.bytes.bytesIndex bytes boundary of

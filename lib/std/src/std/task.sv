@@ -1,6 +1,6 @@
 export (
     catchDefect, mask, finally, bracket, withThread, race, concurrently, timeout,
-    mapConcurrentlyBounded
+    ConcurrentError(..), concurrentHostError, mapConcurrentlyBounded
 )
 
 import prelude.prim(catchDefectIO, maskIO, finallyIO, restoreMaskIO, raiseDefectIO)
@@ -9,6 +9,27 @@ import std.list(*)
 import std.map(*)
 import std.time(sleep)
 import std.thread(spawn, killThread)
+
+-- | Distinguishes a pool/channel failure from a failure returned by one worker.
+data ConcurrentError e =
+    ConcurrentInfrastructure HostError
+  | ConcurrentWorker e
+
+instance Eq e => Eq (ConcurrentError e) where
+    (==) (ConcurrentInfrastructure left) (ConcurrentInfrastructure right) = left == right
+    (==) (ConcurrentWorker left) (ConcurrentWorker right) = left == right
+    (==) _ _ = False
+
+instance Show e => Show (ConcurrentError e) where
+    show (ConcurrentInfrastructure hostError) =
+        "concurrency infrastructure: " <> show hostError
+    show (ConcurrentWorker workerError) =
+        "concurrent worker: " <> show workerError
+
+-- | Collapses a pool running Task workers back to Task at an explicit boundary.
+concurrentHostError : ConcurrentError HostError -> HostError
+concurrentHostError (ConcurrentInfrastructure hostError) = hostError
+concurrentHostError (ConcurrentWorker hostError) = hostError
 
 -- | Handles defects raised while executing an IO action's installed scope.
 catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
@@ -225,17 +246,17 @@ timeout milliseconds action =
 -- | Results retain input order even when operations finish out of order. The
 -- | worker group is scoped: returning, failing, or interrupting the caller
 -- | cancels and joins every worker. A non-positive or unsupported concurrency
--- | limit raises InvalidChannelCapacity.
-mapConcurrentlyBounded : forall a b. Int -> (a -> Task b) -> [a] -> Task [b]
+-- | limit returns ConcurrentInfrastructure InvalidArgument.
+mapConcurrentlyBounded : forall e a b. Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
 mapConcurrentlyBounded concurrency transform values =
-    if concurrency < 1 then failIO (InvalidChannelCapacity concurrency)
-    else if concurrency > 4294967295 then failIO (InvalidChannelCapacity concurrency)
+    if concurrency < 1 then failIO (ConcurrentInfrastructure (HostError InvalidArgument "mapConcurrentlyBounded" ("concurrency must be between 1 and 4294967295, got " <> show concurrency)))
+    else if concurrency > 4294967295 then failIO (ConcurrentInfrastructure (HostError InvalidArgument "mapConcurrentlyBounded" ("concurrency must be between 1 and 4294967295, got " <> show concurrency)))
     else
         let total = std.list.length values in
         if total == 0 then pureIO []
         else do
-            jobs <- std.channel.newBoundedChan total
-            outcomes <- std.channel.newBoundedChan total
+            jobs <- asConcurrentInfrastructure (std.channel.newBoundedChan total)
+            outcomes <- asConcurrentInfrastructure (std.channel.newBoundedChan total)
             let workers = minOrd concurrency total
             withPooledWorkers
                 workers
@@ -244,14 +265,17 @@ mapConcurrentlyBounded concurrency transform values =
                 outcomes
                 (runPooled jobs outcomes values total)
 
-runPooled : forall a b. Chan (Int, a) -> Chan (Int, (Either IOError b)) -> [a] -> Int -> Task [b]
+asConcurrentInfrastructure : forall e a. Task a -> IO (ConcurrentError e) a
+asConcurrentInfrastructure = mapError ConcurrentInfrastructure
+
+runPooled : forall e a b. Chan (Int, a) -> Chan (Int, (Either e b)) -> [a] -> Int -> IO (ConcurrentError e) [b]
 runPooled jobs outcomes values total = do
     enqueuePooled jobs values 0
     ordered <- collectPooled outcomes total std.map.empty
-    std.channel.closeChan outcomes
-    finishPooled (std.map.values ordered)
+    asConcurrentInfrastructure (std.channel.closeChan outcomes)
+    pureIO (std.map.values ordered)
 
-withPooledWorkers : forall a b result. Int -> (a -> Task b) -> Chan (Int, a) -> Chan (Int, (Either IOError b)) -> Task result -> Task result
+withPooledWorkers : forall e a b result. Int -> (a -> IO e b) -> Chan (Int, a) -> Chan (Int, (Either e b)) -> IO (ConcurrentError e) result -> IO (ConcurrentError e) result
 withPooledWorkers count transform jobs outcomes body =
     if count == 0 then body
     else
@@ -259,44 +283,50 @@ withPooledWorkers count transform jobs outcomes body =
             (pooledWorker transform jobs outcomes)
             (fun worker => withPooledWorkers (count - 1) transform jobs outcomes body)
 
-pooledWorker : forall a b. (a -> Task b) -> Chan (Int, a) -> Chan (Int, (Either IOError b)) -> Task ()
+pooledWorker : forall e a b. (a -> IO e b) -> Chan (Int, a) -> Chan (Int, (Either e b)) -> IO (ConcurrentError e) ()
 pooledWorker transform jobs outcomes =
     catchError
         (pooledWorkerLoop transform jobs outcomes)
-        (fun channelClosed => pureIO ())
+        (fun poolError =>
+            case poolError of
+                ConcurrentInfrastructure (HostError ResourceVanished _ _) => pureIO ()
+                | _ => failIO poolError)
 
-pooledWorkerLoop : forall a b. (a -> Task b) -> Chan (Int, a) -> Chan (Int, (Either IOError b)) -> Task ()
+pooledWorkerLoop : forall e a b. (a -> IO e b) -> Chan (Int, a) -> Chan (Int, (Either e b)) -> IO (ConcurrentError e) ()
 pooledWorkerLoop transform jobs outcomes = do
-    job <- std.channel.recv jobs
+    job <- asConcurrentInfrastructure (std.channel.recv jobs)
     case job of
         (index, value) => do
-            outcome <- catchError
-                (fmap Right (transform value))
-                (fun operationError => pureIO (Left operationError))
-            std.channel.send outcomes (index, outcome)
+            outcome <- captureWorker transform value
+            asConcurrentInfrastructure (std.channel.send outcomes (index, outcome))
             pooledWorkerLoop transform jobs outcomes
 
-enqueuePooled : forall a. Chan (Int, a) -> [a] -> Int -> Task ()
-enqueuePooled jobs [] _ = std.channel.closeChan jobs
+captureWorker : forall e a b. (a -> IO e b) -> a -> IO (ConcurrentError e) (Either e b)
+captureWorker transform value =
+    catchError
+        (fmap Right (mapError ConcurrentWorker (transform value)))
+        retainWorkerError
+
+retainWorkerError : forall e b. ConcurrentError e -> IO (ConcurrentError e) (Either e b)
+retainWorkerError (ConcurrentWorker workerError) = pureIO (Left workerError)
+retainWorkerError (ConcurrentInfrastructure hostError) =
+    failIO (ConcurrentInfrastructure hostError)
+
+enqueuePooled : forall e a. Chan (Int, a) -> [a] -> Int -> IO (ConcurrentError e) ()
+enqueuePooled jobs [] _ = asConcurrentInfrastructure (std.channel.closeChan jobs)
 enqueuePooled jobs (value :: rest) index = do
-    std.channel.send jobs (index, value)
+    asConcurrentInfrastructure (std.channel.send jobs (index, value))
     enqueuePooled jobs rest (index + 1)
 
-collectPooled : forall a. Chan (Int, (Either IOError a)) -> Int -> std.map.Map Int (Either IOError a) -> Task (std.map.Map Int (Either IOError a))
+collectPooled : forall e a. Chan (Int, (Either e a)) -> Int -> std.map.Map Int a -> IO (ConcurrentError e) (std.map.Map Int a)
 collectPooled outcomes remaining ordered =
     if remaining == 0 then pureIO ordered
     else do
-        indexed <- std.channel.recv outcomes
+        indexed <- asConcurrentInfrastructure (std.channel.recv outcomes)
         case indexed of
-            (index, outcome) =>
+            (_, Left workerError) => failIO (ConcurrentWorker workerError)
+            | (index, Right value) =>
                 collectPooled
                     outcomes
                     (remaining - 1)
-                    (std.map.insert index outcome ordered)
-
-finishPooled : forall a. [Either IOError a] -> Task [a]
-finishPooled [] = pureIO []
-finishPooled (Left operationError :: _) = failIO operationError
-finishPooled (Right value :: rest) = do
-    values <- finishPooled rest
-    pureIO (value :: values)
+                    (std.map.insert index value ordered)

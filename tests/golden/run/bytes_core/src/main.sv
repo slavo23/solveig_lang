@@ -6,7 +6,7 @@ printByte maybeByte =
         Just byte => printLine (show byte)
         | Nothing => printLine "missing"
 
-printText : Either IOError String -> Task ()
+printText : Either Utf8Error String -> Task ()
 printText result =
     case result of
         Right text => printLine text

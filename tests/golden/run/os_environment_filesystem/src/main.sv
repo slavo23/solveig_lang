@@ -1,7 +1,40 @@
 import std.env(*)
-import std.fs(*)
+import std.fs(FsError(..))
 import std.io(*)
 import std.list(length)
+
+fsToHost : FsError -> HostError
+fsToHost (FsHostError _ hostError) = hostError
+
+getCurrentDirectory : Task String
+getCurrentDirectory = mapError fsToHost std.fs.getCurrentDirectory
+
+setCurrentDirectory : String -> Task ()
+setCurrentDirectory path = mapError fsToHost (std.fs.setCurrentDirectory path)
+
+doesFileExist : String -> Task Bool
+doesFileExist path = mapError fsToHost (std.fs.doesFileExist path)
+
+doesDirectoryExist : String -> Task Bool
+doesDirectoryExist path = mapError fsToHost (std.fs.doesDirectoryExist path)
+
+listDirectory : String -> Task [String]
+listDirectory path = mapError fsToHost (std.fs.listDirectory path)
+
+createDirectory : String -> Task ()
+createDirectory path = mapError fsToHost (std.fs.createDirectory path)
+
+removeFile : String -> Task ()
+removeFile path = mapError fsToHost (std.fs.removeFile path)
+
+renameFile : String -> String -> Task ()
+renameFile source destination = mapError fsToHost (std.fs.renameFile source destination)
+
+getFileSize : String -> Task Int
+getFileSize path = mapError fsToHost (std.fs.getFileSize path)
+
+getModificationTime : String -> Task Int
+getModificationTime path = mapError fsToHost (std.fs.getModificationTime path)
 
 lookupEnvironment : String -> [(String, String)] -> Maybe String;
 lookupEnvironment name [] = Nothing;
@@ -17,43 +50,42 @@ printMaybe value =
 printRequired : String -> Task ();
 printRequired name =
     catchError
-        (bindIO (requireEnv name) (mapError EnvIoError . printLine))
-        (fun envError => printLine (describeEnvError envError));
+        (bindIO (requireEnv name) (mapError EnvHostError . printLine))
+        (fun envError => printLine (show envError));
 
 loadSettings : String -> Task ();
 loadSettings path =
     catchError
         (loadEnvFile path)
-        (fun envError => printLine (describeEnvError envError));
+        (fun envError => printLine (show envError));
 
 missingEnvFile : EnvError -> Task Bool;
 missingEnvFile envError = do
-    printLine (describeEnvError envError)
+    printLine (show envError)
     pureIO False;
 
 printEnvParse : Either EnvError [(String, String)] -> Task ();
 printEnvParse (Right entries) = printLine ("env entries " <> show (length entries));
-printEnvParse (Left envError) = printLine (describeEnvError envError);
+printEnvParse (Left envError) = printLine (show envError);
 
-ignoreExistingDirectory : IOError -> Task ();
+ignoreExistingDirectory : HostError -> Task ();
 ignoreExistingDirectory ioError =
-    case ioError of
-        CreateDirectoryError _ _ => pureIO ()
-        | _ => failIO ioError;
+    if hostErrorOperation ioError == "createDirectory" then pureIO ()
+    else failIO ioError;
 
-reportError : IOError -> Task ();
+reportError : HostError -> Task ();
 reportError ioError =
-    case ioError of
-        GetEnvError _ => printLine "get-env-error"
-        | SetEnvError _ => printLine "set-env-error"
-        | SetCurrentDirectoryError _ _ => printLine "set-cwd-error"
-        | ListDirectoryError _ _ => printLine "list-error"
-        | CreateDirectoryError _ _ => printLine "create-error"
-        | RemoveFileError _ _ => printLine "remove-error"
-        | RenameFileError _ _ _ => printLine "rename-error"
-        | GetFileSizeError _ _ => printLine "size-error"
-        | GetModificationTimeError _ _ => printLine "modified-error"
-        | _ => printLine "wrong-error";
+    let operation = hostErrorOperation ioError in
+    if operation == "getEnv" then printLine "get-env-error"
+    else if operation == "setEnv" then printLine "set-env-error"
+    else if operation == "setCurrentDirectory" then printLine "set-cwd-error"
+    else if operation == "listDirectory" then printLine "list-error"
+    else if operation == "createDirectory" then printLine "create-error"
+    else if operation == "removeFile" then printLine "remove-error"
+    else if operation == "renameFile" then printLine "rename-error"
+    else if operation == "getFileSize" then printLine "size-error"
+    else if operation == "getModificationTime" then printLine "modified-error"
+    else printLine "wrong-error";
 
 failAfter : Task a -> Task ();
 failAfter action = catchError (bindIO action (fun value => printLine "wrong-success")) reportError;

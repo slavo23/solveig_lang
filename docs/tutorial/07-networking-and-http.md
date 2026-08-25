@@ -101,33 +101,33 @@ data HttpError =
   | InvalidHeaderName String
   | InvalidHeaderValue String
   | InvalidHttpLimit String Int
-  | HttpIoError IOError
+  | TransportError HostError
+  | TlsError HostError
+  | RedirectError HostError
+  | ResponseHeadersTooLarge Int
+  | ResponseBodyTooLarge Int
+  | HttpHostError HostError
+  | InvalidResponseUtf8 Utf8Error
 ```
 
-`HttpIoError` may wrap transport, TLS, timeout, redirect, or response-limit
-errors from the `IOError` vocabulary. A function can retain this precise error
-type or translate it at an application boundary with `mapError`.
+The transport, TLS, redirect, and response-limit cases retain domain policy;
+`HttpHostError` wraps other host failures such as timeouts.
+`InvalidResponseUtf8` remains a decoding failure. A function can
+retain this precise error type or translate it at an application boundary with
+`mapError`. Every case has a useful `Show` representation.
 
 ## Concurrent requests
 
-HTTP waiting does not block other runnable Solveig threads. For independent
-requests that should share the ordinary `IOError` channel, translate errors and
-use a bounded pool:
+HTTP waiting does not block other runnable Solveig threads. A bounded pool can
+preserve the precise HTTP error type:
 
 ```solveig
-httpAsIOError : HttpError -> IOError
-httpAsIOError (HttpIoError ioError) = ioError
-httpAsIOError (InvalidUrl text) = HttpTransportError text
-httpAsIOError (InvalidHeaderName name) = HttpTransportError name
-httpAsIOError (InvalidHeaderValue value) = HttpTransportError value
-httpAsIOError (InvalidHttpLimit name value) = HttpTransportError name
-
-fetchStatus : String -> Task Int
+fetchStatus : String -> IO HttpError Int
 fetchStatus url = do
-    response <- mapError httpAsIOError (fetch url)
+    response <- fetch url
     pureIO (statusCode (responseStatus response))
 
-fetchAll : [String] -> Task [Int]
+fetchAll : [String] -> IO (ConcurrentError HttpError) [Int]
 fetchAll = mapConcurrentlyBounded 4 fetchStatus
 ```
 

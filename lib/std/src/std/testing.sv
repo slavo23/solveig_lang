@@ -3,6 +3,12 @@ export (TestFailure(..), assert, assertEqual, checkAll, failureMessage)
 -- | A failed assertion with a stable user-provided label and optional detail.
 data TestFailure = TestFailure String
 
+instance Eq TestFailure where
+    (==) (TestFailure left) (TestFailure right) = left == right
+
+instance Show TestFailure where
+    show (TestFailure message) = message
+
 -- | Checks a Boolean condition without raising a defect.
 assert : String -> Bool -> Either TestFailure ()
 assert label condition =

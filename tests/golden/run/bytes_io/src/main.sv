@@ -13,17 +13,17 @@ printBytes bytes = do
     printLine (showByte (bytesIndex bytes 0))
     printLine (showByte (bytesIndex bytes 1));
 
-reportNegative : IOError -> Task String;
+reportNegative : HostError -> Task String;
 reportNegative ioError =
-    case ioError of
-        ReadHandleError message => pureIO "negative-read"
-        | _ => pureIO "wrong-negative-error";
+    if hostErrorOperation ioError == "handle read"
+        then pureIO "negative-read"
+        else pureIO "wrong-negative-error";
 
-reportFileLimit : String -> IOError -> Task String;
+reportFileLimit : String -> HostError -> Task String;
 reportFileLimit expected ioError =
-    case ioError of
-        ReadFileError _ _ => pureIO expected
-        | _ => pureIO "wrong-file-limit-error";
+    if hostErrorOperation ioError == "readFileLimited"
+        then pureIO expected
+        else pureIO "wrong-file-limit-error";
 
 readChunks : Handle -> Task ();
 readChunks input = do

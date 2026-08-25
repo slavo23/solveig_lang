@@ -4,6 +4,9 @@ import std.text(*)
 
 data ConfigError = ReservedName String
 
+instance Show ConfigError where
+    show error = showConfigError error
+
 data ConfigValue =
     TextValue String
   | ListValue [ConfigValue]
@@ -133,7 +136,7 @@ printSectionReply : forall input. std.parser.ParseReply input ConfigError Sectio
 printSectionReply reply =
     std.parser.foldReply
         (fun _ value _ => printLine (showSection value))
-        (fun _ _ error => printLine (std.parser.renderError showConfigError error))
+        (fun _ _ error => printLine (show error))
         (fun _ _ _ => printLine "awaiting input")
         reply
 

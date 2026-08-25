@@ -1,2 +1,2 @@
 main : Task ()
-main = failIO (StdinError "boom")
+main = failIO (HostError OtherError "main" "boom")

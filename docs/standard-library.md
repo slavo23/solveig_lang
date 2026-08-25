@@ -120,7 +120,7 @@ import std.bytes(*)
 
 ```solveig
 stringToBytes : String -> Bytes
-bytesToString : Bytes -> Either IOError String
+bytesToString : Bytes -> Either Utf8Error String
 bytesLength : Bytes -> Int
 bytesIndex : Bytes -> Int -> Maybe Int
 bytesSlice : Bytes -> Int -> Int -> Bytes
@@ -224,7 +224,9 @@ names =
 
 Both entry points require complete input apart from JSON whitespace and return
 the same structured `std.parser.ParseReply`. Render custom failures with
-`std.json.renderJsonError` through `std.parser.renderError`.
+`std.json.renderJsonError` through `std.parser.renderError`. When the custom
+error itself has `Show`, `ParseError custom` does too, so `show error` is the
+concise equivalent.
 
 ## Handles and files
 
@@ -240,8 +242,8 @@ operations, `withFile`, and the strict whole-file functions `readFile`,
 The unrestricted readers allocate the complete input. Prefer
 `readFileLimited path maximumBytes` or
 `readFileBytesLimited path maximumBytes` when input size is not already
-trusted; they fail with `ReadFileError` after reading at most one byte beyond
-the bound. Text limits count encoded UTF-8 bytes. Use handles for genuinely
+trusted; they fail with `HostError ResourceExhausted` after reading at most one
+byte beyond the bound. Text limits count encoded UTF-8 bytes. Use handles for genuinely
 streaming input.
 
 ```solveig
@@ -264,7 +266,9 @@ import std.fs(*)
 
 This module provides `getCurrentDirectory`, `setCurrentDirectory`,
 `doesFileExist`, `doesDirectoryExist`, `listDirectory`, `createDirectory`,
-`removeFile`, `renameFile`, `getFileSize`, and `getModificationTime`.
+`removeFile`, `renameFile`, `getFileSize`, and `getModificationTime`. Its
+actions return `IO FsError a`, retaining path context and the underlying host
+cause.
 
 ## Environment and processes
 
@@ -291,10 +295,10 @@ line that may contain a secret.
 
 `runProcess` receives an executable and an argument list; it never invokes a
 shell. A non-zero child status is `ProcessResult` data. Failure to start or
-capture the child is `RunProcessError`. The unrestricted form allocates both
+capture the child is `ProcessError`. The unrestricted form allocates both
 complete output streams. `runProcessLimited program arguments
 maximumPerStream` bounds each stream in bytes; overflow terminates and reaps
-the child and raises `RunProcessError`. Interrupting the calling thread also
+the child and raises `ProcessError`. Interrupting the calling thread also
 terminates and reaps its direct child.
 
 ## Channels, threads, and structured tasks
@@ -307,8 +311,8 @@ import std.time(sleep)
 ```
 
 `std.channel` provides `newChan`, `newBoundedChan`, `send`, `recv`, `tryRecv`,
-and `closeChan`. An invalid bounded capacity is the typed
-`InvalidChannelCapacity capacity` error rather than a defect.
+and `closeChan`. An invalid bounded capacity is a typed
+`HostError InvalidArgument` rather than a defect.
 `std.thread` exposes raw `spawn` and `killThread`.
 
 Prefer `std.task` when lifetime or results matter:
@@ -322,12 +326,13 @@ withThread : IO e a -> (ThreadId -> IO e b) -> IO e b
 concurrently : IO e a -> IO e b -> IO e (a, b)
 race : IO e a -> IO e b -> IO e (Either a b)
 timeout : Int -> IO e a -> IO e (Maybe a)
-mapConcurrentlyBounded : Int -> (a -> Task b) -> [a] -> Task [b]
+mapConcurrentlyBounded : Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
 ```
 
 `mapConcurrentlyBounded` scopes and joins its worker group, caps in-flight
-operations, and returns results in input order even when completion order
-differs. Use it for independent `Task` operations; keep sequential `mapM` for
+operations, preserves worker errors separately from pool infrastructure, and
+returns results in input order even when completion order differs. Use it for
+independent IO operations; keep sequential `mapM` for
 small CPU-only transformations where scheduling would add overhead.
 
 ## Testing helpers
@@ -335,7 +340,7 @@ small CPU-only transformations where scheduling would add overhead.
 `std.testing` provides pure `assert`, `assertEqual`, `checkAll`, and
 `failureMessage` operations returning `Either TestFailure`. It deliberately
 does not introduce another test runner, global registry, or exception path.
-Use a program's `main` to render the result:
+`TestFailure` has `Eq` and `Show`; use a program's `main` to render the result:
 
 ```solveig
 checks : Either std.testing.TestFailure ()
@@ -372,7 +377,8 @@ import std.net(*)
 `std.net` provides `connect`, `resolveHost`, `listen`, `accept`, `sendBytes`,
 `recvBytes`, `closeSocket`, and `closeListener`. Prefer `withConnection`,
 `withListener`, and `withAcceptedConnection`; their bracketed scopes close
-owned sockets after success, typed errors, defects, or interruption.
+owned sockets after success, typed errors, defects, or interruption. These
+actions use `NetError`, retaining endpoint context and the host cause.
 
 The low-level `std.net` layer is TCP-oriented and byte-based. Use `std.http`
 for bounded HTTP/1.1 and verified HTTPS rather than hand-building wire frames.

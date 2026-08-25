@@ -4,23 +4,29 @@ import std.task(*)
 import std.thread(*)
 import std.channel(*)
 
+netToHost : NetError -> HostError
+netToHost (NetHostError _ hostError) = hostError
+
+netTask : forall a. IO NetError a -> Task a
+netTask = mapError netToHost
+
 serveClients : Socket -> Int -> Task ()
 serveClients listener remaining =
     if remaining == 0 then
         pureIO ()
     else do
-        connection <- accept listener
-        request <- recvBytes connection 64
-        sendBytes connection request
-        closeSocket connection
+        connection <- netTask (accept listener)
+        request <- netTask (recvBytes connection 64)
+        netTask (sendBytes connection request)
+        netTask (closeSocket connection)
         serveClients listener (remaining - 1)
 
 client : Chan Int -> Int -> Int -> Task ()
 client results port number = do
-    connection <- connect "127.0.0.1" port
-    sendBytes connection (stringToBytes "ping")
-    reply <- recvBytes connection 64
-    closeSocket connection
+    connection <- netTask (connect "127.0.0.1" port)
+    netTask (sendBytes connection (stringToBytes "ping"))
+    reply <- netTask (recvBytes connection 64)
+    netTask (closeSocket connection)
     case bytesToString reply of
         Right text => send results 1
         | Left error => send results 0
@@ -46,12 +52,12 @@ runClients listener port = do
     results <- newBoundedChan 16
     spawnClients results port 16
     completed <- collectClients results 16 0
-    closeSocket listener
+    netTask (closeSocket listener)
     printLine (show completed)
 
 main : Task ()
 main = do
-    listenerInfo <- listen 0
+    listenerInfo <- netTask (listen 0)
     case listenerInfo of
         (listener, port) =>
             withThread

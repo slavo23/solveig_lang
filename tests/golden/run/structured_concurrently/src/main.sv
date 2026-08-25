@@ -3,6 +3,8 @@ import std.time(*)
 
 data WorkError = WorkFailed
 
+data PooledError = PooledFailed
+
 pause : Int -> IO WorkError ()
 pause milliseconds =
     catchError
@@ -41,12 +43,12 @@ pooledWork value = do
     sleep ((5 - value) * 5)
     pureIO (value * 10)
 
-pooledFailure : Int -> Task Int
-pooledFailure 2 = failIO ChannelClosed
-pooledFailure value = pooledWork value
+pooledFailure : Int -> IO PooledError Int
+pooledFailure 2 = failIO PooledFailed
+pooledFailure value = pureIO (value * 10)
 
-reportPooledFailure : IOError -> Task ()
-reportPooledFailure ChannelClosed = printLine "pooled-error=ChannelClosed"
+reportPooledFailure : ConcurrentError PooledError -> Task ()
+reportPooledFailure (ConcurrentWorker PooledFailed) = printLine "pooled-error=PooledFailed"
 reportPooledFailure _ = error "unexpected pooled error"
 
 expectPooledFailure : Task ()
@@ -56,6 +58,19 @@ expectPooledFailure =
             (mapConcurrentlyBounded 2 pooledFailure [1, 2, 3, 4])
             (fun unexpected => error ("unexpected pooled success: " <> show unexpected)))
         reportPooledFailure
+
+reportInvalidPool : ConcurrentError PooledError -> Task ()
+reportInvalidPool (ConcurrentInfrastructure (HostError InvalidArgument _ _)) =
+    printLine "pooled-error=InvalidArgument"
+reportInvalidPool _ = error "unexpected invalid pool error"
+
+expectInvalidPool : Task ()
+expectInvalidPool =
+    catchError
+        (bindIO
+            (mapConcurrentlyBounded 0 pooledFailure [1])
+            (fun unexpected => error "unexpected invalid pool success"))
+        reportInvalidPool
 
 reportFailure : WorkError -> Task ()
 reportFailure WorkFailed = printLine "failed=WorkFailed"
@@ -74,9 +89,10 @@ main = do
     case pair of
         (leftValue, rightValue) =>
             printLine (appendString "pair=7," rightValue)
-    pooled <- mapConcurrentlyBounded 2 pooledWork [1, 2, 3, 4]
+    pooled <- mapError concurrentHostError (mapConcurrentlyBounded 2 pooledWork [1, 2, 3, 4])
     printLine ("pooled=" <> show pooled)
     expectPooledFailure
+    expectInvalidPool
     measured <- std.time.measure (pureIO 42)
     case measured of
         (elapsed, value) =>

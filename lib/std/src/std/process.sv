@@ -1,9 +1,20 @@
 export (
-    ProcessResult, processExitCode, processStdout, processStderr, runProcess,
+    ProcessError(..), ProcessResult, processExitCode, processStdout, processStderr, runProcess,
     runProcessLimited, exitWith, exitSuccess, exitFailure
 )
 
 import prelude.prim(*)
+
+-- | A child-process failure with the requested program retained as context.
+data ProcessError = ProcessHostError String HostError
+
+instance Eq ProcessError where
+    (==) (ProcessHostError leftProgram leftHost) (ProcessHostError rightProgram rightHost) =
+        and (leftProgram == rightProgram) (leftHost == rightHost)
+
+instance Show ProcessError where
+    show (ProcessHostError program hostError) =
+        "process " <> show program <> ": " <> show hostError
 
 -- | Captured output and status from a completed child process.
 data ProcessResult =
@@ -23,13 +34,16 @@ processStderr : ProcessResult -> String
 processStderr (MkProcessResult exitCode output errorOutput) = errorOutput
 
 -- | Runs a child process and strictly captures its output without a library size limit.
-runProcess : String -> [String] -> Task ProcessResult
-runProcess program arguments = prelude.prim.runProcess program arguments
+runProcess : String -> [String] -> IO ProcessError ProcessResult
+runProcess program arguments =
+    mapError (ProcessHostError program) (prelude.prim.runProcess program arguments)
 
 -- | Runs a child process, capturing at most maximum bytes from each output stream.
-runProcessLimited : String -> [String] -> Int -> Task ProcessResult
+runProcessLimited : String -> [String] -> Int -> IO ProcessError ProcessResult
 runProcessLimited program arguments maximum =
-    prelude.prim.runProcessLimited program arguments maximum
+    mapError
+        (ProcessHostError program)
+        (prelude.prim.runProcessLimited program arguments maximum)
 
 -- | Terminates the main program with a host exit status after cleanup.
 exitWith : forall a. Int -> Task a

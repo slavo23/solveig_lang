@@ -7,6 +7,24 @@ import std.time(*)
 emptyBytes : Bytes
 emptyBytes = std.bytes.stringToBytes ""
 
+netToHost : std.net.NetError -> HostError
+netToHost (std.net.NetHostError _ hostError) = hostError
+
+acceptTask : Socket -> Task Socket
+acceptTask listener = mapError netToHost (std.net.accept listener)
+
+recvBytesTask : Socket -> Int -> Task Bytes
+recvBytesTask socket maximum = mapError netToHost (std.net.recvBytes socket maximum)
+
+sendBytesTask : Socket -> Bytes -> Task ()
+sendBytesTask socket bytes = mapError netToHost (std.net.sendBytes socket bytes)
+
+closeSocketTask : Socket -> Task ()
+closeSocketTask socket = mapError netToHost (std.net.closeSocket socket)
+
+listenTask : Int -> Task (Socket, Int)
+listenTask port = mapError netToHost (std.net.listen port)
+
 fixtureBody : String
 fixtureBody =
     "{\"tag_name\":\"v-local\",\"published_at\":\"2026-08-20\",\"html_url\":\"https://example.test/release\"}"
@@ -45,7 +63,7 @@ readRequestHeaders connection accumulated =
         Just _ => pureIO accumulated
         | Nothing =>
             do
-                chunk <- std.net.recvBytes connection 1024
+                chunk <- recvBytesTask connection 1024
                 if std.bytes.bytesLength chunk == 0
                     then pureIO accumulated
                     else readRequestHeaders connection (std.bytes.bytesAppend accumulated chunk)
@@ -53,7 +71,7 @@ readRequestHeaders connection accumulated =
 sendFixtureResponse : Socket -> Bytes -> Task ()
 sendFixtureResponse connection request = do
     std.time.sleep (requestDelay request)
-    std.net.sendBytes connection (std.bytes.stringToBytes fixtureResponse)
+    sendBytesTask connection (std.bytes.stringToBytes fixtureResponse)
 
 requestDelay : Bytes -> Int
 requestDelay request = 30 + mod (byteSum request 0 0) 170
@@ -67,8 +85,8 @@ byteSum bytes index total =
 serveOne : Socket -> Int -> Task ()
 serveOne listener _ =
     std.task.bracket
-        (std.net.accept listener)
-        std.net.closeSocket
+        (acceptTask listener)
+        closeSocketTask
         (fun connection =>
             do
                 request <- readRequestHeaders connection emptyBytes
@@ -79,15 +97,17 @@ serveFixture : Socket -> Int -> Task ()
 serveFixture listener total =
     fmap
         (fun _ => ())
-        (std.task.mapConcurrentlyBounded 8 (serveOne listener) (std.list.range 0 total))
+        (mapError
+            std.task.concurrentHostError
+            (std.task.mapConcurrentlyBounded 8 (serveOne listener) (std.list.range 0 total)))
 
 withFixture : forall a. Int -> (String -> Task a) -> Task a
 withFixture requestCount action = do
-    listenerInfo <- std.net.listen 0
+    listenerInfo <- listenTask 0
     case listenerInfo of
         (listener, port) =>
             std.task.finally
                 (std.task.withThread
                     (serveFixture listener requestCount)
                     (fun server => action ("http://127.0.0.1:" <> show port)))
-                (std.net.closeSocket listener)
+                (closeSocketTask listener)

@@ -137,7 +137,7 @@ main = do
 Concurrent work can be scoped and bounded:
 
 ```solveig
-import std.task(mapConcurrentlyBounded)
+import std.task(concurrentHostError, mapConcurrentlyBounded)
 import std.time(sleep)
 
 work : Int -> Task Int
@@ -147,7 +147,7 @@ work value = do
 
 main : Task ()
 main = do
-    results <- mapConcurrentlyBounded 4 work [1, 2, 3, 4, 5, 6]
+    results <- mapError concurrentHostError (mapConcurrentlyBounded 4 work [1, 2, 3, 4, 5, 6])
     printLine (show results)
 ```
 

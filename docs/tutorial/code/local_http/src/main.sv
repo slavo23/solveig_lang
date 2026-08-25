@@ -16,14 +16,32 @@ responseText =
         <> "Connection: close\u{d}\n\u{d}\n"
         <> responseBody
 
+netToHost : NetError -> HostError
+netToHost (NetHostError _ hostError) = hostError
+
+recvBytesTask : Socket -> Int -> Task Bytes
+recvBytesTask socket maximum = mapError netToHost (std.net.recvBytes socket maximum)
+
+sendBytesTask : Socket -> Bytes -> Task ()
+sendBytesTask socket bytes = mapError netToHost (std.net.sendBytes socket bytes)
+
+closeSocketTask : Socket -> Task ()
+closeSocketTask socket = mapError netToHost (std.net.closeSocket socket)
+
+acceptTask : Socket -> Task Socket
+acceptTask listener = mapError netToHost (std.net.accept listener)
+
+listenTask : Int -> Task (Socket, Int)
+listenTask port = mapError netToHost (std.net.listen port)
+
 reply : Socket -> Task ()
 reply connection = do
-    _ <- recvBytes connection 4096
-    sendBytes connection (stringToBytes responseText)
+    _ <- recvBytesTask connection 4096
+    sendBytesTask connection (stringToBytes responseText)
 
 finishConnection : Chan () -> Socket -> Task ()
 finishConnection finished connection = do
-    closeSocket connection
+    closeSocketTask connection
     std.channel.send finished ()
 
 serveConnection : Chan () -> Socket -> Task ()
@@ -39,7 +57,7 @@ waitFor finished remaining = do
 acceptBatch : Socket -> Chan () -> Int -> Int -> Task ()
 acceptBatch _ finished 0 total = waitFor finished total
 acceptBatch listener finished remaining total = do
-    connection <- accept listener
+    connection <- acceptTask listener
     withThread
         (serveConnection finished connection)
         (fun _ => acceptBatch listener finished (remaining - 1) total)
@@ -50,28 +68,25 @@ serveBatch listener count = do
     acceptBatch listener finished count count
     closeChan finished
 
-httpAsIOError : HttpError -> IOError
-httpAsIOError (HttpIoError ioError) = ioError
-httpAsIOError (InvalidUrl message) = HttpTransportError message
-httpAsIOError (InvalidHeaderName name) = HttpTransportError name
-httpAsIOError (InvalidHeaderValue value) = HttpTransportError value
-httpAsIOError (InvalidHttpLimit name value) = HttpTransportError name
+httpAsHostError : HttpError -> HostError
+httpAsHostError (HttpHostError hostError) = hostError
+httpAsHostError error = HostError InvalidArgument "HTTP" (show error)
 
 fetchOne : String -> Task String
 fetchOne url = do
-    response <- mapError httpAsIOError (fetch url)
+    response <- mapError httpAsHostError (fetch url)
     case std.http.responseText response of
         Right text => pureIO text
-        | Left error => failIO (httpAsIOError error)
+        | Left error => failIO (httpAsHostError error)
 
 runClients : Int -> Task [String]
 runClients port =
     let url = "http://127.0.0.1:" <> show port <> "/message" in
-    mapConcurrentlyBounded 3 fetchOne [url, url, url]
+    mapError concurrentHostError (mapConcurrentlyBounded 3 fetchOne [url, url, url])
 
 main : Task ()
 main =
-    withListener 0 (fun listenerInfo =>
+    bracket (listenTask 0) (fun (listener, _) => closeSocketTask listener) (fun listenerInfo =>
         case listenerInfo of
             (listener, port) =>
                 withThread

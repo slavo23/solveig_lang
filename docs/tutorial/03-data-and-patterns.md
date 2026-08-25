@@ -100,10 +100,10 @@ renderAge (Left (NegativeAge age)) = "invalid age: " <> show age
 ## `IO e a`: effects with typed failure
 
 `IO e a` describes an effectful action that can fail with `e` or succeed with
-`a`. `Task a` is an alias for the common `IO IOError a`:
+`a`. `Task a` is an alias for low-level host IO:
 
 ```solveig
-type Task a = IO IOError a
+type Task a = IO HostError a
 ```
 
 Create success and failure with `pureIO` and `failIO`:
@@ -122,7 +122,7 @@ Handle a typed error with `catchError`:
 recover : IO LookupError String -> Task String
 recover action =
     catchError
-        (mapError (fun (NotFound key) => GetEnvError key) action)
+        (mapError (fun (NotFound key) => HostError DoesNotExist "lookupName" key) action)
         (fun _ => pureIO "anonymous")
 ```
 

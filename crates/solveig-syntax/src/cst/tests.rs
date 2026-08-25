@@ -214,7 +214,7 @@ fn cst_node_spans_exclude_leading_trivia() {
 
 #[test]
 fn cst_places_leading_trivia_at_surrounding_parent_level() {
-    let source = "main : IO IOError ()\nmain = pure ()\n";
+    let source = "main : IO HostError ()\nmain = pure ()\n";
     let parsed = parse_test_source(source);
     let tree = &parsed.cst;
 

@@ -8,22 +8,23 @@ showHttpError (InvalidUrl _) = "invalid-url"
 showHttpError (InvalidHeaderName _) = "invalid-header-name"
 showHttpError (InvalidHeaderValue _) = "invalid-header-value"
 showHttpError (InvalidHttpLimit _ _) = "invalid-limit"
-showHttpError (HttpIoError ioError) =
-    case ioError of
-        HttpTransportError _ => "transport"
-        | HttpTlsError _ => "tls"
-        | HttpTimeoutError _ => "timeout"
-        | HttpRedirectError _ => "redirect"
-        | HttpHeadersTooLarge limit => "headers-too-large:" <> show limit
-        | HttpBodyTooLarge limit => "body-too-large:" <> show limit
-        | _ => "other-io"
+showHttpError (TransportError _) = "transport"
+showHttpError (TlsError _) = "tls"
+showHttpError (RedirectError _) = "redirect"
+showHttpError (ResponseHeadersTooLarge maximum) = "headers-too-large:" <> show maximum
+showHttpError (ResponseBodyTooLarge maximum) = "body-too-large:" <> show maximum
+showHttpError (HttpHostError hostError) =
+    case hostErrorKind hostError of
+        TimeExpired => "timeout"
+        | _ => "host"
+showHttpError (InvalidResponseUtf8 _) = "invalid-response-utf8"
 
 printResponse : String -> std.http.Response -> IO std.http.HttpError ()
 printResponse label response =
     case std.http.responseText response of
         Left error => failIO error
         | Right body =>
-            mapError HttpIoError (printLine
+            mapError HttpHostError (printLine
                 (label
                     <> ":"
                     <> show (std.http.statusCode (std.http.responseStatus response))

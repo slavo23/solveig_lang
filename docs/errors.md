@@ -29,50 +29,39 @@ invariant failure into an ordinary program value.
 
 `IO e a` describes an action that can either fail with an ordinary value of
 type `e` or succeed with a value of type `a`. The Prelude alias
-`Task a = IO IOError a` is the conventional type for executable programs.
-`IOError` is closed and names the operation that failed. `ReadFileError` also
-reports an invalid or exceeded limit from `readFileLimited` and
-`readFileBytesLimited`; `RunProcessError` likewise reports an invalid or
-exceeded `runProcessLimited` capture bound. `InvalidChannelCapacity` reports
-the rejected value before a bounded channel is allocated:
+`Task a = IO HostError a` is the convenient type for low-level host actions and
+ordinary `main` functions.
+
+`HostError` is deliberately small and stable. Its kind describes the cause,
+its operation identifies the primitive boundary, and its message retains host
+detail for diagnostics:
 
 ```solveig
-data IOError =
-    StdoutError String
-  | StdinError String
-  | ReadFileError String String
-  | WriteFileError String String
-  | AppendFileError String String
-  | ChannelClosed
-  | InvalidChannelCapacity Int
-  | InvalidUtf8 String
-  | ResolveHostError String
-  | ConnectError String
-  | ListenError String
-  | AcceptError String
-  | SendError String
-  | RecvError String
-  | CloseSocketError String
-  | OpenHandleError String String
-  | CloseHandleError String
-  | FlushHandleError String
-  | ReadHandleError String
-  | WriteHandleError String
-  | SetBufferingError String
-  | GetEnvError String
-  | SetEnvError String
-  | GetCurrentDirectoryError String
-  | SetCurrentDirectoryError String String
-  | DoesFileExistError String String
-  | DoesDirectoryExistError String String
-  | ListDirectoryError String String
-  | CreateDirectoryError String String
-  | RemoveFileError String String
-  | RenameFileError String String String
-  | GetFileSizeError String String
-  | GetModificationTimeError String String
-  | RunProcessError String String
+data HostErrorKind =
+    AlreadyExists
+  | DoesNotExist
+  | PermissionDenied
+  | ResourceBusy
+  | ResourceExhausted
+  | EndOfFile
+  | InvalidArgument
+  | UnsupportedOperation
+  | TimeExpired
+  | ResourceVanished
+  | Interrupted
+  | NetworkUnreachable
+  | ConnectionRefused
+  | AddressInUse
+  | ProtocolError
+  | OtherError
+
+data HostError = HostError HostErrorKind String String
 ```
+
+Use `hostErrorKind`, `hostErrorOperation`, and `hostErrorMessage` when logic
+needs one field. Prefer the stable kind for decisions; host message wording can
+differ between operating systems. `Show HostError` already produces a useful
+diagnostic, so applications do not need exhaustive rendering functions.
 
 A typed failure short-circuits `bind`: later actions in the same sequence do
 not run. It remains a value rather than unwinding the ordinary call stack.
@@ -81,59 +70,11 @@ not run. It remains a value rather than unwinding the ordinary call stack.
 `orElse` discards the first error and runs a fallback.
 
 ```solveig
-reportIOError : IOError -> Task ()
-reportIOError ioError =
-    case ioError of
-        StdoutError message => printLine (appendString "stdout: " message)
-        | StdinError message => printLine (appendString "stdin: " message)
-        | ReadFileError path message =>
-            printLine (appendString path (appendString ": " message))
-        | WriteFileError path message =>
-            printLine (appendString path (appendString ": " message))
-        | AppendFileError path message =>
-            printLine (appendString path (appendString ": " message))
-        | ChannelClosed => printLine "channel closed"
-        | InvalidChannelCapacity capacity =>
-            printLine (appendString "invalid channel capacity: " (show capacity))
-        | ResolveHostError message =>
-            printLine (appendString "host resolution: " message)
-        | InvalidUtf8 message => printLine (appendString "invalid UTF-8: " message)
-        | ConnectError message => printLine (appendString "connect: " message)
-        | ListenError message => printLine (appendString "listen: " message)
-        | AcceptError message => printLine (appendString "accept: " message)
-        | SendError message => printLine (appendString "send: " message)
-        | RecvError message => printLine (appendString "receive: " message)
-        | CloseSocketError message => printLine (appendString "close: " message)
-        | OpenHandleError path message =>
-            printLine (appendString path (appendString ": " message))
-        | CloseHandleError message => printLine (appendString "close handle: " message)
-        | FlushHandleError message => printLine (appendString "flush handle: " message)
-        | ReadHandleError message => printLine (appendString "read handle: " message)
-        | WriteHandleError message => printLine (appendString "write handle: " message)
-        | SetBufferingError message => printLine (appendString "buffering: " message)
-        | GetEnvError message => printLine (appendString "environment: " message)
-        | SetEnvError message => printLine (appendString "environment: " message)
-        | GetCurrentDirectoryError message => printLine (appendString "cwd: " message)
-        | SetCurrentDirectoryError path message =>
-            printLine (appendString path (appendString ": " message))
-        | DoesFileExistError path message =>
-            printLine (appendString path (appendString ": " message))
-        | DoesDirectoryExistError path message =>
-            printLine (appendString path (appendString ": " message))
-        | ListDirectoryError path message =>
-            printLine (appendString path (appendString ": " message))
-        | CreateDirectoryError path message =>
-            printLine (appendString path (appendString ": " message))
-        | RemoveFileError path message =>
-            printLine (appendString path (appendString ": " message))
-        | RenameFileError source destination message =>
-            printLine (appendString source (appendString " -> " (appendString destination (appendString ": " message))))
-        | GetFileSizeError path message =>
-            printLine (appendString path (appendString ": " message))
-        | GetModificationTimeError path message =>
-            printLine (appendString path (appendString ": " message))
-        | RunProcessError program message =>
-            printLine (appendString program (appendString ": " message))
+reportHostError : HostError -> Task ()
+reportHostError hostError =
+    if hostErrorKind hostError == DoesNotExist then
+        printLine "required input does not exist"
+    else printLine (show hostError)
 
 printSettings : Task ()
 printSettings = do
@@ -141,18 +82,40 @@ printSettings = do
     printLine contents
 
 main : Task ()
-main = catchError printSettings reportIOError
+main = catchError printSettings reportHostError
 ```
 
-Libraries should expose domain-specific error types when the caller can act on
-more useful information than `IOError` alone:
+Higher-level libraries expose domain errors rather than growing `HostError`
+with one constructor per operation:
 
 ```solveig
-data ConfigError = ConfigIO IOError
+data ConfigError = ConfigFile FsError | InvalidConfig String
 
-loadConfig : String -> IO ConfigError String
-loadConfig path = mapError ConfigIO (readFile path)
+listConfigDirectory : String -> IO ConfigError [String]
+listConfigDirectory path = mapError ConfigFile (std.fs.listDirectory path)
 ```
+
+The current standard library provides `FsError`, `ProcessError`, `NetError`,
+`HttpError`, and `EnvError`. Each has `Eq` and `Show`, preserves useful domain
+context, and may wrap the original host cause. HTTP also retains transport,
+TLS, redirect, and response-bound policy cases rather than reducing them to a
+generic protocol failure. Strict UTF-8 decoding is pure
+and uses `Utf8Error` (`InvalidUtf8 byteOffset`) rather than pretending that a
+decoding problem is host IO.
+
+Bounded worker traversal also preserves the distinction:
+
+```solveig
+data ConcurrentError e =
+    ConcurrentInfrastructure HostError
+  | ConcurrentWorker e
+
+mapConcurrentlyBounded :
+    Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
+```
+
+For workers already using `Task`, `concurrentHostError` explicitly collapses
+both cases back to `HostError` when that loss of distinction is appropriate.
 
 Do not use a defect for a missing file, invalid request, failed lookup, or
 another expected outcome. Giving that outcome a type makes recovery visible to
@@ -256,7 +219,7 @@ action and cleanup pair.
 Interruption cancels work because another computation requested it: for
 example, `killThread`, `timeout`, or the losing side of `race`.
 It is delivered only at VM safe points so runtime state remains valid. It is
-not an `IOError`, is not converted to `Defect`, and will not be caught by
+not a typed error, is not converted to `Defect`, and will not be caught by
 `catchError` or `catchDefect`.
 
 `mask action` defers delivery while `action` is runnable, then restores the

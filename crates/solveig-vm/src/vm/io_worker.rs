@@ -94,6 +94,10 @@ pub(super) enum IoFailure {
         path: PathBuf,
         source: io::Error,
     },
+    ReadFileLimited {
+        path: PathBuf,
+        source: io::Error,
+    },
     ReadFileTooLarge {
         path: PathBuf,
         maximum: i64,
@@ -656,16 +660,21 @@ fn perform_read_file(path: PathBuf, maximum: Option<i64>, text: bool) -> IoResul
     }
     match String::from_utf8(contents) {
         Ok(contents) => IoResult::Text(contents),
-        Err(error) => IoResult::Failed(IoFailure::ReadFile {
-            path,
-            source: io::Error::new(io::ErrorKind::InvalidData, error),
-        }),
+        Err(error) => {
+            let source = io::Error::new(io::ErrorKind::InvalidData, error);
+            let failure = if maximum.is_some() {
+                IoFailure::ReadFileLimited { path, source }
+            } else {
+                IoFailure::ReadFile { path, source }
+            };
+            IoResult::Failed(failure)
+        }
     }
 }
 
 fn read_file_limited(path: &Path, maximum: i64) -> Result<Vec<u8>, IoFailure> {
     if maximum < 0 {
-        return Err(IoFailure::ReadFile {
+        return Err(IoFailure::ReadFileLimited {
             path: path.to_path_buf(),
             source: io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -673,28 +682,30 @@ fn read_file_limited(path: &Path, maximum: i64) -> Result<Vec<u8>, IoFailure> {
             ),
         });
     }
-    let maximum = usize::try_from(maximum).map_err(|_out_of_range| IoFailure::ReadFile {
+    let maximum = usize::try_from(maximum).map_err(|_out_of_range| IoFailure::ReadFileLimited {
         path: path.to_path_buf(),
         source: io::Error::new(
             io::ErrorKind::InvalidInput,
             "maximum byte count is not representable by this host",
         ),
     })?;
-    let read_limit = maximum.checked_add(1).ok_or_else(|| IoFailure::ReadFile {
-        path: path.to_path_buf(),
-        source: io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "maximum byte count is not representable by this host",
-        ),
-    })?;
-    let file = fs::File::open(path).map_err(|source| IoFailure::ReadFile {
+    let read_limit = maximum
+        .checked_add(1)
+        .ok_or_else(|| IoFailure::ReadFileLimited {
+            path: path.to_path_buf(),
+            source: io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "maximum byte count is not representable by this host",
+            ),
+        })?;
+    let file = fs::File::open(path).map_err(|source| IoFailure::ReadFileLimited {
         path: path.to_path_buf(),
         source,
     })?;
     let mut contents = Vec::new();
     file.take(read_limit as u64)
         .read_to_end(&mut contents)
-        .map_err(|source| IoFailure::ReadFile {
+        .map_err(|source| IoFailure::ReadFileLimited {
             path: path.to_path_buf(),
             source,
         })?;

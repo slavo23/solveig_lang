@@ -1,19 +1,25 @@
 import std.net(*)
 import std.task(*)
 
+netToHost : NetError -> HostError
+netToHost (NetHostError _ hostError) = hostError
+
+netTask : forall a. IO NetError a -> Task a
+netTask = mapError netToHost
+
 waitForClient : Socket -> Task ()
 waitForClient listener = do
-    connection <- accept listener
-    closeSocket connection
+    connection <- netTask (accept listener)
+    netTask (closeSocket connection)
 
 finishScope : ThreadId -> Task ()
 finishScope thread = printLine "scope-body"
 
 main : Task ()
 main = do
-    listenerInfo <- listen 0
+    listenerInfo <- netTask (listen 0)
     case listenerInfo of
         (listener, port) => do
             withThread (waitForClient listener) finishScope
-            closeSocket listener
+            netTask (closeSocket listener)
             printLine "accept-cancelled"

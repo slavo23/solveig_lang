@@ -1,4 +1,4 @@
-import std.task(mapConcurrentlyBounded)
+import std.task(concurrentHostError, mapConcurrentlyBounded)
 import std.time(sleep)
 
 process : Int -> Task Int
@@ -8,5 +8,5 @@ process value = do
 
 main : Task ()
 main = do
-    results <- mapConcurrentlyBounded 3 process [1, 2, 3, 4]
+    results <- mapError concurrentHostError (mapConcurrentlyBounded 3 process [1, 2, 3, 4])
     printLine ("results: " <> show results)

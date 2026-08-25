@@ -70,8 +70,10 @@ fetchConcurrentObserved :
     String ->
     Maybe String ->
     release_radar.cache.Cache -> [String] -> Task [release_radar.model.ReleaseResult]
-fetchConcurrentObserved workers base token cache =
-    std.task.mapConcurrentlyBounded workers (fetchObserved base token cache)
+fetchConcurrentObserved workers base token cache repositories =
+    mapError
+        std.task.concurrentHostError
+        (std.task.mapConcurrentlyBounded workers (fetchObserved base token cache) repositories)
 
 fetchObserved :
     String ->
@@ -98,16 +100,4 @@ printResults : [release_radar.model.ReleaseResult] -> Task ()
 printResults = mapIO_ (printLine . release_radar.model.renderResult)
 
 describeHttpError : std.http.HttpError -> String
-describeHttpError (InvalidUrl _) = "invalid URL"
-describeHttpError (InvalidHeaderName _) = "invalid header name"
-describeHttpError (InvalidHeaderValue _) = "invalid header value"
-describeHttpError (InvalidHttpLimit name value) = "invalid " <> name <> ": " <> show value
-describeHttpError (HttpIoError ioError) =
-    case ioError of
-        HttpTransportError message => "transport: " <> message
-        | HttpTlsError message => "TLS: " <> message
-        | HttpTimeoutError _ => "request timed out"
-        | HttpRedirectError message => "redirect: " <> message
-        | HttpHeadersTooLarge maximum => "response headers exceed " <> show maximum <> " bytes"
-        | HttpBodyTooLarge maximum => "response body exceeds " <> show maximum <> " bytes"
-        | _ => "unexpected IO error"
+describeHttpError error = show error

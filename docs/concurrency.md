@@ -101,7 +101,8 @@ queues owned by the scheduler, not stored inside the channel object.
 
 - `newChan` creates an unbounded queue.
 - `newBoundedChan capacity` requires a value from 1 through `u32::MAX`.
-  Invalid capacity raises the typed `InvalidChannelCapacity capacity` error;
+  Invalid capacity raises `HostError InvalidArgument` with the rejected value
+  in its diagnostic message;
   capacity zero is not a rendezvous channel.
 - `send` hands its value directly to the oldest waiting receiver, otherwise
   enqueues it. On a full bounded channel it parks the sender.

@@ -184,8 +184,12 @@ pub fn prelude_maybe_nothing_ctor_id(names: &mut Names) -> CtorId {
     names.ctor_id(PRELUDE_MAYBE_NOTHING_NAME)
 }
 
-pub fn prelude_io_error_tycon_id(names: &mut Names) -> TyConId {
-    names.tycon_id(PRELUDE_IO_ERROR_NAME)
+pub fn prelude_host_error_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_HOST_ERROR_NAME)
+}
+
+pub fn prelude_utf8_error_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_UTF8_ERROR_NAME)
 }
 
 pub fn prelude_either_tycon_id(names: &mut Names) -> TyConId {
@@ -272,57 +276,38 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         PRELUDE_ORDERING_LT_NAME => CtorRuntimeRole::PreludeOrderingLt,
         PRELUDE_ORDERING_EQ_NAME => CtorRuntimeRole::PreludeOrderingEq,
         PRELUDE_ORDERING_GT_NAME => CtorRuntimeRole::PreludeOrderingGt,
-        PRELUDE_IO_ERROR_STDOUT_NAME => CtorRuntimeRole::PreludeIoErrorStdout,
-        PRELUDE_IO_ERROR_STDIN_NAME => CtorRuntimeRole::PreludeIoErrorStdin,
-        PRELUDE_IO_ERROR_READ_FILE_NAME => CtorRuntimeRole::PreludeIoErrorReadFile,
-        PRELUDE_IO_ERROR_WRITE_FILE_NAME => CtorRuntimeRole::PreludeIoErrorWriteFile,
-        PRELUDE_IO_ERROR_APPEND_FILE_NAME => CtorRuntimeRole::PreludeIoErrorAppendFile,
-        PRELUDE_IO_ERROR_CHANNEL_CLOSED_NAME => CtorRuntimeRole::PreludeIoErrorChannelClosed,
-        PRELUDE_IO_ERROR_INVALID_UTF8_NAME => CtorRuntimeRole::PreludeIoErrorInvalidUtf8,
-        PRELUDE_IO_ERROR_RESOLVE_HOST_NAME => CtorRuntimeRole::PreludeIoErrorResolveHost,
-        PRELUDE_IO_ERROR_CONNECT_NAME => CtorRuntimeRole::PreludeIoErrorConnect,
-        PRELUDE_IO_ERROR_LISTEN_NAME => CtorRuntimeRole::PreludeIoErrorListen,
-        PRELUDE_IO_ERROR_ACCEPT_NAME => CtorRuntimeRole::PreludeIoErrorAccept,
-        PRELUDE_IO_ERROR_SEND_NAME => CtorRuntimeRole::PreludeIoErrorSend,
-        PRELUDE_IO_ERROR_RECV_NAME => CtorRuntimeRole::PreludeIoErrorRecv,
-        PRELUDE_IO_ERROR_CLOSE_SOCKET_NAME => CtorRuntimeRole::PreludeIoErrorCloseSocket,
-        PRELUDE_IO_ERROR_OPEN_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorOpenHandle,
-        PRELUDE_IO_ERROR_CLOSE_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorCloseHandle,
-        PRELUDE_IO_ERROR_FLUSH_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorFlushHandle,
-        PRELUDE_IO_ERROR_READ_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorReadHandle,
-        PRELUDE_IO_ERROR_WRITE_HANDLE_NAME => CtorRuntimeRole::PreludeIoErrorWriteHandle,
-        PRELUDE_IO_ERROR_SET_BUFFERING_NAME => CtorRuntimeRole::PreludeIoErrorSetBuffering,
-        PRELUDE_IO_ERROR_GET_ENV_NAME => CtorRuntimeRole::PreludeIoErrorGetEnv,
-        PRELUDE_IO_ERROR_SET_ENV_NAME => CtorRuntimeRole::PreludeIoErrorSetEnv,
-        PRELUDE_IO_ERROR_GET_CURRENT_DIRECTORY_NAME => {
-            CtorRuntimeRole::PreludeIoErrorGetCurrentDirectory
+        PRELUDE_HOST_ERROR_CTOR_NAME => CtorRuntimeRole::PreludeHostError,
+        PRELUDE_HOST_ERROR_KIND_ALREADY_EXISTS_NAME => CtorRuntimeRole::PreludeHostAlreadyExists,
+        PRELUDE_HOST_ERROR_KIND_DOES_NOT_EXIST_NAME => CtorRuntimeRole::PreludeHostDoesNotExist,
+        PRELUDE_HOST_ERROR_KIND_PERMISSION_DENIED_NAME => {
+            CtorRuntimeRole::PreludeHostPermissionDenied
         }
-        PRELUDE_IO_ERROR_SET_CURRENT_DIRECTORY_NAME => {
-            CtorRuntimeRole::PreludeIoErrorSetCurrentDirectory
+        PRELUDE_HOST_ERROR_KIND_RESOURCE_BUSY_NAME => CtorRuntimeRole::PreludeHostResourceBusy,
+        PRELUDE_HOST_ERROR_KIND_RESOURCE_EXHAUSTED_NAME => {
+            CtorRuntimeRole::PreludeHostResourceExhausted
         }
-        PRELUDE_IO_ERROR_DOES_FILE_EXIST_NAME => CtorRuntimeRole::PreludeIoErrorDoesFileExist,
-        PRELUDE_IO_ERROR_DOES_DIRECTORY_EXIST_NAME => {
-            CtorRuntimeRole::PreludeIoErrorDoesDirectoryExist
+        PRELUDE_HOST_ERROR_KIND_END_OF_FILE_NAME => CtorRuntimeRole::PreludeHostEndOfFile,
+        PRELUDE_HOST_ERROR_KIND_INVALID_ARGUMENT_NAME => {
+            CtorRuntimeRole::PreludeHostInvalidArgument
         }
-        PRELUDE_IO_ERROR_LIST_DIRECTORY_NAME => CtorRuntimeRole::PreludeIoErrorListDirectory,
-        PRELUDE_IO_ERROR_CREATE_DIRECTORY_NAME => CtorRuntimeRole::PreludeIoErrorCreateDirectory,
-        PRELUDE_IO_ERROR_REMOVE_FILE_NAME => CtorRuntimeRole::PreludeIoErrorRemoveFile,
-        PRELUDE_IO_ERROR_RENAME_FILE_NAME => CtorRuntimeRole::PreludeIoErrorRenameFile,
-        PRELUDE_IO_ERROR_GET_FILE_SIZE_NAME => CtorRuntimeRole::PreludeIoErrorGetFileSize,
-        PRELUDE_IO_ERROR_GET_MODIFICATION_TIME_NAME => {
-            CtorRuntimeRole::PreludeIoErrorGetModificationTime
+        PRELUDE_HOST_ERROR_KIND_UNSUPPORTED_OPERATION_NAME => {
+            CtorRuntimeRole::PreludeHostUnsupportedOperation
         }
-        PRELUDE_IO_ERROR_RUN_PROCESS_NAME => CtorRuntimeRole::PreludeIoErrorRunProcess,
-        PRELUDE_IO_ERROR_HTTP_TRANSPORT_NAME => CtorRuntimeRole::PreludeIoErrorHttpTransport,
-        PRELUDE_IO_ERROR_HTTP_TLS_NAME => CtorRuntimeRole::PreludeIoErrorHttpTls,
-        PRELUDE_IO_ERROR_HTTP_TIMEOUT_NAME => CtorRuntimeRole::PreludeIoErrorHttpTimeout,
-        PRELUDE_IO_ERROR_HTTP_REDIRECT_NAME => CtorRuntimeRole::PreludeIoErrorHttpRedirect,
-        PRELUDE_IO_ERROR_HTTP_HEADERS_TOO_LARGE_NAME => {
-            CtorRuntimeRole::PreludeIoErrorHttpHeadersTooLarge
+        PRELUDE_HOST_ERROR_KIND_TIME_EXPIRED_NAME => CtorRuntimeRole::PreludeHostTimeExpired,
+        PRELUDE_HOST_ERROR_KIND_RESOURCE_VANISHED_NAME => {
+            CtorRuntimeRole::PreludeHostResourceVanished
         }
-        PRELUDE_IO_ERROR_HTTP_BODY_TOO_LARGE_NAME => {
-            CtorRuntimeRole::PreludeIoErrorHttpBodyTooLarge
+        PRELUDE_HOST_ERROR_KIND_INTERRUPTED_NAME => CtorRuntimeRole::PreludeHostInterrupted,
+        PRELUDE_HOST_ERROR_KIND_NETWORK_UNREACHABLE_NAME => {
+            CtorRuntimeRole::PreludeHostNetworkUnreachable
         }
+        PRELUDE_HOST_ERROR_KIND_CONNECTION_REFUSED_NAME => {
+            CtorRuntimeRole::PreludeHostConnectionRefused
+        }
+        PRELUDE_HOST_ERROR_KIND_ADDRESS_IN_USE_NAME => CtorRuntimeRole::PreludeHostAddressInUse,
+        PRELUDE_HOST_ERROR_KIND_PROTOCOL_ERROR_NAME => CtorRuntimeRole::PreludeHostProtocolError,
+        PRELUDE_HOST_ERROR_KIND_OTHER_ERROR_NAME => CtorRuntimeRole::PreludeHostOtherError,
+        PRELUDE_UTF8_ERROR_INVALID_NAME => CtorRuntimeRole::PreludeUtf8ErrorInvalid,
         STD_PROCESS_RESULT_CTOR_NAME => CtorRuntimeRole::StdProcessResult,
         STD_IO_MODE_READ_NAME => CtorRuntimeRole::StdIoModeRead,
         STD_IO_MODE_WRITE_NAME => CtorRuntimeRole::StdIoModeWrite,
@@ -560,45 +545,24 @@ pub enum CtorRuntimeRole {
     PreludeOrderingLt,
     PreludeOrderingEq,
     PreludeOrderingGt,
-    PreludeIoErrorStdout,
-    PreludeIoErrorStdin,
-    PreludeIoErrorReadFile,
-    PreludeIoErrorWriteFile,
-    PreludeIoErrorAppendFile,
-    PreludeIoErrorChannelClosed,
-    PreludeIoErrorInvalidUtf8,
-    PreludeIoErrorResolveHost,
-    PreludeIoErrorConnect,
-    PreludeIoErrorListen,
-    PreludeIoErrorAccept,
-    PreludeIoErrorSend,
-    PreludeIoErrorRecv,
-    PreludeIoErrorCloseSocket,
-    PreludeIoErrorOpenHandle,
-    PreludeIoErrorCloseHandle,
-    PreludeIoErrorFlushHandle,
-    PreludeIoErrorReadHandle,
-    PreludeIoErrorWriteHandle,
-    PreludeIoErrorSetBuffering,
-    PreludeIoErrorGetEnv,
-    PreludeIoErrorSetEnv,
-    PreludeIoErrorGetCurrentDirectory,
-    PreludeIoErrorSetCurrentDirectory,
-    PreludeIoErrorDoesFileExist,
-    PreludeIoErrorDoesDirectoryExist,
-    PreludeIoErrorListDirectory,
-    PreludeIoErrorCreateDirectory,
-    PreludeIoErrorRemoveFile,
-    PreludeIoErrorRenameFile,
-    PreludeIoErrorGetFileSize,
-    PreludeIoErrorGetModificationTime,
-    PreludeIoErrorRunProcess,
-    PreludeIoErrorHttpTransport,
-    PreludeIoErrorHttpTls,
-    PreludeIoErrorHttpTimeout,
-    PreludeIoErrorHttpRedirect,
-    PreludeIoErrorHttpHeadersTooLarge,
-    PreludeIoErrorHttpBodyTooLarge,
+    PreludeHostError,
+    PreludeHostAlreadyExists,
+    PreludeHostDoesNotExist,
+    PreludeHostPermissionDenied,
+    PreludeHostResourceBusy,
+    PreludeHostResourceExhausted,
+    PreludeHostEndOfFile,
+    PreludeHostInvalidArgument,
+    PreludeHostUnsupportedOperation,
+    PreludeHostTimeExpired,
+    PreludeHostResourceVanished,
+    PreludeHostInterrupted,
+    PreludeHostNetworkUnreachable,
+    PreludeHostConnectionRefused,
+    PreludeHostAddressInUse,
+    PreludeHostProtocolError,
+    PreludeHostOtherError,
+    PreludeUtf8ErrorInvalid,
     StdProcessResult,
     StdIoModeRead,
     StdIoModeWrite,

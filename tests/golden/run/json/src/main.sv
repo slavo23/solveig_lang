@@ -49,7 +49,7 @@ roundTrip value =
                 (std.json.parseJson std.json.defaultJsonLimits
                     (std.bytes.stringToBytes text))
 
-utf8SliceText : Either IOError String -> String
+utf8SliceText : Either Utf8Error String -> String
 utf8SliceText (Right text) = text
 utf8SliceText (Left (InvalidUtf8 _)) = "invalid UTF-8"
 utf8SliceText (Left _) = "unexpected error"

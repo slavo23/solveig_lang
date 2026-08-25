@@ -9,9 +9,16 @@ newChan = prelude.prim.newChan
 -- | Creates a typed channel with a supported positive capacity.
 newBoundedChan : forall a. Int -> Task (Chan a)
 newBoundedChan capacity =
-    if capacity < 1 then failIO (InvalidChannelCapacity capacity)
-    else if capacity > 4294967295 then failIO (InvalidChannelCapacity capacity)
+    if capacity < 1 then failIO (invalidCapacity capacity)
+    else if capacity > 4294967295 then failIO (invalidCapacity capacity)
     else prelude.prim.newBoundedChan capacity
+
+invalidCapacity : Int -> HostError
+invalidCapacity capacity =
+    HostError
+        InvalidArgument
+        "newBoundedChan"
+        ("capacity must be between 1 and 4294967295, got " <> show capacity)
 
 -- | Sends a value, blocking while a bounded channel is full.
 send : forall a. Chan a -> a -> Task ()

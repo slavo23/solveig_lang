@@ -171,11 +171,10 @@ readBytes input = hGetBytes input 64;
 writeBytes : Bytes -> Handle -> Task ();
 writeBytes bytes output = hPutBytes output bytes;
 
-describeUtf8 : Either IOError String -> Task ();
+describeUtf8 : Either Utf8Error String -> Task ();
 describeUtf8 result =
     case result of
-        Left (InvalidUtf8 message) => printLine "invalid"
-        | Left _ => printLine "wrong-error"
+        Left (InvalidUtf8 offset) => printLine "invalid"
         | Right _ => printLine "wrong-success";
 
 main : Task ();

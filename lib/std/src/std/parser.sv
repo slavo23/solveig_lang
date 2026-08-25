@@ -738,6 +738,9 @@ renderError renderCustom (ParseError (Position offset line column) unexpected ex
     renderContexts contexts <>
     renderCustomErrors renderCustom custom
 
+instance Show custom => Show (ParseError custom) where
+    show error = renderError show error
+
 -- | Renders the structural body of a parse error.
 renderErrorBody : Maybe String -> [String] -> Maybe String -> String
 renderErrorBody _ _ (Just reason) = reason

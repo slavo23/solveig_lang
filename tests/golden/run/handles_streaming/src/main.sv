@@ -4,44 +4,44 @@ import std.thread(*)
 import std.channel(*)
 import std.io(*)
 
-ignoreError : IOError -> Task ();
+ignoreError : HostError -> Task ();
 ignoreError ioError = pureIO ();
 
-reportClosedRead : IOError -> Task String;
+reportClosedRead : HostError -> Task String;
 reportClosedRead ioError =
-    case ioError of
-        ReadHandleError message => pureIO "closed-read"
-        | _ => pureIO "wrong-read-error";
+    if hostErrorOperation ioError == "handle read"
+        then pureIO "closed-read"
+        else pureIO "wrong-read-error";
 
-reportClosedWrite : String -> IOError -> Task String;
+reportClosedWrite : String -> HostError -> Task String;
 reportClosedWrite expected ioError =
-    case ioError of
-        WriteHandleError message => pureIO expected
-        | _ => pureIO "wrong-write-error";
+    if hostErrorOperation ioError == "handle write"
+        then pureIO expected
+        else pureIO "wrong-write-error";
 
-reportOpen : IOError -> Task String;
+reportOpen : HostError -> Task String;
 reportOpen ioError =
-    case ioError of
-        OpenHandleError path message => pureIO "open-error"
-        | _ => pureIO "wrong-open-error";
+    if hostErrorOperation ioError == "openFile"
+        then pureIO "open-error"
+        else pureIO "wrong-open-error";
 
-reportClose : IOError -> Task String;
+reportClose : HostError -> Task String;
 reportClose ioError =
-    case ioError of
-        CloseHandleError message => pureIO "close-error"
-        | _ => pureIO "wrong-close-error";
+    if hostErrorOperation ioError == "hClose"
+        then pureIO "close-error"
+        else pureIO "wrong-close-error";
 
-reportFlush : IOError -> Task String;
+reportFlush : HostError -> Task String;
 reportFlush ioError =
-    case ioError of
-        FlushHandleError message => pureIO "flush-error"
-        | _ => pureIO "wrong-flush-error";
+    if hostErrorOperation ioError == "hFlush"
+        then pureIO "flush-error"
+        else pureIO "wrong-flush-error";
 
-reportBuffering : IOError -> Task String;
+reportBuffering : HostError -> Task String;
 reportBuffering ioError =
-    case ioError of
-        SetBufferingError message => pureIO "buffering-error"
-        | _ => pureIO "wrong-buffering-error";
+    if hostErrorOperation ioError == "hSetBuffering"
+        then pureIO "buffering-error"
+        else pureIO "wrong-buffering-error";
 
 writeGenerated : Handle -> Task ();
 writeGenerated output = do
@@ -64,7 +64,7 @@ readGenerated file = do
 failAfterSharing : Chan Handle -> Handle -> Task ();
 failAfterSharing escaped file = do
     send escaped file
-    failIO (WriteHandleError "planned");
+    failIO (HostError OtherError "handle write" "planned");
 
 waitAfterSharing : Chan Handle -> Chan () -> Handle -> Task ();
 waitAfterSharing escaped started file = do

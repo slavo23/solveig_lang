@@ -45,9 +45,8 @@ auditOne results (LogJob path) =
     catchError
         (auditFile results path)
         (fun error =>
-            case error of
-                ReadFileError failedPath message => send results MissingLog
-                | other => failIO other)
+            if hostErrorOperation error == "readFile" then send results MissingLog
+            else failIO error)
 
 auditFile : Chan AuditResult -> String -> Task ()
 auditFile results path = do
@@ -59,9 +58,9 @@ worker jobs results =
     catchError
         (workerStep jobs results)
         (fun error =>
-            case error of
-                ChannelClosed => pureIO ()
-                | other => failIO other)
+            case hostErrorKind error of
+                ResourceVanished => pureIO ()
+                | _ => failIO error)
 
 workerStep : Chan LogJob -> Chan AuditResult -> Task ()
 workerStep jobs results = do

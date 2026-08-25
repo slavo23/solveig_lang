@@ -192,7 +192,7 @@ fn decode_utf8_result(
 ) -> Result<Value, RuntimeError> {
     match String::from_utf8(value) {
         Ok(text) => alloc_valid_utf8_result(ctx, &text, builtin),
-        Err(error) => alloc_invalid_utf8_result(ctx, &error.to_string(), builtin),
+        Err(error) => alloc_invalid_utf8_result(ctx, error.utf8_error().valid_up_to(), builtin),
     }
 }
 
@@ -217,20 +217,24 @@ fn alloc_valid_utf8_result(
 
 fn alloc_invalid_utf8_result(
     ctx: &mut VmCtx<'_, '_>,
-    message: &str,
+    offset: usize,
     builtin: &str,
 ) -> Result<Value, RuntimeError> {
     let invalid_tag =
-        ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeIoErrorInvalidUtf8, 1, builtin)?;
+        ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeUtf8ErrorInvalid, 1, builtin)?;
     let result_tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeEitherLeft, 1, builtin)?;
+    let offset = i64::try_from(offset)
+        .map_err(|_out_of_range| RuntimeError::builtin("UTF-8 offset exceeds Int".to_string()))?;
     let checkpoint = ctx.interpreter.process.temporary_roots.len();
-    let message = ctx.alloc_str(message);
-    ctx.interpreter.process.temporary_roots.push(message);
+    ctx.interpreter
+        .process
+        .temporary_roots
+        .push(Value::Int(offset));
     ctx.interpreter.safe_point();
-    let message = temporary_root(ctx, checkpoint, builtin, "error");
+    let offset = temporary_root(ctx, checkpoint, builtin, "error offset");
     let invalid = ctx.interpreter.heap.alloc(HeapObject::Data1 {
         tag: invalid_tag,
-        field: message,
+        field: offset,
     });
     let root = ctx
         .interpreter
@@ -240,7 +244,7 @@ fn alloc_invalid_utf8_result(
         .unwrap_or_else(|| solveig_base::ice!("{builtin} error root vanished"));
     *root = invalid;
     ctx.interpreter.safe_point();
-    let invalid = temporary_root(ctx, checkpoint, builtin, "IOError");
+    let invalid = temporary_root(ctx, checkpoint, builtin, "Utf8Error");
     let result = ctx.interpreter.heap.alloc(HeapObject::Data1 {
         tag: result_tag,
         field: invalid,

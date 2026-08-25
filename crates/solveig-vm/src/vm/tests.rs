@@ -395,27 +395,27 @@ fn raised_defect_value_survives_collection() {
 
 #[test]
 fn host_io_failure_becomes_the_matching_typed_error_constructor() {
-    const STDOUT_ERROR_TAG: u16 = 2;
-    const STDIN_ERROR_TAG: u16 = 3;
+    const OTHER_ERROR_TAG: u16 = 2;
+    const HOST_ERROR_TAG: u16 = 3;
     let program = program_with_ctors(
         vec![global("main", int(0))],
         Vec::new(),
         &[
             ctor_spec(
                 CtorId(300),
-                CtorRuntimeRole::PreludeIoErrorStdout,
-                "prelude.builtins.StdoutError",
-                "StdoutError",
-                STDOUT_ERROR_TAG,
-                1,
+                CtorRuntimeRole::PreludeHostOtherError,
+                "prelude.builtins.OtherError",
+                "OtherError",
+                OTHER_ERROR_TAG,
+                0,
             ),
             ctor_spec(
                 CtorId(301),
-                CtorRuntimeRole::PreludeIoErrorStdin,
-                "prelude.builtins.StdinError",
-                "StdinError",
-                STDIN_ERROR_TAG,
-                1,
+                CtorRuntimeRole::PreludeHostError,
+                "prelude.builtins.HostError",
+                "HostError",
+                HOST_ERROR_TAG,
+                3,
             ),
         ],
     );
@@ -434,13 +434,31 @@ fn host_io_failure_becomes_the_matching_typed_error_constructor() {
     let HeapObject::IoAction(IoAction::Fail(Value::Obj(error))) = runtime.heap.get(action) else {
         solveig_base::ice!("stdout failure did not become a failed IO action");
     };
-    let HeapObject::Data1 { tag, field } = runtime.heap.get(*error) else {
-        solveig_base::ice!("stdout failure did not use its unary IOError constructor");
+    let HeapObject::DataN { tag, fields } = *runtime.heap.get(*error) else {
+        solveig_base::ice!("stdout failure did not use HostError");
     };
-    assert_eq!(*tag, STDOUT_ERROR_TAG);
-    let Value::Obj(message) = field else {
-        solveig_base::ice!("stdout error message was not a heap string");
+    assert_eq!(tag, HOST_ERROR_TAG);
+    let [Value::Obj(kind), Value::Obj(operation), Value::Obj(message)] =
+        runtime.heap.payload_slice(*error, fields)
+    else {
+        solveig_base::ice!("HostError did not have kind, operation, and message fields");
     };
+    assert!(matches!(
+        runtime.heap.get(*kind),
+        HeapObject::Data0 {
+            tag: OTHER_ERROR_TAG
+        }
+    ));
+    let HeapObject::Str {
+        bytes: operation_bytes,
+    } = runtime.heap.get(*operation)
+    else {
+        solveig_base::ice!("HostError operation was not represented as String");
+    };
+    assert_eq!(
+        runtime.heap.str_value(*operation, *operation_bytes),
+        "print"
+    );
     let HeapObject::Str { bytes } = runtime.heap.get(*message) else {
         solveig_base::ice!("stdout error message was not represented as String");
     };
@@ -457,10 +475,35 @@ fn host_io_failure_becomes_the_matching_typed_error_constructor() {
     let HeapObject::IoAction(IoAction::Fail(Value::Obj(error))) = runtime.heap.get(action) else {
         solveig_base::ice!("stdin failure did not become a failed IO action");
     };
-    let HeapObject::Data1 { tag, .. } = runtime.heap.get(*error) else {
-        solveig_base::ice!("stdin failure did not use its unary IOError constructor");
+    let HeapObject::DataN { tag, fields } = *runtime.heap.get(*error) else {
+        solveig_base::ice!("stdin failure did not use HostError");
     };
-    assert_eq!(*tag, STDIN_ERROR_TAG);
+    assert_eq!(tag, HOST_ERROR_TAG);
+    let [Value::Obj(kind), Value::Obj(operation), Value::Obj(message)] =
+        runtime.heap.payload_slice(*error, fields)
+    else {
+        solveig_base::ice!("HostError did not have kind, operation, and message fields");
+    };
+    assert!(matches!(
+        runtime.heap.get(*kind),
+        HeapObject::Data0 {
+            tag: OTHER_ERROR_TAG
+        }
+    ));
+    let HeapObject::Str {
+        bytes: operation_bytes,
+    } = runtime.heap.get(*operation)
+    else {
+        solveig_base::ice!("HostError operation was not represented as String");
+    };
+    assert_eq!(
+        runtime.heap.str_value(*operation, *operation_bytes),
+        "readLine"
+    );
+    let HeapObject::Str { bytes } = runtime.heap.get(*message) else {
+        solveig_base::ice!("stdin error message was not represented as String");
+    };
+    assert_eq!(runtime.heap.str_value(*message, *bytes), "unreadable");
 }
 
 #[test]
@@ -1521,7 +1564,7 @@ fn bytes_to_string_preserves_invalid_utf8_as_an_either_error() {
         &[
             ctor_spec(
                 CtorId(200),
-                CtorRuntimeRole::PreludeIoErrorInvalidUtf8,
+                CtorRuntimeRole::PreludeUtf8ErrorInvalid,
                 "prelude.builtins.InvalidUtf8",
                 "InvalidUtf8",
                 INVALID_UTF8_TAG,
@@ -1570,7 +1613,7 @@ fn bytes_to_string_preserves_invalid_utf8_as_an_either_error() {
         runtime.heap.get(error_id),
         HeapObject::Data1 {
             tag: INVALID_UTF8_TAG,
-            field: Value::Obj(_)
+            field: Value::Int(0)
         }
     ));
 }

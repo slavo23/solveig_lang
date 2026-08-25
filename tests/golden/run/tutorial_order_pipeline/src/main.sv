@@ -28,7 +28,7 @@ worker jobs results =
         (workerStep jobs results)
         (fun error =>
             case error of
-                ChannelClosed => pureIO ()
+                HostError ResourceVanished _ _ => pureIO ()
                 | other => failIO other)
 
 workerStep : Chan Order -> Chan Fulfilment -> Task ()

@@ -320,51 +320,32 @@ pub const COMPILER_FALSE_NAME: &str = "prelude.builtins.False";
 pub const PRELUDE_MAYBE_NAME: &str = "prelude.builtins.Maybe";
 pub const PRELUDE_MAYBE_JUST_NAME: &str = "prelude.builtins.Just";
 pub const PRELUDE_MAYBE_NOTHING_NAME: &str = "prelude.builtins.Nothing";
-pub const PRELUDE_IO_ERROR_NAME: &str = "prelude.builtins.IOError";
-pub const PRELUDE_IO_ERROR_STDOUT_NAME: &str = "prelude.builtins.StdoutError";
-pub const PRELUDE_IO_ERROR_STDIN_NAME: &str = "prelude.builtins.StdinError";
-pub const PRELUDE_IO_ERROR_READ_FILE_NAME: &str = "prelude.builtins.ReadFileError";
-pub const PRELUDE_IO_ERROR_WRITE_FILE_NAME: &str = "prelude.builtins.WriteFileError";
-pub const PRELUDE_IO_ERROR_APPEND_FILE_NAME: &str = "prelude.builtins.AppendFileError";
-pub const PRELUDE_IO_ERROR_CHANNEL_CLOSED_NAME: &str = "prelude.builtins.ChannelClosed";
-pub const PRELUDE_IO_ERROR_INVALID_UTF8_NAME: &str = "prelude.builtins.InvalidUtf8";
-pub const PRELUDE_IO_ERROR_RESOLVE_HOST_NAME: &str = "prelude.builtins.ResolveHostError";
-pub const PRELUDE_IO_ERROR_CONNECT_NAME: &str = "prelude.builtins.ConnectError";
-pub const PRELUDE_IO_ERROR_LISTEN_NAME: &str = "prelude.builtins.ListenError";
-pub const PRELUDE_IO_ERROR_ACCEPT_NAME: &str = "prelude.builtins.AcceptError";
-pub const PRELUDE_IO_ERROR_SEND_NAME: &str = "prelude.builtins.SendError";
-pub const PRELUDE_IO_ERROR_RECV_NAME: &str = "prelude.builtins.RecvError";
-pub const PRELUDE_IO_ERROR_CLOSE_SOCKET_NAME: &str = "prelude.builtins.CloseSocketError";
-pub const PRELUDE_IO_ERROR_OPEN_HANDLE_NAME: &str = "prelude.builtins.OpenHandleError";
-pub const PRELUDE_IO_ERROR_CLOSE_HANDLE_NAME: &str = "prelude.builtins.CloseHandleError";
-pub const PRELUDE_IO_ERROR_FLUSH_HANDLE_NAME: &str = "prelude.builtins.FlushHandleError";
-pub const PRELUDE_IO_ERROR_READ_HANDLE_NAME: &str = "prelude.builtins.ReadHandleError";
-pub const PRELUDE_IO_ERROR_WRITE_HANDLE_NAME: &str = "prelude.builtins.WriteHandleError";
-pub const PRELUDE_IO_ERROR_SET_BUFFERING_NAME: &str = "prelude.builtins.SetBufferingError";
-pub const PRELUDE_IO_ERROR_GET_ENV_NAME: &str = "prelude.builtins.GetEnvError";
-pub const PRELUDE_IO_ERROR_SET_ENV_NAME: &str = "prelude.builtins.SetEnvError";
-pub const PRELUDE_IO_ERROR_GET_CURRENT_DIRECTORY_NAME: &str =
-    "prelude.builtins.GetCurrentDirectoryError";
-pub const PRELUDE_IO_ERROR_SET_CURRENT_DIRECTORY_NAME: &str =
-    "prelude.builtins.SetCurrentDirectoryError";
-pub const PRELUDE_IO_ERROR_DOES_FILE_EXIST_NAME: &str = "prelude.builtins.DoesFileExistError";
-pub const PRELUDE_IO_ERROR_DOES_DIRECTORY_EXIST_NAME: &str =
-    "prelude.builtins.DoesDirectoryExistError";
-pub const PRELUDE_IO_ERROR_LIST_DIRECTORY_NAME: &str = "prelude.builtins.ListDirectoryError";
-pub const PRELUDE_IO_ERROR_CREATE_DIRECTORY_NAME: &str = "prelude.builtins.CreateDirectoryError";
-pub const PRELUDE_IO_ERROR_REMOVE_FILE_NAME: &str = "prelude.builtins.RemoveFileError";
-pub const PRELUDE_IO_ERROR_RENAME_FILE_NAME: &str = "prelude.builtins.RenameFileError";
-pub const PRELUDE_IO_ERROR_GET_FILE_SIZE_NAME: &str = "prelude.builtins.GetFileSizeError";
-pub const PRELUDE_IO_ERROR_GET_MODIFICATION_TIME_NAME: &str =
-    "prelude.builtins.GetModificationTimeError";
-pub const PRELUDE_IO_ERROR_RUN_PROCESS_NAME: &str = "prelude.builtins.RunProcessError";
-pub const PRELUDE_IO_ERROR_HTTP_TRANSPORT_NAME: &str = "prelude.builtins.HttpTransportError";
-pub const PRELUDE_IO_ERROR_HTTP_TLS_NAME: &str = "prelude.builtins.HttpTlsError";
-pub const PRELUDE_IO_ERROR_HTTP_TIMEOUT_NAME: &str = "prelude.builtins.HttpTimeoutError";
-pub const PRELUDE_IO_ERROR_HTTP_REDIRECT_NAME: &str = "prelude.builtins.HttpRedirectError";
-pub const PRELUDE_IO_ERROR_HTTP_HEADERS_TOO_LARGE_NAME: &str =
-    "prelude.builtins.HttpHeadersTooLarge";
-pub const PRELUDE_IO_ERROR_HTTP_BODY_TOO_LARGE_NAME: &str = "prelude.builtins.HttpBodyTooLarge";
+pub const PRELUDE_HOST_ERROR_NAME: &str = "prelude.builtins.HostError";
+pub const PRELUDE_HOST_ERROR_CTOR_NAME: &str = "prelude.builtins.HostError";
+pub const PRELUDE_HOST_ERROR_KIND_ALREADY_EXISTS_NAME: &str = "prelude.builtins.AlreadyExists";
+pub const PRELUDE_HOST_ERROR_KIND_DOES_NOT_EXIST_NAME: &str = "prelude.builtins.DoesNotExist";
+pub const PRELUDE_HOST_ERROR_KIND_PERMISSION_DENIED_NAME: &str =
+    "prelude.builtins.PermissionDenied";
+pub const PRELUDE_HOST_ERROR_KIND_RESOURCE_BUSY_NAME: &str = "prelude.builtins.ResourceBusy";
+pub const PRELUDE_HOST_ERROR_KIND_RESOURCE_EXHAUSTED_NAME: &str =
+    "prelude.builtins.ResourceExhausted";
+pub const PRELUDE_HOST_ERROR_KIND_END_OF_FILE_NAME: &str = "prelude.builtins.EndOfFile";
+pub const PRELUDE_HOST_ERROR_KIND_INVALID_ARGUMENT_NAME: &str = "prelude.builtins.InvalidArgument";
+pub const PRELUDE_HOST_ERROR_KIND_UNSUPPORTED_OPERATION_NAME: &str =
+    "prelude.builtins.UnsupportedOperation";
+pub const PRELUDE_HOST_ERROR_KIND_TIME_EXPIRED_NAME: &str = "prelude.builtins.TimeExpired";
+pub const PRELUDE_HOST_ERROR_KIND_RESOURCE_VANISHED_NAME: &str =
+    "prelude.builtins.ResourceVanished";
+pub const PRELUDE_HOST_ERROR_KIND_INTERRUPTED_NAME: &str = "prelude.builtins.Interrupted";
+pub const PRELUDE_HOST_ERROR_KIND_NETWORK_UNREACHABLE_NAME: &str =
+    "prelude.builtins.NetworkUnreachable";
+pub const PRELUDE_HOST_ERROR_KIND_CONNECTION_REFUSED_NAME: &str =
+    "prelude.builtins.ConnectionRefused";
+pub const PRELUDE_HOST_ERROR_KIND_ADDRESS_IN_USE_NAME: &str = "prelude.builtins.AddressInUse";
+pub const PRELUDE_HOST_ERROR_KIND_PROTOCOL_ERROR_NAME: &str = "prelude.builtins.ProtocolError";
+pub const PRELUDE_HOST_ERROR_KIND_OTHER_ERROR_NAME: &str = "prelude.builtins.OtherError";
+pub const PRELUDE_UTF8_ERROR_NAME: &str = "prelude.builtins.Utf8Error";
+pub const PRELUDE_UTF8_ERROR_INVALID_NAME: &str = "prelude.builtins.InvalidUtf8";
 pub const STD_PROCESS_RESULT_NAME: &str = "std.process.ProcessResult";
 pub const STD_PROCESS_RESULT_CTOR_NAME: &str = "std.process.MkProcessResult";
 pub const STD_IO_MODE_NAME: &str = "std.io.IOMode";

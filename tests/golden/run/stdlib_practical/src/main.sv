@@ -54,22 +54,40 @@ parseWorkers text =
             workersParser
             (std.parser.textInput (std.text.trimAscii text)))
 
-httpAsIOError : std.http.HttpError -> IOError
-httpAsIOError (HttpIoError ioError) = ioError
-httpAsIOError (InvalidUrl _) = HttpTransportError "invalid URL"
-httpAsIOError (InvalidHeaderName _) = HttpTransportError "invalid header name"
-httpAsIOError (InvalidHeaderValue _) = HttpTransportError "invalid header value"
-httpAsIOError (InvalidHttpLimit _ _) = HttpTransportError "invalid HTTP limit"
+httpAsHostError : std.http.HttpError -> HostError
+httpAsHostError (HttpHostError hostError) = hostError
+httpAsHostError error = HostError InvalidArgument "HTTP" (show error)
+
+netToHost : std.net.NetError -> HostError
+netToHost (std.net.NetHostError _ hostError) = hostError
+
+acceptTask : Socket -> Task Socket
+acceptTask listener = mapError netToHost (std.net.accept listener)
+
+recvBytesTask : Socket -> Int -> Task Bytes
+recvBytesTask socket maximum = mapError netToHost (std.net.recvBytes socket maximum)
+
+sendBytesTask : Socket -> Bytes -> Task ()
+sendBytesTask socket bytes = mapError netToHost (std.net.sendBytes socket bytes)
+
+closeSocketTask : Socket -> Task ()
+closeSocketTask socket = mapError netToHost (std.net.closeSocket socket)
+
+listenTask : Int -> Task (Socket, Int)
+listenTask port = mapError netToHost (std.net.listen port)
 
 serveOnce : Socket -> Task ()
 serveOnce listener =
-    std.net.withAcceptedConnection listener (fun connection => do
-        _ <- std.net.recvBytes connection 4096
-        std.net.sendBytes connection (std.bytes.stringToBytes fixtureResponse))
+    bracket
+        (acceptTask listener)
+        closeSocketTask
+        (fun connection => do
+            _ <- recvBytesTask connection 4096
+            sendBytesTask connection (std.bytes.stringToBytes fixtureResponse))
 
 withFixture : forall a. (String -> Task a) -> Task a
 withFixture action =
-    std.net.withListener 0 (fun listenerInfo =>
+    bracket (listenTask 0) (fun (listener, _) => closeSocketTask listener) (fun listenerInfo =>
         case listenerInfo of
             (listener, port) =>
                 std.task.withThread
@@ -78,7 +96,7 @@ withFixture action =
 
 fetchNames : String -> Task (Either std.testing.TestFailure (Int, (std.vector.Vector String)))
 fetchNames base = do
-    response <- mapError httpAsIOError (std.http.fetch (base <> "/names"))
+    response <- mapError httpAsHostError (std.http.fetch (base <> "/names"))
     let status = std.http.statusCode (std.http.responseStatus response)
     pureIO
         (std.parser.foldReply
@@ -114,7 +132,7 @@ invalidUrlIsTyped =
 
 resultOrExit : Either std.testing.TestFailure a -> Task a
 resultOrExit (Right value) = pureIO value
-resultOrExit (Left failure) = error (std.testing.failureMessage failure)
+resultOrExit (Left failure) = error (show failure)
 
 isNothing : Maybe a -> Bool
 isNothing Nothing = True

@@ -1,8 +1,8 @@
 import std.thread(*)
 import std.channel(*)
 
-closedRecv : IOError -> Task Int
-closedRecv ChannelClosed = pureIO 42
+closedRecv : HostError -> Task Int
+closedRecv (HostError ResourceVanished _ _) = pureIO 42
 closedRecv _ = pureIO (-1)
 
 waiter : Chan Int -> Chan () -> Chan Int -> Task ()

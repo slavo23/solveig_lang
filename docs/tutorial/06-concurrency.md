@@ -76,7 +76,7 @@ For a list of independent `Task` operations, use
 `mapConcurrentlyBounded`:
 
 ```solveig
-import std.task(mapConcurrentlyBounded)
+import std.task(concurrentHostError, mapConcurrentlyBounded)
 import std.time(sleep)
 
 process : Int -> Task Int
@@ -86,7 +86,7 @@ process value = do
 
 main : Task ()
 main = do
-    results <- mapConcurrentlyBounded 3 process [1, 2, 3, 4]
+    results <- mapError concurrentHostError (mapConcurrentlyBounded 3 process [1, 2, 3, 4])
     printLine ("results: " <> show results)
 ```
 
@@ -101,8 +101,11 @@ Choose it from the capacity of the external service, file descriptor budget,
 and workload measurements—not from list length alone.
 
 When any operation fails, the pool stops and its scoped workers are cancelled
-and joined. An invalid non-positive capacity fails with
-`InvalidChannelCapacity`.
+and joined. The generic result distinguishes `ConcurrentWorker workerError`
+from `ConcurrentInfrastructure hostError`. The example explicitly collapses
+that distinction because both its workers and `main` use `HostError`. An
+invalid non-positive capacity is `ConcurrentInfrastructure (HostError
+InvalidArgument ...)`.
 
 ## Explicit thread scopes
 

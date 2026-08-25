@@ -51,7 +51,44 @@ data HttpError =
   | InvalidHeaderName String
   | InvalidHeaderValue String
   | InvalidHttpLimit String Int
-  | HttpIoError IOError
+  | TransportError HostError
+  | TlsError HostError
+  | RedirectError HostError
+  | ResponseHeadersTooLarge Int
+  | ResponseBodyTooLarge Int
+  | HttpHostError HostError
+  | InvalidResponseUtf8 Utf8Error
+
+instance Eq HttpError where
+    (==) (InvalidUrl left) (InvalidUrl right) = left == right
+    (==) (InvalidHeaderName left) (InvalidHeaderName right) = left == right
+    (==) (InvalidHeaderValue left) (InvalidHeaderValue right) = left == right
+    (==) (InvalidHttpLimit leftName leftValue) (InvalidHttpLimit rightName rightValue) =
+        and (leftName == rightName) (leftValue == rightValue)
+    (==) (TransportError left) (TransportError right) = left == right
+    (==) (TlsError left) (TlsError right) = left == right
+    (==) (RedirectError left) (RedirectError right) = left == right
+    (==) (ResponseHeadersTooLarge left) (ResponseHeadersTooLarge right) = left == right
+    (==) (ResponseBodyTooLarge left) (ResponseBodyTooLarge right) = left == right
+    (==) (HttpHostError left) (HttpHostError right) = left == right
+    (==) (InvalidResponseUtf8 left) (InvalidResponseUtf8 right) = left == right
+    (==) _ _ = False
+
+instance Show HttpError where
+    show (InvalidUrl spelling) = "invalid URL " <> show spelling
+    show (InvalidHeaderName name) = "invalid HTTP header name " <> show name
+    show (InvalidHeaderValue value) = "invalid HTTP header value " <> show value
+    show (InvalidHttpLimit name value) =
+        "invalid HTTP " <> name <> " limit " <> show value
+    show (TransportError hostError) = "HTTP transport: " <> show hostError
+    show (TlsError hostError) = "HTTP TLS: " <> show hostError
+    show (RedirectError hostError) = "HTTP redirect: " <> show hostError
+    show (ResponseHeadersTooLarge maximum) =
+        "HTTP response headers exceed " <> show maximum <> " bytes"
+    show (ResponseBodyTooLarge maximum) =
+        "HTTP response body exceeds " <> show maximum <> " bytes"
+    show (HttpHostError hostError) = "HTTP: " <> show hostError
+    show (InvalidResponseUtf8 utf8Error) = "HTTP response: " <> show utf8Error
 
 -- | Practical defaults: 64 KiB headers, 8 MiB body, 15 seconds, five redirects.
 defaultHttpLimits : HttpLimits
@@ -143,7 +180,7 @@ withoutBody (Request method url headers _) =
 -- | Performs one bounded request without blocking other Solveig green threads.
 -- |
 -- | 4xx and 5xx statuses are returned normally. Transport, TLS, timeout,
--- | redirect, and response-limit failures are returned as HttpIoError.
+-- | redirect, and response-limit failures are returned as HttpHostError.
 request : HttpLimits -> Request -> IO HttpError Response
 request limits requestValue =
     case validateRequest limits requestValue of
@@ -153,10 +190,20 @@ request limits requestValue =
                 HttpLimits maximumHeaders maximumBody timeout redirects =>
                     fmap
                         responseFromRaw
-                        (mapError HttpIoError
+                        (mapError (httpHostError limits)
                             (prelude.prim.httpRequestRaw
                                 (methodText method, url, map headerToRaw headers, body)
                                 (maximumHeaders, maximumBody, timeout, redirectCount redirects)))
+
+httpHostError : HttpLimits -> HostError -> HttpError
+httpHostError (HttpLimits maximumHeaders maximumBody _ _) hostError =
+    case hostErrorOperation hostError of
+        "httpTransport" => TransportError hostError
+        | "httpTls" => TlsError hostError
+        | "httpRedirect" => RedirectError hostError
+        | "httpResponseHeaders" => ResponseHeadersTooLarge maximumHeaders
+        | "httpResponseBody" => ResponseBodyTooLarge maximumBody
+        | _ => HttpHostError hostError
 
 responseFromRaw : (Int, [(String, String)], Bytes) -> Response
 responseFromRaw (code, rawHeaders, body) =
@@ -207,7 +254,7 @@ responseText : Response -> Either HttpError String
 responseText response =
     case std.bytes.bytesToString (responseBody response) of
         Right text => Right text
-        | Left error => Left (HttpIoError error)
+        | Left error => Left (InvalidResponseUtf8 error)
 
 -- | Splits the bounded body into chunks no larger than the requested size.
 -- |

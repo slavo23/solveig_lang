@@ -1,6 +1,6 @@
 # Input and output
 
-Solveig's `Task a` is `IO IOError a`: an inert description that the runtime
+Solveig's `Task a` is `IO HostError a`: an inert description that the runtime
 performs when it runs `main`. Blocking file and standard-input operations run
 on the bounded IO worker pool, so a blocked handle does not block lightweight
 threads or the scheduler. Open files are distributed across that pool and all
@@ -30,7 +30,7 @@ construct one. Handles are not heap objects.
 
 **GC never closes a handle.** Use `withFile` for normal code, or call `hClose`
 explicitly when ownership must cross a larger scope. `withFile` is defined via
-`bracket`, so it closes after success, a typed `IOError`, a defect, or thread
+`bracket`, so it closes after success, a typed error, a defect, or thread
 interruption:
 
 ```solveig
@@ -44,8 +44,8 @@ copyText source destination =
             hPutStr output contents))
 ```
 
-Using a closed handle raises the error for the attempted operation, such as
-`ReadHandleError`, `WriteHandleError`, or `FlushHandleError`. Handle identities
+Using a closed handle raises `HostError ResourceVanished` with the attempted
+operation recorded in `hostErrorOperation`. Handle identities
 are not reused within a runtime, so a stale identity cannot alias a later file.
 
 ## Opening and closing
@@ -147,8 +147,8 @@ printStr : String -> Task ()
 `printLine` uses `hPutStrLn stdout`. `printStr` uses
 `hPutStr stdout` and then flushes, preserving its practical prompt-writing
 behavior regardless of redirection. Direct `hPutStr` calls retain full control
-over buffering. Failures use `ReadHandleError` or `WriteHandleError`, including
-when the corresponding standard handle was explicitly closed.
+over buffering. Failures use `HostError`; its operation distinguishes reads,
+writes, and flushes, including when a standard handle was explicitly closed.
 
 ## Whole-file text input
 
@@ -160,8 +160,8 @@ readFileLimited : String -> Int -> Task String
 Both operations strictly decode UTF-8 before succeeding. `readFile` has no
 library size bound and should be used only when the complete input comfortably
 fits memory. `readFileLimited path maximum` counts encoded bytes, reads at most
-`maximum + 1`, and raises `ReadFileError path message` when the input is larger
-or the maximum is invalid. This is a runtime-enforced bound, not a metadata
+`maximum + 1`, and raises `HostError ResourceExhausted` when the input is larger
+or `HostError InvalidArgument` when the maximum is invalid. This is a runtime-enforced bound, not a metadata
 pre-check that can race with file growth.
 
 ## Byte input and output
@@ -177,32 +177,32 @@ hPutBytes : Handle -> Bytes -> Task ()
 These operations transfer arbitrary bytes without encoding or newline
 translation. `readFileBytes` strictly reads and allocates the entire file with
 no library size bound. `readFileBytesLimited path maximum` reads at most the
-non-negative byte limit and raises `ReadFileError path message` if the file has
+non-negative byte limit and raises `HostError ResourceExhausted` if the file has
 even one more byte; the runtime reads no more than `maximum + 1` bytes to make
 that decision, so it does not rely on racy file metadata. A negative or
-host-unrepresentable maximum also raises `ReadFileError`.
+host-unrepresentable maximum also raises `HostError InvalidArgument`.
 
 `writeFileBytes` creates or replaces a file just like `writeFile`, but writes
-the supplied bytes unchanged. They bypass handle buffering and raise
-`ReadFileError path message` or `WriteFileError path message` on host failure.
+the supplied bytes unchanged. They bypass handle buffering and raise a
+`HostError` carrying `readFileBytes` or `writeFileBytes` as its operation.
 
 `hGetBytes handle maximum` reads at most the non-negative `maximum`. It returns
 fewer bytes at EOF and returns empty bytes when called at EOF or with zero.
 Regular files fill the requested count unless EOF is reached; `stdin` may
 return a shorter chunk when that is what the embedding host stream makes
 available. A negative or host-unrepresentable maximum, a non-readable or
-closed handle, and host failures raise `ReadHandleError message`.
+closed handle, and host failures raise `HostError` with operation `hGetBytes`.
 
 `hPutBytes` uses precisely the same buffer as text output. Under line
 buffering, a byte value `10` triggers a flush; block-buffer sizes count bytes.
 Success means the bytes reached the language buffer, so use `hFlush` when the
 host must observe them immediately. A non-writable or closed handle and host
-failures raise `WriteHandleError message`.
+failures raise `HostError` with operation `hPutBytes`.
 
 Text and byte operations can be mixed on one handle without changing its
 logical position. Text input still decodes strictly: invalid UTF-8 raises the
 operation's read error. Byte input never decodes. Convert explicitly with
-`bytesToString`; it returns `Left (InvalidUtf8 message)` rather than panicking or
+`bytesToString`; it returns `Left (InvalidUtf8 byteOffset)` rather than panicking or
 replacing malformed input.
 
 ## Environment and program identity
@@ -390,7 +390,8 @@ bits to a parent process.
 ## Platform notes
 
 File sharing and permission errors retain the host operating system's message
-inside the operation-specific `IOError`, so wording differs by platform.
+inside `HostError`, so wording differs by platform. Match `HostErrorKind`, not
+that platform message, when control flow depends on the cause.
 `ReadWriteMode` does not request file creation on any platform. Files are opened
 in binary host mode and Solveig performs UTF-8 decoding and newline handling,
 which keeps text and byte writes consistent across Unix and Windows. Paths
