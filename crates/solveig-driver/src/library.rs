@@ -29,6 +29,7 @@ const STD_LIST_SRC: &str = include_str!("../../../lib/std/src/std/list.sv");
 const STD_MAP_SRC: &str = include_str!("../../../lib/std/src/std/map.sv");
 const STD_NET_SRC: &str = include_str!("../../../lib/std/src/std/net.sv");
 const STD_PARSER_SRC: &str = include_str!("../../../lib/std/src/std/parser.sv");
+const STD_PATH_SRC: &str = include_str!("../../../lib/std/src/std/path.sv");
 const STD_PROCESS_SRC: &str = include_str!("../../../lib/std/src/std/process.sv");
 const STD_RANDOM_SRC: &str = include_str!("../../../lib/std/src/std/random.sv");
 const STD_QUEUE_SRC: &str = include_str!("../../../lib/std/src/std/queue.sv");
@@ -68,6 +69,7 @@ pub(crate) fn embedded_library_source(module: &str) -> Option<&'static str> {
         "std.map" => Some(STD_MAP_SRC),
         "std.net" => Some(STD_NET_SRC),
         "std.parser" => Some(STD_PARSER_SRC),
+        "std.path" => Some(STD_PATH_SRC),
         "std.process" => Some(STD_PROCESS_SRC),
         "std.random" => Some(STD_RANDOM_SRC),
         "std.queue" => Some(STD_QUEUE_SRC),
@@ -114,6 +116,7 @@ pub(crate) fn embedded_library_modules(package: &str) -> &'static [&'static str]
             "std/map.sv",
             "std/net.sv",
             "std/parser.sv",
+            "std/path.sv",
             "std/process.sv",
             "std/random.sv",
             "std/queue.sv",

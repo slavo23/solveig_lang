@@ -34,7 +34,7 @@ main = do
     recv ready
     finally
         (catchDefect
-            (catchError (exitWith 23) ignoreError)
+            (catchError (exitWith (exitCodeFromInt 23)) ignoreError)
             ignoreDefect)
         (printLine "main cleanup")
     printLine "unreachable"

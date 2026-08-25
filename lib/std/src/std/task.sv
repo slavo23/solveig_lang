@@ -7,7 +7,7 @@ import prelude.prim(catchDefectIO, maskIO, finallyIO, restoreMaskIO, raiseDefect
 import std.channel(*)
 import std.list(*)
 import std.map(*)
-import std.time(sleep)
+import std.time(Duration, sleep)
 import std.thread(spawn, killThread)
 
 -- | Distinguishes a pool/channel failure from a failure returned by one worker.
@@ -222,16 +222,16 @@ concurrently left right =
                                                 | (Right rightValue, Right duplicate) =>
                                                     error "structured child sent more than one outcome"))))))
 
--- | Runs an action until its millisecond deadline and returns Nothing on expiry.
+-- | Runs an action until its deadline and returns Nothing on expiry.
 -- This is the timer-specialized form of Control.Concurrent.Async's `race`, so
 -- the losing action is cancelled through the same scoped-child protocol:
 -- https://hackage.haskell.org/package/async/docs/Control-Concurrent-Async.html#v:race
-timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
-timeout milliseconds action =
+timeout : forall e a. Duration -> IO e a -> IO e (Maybe a)
+timeout duration action =
     bindIO
         (race
             (catchError
-                (bindIO (sleep milliseconds) (fun elapsed => pureIO Nothing))
+                (bindIO (sleep duration) (fun elapsed => pureIO Nothing))
                 (fun timerError =>
                     error "structured concurrency timer failed"))
             (bindIO action (fun value => pureIO (Just value))))

@@ -250,9 +250,9 @@ std.env.getEnv : String -> IO HostError (Maybe String)
 std.env.getEnvOr : String -> String -> IO HostError String
 std.env.getEnvironment : IO HostError [(String, String)]
 std.env.getProgName : IO HostError String
-std.env.loadEnvFile : String -> IO EnvError ()
-std.env.loadEnvFileIfExists : String -> IO EnvError Bool
-std.env.loadEnvFileLimited : String -> Int -> IO EnvError ()
+std.env.loadEnvFile : Path -> IO EnvError ()
+std.env.loadEnvFileIfExists : Path -> IO EnvError Bool
+std.env.loadEnvFileLimited : Path -> Int -> IO EnvError ()
 std.env.parseEnvFile : String -> Either EnvError [(String, String)]
 std.env.parseEnvLines : [String] -> Int -> Map String () -> [(String, String)] -> Either EnvError [(String, String)]
 std.env.quotedEnvValue : Int -> Char -> [Char] -> Either EnvError String
@@ -261,17 +261,17 @@ std.env.setEnv : String -> String -> IO HostError ()
 std.env.setMissingEntries : [(String, String)] -> IO EnvError ()
 std.env.validEnvName : String -> Bool
 std.env.validEnvNameStart : Char -> Bool
-std.fs.atPath : forall a. String -> IO HostError a -> IO FsError a
-std.fs.createDirectory : String -> IO FsError ()
-std.fs.doesDirectoryExist : String -> IO FsError Bool
-std.fs.doesFileExist : String -> IO FsError Bool
-std.fs.getCurrentDirectory : IO FsError String
-std.fs.getFileSize : String -> IO FsError Int
-std.fs.getModificationTime : String -> IO FsError Int
-std.fs.listDirectory : String -> IO FsError [String]
-std.fs.removeFile : String -> IO FsError ()
-std.fs.renameFile : String -> String -> IO FsError ()
-std.fs.setCurrentDirectory : String -> IO FsError ()
+std.fs.atPath : forall a. Path -> IO HostError a -> IO FsError a
+std.fs.createDirectory : Path -> IO FsError ()
+std.fs.doesDirectoryExist : Path -> IO FsError Bool
+std.fs.doesFileExist : Path -> IO FsError Bool
+std.fs.getCurrentDirectory : IO FsError Path
+std.fs.getFileSize : Path -> IO FsError Int
+std.fs.getModificationTime : Path -> IO FsError SystemTime
+std.fs.listDirectory : Path -> IO FsError [Path]
+std.fs.removeFile : Path -> IO FsError ()
+std.fs.renameFile : Path -> Path -> IO FsError ()
+std.fs.setCurrentDirectory : Path -> IO FsError ()
 std.http.allHeaderNameChars : [Char] -> Bool
 std.http.asciiCharsEqual : [Char] -> [Char] -> Bool
 std.http.asciiCode : Char -> Int
@@ -292,17 +292,28 @@ std.http.getUrl : Url -> IO HttpError Response
 std.http.head : Url -> Request
 std.http.header : String -> String -> Either HttpError Header
 std.http.headerFromRaw : (String, String) -> Header
+std.http.headerName : Header -> String
 std.http.headerToRaw : Header -> (String, String)
+std.http.headerValue : Header -> String
 std.http.headersFromList : [(String, String)] -> Either HttpError [Header]
 std.http.httpHostError : HttpLimits -> HostError -> HttpError
+std.http.httpTimeout : HttpLimits -> Duration
 std.http.isHeaderNameChar : Char -> Bool
 std.http.isSuccessful : Status -> Bool
+std.http.maximumBodyBytes : HttpLimits -> Int
+std.http.maximumHeaderBytes : HttpLimits -> Int
 std.http.methodText : Method -> String
 std.http.patch : Url -> Request
 std.http.post : Url -> Request
 std.http.put : Url -> Request
 std.http.redirectCount : RedirectPolicy -> Int
+std.http.redirectPolicy : HttpLimits -> RedirectPolicy
 std.http.request : HttpLimits -> Request -> IO HttpError Response
+std.http.requestBody : Request -> Maybe Bytes
+std.http.requestHeaders : Request -> [Header]
+std.http.requestMethod : Request -> Method
+std.http.requestUrl : Request -> Url
+std.http.response : Status -> [Header] -> Bytes -> Response
 std.http.responseBody : Response -> Bytes
 std.http.responseFromRaw : (Int, [(String, String)], Bytes) -> Response
 std.http.responseHeaders : Response -> [Header]
@@ -310,6 +321,7 @@ std.http.responseStatus : Response -> Status
 std.http.responseText : Response -> Either HttpError String
 std.http.send : Request -> IO HttpError Response
 std.http.statusCode : Status -> Int
+std.http.statusFromInt : Int -> Either HttpError Status
 std.http.urlFromString : String -> Either HttpError Url
 std.http.urlToString : Url -> String
 std.http.validHeaderName : String -> Bool
@@ -325,6 +337,10 @@ std.http.validateRequestFields : Request -> Either HttpError Request
 std.http.withBody : Bytes -> Request -> Request
 std.http.withHeader : Header -> Request -> Request
 std.http.withHeaders : [Header] -> Request -> Request
+std.http.withHttpTimeout : Duration -> HttpLimits -> HttpLimits
+std.http.withMaximumBodyBytes : Int -> HttpLimits -> HttpLimits
+std.http.withMaximumHeaderBytes : Int -> HttpLimits -> HttpLimits
+std.http.withRedirectPolicy : RedirectPolicy -> HttpLimits -> HttpLimits
 std.http.withTextBody : String -> Request -> Request
 std.http.withoutBody : Request -> Request
 std.io.appendFile : String -> String -> IO HostError ()
@@ -456,17 +472,20 @@ std.map.toAscListInto : forall k v. Map k v -> [Entry k v] -> [Entry k v]
 std.map.values : forall k v. Map k v -> [v]
 std.map.valuesInto : forall k v. Map k v -> [v] -> [v]
 std.net.accept : Socket -> IO NetError Socket
+std.net.anyPort : Port
 std.net.atEndpoint : forall a. String -> IO HostError a -> IO NetError a
-std.net.closeListener : (Socket, Int) -> IO NetError ()
+std.net.closeListener : (Socket, Port) -> IO NetError ()
 std.net.closeSocket : Socket -> IO NetError ()
-std.net.connect : String -> Int -> IO NetError Socket
-std.net.listen : Int -> IO NetError (Socket, Int)
+std.net.connect : String -> Port -> IO NetError Socket
+std.net.listen : Port -> IO NetError (Socket, Port)
+std.net.portFromInt : Int -> Either PortError Port
+std.net.portToInt : Port -> Int
 std.net.recvBytes : Socket -> Int -> IO NetError Bytes
 std.net.resolveHost : String -> IO NetError String
 std.net.sendBytes : Socket -> Bytes -> IO NetError ()
 std.net.withAcceptedConnection : forall a. Socket -> (Socket -> IO NetError a) -> IO NetError a
-std.net.withConnection : forall a. String -> Int -> (Socket -> IO NetError a) -> IO NetError a
-std.net.withListener : forall a. Int -> ((Socket, Int) -> IO NetError a) -> IO NetError a
+std.net.withConnection : forall a. String -> Port -> (Socket -> IO NetError a) -> IO NetError a
+std.net.withListener : forall a. Port -> ((Socket, Port) -> IO NetError a) -> IO NetError a
 std.parser.<?> : forall input custom value. Parser input custom value -> String -> Parser input custom value
 std.parser.addConsumption : forall input custom value. Consumption -> ParseReply input custom value -> ParseReply input custom value
 std.parser.andThen : forall input custom a b. Parser input custom a -> (a -> Parser input custom b) -> Parser input custom b
@@ -562,14 +581,30 @@ std.parser.textRestore : TextInput -> TextInput -> TextInput
 std.parser.token : forall input token custom. Eq token => InputOps input token -> String -> token -> Parser input custom token
 std.parser.tokens : forall input token custom. Eq token => InputOps input token -> String -> [token] -> Parser input custom [token]
 std.parser.tokensExact : forall input token custom. Eq token => InputOps input token -> [token] -> Parser input custom [token]
+std.path.currentPath : Path
+std.path.hasNull : [Char] -> Bool
+std.path.pathFromHost : String -> Path
+std.path.pathFromString : String -> Either PathError Path
+std.path.pathToString : Path -> String
+std.process.argumentsContainNull : [String] -> Bool
+std.process.charsContainNull : [Char] -> Bool
+std.process.containsNull : String -> Bool
+std.process.exitCodeFromInt : Int -> ExitCode
+std.process.exitCodeToInt : ExitCode -> Int
 std.process.exitFailure : forall a. IO HostError a
 std.process.exitSuccess : forall a. IO HostError a
-std.process.exitWith : forall a. Int -> IO HostError a
-std.process.processExitCode : ProcessResult -> Int
+std.process.exitWith : forall a. ExitCode -> IO HostError a
+std.process.isExitSuccess : ExitCode -> Bool
+std.process.process : String -> [String] -> Either ProcessError Process
+std.process.processArguments : Process -> [String]
+std.process.processExitCode : ProcessResult -> ExitCode
+std.process.processProgram : Process -> String
 std.process.processStderr : ProcessResult -> String
 std.process.processStdout : ProcessResult -> String
-std.process.runProcess : String -> [String] -> IO ProcessError ProcessResult
-std.process.runProcessLimited : String -> [String] -> Int -> IO ProcessError ProcessResult
+std.process.runProcess : Process -> IO ProcessError ProcessResult
+std.process.runProcessLimited : Process -> Int -> IO ProcessError ProcessResult
+std.process.withArgument : String -> Process -> Either ProcessError Process
+std.process.withArguments : [String] -> Process -> Either ProcessError Process
 std.queue.dequeue : forall a. Queue a -> Maybe (a, Queue a)
 std.queue.empty : forall a. Queue a
 std.queue.enqueue : forall a. Queue a -> a -> Queue a
@@ -615,7 +650,7 @@ std.task.pooledWorkerLoop : forall e a b. (a -> IO e b) -> Chan (Int, a) -> Chan
 std.task.race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
 std.task.retainWorkerError : forall e b. ConcurrentError e -> IO (ConcurrentError e) (Either e b)
 std.task.runPooled : forall e a b. Chan (Int, a) -> Chan (Int, Either e b) -> [a] -> Int -> IO (ConcurrentError e) [b]
-std.task.timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
+std.task.timeout : forall e a. Duration -> IO e a -> IO e (Maybe a)
 std.task.withPooledWorkers : forall e a b result. Int -> (a -> IO e b) -> Chan (Int, a) -> Chan (Int, Either e b) -> IO (ConcurrentError e) result -> IO (ConcurrentError e) result
 std.task.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
 std.testing.assert : String -> Bool -> Either TestFailure ()
@@ -640,10 +675,22 @@ std.text.trimAscii : String -> String
 std.text.trimAsciiStart : [Char] -> [Char]
 std.thread.killThread : ThreadId -> IO HostError ()
 std.thread.spawn : forall childError e. IO childError () -> IO e ThreadId
-std.time.getMonotonicTime : IO HostError Int
-std.time.getSystemTime : IO HostError Int
-std.time.measure : forall a. IO HostError a -> IO HostError (Int, a)
-std.time.sleep : Int -> IO HostError ()
+std.time.durationToMicroseconds : Duration -> Int
+std.time.durationToMilliseconds : Duration -> Int
+std.time.durationToNanoseconds : Duration -> Int
+std.time.getMonotonicTime : forall e. IO e Instant
+std.time.getSystemTime : forall e. IO e SystemTime
+std.time.instantDifference : Instant -> Instant -> Duration
+std.time.measure : forall e a. IO e a -> IO e (Duration, a)
+std.time.microseconds : Int -> Duration
+std.time.milliseconds : Int -> Duration
+std.time.nanoseconds : Int -> Duration
+std.time.seconds : Int -> Duration
+std.time.sleep : Duration -> IO HostError ()
+std.time.sleepMilliseconds : Duration -> Int
+std.time.systemTimeDifference : SystemTime -> SystemTime -> Duration
+std.time.systemTimeFromNanoseconds : Int -> SystemTime
+std.time.systemTimeNanoseconds : SystemTime -> Int
 std.vector.balance : forall a. Vector a -> Vector a -> Vector a
 std.vector.buildVector : forall a. [Vector a] -> Vector a
 std.vector.empty : forall a. Vector a

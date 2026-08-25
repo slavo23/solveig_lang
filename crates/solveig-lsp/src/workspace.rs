@@ -812,6 +812,7 @@ pub(crate) mod tests {
             "std/src/std/list.sv",
             "std/src/std/map.sv",
             "std/src/std/net.sv",
+            "std/src/std/path.sv",
             "std/src/std/process.sv",
             "std/src/std/random.sv",
             "std/src/std/task.sv",

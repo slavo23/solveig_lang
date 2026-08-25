@@ -73,7 +73,7 @@ sendBytesTask socket bytes = mapError netToHost (std.net.sendBytes socket bytes)
 closeSocketTask : Socket -> Task ()
 closeSocketTask socket = mapError netToHost (std.net.closeSocket socket)
 
-listenTask : Int -> Task (Socket, Int)
+listenTask : Port -> Task (Socket, Port)
 listenTask port = mapError netToHost (std.net.listen port)
 
 serveOnce : Socket -> Task ()
@@ -87,7 +87,7 @@ serveOnce listener =
 
 withFixture : forall a. (String -> Task a) -> Task a
 withFixture action =
-    bracket (listenTask 0) (fun (listener, _) => closeSocketTask listener) (fun listenerInfo =>
+    bracket (listenTask anyPort) (fun (listener, _) => closeSocketTask listener) (fun listenerInfo =>
         case listenerInfo of
             (listener, port) =>
                 std.task.withThread
@@ -145,7 +145,7 @@ main = do
     fetched <- withFixture fetchNames
     response <- resultOrExit fetched
     typedInvalid <- invalidUrlIsTyped
-    cancelled <- std.task.timeout 5 (std.time.sleep 100)
+    cancelled <- std.task.timeout (std.time.milliseconds 5) (std.time.sleep (std.time.milliseconds 100))
     case response of
         (status, names) =>
             resultOrExit

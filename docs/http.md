@@ -11,6 +11,7 @@ response, including status and headers:
 
 ```solveig
 import std.http(*)
+import std.time
 
 showPage : String -> IO std.http.HttpError String
 showPage spelling = do
@@ -26,7 +27,13 @@ ordinary `(String, String)` values and are validated before network work:
 
 ```solveig
 response <- std.http.fetchWith
-    (std.http.HttpLimits 65536 1048576 5000 std.http.NoRedirects)
+    (std.http.withRedirectPolicy
+        std.http.NoRedirects
+        (std.http.withHttpTimeout
+            (std.time.milliseconds 5000)
+            (std.http.withMaximumBodyBytes
+                1048576
+                (std.http.withMaximumHeaderBytes 65536 std.http.defaultHttpLimits))))
     [ ("Accept", "application/json")
     , ("Authorization", "Bearer " <> token)
     ]
@@ -38,11 +45,12 @@ validate with `urlFromString` and `header`, build with
 `get`/`post`/`withHeader`/`withHeaders`/`withBody`/`withTextBody`, then call
 `send` for default limits or `request` for explicit limits.
 
-The four `HttpLimits` fields are maximum response-header bytes, maximum body
-bytes, a whole-request timeout in milliseconds, and redirect policy. Header
-bytes must be positive, body bytes non-negative, timeout positive, and redirect
-count non-negative. `defaultHttpLimits` is 64 KiB, 8 MiB, 15 seconds, and five
-redirects.
+`HttpLimits` is opaque. Start from `defaultHttpLimits`, then use
+`withMaximumHeaderBytes`, `withMaximumBodyBytes`, `withHttpTimeout`, and
+`withRedirectPolicy`. The corresponding accessors make policy inspection
+explicit. Header bytes must be positive, body bytes non-negative, timeout
+positive, and redirect count non-negative. The default is 64 KiB, 8 MiB,
+15 seconds, and five redirects.
 
 HTTP 4xx and 5xx responses are not transport errors. This lets applications
 handle 304 caching, 404 absence, authentication responses, and rate limits by

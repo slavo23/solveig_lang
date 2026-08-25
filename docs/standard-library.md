@@ -262,13 +262,15 @@ Filesystem metadata and directory operations are separate:
 
 ```solveig
 import std.fs(*)
+import std.path(*)
 ```
 
 This module provides `getCurrentDirectory`, `setCurrentDirectory`,
 `doesFileExist`, `doesDirectoryExist`, `listDirectory`, `createDirectory`,
 `removeFile`, `renameFile`, `getFileSize`, and `getModificationTime`. Its
 actions return `IO FsError a`, retaining path context and the underlying host
-cause.
+cause. They accept opaque `Path` values constructed with `pathFromString`;
+`getModificationTime` returns `SystemTime`, not a bare integer.
 
 ## Environment and processes
 
@@ -289,15 +291,17 @@ single or double quotes. It deliberately performs no interpolation or shell
 evaluation. Invalid errors retain a line number and reason, never the source
 line that may contain a secret.
 
-`std.process` owns `ProcessResult`, its three accessors,
+`std.process` owns validated opaque `Process` and `ExitCode` values,
+`ProcessResult`, its three accessors,
 `runProcess`, `runProcessLimited`, and
 `exitWith`/`exitSuccess`/`exitFailure`.
 
-`runProcess` receives an executable and an argument list; it never invokes a
-shell. A non-zero child status is `ProcessResult` data. Failure to start or
+`process program arguments` validates a request, which `runProcess` executes
+without invoking a shell. A non-zero child status is `ProcessResult` data,
+available through an opaque `ExitCode`. Failure to start or
 capture the child is `ProcessError`. The unrestricted form allocates both
-complete output streams. `runProcessLimited program arguments
-maximumPerStream` bounds each stream in bytes; overflow terminates and reaps
+complete output streams. `runProcessLimited processValue maximumPerStream`
+bounds each stream in bytes; overflow terminates and reaps
 the child and raises `ProcessError`. Interrupting the calling thread also
 terminates and reaps its direct child.
 
@@ -307,7 +311,7 @@ terminates and reaps its direct child.
 import std.channel(*)
 import std.thread(*)
 import std.task(*)
-import std.time(sleep)
+import std.time(Duration, sleep)
 ```
 
 `std.channel` provides `newChan`, `newBoundedChan`, `send`, `recv`, `tryRecv`,
@@ -325,7 +329,7 @@ mask : IO e a -> IO e a
 withThread : IO e a -> (ThreadId -> IO e b) -> IO e b
 concurrently : IO e a -> IO e b -> IO e (a, b)
 race : IO e a -> IO e b -> IO e (Either a b)
-timeout : Int -> IO e a -> IO e (Maybe a)
+timeout : Duration -> IO e a -> IO e (Maybe a)
 mapConcurrentlyBounded : Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
 ```
 
@@ -357,9 +361,10 @@ import std.time(*)
 import std.random(*)
 ```
 
-`sleep` and `timeout` use milliseconds. `getMonotonicTime` and
-`getSystemTime` return nanoseconds. `measure task` returns `(elapsedNanos,
-value)`, using the monotonic clock around the complete task.
+`sleep` and `timeout` accept `Duration`, constructed with `nanoseconds`,
+`microseconds`, `milliseconds`, or `seconds`. `getMonotonicTime` returns
+`Instant`; `getSystemTime` returns the distinct wall-clock `SystemTime`.
+`measure task` returns `(elapsedDuration, value)`.
 
 Random draws use explicit immutable `StdGen` state. `mkStdGen` is reproducible;
 `newStdGen` obtains a runtime-local clock seed. `randomInt` returns
@@ -379,6 +384,8 @@ import std.net(*)
 `withListener`, and `withAcceptedConnection`; their bracketed scopes close
 owned sockets after success, typed errors, defects, or interruption. These
 actions use `NetError`, retaining endpoint context and the host cause.
+Network operations accept validated `Port` values; `portFromInt` checks an
+external integer and `anyPort` explicitly requests an ephemeral listener.
 
 The low-level `std.net` layer is TCP-oriented and byte-based. Use `std.http`
 for bounded HTTP/1.1 and verified HTTPS rather than hand-building wire frames.
@@ -388,11 +395,20 @@ Streaming subprocess pipes, UDP, and general IPv6 selection are not provided.
 
 ```solveig
 import std.http(*)
+import std.time
 
 fetchRelease : String -> IO std.http.HttpError std.http.Response
 fetchRelease repository =
     std.http.fetchWith
-        (std.http.HttpLimits 65536 1048576 5000 std.http.NoRedirects)
+        (std.http.withRedirectPolicy
+            std.http.NoRedirects
+            (std.http.withHttpTimeout
+                (std.time.milliseconds 5000)
+                (std.http.withMaximumBodyBytes
+                    1048576
+                    (std.http.withMaximumHeaderBytes
+                        65536
+                        std.http.defaultHttpLimits))))
         [("Accept", "application/json")]
         ("https://api.example.test/repos/" <> repository <> "/release")
 ```

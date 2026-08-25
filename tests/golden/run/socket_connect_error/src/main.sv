@@ -3,10 +3,10 @@ import std.net(*)
 netToHost : NetError -> HostError
 netToHost (NetHostError _ hostError) = hostError
 
-connectTask : String -> Int -> Task Socket
+connectTask : String -> Port -> Task Socket
 connectTask host port = mapError netToHost (connect host port)
 
-listenTask : Int -> Task (Socket, Int)
+listenTask : Port -> Task (Socket, Port)
 listenTask port = mapError netToHost (listen port)
 
 closeSocketTask : Socket -> Task ()
@@ -21,7 +21,7 @@ unexpectedConnect connection = do
     closeSocketTask connection
     printLine "unexpected-connect"
 
-connectAfterClose : Socket -> Int -> Task ()
+connectAfterClose : Socket -> Port -> Task ()
 connectAfterClose listener port = do
     closeSocketTask listener
     catchError
@@ -32,6 +32,6 @@ connectAfterClose listener port = do
 
 main : Task ()
 main = do
-    listenerInfo <- listenTask 0
+    listenerInfo <- listenTask anyPort
     case listenerInfo of
         (listener, port) => connectAfterClose listener port

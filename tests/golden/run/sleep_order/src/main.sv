@@ -4,7 +4,7 @@ import std.channel(*)
 
 worker : Int -> String -> Chan () -> Task ()
 worker delay label done = do
-    sleep delay
+    sleep (milliseconds delay)
     printLine label
     send done ()
 

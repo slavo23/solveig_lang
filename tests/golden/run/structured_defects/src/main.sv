@@ -6,7 +6,7 @@ raiseInChild : Defect -> Task ()
 raiseInChild defect = prelude.prim.raiseDefectIO defect
 
 peer : Task ()
-peer = sleep 100
+peer = sleep (milliseconds 100)
 
 report : Defect -> Task ()
 report defect =

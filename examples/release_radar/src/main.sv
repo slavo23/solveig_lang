@@ -2,6 +2,7 @@ import std.env(*)
 import std.io(*)
 import std.list(length, isEmpty)
 import std.process(exitFailure)
+import std.path(*)
 import std.text(lines, trimAscii, startsWith)
 import std.time(*)
 import release_radar.cache(*)
@@ -27,9 +28,6 @@ repositoriesFromText = filter repositoryLine . map trimAscii . lines
 repositoryLine : String -> Bool
 repositoryLine line = and (line /= "") (not (startsWith "#" line))
 
-milliseconds : Int -> Int
-milliseconds nanoseconds = div nanoseconds 1000000
-
 printSummary : [String] -> [release_radar.model.ReleaseResult] -> Task ()
 printSummary repositories results = do
     printLine
@@ -40,18 +38,21 @@ printSummary repositories results = do
             "-worker pool")
     printResults results
 
-reportLocalComparison : [String] -> Int -> [release_radar.model.ReleaseResult] -> Int -> Task ()
+reportLocalComparison : [String] -> Duration -> [release_radar.model.ReleaseResult] -> Duration -> Task ()
 reportLocalComparison repositories sequentialNanos results concurrentNanos =
     if concurrentNanos >= sequentialNanos
         then error "local concurrency comparison did not beat sequential execution"
         else do
             printLine
                 ("local comparison: sequential " <>
-                    show (milliseconds sequentialNanos) <>
+                    show (durationToMilliseconds sequentialNanos) <>
                     " ms, concurrent " <>
-                    show (milliseconds concurrentNanos) <>
+                    show (durationToMilliseconds concurrentNanos) <>
                     " ms (" <>
-                    show (div sequentialNanos concurrentNanos) <>
+                    show
+                        (div
+                            (durationToNanoseconds sequentialNanos)
+                            (durationToNanoseconds concurrentNanos)) <>
                     "x faster)")
             printSummary repositories results
 
@@ -79,8 +80,14 @@ runLocal repositories =
 
 liveToken : IO std.env.EnvError (Maybe String)
 liveToken = do
-    _ <- std.env.loadEnvFileIfExists envPath
+    _ <- std.env.loadEnvFileIfExists (requiredPath envPath)
     fmap usableToken (mapError std.env.EnvHostError (std.env.getEnv "GITHUB_TOKEN"))
+
+requiredPath : String -> Path
+requiredPath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error ("invalid Release Radar path: " <> show pathError)
 
 usableToken : Maybe String -> Maybe String
 usableToken Nothing = Nothing
@@ -125,7 +132,7 @@ runLive cache repositories = do
                         do
                             printLine
                                 ("live requests completed in " <>
-                                    show (milliseconds elapsed) <>
+                                    show (durationToMilliseconds elapsed) <>
                                     " ms")
                             printSummary repositories results
                             writeCache cachePath (updateCache cache results)

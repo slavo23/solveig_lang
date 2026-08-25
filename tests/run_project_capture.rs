@@ -417,14 +417,14 @@ fn cli_exit_flushes_an_open_file_and_propagates_its_status() {
     let project_root = write_temp_project(
         "cli_exit_flush",
         r#"import std.io(*)
-import std.process(exitWith)
+import std.process(exitCodeFromInt, exitWith)
 
 main : Task ()
 main = do
     output <- openFile "buffered.txt" WriteMode
     hSetBuffering output (BlockBuffering (Just 4096))
     hPutStr output "flushed during exit"
-    exitWith 37
+    exitWith (exitCodeFromInt 37)
 "#,
     );
 

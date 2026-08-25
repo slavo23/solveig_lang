@@ -70,7 +70,7 @@ waitAfterSharing : Chan Handle -> Chan () -> Handle -> Task ();
 waitAfterSharing escaped started file = do
     send escaped file
     send started ()
-    sleep 100000;
+    sleep (milliseconds 100000);
 
 main : Task ();
 main = do

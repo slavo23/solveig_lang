@@ -138,11 +138,11 @@ Concurrent work can be scoped and bounded:
 
 ```solveig
 import std.task(concurrentHostError, mapConcurrentlyBounded)
-import std.time(sleep)
+import std.time(milliseconds, sleep)
 
 work : Int -> Task Int
 work value = do
-    sleep 10
+    sleep (milliseconds 10)
     pureIO (value * value)
 
 main : Task ()

@@ -250,22 +250,21 @@ same scheduler completion path. Many green threads can therefore wait on
 different sockets without exhausting a thread pool.
 
 ```solveig
-resolveHost : String -> Task String
-connect : String -> Int -> Task Socket
-listen : Int -> Task (Socket, Int)
-accept : Socket -> Task Socket
-sendBytes : Socket -> Bytes -> Task ()
-recvBytes : Socket -> Int -> Task Bytes
-closeSocket : Socket -> Task ()
-closeListener : (Socket, Int) -> Task ()
-withConnection : String -> Int -> (Socket -> Task a) -> Task a
-withListener : Int -> ((Socket, Int) -> Task a) -> Task a
-withAcceptedConnection : Socket -> (Socket -> Task a) -> Task a
+resolveHost : String -> IO NetError String
+connect : String -> Port -> IO NetError Socket
+listen : Port -> IO NetError (Socket, Port)
+accept : Socket -> IO NetError Socket
+sendBytes : Socket -> Bytes -> IO NetError ()
+recvBytes : Socket -> Int -> IO NetError Bytes
+closeSocket : Socket -> IO NetError ()
+withConnection : String -> Port -> (Socket -> IO NetError a) -> IO NetError a
+withListener : Port -> ((Socket, Port) -> IO NetError a) -> IO NetError a
+withAcceptedConnection : Socket -> (Socket -> IO NetError a) -> IO NetError a
 ```
 
 `resolveHost` performs blocking standard-library DNS on the worker pool and
 returns one IPv4 literal. `connect` accepts that literal or `localhost`; it
-does not perform DNS itself. `listen` binds IPv4 loopback, and port zero asks
+does not perform DNS itself. `listen` binds IPv4 loopback, and `anyPort` asks
 the OS to choose a free port returned as `(listener, actualPort)`.
 
 Prefer `withConnection`, `withListener`, and `withAcceptedConnection` for
@@ -319,7 +318,7 @@ Test protocols through exact events rather than timing luck:
 2. Assert conserved values or a final ordered result, not one accidental
    interleaving.
 3. Use `sleep` only when timer behavior is what the test is checking.
-4. Use a loopback listener on port zero for networking tests instead of public
+4. Use a loopback listener with `anyPort` for networking tests instead of public
    DNS or internet access.
 5. Close channels and resources explicitly so every blocked loop has a defined
    termination path.

@@ -8,7 +8,7 @@ data PooledError = PooledFailed
 pause : Int -> IO WorkError ()
 pause milliseconds =
     catchError
-        (sleep milliseconds)
+        (sleep (std.time.milliseconds milliseconds))
         (fun timerError => error "structured test timer failed")
 
 logLine : String -> IO WorkError ()
@@ -40,7 +40,7 @@ rightSuccess = do
 
 pooledWork : Int -> Task Int
 pooledWork value = do
-    sleep ((5 - value) * 5)
+    sleep (std.time.milliseconds ((5 - value) * 5))
     pureIO (value * 10)
 
 pooledFailure : Int -> IO PooledError Int
@@ -96,4 +96,4 @@ main = do
     measured <- std.time.measure (pureIO 42)
     case measured of
         (elapsed, value) =>
-            printLine ("measured=" <> show (elapsed >= 0) <> ":" <> show value)
+            printLine ("measured=" <> show (elapsed >= nanoseconds 0) <> ":" <> show value)

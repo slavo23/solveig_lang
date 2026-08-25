@@ -2,39 +2,52 @@ import std.env(*)
 import std.fs(FsError(..))
 import std.io(*)
 import std.list(length)
+import std.path(*)
+import std.time(SystemTime, systemTimeNanoseconds)
 
 fsToHost : FsError -> HostError
 fsToHost (FsHostError _ hostError) = hostError
 
-getCurrentDirectory : Task String
+fixturePath : String -> Path
+fixturePath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error ("invalid fixture path: " <> show pathError)
+
+getCurrentDirectory : Task Path
 getCurrentDirectory = mapError fsToHost std.fs.getCurrentDirectory
 
 setCurrentDirectory : String -> Task ()
-setCurrentDirectory path = mapError fsToHost (std.fs.setCurrentDirectory path)
+setCurrentDirectory path = mapError fsToHost (std.fs.setCurrentDirectory (fixturePath path))
 
 doesFileExist : String -> Task Bool
-doesFileExist path = mapError fsToHost (std.fs.doesFileExist path)
+doesFileExist path = mapError fsToHost (std.fs.doesFileExist (fixturePath path))
 
-doesDirectoryExist : String -> Task Bool
+doesDirectoryExist : Path -> Task Bool
 doesDirectoryExist path = mapError fsToHost (std.fs.doesDirectoryExist path)
 
 listDirectory : String -> Task [String]
-listDirectory path = mapError fsToHost (std.fs.listDirectory path)
+listDirectory path =
+    fmap
+        (map pathToString)
+        (mapError fsToHost (std.fs.listDirectory (fixturePath path)))
 
 createDirectory : String -> Task ()
-createDirectory path = mapError fsToHost (std.fs.createDirectory path)
+createDirectory path = mapError fsToHost (std.fs.createDirectory (fixturePath path))
 
 removeFile : String -> Task ()
-removeFile path = mapError fsToHost (std.fs.removeFile path)
+removeFile path = mapError fsToHost (std.fs.removeFile (fixturePath path))
 
 renameFile : String -> String -> Task ()
-renameFile source destination = mapError fsToHost (std.fs.renameFile source destination)
+renameFile source destination =
+    mapError fsToHost (std.fs.renameFile (fixturePath source) (fixturePath destination))
 
 getFileSize : String -> Task Int
-getFileSize path = mapError fsToHost (std.fs.getFileSize path)
+getFileSize path = mapError fsToHost (std.fs.getFileSize (fixturePath path))
 
-getModificationTime : String -> Task Int
-getModificationTime path = mapError fsToHost (std.fs.getModificationTime path)
+getModificationTime : String -> Task SystemTime
+getModificationTime path =
+    mapError fsToHost (std.fs.getModificationTime (fixturePath path))
 
 lookupEnvironment : String -> [(String, String)] -> Maybe String;
 lookupEnvironment name [] = Nothing;
@@ -56,7 +69,7 @@ printRequired name =
 loadSettings : String -> Task ();
 loadSettings path =
     catchError
-        (loadEnvFile path)
+        (loadEnvFile (fixturePath path))
         (fun envError => printLine (show envError));
 
 missingEnvFile : EnvError -> Task Bool;
@@ -113,7 +126,7 @@ main = do
     printLine (show fixtureFile)
     missingFile <- doesFileExist "fixture/missing.txt"
     printLine (show missingFile)
-    fixtureDirectory <- doesDirectoryExist "fixture"
+    fixtureDirectory <- doesDirectoryExist (fixturePath "fixture")
     printLine (show fixtureDirectory)
 
     created <- catchError (createDirectory "generated") ignoreExistingDirectory
@@ -121,7 +134,7 @@ main = do
     size <- getFileSize "generated/data.txt"
     printLine (show size)
     modified <- getModificationTime "generated/data.txt"
-    if modified > 0 then printLine "modified" else printLine "wrong-time"
+    if systemTimeNanoseconds modified > 0 then printLine "modified" else printLine "wrong-time"
     entries <- listDirectory "generated"
     mapIO_ printLine entries
 
@@ -136,7 +149,7 @@ main = do
     loadedEmpty <- getEnv "SOLVEIG_L3_EMPTY"
     printMaybe loadedEmpty
     missingDotEnv <- catchError
-        (loadEnvFileIfExists "generated/missing.env")
+        (loadEnvFileIfExists (fixturePath "generated/missing.env"))
         missingEnvFile
     printLine (show missingDotEnv)
     printEnvParse (parseEnvFile "GOOD=one\nSECOND=two\n")

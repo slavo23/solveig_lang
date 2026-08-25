@@ -149,7 +149,11 @@ Re-raising `other` prevents unrelated failures from being hidden.
 - `getFileSize` and `getModificationTime`.
 
 They return `IO FsError a`, retaining filesystem path context around the host
-cause. The current directory is runtime state shared by the program, so
+cause. Filesystem operations accept an opaque `Path`; validate external text
+with `pathFromString` and convert back only with `pathToString`.
+`getModificationTime` returns `SystemTime`, keeping wall-clock values
+distinct from monotonic `Instant` readings and integer units. The current
+directory is runtime state shared by the program, so
 changing it concurrently can make relative paths surprising. In
 concurrent code, prefer stable paths over frequent directory changes.
 
@@ -179,21 +183,26 @@ missing file as an error. Do not print secrets read from the environment.
 
 ## Child processes
 
-`std.process.runProcess program arguments` waits for a child process and
-returns its exit code, stdout, and stderr:
+`std.process.runProcess processValue` waits for a validated child-process
+request and returns its exit code, stdout, and stderr:
 
 ```solveig
 import std.process(*)
 
 main : Task ()
-main = do
-    result <- runProcess "git" ["--version"]
-    printStr (processStdout result)
+main =
+    case process "git" ["--version"] of
+        Left processError => printLine (show processError)
+        | Right processValue => do
+            result <- runProcess processValue
+            printStr (processStdout result)
 ```
 
 The program is invoked directly, not through a shell. Arguments are separate
 strings, which avoids shell quoting and expansion. `runProcessLimited` is the
 opt-in variant for untrusted or potentially unbounded child output.
+`processExitCode` returns opaque `ExitCode`; use `isExitSuccess` for the
+common branch or `exitCodeToInt` at a host/protocol boundary.
 
 ## Cleanup patterns
 

@@ -19,7 +19,7 @@ validateOrder (Order orderId quantity) =
 
 processOrder : Chan Fulfilment -> Order -> Task ()
 processOrder results order = do
-    sleep 10
+    sleep (milliseconds 10)
     send results (validateOrder order)
 
 worker : Chan Order -> Chan Fulfilment -> Task ()

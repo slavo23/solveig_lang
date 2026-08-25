@@ -6,18 +6,18 @@ import std.channel(*)
 slow : Task String
 slow =
     finally
-        (bindIO (sleep 30) (fun elapsed => pureIO "slow"))
+        (bindIO (sleep (milliseconds 30)) (fun elapsed => pureIO "slow"))
         (printLine "slow-cleaned")
 
 fast : Task String
 fast = do
-    sleep 10
+    sleep (milliseconds 10)
     pureIO "fast"
 
 errorLoser : Task String
 errorLoser =
     finally
-        (bindIO (sleep 100) (fun elapsed => pureIO "late"))
+        (bindIO (sleep (milliseconds 100)) (fun elapsed => pureIO "late"))
         (printLine "error-loser-cleaned")
 
 failClosed : Task String

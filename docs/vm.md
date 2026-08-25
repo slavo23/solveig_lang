@@ -720,7 +720,8 @@ crossing the worker boundary. The worker invokes no shell, closes stdin, owns
 the direct child through termination and reap, and drains both output pipes
 concurrently. The scheduler later allocates the three-field `ProcessResult`.
 A non-zero status is data, while spawn/wait/UTF-8/limit failures map to
-`RunProcessError`. Cancellation tombstones the language request and signals
+`ProcessError` wrapping the classified `HostError`. Cancellation tombstones
+the language request and signals
 the worker to terminate and reap the child before posting the discarded
 completion.
 

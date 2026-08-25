@@ -17,7 +17,7 @@ finishScope thread = printLine "scope-body"
 
 main : Task ()
 main = do
-    listenerInfo <- netTask (listen 0)
+    listenerInfo <- netTask (listen anyPort)
     case listenerInfo of
         (listener, port) => do
             withThread (waitForClient listener) finishScope

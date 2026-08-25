@@ -15,16 +15,16 @@ an empirical question; measure the real program rather than assuming.
 
 ```solveig
 import std.task(concurrently)
-import std.time(sleep)
+import std.time(milliseconds, sleep)
 
 left : Task String
 left = do
-    sleep 30
+    sleep (milliseconds 30)
     pureIO "left"
 
 right : Task Int
 right = do
-    sleep 10
+    sleep (milliseconds 10)
     pureIO 42
 
 main : Task ()
@@ -48,20 +48,20 @@ not outlive the call.
 
 ```solveig
 import std.task(race)
-import std.time(sleep)
+import std.time(milliseconds, sleep)
 
 main : Task ()
 main = do
     winner <- race
-        (do sleep 20; pureIO "timer A")
-        (do sleep 50; pureIO "timer B")
+        (do sleep (milliseconds 20); pureIO "timer A")
+        (do sleep (milliseconds 50); pureIO "timer B")
     printLine (show winner)
 ```
 
-`timeout milliseconds action` is the common timer race:
+`timeout duration action` is the common timer race:
 
 ```solveig
-maybeValue <- timeout 250 operation
+maybeValue <- timeout (milliseconds 250) operation
 case maybeValue of
     Nothing => printLine "operation timed out"
     | Just value => printLine (show value)
@@ -77,11 +77,11 @@ For a list of independent `Task` operations, use
 
 ```solveig
 import std.task(concurrentHostError, mapConcurrentlyBounded)
-import std.time(sleep)
+import std.time(milliseconds, sleep)
 
 process : Int -> Task Int
 process value = do
-    sleep ((5 - value) * 10)
+    sleep (milliseconds ((5 - value) * 10))
     pureIO (value * value)
 
 main : Task ()
@@ -114,18 +114,18 @@ ensures the child is interrupted and joined when `body` leaves:
 
 ```solveig
 import std.task(withThread)
-import std.time(sleep)
+import std.time(milliseconds, sleep)
 
 heartbeat : Task ()
 heartbeat = do
     printLine "working"
-    sleep 100
+    sleep (milliseconds 100)
     heartbeat
 
 main : Task ()
 main =
     withThread heartbeat (fun _ => do
-        sleep 250
+        sleep (milliseconds 250)
         printLine "main work finished")
 ```
 
@@ -207,8 +207,10 @@ who sends, who closes, and how every loop terminates.
 
 ## Measuring useful concurrency
 
-`std.time.measure action` returns `(elapsedNanoseconds, result)` using a
-monotonic clock. To compare sequential and concurrent versions:
+`std.time.measure action` returns `(elapsedDuration, result)` using a
+monotonic clock. Convert explicitly with `durationToNanoseconds` or
+`durationToMilliseconds` only where a numeric unit is required. To compare
+sequential and concurrent versions:
 
 1. Run the same inputs and the same operation.
 2. Keep correctness checks identical.

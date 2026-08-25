@@ -1,10 +1,52 @@
 export (
-    NetError(..), connect, resolveHost, listen, accept, sendBytes, recvBytes, closeSocket,
+    Port, PortError(..), portFromInt, portToInt, anyPort, NetError(..), connect,
+    resolveHost, listen, accept, sendBytes, recvBytes, closeSocket, closeListener,
     withConnection, withListener, withAcceptedConnection
 )
 
 import prelude.prim(*)
 import std.task(bracket)
+
+-- | A failure while validating a TCP or UDP port number.
+data PortError = InvalidPort Int
+
+instance Eq PortError where
+    (==) (InvalidPort left) (InvalidPort right) = left == right
+
+instance Show PortError where
+    show (InvalidPort value) = "invalid port " <> show value <> "; expected 0 through 65535"
+
+-- | A validated 16-bit network port. Zero asks the host to choose a port.
+data Port = Port Int
+
+instance Eq Port where
+    (==) (Port left) (Port right) = left == right
+
+instance PartialOrd Port where
+    partialCompare (Port left) (Port right) = partialCompare left right
+
+instance Ord Port where
+    compare (Port left) (Port right) = compare left right
+
+instance Show Port where
+    show (Port value) = show value
+
+instance Hashable Port where
+    hashWithSalt salt (Port value) = hashWithSalt salt value
+
+-- | Validates an integer as a network port.
+portFromInt : Int -> Either PortError Port
+portFromInt value =
+    if and (value >= 0) (value <= 65535) then Right (Port value)
+    else Left (InvalidPort value)
+
+-- | Returns a port's integer value.
+portToInt : Port -> Int
+portToInt (Port value) = value
+
+-- | Requests an ephemeral port when listening.
+anyPort : Port
+anyPort = Port 0
 
 -- | A network failure with the endpoint or socket operation retained.
 data NetError = NetHostError String HostError
@@ -21,16 +63,22 @@ atEndpoint : forall a. String -> Task a -> IO NetError a
 atEndpoint context operation = mapError (NetHostError context) operation
 
 -- | Opens a TCP connection to an IP address or localhost.
-connect : String -> Int -> IO NetError Socket
-connect host port = atEndpoint (host <> ":" <> show port) (prelude.prim.connect host port)
+connect : String -> Port -> IO NetError Socket
+connect host port =
+    atEndpoint
+        (host <> ":" <> show port)
+        (prelude.prim.connect host (portToInt port))
 
 -- | Resolves a host name to an IPv4 address without blocking other green threads.
 resolveHost : String -> IO NetError String
 resolveHost host = atEndpoint host (prelude.prim.resolveHost host)
 
 -- | Binds a loopback TCP listener and returns its actual port.
-listen : Int -> IO NetError (Socket, Int)
-listen port = atEndpoint ("port " <> show port) (prelude.prim.listen port)
+listen : Port -> IO NetError (Socket, Port)
+listen port =
+    fmap
+        (fun (socket, actual) => (socket, Port actual))
+        (atEndpoint ("port " <> show port) (prelude.prim.listen (portToInt port)))
 
 -- | Accepts the next connection from a TCP listener.
 accept : Socket -> IO NetError Socket
@@ -49,15 +97,14 @@ closeSocket : Socket -> IO NetError ()
 closeSocket socket = atEndpoint "close" (prelude.prim.closeSocket socket)
 
 -- | Opens and closes a TCP connection around a use action.
-withConnection : forall a. String -> Int -> (Socket -> IO NetError a) -> IO NetError a
+withConnection : forall a. String -> Port -> (Socket -> IO NetError a) -> IO NetError a
 withConnection host port use = bracket (connect host port) closeSocket use
 
--- | Closes the listener in a result returned by listen.
-closeListener : (Socket, Int) -> IO NetError ()
+closeListener : (Socket, Port) -> IO NetError ()
 closeListener (listener, _) = closeSocket listener
 
 -- | Binds and closes a TCP listener around a use action.
-withListener : forall a. Int -> ((Socket, Int) -> IO NetError a) -> IO NetError a
+withListener : forall a. Port -> ((Socket, Port) -> IO NetError a) -> IO NetError a
 withListener port use = bracket (listen port) closeListener use
 
 -- | Accepts and closes one TCP connection around a use action.

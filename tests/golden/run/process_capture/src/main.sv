@@ -3,14 +3,23 @@ import std.env(*)
 
 processToHost : ProcessError -> HostError
 processToHost (ProcessHostError _ hostError) = hostError
+processToHost (InvalidProcess reason) = HostError InvalidArgument "process" reason
+
+requireProcess : String -> [String] -> Task Process
+requireProcess program arguments =
+    case process program arguments of
+        Left error => failIO (processToHost error)
+        | Right processValue => pureIO processValue
 
 runProcessTask : String -> [String] -> Task ProcessResult
-runProcessTask program arguments =
-    mapError processToHost (std.process.runProcess program arguments)
+runProcessTask program arguments = do
+    processValue <- requireProcess program arguments
+    mapError processToHost (std.process.runProcess processValue)
 
 runProcessLimitedTask : String -> [String] -> Int -> Task ProcessResult
-runProcessLimitedTask program arguments maximum =
-    mapError processToHost (std.process.runProcessLimited program arguments maximum)
+runProcessLimitedTask program arguments maximum = do
+    processValue <- requireProcess program arguments
+    mapError processToHost (std.process.runProcessLimited processValue maximum)
 
 reportRunProcessError : HostError -> Task ()
 reportRunProcessError ioError =
@@ -28,7 +37,7 @@ runFixture : String -> Task ()
 runFixture executable = do
     setEnv "SOLVEIG_L3_CHILD_VALUE" "inherited"
     result <- runProcessTask executable ["--project-root", "child", "--", "alpha", "two words"]
-    printLine (appendString "exit=" (show (processExitCode result)))
+    printLine (appendString "exit=" (show (exitCodeToInt (processExitCode result))))
     printStr (processStdout result)
     printStr (processStderr result)
     limited <- runProcessLimitedTask executable ["--project-root", "child", "--", "alpha", "two words"] 26
@@ -52,7 +61,7 @@ runFixture executable = do
 runFailure : String -> Task ()
 runFailure executable = do
     result <- runProcessTask executable ["--definitely-invalid-l3-flag"]
-    printLine (appendString "failure-exit=" (show (processExitCode result)))
+    printLine (appendString "failure-exit=" (show (exitCodeToInt (processExitCode result))))
     if processStderr result == "" then
         printLine "missing-failure-stderr"
     else

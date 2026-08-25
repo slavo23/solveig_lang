@@ -21,7 +21,7 @@ serveClients listener remaining =
         netTask (closeSocket connection)
         serveClients listener (remaining - 1)
 
-client : Chan Int -> Int -> Int -> Task ()
+client : Chan Int -> Port -> Int -> Task ()
 client results port number = do
     connection <- netTask (connect "127.0.0.1" port)
     netTask (sendBytes connection (stringToBytes "ping"))
@@ -31,7 +31,7 @@ client results port number = do
         Right text => send results 1
         | Left error => send results 0
 
-spawnClients : Chan Int -> Int -> Int -> Task ()
+spawnClients : Chan Int -> Port -> Int -> Task ()
 spawnClients results port remaining =
     if remaining == 0 then
         pureIO ()
@@ -47,7 +47,7 @@ collectClients results remaining total =
         completed <- recv results
         collectClients results (remaining - 1) (total + completed)
 
-runClients : Socket -> Int -> Task ()
+runClients : Socket -> Port -> Task ()
 runClients listener port = do
     results <- newBoundedChan 16
     spawnClients results port 16
@@ -57,7 +57,7 @@ runClients listener port = do
 
 main : Task ()
 main = do
-    listenerInfo <- netTask (listen 0)
+    listenerInfo <- netTask (listen anyPort)
     case listenerInfo of
         (listener, port) =>
             withThread

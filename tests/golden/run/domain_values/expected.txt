@@ -1,0 +1,5 @@
+path=data/input.txt:True:True
+port=443:0
+duration=1250:1250000:True
+http=GET:https://example.com/items:Accept=application/json:204:4096:2000
+process=echo:["hello", "world"]:ExitSuccess:ExitFailure 7:True:7

@@ -22,7 +22,7 @@ sendBytesTask socket bytes = mapError netToHost (std.net.sendBytes socket bytes)
 closeSocketTask : Socket -> Task ()
 closeSocketTask socket = mapError netToHost (std.net.closeSocket socket)
 
-listenTask : Int -> Task (Socket, Int)
+listenTask : Port -> Task (Socket, Port)
 listenTask port = mapError netToHost (std.net.listen port)
 
 fixtureBody : String
@@ -70,7 +70,7 @@ readRequestHeaders connection accumulated =
 
 sendFixtureResponse : Socket -> Bytes -> Task ()
 sendFixtureResponse connection request = do
-    std.time.sleep (requestDelay request)
+    std.time.sleep (std.time.milliseconds (requestDelay request))
     sendBytesTask connection (std.bytes.stringToBytes fixtureResponse)
 
 requestDelay : Bytes -> Int
@@ -103,7 +103,7 @@ serveFixture listener total =
 
 withFixture : forall a. Int -> (String -> Task a) -> Task a
 withFixture requestCount action = do
-    listenerInfo <- listenTask 0
+    listenerInfo <- listenTask std.net.anyPort
     case listenerInfo of
         (listener, port) =>
             std.task.finally

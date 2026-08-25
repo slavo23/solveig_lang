@@ -31,7 +31,7 @@ closeSocketTask socket = mapError netToHost (std.net.closeSocket socket)
 acceptTask : Socket -> Task Socket
 acceptTask listener = mapError netToHost (std.net.accept listener)
 
-listenTask : Int -> Task (Socket, Int)
+listenTask : Port -> Task (Socket, Port)
 listenTask port = mapError netToHost (std.net.listen port)
 
 reply : Socket -> Task ()
@@ -79,14 +79,14 @@ fetchOne url = do
         Right text => pureIO text
         | Left error => failIO (httpAsHostError error)
 
-runClients : Int -> Task [String]
+runClients : Port -> Task [String]
 runClients port =
     let url = "http://127.0.0.1:" <> show port <> "/message" in
     mapError concurrentHostError (mapConcurrentlyBounded 3 fetchOne [url, url, url])
 
 main : Task ()
 main =
-    bracket (listenTask 0) (fun (listener, _) => closeSocketTask listener) (fun listenerInfo =>
+    bracket (listenTask anyPort) (fun (listener, _) => closeSocketTask listener) (fun listenerInfo =>
         case listenerInfo of
             (listener, port) =>
                 withThread

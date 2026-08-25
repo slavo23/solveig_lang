@@ -4,6 +4,7 @@ import std.task(*)
 import std.channel(*)
 import std.env(*)
 import std.io(*)
+import std.time(milliseconds)
 
 data DownloadJob = DownloadJob String String
 
@@ -35,10 +36,10 @@ closeSocketTask socket = mapError netToHost (std.net.closeSocket socket)
 acceptTask : Socket -> Task Socket
 acceptTask listener = mapError netToHost (std.net.accept listener)
 
-connectTask : String -> Int -> Task Socket
+connectTask : String -> Port -> Task Socket
 connectTask host port = mapError netToHost (std.net.connect host port)
 
-listenTask : Int -> Task (Socket, Int)
+listenTask : Port -> Task (Socket, Port)
 listenTask port = mapError netToHost (std.net.listen port)
 
 resolveHostTask : String -> Task String
@@ -156,30 +157,31 @@ fetchWith host path socket = do
             | Left error => failIO error
         else failIO (HostError ProtocolError "fetch" (appendString "HTTP request failed: " path))
 
-fetch : String -> Int -> String -> String -> Task Bytes
+fetch : String -> Port -> String -> String -> Task Bytes
 fetch address port host path = bracket (connectTask address port) closeSocketTask (fetchWith host path)
 
 download :
     Chan DownloadResult ->
-    (String -> Int -> String -> String -> Task (Maybe Bytes)) ->
-    String -> Int -> String -> DownloadJob -> Task ()
+    (String -> Port -> String -> String -> Task (Maybe Bytes)) ->
+    String -> Port -> String -> DownloadJob -> Task ()
 download results fetcher address port host (DownloadJob path output) =
     catchError
         (downloadAttempt results fetcher address port host path output)
         (fun error => send results DownloadFailed)
 
-fetchLocal : String -> Int -> String -> String -> Task (Maybe Bytes)
+fetchLocal : String -> Port -> String -> String -> Task (Maybe Bytes)
 fetchLocal address port host path = do
     body <- fetch address port host path
     pureIO (Just body)
 
-fetchInternet : String -> Int -> String -> String -> Task (Maybe Bytes)
-fetchInternet address port host path = timeout 5000 (fetch address port host path)
+fetchInternet : String -> Port -> String -> String -> Task (Maybe Bytes)
+fetchInternet address port host path =
+    timeout (milliseconds 5000) (fetch address port host path)
 
 downloadAttempt :
     Chan DownloadResult ->
-    (String -> Int -> String -> String -> Task (Maybe Bytes)) ->
-    String -> Int -> String -> String -> String -> Task ()
+    (String -> Port -> String -> String -> Task (Maybe Bytes)) ->
+    String -> Port -> String -> String -> String -> Task ()
 downloadAttempt results fetcher address port host path output = do
     writeFileTask output ""
     fetched <- fetcher address port host path
@@ -196,14 +198,14 @@ downloadAttempt results fetcher address port host path output = do
 worker :
     Chan DownloadJob ->
     Chan DownloadResult ->
-    (String -> Int -> String -> String -> Task (Maybe Bytes)) -> String -> Int -> String -> Task ()
+    (String -> Port -> String -> String -> Task (Maybe Bytes)) -> String -> Port -> String -> Task ()
 worker jobs results fetcher address port host =
     catchError (workerStep jobs results fetcher address port host) (fun error => pureIO ())
 
 workerStep :
     Chan DownloadJob ->
     Chan DownloadResult ->
-    (String -> Int -> String -> String -> Task (Maybe Bytes)) -> String -> Int -> String -> Task ()
+    (String -> Port -> String -> String -> Task (Maybe Bytes)) -> String -> Port -> String -> Task ()
 workerStep jobs results fetcher address port host = do
     job <- recv jobs
     download results fetcher address port host job
@@ -257,8 +259,8 @@ printSummary (DownloadStats successes failures totalBytes) =
                         (appendString " failed, " (appendString (show totalBytes) " bytes"))))))
 
 runPool :
-    (String -> Int -> String -> String -> Task (Maybe Bytes)) ->
-    String -> Int -> String -> (Chan DownloadJob -> Task ()) -> Task ()
+    (String -> Port -> String -> String -> Task (Maybe Bytes)) ->
+    String -> Port -> String -> (Chan DownloadJob -> Task ()) -> Task ()
 runPool fetcher address port host enqueue = do
     jobs <- newBoundedChan 2
     results <- newBoundedChan 4
@@ -276,7 +278,7 @@ runPool fetcher address port host enqueue = do
                 )
         )
 
-runLocalExample : String -> Socket -> Int -> Task ()
+runLocalExample : String -> Socket -> Port -> Task ()
 runLocalExample address listener port =
     finally
         (withThread
@@ -287,7 +289,7 @@ runLocalExample address listener port =
 runLocal : Task ()
 runLocal = do
     address <- resolveHostTask "localhost"
-    listenerInfo <- listenTask 0
+    listenerInfo <- listenTask anyPort
     case listenerInfo of
         (listener, port) => runLocalExample address listener port
 
@@ -295,7 +297,9 @@ runInternet : Task ()
 runInternet = do
     printLine "downloading from http://neverssl.com with two workers"
     address <- resolveHostTask "neverssl.com"
-    runPool fetchInternet address 80 "neverssl.com" enqueueInternetJobs
+    case portFromInt 80 of
+        Left error => failIO (HostError InvalidArgument "portFromInt" (show error))
+        | Right port => runPool fetchInternet address port "neverssl.com" enqueueInternetJobs
 
 useLocalServer : List String -> Bool
 useLocalServer args =

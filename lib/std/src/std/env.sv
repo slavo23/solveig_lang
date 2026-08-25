@@ -8,6 +8,7 @@ import std.fs(*)
 import std.io(*)
 import std.list(reverse)
 import std.map(*)
+import std.path(Path, pathToString)
 import std.text(*)
 
 -- | A failure while resolving or loading application environment settings.
@@ -76,19 +77,21 @@ parseEnvFile text =
     parseEnvLines (std.text.lines text) 1 std.map.empty []
 
 -- | Loads a dotenv file no larger than 64 KiB without replacing existing variables.
-loadEnvFile : String -> IO EnvError ()
+loadEnvFile : Path -> IO EnvError ()
 loadEnvFile path = loadEnvFileLimited path 65536
 
 -- | Loads a bounded dotenv file without replacing variables already in the process environment.
-loadEnvFileLimited : String -> Int -> IO EnvError ()
+loadEnvFileLimited : Path -> Int -> IO EnvError ()
 loadEnvFileLimited path maximum = do
-    contents <- mapError EnvHostError (std.io.readFileLimited path maximum)
+    contents <- mapError
+        (fun hostError => EnvFileError (FsHostError path hostError))
+        (std.io.readFileLimited (pathToString path) maximum)
     case parseEnvFile contents of
         Left parseError => failIO parseError
         | Right entries => setMissingEntries entries
 
 -- | Loads a dotenv file when it exists and reports whether it was present.
-loadEnvFileIfExists : String -> IO EnvError Bool
+loadEnvFileIfExists : Path -> IO EnvError Bool
 loadEnvFileIfExists path = do
     exists <- mapError EnvFileError (std.fs.doesFileExist path)
     if exists then do

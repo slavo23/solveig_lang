@@ -4,12 +4,12 @@ import std.time(*)
 slow : Task String
 slow =
     finally
-        (bindIO (sleep 30) (fun elapsed => pureIO "slow"))
+        (bindIO (sleep (milliseconds 30)) (fun elapsed => pureIO "slow"))
         (printLine "timeout-loser-cleaned")
 
 fast : Task String
 fast = do
-    sleep 5
+    sleep (milliseconds 5)
     pureIO "fast"
 
 report : Maybe String -> Task ()
@@ -20,7 +20,7 @@ report result =
 
 main : Task ()
 main = do
-    first <- timeout 10 slow
+    first <- timeout (milliseconds 10) slow
     report first
-    second <- timeout 20 fast
+    second <- timeout (milliseconds 20) fast
     report second

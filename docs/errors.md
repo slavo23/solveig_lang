@@ -91,7 +91,7 @@ with one constructor per operation:
 ```solveig
 data ConfigError = ConfigFile FsError | InvalidConfig String
 
-listConfigDirectory : String -> IO ConfigError [String]
+listConfigDirectory : std.path.Path -> IO ConfigError [std.path.Path]
 listConfigDirectory path = mapError ConfigFile (std.fs.listDirectory path)
 ```
 

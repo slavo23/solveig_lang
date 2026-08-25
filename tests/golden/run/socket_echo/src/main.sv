@@ -13,7 +13,7 @@ echoConnection connection = do
     request <- netTask (recvBytes connection 1024)
     netTask (sendBytes connection request)
 
-runClient : Int -> Task ()
+runClient : Port -> Task ()
 runClient port =
     bracket
         (netTask (connect "127.0.0.1" port))
@@ -27,7 +27,7 @@ runClient port =
 
 main : Task ()
 main =
-    bracket (netTask (listen 0)) (fun (listener, _) => netTask (closeSocket listener)) (fun listenerInfo =>
+    bracket (netTask (listen anyPort)) (fun (listener, _) => netTask (closeSocket listener)) (fun listenerInfo =>
         case listenerInfo of
             (listener, port) =>
                 withThread

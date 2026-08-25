@@ -1,24 +1,137 @@
-export (sleep, getMonotonicTime, getSystemTime, measure)
+export (
+    Duration, Instant, SystemTime, nanoseconds, microseconds, milliseconds, seconds,
+    durationToNanoseconds, durationToMicroseconds, durationToMilliseconds,
+    instantDifference, systemTimeDifference, systemTimeNanoseconds, sleep,
+    getMonotonicTime, getSystemTime, measure
+)
 
 import prelude.prim(*)
 
--- | Suspends the current thread for at least the requested milliseconds.
-sleep : Int -> Task ()
-sleep milliseconds = prelude.prim.sleep milliseconds
+-- | A signed span of time stored as nanoseconds.
+-- |
+-- | Signed durations are useful for clock differences. Sleeping for a
+-- | non-positive duration completes immediately, matching the host primitive.
+data Duration = Duration Int
 
--- | Returns nanoseconds from an arbitrary runtime-local monotonic origin.
-getMonotonicTime : Task Int
-getMonotonicTime = prelude.prim.getMonotonicTime
+-- | A reading from the runtime-local monotonic clock.
+data Instant = Instant Int
+
+-- | Signed nanoseconds since the Unix epoch from the wall clock.
+data SystemTime = SystemTime Int
+
+instance Eq Duration where
+    (==) (Duration left) (Duration right) = left == right
+
+instance PartialOrd Duration where
+    partialCompare (Duration left) (Duration right) = partialCompare left right
+
+instance Ord Duration where
+    compare (Duration left) (Duration right) = compare left right
+
+instance Show Duration where
+    show (Duration value) = show value <> "ns"
+
+instance Hashable Duration where
+    hashWithSalt salt (Duration value) = hashWithSalt salt value
+
+instance Eq Instant where
+    (==) (Instant left) (Instant right) = left == right
+
+instance PartialOrd Instant where
+    partialCompare (Instant left) (Instant right) = partialCompare left right
+
+instance Ord Instant where
+    compare (Instant left) (Instant right) = compare left right
+
+instance Show Instant where
+    show (Instant value) = "Instant " <> show value <> "ns"
+
+instance Hashable Instant where
+    hashWithSalt salt (Instant value) = hashWithSalt salt value
+
+instance Eq SystemTime where
+    (==) (SystemTime left) (SystemTime right) = left == right
+
+instance PartialOrd SystemTime where
+    partialCompare (SystemTime left) (SystemTime right) = partialCompare left right
+
+instance Ord SystemTime where
+    compare (SystemTime left) (SystemTime right) = compare left right
+
+instance Show SystemTime where
+    show (SystemTime value) = "SystemTime " <> show value <> "ns"
+
+instance Hashable SystemTime where
+    hashWithSalt salt (SystemTime value) = hashWithSalt salt value
+
+-- | Constructs a duration from nanoseconds.
+nanoseconds : Int -> Duration
+nanoseconds = Duration
+
+-- | Constructs a duration from microseconds.
+microseconds : Int -> Duration
+microseconds value = Duration (value * 1000)
+
+-- | Constructs a duration from milliseconds.
+milliseconds : Int -> Duration
+milliseconds value = Duration (value * 1000000)
+
+-- | Constructs a duration from seconds.
+seconds : Int -> Duration
+seconds value = Duration (value * 1000000000)
+
+-- | Returns a duration as nanoseconds.
+durationToNanoseconds : Duration -> Int
+durationToNanoseconds (Duration value) = value
+
+-- | Returns whole microseconds, truncating toward zero.
+durationToMicroseconds : Duration -> Int
+durationToMicroseconds (Duration value) = div value 1000
+
+-- | Returns whole milliseconds, truncating toward zero.
+durationToMilliseconds : Duration -> Int
+durationToMilliseconds (Duration value) = div value 1000000
+
+-- | Subtracts the first monotonic reading from the second.
+instantDifference : Instant -> Instant -> Duration
+instantDifference (Instant started) (Instant finished) = Duration (finished - started)
+
+-- | Subtracts the first wall-clock reading from the second.
+systemTimeDifference : SystemTime -> SystemTime -> Duration
+systemTimeDifference (SystemTime started) (SystemTime finished) =
+    Duration (finished - started)
 
 -- | Returns signed nanoseconds since the Unix epoch.
-getSystemTime : Task Int
-getSystemTime = prelude.prim.getSystemTime
+systemTimeNanoseconds : SystemTime -> Int
+systemTimeNanoseconds (SystemTime value) = value
 
--- | Runs an IO operation and returns its monotonic elapsed nanoseconds with its
--- | result.
-measure : forall a. Task a -> Task (Int, a)
+-- Package-internal conversion for nanoseconds returned by host primitives.
+systemTimeFromNanoseconds : Int -> SystemTime
+systemTimeFromNanoseconds = SystemTime
+
+-- | Suspends the current thread for at least the requested duration.
+sleep : Duration -> Task ()
+sleep duration = prelude.prim.sleep (sleepMilliseconds duration)
+
+sleepMilliseconds : Duration -> Int
+sleepMilliseconds (Duration value) =
+    if value <= 0 then 0
+    else
+        let whole = div value 1000000 in
+        if mod value 1000000 == 0 then whole else whole + 1
+
+-- | Returns a reading from an arbitrary runtime-local monotonic origin.
+getMonotonicTime : forall e. IO e Instant
+getMonotonicTime = fmap Instant prelude.prim.getMonotonicTime
+
+-- | Returns the current wall-clock time relative to the Unix epoch.
+getSystemTime : forall e. IO e SystemTime
+getSystemTime = fmap SystemTime prelude.prim.getSystemTime
+
+-- | Runs an operation and returns its monotonic elapsed duration with its result.
+measure : forall e a. IO e a -> IO e (Duration, a)
 measure operation = do
     started <- getMonotonicTime
     value <- operation
     finished <- getMonotonicTime
-    prelude.prim.pureIO (finished - started, value)
+    prelude.prim.pureIO (instantDifference started finished, value)

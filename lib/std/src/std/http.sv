@@ -1,18 +1,31 @@
 export (
-    Url, Method(..), Header(..), Request, Status(..), Response(..), RedirectPolicy(..), HttpLimits(..),
+    Url, Method(..), Header, Request, Status, Response, RedirectPolicy(..), HttpLimits,
     HttpError(..), defaultHttpLimits, fetch, fetchWith, send, urlFromString, urlToString,
-    header, get, head, post, put, patch, delete, withHeader, withHeaders, withTextBody,
-    withBody, withoutBody, request, getUrl, responseStatus, statusCode, isSuccessful,
-    responseHeaders, responseBody, findHeader, responseText, bodyChunks, foldBodyChunks,
-    headersFromList
+    header, headerName, headerValue, get, head, post, put, patch, delete, withHeader,
+    withHeaders, withTextBody, withBody, withoutBody, requestMethod, requestUrl,
+    requestHeaders, requestBody, request, getUrl, statusFromInt, response,
+    responseStatus, statusCode, isSuccessful, responseHeaders, responseBody, findHeader,
+    responseText, bodyChunks, foldBodyChunks, headersFromList, withMaximumHeaderBytes,
+    withMaximumBodyBytes, withHttpTimeout, withRedirectPolicy, maximumHeaderBytes,
+    maximumBodyBytes, httpTimeout, redirectPolicy
 )
 
 import prelude.prim(httpRequestRaw, stringLength, stringSlice)
 import std.bytes(*)
 import std.text(*)
+import std.time(Duration, durationToMilliseconds, milliseconds)
 
 -- | An absolute HTTP or HTTPS URL validated by urlFromString.
 data Url = Url String
+
+instance Eq Url where
+    (==) (Url left) (Url right) = left == right
+
+instance Show Url where
+    show (Url value) = value
+
+instance Hashable Url where
+    hashWithSalt salt (Url value) = hashWithSalt salt value
 
 -- | Standard HTTP request methods.
 data Method =
@@ -24,8 +37,28 @@ data Method =
   | Delete
   | Options
 
+instance Eq Method where
+    (==) Get Get = True
+    (==) Head Head = True
+    (==) Post Post = True
+    (==) Put Put = True
+    (==) Patch Patch = True
+    (==) Delete Delete = True
+    (==) Options Options = True
+    (==) _ _ = False
+
+instance Show Method where
+    show = methodText
+
 -- | One HTTP header name and value.
 data Header = Header String String
+
+instance Eq Header where
+    (==) (Header leftName leftValue) (Header rightName rightValue) =
+        and (asciiStringEqual leftName rightName) (leftValue == rightValue)
+
+instance Show Header where
+    show (Header name value) = name <> ": " <> value
 
 -- | An HTTP request with explicit headers and an optional bounded byte body.
 data Request = Request Method Url [Header] (Maybe Bytes)
@@ -33,23 +66,70 @@ data Request = Request Method Url [Header] (Maybe Bytes)
 -- | A three-digit HTTP response status.
 data Status = Status Int
 
+instance Eq Status where
+    (==) (Status left) (Status right) = left == right
+
+instance PartialOrd Status where
+    partialCompare (Status left) (Status right) = partialCompare left right
+
+instance Ord Status where
+    compare (Status left) (Status right) = compare left right
+
+instance Show Status where
+    show (Status code) = show code
+
+instance Hashable Status where
+    hashWithSalt salt (Status code) = hashWithSalt salt code
+
 -- | A bounded HTTP response. The body is never larger than maximumBodyBytes.
 data Response = Response Status [Header] Bytes
 
 -- | Redirect behavior. FollowRedirects zero behaves like NoRedirects.
 data RedirectPolicy = NoRedirects | FollowRedirects Int
 
+instance Eq RedirectPolicy where
+    (==) NoRedirects NoRedirects = True
+    (==) (FollowRedirects left) (FollowRedirects right) = left == right
+    (==) _ _ = False
+
+instance Show RedirectPolicy where
+    show NoRedirects = "NoRedirects"
+    show (FollowRedirects count) = "FollowRedirects " <> show count
+
 -- | Resource limits for one request.
 -- |
 -- | Fields are maximum response-header bytes, maximum response-body bytes,
--- | the whole-request timeout in milliseconds, and redirect policy.
-data HttpLimits = HttpLimits Int Int Int RedirectPolicy
+-- | the whole-request duration, and redirect policy.
+data HttpLimits = HttpLimits Int Int Duration RedirectPolicy
+
+instance Eq HttpLimits where
+    (==)
+        (HttpLimits leftHeaders leftBody leftTimeout leftRedirects)
+        (HttpLimits rightHeaders rightBody rightTimeout rightRedirects) =
+            and
+                (leftHeaders == rightHeaders)
+                (and
+                    (leftBody == rightBody)
+                    (and (leftTimeout == rightTimeout) (leftRedirects == rightRedirects)))
+
+instance Show HttpLimits where
+    show (HttpLimits headers body timeout redirects) =
+        "HttpLimits { maximumHeaderBytes = "
+            <> show headers
+            <> ", maximumBodyBytes = "
+            <> show body
+            <> ", timeout = "
+            <> show timeout
+            <> ", redirects = "
+            <> show redirects
+            <> " }"
 
 -- | Pure request-policy errors or a typed host HTTP failure.
 data HttpError =
     InvalidUrl String
   | InvalidHeaderName String
   | InvalidHeaderValue String
+  | InvalidStatus Int
   | InvalidHttpLimit String Int
   | TransportError HostError
   | TlsError HostError
@@ -63,6 +143,7 @@ instance Eq HttpError where
     (==) (InvalidUrl left) (InvalidUrl right) = left == right
     (==) (InvalidHeaderName left) (InvalidHeaderName right) = left == right
     (==) (InvalidHeaderValue left) (InvalidHeaderValue right) = left == right
+    (==) (InvalidStatus left) (InvalidStatus right) = left == right
     (==) (InvalidHttpLimit leftName leftValue) (InvalidHttpLimit rightName rightValue) =
         and (leftName == rightName) (leftValue == rightValue)
     (==) (TransportError left) (TransportError right) = left == right
@@ -78,6 +159,7 @@ instance Show HttpError where
     show (InvalidUrl spelling) = "invalid URL " <> show spelling
     show (InvalidHeaderName name) = "invalid HTTP header name " <> show name
     show (InvalidHeaderValue value) = "invalid HTTP header value " <> show value
+    show (InvalidStatus code) = "invalid HTTP status " <> show code
     show (InvalidHttpLimit name value) =
         "invalid HTTP " <> name <> " limit " <> show value
     show (TransportError hostError) = "HTTP transport: " <> show hostError
@@ -92,7 +174,7 @@ instance Show HttpError where
 
 -- | Practical defaults: 64 KiB headers, 8 MiB body, 15 seconds, five redirects.
 defaultHttpLimits : HttpLimits
-defaultHttpLimits = HttpLimits 65536 8388608 15000 (FollowRedirects 5)
+defaultHttpLimits = HttpLimits 65536 8388608 (milliseconds 15000) (FollowRedirects 5)
 
 -- | Performs a bounded GET from a URL string with practical default limits.
 fetch : String -> IO HttpError Response
@@ -126,8 +208,16 @@ urlToString (Url text) = text
 header : String -> String -> Either HttpError Header
 header name value =
     if not (validHeaderName name) then Left (InvalidHeaderName name)
-    else if not (validHeaderValue value) then Left (InvalidHeaderValue name)
+    else if not (validHeaderValue value) then Left (InvalidHeaderValue value)
     else Right (Header name value)
+
+-- | Returns a header's field name.
+headerName : Header -> String
+headerName (Header name _) = name
+
+-- | Returns a header's field value.
+headerValue : Header -> String
+headerValue (Header _ value) = value
 
 -- | Builds a GET request without headers or a body.
 get : Url -> Request
@@ -177,10 +267,26 @@ withoutBody : Request -> Request
 withoutBody (Request method url headers _) =
     Request method url headers Nothing
 
+-- | Returns a request's method.
+requestMethod : Request -> Method
+requestMethod (Request method _ _ _) = method
+
+-- | Returns a request's URL.
+requestUrl : Request -> Url
+requestUrl (Request _ url _ _) = url
+
+-- | Returns request headers in wire order.
+requestHeaders : Request -> [Header]
+requestHeaders (Request _ _ headers _) = headers
+
+-- | Returns a request's optional strict body.
+requestBody : Request -> Maybe Bytes
+requestBody (Request _ _ _ body) = body
+
 -- | Performs one bounded request without blocking other Solveig green threads.
 -- |
 -- | 4xx and 5xx statuses are returned normally. Transport, TLS, timeout,
--- | redirect, and response-limit failures are returned as HttpHostError.
+-- | redirect, and response-limit failures retain their specific HttpError form.
 request : HttpLimits -> Request -> IO HttpError Response
 request limits requestValue =
     case validateRequest limits requestValue of
@@ -193,7 +299,7 @@ request limits requestValue =
                         (mapError (httpHostError limits)
                             (prelude.prim.httpRequestRaw
                                 (methodText method, url, map headerToRaw headers, body)
-                                (maximumHeaders, maximumBody, timeout, redirectCount redirects)))
+                                (maximumHeaders, maximumBody, durationToMilliseconds timeout, redirectCount redirects)))
 
 httpHostError : HttpLimits -> HostError -> HttpError
 httpHostError (HttpLimits maximumHeaders maximumBody _ _) hostError =
@@ -215,6 +321,16 @@ headerToRaw (Header name value) = (name, value)
 headerFromRaw : (String, String) -> Header
 headerFromRaw (name, value) = Header name value
 
+-- | Validates an integer as a three-digit HTTP status.
+statusFromInt : Int -> Either HttpError Status
+statusFromInt code =
+    if and (code >= 100) (code <= 599) then Right (Status code)
+    else Left (InvalidStatus code)
+
+-- | Constructs a strict response value from validated components.
+response : Status -> [Header] -> Bytes -> Response
+response = Response
+
 -- | Performs a GET with default limits.
 getUrl : Url -> IO HttpError Response
 getUrl url = request defaultHttpLimits (get url)
@@ -230,6 +346,42 @@ statusCode (Status code) = code
 -- | Reports whether a status is in the successful 2xx range.
 isSuccessful : Status -> Bool
 isSuccessful (Status code) = and (code >= 200) (code < 300)
+
+-- | Changes the maximum accepted response-header bytes.
+withMaximumHeaderBytes : Int -> HttpLimits -> HttpLimits
+withMaximumHeaderBytes maximum (HttpLimits _ body timeout redirects) =
+    HttpLimits maximum body timeout redirects
+
+-- | Changes the maximum accepted response-body bytes.
+withMaximumBodyBytes : Int -> HttpLimits -> HttpLimits
+withMaximumBodyBytes maximum (HttpLimits headers _ timeout redirects) =
+    HttpLimits headers maximum timeout redirects
+
+-- | Changes the whole-request timeout.
+withHttpTimeout : Duration -> HttpLimits -> HttpLimits
+withHttpTimeout timeout (HttpLimits headers body _ redirects) =
+    HttpLimits headers body timeout redirects
+
+-- | Changes redirect behavior.
+withRedirectPolicy : RedirectPolicy -> HttpLimits -> HttpLimits
+withRedirectPolicy redirects (HttpLimits headers body timeout _) =
+    HttpLimits headers body timeout redirects
+
+-- | Returns the maximum accepted response-header bytes.
+maximumHeaderBytes : HttpLimits -> Int
+maximumHeaderBytes (HttpLimits maximum _ _ _) = maximum
+
+-- | Returns the maximum accepted response-body bytes.
+maximumBodyBytes : HttpLimits -> Int
+maximumBodyBytes (HttpLimits _ maximum _ _) = maximum
+
+-- | Returns the whole-request timeout.
+httpTimeout : HttpLimits -> Duration
+httpTimeout (HttpLimits _ _ timeout _) = timeout
+
+-- | Returns redirect behavior.
+redirectPolicy : HttpLimits -> RedirectPolicy
+redirectPolicy (HttpLimits _ _ _ redirects) = redirects
 
 -- | Returns all response headers in wire order.
 responseHeaders : Response -> [Header]
@@ -292,7 +444,8 @@ validateRequest : HttpLimits -> Request -> Either HttpError Request
 validateRequest (HttpLimits maximumHeaders maximumBody timeout redirects) requestValue =
     if maximumHeaders <= 0 then Left (InvalidHttpLimit "response header bytes" maximumHeaders)
     else if maximumBody < 0 then Left (InvalidHttpLimit "response body bytes" maximumBody)
-    else if timeout <= 0 then Left (InvalidHttpLimit "timeout milliseconds" timeout)
+    else if durationToMilliseconds timeout <= 0 then
+        Left (InvalidHttpLimit "timeout milliseconds" (durationToMilliseconds timeout))
     else case redirects of
         FollowRedirects count =>
             if count < 0 then Left (InvalidHttpLimit "redirect count" count)
@@ -308,7 +461,7 @@ validateHeaders : [Header] -> Request -> Either HttpError Request
 validateHeaders [] requestValue = Right requestValue
 validateHeaders (Header name value :: rest) requestValue =
     if not (validHeaderName name) then Left (InvalidHeaderName name)
-    else if not (validHeaderValue value) then Left (InvalidHeaderValue name)
+    else if not (validHeaderValue value) then Left (InvalidHeaderValue value)
     else validateHeaders rest requestValue
 
 redirectCount : RedirectPolicy -> Int

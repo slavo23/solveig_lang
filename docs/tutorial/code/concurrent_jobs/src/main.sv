@@ -1,9 +1,9 @@
 import std.task(concurrentHostError, mapConcurrentlyBounded)
-import std.time(sleep)
+import std.time(milliseconds, sleep)
 
 process : Int -> Task Int
 process value = do
-    sleep ((5 - value) * 10)
+    sleep (milliseconds ((5 - value) * 10))
     pureIO (value * value)
 
 main : Task ()

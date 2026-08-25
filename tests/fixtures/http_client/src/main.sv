@@ -2,11 +2,13 @@ import std.bytes(*)
 import std.env(getArgs)
 import std.http(*)
 import std.task(timeout)
+import std.time(milliseconds)
 
 showHttpError : std.http.HttpError -> String
 showHttpError (InvalidUrl _) = "invalid-url"
 showHttpError (InvalidHeaderName _) = "invalid-header-name"
 showHttpError (InvalidHeaderValue _) = "invalid-header-value"
+showHttpError (InvalidStatus _) = "invalid-status"
 showHttpError (InvalidHttpLimit _ _) = "invalid-limit"
 showHttpError (TransportError _) = "transport"
 showHttpError (TlsError _) = "tls"
@@ -56,12 +58,22 @@ requireUrl spelling =
         Right url => url
         | Left _ => error "fixture URL invalid"
 
+limits : Int -> Int -> Int -> RedirectPolicy -> HttpLimits
+limits headerBytes bodyBytes timeoutMilliseconds redirects =
+    withRedirectPolicy
+        redirects
+        (withHttpTimeout
+            (milliseconds timeoutMilliseconds)
+            (withMaximumBodyBytes
+                bodyBytes
+                (withMaximumHeaderBytes headerBytes defaultHttpLimits)))
+
 cancelSlowRequest : String -> Task (Maybe std.http.Response)
 cancelSlowRequest base =
     catchError
-        (timeout 20
+        (timeout (milliseconds 20)
             (std.http.request
-                (std.http.HttpLimits 65536 1024 1000 std.http.NoRedirects)
+                (limits 65536 1024 1000 std.http.NoRedirects)
                 (std.http.get (requireUrl (base <> "/slow")))))
         (fun requestError => pureIO Nothing)
 
@@ -72,19 +84,19 @@ main = do
     let tlsBase = tlsArgument args
     catchError
         (std.http.fetchWith
-            (std.http.HttpLimits 65536 1024 1000 std.http.NoRedirects)
+            (limits 65536 1024 1000 std.http.NoRedirects)
             [("Accept", "text/plain")]
             (base <> "/chunked")
             >>= printResponse "fetch")
         (fun error => printLine ("fetch:" <> showHttpError error))
-    fetch "chunked" (std.http.HttpLimits 65536 1024 1000 (std.http.FollowRedirects 2)) (base <> "/chunked")
-    fetch "redirect" (std.http.HttpLimits 65536 1024 1000 (std.http.FollowRedirects 2)) (base <> "/redirect")
-    fetch "status" (std.http.HttpLimits 65536 1024 1000 std.http.NoRedirects) (base <> "/missing")
-    fetch "body-limit" (std.http.HttpLimits 65536 4 1000 std.http.NoRedirects) (base <> "/large")
-    fetch "header-limit" (std.http.HttpLimits 80 1024 1000 std.http.NoRedirects) (base <> "/large-header")
-    fetch "malformed" (std.http.HttpLimits 65536 1024 1000 std.http.NoRedirects) (base <> "/malformed")
-    fetch "redirect-limit" (std.http.HttpLimits 65536 1024 1000 (std.http.FollowRedirects 1)) (base <> "/redirect-loop")
-    fetch "host-timeout" (std.http.HttpLimits 65536 1024 20 std.http.NoRedirects) (base <> "/slow-timeout")
-    fetch "tls" (std.http.HttpLimits 65536 1024 1000 std.http.NoRedirects) (tlsBase <> "/secure")
+    fetch "chunked" (limits 65536 1024 1000 (std.http.FollowRedirects 2)) (base <> "/chunked")
+    fetch "redirect" (limits 65536 1024 1000 (std.http.FollowRedirects 2)) (base <> "/redirect")
+    fetch "status" (limits 65536 1024 1000 std.http.NoRedirects) (base <> "/missing")
+    fetch "body-limit" (limits 65536 4 1000 std.http.NoRedirects) (base <> "/large")
+    fetch "header-limit" (limits 80 1024 1000 std.http.NoRedirects) (base <> "/large-header")
+    fetch "malformed" (limits 65536 1024 1000 std.http.NoRedirects) (base <> "/malformed")
+    fetch "redirect-limit" (limits 65536 1024 1000 (std.http.FollowRedirects 1)) (base <> "/redirect-loop")
+    fetch "host-timeout" (limits 65536 1024 20 std.http.NoRedirects) (base <> "/slow-timeout")
+    fetch "tls" (limits 65536 1024 1000 std.http.NoRedirects) (tlsBase <> "/secure")
     timed <- cancelSlowRequest base
     printLine (case timed of Nothing => "cancelled:prompt" | Just _ => "cancelled:late")

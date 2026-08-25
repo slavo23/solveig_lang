@@ -5,7 +5,14 @@ import release_radar.cache(*)
 import release_radar.model(*)
 
 httpLimits : std.http.HttpLimits
-httpLimits = std.http.HttpLimits 65536 1048576 10000 std.http.NoRedirects
+httpLimits =
+    std.http.withRedirectPolicy
+        std.http.NoRedirects
+        (std.http.withHttpTimeout
+            (std.time.milliseconds 10000)
+            (std.http.withMaximumBodyBytes
+                1048576
+                (std.http.withMaximumHeaderBytes 65536 std.http.defaultHttpLimits)))
 
 commonHeaders : [(String, String)]
 commonHeaders =
@@ -86,15 +93,12 @@ fetchObserved base token cache repository = do
             do
                 printLine
                     ("[done " <>
-                        show (milliseconds elapsed) <>
+                        show (durationToMilliseconds elapsed) <>
                         " ms] " <>
                         release_radar.model.releaseRepository result <>
                         " — " <>
                         release_radar.model.completionLabel result)
                 pureIO result
-
-milliseconds : Int -> Int
-milliseconds nanoseconds = div nanoseconds 1000000
 
 printResults : [release_radar.model.ReleaseResult] -> Task ()
 printResults = mapIO_ (printLine . release_radar.model.renderResult)

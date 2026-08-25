@@ -3,7 +3,8 @@ import std.env(EnvError(..))
 import std.fs(FsError(..))
 import std.http(HttpError(..))
 import std.net(NetError(..))
-import std.process(ProcessError(..))
+import std.path(Path, pathFromString)
+import std.process(Process, ProcessError(..), process)
 import std.task(*)
 
 data DomainError = Missing
@@ -40,6 +41,18 @@ reportAppend error = reportOperation "appendFile" "append-file-error" error
 infrastructureError : ConcurrentError DomainError
 infrastructureError =
     ConcurrentInfrastructure (HostError PermissionDenied "openFile" "denied")
+
+fixturePath : String -> Path
+fixturePath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left _ => error "fixture path invalid"
+
+fixtureProcess : String -> Process
+fixtureProcess program =
+    case process program [] of
+        Right processValue => processValue
+        | Left _ => error "fixture process invalid"
 
 releaseResource : String -> Task ()
 releaseResource name = printLine (appendString "release " name)
@@ -105,8 +118,8 @@ main = do
     catchError (prelude.prim.appendFile "missing/child.txt" "text") reportAppend
     let denied = HostError PermissionDenied "openFile" "denied"
     printLine (show denied)
-    printLine (show (FsHostError "settings.conf" denied))
-    printLine (show (ProcessHostError "tool" denied))
+    printLine (show (FsHostError (fixturePath "settings.conf") denied))
+    printLine (show (ProcessHostError (fixtureProcess "tool") denied))
     printLine (show (NetHostError "example.test:443" denied))
     printLine (show (HttpHostError denied))
     printLine (show (ResponseBodyTooLarge 1024))

@@ -32,14 +32,22 @@ Use `fetchWith` only when the application needs a different policy or request
 headers:
 
 ```solveig
+import std.time(milliseconds)
+
 fetchWith
-    (HttpLimits 65536 1048576 5000 NoRedirects)
+    (withRedirectPolicy
+        NoRedirects
+        (withHttpTimeout
+            (milliseconds 5000)
+            (withMaximumBodyBytes
+                1048576
+                (withMaximumHeaderBytes 65536 defaultHttpLimits))))
     [("Accept", "application/json")]
     url
 ```
 
-The fields are maximum header bytes, maximum body bytes, timeout milliseconds,
-and redirect policy. Explicit limits belong at a trust boundary, not on every
+`HttpLimits` is opaque: named transformations make it clear which policy is
+being changed. Explicit limits belong at a trust boundary, not on every
 beginner example.
 
 ## Status, headers, and body
@@ -100,6 +108,7 @@ data HttpError =
     InvalidUrl String
   | InvalidHeaderName String
   | InvalidHeaderValue String
+  | InvalidStatus Int
   | InvalidHttpLimit String Int
   | TransportError HostError
   | TlsError HostError
@@ -148,7 +157,7 @@ remove the service's usage policy; handle status and rate-limit headers.
 import std.bytes(*)
 import std.net(*)
 
-echo : String -> Int -> String -> Task String
+echo : String -> Port -> String -> IO NetError String
 echo host port message =
     withConnection host port (fun socket => do
         sendBytes socket (stringToBytes message)
@@ -165,8 +174,10 @@ available.
 
 ## TCP listeners
 
-`withListener port body` binds a listener. Port `0` asks the operating system
-for an available port and returns `(listener, actualPort)`. `accept` waits for a
+`withListener port body` binds a listener. Pass `anyPort` to ask the
+operating system for an available port; it returns
+`(listener, actualPort)`. Validate externally supplied integers with
+`portFromInt`. `accept` waits for a
 connection. Each accepted socket must be closed, normally with `finally` or a
 small ownership helper.
 
