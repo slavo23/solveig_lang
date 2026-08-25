@@ -1,6 +1,6 @@
 export (
     Int, Float, Char, String, IO, Bool(..), ThreadId, Chan, Bytes, Socket, Handle, StdGen,
-    Maybe(..), Either(..), Result(..), Tuple2(..), Tuple3(..), Tuple4(..), Tuple5(..),
+    Maybe(..), Either(..), Tuple2(..), Tuple3(..), Tuple4(..), Tuple5(..),
     Tuple6(..), Tuple7(..), Tuple8(..), Never, IOError(..), Defect(..), Task,
     pureIO, bindIO, failIO, error, catchError, mapError, orElse, printLine, printStr,
     readLine, appendString, even, odd, not, and, or
@@ -21,13 +21,6 @@ data Either a b =
     Left a
   | -- | Holds a value from the right side.
     Right b
-
--- | A successful value or an expected failure.
-data Result e a =
-    -- | Holds a successful value.
-    Ok a
-  | -- | Holds an expected failure.
-    Err e
 
 -- | A heterogeneous product of two values, written `(a, b)`.
 data Tuple2 a b = MkTuple2 a b

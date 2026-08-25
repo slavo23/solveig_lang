@@ -94,8 +94,8 @@ serveConnectionBody : Socket -> Task ()
 serveConnectionBody connection = do
     requestBytes <- readHeaders connection emptyBytes
     case bytesToString requestBytes of
-        Ok request => sendBytes connection (stringToBytes (responseFor request))
-        | Err error => failIO error
+        Right request => sendBytes connection (stringToBytes (responseFor request))
+        | Left error => failIO error
 
 serve : Socket -> Int -> Task ()
 serve listener remaining =
@@ -110,11 +110,11 @@ successfulStatus : Bytes -> Bool
 successfulStatus response =
     and (byteIs response 9 50) (and (byteIs response 10 48) (byteIs response 11 48))
 
-responseBody : Bytes -> Result IOError Bytes
+responseBody : Bytes -> Either IOError Bytes
 responseBody response =
     case findHeaderEnd response 0 of
-        Just start => Ok (bytesSlice response start (bytesLength response - start))
-        | Nothing => Err (RecvError "HTTP response has no header terminator")
+        Just start => Right (bytesSlice response start (bytesLength response - start))
+        | Nothing => Left (RecvError "HTTP response has no header terminator")
 
 fetchWith : String -> String -> Socket -> Task Bytes
 fetchWith host path socket = do
@@ -122,8 +122,8 @@ fetchWith host path socket = do
     response <- readResponse socket emptyBytes
     if successfulStatus response
         then case responseBody response of
-            Ok body => pureIO body
-            | Err error => failIO error
+            Right body => pureIO body
+            | Left error => failIO error
         else failIO (RecvError (appendString "HTTP request failed: " path))
 
 fetch : String -> Int -> String -> String -> Task Bytes
@@ -156,11 +156,11 @@ downloadAttempt results fetcher address port host path output = do
     case fetched of
         Just body =>
             case bytesToString body of
-                Ok contents =>
+                Right contents =>
                     do
                         writeFile output contents
                         send results (Downloaded (bytesLength body))
-                | Err error => failIO error
+                | Left error => failIO error
         | Nothing => failIO (RecvError "HTTP request timed out after five seconds")
 
 worker :

@@ -17,7 +17,7 @@ Read the chapters in order on a first pass:
 2. [Language basics](02-language-basics.md) covers values, functions,
    expressions, lists, tuples, and operators.
 3. [Data, patterns, and errors](03-data-and-patterns.md) introduces algebraic
-   data types, exhaustive pattern matching, `Maybe`, `Result`, and typed IO.
+   data types, exhaustive pattern matching, `Maybe`, `Either`, and typed IO.
 4. [Abstraction](04-abstraction.md) covers modules, polymorphism, type aliases,
    typeclasses, instances, higher-order functions, and point-free style.
 5. [IO and files](05-io-and-files.md) explains `Task`, `do`, handles, cleanup,

@@ -4,11 +4,11 @@ import std.bytes(*)
 main : Task ()
 main =
     case std.http.urlFromString "https://example.com/releases" of
-        Err _ => printLine "url: invalid"
-        | Ok url =>
+        Left _ => printLine "url: invalid"
+        | Right url =>
             case std.http.bodyChunks 3 (std.http.Response (std.http.Status 200) [] (std.bytes.stringToBytes "abcdefg")) of
-                Err _ => printLine "chunks: invalid"
-                | Ok chunks =>
+                Left _ => printLine "chunks: invalid"
+                | Right chunks =>
                     bindIO (printLine ("url: " <> std.http.urlToString url)) (fun _ =>
                         bindIO (printLine ("chunks: " <> show (map std.bytes.bytesLength chunks))) (fun _ =>
                             printLine

@@ -56,7 +56,7 @@ getProgName = prelude.prim.getProgName
 -- | prefix and matching single or double quotes around values are accepted.
 -- | Duplicate names and invalid ASCII environment names are rejected without
 -- | retaining the possibly secret source line in the error.
-parseEnvFile : String -> Result EnvError [(String, String)]
+parseEnvFile : String -> Either EnvError [(String, String)]
 parseEnvFile text =
     parseEnvLines (std.text.lines text) 1 std.map.empty []
 
@@ -69,8 +69,8 @@ loadEnvFileLimited : String -> Int -> IO EnvError ()
 loadEnvFileLimited path maximum = do
     contents <- mapError EnvIoError (std.io.readFileLimited path maximum)
     case parseEnvFile contents of
-        Err parseError => failIO parseError
-        | Ok entries => setMissingEntries entries
+        Left parseError => failIO parseError
+        | Right entries => setMissingEntries entries
 
 -- | Loads a dotenv file when it exists and reports whether it was present.
 loadEnvFileIfExists : String -> IO EnvError Bool
@@ -88,8 +88,8 @@ describeEnvError (MissingEnv name) = "missing environment variable " <> name
 describeEnvError (InvalidEnvLine line reason) =
     "invalid environment file line " <> show line <> ": " <> reason
 
-parseEnvLines : [String] -> Int -> std.map.Map String () -> [(String, String)] -> Result EnvError [(String, String)]
-parseEnvLines [] _ _ reversedEntries = Ok (reverse reversedEntries)
+parseEnvLines : [String] -> Int -> std.map.Map String () -> [(String, String)] -> Either EnvError [(String, String)]
+parseEnvLines [] _ _ reversedEntries = Right (reverse reversedEntries)
 parseEnvLines (sourceLine :: rest) lineNumber names reversedEntries =
     let line = std.text.trimAscii sourceLine in
     if or (std.text.isEmpty line) (std.text.startsWith "#" line) then
@@ -99,16 +99,16 @@ parseEnvLines (sourceLine :: rest) lineNumber names reversedEntries =
             Nothing => line
             | Just exported => std.text.trimAscii exported
         in case std.text.splitOnce '=' assignment of
-            Nothing => Err (InvalidEnvLine lineNumber "expected NAME=VALUE")
+            Nothing => Left (InvalidEnvLine lineNumber "expected NAME=VALUE")
             | Just (rawName, rawValue) =>
                 let name = std.text.trimAscii rawName in
                 if not (validEnvName name) then
-                    Err (InvalidEnvLine lineNumber "invalid variable name")
+                    Left (InvalidEnvLine lineNumber "invalid variable name")
                 else if std.map.member name names then
-                    Err (InvalidEnvLine lineNumber "duplicate variable name")
+                    Left (InvalidEnvLine lineNumber "duplicate variable name")
                 else case envValue lineNumber (std.text.trimAscii rawValue) of
-                    Err valueError => Err valueError
-                    | Ok value =>
+                    Left valueError => Left valueError
+                    | Right value =>
                         parseEnvLines
                             rest
                             (lineNumber + 1)
@@ -138,21 +138,21 @@ allValidEnvNameChars (character :: rest) =
         (or (validEnvNameStart character) (and (point >= 48) (point <= 57)))
         (allValidEnvNameChars rest)
 
-envValue : Int -> String -> Result EnvError String
-envValue _ "" = Ok ""
+envValue : Int -> String -> Either EnvError String
+envValue _ "" = Right ""
 envValue lineNumber value =
     case std.text.stringToChars value of
         '\'' :: rest => quotedEnvValue lineNumber '\'' rest
         | '"' :: rest => quotedEnvValue lineNumber '"' rest
-        | _ => Ok value
+        | _ => Right value
 
-quotedEnvValue : Int -> Char -> [Char] -> Result EnvError String
+quotedEnvValue : Int -> Char -> [Char] -> Either EnvError String
 quotedEnvValue lineNumber quote characters =
     case reverse characters of
         closing :: reversedValue =>
-            if closing == quote then Ok (std.text.charsToString (reverse reversedValue))
-            else Err (InvalidEnvLine lineNumber "unterminated quoted value")
-        | [] => Err (InvalidEnvLine lineNumber "unterminated quoted value")
+            if closing == quote then Right (std.text.charsToString (reverse reversedValue))
+            else Left (InvalidEnvLine lineNumber "unterminated quoted value")
+        | [] => Left (InvalidEnvLine lineNumber "unterminated quoted value")
 
 setMissingEntries : [(String, String)] -> IO EnvError ()
 setMissingEntries [] = pureIO ()

@@ -43,12 +43,12 @@ workersParser =
                 std.parser.textInputOps
                 (std.parser.satisfy std.parser.textInputOps "digit" isDigit)))
 
-parseWorkers : String -> Result std.testing.TestFailure Int
+parseWorkers : String -> Either std.testing.TestFailure Int
 parseWorkers text =
     std.parser.foldReply
-        (fun _ value _ => Ok value)
-        (fun _ _ _ => Err (TestFailure "settings parser rejected valid input"))
-        (fun _ _ _ => Err (TestFailure "settings parser requested more input"))
+        (fun _ value _ => Right value)
+        (fun _ _ _ => Left (TestFailure "settings parser rejected valid input"))
+        (fun _ _ _ => Left (TestFailure "settings parser requested more input"))
         (std.parser.runComplete
             std.parser.textInputOps
             workersParser
@@ -76,26 +76,26 @@ withFixture action =
                     (serveOnce listener)
                     (fun _ => action ("http://127.0.0.1:" <> show port)))
 
-fetchNames : String -> Task (Result std.testing.TestFailure (Int, (std.vector.Vector String)))
+fetchNames : String -> Task (Either std.testing.TestFailure (Int, (std.vector.Vector String)))
 fetchNames base = do
     response <- mapError httpAsIOError (std.http.fetch (base <> "/names"))
     let status = std.http.statusCode (std.http.responseStatus response)
     pureIO
         (std.parser.foldReply
             (fun _ value _ => namesFromJson status value)
-            (fun _ _ _ => Err (TestFailure "HTTP body is invalid JSON"))
-            (fun _ _ _ => Err (TestFailure "HTTP JSON requested more input"))
+            (fun _ _ _ => Left (TestFailure "HTTP body is invalid JSON"))
+            (fun _ _ _ => Left (TestFailure "HTTP JSON requested more input"))
             (std.json.parseJson std.json.defaultJsonLimits (std.http.responseBody response)))
 
-namesFromJson : Int -> std.json.Json -> Result std.testing.TestFailure (Int, (std.vector.Vector String))
+namesFromJson : Int -> std.json.Json -> Either std.testing.TestFailure (Int, (std.vector.Vector String))
 namesFromJson status (JsonObject object) =
     case std.map.lookup "names" object of
         Just (JsonArray values) =>
             case jsonStrings (std.vector.toList values) of
-                Just names => Ok (status, (std.vector.fromList names))
-                | Nothing => Err (TestFailure "names array contains a non-string")
-        | _ => Err (TestFailure "JSON object has no names array")
-namesFromJson _ _ = Err (TestFailure "HTTP JSON is not an object")
+                Just names => Right (status, (std.vector.fromList names))
+                | Nothing => Left (TestFailure "names array contains a non-string")
+        | _ => Left (TestFailure "JSON object has no names array")
+namesFromJson _ _ = Left (TestFailure "HTTP JSON is not an object")
 
 jsonStrings : [std.json.Json] -> Maybe [String]
 jsonStrings [] = Just []
@@ -112,9 +112,9 @@ invalidUrlIsTyped =
         (fun httpError => pureIO
             (case httpError of InvalidUrl _ => True | _ => False))
 
-resultOrExit : Result std.testing.TestFailure a -> Task a
-resultOrExit (Ok value) = pureIO value
-resultOrExit (Err failure) = error (std.testing.failureMessage failure)
+resultOrExit : Either std.testing.TestFailure a -> Task a
+resultOrExit (Right value) = pureIO value
+resultOrExit (Left failure) = error (std.testing.failureMessage failure)
 
 isNothing : Maybe a -> Bool
 isNothing Nothing = True

@@ -65,32 +65,32 @@ fetch spelling = fetchWith defaultHttpLimits [] spelling
 fetchWith : HttpLimits -> [(String, String)] -> String -> IO HttpError Response
 fetchWith limits rawHeaders spelling =
     case urlFromString spelling of
-        Err urlError => failIO urlError
-        | Ok url =>
+        Left urlError => failIO urlError
+        | Right url =>
             case headersFromList rawHeaders of
-                Err headerError => failIO headerError
-                | Ok headers => request limits (withHeaders headers (get url))
+                Left headerError => failIO headerError
+                | Right headers => request limits (withHeaders headers (get url))
 
 -- | Performs a prepared request with practical default limits.
 send : Request -> IO HttpError Response
 send requestValue = request defaultHttpLimits requestValue
 
 -- | Validates an absolute URL. Only http and https schemes are accepted.
-urlFromString : String -> Result HttpError Url
+urlFromString : String -> Either HttpError Url
 urlFromString text =
-    if validUrlText text then Ok (Url text)
-    else Err (InvalidUrl text)
+    if validUrlText text then Right (Url text)
+    else Left (InvalidUrl text)
 
 -- | Returns the absolute spelling retained by a URL.
 urlToString : Url -> String
 urlToString (Url text) = text
 
 -- | Builds and validates one HTTP header.
-header : String -> String -> Result HttpError Header
+header : String -> String -> Either HttpError Header
 header name value =
-    if not (validHeaderName name) then Err (InvalidHeaderName name)
-    else if not (validHeaderValue value) then Err (InvalidHeaderValue name)
-    else Ok (Header name value)
+    if not (validHeaderName name) then Left (InvalidHeaderName name)
+    else if not (validHeaderValue value) then Left (InvalidHeaderValue name)
+    else Right (Header name value)
 
 -- | Builds a GET request without headers or a body.
 get : Url -> Request
@@ -147,8 +147,8 @@ withoutBody (Request method url headers _) =
 request : HttpLimits -> Request -> IO HttpError Response
 request limits requestValue =
     case validateRequest limits requestValue of
-        Err policyError => failIO policyError
-        | Ok (Request method (Url url) headers body) =>
+        Left policyError => failIO policyError
+        | Right (Request method (Url url) headers body) =>
             case limits of
                 HttpLimits maximumHeaders maximumBody timeout redirects =>
                     fmap
@@ -203,26 +203,26 @@ findHeaderIn name (Header candidate value :: rest) =
     else findHeaderIn name rest
 
 -- | Strictly decodes the bounded body as UTF-8.
-responseText : Response -> Result HttpError String
+responseText : Response -> Either HttpError String
 responseText response =
     case std.bytes.bytesToString (responseBody response) of
-        Ok text => Ok text
-        | Err error => Err (HttpIoError error)
+        Right text => Right text
+        | Left error => Left (HttpIoError error)
 
 -- | Splits the bounded body into chunks no larger than the requested size.
 -- |
 -- | This is useful for incremental consumers while retaining the request's
 -- | hard whole-body allocation bound. Non-positive chunk sizes are rejected.
-bodyChunks : Int -> Response -> Result HttpError [Bytes]
+bodyChunks : Int -> Response -> Either HttpError [Bytes]
 bodyChunks size response =
-    if size <= 0 then Err (InvalidHttpLimit "chunk bytes" size)
-    else Ok (chunksFrom size (responseBody response) 0)
+    if size <= 0 then Left (InvalidHttpLimit "chunk bytes" size)
+    else Right (chunksFrom size (responseBody response) 0)
 
 -- | Folds bounded body chunks without allocating a list of chunks.
-foldBodyChunks : forall state. Int -> (state -> Bytes -> state) -> state -> Response -> Result HttpError state
+foldBodyChunks : forall state. Int -> (state -> Bytes -> state) -> state -> Response -> Either HttpError state
 foldBodyChunks size step initial response =
-    if size <= 0 then Err (InvalidHttpLimit "chunk bytes" size)
-    else Ok (foldChunksFrom size step initial (responseBody response) 0)
+    if size <= 0 then Left (InvalidHttpLimit "chunk bytes" size)
+    else Right (foldChunksFrom size step initial (responseBody response) 0)
 
 chunksFrom : Int -> Bytes -> Int -> [Bytes]
 chunksFrom size bytes offset =
@@ -241,27 +241,27 @@ foldChunksFrom size step state bytes offset =
         bytes
         (offset + size)
 
-validateRequest : HttpLimits -> Request -> Result HttpError Request
+validateRequest : HttpLimits -> Request -> Either HttpError Request
 validateRequest (HttpLimits maximumHeaders maximumBody timeout redirects) requestValue =
-    if maximumHeaders <= 0 then Err (InvalidHttpLimit "response header bytes" maximumHeaders)
-    else if maximumBody < 0 then Err (InvalidHttpLimit "response body bytes" maximumBody)
-    else if timeout <= 0 then Err (InvalidHttpLimit "timeout milliseconds" timeout)
+    if maximumHeaders <= 0 then Left (InvalidHttpLimit "response header bytes" maximumHeaders)
+    else if maximumBody < 0 then Left (InvalidHttpLimit "response body bytes" maximumBody)
+    else if timeout <= 0 then Left (InvalidHttpLimit "timeout milliseconds" timeout)
     else case redirects of
         FollowRedirects count =>
-            if count < 0 then Err (InvalidHttpLimit "redirect count" count)
+            if count < 0 then Left (InvalidHttpLimit "redirect count" count)
             else validateRequestFields requestValue
         | NoRedirects => validateRequestFields requestValue
 
-validateRequestFields : Request -> Result HttpError Request
+validateRequestFields : Request -> Either HttpError Request
 validateRequestFields (Request method (Url url) headers body) =
-    if not (validUrlText url) then Err (InvalidUrl url)
+    if not (validUrlText url) then Left (InvalidUrl url)
     else validateHeaders headers (Request method (Url url) headers body)
 
-validateHeaders : [Header] -> Request -> Result HttpError Request
-validateHeaders [] requestValue = Ok requestValue
+validateHeaders : [Header] -> Request -> Either HttpError Request
+validateHeaders [] requestValue = Right requestValue
 validateHeaders (Header name value :: rest) requestValue =
-    if not (validHeaderName name) then Err (InvalidHeaderName name)
-    else if not (validHeaderValue value) then Err (InvalidHeaderValue name)
+    if not (validHeaderName name) then Left (InvalidHeaderName name)
+    else if not (validHeaderValue value) then Left (InvalidHeaderValue name)
     else validateHeaders rest requestValue
 
 redirectCount : RedirectPolicy -> Int
@@ -355,15 +355,15 @@ validHeaderValueChars (character :: rest) =
         (and (point /= 0) (validHeaderValueChars rest))
 
 -- | Validates ordinary string-pair headers for use with the low-level request API.
-headersFromList : [(String, String)] -> Result HttpError [Header]
-headersFromList [] = Ok []
+headersFromList : [(String, String)] -> Either HttpError [Header]
+headersFromList [] = Right []
 headersFromList ((name, value) :: rest) =
     case header name value of
-        Err headerError => Err headerError
-        | Ok checked =>
+        Left headerError => Left headerError
+        | Right checked =>
             case headersFromList rest of
-                Err restError => Err restError
-                | Ok headers => Ok (checked :: headers)
+                Left restError => Left restError
+                | Right headers => Right (checked :: headers)
 
 asciiStringEqual : String -> String -> Bool
 asciiStringEqual left right =

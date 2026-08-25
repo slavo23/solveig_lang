@@ -16,8 +16,8 @@ showPage : String -> IO std.http.HttpError String
 showPage spelling = do
     response <- std.http.fetch spelling
     case std.http.responseText response of
-        Ok text => pureIO text
-        | Err error => failIO error
+        Right text => pureIO text
+        | Left error => failIO error
 ```
 
 `fetchWith limits headers spelling` keeps the same one-call shape when an
@@ -59,7 +59,7 @@ response ownership a simple cleanup rule and prevents unbounded network input.
 same slices without constructing a list:
 
 ```solveig
-countBytes : std.http.Response -> Result std.http.HttpError Int
+countBytes : std.http.Response -> Either std.http.HttpError Int
 countBytes = std.http.foldBodyChunks
     16384
     (fun total chunk => total + std.bytes.bytesLength chunk)

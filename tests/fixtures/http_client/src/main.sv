@@ -21,8 +21,8 @@ showHttpError (HttpIoError ioError) =
 printResponse : String -> std.http.Response -> IO std.http.HttpError ()
 printResponse label response =
     case std.http.responseText response of
-        Err error => failIO error
-        | Ok body =>
+        Left error => failIO error
+        | Right body =>
             mapError HttpIoError (printLine
                 (label
                     <> ":"
@@ -35,8 +35,8 @@ printResponse label response =
 fetch : String -> std.http.HttpLimits -> String -> Task ()
 fetch label limits spelling =
     case std.http.urlFromString spelling of
-        Err error => printLine (label <> ":" <> showHttpError error)
-        | Ok url =>
+        Left error => printLine (label <> ":" <> showHttpError error)
+        | Right url =>
             catchError
                 (std.http.request limits (std.http.get url) >>= printResponse label)
                 (fun error => printLine (label <> ":" <> showHttpError error))
@@ -52,8 +52,8 @@ tlsArgument _ = "https://127.0.0.1:1"
 requireUrl : String -> std.http.Url
 requireUrl spelling =
     case std.http.urlFromString spelling of
-        Ok url => url
-        | Err _ => error "fixture URL invalid"
+        Right url => url
+        | Left _ => error "fixture URL invalid"
 
 cancelSlowRequest : String -> Task (Maybe std.http.Response)
 cancelSlowRequest base =

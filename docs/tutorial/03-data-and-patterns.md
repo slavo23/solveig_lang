@@ -80,21 +80,21 @@ Use it when absence is an expected answer, such as a missing map key or an
 out-of-range vector index. Callers cannot accidentally treat absence as a
 normal value because they must match both constructors.
 
-## `Result`: pure failure is data
+## `Either`: pure failure is data
 
-`Result e a` is `Ok a` or `Err e`. It is useful for parsing, validation, and
+`Either e a` is `Right a` or `Left e`. It is useful for parsing, validation, and
 decoding that perform no IO:
 
 ```solveig
 data AgeError = NegativeAge Int
 
-validateAge : Int -> Result AgeError Int
+validateAge : Int -> Either AgeError Int
 validateAge age =
-    if age < 0 then Err (NegativeAge age) else Ok age
+    if age < 0 then Left (NegativeAge age) else Right age
 
-renderAge : Result AgeError Int -> String
-renderAge (Ok age) = "age: " <> show age
-renderAge (Err (NegativeAge age)) = "invalid age: " <> show age
+renderAge : Either AgeError Int -> String
+renderAge (Right age) = "age: " <> show age
+renderAge (Left (NegativeAge age)) = "invalid age: " <> show age
 ```
 
 ## `IO e a`: effects with typed failure

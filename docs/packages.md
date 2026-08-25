@@ -146,7 +146,7 @@ export (
     parse,       -- a value or function
     (<?>),       -- an operator, written in parentheses
     Decoder,     -- an opaque data type; constructors stay hidden
-    Result(..),  -- a data type together with all of its constructors
+    Either(..),  -- a data type together with all of its constructors
     UserId,      -- a type alias
     Monad        -- a class together with its methods and fixities
 )
@@ -203,7 +203,7 @@ Import entities use the same rules as module APIs:
 ```solveig
 import data.model(
     User,                  -- opaque type
-    Result(..) as Outcome, -- renamed type plus every original constructor
+    Either(..) as Outcome, -- renamed type plus every original constructor
     Parser,                -- class together with every method and fixity
     (<?>) as (<||>)        -- renamed operator
 )
@@ -231,7 +231,7 @@ reexport config.types(Config, ConfigError(..))
 reexport config.text(parse as parseConfigText)
 import config.text(parse)
 
-parseConfig : String -> Result ConfigError Config
+parseConfig : String -> Either ConfigError Config
 parseConfig source = parse source
 ```
 

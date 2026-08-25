@@ -201,7 +201,7 @@ fn alloc_valid_utf8_result(
     text: &str,
     builtin: &str,
 ) -> Result<Value, RuntimeError> {
-    let tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeResultOk, 1, builtin)?;
+    let tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeEitherRight, 1, builtin)?;
     let checkpoint = ctx.interpreter.process.temporary_roots.len();
     let text = ctx.alloc_str(text);
     ctx.interpreter.process.temporary_roots.push(text);
@@ -222,7 +222,7 @@ fn alloc_invalid_utf8_result(
 ) -> Result<Value, RuntimeError> {
     let invalid_tag =
         ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeIoErrorInvalidUtf8, 1, builtin)?;
-    let result_tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeResultErr, 1, builtin)?;
+    let result_tag = ctx.ctor_tag_with_arity(CtorRuntimeRole::PreludeEitherLeft, 1, builtin)?;
     let checkpoint = ctx.interpreter.process.temporary_roots.len();
     let message = ctx.alloc_str(message);
     ctx.interpreter.process.temporary_roots.push(message);

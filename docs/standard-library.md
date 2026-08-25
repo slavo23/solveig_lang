@@ -119,7 +119,7 @@ import std.bytes(*)
 
 ```solveig
 stringToBytes : String -> Bytes
-bytesToString : Bytes -> Result IOError String
+bytesToString : Bytes -> Either IOError String
 bytesLength : Bytes -> Int
 bytesIndex : Bytes -> Int -> Maybe Int
 bytesSlice : Bytes -> Int -> Int -> Bytes
@@ -127,7 +127,7 @@ bytesAppend : Bytes -> Bytes -> Bytes
 ```
 
 `String` is valid UTF-8; `Bytes` preserves arbitrary data. Decoding therefore
-returns `Result` instead of replacing invalid input.
+returns `Either` instead of replacing invalid input.
 
 The bulk `bytesSpanAny`, `bytesFindAny`, `bytesFindBelow`, and
 `bytesSpanRange` operations scan without constructing a `Maybe` for each byte.
@@ -332,12 +332,12 @@ small CPU-only transformations where scheduling would add overhead.
 ## Testing helpers
 
 `std.testing` provides pure `assert`, `assertEqual`, `checkAll`, and
-`failureMessage` operations returning `Result TestFailure`. It deliberately
+`failureMessage` operations returning `Either TestFailure`. It deliberately
 does not introduce another test runner, global registry, or exception path.
 Use a program's `main` to render the result:
 
 ```solveig
-checks : Result std.testing.TestFailure ()
+checks : Either std.testing.TestFailure ()
 checks = std.testing.checkAll
     [ std.testing.assert "queue is non-empty" (not (std.queue.isEmpty queue))
     , std.testing.assertEqual "queue length" 2 (std.queue.length queue)

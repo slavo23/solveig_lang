@@ -13,8 +13,8 @@ runClient port =
         sendBytes connection (stringToBytes "echo over TCP")
         reply <- recvBytes connection 1024
         case bytesToString reply of
-            Ok text => printLine text
-            | Err error => printLine "invalid reply")
+            Right text => printLine text
+            | Left error => printLine "invalid reply")
 
 main : Task ()
 main =

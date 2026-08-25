@@ -188,8 +188,8 @@ pub fn prelude_io_error_tycon_id(names: &mut Names) -> TyConId {
     names.tycon_id(PRELUDE_IO_ERROR_NAME)
 }
 
-pub fn prelude_result_tycon_id(names: &mut Names) -> TyConId {
-    names.tycon_id(PRELUDE_RESULT_NAME)
+pub fn prelude_either_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_EITHER_NAME)
 }
 
 pub fn prelude_defect_tycon_id(names: &mut Names) -> TyConId {
@@ -331,8 +331,8 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         STD_BUFFER_MODE_NONE_NAME => CtorRuntimeRole::StdBufferModeNone,
         STD_BUFFER_MODE_LINE_NAME => CtorRuntimeRole::StdBufferModeLine,
         STD_BUFFER_MODE_BLOCK_NAME => CtorRuntimeRole::StdBufferModeBlock,
-        PRELUDE_RESULT_OK_NAME => CtorRuntimeRole::PreludeResultOk,
-        PRELUDE_RESULT_ERR_NAME => CtorRuntimeRole::PreludeResultErr,
+        PRELUDE_EITHER_LEFT_NAME => CtorRuntimeRole::PreludeEitherLeft,
+        PRELUDE_EITHER_RIGHT_NAME => CtorRuntimeRole::PreludeEitherRight,
         PRELUDE_DEFECT_ERROR_NAME => CtorRuntimeRole::PreludeDefectError,
         PRELUDE_DEFECT_DIVISION_BY_ZERO_NAME => CtorRuntimeRole::PreludeDefectDivisionByZero,
         PRELUDE_DEFECT_STACK_EXHAUSTED_NAME => CtorRuntimeRole::PreludeDefectStackExhausted,
@@ -607,8 +607,8 @@ pub enum CtorRuntimeRole {
     StdBufferModeNone,
     StdBufferModeLine,
     StdBufferModeBlock,
-    PreludeResultOk,
-    PreludeResultErr,
+    PreludeEitherLeft,
+    PreludeEitherRight,
     PreludeDefectError,
     PreludeDefectDivisionByZero,
     PreludeDefectStackExhausted,

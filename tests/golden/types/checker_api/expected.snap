@@ -74,10 +74,10 @@ prelude.prim.bytesFindBelow : Bytes -> Int -> Int -> Int
 prelude.prim.bytesIndex : Bytes -> Int -> Maybe Int
 prelude.prim.bytesLength : Bytes -> Int
 prelude.prim.bytesSlice : Bytes -> Int -> Int -> Bytes
-prelude.prim.bytesSliceToString : Bytes -> Int -> Int -> Result IOError String
+prelude.prim.bytesSliceToString : Bytes -> Int -> Int -> Either IOError String
 prelude.prim.bytesSpanAny : Bytes -> Int -> Bytes -> Int
 prelude.prim.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
-prelude.prim.bytesToString : Bytes -> Result IOError String
+prelude.prim.bytesToString : Bytes -> Either IOError String
 prelude.prim.catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.prim.catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.prim.charCompare : Char -> Char -> Ordering
@@ -226,10 +226,10 @@ std.bytes.bytesFindBelow : Bytes -> Int -> Int -> Int
 std.bytes.bytesIndex : Bytes -> Int -> Maybe Int
 std.bytes.bytesLength : Bytes -> Int
 std.bytes.bytesSlice : Bytes -> Int -> Int -> Bytes
-std.bytes.bytesSliceToString : Bytes -> Int -> Int -> Result IOError String
+std.bytes.bytesSliceToString : Bytes -> Int -> Int -> Either IOError String
 std.bytes.bytesSpanAny : Bytes -> Int -> Bytes -> Int
 std.bytes.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
-std.bytes.bytesToString : Bytes -> Result IOError String
+std.bytes.bytesToString : Bytes -> Either IOError String
 std.bytes.stringToBytes : String -> Bytes
 std.channel.closeChan : forall a. Chan a -> IO IOError ()
 std.channel.newBoundedChan : forall a. Int -> IO IOError (Chan a)
@@ -239,7 +239,7 @@ std.channel.send : forall a. Chan a -> a -> IO IOError ()
 std.channel.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
 std.env.allValidEnvNameChars : [Char] -> Bool
 std.env.describeEnvError : EnvError -> String
-std.env.envValue : Int -> String -> Result EnvError String
+std.env.envValue : Int -> String -> Either EnvError String
 std.env.getArgs : forall e. IO e [String]
 std.env.getEnv : String -> IO IOError (Maybe String)
 std.env.getEnvOr : String -> String -> IO IOError String
@@ -248,9 +248,9 @@ std.env.getProgName : IO IOError String
 std.env.loadEnvFile : String -> IO EnvError ()
 std.env.loadEnvFileIfExists : String -> IO EnvError Bool
 std.env.loadEnvFileLimited : String -> Int -> IO EnvError ()
-std.env.parseEnvFile : String -> Result EnvError [(String, String)]
-std.env.parseEnvLines : [String] -> Int -> Map String () -> [(String, String)] -> Result EnvError [(String, String)]
-std.env.quotedEnvValue : Int -> Char -> [Char] -> Result EnvError String
+std.env.parseEnvFile : String -> Either EnvError [(String, String)]
+std.env.parseEnvLines : [String] -> Int -> Map String () -> [(String, String)] -> Either EnvError [(String, String)]
+std.env.quotedEnvValue : Int -> Char -> [Char] -> Either EnvError String
 std.env.requireEnv : String -> IO EnvError String
 std.env.setEnv : String -> String -> IO IOError ()
 std.env.setMissingEntries : [(String, String)] -> IO EnvError ()
@@ -270,7 +270,7 @@ std.http.allHeaderNameChars : [Char] -> Bool
 std.http.asciiCharsEqual : [Char] -> [Char] -> Bool
 std.http.asciiCode : Char -> Int
 std.http.asciiStringEqual : String -> String -> Bool
-std.http.bodyChunks : Int -> Response -> Result HttpError [Bytes]
+std.http.bodyChunks : Int -> Response -> Either HttpError [Bytes]
 std.http.chunksFrom : Int -> Bytes -> Int -> [Bytes]
 std.http.containsCodePoint : Int -> [Int] -> Bool
 std.http.defaultHttpLimits : HttpLimits
@@ -279,15 +279,15 @@ std.http.fetch : String -> IO HttpError Response
 std.http.fetchWith : HttpLimits -> [(String, String)] -> String -> IO HttpError Response
 std.http.findHeader : String -> Response -> Maybe String
 std.http.findHeaderIn : String -> [Header] -> Maybe String
-std.http.foldBodyChunks : forall state. Int -> (state -> Bytes -> state) -> state -> Response -> Result HttpError state
+std.http.foldBodyChunks : forall state. Int -> (state -> Bytes -> state) -> state -> Response -> Either HttpError state
 std.http.foldChunksFrom : forall state. Int -> (state -> Bytes -> state) -> state -> Bytes -> Int -> state
 std.http.get : Url -> Request
 std.http.getUrl : Url -> IO HttpError Response
 std.http.head : Url -> Request
-std.http.header : String -> String -> Result HttpError Header
+std.http.header : String -> String -> Either HttpError Header
 std.http.headerFromRaw : (String, String) -> Header
 std.http.headerToRaw : Header -> (String, String)
-std.http.headersFromList : [(String, String)] -> Result HttpError [Header]
+std.http.headersFromList : [(String, String)] -> Either HttpError [Header]
 std.http.isHeaderNameChar : Char -> Bool
 std.http.isSuccessful : Status -> Bool
 std.http.methodText : Method -> String
@@ -300,10 +300,10 @@ std.http.responseBody : Response -> Bytes
 std.http.responseFromRaw : (Int, [(String, String)], Bytes) -> Response
 std.http.responseHeaders : Response -> [Header]
 std.http.responseStatus : Response -> Status
-std.http.responseText : Response -> Result HttpError String
+std.http.responseText : Response -> Either HttpError String
 std.http.send : Request -> IO HttpError Response
 std.http.statusCode : Status -> Int
-std.http.urlFromString : String -> Result HttpError Url
+std.http.urlFromString : String -> Either HttpError Url
 std.http.urlToString : Url -> String
 std.http.validHeaderName : String -> Bool
 std.http.validHeaderValue : String -> Bool
@@ -312,9 +312,9 @@ std.http.validUrlAuthority : [Char] -> Int -> Bool
 std.http.validUrlChars : [Char] -> Bool
 std.http.validUrlTail : String -> Bool
 std.http.validUrlText : String -> Bool
-std.http.validateHeaders : [Header] -> Request -> Result HttpError Request
-std.http.validateRequest : HttpLimits -> Request -> Result HttpError Request
-std.http.validateRequestFields : Request -> Result HttpError Request
+std.http.validateHeaders : [Header] -> Request -> Either HttpError Request
+std.http.validateRequest : HttpLimits -> Request -> Either HttpError Request
+std.http.validateRequestFields : Request -> Either HttpError Request
 std.http.withBody : Bytes -> Request -> Request
 std.http.withHeader : Header -> Request -> Request
 std.http.withHeaders : [Header] -> Request -> Request
@@ -350,9 +350,9 @@ std.json.boolToken : Parser ByteInput JsonError Bool
 std.json.byteAt : Bytes -> Int -> Int
 std.json.byteInputValue : ByteInput -> Maybe Int
 std.json.consumedRejectJson : forall a. ByteInput -> JsonError -> ParseReply ByteInput JsonError a
-std.json.decodeEscape : Bytes -> Int -> Result JsonError (String, Int)
+std.json.decodeEscape : Bytes -> Int -> Either JsonError (String, Int)
 std.json.decodeJson : forall a. JsonLimits -> Decoder a -> Bytes -> ParseReply ByteInput JsonError a
-std.json.decodeUnicodeEscape : Bytes -> Int -> Result JsonError (String, Int)
+std.json.decodeUnicodeEscape : Bytes -> Int -> Either JsonError (String, Int)
 std.json.decoderParser : forall a. Decoder a -> JsonLimits -> Int -> Parser ByteInput JsonError a
 std.json.defaultJsonLimits : JsonLimits
 std.json.dispatchJsonValue : JsonLimits -> Int -> ByteInput -> ParseReply ByteInput JsonError Json
@@ -398,14 +398,14 @@ std.json.prependReversed : forall a. [a] -> [a] -> [a]
 std.json.prependReversedInto : forall a. [a] -> [a] -> [a]
 std.json.readHex4 : Bytes -> Int -> Maybe Int
 std.json.rejectJson : forall a. ByteInput -> JsonError -> ParseReply ByteInput JsonError a
-std.json.renderArrayReverse : JsonLimits -> Int -> [Json] -> Bool -> [Char] -> Result JsonError [Char]
-std.json.renderJson : Json -> Result JsonError String
+std.json.renderArrayReverse : JsonLimits -> Int -> [Json] -> Bool -> [Char] -> Either JsonError [Char]
+std.json.renderJson : Json -> Either JsonError String
 std.json.renderJsonError : JsonError -> String
-std.json.renderJsonWith : JsonLimits -> Json -> Result JsonError String
-std.json.renderObjectReverse : JsonLimits -> Int -> [Entry String Json] -> Bool -> [Char] -> Result JsonError [Char]
-std.json.renderStringInto : JsonLimits -> String -> [Char] -> Result JsonError [Char]
-std.json.renderValueInto : JsonLimits -> Int -> Json -> [Char] -> Result JsonError [Char]
-std.json.scalarString : Int -> Int -> Result JsonError (String, Int)
+std.json.renderJsonWith : JsonLimits -> Json -> Either JsonError String
+std.json.renderObjectReverse : JsonLimits -> Int -> [Entry String Json] -> Bool -> [Char] -> Either JsonError [Char]
+std.json.renderStringInto : JsonLimits -> String -> [Char] -> Either JsonError [Char]
+std.json.renderValueInto : JsonLimits -> Int -> Json -> [Char] -> Either JsonError [Char]
+std.json.scalarString : Int -> Int -> Either JsonError (String, Int)
 std.json.scanNumber : JsonLimits -> ByteInput -> ParseReply ByteInput JsonError JsonNumber
 std.json.scanString : JsonLimits -> ByteInput -> ParseReply ByteInput JsonError String
 std.json.scanStringAt : JsonLimits -> Bytes -> Int -> Int -> [Char] -> ParseReply ByteInput JsonError String
@@ -607,9 +607,9 @@ std.task.runPooled : forall a b. Chan (Int, a) -> Chan (Int, Either IOError b) -
 std.task.timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
 std.task.withPooledWorkers : forall a b result. Int -> (a -> IO IOError b) -> Chan (Int, a) -> Chan (Int, Either IOError b) -> IO IOError result -> IO IOError result
 std.task.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
-std.testing.assert : String -> Bool -> Result TestFailure ()
-std.testing.assertEqual : forall a. (Eq a, Show a) => String -> a -> a -> Result TestFailure ()
-std.testing.checkAll : [Result TestFailure ()] -> Result TestFailure ()
+std.testing.assert : String -> Bool -> Either TestFailure ()
+std.testing.assertEqual : forall a. (Eq a, Show a) => String -> a -> a -> Either TestFailure ()
+std.testing.checkAll : [Either TestFailure ()] -> Either TestFailure ()
 std.testing.failureMessage : TestFailure -> String
 std.text.charToCodePoint : Char -> Int
 std.text.charsToString : [Char] -> String

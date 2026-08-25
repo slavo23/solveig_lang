@@ -6,11 +6,11 @@ printByte maybeByte =
         Just byte => printLine (show byte)
         | Nothing => printLine "missing"
 
-printText : Result IOError String -> Task ()
+printText : Either IOError String -> Task ()
 printText result =
     case result of
-        Ok text => printLine text
-        | Err error => printLine "invalid UTF-8"
+        Right text => printLine text
+        | Left error => printLine "invalid UTF-8"
 
 main : Task ()
 main = do

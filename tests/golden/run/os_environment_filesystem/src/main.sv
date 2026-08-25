@@ -31,9 +31,9 @@ missingEnvFile envError = do
     printLine (describeEnvError envError)
     pureIO False;
 
-printEnvParse : Result EnvError [(String, String)] -> Task ();
-printEnvParse (Ok entries) = printLine ("env entries " <> show (length entries));
-printEnvParse (Err envError) = printLine (describeEnvError envError);
+printEnvParse : Either EnvError [(String, String)] -> Task ();
+printEnvParse (Right entries) = printLine ("env entries " <> show (length entries));
+printEnvParse (Left envError) = printLine (describeEnvError envError);
 
 ignoreExistingDirectory : IOError -> Task ();
 ignoreExistingDirectory ioError =

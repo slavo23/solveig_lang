@@ -61,8 +61,8 @@ fetchOne : String -> Task String
 fetchOne url = do
     response <- mapError httpAsIOError (fetch url)
     case std.http.responseText response of
-        Ok text => pureIO text
-        | Err error => failIO (httpAsIOError error)
+        Right text => pureIO text
+        | Left error => failIO (httpAsIOError error)
 
 runClients : Int -> Task [String]
 runClients port =

@@ -15,8 +15,8 @@ replyText showValue reply =
 renderedJson : std.json.Json -> String
 renderedJson value =
     case std.json.renderJson value of
-        Ok text => text
-        | Err error => std.json.renderJsonError error
+        Right text => text
+        | Left error => std.json.renderJsonError error
 
 showStrings : std.vector.Vector String -> String
 showStrings values = show (std.vector.toList values)
@@ -43,16 +43,16 @@ manualJson = std.json.JsonObject
 roundTrip : std.json.Json -> String
 roundTrip value =
     case std.json.renderJson value of
-        Err error => std.json.renderJsonError error
-        | Ok text =>
+        Left error => std.json.renderJsonError error
+        | Right text =>
             replyText renderedJson
                 (std.json.parseJson std.json.defaultJsonLimits
                     (std.bytes.stringToBytes text))
 
-utf8SliceText : Result IOError String -> String
-utf8SliceText (Ok text) = text
-utf8SliceText (Err (InvalidUtf8 _)) = "invalid UTF-8"
-utf8SliceText (Err _) = "unexpected error"
+utf8SliceText : Either IOError String -> String
+utf8SliceText (Right text) = text
+utf8SliceText (Left (InvalidUtf8 _)) = "invalid UTF-8"
+utf8SliceText (Left _) = "unexpected error"
 
 validNumber : String -> Bool
 validNumber text =

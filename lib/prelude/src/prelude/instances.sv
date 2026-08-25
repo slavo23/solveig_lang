@@ -76,11 +76,6 @@ instance (Eq a, Eq b) => Eq (Either a b) where
     (==) (Right x) (Right y) = x == y
     (==) _ _ = False
 
-instance (Eq e, Eq a) => Eq (Result e a) where
-    (==) (Ok x) (Ok y) = x == y
-    (==) (Err x) (Err y) = x == y
-    (==) _ _ = False
-
 instance PartialOrd Int where
     partialCompare x y = Just (intCompare x y)
 
@@ -228,12 +223,6 @@ instance (PartialOrd a, PartialOrd b) => PartialOrd (Either a b) where
     partialCompare (Right x) (Left y) = Just GT
     partialCompare (Right x) (Right y) = partialCompare x y
 
-instance (PartialOrd e, PartialOrd a) => PartialOrd (Result e a) where
-    partialCompare (Ok x) (Ok y) = partialCompare x y
-    partialCompare (Ok x) (Err y) = Just LT
-    partialCompare (Err x) (Ok y) = Just GT
-    partialCompare (Err x) (Err y) = partialCompare x y
-
 instance Ord Int where
     compare x y = intCompare x y
 
@@ -356,12 +345,6 @@ instance (Ord a, Ord b) => Ord (Either a b) where
     compare (Right x) (Left y) = GT
     compare (Right x) (Right y) = compare x y
 
-instance (Ord e, Ord a) => Ord (Result e a) where
-    compare (Ok x) (Ok y) = compare x y
-    compare (Ok x) (Err y) = LT
-    compare (Err x) (Ok y) = GT
-    compare (Err x) (Err y) = compare x y
-
 instance Num Int where
     (+) x y = intAdd x y
     (*) x y = intMul x y
@@ -407,10 +390,6 @@ instance Functor (Either e) where
     fmap f (Left error) = Left error
     fmap f (Right x) = Right (f x)
 
-instance Functor (Result e) where
-    fmap f (Ok x) = Ok (f x)
-    fmap f (Err error) = Err error
-
 instance Functor (IO e) where
     fmap f action =
         prelude.builtins.bindIO action (fun value =>
@@ -430,11 +409,6 @@ instance Applicative (Either e) where
     apply (Left error) mx = Left error
     apply (Right f) mx = fmap f mx
 
-instance Applicative (Result e) where
-    pure x = Ok x
-    apply (Err error) mx = Err error
-    apply (Ok f) mx = fmap f mx
-
 instance Applicative (IO e) where
     pure value = prelude.builtins.pureIO value
     apply actionF actionX =
@@ -452,10 +426,6 @@ instance Monad List where
 instance Monad (Either e) where
     bind (Left error) f = Left error
     bind (Right x) f = f x
-
-instance Monad (Result e) where
-    bind (Err error) f = Err error
-    bind (Ok x) f = f x
 
 instance Monad (IO e) where
     bind action f = prelude.builtins.bindIO action f
@@ -522,10 +492,6 @@ instance (Show a, Show b, Show c, Show d, Show e, Show f, Show g, Show h) => Sho
 instance (Show a, Show b) => Show (Either a b) where
     show (Left x) = stringAppend "Left " (show x)
     show (Right x) = stringAppend "Right " (show x)
-
-instance (Show e, Show a) => Show (Result e a) where
-    show (Ok x) = stringAppend "Ok " (show x)
-    show (Err error) = stringAppend "Err " (show error)
 
 instance Semigroup String where
     combine x y = stringAppend x y

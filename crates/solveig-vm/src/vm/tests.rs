@@ -1511,9 +1511,9 @@ fn display_does_not_tuple_an_ordinary_user_product() {
 }
 
 #[test]
-fn bytes_to_string_preserves_invalid_utf8_as_a_result_error() {
+fn bytes_to_string_preserves_invalid_utf8_as_an_either_error() {
     const INVALID_UTF8_TAG: u16 = 20;
-    const RESULT_ERR_TAG: u16 = 21;
+    const EITHER_LEFT_TAG: u16 = 21;
 
     let program = program_with_ctors(
         vec![global("main", int(0))],
@@ -1529,10 +1529,10 @@ fn bytes_to_string_preserves_invalid_utf8_as_a_result_error() {
             ),
             ctor_spec(
                 CtorId(201),
-                CtorRuntimeRole::PreludeResultErr,
-                "prelude.builtins.Err",
-                "Err",
-                RESULT_ERR_TAG,
+                CtorRuntimeRole::PreludeEitherLeft,
+                "prelude.builtins.Left",
+                "Left",
+                EITHER_LEFT_TAG,
                 1,
             ),
         ],
@@ -1552,7 +1552,7 @@ fn bytes_to_string_preserves_invalid_utf8_as_a_result_error() {
         let builtin = crate::builtins::lookup(BUILTIN_BYTES_TO_STRING)
             .expect("bytesToString builtin should be registered");
         (builtin.run)(&mut VmCtx::new(&mut interpreter), &[invalid])
-            .expect("invalid UTF-8 should be a Result value")
+            .expect("invalid UTF-8 should be an Either value")
     };
     runtime.restore_process(process);
 
@@ -1560,11 +1560,11 @@ fn bytes_to_string_preserves_invalid_utf8_as_a_result_error() {
         solveig_base::ice!("bytesToString error was not heap allocated")
     };
     let HeapObject::Data1 {
-        tag: RESULT_ERR_TAG,
+        tag: EITHER_LEFT_TAG,
         field: Value::Obj(error_id),
     } = *runtime.heap.get(result_id)
     else {
-        solveig_base::ice!("bytesToString did not return Err")
+        solveig_base::ice!("bytesToString did not return Left")
     };
     assert!(matches!(
         runtime.heap.get(error_id),
@@ -1576,18 +1576,18 @@ fn bytes_to_string_preserves_invalid_utf8_as_a_result_error() {
 }
 
 #[test]
-fn bytes_to_string_roots_valid_text_across_its_result_allocation() {
-    const RESULT_OK_TAG: u16 = 20;
+fn bytes_to_string_roots_valid_text_across_its_either_allocation() {
+    const EITHER_RIGHT_TAG: u16 = 20;
 
     let program = program_with_ctors(
         vec![global("main", int(0))],
         Vec::new(),
         &[ctor_spec(
             CtorId(200),
-            CtorRuntimeRole::PreludeResultOk,
-            "prelude.builtins.Ok",
-            "Ok",
-            RESULT_OK_TAG,
+            CtorRuntimeRole::PreludeEitherRight,
+            "prelude.builtins.Right",
+            "Right",
+            EITHER_RIGHT_TAG,
             1,
         )],
     );
@@ -1606,7 +1606,7 @@ fn bytes_to_string_roots_valid_text_across_its_result_allocation() {
         let builtin = crate::builtins::lookup(BUILTIN_BYTES_TO_STRING)
             .expect("bytesToString builtin should be registered");
         (builtin.run)(&mut VmCtx::new(&mut interpreter), &[bytes])
-            .expect("valid UTF-8 should be a Result value")
+            .expect("valid UTF-8 should be an Either value")
     };
     runtime.restore_process(process);
 
@@ -1614,14 +1614,14 @@ fn bytes_to_string_roots_valid_text_across_its_result_allocation() {
         solveig_base::ice!("bytesToString success was not heap allocated")
     };
     let HeapObject::Data1 {
-        tag: RESULT_OK_TAG,
+        tag: EITHER_RIGHT_TAG,
         field: Value::Obj(text_id),
     } = *runtime.heap.get(result_id)
     else {
-        solveig_base::ice!("bytesToString did not return Ok")
+        solveig_base::ice!("bytesToString did not return Right")
     };
     let HeapObject::Str { bytes } = runtime.heap.get(text_id) else {
-        solveig_base::ice!("bytesToString Ok did not contain text")
+        solveig_base::ice!("bytesToString Right did not contain text")
     };
     assert_eq!(runtime.heap.str_value(text_id, *bytes), "safe point");
 }

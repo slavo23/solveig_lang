@@ -20,8 +20,8 @@ downloadText : String -> IO HttpError String
 downloadText url = do
     response <- fetch url
     case responseText response of
-        Ok text => pureIO text
-        | Err error => failIO error
+        Right text => pureIO text
+        | Left error => failIO error
 ```
 
 `fetch` performs a GET with `defaultHttpLimits`: at most 64 KiB of response
@@ -47,12 +47,12 @@ beginner example.
 An HTTP 404 or 500 is a valid `Response`, not a transport failure. Inspect it:
 
 ```solveig
-summarize : Response -> Result HttpError String
+summarize : Response -> Either HttpError String
 summarize response =
     let code = statusCode (responseStatus response)
     in case responseText response of
-        Err error => Err error
-        | Ok body => Ok ("status " <> show code <> ": " <> body)
+        Left error => Left error
+        | Right body => Right ("status " <> show code <> ": " <> body)
 ```
 
 `isSuccessful` recognizes the 2xx range. `findHeader` compares header names
@@ -74,11 +74,11 @@ import std.http(*)
 postJson : String -> String -> IO HttpError Response
 postJson spelling body =
     case urlFromString spelling of
-        Err error => failIO error
-        | Ok url =>
+        Left error => failIO error
+        | Right url =>
             case header "Content-Type" "application/json" of
-                Err error => failIO error
-                | Ok contentType =>
+                Left error => failIO error
+                | Right contentType =>
                     send (withTextBody body (withHeader contentType (post url)))
 ```
 
@@ -154,8 +154,8 @@ echo host port message =
         sendBytes socket (stringToBytes message)
         reply <- recvBytes socket 4096
         case bytesToString reply of
-            Ok text => pureIO text
-            | Err error => failIO error)
+            Right text => pureIO text
+            | Left error => failIO error)
 ```
 
 TCP is a byte stream, not a message protocol. One `sendBytes` is not guaranteed

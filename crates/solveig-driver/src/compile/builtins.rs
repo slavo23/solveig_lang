@@ -94,9 +94,9 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         Ty::make_con_id(prelude_maybe_tycon_id(names)),
         string.clone(),
     );
-    let result_io_string = Ty::make_app(
+    let either_io_string = Ty::make_app(
         Ty::make_app(
-            Ty::make_con_id(prelude_result_tycon_id(names)),
+            Ty::make_con_id(prelude_either_tycon_id(names)),
             io_error.clone(),
         ),
         string.clone(),
@@ -371,7 +371,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "bytesToString",
             BUILTIN_BYTES_TO_STRING,
             1,
-            unary(bytes.clone(), result_io_string.clone()),
+            unary(bytes.clone(), either_io_string.clone()),
         ),
         prim_spec(
             "bytesLength",
@@ -428,7 +428,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "bytesSliceToString",
             BUILTIN_BYTES_SLICE_TO_STRING,
             3,
-            arr(&[bytes, int.clone(), int.clone()], result_io_string),
+            arr(&[bytes, int.clone(), int.clone()], either_io_string),
         ),
         prim_spec(
             "connect",

@@ -22,8 +22,8 @@ client results port number = do
     reply <- recvBytes connection 64
     closeSocket connection
     case bytesToString reply of
-        Ok text => send results 1
-        | Err error => send results 0
+        Right text => send results 1
+        | Left error => send results 0
 
 spawnClients : Chan Int -> Int -> Int -> Task ()
 spawnClients results port remaining =

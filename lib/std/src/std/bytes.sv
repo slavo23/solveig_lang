@@ -10,7 +10,7 @@ stringToBytes : String -> Bytes
 stringToBytes text = prelude.prim.stringToBytes text
 
 -- | Decodes UTF-8 bytes without replacing invalid input.
-bytesToString : Bytes -> Result IOError String
+bytesToString : Bytes -> Either IOError String
 bytesToString bytes = prelude.prim.bytesToString bytes
 
 -- | Returns the number of bytes.
@@ -63,6 +63,6 @@ bytesSpanRange bytes start lower upper =
 -- |
 -- | Invalid UTF-8 returns InvalidUtf8. Negative starts and lengths behave like
 -- | bytesSlice: the start is zero and the requested length is empty.
-bytesSliceToString : Bytes -> Int -> Int -> Result IOError String
+bytesSliceToString : Bytes -> Int -> Int -> Either IOError String
 bytesSliceToString bytes start length =
     prelude.prim.bytesSliceToString bytes start length

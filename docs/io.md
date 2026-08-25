@@ -202,7 +202,7 @@ failures raise `WriteHandleError message`.
 Text and byte operations can be mixed on one handle without changing its
 logical position. Text input still decodes strictly: invalid UTF-8 raises the
 operation's read error. Byte input never decodes. Convert explicitly with
-`bytesToString`; it returns `Err (InvalidUtf8 message)` rather than panicking or
+`bytesToString`; it returns `Left (InvalidUtf8 message)` rather than panicking or
 replacing malformed input.
 
 ## Environment and program identity

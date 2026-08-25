@@ -4,23 +4,23 @@ export (TestFailure(..), assert, assertEqual, checkAll, failureMessage)
 data TestFailure = TestFailure String
 
 -- | Checks a Boolean condition without raising a defect.
-assert : String -> Bool -> Result TestFailure ()
+assert : String -> Bool -> Either TestFailure ()
 assert label condition =
-    if condition then Ok () else Err (TestFailure label)
+    if condition then Right () else Left (TestFailure label)
 
 -- | Checks equality and records both displayed values when they differ.
-assertEqual : forall a. (Eq a, Show a) => String -> a -> a -> Result TestFailure ()
+assertEqual : forall a. (Eq a, Show a) => String -> a -> a -> Either TestFailure ()
 assertEqual label expected actual =
-    if expected == actual then Ok ()
-    else Err
+    if expected == actual then Right ()
+    else Left
         (TestFailure
             (label <> ": expected " <> show expected <> ", got " <> show actual))
 
 -- | Returns the first failed assertion from a deterministic list.
-checkAll : [Result TestFailure ()] -> Result TestFailure ()
-checkAll [] = Ok ()
-checkAll (Ok _ :: rest) = checkAll rest
-checkAll (Err failure :: _) = Err failure
+checkAll : [Either TestFailure ()] -> Either TestFailure ()
+checkAll [] = Right ()
+checkAll (Right _ :: rest) = checkAll rest
+checkAll (Left failure :: _) = Left failure
 
 -- | Returns a failed assertion's human-readable message.
 failureMessage : TestFailure -> String

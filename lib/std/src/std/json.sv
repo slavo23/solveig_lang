@@ -197,26 +197,26 @@ parseJson : JsonLimits -> Bytes -> std.parser.ParseReply std.parser.ByteInput Js
 parseJson limits bytes = decodeJson limits jsonDecoder bytes
 
 -- | Renders with defaultJsonLimits and deterministic ascending object keys.
-renderJson : Json -> Result JsonError String
+renderJson : Json -> Either JsonError String
 renderJson value = renderJsonWith defaultJsonLimits value
 
 -- | Renders with explicit depth, string, container, number, and output bounds.
 -- |
 -- | Numbers are revalidated, strings are escaped, and object keys are emitted
 -- | in std.map ascending order. The final UTF-8 output must fit maximumInputBytes.
-renderJsonWith : JsonLimits -> Json -> Result JsonError String
+renderJsonWith : JsonLimits -> Json -> Either JsonError String
 renderJsonWith limits value =
     case invalidLimits limits of
-        Just error => Err error
+        Just error => Left error
         | Nothing =>
             case renderValueInto limits 0 value [] of
-                Err error => Err error
-                | Ok characters =>
+                Left error => Left error
+                | Right characters =>
                     let text = std.text.charsToString characters in
                     let actual = std.bytes.bytesLength (std.bytes.stringToBytes text) in
                     if actual > maximumInputBytes limits then
-                        Err (JsonInputTooLarge actual (maximumInputBytes limits))
-                    else Ok text
+                        Left (JsonInputTooLarge actual (maximumInputBytes limits))
+                    else Right text
 
 -- | Renders a JSON-specific error for std.parser.renderError.
 renderJsonError : JsonError -> String
@@ -411,10 +411,10 @@ finishNumber limits bytes start end =
         consumedRejectJson rest (JsonNumberTooLarge (maximumNumberBytes limits))
     else
         case std.bytes.bytesSliceToString bytes start length of
-            Ok text => std.parser.Parsed std.parser.ConsumedInput (JsonNumber text) rest
-            | Err (InvalidUtf8 message) =>
+            Right text => std.parser.Parsed std.parser.ConsumedInput (JsonNumber text) rest
+            | Left (InvalidUtf8 message) =>
                 consumedRejectJson rest (JsonInvalidUtf8 message)
-            | Err _ => consumedRejectJson rest (JsonInvalidNumber "number decoding failed")
+            | Left _ => consumedRejectJson rest (JsonInvalidNumber "number decoding failed")
 
 stringToken : JsonLimits -> std.parser.Parser std.parser.ByteInput JsonError String
 stringToken limits =
@@ -443,10 +443,10 @@ scanStringAt limits bytes contentStart offset reversed =
         consumedRejectJson boundaryInput (JsonUnescapedControl (byteAt bytes control))
     else
         case std.bytes.bytesSliceToString bytes offset (boundary - offset) of
-            Err (InvalidUtf8 message) =>
+            Left (InvalidUtf8 message) =>
                 consumedRejectJson boundaryInput (JsonInvalidUtf8 message)
-            | Err _ => consumedRejectJson boundaryInput (JsonInvalidUtf8 "string decoding failed")
-            | Ok chunk =>
+            | Left _ => consumedRejectJson boundaryInput (JsonInvalidUtf8 "string decoding failed")
+            | Right chunk =>
                 let accumulated = prependReversed (std.text.stringToChars chunk) reversed in
                 case std.bytes.bytesIndex bytes boundary of
                     Nothing => consumedRejectJson boundaryInput JsonUnterminatedString
@@ -456,8 +456,8 @@ scanStringAt limits bytes contentStart offset reversed =
                             (std.parser.ByteInput bytes (boundary + 1))
                     | Just 92 =>
                         case decodeEscape bytes (boundary + 1) of
-                            Err error => consumedRejectJson boundaryInput error
-                            | Ok (escaped, next) =>
+                            Left error => consumedRejectJson boundaryInput error
+                            | Right (escaped, next) =>
                                 scanStringAt limits bytes contentStart next
                                     (prependReversed (std.text.stringToChars escaped) accumulated)
                     | Just byte => consumedRejectJson boundaryInput (JsonUnescapedControl byte)
@@ -470,25 +470,25 @@ prependReversedInto [] reversed = reversed
 prependReversedInto (value :: rest) reversed =
     prependReversedInto rest (value :: reversed)
 
-decodeEscape : Bytes -> Int -> Result JsonError (String, Int)
+decodeEscape : Bytes -> Int -> Either JsonError (String, Int)
 decodeEscape bytes offset =
     case std.bytes.bytesIndex bytes offset of
-        Nothing => Err JsonUnterminatedString
-        | Just 34 => Ok ("\"", (offset + 1))
-        | Just 92 => Ok ("\\", (offset + 1))
-        | Just 47 => Ok ("/", (offset + 1))
-        | Just 98 => Ok ("\u{8}", (offset + 1))
-        | Just 102 => Ok ("\u{c}", (offset + 1))
-        | Just 110 => Ok ("\n", (offset + 1))
-        | Just 114 => Ok ("\u{d}", (offset + 1))
-        | Just 116 => Ok ("\t", (offset + 1))
+        Nothing => Left JsonUnterminatedString
+        | Just 34 => Right ("\"", (offset + 1))
+        | Just 92 => Right ("\\", (offset + 1))
+        | Just 47 => Right ("/", (offset + 1))
+        | Just 98 => Right ("\u{8}", (offset + 1))
+        | Just 102 => Right ("\u{c}", (offset + 1))
+        | Just 110 => Right ("\n", (offset + 1))
+        | Just 114 => Right ("\u{d}", (offset + 1))
+        | Just 116 => Right ("\t", (offset + 1))
         | Just 117 => decodeUnicodeEscape bytes (offset + 1)
-        | Just byte => Err (JsonInvalidEscape ("byte " <> show byte))
+        | Just byte => Left (JsonInvalidEscape ("byte " <> show byte))
 
-decodeUnicodeEscape : Bytes -> Int -> Result JsonError (String, Int)
+decodeUnicodeEscape : Bytes -> Int -> Either JsonError (String, Int)
 decodeUnicodeEscape bytes offset =
     case readHex4 bytes offset of
-        Nothing => Err JsonInvalidUnicodeEscape
+        Nothing => Left JsonInvalidUnicodeEscape
         | Just high =>
             if and (high >= 55296) (high <= 56319) then
                 let slash = offset + 4 in
@@ -498,18 +498,18 @@ decodeUnicodeEscape bytes offset =
                             if and (low >= 56320) (low <= 57343) then
                                 scalarString (65536 + ((high - 55296) * 1024) + (low - 56320))
                                     (slash + 6)
-                            else Err JsonInvalidUnicodeEscape
-                        | Nothing => Err JsonInvalidUnicodeEscape
-                else Err JsonInvalidUnicodeEscape
+                            else Left JsonInvalidUnicodeEscape
+                        | Nothing => Left JsonInvalidUnicodeEscape
+                else Left JsonInvalidUnicodeEscape
             else if and (high >= 56320) (high <= 57343) then
-                Err JsonInvalidUnicodeEscape
+                Left JsonInvalidUnicodeEscape
             else scalarString high (offset + 4)
 
-scalarString : Int -> Int -> Result JsonError (String, Int)
+scalarString : Int -> Int -> Either JsonError (String, Int)
 scalarString codePoint next =
     case std.text.codePointToString codePoint of
-        Just text => Ok (text, next)
-        | Nothing => Err JsonInvalidUnicodeEscape
+        Just text => Right (text, next)
+        | Nothing => Left JsonInvalidUnicodeEscape
 
 readHex4 : Bytes -> Int -> Maybe Int
 readHex4 bytes offset =
@@ -589,63 +589,63 @@ objectItems limits valueParser values count =
                                 (std.parser.defer (fun _ =>
                                     objectItems limits valueParser nextValues nextCount))))))
 
-renderValueInto : JsonLimits -> Int -> Json -> [Char] -> Result JsonError [Char]
-renderValueInto _ _ JsonNull suffix = Ok ('n' :: 'u' :: 'l' :: 'l' :: suffix)
-renderValueInto _ _ (JsonBool True) suffix = Ok ('t' :: 'r' :: 'u' :: 'e' :: suffix)
-renderValueInto _ _ (JsonBool False) suffix = Ok ('f' :: 'a' :: 'l' :: 's' :: 'e' :: suffix)
+renderValueInto : JsonLimits -> Int -> Json -> [Char] -> Either JsonError [Char]
+renderValueInto _ _ JsonNull suffix = Right ('n' :: 'u' :: 'l' :: 'l' :: suffix)
+renderValueInto _ _ (JsonBool True) suffix = Right ('t' :: 'r' :: 'u' :: 'e' :: suffix)
+renderValueInto _ _ (JsonBool False) suffix = Right ('f' :: 'a' :: 'l' :: 's' :: 'e' :: suffix)
 renderValueInto limits _ (JsonNumberValue (JsonNumber number)) suffix =
     if std.bytes.bytesLength (std.bytes.stringToBytes number) > maximumNumberBytes limits then
-        Err (JsonNumberTooLarge (maximumNumberBytes limits))
+        Left (JsonNumberTooLarge (maximumNumberBytes limits))
     else case validateNumberWith limits number of
-        Nothing => Err (JsonInvalidNumber number)
-        | Just _ => Ok (prependChars number suffix)
+        Nothing => Left (JsonInvalidNumber number)
+        | Just _ => Right (prependChars number suffix)
 renderValueInto limits _ (JsonString value) suffix = renderStringInto limits value suffix
 renderValueInto limits depth (JsonArray values) suffix =
-    if depth >= maximumDepth limits then Err (JsonDepthExceeded (maximumDepth limits))
+    if depth >= maximumDepth limits then Left (JsonDepthExceeded (maximumDepth limits))
     else if std.vector.length values > maximumContainerItems limits then
-        Err (JsonContainerTooLarge (maximumContainerItems limits))
+        Left (JsonContainerTooLarge (maximumContainerItems limits))
     else
         case renderArrayReverse limits (depth + 1)
                 (std.list.reverse (std.vector.toList values)) True (']' :: suffix) of
-            Err error => Err error
-            | Ok body => Ok ('[' :: body)
+            Left error => Left error
+            | Right body => Right ('[' :: body)
 renderValueInto limits depth (JsonObject values) suffix =
-    if depth >= maximumDepth limits then Err (JsonDepthExceeded (maximumDepth limits))
+    if depth >= maximumDepth limits then Left (JsonDepthExceeded (maximumDepth limits))
     else if std.map.size values > maximumContainerItems limits then
-        Err (JsonContainerTooLarge (maximumContainerItems limits))
+        Left (JsonContainerTooLarge (maximumContainerItems limits))
     else
         case renderObjectReverse limits (depth + 1)
                 (std.list.reverse (std.map.toAscList values)) True ('}' :: suffix) of
-            Err error => Err error
-            | Ok body => Ok ('{' :: body)
+            Left error => Left error
+            | Right body => Right ('{' :: body)
 
-renderArrayReverse : JsonLimits -> Int -> [Json] -> Bool -> [Char] -> Result JsonError [Char]
-renderArrayReverse _ _ [] _ suffix = Ok suffix
+renderArrayReverse : JsonLimits -> Int -> [Json] -> Bool -> [Char] -> Either JsonError [Char]
+renderArrayReverse _ _ [] _ suffix = Right suffix
 renderArrayReverse limits depth (value :: rest) first suffix =
     let separated = if first then suffix else ',' :: suffix in
     case renderValueInto limits depth value separated of
-        Err error => Err error
-        | Ok rendered => renderArrayReverse limits depth rest False rendered
+        Left error => Left error
+        | Right rendered => renderArrayReverse limits depth rest False rendered
 
-renderObjectReverse : JsonLimits -> Int -> [std.map.Entry String Json] -> Bool -> [Char] -> Result JsonError [Char]
-renderObjectReverse _ _ [] _ suffix = Ok suffix
+renderObjectReverse : JsonLimits -> Int -> [std.map.Entry String Json] -> Bool -> [Char] -> Either JsonError [Char]
+renderObjectReverse _ _ [] _ suffix = Right suffix
 renderObjectReverse limits depth (Entry key value :: rest) first suffix =
     let separated = if first then suffix else ',' :: suffix in
     case renderValueInto limits depth value separated of
-        Err error => Err error
-        | Ok renderedValue =>
+        Left error => Left error
+        | Right renderedValue =>
             case renderStringInto limits key (':' :: renderedValue) of
-                Err error => Err error
-                | Ok renderedEntry =>
+                Left error => Left error
+                | Right renderedEntry =>
                     renderObjectReverse limits depth rest False renderedEntry
 
-renderStringInto : JsonLimits -> String -> [Char] -> Result JsonError [Char]
+renderStringInto : JsonLimits -> String -> [Char] -> Either JsonError [Char]
 renderStringInto limits value suffix =
     let characters = std.text.stringToChars value in
     let length = escapedStringLength characters 0 in
     if length > maximumStringBytes limits then
-        Err (JsonStringTooLarge (maximumStringBytes limits))
-    else Ok ('"' :: escapeStringInto (std.list.reverse characters) ('"' :: suffix))
+        Left (JsonStringTooLarge (maximumStringBytes limits))
+    else Right ('"' :: escapeStringInto (std.list.reverse characters) ('"' :: suffix))
 
 escapedStringLength : [Char] -> Int -> Int
 escapedStringLength [] length = length
