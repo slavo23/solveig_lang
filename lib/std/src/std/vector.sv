@@ -153,5 +153,24 @@ instance Functor Vector where
     fmap transform (VectorBranch height count left right) =
         VectorBranch height count (fmap transform left) (fmap transform right)
 
+instance Foldable Vector where
+    foldr combine initial vector = foldr combine initial (toList vector)
+    foldl combine initial vector = foldl combine initial (toList vector)
+
+instance Traversable Vector where
+    traverse _ VectorEmpty = pure VectorEmpty
+    traverse transform (VectorLeaf value) = fmap VectorLeaf (transform value)
+    traverse transform (VectorBranch height count left right) =
+        liftA2
+            (VectorBranch height count)
+            (traverse transform left)
+            (traverse transform right)
+
 instance Eq a => Eq (Vector a) where
     (==) left right = toList left == toList right
+
+instance Show a => Show (Vector a) where
+    show vector = "fromList " <> show (toList vector)
+
+instance Hashable a => Hashable (Vector a) where
+    hashWithSalt salt vector = hashWithSalt salt (toList vector)

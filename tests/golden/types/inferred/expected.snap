@@ -271,6 +271,71 @@ std.fs.listDirectory : Path -> IO FsError [Path]
 std.fs.removeFile : Path -> IO FsError ()
 std.fs.renameFile : Path -> Path -> IO FsError ()
 std.fs.setCurrentDirectory : Path -> IO FsError ()
+std.hashmap.bitFor : Int -> Int
+std.hashmap.branchWidth : Int
+std.hashmap.childAt : forall a. Int -> [a] -> a
+std.hashmap.collectCollision : forall k v. [(Int, k, v)] -> [HashMap k v] -> [(k, v)] -> [(k, v)]
+std.hashmap.collectNodes : forall k v. [HashMap k v] -> [(k, v)] -> [(k, v)]
+std.hashmap.collisionHash : forall k v. [(Int, k, v)] -> Int
+std.hashmap.collisionNode : forall k v. Int -> [(Int, k, v)] -> HashMap k v
+std.hashmap.compactBranch : forall k v. Int -> Int -> [HashMap k v] -> HashMap k v
+std.hashmap.countBits : Int -> Int -> Int
+std.hashmap.delete : forall k v. Hashable k => k -> HashMap k v -> HashMap k v
+std.hashmap.deleteCollision : forall k v. Eq k => Int -> k -> [(Int, k, v)] -> [(Int, k, v)] -> (Bool, [(Int, k, v)])
+std.hashmap.deleteNode : forall k v. Eq k => Int -> Int -> k -> HashMap k v -> (Bool, HashMap k v)
+std.hashmap.empty : forall k v. HashMap k v
+std.hashmap.equalEntries : forall k v. (Hashable k, Eq v) => HashMap k v -> [(k, v)] -> Bool
+std.hashmap.fragment : Int -> Int
+std.hashmap.fromList : forall k v. Hashable k => [(k, v)] -> HashMap k v
+std.hashmap.hasBit : Int -> Int -> Bool
+std.hashmap.hashEntries : forall k v. (Hashable k, Hashable v) => Int -> [(k, v)] -> Int
+std.hashmap.hashedEntries : forall k v. HashMap k v -> [(Int, k, v)]
+std.hashmap.insert : forall k v. Hashable k => k -> v -> HashMap k v -> HashMap k v
+std.hashmap.insertAt : forall a. Int -> a -> [a] -> [a]
+std.hashmap.insertCollision : forall k v. Eq k => Int -> k -> v -> [(Int, k, v)] -> [(Int, k, v)] -> (Bool, [(Int, k, v)])
+std.hashmap.insertEntries : forall k v. Hashable k => [(k, v)] -> HashMap k v -> HashMap k v
+std.hashmap.insertNode : forall k v. Eq k => Int -> Int -> k -> v -> HashMap k v -> (Bool, HashMap k v)
+std.hashmap.isEmpty : forall k v. HashMap k v -> Bool
+std.hashmap.keys : forall k v. HashMap k v -> [k]
+std.hashmap.lookup : forall k v. Hashable k => k -> HashMap k v -> Maybe v
+std.hashmap.lookupCollision : forall k v. Eq k => Int -> k -> [(Int, k, v)] -> Maybe v
+std.hashmap.lookupNode : forall k v. Eq k => Int -> Int -> k -> HashMap k v -> Maybe v
+std.hashmap.mapCollisionValue : forall k a b. (a -> b) -> (Int, k, a) -> (Int, k, b)
+std.hashmap.mapCollisionValues : forall k a b. (a -> b) -> [(Int, k, a)] -> [(Int, k, b)]
+std.hashmap.mapNodeValues : forall k a b. (a -> b) -> HashMap k a -> HashMap k b
+std.hashmap.maximumDepth : Int
+std.hashmap.member : forall k v. Hashable k => k -> HashMap k v -> Bool
+std.hashmap.mergeNodes : forall k v. Int -> Int -> HashMap k v -> Int -> HashMap k v -> HashMap k v
+std.hashmap.rankFor : Int -> Int -> Int
+std.hashmap.removeAt : forall a. Int -> [a] -> [a]
+std.hashmap.replaceAt : forall a. Int -> a -> [a] -> [a]
+std.hashmap.restoreEntries : forall entry. [entry] -> [entry] -> [entry]
+std.hashmap.shiftHash : Int -> Int -> Int
+std.hashmap.singleton : forall k v. Hashable k => k -> v -> HashMap k v
+std.hashmap.size : forall k v. HashMap k v -> Int
+std.hashmap.toAscList : forall k v. Ord k => HashMap k v -> [(k, v)]
+std.hashmap.toList : forall k v. HashMap k v -> [(k, v)]
+std.hashmap.traverseCollisionEntry : forall f k a b. Applicative f => (a -> f b) -> (Int, k, a) -> f (Int, k, b)
+std.hashmap.union : forall k v. Hashable k => HashMap k v -> HashMap k v -> HashMap k v
+std.hashmap.values : forall k v. HashMap k v -> [v]
+std.hashset.delete : forall a. Hashable a => a -> HashSet a -> HashSet a
+std.hashset.difference : forall a. Hashable a => HashSet a -> HashSet a -> HashSet a
+std.hashset.differenceValues : forall a. Hashable a => HashSet a -> [a] -> HashSet a -> HashSet a
+std.hashset.empty : forall a. HashSet a
+std.hashset.equalElements : forall a. Hashable a => HashSet a -> [a] -> Bool
+std.hashset.fromList : forall a. Hashable a => [a] -> HashSet a
+std.hashset.hashElements : forall a. Hashable a => Int -> [a] -> Int
+std.hashset.insert : forall a. Hashable a => a -> HashSet a -> HashSet a
+std.hashset.insertValues : forall a. Hashable a => [a] -> HashSet a -> HashSet a
+std.hashset.intersection : forall a. Hashable a => HashSet a -> HashSet a -> HashSet a
+std.hashset.intersectionValues : forall a. Hashable a => HashSet a -> [a] -> HashSet a -> HashSet a
+std.hashset.isEmpty : forall a. HashSet a -> Bool
+std.hashset.member : forall a. Hashable a => a -> HashSet a -> Bool
+std.hashset.singleton : forall a. Hashable a => a -> HashSet a
+std.hashset.size : forall a. HashSet a -> Int
+std.hashset.toAscList : forall a. Ord a => HashSet a -> [a]
+std.hashset.toList : forall a. HashSet a -> [a]
+std.hashset.union : forall a. Hashable a => HashSet a -> HashSet a -> HashSet a
 std.http.allHeaderNameChars : [Char] -> Bool
 std.http.asciiCharsEqual : [Char] -> [Char] -> Bool
 std.http.asciiCode : Char -> Int
@@ -427,7 +492,7 @@ std.json.renderArrayReverse : JsonLimits -> Int -> [Json] -> Bool -> [Char] -> E
 std.json.renderJson : Json -> Either JsonError String
 std.json.renderJsonError : JsonError -> String
 std.json.renderJsonWith : JsonLimits -> Json -> Either JsonError String
-std.json.renderObjectReverse : JsonLimits -> Int -> [Entry String Json] -> Bool -> [Char] -> Either JsonError [Char]
+std.json.renderObjectReverse : JsonLimits -> Int -> [(String, Json)] -> Bool -> [Char] -> Either JsonError [Char]
 std.json.renderStringInto : JsonLimits -> String -> [Char] -> Either JsonError [Char]
 std.json.renderValueInto : JsonLimits -> Int -> Json -> [Char] -> Either JsonError [Char]
 std.json.scalarString : Int -> Int -> Either JsonError (String, Int)
@@ -457,9 +522,11 @@ std.list.zipWithInto : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c] -> [c]
 std.map.balance : forall k v. k -> v -> Map k v -> Map k v -> Map k v
 std.map.delete : forall k v. Ord k => k -> Map k v -> Map k v
 std.map.empty : forall k v. Map k v
-std.map.fromList : forall k v. Ord k => [Entry k v] -> Map k v
-std.map.fromListInto : forall k v. Ord k => Map k v -> [Entry k v] -> Map k v
+std.map.fromList : forall k v. Ord k => [(k, v)] -> Map k v
+std.map.fromListInto : forall k v. Ord k => Map k v -> [(k, v)] -> Map k v
+std.map.hashEntries : forall k v. (Hashable k, Hashable v) => Int -> [(k, v)] -> Int
 std.map.insert : forall k v. Ord k => k -> v -> Map k v -> Map k v
+std.map.isEmpty : forall k v. Map k v -> Bool
 std.map.join : forall k v. Map k v -> Map k v -> Map k v
 std.map.keys : forall k v. Map k v -> [k]
 std.map.keysInto : forall k v. Map k v -> [k] -> [k]
@@ -467,13 +534,15 @@ std.map.lookup : forall k v. Ord k => k -> Map k v -> Maybe v
 std.map.makeNode : forall k v. k -> v -> Map k v -> Map k v -> Map k v
 std.map.mapHeight : forall k v. Map k v -> Int
 std.map.member : forall k v. Ord k => k -> Map k v -> Bool
+std.map.pairLeftValue : forall k a. Map k a -> a -> (Map k a, a)
+std.map.rebuildTraversedNode : forall k v. Int -> Int -> k -> (Map k v, v) -> Map k v -> Map k v
 std.map.removeMinimum : forall k v. Map k v -> RemoveMinimum k v
 std.map.rotateLeft : forall k v. Map k v -> Map k v
 std.map.rotateRight : forall k v. Map k v -> Map k v
 std.map.singleton : forall k v. k -> v -> Map k v
 std.map.size : forall k v. Map k v -> Int
-std.map.toAscList : forall k v. Map k v -> [Entry k v]
-std.map.toAscListInto : forall k v. Map k v -> [Entry k v] -> [Entry k v]
+std.map.toAscList : forall k v. Map k v -> [(k, v)]
+std.map.toAscListInto : forall k v. Map k v -> [(k, v)] -> [(k, v)]
 std.map.values : forall k v. Map k v -> [v]
 std.map.valuesInto : forall k v. Map k v -> [v] -> [v]
 std.net.accept : Socket -> IO NetError Socket
@@ -633,6 +702,7 @@ std.set.fromListInto : forall a. Ord a => Set a -> [a] -> Set a
 std.set.insert : forall a. Ord a => a -> Set a -> Set a
 std.set.intersection : forall a. Ord a => Set a -> Set a -> Set a
 std.set.intersectionValues : forall a. Ord a => Set a -> [a] -> Set a -> Set a
+std.set.isEmpty : forall a. Set a -> Bool
 std.set.member : forall a. Ord a => a -> Set a -> Bool
 std.set.singleton : forall a. a -> Set a
 std.set.size : forall a. Set a -> Int

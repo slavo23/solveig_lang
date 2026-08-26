@@ -43,8 +43,8 @@ updateEntry entries (ReleaseFailed _ _) = entries
 cacheText : Cache -> String
 cacheText (Cache entries) = foldr appendCacheEntry "" (std.map.toAscList entries)
 
-appendCacheEntry : std.map.Entry String String -> String -> String
-appendCacheEntry (Entry repository etag) rest = repository <> "\t" <> etag <> "\n" <> rest
+appendCacheEntry : (String, String) -> String -> String
+appendCacheEntry (repository, etag) rest = repository <> "\t" <> etag <> "\n" <> rest
 
 writeCache : String -> Cache -> Task ()
 writeCache path = std.io.writeFile path . cacheText

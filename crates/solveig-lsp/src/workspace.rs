@@ -807,6 +807,8 @@ pub(crate) mod tests {
             "std/src/std/channel.sv",
             "std/src/std/env.sv",
             "std/src/std/fs.sv",
+            "std/src/std/hashmap.sv",
+            "std/src/std/hashset.sv",
             "std/src/std/io.sv",
             "std/src/std/list.sv",
             "std/src/std/map.sv",

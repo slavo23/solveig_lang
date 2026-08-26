@@ -211,9 +211,9 @@ vectorIndexMain = sumIndexed (std.vector.index benchmarkVector) 2000 0
 listIndexMain : Int
 listIndexMain = sumIndexed (listIndex benchmarkValues) 2000 0
 
-mapEntries : [Int] -> [std.map.Entry Int Int]
+mapEntries : [Int] -> [(Int, Int)]
 mapEntries [] = []
-mapEntries (value :: rest) = std.map.Entry value (value * 2) :: mapEntries rest
+mapEntries (value :: rest) = (value, value * 2) :: mapEntries rest
 
 benchmarkMap : std.map.Map Int Int
 benchmarkMap = std.map.fromList (mapEntries benchmarkValues)

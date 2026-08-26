@@ -629,9 +629,9 @@ renderArrayReverse limits depth (value :: rest) first suffix =
         Left error => Left error
         | Right rendered => renderArrayReverse limits depth rest False rendered
 
-renderObjectReverse : JsonLimits -> Int -> [std.map.Entry String Json] -> Bool -> [Char] -> Either JsonError [Char]
+renderObjectReverse : JsonLimits -> Int -> [(String, Json)] -> Bool -> [Char] -> Either JsonError [Char]
 renderObjectReverse _ _ [] _ suffix = Right suffix
-renderObjectReverse limits depth (Entry key value :: rest) first suffix =
+renderObjectReverse limits depth ((key, value) :: rest) first suffix =
     let separated = if first then suffix else ',' :: suffix in
     case renderValueInto limits depth value separated of
         Left error => Left error

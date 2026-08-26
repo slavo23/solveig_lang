@@ -17,6 +17,8 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.vector` | Persistent indexed sequences with logarithmic updates |
 | `std.map` | Persistent ordered key-value maps |
 | `std.set` | Persistent ordered sets |
+| `std.hashmap` | Persistent hash key-value maps with expected constant-time access |
+| `std.hashset` | Persistent hash sets with expected constant-time membership |
 | `std.queue` | Persistent FIFO queues |
 | `std.text` | Packed UTF-8 scans, explicit scalar/byte operations, and linear text construction |
 | `std.bytes` | Strict/replacement UTF-8 decoding, packed byte scans, and linear binary construction |
@@ -78,6 +80,8 @@ building is stack-safe and linear in the result's UTF-8 bytes.
 import std.vector(*)
 import std.map(*)
 import std.set(*)
+import std.hashmap
+import std.hashset
 import std.queue(*)
 ```
 
@@ -100,20 +104,55 @@ sharing.
 
 `Map` and `Set` use persistent AVL trees and therefore require `Ord` keys or
 elements. Lookup, insertion, and deletion are logarithmic; `size` is constant
-time; ordered traversal is linear and deterministic. `Map.fromList` keeps the
-last value for a duplicate key. `Set.fromList` discards duplicates.
+time; ordered traversal is linear and deterministic. `Map.fromList` consumes
+ordinary `(key, value)` tuples and keeps the last value for a duplicate key.
+`Set.fromList` discards duplicates.
 
 ```solveig
 phoneBook : std.map.Map String String
 phoneBook =
     std.map.fromList
-        [ std.map.Entry "Ada" "+44"
-        , std.map.Entry "Linus" "+358"
+        [ ("Ada", "+44")
+        , ("Linus", "+358")
         ]
 
 names : [String]
 names = std.map.keys phoneBook
 ```
+
+Use `HashMap` or `HashSet` when keys have `Hashable` and equality but ordered
+traversal is not the primary operation. They use immutable bitmap-indexed
+32-way hash tries. Dispersed lookup, insertion, and deletion have expected
+constant cost, with at most thirteen trie levels for an `Int` hash. Updates
+copy only the search spine and retain every untouched branch. A deliberately
+bad `Hashable` instance can put several distinct keys in one full-hash
+collision bucket; operations on that bucket are linear in its size.
+
+```solveig
+import std.hashmap
+
+scores : std.hashmap.HashMap String Int
+scores = std.hashmap.fromList [("Ada", 10), ("Grace", 12), ("Ada", 15)]
+
+adaScore : Maybe Int
+adaScore = std.hashmap.lookup "Ada" scores
+```
+
+`HashMap.toList`, `keys`, `values`, `HashSet.toList`, and their `Foldable`
+instances use defined trie order: ascending hash fragments and insertion order
+within a complete-hash collision bucket. They do not promise key order. Use
+`toAscList` when an `Ord` instance is available and sorted output matters.
+`Show` also uses ascending order, so equal values render identically regardless
+of insertion history. `Hashable` is order-independent and remains available
+without `Ord`; equal maps and sets therefore always produce equal salted
+hashes.
+
+All collection types are opaque. Use their public constructors and operations
+so cached sizes, tree balance, hash fragments, and queue normalization remain
+valid. `Functor`, `Foldable`, `Traversable`, `Eq`, `Show`, and `Hashable` are
+provided where they preserve the collection abstraction. In particular,
+`HashSet` is not a `Functor`: changing an element may change its hash and must
+therefore be an explicit rebuild.
 
 `Queue` uses a front list and a reversed rear list. `enqueue` and `dequeue`
 are amortized constant time, `length` is constant time, and `toList` is linear.
@@ -125,10 +164,6 @@ next =
     std.queue.dequeue
         (std.queue.enqueue (std.queue.enqueue std.queue.empty "first") "second")
 ```
-
-The exported collection constructors describe the current representation and
-should not be used by application code; use the smart constructors and
-operations above so cached balance and size invariants remain valid.
 
 ## Bytes
 

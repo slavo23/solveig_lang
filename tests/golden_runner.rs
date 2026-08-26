@@ -115,7 +115,7 @@ fn golden_case_weight(case_root: &Path) -> usize {
         // fixtures cluster tightly around one project-check unit.
         Some("io_million_bind_loop") => 12,
         Some("process_capture") => 4,
-        Some("finite_data" | "stress_two" | "sudoku") => 2,
+        Some("finite_data" | "hash_collections" | "stress_two" | "sudoku") => 2,
         _ => 1,
     }
 }

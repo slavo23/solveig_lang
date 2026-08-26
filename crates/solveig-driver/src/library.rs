@@ -22,6 +22,8 @@ const STD_BYTES_SRC: &str = include_str!("../../../lib/std/src/std/bytes.sv");
 const STD_CHANNEL_SRC: &str = include_str!("../../../lib/std/src/std/channel.sv");
 const STD_ENV_SRC: &str = include_str!("../../../lib/std/src/std/env.sv");
 const STD_FS_SRC: &str = include_str!("../../../lib/std/src/std/fs.sv");
+const STD_HASHMAP_SRC: &str = include_str!("../../../lib/std/src/std/hashmap.sv");
+const STD_HASHSET_SRC: &str = include_str!("../../../lib/std/src/std/hashset.sv");
 const STD_HTTP_SRC: &str = include_str!("../../../lib/std/src/std/http.sv");
 const STD_IO_SRC: &str = include_str!("../../../lib/std/src/std/io.sv");
 const STD_JSON_SRC: &str = include_str!("../../../lib/std/src/std/json.sv");
@@ -63,6 +65,8 @@ pub(crate) fn embedded_library_source(module: &str) -> Option<&'static str> {
         "std.channel" => Some(STD_CHANNEL_SRC),
         "std.env" => Some(STD_ENV_SRC),
         "std.fs" => Some(STD_FS_SRC),
+        "std.hashmap" => Some(STD_HASHMAP_SRC),
+        "std.hashset" => Some(STD_HASHSET_SRC),
         "std.http" => Some(STD_HTTP_SRC),
         "std.io" => Some(STD_IO_SRC),
         "std.json" => Some(STD_JSON_SRC),
@@ -111,6 +115,8 @@ pub(crate) fn embedded_library_modules(package: &str) -> &'static [&'static str]
             "std/channel.sv",
             "std/env.sv",
             "std/fs.sv",
+            "std/hashmap.sv",
+            "std/hashset.sv",
             "std/http.sv",
             "std/io.sv",
             "std/json.sv",

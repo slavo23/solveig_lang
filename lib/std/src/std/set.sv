@@ -1,5 +1,5 @@
 export (
-    Set, empty, singleton, size, member, insert, delete, fromList, toAscList, union,
+    Set, empty, singleton, size, isEmpty, member, insert, delete, fromList, toAscList, union,
     intersection, difference
 )
 
@@ -20,6 +20,10 @@ singleton value = MkSet (std.map.singleton value ())
 size : forall a. Set a -> Int
 size (MkSet map) = std.map.size map
 
+-- | Reports whether the set is empty in constant time.
+isEmpty : forall a. Set a -> Bool
+isEmpty (MkSet map) = std.map.isEmpty map
+
 -- | Reports whether an element is present.
 member : forall a. Ord a => a -> Set a -> Bool
 member value (MkSet map) = std.map.member value map
@@ -34,7 +38,7 @@ delete value (MkSet map) = MkSet (std.map.delete value map)
 
 -- | Builds a set, discarding duplicate elements.
 fromList : forall a. Ord a => [a] -> Set a
-fromList values = fromListInto empty values
+fromList = fromListInto empty
 
 fromListInto : forall a. Ord a => Set a -> [a] -> Set a
 fromListInto set [] = set
@@ -74,6 +78,16 @@ differenceValues removed (value :: rest) result =
 
 instance Eq a => Eq (Set a) where
     (==) left right = toAscList left == toAscList right
+
+instance Foldable Set where
+    foldr combine initial set = foldr combine initial (toAscList set)
+    foldl combine initial set = foldl combine initial (toAscList set)
+
+instance Show a => Show (Set a) where
+    show set = "fromList " <> show (toAscList set)
+
+instance Hashable a => Hashable (Set a) where
+    hashWithSalt salt set = hashWithSalt salt (toAscList set)
 
 instance Ord a => Semigroup (Set a) where
     combine left right = union left right

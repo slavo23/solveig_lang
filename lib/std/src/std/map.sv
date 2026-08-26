@@ -1,10 +1,7 @@
 export (
-    Entry(..), Map, empty, singleton, size, lookup, member, insert, delete, fromList,
+    Map, empty, singleton, size, isEmpty, lookup, member, insert, delete, fromList,
     toAscList, keys, values
 )
-
--- | A key-value pair used by ordered map traversal and construction.
-data Entry k v = Entry k v
 
 -- | An immutable ordered map backed by a persistent AVL tree.
 data Map k v =
@@ -31,6 +28,11 @@ mapHeight (MapNode height _ _ _ _ _) = height
 size : forall k v. Map k v -> Int
 size MapEmpty = 0
 size (MapNode _ count _ _ _ _) = count
+
+-- | Reports whether the map is empty in constant time.
+isEmpty : forall k v. Map k v -> Bool
+isEmpty MapEmpty = True
+isEmpty _ = False
 
 makeNode : forall k v. k -> v -> Map k v -> Map k v -> Map k v
 makeNode key value left right =
@@ -134,23 +136,23 @@ delete key (MapNode _ _ nodeKey nodeValue left right) =
         | EQ => join left right
         | GT => balance nodeKey nodeValue left (delete key right)
 
--- | Builds a map, keeping the last value for each repeated key.
-fromList : forall k v. Ord k => [Entry k v] -> Map k v
-fromList entries = fromListInto empty entries
+-- | Builds a map from key-value tuples, keeping the last repeated key.
+fromList : forall k v. Ord k => [(k, v)] -> Map k v
+fromList = fromListInto empty
 
-fromListInto : forall k v. Ord k => Map k v -> [Entry k v] -> Map k v
+fromListInto : forall k v. Ord k => Map k v -> [(k, v)] -> Map k v
 fromListInto map [] = map
-fromListInto map (Entry key value :: rest) =
+fromListInto map ((key, value) :: rest) =
     fromListInto (insert key value map) rest
 
 -- | Returns entries in ascending key order.
-toAscList : forall k v. Map k v -> [Entry k v]
+toAscList : forall k v. Map k v -> [(k, v)]
 toAscList map = toAscListInto map []
 
-toAscListInto : forall k v. Map k v -> [Entry k v] -> [Entry k v]
+toAscListInto : forall k v. Map k v -> [(k, v)] -> [(k, v)]
 toAscListInto MapEmpty acc = acc
 toAscListInto (MapNode _ _ key value left right) acc =
-    toAscListInto left (Entry key value :: toAscListInto right acc)
+    toAscListInto left ((key, value) :: toAscListInto right acc)
 
 -- | Returns keys in ascending order.
 keys : forall k v. Map k v -> [k]
@@ -174,3 +176,41 @@ instance Functor (Map k) where
     fmap transform MapEmpty = MapEmpty
     fmap transform (MapNode height count key value left right) =
         MapNode height count key (transform value) (fmap transform left) (fmap transform right)
+
+instance Foldable (Map k) where
+    foldr combine initial map = foldr combine initial (values map)
+    foldl combine initial map = foldl combine initial (values map)
+
+pairLeftValue : forall k a. Map k a -> a -> (Map k a, a)
+pairLeftValue left value = (left, value)
+
+rebuildTraversedNode :
+    forall k v. Int -> Int -> k -> (Map k v, v) -> Map k v -> Map k v
+rebuildTraversedNode height count key (left, value) right =
+    MapNode height count key value left right
+
+instance Traversable (Map k) where
+    traverse _ MapEmpty = pure MapEmpty
+    traverse transform (MapNode height count key value left right) =
+        liftA2
+            (rebuildTraversedNode height count key)
+            (liftA2
+                pairLeftValue
+                (traverse transform left)
+                (transform value))
+            (traverse transform right)
+
+instance (Eq k, Eq v) => Eq (Map k v) where
+    (==) left right = toAscList left == toAscList right
+
+instance (Show k, Show v) => Show (Map k v) where
+    show map = "fromList " <> show (toAscList map)
+
+hashEntries : forall k v. (Hashable k, Hashable v) => Int -> [(k, v)] -> Int
+hashEntries salt [] = salt
+hashEntries salt ((key, value) :: rest) =
+    hashEntries (hashWithSalt (hashWithSalt salt key) value) rest
+
+instance (Hashable k, Hashable v) => Hashable (Map k v) where
+    hashWithSalt salt map =
+        hashEntries (hashWithSalt salt (size map)) (toAscList map)

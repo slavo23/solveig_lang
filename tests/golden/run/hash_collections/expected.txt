@@ -1,0 +1,32 @@
+256
+Just 2560
+Nothing
+Just 1280
+256
+True
+True
+Just 9999
+Just 1280
+True
+True
+True
+True
+True
+328960
+Just fromList [(1, 10), (2, 20)]
+Nothing
+True
+[(-9223372036854775808, 1), (-1, 2), (31, 3)]
+Just 2
+10000
+Just 19998
+Nothing
+Just 10000
+10000
+300
+100
+100
+6
+True
+True
+True

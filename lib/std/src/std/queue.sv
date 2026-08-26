@@ -50,7 +50,7 @@ dequeue queue =
 
 -- | Builds a queue in linear time.
 fromList : forall a. [a] -> Queue a
-fromList values = foldl enqueue empty values
+fromList = foldl enqueue empty
 
 -- | Returns elements from front to back in linear time.
 toList : forall a. Queue a -> [a]
@@ -59,5 +59,18 @@ toList (MkQueue _ front rear) = front ++ reverse rear
 instance Functor Queue where
     fmap transform queue = fromList (map transform (toList queue))
 
+instance Foldable Queue where
+    foldr combine initial queue = foldr combine initial (toList queue)
+    foldl combine initial queue = foldl combine initial (toList queue)
+
+instance Traversable Queue where
+    traverse transform queue = fmap fromList (traverse transform (toList queue))
+
 instance Eq a => Eq (Queue a) where
     (==) left right = toList left == toList right
+
+instance Show a => Show (Queue a) where
+    show queue = "fromList " <> show (toList queue)
+
+instance Hashable a => Hashable (Queue a) where
+    hashWithSalt salt queue = hashWithSalt salt (toList queue)

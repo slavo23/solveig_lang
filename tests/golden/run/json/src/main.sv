@@ -36,8 +36,8 @@ largeExact =
 manualJson : std.json.Json
 manualJson = std.json.JsonObject
     (std.map.fromList
-        [ std.map.Entry "line\n" (std.json.JsonString "tab\tquote\"")
-        , std.map.Entry "flag" (std.json.JsonBool True)
+        [ ("line\n", std.json.JsonString "tab\tquote\"")
+        , ("flag", std.json.JsonBool True)
         ])
 
 roundTrip : std.json.Json -> String
