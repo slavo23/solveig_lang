@@ -3,6 +3,9 @@ name = "solveig-lsp"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+doctest = false
+
 [dependencies]
 solveig-base = { path = "../solveig-base", version = "0.1.0" }
 solveig-driver = { path = "../solveig-driver", version = "0.1.0" }

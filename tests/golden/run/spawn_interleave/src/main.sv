@@ -1,4 +1,5 @@
 import std.thread(*)
+import std.channel(*)
 
 pause : Int -> Task ()
 pause n =
@@ -7,15 +8,18 @@ pause n =
         pureIO ()
         pause (n - 1)
 
-worker : String -> Task ()
-worker label = do
+worker : Chan () -> String -> Task ()
+worker done label = do
     printLine (appendString label "1")
     pause 10000
     printLine (appendString label "2")
+    send done ()
 
 main : Task ()
 main = do
-    _ <- spawn (worker "A")
-    _ <- spawn (worker "B")
-    pause 30000
+    done <- newChan
+    _ <- spawn (worker done "A")
+    _ <- spawn (worker done "B")
+    _ <- recv done
+    _ <- recv done
     printLine "main"

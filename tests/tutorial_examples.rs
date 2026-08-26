@@ -5,14 +5,18 @@ use solveig_driver::run_project_capture;
 use tempfile::TempDir;
 
 #[test]
-fn documentation_projects_compile_and_run() {
-    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
-
+fn language_tour_documentation_project_compiles_and_runs() {
+    let repository = repository_root();
     run_copied_project(
         &repository.join("docs/tutorial/code/language_tour"),
         "high: 12\n[\"ada@example.test\"]\n(\"answer\", 42)\n(7, \"seven\")\n[1, 2, 3]\n",
         |_| {},
     );
+}
+
+#[test]
+fn file_summary_documentation_project_compiles_and_runs() {
+    let repository = repository_root();
     run_copied_project(
         &repository.join("docs/tutorial/code/file_summary"),
         "readings: 4\n",
@@ -24,16 +28,30 @@ fn documentation_projects_compile_and_run() {
             );
         },
     );
+}
+
+#[test]
+fn concurrent_jobs_documentation_project_compiles_and_runs() {
+    let repository = repository_root();
     run_copied_project(
         &repository.join("docs/tutorial/code/concurrent_jobs"),
         "results: [1, 4, 9, 16]\n",
         |_| {},
     );
+}
+
+#[test]
+fn local_http_documentation_project_compiles_and_runs() {
+    let repository = repository_root();
     run_copied_project(
         &repository.join("docs/tutorial/code/local_http"),
         "responses: 3\n{\"message\":\"hello from Solveig\"}\n",
         |_| {},
     );
+}
+
+fn repository_root() -> &'static Path {
+    Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
 fn run_copied_project(source: &Path, expected_output: &str, check_files: impl FnOnce(&Path)) {

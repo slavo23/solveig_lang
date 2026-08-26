@@ -8,6 +8,7 @@ use std::fs;
 use std::panic;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Instant;
 
 use solveig_driver::run_project_capture_with_stdin_and_args;
 
@@ -43,7 +44,9 @@ fn run_golden_shard(shard_index: usize) {
     cases.push(manifest_root.join("examples/concurrent_downloader"));
     cases.push(manifest_root.join("examples/log_audit"));
     cases.sort();
-    let cases = fixture_shards::select_fixture_shard(cases, shard_index);
+    let cases = fixture_shards::select_weighted_fixture_shard(cases, shard_index, |case| {
+        golden_case_weight(case)
+    });
 
     assert!(
         !cases.is_empty(),
@@ -57,6 +60,7 @@ fn run_golden_shard(shard_index: usize) {
             .and_then(|name| name.to_str())
             .unwrap_or("<invalid-case-name>");
 
+        let started = Instant::now();
         let stdin = case_stdin(case_name, &case_root);
         let args = case_args(case_name, &case_root);
         let actual = if case_root.join("expected.stderr.txt").is_file() {
@@ -95,6 +99,24 @@ fn run_golden_shard(shard_index: usize) {
         };
 
         snapshot_support::assert_fixture_snapshot(&case_root, case_name, &expected, &actual);
+
+        if env::var_os("SOLVEIG_TEST_TIMINGS").is_some() {
+            eprintln!(
+                "solveig-golden-time {case_name} {}",
+                started.elapsed().as_millis()
+            );
+        }
+    }
+}
+
+fn golden_case_weight(case_root: &Path) -> usize {
+    match case_root.file_name().and_then(|name| name.to_str()) {
+        // Ratios rounded from SOLVEIG_TEST_TIMINGS measurements. Unlisted
+        // fixtures cluster tightly around one project-check unit.
+        Some("io_million_bind_loop") => 12,
+        Some("process_capture") => 4,
+        Some("finite_data" | "stress_two" | "sudoku") => 2,
+        _ => 1,
     }
 }
 

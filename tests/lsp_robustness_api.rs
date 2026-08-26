@@ -3,6 +3,7 @@
     reason = "integration tests use panic messages to explain LSP audit failures"
 )]
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -11,44 +12,44 @@ use solveig_driver::Compilation;
 use solveig_ide::{CompilationIdeExt, SourceInlayHintConfig, SourceSelectionRange, SourceSymbol};
 use solveig_syntax::lexer::{Token, lex};
 
-// Four retained compilations cap peak memory while distributing the exhaustive token audit.
-const TOKEN_SWEEP_SHARD_COUNT: usize = 4;
-
 fn fixture_root(name: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(name)
 }
 
 #[test]
-fn editor_queries_survive_project_token_sweeps_shard_1_of_4() {
-    assert_editor_queries_survive_token_sweep_shard(0);
+fn editor_queries_survive_scry_project_token_sweep() {
+    assert_editor_queries_survive_token_sweep("examples/scry", 0, 1);
 }
 
 #[test]
-fn editor_queries_survive_project_token_sweeps_shard_2_of_4() {
-    assert_editor_queries_survive_token_sweep_shard(1);
+fn editor_queries_survive_smoke_project_token_sweep_shard_1_of_3() {
+    assert_editor_queries_survive_token_sweep("examples/smoke_suite", 0, 3);
 }
 
 #[test]
-fn editor_queries_survive_project_token_sweeps_shard_3_of_4() {
-    assert_editor_queries_survive_token_sweep_shard(2);
+fn editor_queries_survive_smoke_project_token_sweep_shard_2_of_3() {
+    assert_editor_queries_survive_token_sweep("examples/smoke_suite", 1, 3);
 }
 
 #[test]
-fn editor_queries_survive_project_token_sweeps_shard_4_of_4() {
-    assert_editor_queries_survive_token_sweep_shard(3);
+fn editor_queries_survive_smoke_project_token_sweep_shard_3_of_3() {
+    assert_editor_queries_survive_token_sweep("examples/smoke_suite", 2, 3);
 }
 
-fn assert_editor_queries_survive_token_sweep_shard(shard_index: usize) {
-    for project in ["examples/scry", "examples/smoke_suite"] {
-        let anomalies = audit_project_shard(&fixture_root(project), shard_index);
+fn assert_editor_queries_survive_token_sweep(
+    project: &str,
+    shard_index: usize,
+    shard_count: usize,
+) {
+    let anomalies = audit_project_shard(&fixture_root(project), shard_index, shard_count);
 
-        assert!(
-            anomalies.is_empty(),
-            "editor audit shard {} found anomalies in `{project}`:\n{}",
-            shard_index + 1,
-            anomalies.join("\n")
-        );
-    }
+    assert!(
+        anomalies.is_empty(),
+        "editor audit shard {}/{} found anomalies in `{project}`:\n{}",
+        shard_index + 1,
+        shard_count,
+        anomalies.join("\n")
+    );
 }
 
 #[test]
@@ -189,11 +190,9 @@ fn case_hover_snapshots_cover_scry_and_smoke_examples() {
         ),
     ];
 
-    for (project, relative_file, lines, expected) in cases {
+    let mut compilations = BTreeMap::new();
+    for project in ["examples/scry", "examples/smoke_suite"] {
         let project_root = fixture_root(project);
-        let file = project_root.join(relative_file);
-        let source = fs::read_to_string(&file)
-            .unwrap_or_else(|err| panic!("{} should be readable: {err}", file.display()));
         let mut compilation = Compilation::new(&project_root);
         let diagnostics = {
             let result = compilation
@@ -201,6 +200,25 @@ fn case_hover_snapshots_cover_scry_and_smoke_examples() {
                 .unwrap_or_else(|err| panic!("{project} should check: {err}"));
             format!("{:?}", result.diagnostics())
         };
+        assert!(
+            compilation
+                .source_map()
+                .files()
+                .iter()
+                .any(|source| source.path.starts_with(&project_root)),
+            "{project} should retain project sources after diagnostics: {diagnostics}"
+        );
+        compilations.insert(project, compilation);
+    }
+
+    for (project, relative_file, lines, expected) in cases {
+        let project_root = fixture_root(project);
+        let file = project_root.join(relative_file);
+        let source = fs::read_to_string(&file)
+            .unwrap_or_else(|err| panic!("{} should be readable: {err}", file.display()));
+        let compilation = compilations
+            .get(project)
+            .unwrap_or_else(|| panic!("{project} should have a retained compilation"));
 
         assert!(
             compilation
@@ -208,12 +226,11 @@ fn case_hover_snapshots_cover_scry_and_smoke_examples() {
                 .files()
                 .iter()
                 .any(|source| source.path == file),
-            "{project} should retain {} for editor queries after diagnostics: {}",
-            file.display(),
-            diagnostics
+            "{project} should retain {} for editor queries",
+            file.display()
         );
 
-        let actual = hover_audit_for_lines(&compilation, &file, &source, lines);
+        let actual = hover_audit_for_lines(compilation, &file, &source, lines);
         assert_eq!(
             actual, expected,
             "case-hover snapshot changed for {project}/{relative_file}"
@@ -221,7 +238,7 @@ fn case_hover_snapshots_cover_scry_and_smoke_examples() {
     }
 }
 
-fn audit_project_shard(project_root: &Path, shard_index: usize) -> Vec<String> {
+fn audit_project_shard(project_root: &Path, shard_index: usize, shard_count: usize) -> Vec<String> {
     let mut compilation = Compilation::new(project_root);
     let result = compilation
         .check(true)
@@ -251,18 +268,14 @@ fn audit_project_shard(project_root: &Path, shard_index: usize) -> Vec<String> {
     for file in project_files
         .iter()
         .enumerate()
-        .filter_map(|(index, file)| {
-            (index % TOKEN_SWEEP_SHARD_COUNT == shard_index).then_some(file)
-        })
+        .filter_map(|(index, file)| (index % shard_count == shard_index).then_some(file))
     {
         audit_file(&mut compilation, file, &mut anomalies);
     }
     for file in solveig_sources(&project_root.join("src"))
         .into_iter()
         .enumerate()
-        .filter_map(|(index, file)| {
-            (index % TOKEN_SWEEP_SHARD_COUNT == shard_index).then_some(file)
-        })
+        .filter_map(|(index, file)| (index % shard_count == shard_index).then_some(file))
     {
         if project_files.contains(&file) {
             continue;

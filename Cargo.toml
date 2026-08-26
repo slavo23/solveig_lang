@@ -27,6 +27,11 @@ solveig-ast = { path = "crates/solveig-ast", version = "0.1.0" }
 solveig-vm = { path = "crates/solveig-vm", version = "0.1.0" }
 tempfile = "3"
 
+[[bin]]
+name = "solveig"
+path = "src/main.rs"
+test = false
+
 [[bench]]
 name = "language"
 harness = false
@@ -117,6 +122,48 @@ uninlined_format_args = "warn"
 items_after_statements = "warn"
 match_same_arms = "warn"
 map_unwrap_or = "warn"
+
+[profile.test.package.solveig]
+opt-level = 1
+
+[profile.test.package.solveig-ast]
+opt-level = 1
+
+[profile.test.package.solveig-base]
+opt-level = 1
+
+[profile.test.package.solveig-check]
+opt-level = 1
+
+[profile.test.package.solveig-driver]
+opt-level = 1
+
+[profile.test.package.solveig-fmt]
+opt-level = 1
+
+[profile.test.package.solveig-ide]
+opt-level = 1
+
+[profile.test.package.solveig-lower]
+opt-level = 1
+
+[profile.test.package.solveig-lsp]
+opt-level = 1
+
+[profile.test.package.solveig-package]
+opt-level = 1
+
+[profile.test.package.solveig-report]
+opt-level = 1
+
+[profile.test.package.solveig-resolve]
+opt-level = 1
+
+[profile.test.package.solveig-syntax]
+opt-level = 1
+
+[profile.test.package.solveig-vm]
+opt-level = 1
 
 [profile.samply]
 inherits = "release"

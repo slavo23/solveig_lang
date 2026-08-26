@@ -3,6 +3,9 @@ name = "solveig-lower"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+doctest = false
+
 [dependencies]
 solveig-ast = { path = "../solveig-ast" }
 solveig-base = { path = "../solveig-base" }

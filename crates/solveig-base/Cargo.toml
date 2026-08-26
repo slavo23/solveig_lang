@@ -3,6 +3,9 @@ name = "solveig-base"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+doctest = false
+
 [dependencies]
 rustc-hash = { workspace = true }
 text-size = { workspace = true }

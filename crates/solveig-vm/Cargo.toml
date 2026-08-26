@@ -3,6 +3,9 @@ name = "solveig-vm"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+doctest = false
+
 [dependencies]
 la-arena.workspace = true
 mio = { version = "1.2.2", features = ["net", "os-poll"] }

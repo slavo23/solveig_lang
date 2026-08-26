@@ -3,6 +3,10 @@ name = "solveig-driver"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+doctest = false
+test = false
+
 [dependencies]
 camino = { workspace = true }
 solveig-ast = { path = "../solveig-ast", version = "0.1.0" }

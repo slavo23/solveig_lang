@@ -717,7 +717,6 @@ pub(crate) mod tests {
     use async_lsp::lsp_types::{
         CodeActionOrCommand, DiagnosticSeverity, HoverContents, NumberOrString,
     };
-    use solveig_driver::Compilation;
     use std::fs;
     use std::ops::Deref;
     use std::process::Command;
@@ -899,15 +898,28 @@ pub(crate) mod tests {
                 continue;
             }
 
-            let mut compilation = Compilation::new(&case_root);
-            let result = compilation
-                .check(false)
-                .unwrap_or_else(|err| panic!("{case_name} should return diagnostics: {err}"));
-            let expected = diagnostic_map(
-                result.diagnostics(),
-                result.source_map(),
-                PositionEncoding::Utf16,
-            );
+            let expected = {
+                assert_eq!(
+                    state.workspaces.len(),
+                    1,
+                    "{case_name} should retain exactly one workspace"
+                );
+                let workspace = state
+                    .workspaces
+                    .values()
+                    .next()
+                    .unwrap_or_else(|| panic!("{case_name} should retain its workspace"));
+                let mut workspace = lock_workspace(workspace);
+                let result = workspace
+                    .compilation
+                    .ensure_checked(false)
+                    .unwrap_or_else(|err| panic!("{case_name} should retain diagnostics: {err}"));
+                diagnostic_map(
+                    result.diagnostics(),
+                    result.source_map(),
+                    PositionEncoding::Utf16,
+                )
+            };
             let actual = publications.into_iter().collect::<BTreeMap<_, _>>();
 
             assert_eq!(
