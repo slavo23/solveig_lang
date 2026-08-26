@@ -1,6 +1,7 @@
 export (
     accept, appendFile, bindIO, bytesAppend, bytesConcat, bytesFindAny, bytesFindBelow,
     bytesIndex, bytesLength, bytesSlice, bytesSliceToString, bytesSpanAny, bytesSpanRange,
+    bytesUtf8ValidPrefix,
     bytesToString, bytesToStringReplacing, catchDefectIO, catchIO, charCompare,
     charEq, charToCodePoint,
     charToString, charsToString, closeChan, closeSocket, codePointToString, connect,
@@ -14,6 +15,7 @@ export (
     intLe, intLt, intMod, intMul, intNeg, intSub, intToFloat, intToString,
     killThread, listDirectory, listen, maskIO, mkStdGen, newBoundedChan, newChan,
     newStdGen, openFile, printLine, printStr, pureIO, raiseDefectIO, randomInt,
+    pathExtension, pathFileName, pathIsAbsolute, pathJoin, pathNormalise, pathParent,
     randomRange, readFile, readFileBytes, readFileBytesLimited, readFileLimited,
     readLine, recv, recvBytes, removeFile, renameFile, resolveHost, restoreMaskIO,
     runProcess, runProcessLimited, send, sendBytes, setCurrentDirectory, setEnv, sleep,
@@ -21,5 +23,6 @@ export (
     stringCharAtByte,
     stringCharAt, stringCompare, stringEq, stringFindCharFrom, stringLength,
     stringSlice, stringStartsWith, stringToBytes, stringToChars, stringTrimAscii,
-    stringsConcat, tryRecv, writeFile, writeFileBytes
+    stringsConcat, tryRecv, writeFile, writeFileAtomic, writeFileBytes,
+    writeFileBytesAtomic
 )

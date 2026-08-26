@@ -83,6 +83,7 @@ prelude.prim.bytesSpanAny : Bytes -> Int -> Bytes -> Int
 prelude.prim.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
 prelude.prim.bytesToString : Bytes -> Either Utf8Error String
 prelude.prim.bytesToStringReplacing : Bytes -> String
+prelude.prim.bytesUtf8ValidPrefix : Bytes -> Bool -> Either Utf8Error Int
 prelude.prim.catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.prim.catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.prim.charCompare : Char -> Char -> Ordering
@@ -157,6 +158,12 @@ prelude.prim.newBoundedChan : forall e a. Int -> IO e (Chan a)
 prelude.prim.newChan : forall e a. IO e (Chan a)
 prelude.prim.newStdGen : forall e. IO e StdGen
 prelude.prim.openFile : String -> IOMode -> IO HostError Handle
+prelude.prim.pathExtension : String -> Maybe String
+prelude.prim.pathFileName : String -> Maybe String
+prelude.prim.pathIsAbsolute : String -> Bool
+prelude.prim.pathJoin : String -> String -> String
+prelude.prim.pathNormalise : String -> String
+prelude.prim.pathParent : String -> Maybe String
 prelude.prim.printLine : String -> IO HostError ()
 prelude.prim.printStr : String -> IO HostError ()
 prelude.prim.pureIO : forall e a. a -> IO e a
@@ -202,7 +209,9 @@ prelude.prim.stringTrimAscii : String -> String
 prelude.prim.stringsConcat : [String] -> String
 prelude.prim.tryRecv : forall a. Chan a -> IO HostError (Maybe a)
 prelude.prim.writeFile : String -> String -> IO HostError ()
+prelude.prim.writeFileAtomic : String -> String -> IO HostError ()
 prelude.prim.writeFileBytes : String -> Bytes -> IO HostError ()
+prelude.prim.writeFileBytesAtomic : String -> Bytes -> IO HostError ()
 prelude.show.showCharPayload : Char -> String
 prelude.show.showListItems : forall a. Show a => [a] -> String
 prelude.show.showStringChars : [Char] -> String
@@ -252,6 +261,7 @@ std.bytes.bytesSpanAny : Bytes -> Int -> Bytes -> Int
 std.bytes.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
 std.bytes.bytesToString : Bytes -> Either Utf8Error String
 std.bytes.bytesToStringReplacing : Bytes -> String
+std.bytes.bytesUtf8ValidPrefix : Bytes -> Bool -> Either Utf8Error Int
 std.bytes.emptyBytesBuilder : BytesBuilder
 std.bytes.stringToBytes : String -> Bytes
 std.channel.closeChan : forall a. Chan a -> IO HostError ()
@@ -279,17 +289,44 @@ std.env.setEnv : String -> String -> IO HostError ()
 std.env.setMissingEntries : [(String, String)] -> IO EnvError ()
 std.env.validEnvName : String -> Bool
 std.env.validEnvNameStart : Char -> Bool
+std.fs.absoluteUtf8Error : Path -> Int -> Utf8Error -> FsError
+std.fs.appendFile : Path -> String -> IO FsError ()
+std.fs.appendFileBytes : Path -> Bytes -> IO FsError ()
 std.fs.atPath : forall a. Path -> IO HostError a -> IO FsError a
 std.fs.createDirectory : Path -> IO FsError ()
+std.fs.decodeFile : Path -> Int -> Bytes -> IO FsError String
+std.fs.decodeUtf8Prefix : Bytes -> Int -> String
 std.fs.doesDirectoryExist : Path -> IO FsError Bool
 std.fs.doesFileExist : Path -> IO FsError Bool
+std.fs.emitLine : Path -> Handle -> BytesBuilder -> Int -> Bytes -> Int -> Bool -> Int -> Int -> IO FsError (Maybe (String, (Handle, BytesBuilder, Int, Bytes, Int, Bool)))
+std.fs.fileByteStep : Path -> Int -> Handle -> () -> IO FsError (Maybe (Bytes, ()))
+std.fs.fileByteStream : Path -> Int -> Handle -> Stream () FsError Bytes
+std.fs.fileLineStep : Path -> Int -> (Handle, BytesBuilder, Int, Bytes, Int, Bool) -> IO FsError (Maybe (String, (Handle, BytesBuilder, Int, Bytes, Int, Bool)))
+std.fs.fileLineStream : Path -> Int -> Handle -> Stream () FsError String
+std.fs.fileTextStep : Path -> Int -> (Handle, Bytes, Int) -> IO FsError (Maybe (String, (Handle, Bytes, Int)))
+std.fs.fileTextStream : Path -> Int -> Handle -> Stream () FsError String
+std.fs.finishText : Path -> Handle -> Bytes -> Int -> IO FsError (Maybe (String, (Handle, Bytes, Int)))
 std.fs.getCurrentDirectory : IO FsError Path
 std.fs.getFileSize : Path -> IO FsError Int
 std.fs.getModificationTime : Path -> IO FsError SystemTime
+std.fs.invalidChunkSize : forall a. Path -> String -> Int -> IO FsError a
 std.fs.listDirectory : Path -> IO FsError [Path]
+std.fs.readFile : Path -> IO FsError String
+std.fs.readFileBytes : Path -> IO FsError Bytes
+std.fs.readFileBytesLimited : Path -> Int -> IO FsError Bytes
+std.fs.readFileLimited : Path -> Int -> IO FsError String
 std.fs.removeFile : Path -> IO FsError ()
 std.fs.renameFile : Path -> Path -> IO FsError ()
 std.fs.setCurrentDirectory : Path -> IO FsError ()
+std.fs.stripCarriageReturn : Bytes -> Int -> Int
+std.fs.withFileByteStream : forall result. Int -> Path -> (forall scope. Stream scope FsError Bytes -> IO FsError result) -> IO FsError result
+std.fs.withFileLineStream : forall result. Int -> Path -> (forall scope. Stream scope FsError String -> IO FsError result) -> IO FsError result
+std.fs.withFileTextStream : forall result. Int -> Path -> (forall scope. Stream scope FsError String -> IO FsError result) -> IO FsError result
+std.fs.withReadHandle : forall result. Path -> (Handle -> IO FsError result) -> IO FsError result
+std.fs.writeFile : Path -> String -> IO FsError ()
+std.fs.writeFileAtomic : Path -> String -> IO FsError ()
+std.fs.writeFileBytes : Path -> Bytes -> IO FsError ()
+std.fs.writeFileBytesAtomic : Path -> Bytes -> IO FsError ()
 std.hashmap.bitFor : Int -> Int
 std.hashmap.branchWidth : Int
 std.hashmap.childAt : forall a. Int -> [a] -> a
@@ -674,8 +711,16 @@ std.parser.textRestore : TextInput -> TextInput -> TextInput
 std.parser.token : forall input token custom. Eq token => InputOps input token -> String -> token -> Parser input custom token
 std.parser.tokens : forall input token custom. Eq token => InputOps input token -> String -> [token] -> Parser input custom [token]
 std.parser.tokensExact : forall input token custom. Eq token => InputOps input token -> [token] -> Parser input custom [token]
+std.path.</> : Path -> Path -> Path
 std.path.currentPath : Path
+std.path.extension : Path -> Maybe String
+std.path.fileName : Path -> Maybe String
 std.path.hasNull : [Char] -> Bool
+std.path.isAbsolute : Path -> Bool
+std.path.isRelative : Path -> Bool
+std.path.joinPath : Path -> Path -> Path
+std.path.normalise : Path -> Path
+std.path.parent : Path -> Maybe Path
 std.path.pathFromHost : String -> Path
 std.path.pathFromString : String -> Either PathError Path
 std.path.pathToString : Path -> String

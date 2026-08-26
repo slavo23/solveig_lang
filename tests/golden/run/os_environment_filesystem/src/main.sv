@@ -7,6 +7,8 @@ import std.time(SystemTime, systemTimeNanoseconds)
 
 fsToHost : FsError -> HostError
 fsToHost (FsHostError _ hostError) = hostError
+fsToHost (FsInvalidUtf8 path utf8Error) =
+    HostError InvalidArgument "filesystemUtf8" (show path <> ": " <> show utf8Error)
 
 fixturePath : String -> Path
 fixturePath spelling =

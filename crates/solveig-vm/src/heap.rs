@@ -222,15 +222,39 @@ pub enum EnvironmentAction {
 #[derive(Debug, Clone, Copy)]
 pub enum FilesystemAction {
     GetCurrentDirectory,
-    SetCurrentDirectory { path: Value },
-    DoesFileExist { path: Value },
-    DoesDirectoryExist { path: Value },
-    ListDirectory { path: Value },
-    CreateDirectory { path: Value },
-    RemoveFile { path: Value },
-    RenameFile { source: Value, destination: Value },
-    GetFileSize { path: Value },
-    GetModificationTime { path: Value },
+    SetCurrentDirectory {
+        path: Value,
+    },
+    DoesFileExist {
+        path: Value,
+    },
+    DoesDirectoryExist {
+        path: Value,
+    },
+    ListDirectory {
+        path: Value,
+    },
+    CreateDirectory {
+        path: Value,
+    },
+    RemoveFile {
+        path: Value,
+    },
+    RenameFile {
+        source: Value,
+        destination: Value,
+    },
+    WriteFileAtomic {
+        path: Value,
+        contents: Value,
+        bytes: bool,
+    },
+    GetFileSize {
+        path: Value,
+    },
+    GetModificationTime {
+        path: Value,
+    },
 }
 
 /// Identifies a channel heap object while it is registered with the scheduler.

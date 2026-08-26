@@ -103,5 +103,17 @@ pub(super) fn handle_builtin_specs(
             2,
             arr(&[string.clone(), bytes.clone()], task(Ty::TyUnit)),
         ),
+        prim_spec(
+            "writeFileAtomic",
+            BUILTIN_WRITE_FILE_ATOMIC,
+            2,
+            arr(&[string.clone(), string.clone()], task(Ty::TyUnit)),
+        ),
+        prim_spec(
+            "writeFileBytesAtomic",
+            BUILTIN_WRITE_FILE_BYTES_ATOMIC,
+            2,
+            arr(&[string.clone(), bytes.clone()], task(Ty::TyUnit)),
+        ),
     ]
 }

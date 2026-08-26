@@ -45,6 +45,41 @@ pub(super) fn bytes_to_string_replacing(
     Ok(ctx.alloc_str(&text))
 }
 
+pub(super) fn bytes_utf8_valid_prefix(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let bytes = expect_bytes_owned(ctx, args, 0, "bytesUtf8ValidPrefix")?;
+    let end_of_input = match expect_value(args, 1, "bytesUtf8ValidPrefix")? {
+        value if value == ctx.bool_value(true) => true,
+        value if value == ctx.bool_value(false) => false,
+        _ => {
+            return Err(RuntimeError::builtin(
+                "bytesUtf8ValidPrefix expected Bool argument at position 2".to_string(),
+            ));
+        }
+    };
+    let prefix = match std::str::from_utf8(&bytes) {
+        Ok(_valid) => Ok(bytes.len()),
+        Err(error) if error.error_len().is_none() && !end_of_input => Ok(error.valid_up_to()),
+        Err(error) => Err(error.valid_up_to()),
+    };
+
+    match prefix {
+        Ok(length) => {
+            let length = i64::try_from(length).map_err(|_out_of_range| {
+                RuntimeError::builtin("UTF-8 prefix length exceeds Int".to_string())
+            })?;
+            ctx.alloc_data1_ctor(
+                CtorRuntimeRole::PreludeEitherRight,
+                Value::Int(length),
+                "bytesUtf8ValidPrefix",
+            )
+        }
+        Err(offset) => alloc_invalid_utf8_result(ctx, offset, "bytesUtf8ValidPrefix"),
+    }
+}
+
 pub(super) fn bytes_length(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let id = expect_bytes_id(ctx, args, 0, "bytesLength")?;
     let byte_ref = bytes_ref(ctx, id, "bytesLength")?;

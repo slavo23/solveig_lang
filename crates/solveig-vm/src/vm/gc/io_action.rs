@@ -260,6 +260,10 @@ fn visit_filesystem_mut(action: &mut FilesystemAction, mut visit: impl FnMut(&mu
             visit(source);
             visit(destination);
         }
+        FilesystemAction::WriteFileAtomic { path, contents, .. } => {
+            visit(path);
+            visit(contents);
+        }
     }
 }
 
@@ -280,6 +284,10 @@ fn visit_filesystem(action: FilesystemAction, mut visit: impl FnMut(Value)) {
         } => {
             visit(source);
             visit(destination);
+        }
+        FilesystemAction::WriteFileAtomic { path, contents, .. } => {
+            visit(path);
+            visit(contents);
         }
     }
 }

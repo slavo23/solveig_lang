@@ -35,7 +35,7 @@ pub(super) fn os_builtin_specs(
             "getEnv",
             BUILTIN_GET_ENV,
             1,
-            unary(string.clone(), task(maybe_string)),
+            unary(string.clone(), task(maybe_string.clone())),
         ),
         prim_spec(
             "setEnv",
@@ -114,6 +114,42 @@ pub(super) fn os_builtin_specs(
             BUILTIN_GET_MODIFICATION_TIME,
             1,
             unary(string.clone(), task(int.clone())),
+        ),
+        prim_spec(
+            "pathJoin",
+            BUILTIN_PATH_JOIN,
+            2,
+            arr(&[string.clone(), string.clone()], string.clone()),
+        ),
+        prim_spec(
+            "pathParent",
+            BUILTIN_PATH_PARENT,
+            1,
+            unary(string.clone(), maybe_string.clone()),
+        ),
+        prim_spec(
+            "pathFileName",
+            BUILTIN_PATH_FILE_NAME,
+            1,
+            unary(string.clone(), maybe_string.clone()),
+        ),
+        prim_spec(
+            "pathExtension",
+            BUILTIN_PATH_EXTENSION,
+            1,
+            unary(string.clone(), maybe_string),
+        ),
+        prim_spec(
+            "pathNormalise",
+            BUILTIN_PATH_NORMALISE,
+            1,
+            unary(string.clone(), string.clone()),
+        ),
+        prim_spec(
+            "pathIsAbsolute",
+            BUILTIN_PATH_IS_ABSOLUTE,
+            1,
+            unary(string.clone(), bool_ty.clone()),
         ),
         prim_spec(
             "runProcess",

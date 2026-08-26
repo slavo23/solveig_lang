@@ -1,7 +1,7 @@
 export (
     stringToBytes, bytesToString, bytesLength, bytesIndex, bytesSlice, bytesAppend,
     bytesToStringReplacing, bytesSpanAny, bytesFindAny, bytesFindBelow, bytesSpanRange,
-    bytesSliceToString, BytesBuilder, emptyBytesBuilder, bytesBuilder,
+    bytesSliceToString, bytesUtf8ValidPrefix, BytesBuilder, emptyBytesBuilder, bytesBuilder,
     appendBytesBuilder, buildBytes
 )
 
@@ -75,6 +75,16 @@ bytesSpanRange bytes start lower upper =
 bytesSliceToString : Bytes -> Int -> Int -> Either Utf8Error String
 bytesSliceToString bytes start length =
     prelude.prim.bytesSliceToString bytes start length
+
+-- | Finds the longest prefix that is complete, valid UTF-8.
+-- |
+-- | When more input may follow, a trailing incomplete scalar is excluded from
+-- | the returned byte length. At end of input that same suffix is InvalidUtf8.
+-- | This supports incremental decoders without treating a chunk boundary as a
+-- | malformed character boundary.
+bytesUtf8ValidPrefix : Bytes -> Bool -> Either Utf8Error Int
+bytesUtf8ValidPrefix bytes endOfInput =
+    prelude.prim.bytesUtf8ValidPrefix bytes endOfInput
 
 -- | A compositional plan for constructing one Bytes value without repeated copying.
 -- |

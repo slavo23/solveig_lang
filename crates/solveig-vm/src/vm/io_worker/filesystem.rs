@@ -1,6 +1,7 @@
 //! Blocking filesystem requests and their operation-specific failures.
 
 use super::*;
+use std::ffi::OsString;
 use std::time::UNIX_EPOCH;
 
 pub(crate) enum FilesystemRequest {
@@ -13,6 +14,11 @@ pub(crate) enum FilesystemRequest {
     RenameFile {
         source: PathBuf,
         destination: PathBuf,
+    },
+    WriteFileAtomic {
+        path: PathBuf,
+        contents: Vec<u8>,
+        operation: &'static str,
     },
     GetFileSize(PathBuf),
     GetModificationTime(PathBuf),
@@ -49,6 +55,11 @@ pub(crate) enum FilesystemFailure {
         destination: PathBuf,
         source: io::Error,
     },
+    WriteFileAtomic {
+        path: PathBuf,
+        operation: &'static str,
+        source: io::Error,
+    },
     GetFileSize {
         path: PathBuf,
         source: io::Error,
@@ -79,6 +90,11 @@ pub(super) fn perform(request: FilesystemRequest) -> IoResult {
             source,
             destination,
         } => rename_file(source, destination),
+        FilesystemRequest::WriteFileAtomic {
+            path,
+            contents,
+            operation,
+        } => write_file_atomic(path, &contents, operation),
         FilesystemRequest::GetFileSize(path) => get_file_size(path),
         FilesystemRequest::GetModificationTime(path) => get_modification_time(path),
     }
@@ -159,6 +175,65 @@ fn rename_file(source_path: PathBuf, destination: PathBuf) -> IoResult {
             source,
         }),
     }
+}
+
+fn write_file_atomic(path: PathBuf, contents: &[u8], operation: &'static str) -> IoResult {
+    match replace_file_atomically(&path, contents) {
+        Ok(()) => IoResult::Unit,
+        Err(source) => failed(FilesystemFailure::WriteFileAtomic {
+            path,
+            operation,
+            source,
+        }),
+    }
+}
+
+fn replace_file_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "atomic file destination must have a file name",
+        )
+    })?;
+    let existing_permissions = fs::metadata(path)
+        .ok()
+        .map(|metadata| metadata.permissions());
+
+    for attempt in 0..1024_u16 {
+        let mut temporary_name = OsString::from(".");
+        temporary_name.push(file_name);
+        temporary_name.push(format!(".solveig-atomic-{}-{attempt}", std::process::id()));
+        let temporary_path = parent.join(temporary_name);
+        let mut temporary = match OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&temporary_path)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error),
+        };
+
+        let result = (|| {
+            if let Some(permissions) = existing_permissions.clone() {
+                temporary.set_permissions(permissions)?;
+            }
+            temporary.write_all(contents)?;
+            temporary.sync_all()?;
+            drop(temporary);
+            fs::rename(&temporary_path, path)
+        })();
+        if result.is_err() {
+            let _ignored_cleanup_error = fs::remove_file(&temporary_path);
+        }
+        return result;
+    }
+
+    Err(io::Error::new(
+        io::ErrorKind::AlreadyExists,
+        "could not reserve an atomic-write temporary file after 1024 attempts",
+    ))
 }
 
 fn get_file_size(path: PathBuf) -> IoResult {

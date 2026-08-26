@@ -119,6 +119,28 @@ impl Interpreter<'_> {
                 source: self.resolve_filesystem_path(source, "renameFile")?,
                 destination: self.resolve_filesystem_path(destination, "renameFile")?,
             },
+            FilesystemAction::WriteFileAtomic {
+                path,
+                contents,
+                bytes,
+            } => {
+                let builtin = if bytes {
+                    "writeFileBytesAtomic"
+                } else {
+                    "writeFileAtomic"
+                };
+                let path = self.resolve_filesystem_path(path, builtin)?;
+                let contents = if bytes {
+                    self.expect_bytes_value(contents, builtin)?
+                } else {
+                    self.expect_string_value(contents, builtin)?.into_bytes()
+                };
+                FilesystemRequest::WriteFileAtomic {
+                    path,
+                    contents,
+                    operation: builtin,
+                }
+            }
             FilesystemAction::GetFileSize { path } => {
                 FilesystemRequest::GetFileSize(self.resolve_filesystem_path(path, "getFileSize")?)
             }

@@ -323,8 +323,8 @@ concise equivalent.
 import std.io(*)
 ```
 
-`std.io` owns `IOMode`, `BufferMode`, the standard handles, incremental handle
-operations, `withFile`, and the strict whole-file functions `readFile`,
+`std.io` owns the low-level `String`-path boundary: `IOMode`, `BufferMode`, the
+standard handles, incremental handle operations, `withFile`, and the strict whole-file functions `readFile`,
 `readFileLimited`, `readFileBytes`, `readFileBytesLimited`, `writeFile`,
 `writeFileBytes`, and `appendFile`.
 
@@ -347,19 +347,30 @@ The garbage collector does not close handles. Prefer `withFile`; it uses
 `std.task.bracket` so cleanup runs after success, typed error, defect, or
 interruption.
 
-Filesystem metadata and directory operations are separate:
+Application filesystem work belongs in the `Path`-typed facade:
 
 ```solveig
 import std.fs(*)
 import std.path(*)
 ```
 
-This module provides `getCurrentDirectory`, `setCurrentDirectory`,
+`std.path` provides `joinPath` and `(</>)`, `parent`, `fileName`, `extension`,
+lexical `normalise`, and absolute/relative queries without touching the
+filesystem. `std.fs` provides convenient strict and bounded text/byte reads,
+ordinary and atomic writes, append operations, and scoped byte/text/line
+streams in addition to `getCurrentDirectory`, `setCurrentDirectory`,
 `doesFileExist`, `doesDirectoryExist`, `listDirectory`, `createDirectory`,
 `removeFile`, `renameFile`, `getFileSize`, and `getModificationTime`. Its
-actions return `IO FsError a`, retaining path context and the underlying host
-cause. They accept opaque `Path` values constructed with `pathFromString`;
+actions return `IO FsError a`, retaining path context while keeping invalid
+UTF-8 distinct from the underlying host cause. They accept opaque `Path`
+values constructed with `pathFromString`;
 `getModificationTime` returns `SystemTime`, not a bare integer.
+
+The unrestricted strict readers are the concise choice for trusted files. Use
+the `*Limited` forms for untrusted finite input and scoped streams for data that
+may not fit memory. Atomic writes sync a sibling temporary file and then use a
+single host rename; unsupported replacement fails without exposing a partial
+new destination.
 
 ## Environment and processes
 

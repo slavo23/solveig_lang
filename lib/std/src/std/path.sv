@@ -1,8 +1,12 @@
 export (
-    Path, PathError(..), pathFromString, pathToString, currentPath
+    Path, PathError(..), pathFromString, pathToString, currentPath, joinPath, (</>),
+    parent, fileName, extension, normalise, isAbsolute, isRelative
 )
 
+import prelude.prim(pathExtension, pathFileName, pathIsAbsolute, pathJoin, pathNormalise, pathParent)
 import std.text(charToCodePoint, stringToChars)
+
+infixr 5 </>
 
 -- | A failure while constructing a host path value.
 data PathError = EmptyPath | NullPath
@@ -57,6 +61,50 @@ pathFromHost = Path
 -- | The current-directory path.
 currentPath : Path
 currentPath = Path "."
+
+-- | Joins two paths using the host platform's path rules.
+-- |
+-- | An absolute second path replaces the first path. The operation is lexical:
+-- | it neither accesses the filesystem nor resolves symbolic links.
+joinPath : Path -> Path -> Path
+joinPath (Path base) (Path child) = Path (prelude.prim.pathJoin base child)
+
+-- | Infix form of joinPath, with the same precedence as Haskell's (</>).
+(</>) : Path -> Path -> Path
+(</>) = joinPath
+
+-- | Returns the lexical parent, or Nothing when the path has no non-empty parent.
+parent : Path -> Maybe Path
+parent (Path spelling) = fmap Path (prelude.prim.pathParent spelling)
+
+-- | Returns the final normal path component.
+-- |
+-- | Root paths and paths ending in `.` or `..` have no file name.
+fileName : Path -> Maybe String
+fileName (Path spelling) = prelude.prim.pathFileName spelling
+
+-- | Returns the final component's extension without the leading dot.
+-- |
+-- | A leading dot alone does not introduce an extension, so `.gitignore` has
+-- | no extension. A trailing dot produces Just "".
+extension : Path -> Maybe String
+extension (Path spelling) = prelude.prim.pathExtension spelling
+
+-- | Lexically removes redundant `.` components and collapses `name/..` pairs.
+-- |
+-- | Leading `..` components of relative paths are retained, while attempts to
+-- | walk above a root are ignored. This does not access the filesystem,
+-- | canonicalise case, or resolve symbolic links.
+normalise : Path -> Path
+normalise (Path spelling) = Path (prelude.prim.pathNormalise spelling)
+
+-- | Reports whether the host platform treats a path as absolute.
+isAbsolute : Path -> Bool
+isAbsolute (Path spelling) = prelude.prim.pathIsAbsolute spelling
+
+-- | Reports whether the host platform treats a path as relative.
+isRelative : Path -> Bool
+isRelative = not . isAbsolute
 
 hasNull : [Char] -> Bool
 hasNull [] = False

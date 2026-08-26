@@ -395,6 +395,11 @@ impl Interpreter<'_> {
                         destination.display()
                     ),
                 ),
+                FilesystemFailure::WriteFileAtomic {
+                    path,
+                    operation,
+                    source,
+                } => self.alloc_path_io_error(operation, &path, &source),
                 FilesystemFailure::GetFileSize { path, source } => {
                     self.alloc_path_io_error("getFileSize", &path, &source)
                 }

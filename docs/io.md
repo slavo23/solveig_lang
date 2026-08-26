@@ -198,6 +198,35 @@ fits memory. `readFileLimited path maximum` counts encoded bytes, reads at most
 or `HostError InvalidArgument` when the maximum is invalid. This is a runtime-enforced bound, not a metadata
 pre-check that can race with file growth.
 
+For application code, prefer the `Path`-typed `std.fs` facade. It keeps path
+context on every failure and distinguishes malformed text from an operating
+system failure:
+
+```solveig
+data FsError =
+    FsHostError Path HostError
+  | FsInvalidUtf8 Path Utf8Error
+
+readFile : Path -> IO FsError String
+readFileLimited : Path -> Int -> IO FsError String
+readFileBytes : Path -> IO FsError Bytes
+readFileBytesLimited : Path -> Int -> IO FsError Bytes
+writeFile : Path -> String -> IO FsError ()
+writeFileAtomic : Path -> String -> IO FsError ()
+writeFileBytes : Path -> Bytes -> IO FsError ()
+writeFileBytesAtomic : Path -> Bytes -> IO FsError ()
+appendFile : Path -> String -> IO FsError ()
+appendFileBytes : Path -> Bytes -> IO FsError ()
+```
+
+The unrestricted readers are deliberately convenient for ordinary trusted
+files; callers do not have to invent an arbitrary limit. Use the bounded forms
+at an untrusted-input boundary and scoped streams when input may not fit in
+memory. `writeFileAtomic` and `writeFileBytesAtomic` write and sync a sibling
+temporary file before replacing the destination with one host rename. A host
+that cannot atomically replace an existing destination returns `FsHostError`;
+the old destination remains intact and the temporary file is removed.
+
 ## Byte input and output
 
 ```solveig
@@ -322,6 +351,28 @@ nonces, passwords, or any other cryptographic purpose.
 
 ## Filesystem and logical working directory
 
+`std.path.Path` is opaque rather than a synonym for `String`. Its pure path
+algebra follows the host platform without accessing the filesystem:
+
+```solveig
+pathFromString : String -> Either PathError Path
+pathToString : Path -> String
+joinPath : Path -> Path -> Path
+(</>) : Path -> Path -> Path
+parent : Path -> Maybe Path
+fileName : Path -> Maybe String
+extension : Path -> Maybe String
+normalise : Path -> Path
+isAbsolute : Path -> Bool
+isRelative : Path -> Bool
+```
+
+`normalise` is lexical: it removes redundant `.` components and collapses
+ordinary `name/..` pairs, but it does not resolve symbolic links, canonicalise
+case, or require a path to exist. An absolute right operand of `(</>)` replaces
+the left operand according to the host's path rules. `extension` omits the
+leading dot.
+
 ```solveig
 getCurrentDirectory : IO FsError Path
 setCurrentDirectory : Path -> IO FsError ()
@@ -334,6 +385,34 @@ renameFile : Path -> Path -> IO FsError ()
 getFileSize : Path -> IO FsError Int
 getModificationTime : Path -> IO FsError SystemTime
 ```
+
+Large or incremental files use the same strict pull protocol as other scoped
+resources:
+
+```solveig
+withFileByteStream :
+    Int -> Path ->
+    (forall scope. Stream scope FsError Bytes -> IO FsError result) ->
+    IO FsError result
+
+withFileTextStream :
+    Int -> Path ->
+    (forall scope. Stream scope FsError String -> IO FsError result) ->
+    IO FsError result
+
+withFileLineStream :
+    Int -> Path ->
+    (forall scope. Stream scope FsError String -> IO FsError result) ->
+    IO FsError result
+```
+
+The positive chunk size controls each host read, not a total file limit. Text
+streams retain an incomplete UTF-8 scalar across byte chunks and report an
+absolute byte offset for malformed input. Line streams accept LF and CRLF,
+retain blank lines, and omit terminators. They allocate in proportion to the
+longest individual line. The rank-2 callback prevents a stream from escaping
+the handle that owns it; returning early, failing, raising a defect, or being
+interrupted closes that handle.
 
 Each runtime starts at the canonical project root and owns a logical working
 directory. Relative paths for these operations and all file/handle operations

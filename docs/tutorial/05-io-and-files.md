@@ -183,6 +183,22 @@ Re-raising `other` prevents unrelated failures from being hidden.
 - `removeFile` and `renameFile`;
 - `getFileSize` and `getModificationTime`.
 
+It also owns the high-level file operations. These accept `Path`, retain path
+context in `FsError`, and report invalid UTF-8 separately from host failures:
+
+```solveig
+readConfig : Path -> IO FsError String
+readConfig = std.fs.readFile
+
+saveConfig : Path -> String -> IO FsError ()
+saveConfig = std.fs.writeFileAtomic
+```
+
+Use `readFile` for an ordinary trusted file, `readFileLimited` at an untrusted
+finite-input boundary, and `withFileByteStream`, `withFileTextStream`, or
+`withFileLineStream` when the input may not fit memory. A stream's chunk size
+bounds each read; it is not a total download or file limit.
+
 They return `IO FsError a`, retaining filesystem path context around the host
 cause. Filesystem operations accept an opaque `Path`; validate external text
 with `pathFromString` and convert back only with `pathToString`.

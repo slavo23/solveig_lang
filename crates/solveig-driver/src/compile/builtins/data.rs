@@ -20,8 +20,15 @@ pub(super) fn data_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec>
     let bytes_list = Ty::make_app(list, bytes.clone());
     let utf8_error = Ty::make_con_id(prelude_utf8_error_tycon_id(names));
     let either_utf8_string = Ty::make_app(
-        Ty::make_app(Ty::make_con_id(prelude_either_tycon_id(names)), utf8_error),
+        Ty::make_app(
+            Ty::make_con_id(prelude_either_tycon_id(names)),
+            utf8_error.clone(),
+        ),
         string.clone(),
+    );
+    let either_utf8_int = Ty::make_app(
+        Ty::make_app(Ty::make_con_id(prelude_either_tycon_id(names)), utf8_error),
+        int.clone(),
     );
 
     vec![
@@ -134,7 +141,7 @@ pub(super) fn data_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec>
             "charEq",
             BUILTIN_CHAR_EQ,
             2,
-            binary(char_ty.clone(), bool_ty),
+            binary(char_ty.clone(), bool_ty.clone()),
         ),
         prim_spec(
             "charCompare",
@@ -183,6 +190,12 @@ pub(super) fn data_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec>
             BUILTIN_BYTES_TO_STRING_REPLACING,
             1,
             unary(bytes.clone(), string),
+        ),
+        prim_spec(
+            "bytesUtf8ValidPrefix",
+            BUILTIN_BYTES_UTF8_VALID_PREFIX,
+            2,
+            arr(&[bytes.clone(), bool_ty], either_utf8_int),
         ),
         prim_spec(
             "bytesLength",
