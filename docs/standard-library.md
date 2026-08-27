@@ -392,18 +392,21 @@ evaluation. Invalid errors retain a line number and reason, never the source
 line that may contain a secret.
 
 `std.process` owns validated opaque `Process` and `ExitCode` values,
-`ProcessResult`, its three accessors,
-`runProcess`, `runProcessLimited`, and
+binary-safe `ProcessResult`, its byte and explicit UTF-8 accessors,
+request transformations for cwd (including restoring inherited cwd),
+environment, stdin, and capture/discard,
+`runProcess`, `runProcessLimited`, `runProcessTimeout`, and
 `exitWith`/`exitSuccess`/`exitFailure`.
 
 `process program arguments` validates a request, which `runProcess` executes
 without invoking a shell. A non-zero child status is `ProcessResult` data,
 available through an opaque `ExitCode`. Failure to start or
-capture the child is `ProcessError`. The unrestricted form allocates both
-complete output streams. `runProcessLimited processValue maximumPerStream`
+capture the child is `ProcessError`. The unrestricted form allocates each
+selected complete output stream as `Bytes`; decoding returns `Either
+Utf8Error String`. `runProcessLimited processValue maximumPerStream`
 bounds each stream in bytes; overflow terminates and reaps
-the child and raises `ProcessError`. Interrupting the calling thread also
-terminates and reaps its direct child.
+the child and raises `ProcessError`. Discarded streams are drained without
+retention. Timeout and interruption both terminate and reap the direct child.
 
 ## Channels, threads, and structured tasks
 

@@ -1,7 +1,7 @@
 //! Cancellable strict child-process capture on the bounded blocking worker pool.
 
 use super::*;
-use std::process::{Child, Command, ExitStatus, Stdio};
+use std::process::{Child, Command, ExitStatus as ChildExitStatus, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender};
 
 const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(1);
@@ -13,13 +13,16 @@ pub(crate) struct ProcessRequest {
     pub arguments: Vec<String>,
     pub cwd: PathBuf,
     pub environment: Vec<(String, String)>,
+    pub stdin: Vec<u8>,
+    pub capture_stdout: bool,
+    pub capture_stderr: bool,
     pub maximum: Option<i64>,
 }
 
 pub(crate) struct ProcessOutput {
     pub exit_code: i64,
-    pub stdout: String,
-    pub stderr: String,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
 }
 
 pub(crate) struct ProcessFailure {
@@ -29,7 +32,7 @@ pub(crate) struct ProcessFailure {
 
 pub(super) enum ProcessSignal {
     Cancel,
-    CaptureFailed,
+    PipeFailed,
 }
 
 pub(super) fn perform(
@@ -54,6 +57,9 @@ fn capture(
         arguments,
         cwd,
         environment,
+        stdin,
+        capture_stdout,
+        capture_stderr,
         maximum,
         ..
     } = request;
@@ -66,18 +72,23 @@ fn capture(
                 "child process was cancelled before it started",
             ));
         }
-        Ok(ProcessSignal::CaptureFailed) => {
-            solveig_base::ice!("process capture failed before its pipe readers started")
+        Ok(ProcessSignal::PipeFailed) => {
+            solveig_base::ice!("process pipe failed before its worker threads started")
         }
         Err(mpsc::TryRecvError::Empty) => {}
     }
 
+    let child_stdin = if stdin.is_empty() {
+        Stdio::null()
+    } else {
+        Stdio::piped()
+    };
     let mut child = Command::new(executable)
         .args(arguments)
         .current_dir(cwd)
         .env_clear()
         .envs(environment)
-        .stdin(Stdio::null())
+        .stdin(child_stdin)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?;
@@ -99,12 +110,35 @@ fn capture(
     // the scheduler's cancellation signal and retains the `Child` to reap it.
     thread::scope(|scope| {
         let stdout_signals = signal_tx.clone();
-        let stdout_reader =
-            scope.spawn(move || read_capture(stdout, maximum, "standard output", &stdout_signals));
-        let stderr_reader =
-            scope.spawn(move || read_capture(stderr, maximum, "standard error", &signal_tx));
+        let stdin_signals = signal_tx.clone();
+        let stdout_reader = scope.spawn(move || {
+            read_capture(
+                stdout,
+                maximum,
+                capture_stdout,
+                "standard output",
+                &stdout_signals,
+            )
+        });
+        let stderr_reader = scope.spawn(move || {
+            read_capture(
+                stderr,
+                maximum,
+                capture_stderr,
+                "standard error",
+                &signal_tx,
+            )
+        });
+        let stdin_writer = child.stdin.take().map(|mut child_stdin| {
+            scope.spawn(move || write_input(&mut child_stdin, &stdin, &stdin_signals))
+        });
 
         let status = wait_for_child(&mut child, signals);
+        if let Some(writer) = stdin_writer {
+            writer
+                .join()
+                .map_err(|_panic| io::Error::other("child standard-input writer panicked"))??;
+        }
         let stdout = stdout_reader
             .join()
             .map_err(|_panic| io::Error::other("child standard-output reader panicked"))?;
@@ -120,8 +154,24 @@ fn capture(
                 "child process was cancelled",
             ));
         };
-        decode_output(status, stdout, stderr)
+        Ok(ProcessOutput {
+            exit_code: status.code().map_or(-1, i64::from),
+            stdout,
+            stderr,
+        })
     })
+}
+
+fn write_input(
+    stream: &mut impl Write,
+    input: &[u8],
+    signals: &Sender<ProcessSignal>,
+) -> io::Result<()> {
+    let result = stream.write_all(input).and_then(|()| stream.flush());
+    if result.is_err() {
+        drop(signals.send(ProcessSignal::PipeFailed));
+    }
+    result
 }
 
 fn capture_limit(maximum: Option<i64>) -> io::Result<Option<usize>> {
@@ -145,12 +195,17 @@ fn capture_limit(maximum: Option<i64>) -> io::Result<Option<usize>> {
 fn read_capture(
     mut stream: impl Read,
     maximum: Option<usize>,
+    retain: bool,
     stream_name: &'static str,
     signals: &Sender<ProcessSignal>,
 ) -> io::Result<Vec<u8>> {
-    let result = read_capture_inner(&mut stream, maximum, stream_name);
+    let result = if retain {
+        read_capture_inner(&mut stream, maximum, stream_name)
+    } else {
+        io::copy(&mut stream, &mut io::sink()).map(|_copied| Vec::new())
+    };
     if result.is_err() {
-        drop(signals.send(ProcessSignal::CaptureFailed));
+        drop(signals.send(ProcessSignal::PipeFailed));
     }
     result
 }
@@ -193,13 +248,13 @@ fn read_capture_inner(
 fn wait_for_child(
     child: &mut Child,
     signals: &Receiver<ProcessSignal>,
-) -> io::Result<Option<ExitStatus>> {
+) -> io::Result<Option<ChildExitStatus>> {
     loop {
         if let Some(status) = child.try_wait()? {
             return Ok(Some(status));
         }
         match signals.recv_timeout(PROCESS_POLL_INTERVAL) {
-            Ok(ProcessSignal::Cancel | ProcessSignal::CaptureFailed)
+            Ok(ProcessSignal::Cancel | ProcessSignal::PipeFailed)
             | Err(RecvTimeoutError::Disconnected) => {
                 terminate_and_reap(child)?;
                 return Ok(None);
@@ -220,28 +275,4 @@ fn terminate_and_reap(child: &mut Child) -> io::Result<()> {
             "failed to terminate child ({kill_error}) and then failed to reap it ({wait_error})"
         ))),
     }
-}
-
-fn decode_output(
-    status: ExitStatus,
-    stdout: Vec<u8>,
-    stderr: Vec<u8>,
-) -> io::Result<ProcessOutput> {
-    let stdout = String::from_utf8(stdout).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("child standard output is not valid UTF-8: {error}"),
-        )
-    })?;
-    let stderr = String::from_utf8(stderr).map_err(|error| {
-        io::Error::new(
-            io::ErrorKind::InvalidData,
-            format!("child standard error is not valid UTF-8: {error}"),
-        )
-    })?;
-    Ok(ProcessOutput {
-        exit_code: status.code().map_or(-1, i64::from),
-        stdout,
-        stderr,
-    })
 }

@@ -3,13 +3,18 @@ source: tests/snapshot_support.rs
 expression: actual
 ---
 exit=0
-inherited
+overridden
+missing
+cwd-ok
+from-stdin
+
 alpha
 two words
 child-stderr
 limited-capture
 process-output-limit
-negative-process-limit
+discarded-stderr
+process-timeout
 failure-exit=2
 failure-stderr
 run-process-error

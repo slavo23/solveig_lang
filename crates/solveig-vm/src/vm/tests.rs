@@ -830,6 +830,9 @@ fn interruption_terminates_and_reaps_an_active_child_process() {
                     cwd: std::env::current_dir()
                         .expect("process-test working directory should be available"),
                     environment,
+                    stdin: Vec::new(),
+                    capture_stdout: true,
+                    capture_stderr: true,
                     maximum: None,
                 }),
             )

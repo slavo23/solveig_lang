@@ -555,3 +555,5 @@ pub const BUILTIN_PATH_IS_ABSOLUTE: BuiltinId = BuiltinId(140);
 pub const BUILTIN_BYTES_UTF8_VALID_PREFIX: BuiltinId = BuiltinId(141);
 pub const BUILTIN_WRITE_FILE_ATOMIC: BuiltinId = BuiltinId(142);
 pub const BUILTIN_WRITE_FILE_BYTES_ATOMIC: BuiltinId = BuiltinId(143);
+pub const BUILTIN_RUN_PROCESS_CONFIGURED: BuiltinId = BuiltinId(144);
+pub const BUILTIN_BYTES_EQ: BuiltinId = BuiltinId(145);

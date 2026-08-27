@@ -195,13 +195,19 @@ pub(super) fn data_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec>
             "bytesUtf8ValidPrefix",
             BUILTIN_BYTES_UTF8_VALID_PREFIX,
             2,
-            arr(&[bytes.clone(), bool_ty], either_utf8_int),
+            arr(&[bytes.clone(), bool_ty.clone()], either_utf8_int),
         ),
         prim_spec(
             "bytesLength",
             BUILTIN_BYTES_LENGTH,
             1,
             unary(bytes.clone(), int.clone()),
+        ),
+        prim_spec(
+            "bytesEq",
+            BUILTIN_BYTES_EQ,
+            2,
+            binary(bytes.clone(), bool_ty),
         ),
         prim_spec(
             "bytesIndex",

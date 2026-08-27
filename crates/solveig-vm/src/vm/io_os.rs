@@ -155,36 +155,192 @@ impl Interpreter<'_> {
 
     pub(super) fn prepare_process_request(
         &mut self,
-        program: Value,
-        arguments: Value,
-        maximum: Option<i64>,
+        request: Value,
     ) -> Result<ProcessRequest, RuntimeError> {
-        let builtin = if maximum.is_some() {
-            "runProcessLimited"
-        } else {
-            "runProcess"
-        };
+        let builtin = "runProcessConfigured";
+        let [program, arguments, config] = self.expect_tuple::<3>(request, builtin)?;
         let program = self.expect_string_value(program, builtin)?;
         let arguments = self.expect_string_list_value(arguments, builtin)?;
+        let [
+            cwd,
+            inherit_environment,
+            environment,
+            removed_environment,
+            stdin,
+            capture_stdout,
+            capture_stderr,
+            maximum,
+        ] = self.expect_tuple::<8>(config, builtin)?;
+        let cwd = self.expect_string_value(cwd, builtin)?;
+        let cwd = if cwd.is_empty() {
+            self.io.current_directory().to_path_buf()
+        } else {
+            self.io.resolve_path(&cwd)
+        };
+        let maximum = self.expect_optional_nonnegative_int(maximum, builtin)?;
         let program_path = std::path::Path::new(&program);
         let executable = if program_path.is_absolute() || program_path.components().count() == 1 {
             program_path.to_path_buf()
         } else {
-            self.io.resolve_path(&program)
+            cwd.join(program_path)
         };
+        let inherit_environment = self.expect_bool_value(inherit_environment, builtin)?;
+        let mut host_environment = if inherit_environment {
+            self.io.environment().clone()
+        } else {
+            std::collections::BTreeMap::new()
+        };
+        for name in self.expect_string_list_value(removed_environment, builtin)? {
+            host_environment.remove(&name);
+        }
+        for (name, value) in self.expect_string_pair_list_value(environment, builtin)? {
+            host_environment.insert(name, value);
+        }
         Ok(ProcessRequest {
             program,
             executable,
             arguments,
-            cwd: self.io.current_directory().to_path_buf(),
-            environment: self
-                .io
-                .environment()
-                .iter()
-                .map(|(name, value)| (name.clone(), value.clone()))
-                .collect(),
+            cwd,
+            environment: host_environment.into_iter().collect(),
+            stdin: self.expect_bytes_value(stdin, builtin)?,
+            capture_stdout: self.expect_bool_value(capture_stdout, builtin)?,
+            capture_stderr: self.expect_bool_value(capture_stderr, builtin)?,
             maximum,
         })
+    }
+
+    fn expect_tuple<const N: usize>(
+        &mut self,
+        value: Value,
+        builtin: &str,
+    ) -> Result<[Value; N], RuntimeError> {
+        let role_arity = u8::try_from(N)
+            .map_err(|_arity| RuntimeError::builtin(format!("{builtin} tuple arity is invalid")))?;
+        let ctor_arity = u16::try_from(N)
+            .map_err(|_arity| RuntimeError::builtin(format!("{builtin} tuple arity is invalid")))?;
+        let tag = VmCtx::new(self).ctor_tag_with_arity(
+            CtorRuntimeRole::PreludeTuple(role_arity),
+            ctor_arity,
+            builtin,
+        )?;
+        let Value::Obj(id) = value else {
+            return Err(RuntimeError::builtin(format!(
+                "{builtin} expected a {N}-tuple"
+            )));
+        };
+        let values = match self.heap.get(id) {
+            HeapObject::DataN {
+                tag: actual_tag,
+                fields,
+            } if *actual_tag == tag => self.heap.payload_slice(id, *fields).to_vec(),
+            _ => Vec::new(),
+        };
+        values
+            .try_into()
+            .map_err(|_values| RuntimeError::builtin(format!("{builtin} expected a {N}-tuple")))
+    }
+
+    fn expect_bool_value(&self, value: Value, builtin: &str) -> Result<bool, RuntimeError> {
+        if value == self.bool_value(true) {
+            Ok(true)
+        } else if value == self.bool_value(false) {
+            Ok(false)
+        } else {
+            Err(RuntimeError::builtin(format!(
+                "{builtin} expected a Bool configuration value"
+            )))
+        }
+    }
+
+    fn expect_optional_nonnegative_int(
+        &mut self,
+        value: Value,
+        builtin: &str,
+    ) -> Result<Option<i64>, RuntimeError> {
+        let nothing_tag = VmCtx::new(self).ctor_tag_with_arity(
+            CtorRuntimeRole::PreludeMaybeNothing,
+            0,
+            builtin,
+        )?;
+        let just_tag =
+            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludeMaybeJust, 1, builtin)?;
+        let Value::Obj(id) = value else {
+            return Err(RuntimeError::builtin(format!(
+                "{builtin} expected Maybe Int for the output limit"
+            )));
+        };
+        match self.heap.get(id) {
+            HeapObject::Data0 { tag } if *tag == nothing_tag => Ok(None),
+            HeapObject::Data1 {
+                tag,
+                field: Value::Int(maximum),
+            } if *tag == just_tag && *maximum >= 0 => Ok(Some(*maximum)),
+            _ => Err(RuntimeError::builtin(format!(
+                "{builtin} expected Nothing or a non-negative Just Int output limit"
+            ))),
+        }
+    }
+
+    fn expect_string_pair_list_value(
+        &mut self,
+        mut current: Value,
+        builtin: &str,
+    ) -> Result<Vec<(String, String)>, RuntimeError> {
+        let nil_tag =
+            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludeListNil, 0, builtin)?;
+        let cons_tag =
+            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludeListCons, 2, builtin)?;
+        let pair_tag =
+            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludeTuple(2), 2, builtin)?;
+        let mut pairs = Vec::new();
+
+        loop {
+            let Value::Obj(id) = current else {
+                return Err(RuntimeError::builtin(format!(
+                    "{builtin} expected [(String, String)]"
+                )));
+            };
+            match self.heap.get(id) {
+                HeapObject::Data0 { tag } if *tag == nil_tag => return Ok(pairs),
+                HeapObject::Data2 {
+                    tag,
+                    field0,
+                    field1,
+                } if *tag == cons_tag => {
+                    let pair = *field0;
+                    current = *field1;
+                    let Value::Obj(pair_id) = pair else {
+                        return Err(RuntimeError::builtin(format!(
+                            "{builtin} expected environment pairs"
+                        )));
+                    };
+                    let HeapObject::Data2 {
+                        tag,
+                        field0,
+                        field1,
+                    } = self.heap.get(pair_id)
+                    else {
+                        return Err(RuntimeError::builtin(format!(
+                            "{builtin} expected environment pairs"
+                        )));
+                    };
+                    if *tag != pair_tag {
+                        return Err(RuntimeError::builtin(format!(
+                            "{builtin} expected environment pairs"
+                        )));
+                    }
+                    pairs.push((
+                        self.expect_string_value(*field0, builtin)?,
+                        self.expect_string_value(*field1, builtin)?,
+                    ));
+                }
+                _ => {
+                    return Err(RuntimeError::builtin(format!(
+                        "{builtin} expected [(String, String)]"
+                    )));
+                }
+            }
+        }
     }
 
     fn expect_string_list_value(

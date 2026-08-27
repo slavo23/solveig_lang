@@ -88,6 +88,17 @@ pub(super) fn bytes_length(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Va
     Ok(Value::Int(length))
 }
 
+pub(super) fn bytes_eq(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let left_id = expect_bytes_id(ctx, args, 0, "bytesEq")?;
+    let right_id = expect_bytes_id(ctx, args, 1, "bytesEq")?;
+    let left = bytes_ref(ctx, left_id, "bytesEq")?;
+    let right = bytes_ref(ctx, right_id, "bytesEq")?;
+    Ok(ctx.bool_value(
+        ctx.interpreter.heap.bytes_value(left_id, left)
+            == ctx.interpreter.heap.bytes_value(right_id, right),
+    ))
+}
+
 pub(super) fn bytes_index(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let id = expect_bytes_id(ctx, args, 0, "bytesIndex")?;
     let index = expect_int(args, 1, "bytesIndex")?;

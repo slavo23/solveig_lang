@@ -195,13 +195,8 @@ impl Interpreter<'_> {
                         return self.block_on_io(IoRequest::Filesystem(request));
                     }
                 },
-                IoAction::RunProcess {
-                    program: child_program,
-                    arguments,
-                    maximum,
-                } => {
-                    let request =
-                        self.prepare_process_request(child_program, arguments, maximum)?;
+                IoAction::RunProcess { request } => {
+                    let request = self.prepare_process_request(request)?;
                     if let Some(interruption) = self.accept_pending_interruption_at_block() {
                         self.resume_io_interruption(program, interruption)?;
                         continue;

@@ -202,9 +202,7 @@ pub enum IoAction {
     Environment(EnvironmentAction),
     Filesystem(FilesystemAction),
     RunProcess {
-        program: Value,
-        arguments: Value,
-        maximum: Option<i64>,
+        request: Value,
     },
     Exit {
         status: i64,

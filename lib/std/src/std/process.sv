@@ -1,26 +1,127 @@
 export (
-    Process, ProcessError(..), process, withArgument, withArguments, processProgram,
-    processArguments, ProcessResult, processExitCode, processStdout, processStderr,
-    ExitCode, exitCodeFromInt, exitCodeToInt, isExitSuccess, runProcess,
-    runProcessLimited, exitWith, exitSuccess, exitFailure
+    Process, ProcessError(..), ProcessOutputPolicy(..), process, withArgument,
+    withArguments, withWorkingDirectory, inheritProcessWorkingDirectory,
+    inheritProcessEnvironment,
+    clearProcessEnvironment, withEnvironment, withoutEnvironment,
+    withStandardInput, withStandardInputText, withoutStandardInput,
+    captureStandardOutput, discardStandardOutput, captureStandardError,
+    discardStandardError, processProgram, processArguments,
+    processWorkingDirectory, ProcessResult, processExitCode,
+    processStdoutBytes, processStderrBytes, processStdoutText,
+    processStderrText, ExitCode, exitCodeFromInt, exitCodeToInt,
+    isExitSuccess, runProcess, runProcessLimited, runProcessTimeout,
+    exitWith, exitSuccess, exitFailure
 )
 
-import prelude.prim(*)
+import prelude.prim(exitWith, runProcessConfigured)
+import std.bytes(bytesLength, bytesToString, stringToBytes)
+import std.path(Path, pathToString)
+import std.task(timeout)
 import std.text(charToCodePoint, stringToChars)
+import std.time(Duration)
 
--- | A validated child-process request.
+-- | Selects whether one child output stream is retained in the result.
+data ProcessOutputPolicy = CaptureOutput | DiscardOutput
+
+instance Eq ProcessOutputPolicy where
+    (==) CaptureOutput CaptureOutput = True
+    (==) DiscardOutput DiscardOutput = True
+    (==) _ _ = False
+
+instance Show ProcessOutputPolicy where
+    show CaptureOutput = "CaptureOutput"
+    show DiscardOutput = "DiscardOutput"
+
+data ProcessCommand = ProcessCommand String [String]
+
+instance Eq ProcessCommand where
+    (==)
+        (ProcessCommand leftProgram leftArguments)
+        (ProcessCommand rightProgram rightArguments) =
+            and (leftProgram == rightProgram) (leftArguments == rightArguments)
+
+data ProcessWorkingDirectory =
+    InheritWorkingDirectory
+  | WorkingDirectory Path
+
+instance Eq ProcessWorkingDirectory where
+    (==) InheritWorkingDirectory InheritWorkingDirectory = True
+    (==) (WorkingDirectory left) (WorkingDirectory right) = left == right
+    (==) _ _ = False
+
+data ProcessEnvironmentBase =
+    InheritEnvironment
+  | EmptyEnvironment
+
+instance Eq ProcessEnvironmentBase where
+    (==) InheritEnvironment InheritEnvironment = True
+    (==) EmptyEnvironment EmptyEnvironment = True
+    (==) _ _ = False
+
+data ProcessEnvironment =
+    ProcessEnvironment ProcessEnvironmentBase [(String, String)] [String]
+
+instance Eq ProcessEnvironment where
+    (==)
+        (ProcessEnvironment leftBase leftSets leftRemovals)
+        (ProcessEnvironment rightBase rightSets rightRemovals) =
+            and
+                (leftBase == rightBase)
+                (and (leftSets == rightSets) (leftRemovals == rightRemovals))
+
+data ProcessInput = ProcessInput Bytes
+
+instance Eq ProcessInput where
+    (==) (ProcessInput left) (ProcessInput right) = left == right
+
+data ProcessOutputs =
+    ProcessOutputs ProcessOutputPolicy ProcessOutputPolicy
+
+instance Eq ProcessOutputs where
+    (==)
+        (ProcessOutputs leftStandardOutput leftStandardError)
+        (ProcessOutputs rightStandardOutput rightStandardError) =
+            and
+                (leftStandardOutput == rightStandardOutput)
+                (leftStandardError == rightStandardError)
+
+data ProcessConfig =
+    ProcessConfig
+        ProcessWorkingDirectory
+        ProcessEnvironment
+        ProcessInput
+        ProcessOutputs
+
+instance Eq ProcessConfig where
+    (==)
+        (ProcessConfig leftCwd leftEnvironment leftInput leftOutputs)
+        (ProcessConfig rightCwd rightEnvironment rightInput rightOutputs) =
+            and
+                (leftCwd == rightCwd)
+                (and
+                    (leftEnvironment == rightEnvironment)
+                    (and (leftInput == rightInput) (leftOutputs == rightOutputs)))
+
+-- | A validated strict child-process request.
 -- |
--- | The program is passed directly to the host process API; no shell is used.
-data Process = Process String [String]
+-- | The program and arguments are passed directly to the host process API;
+-- | no shell parses or expands them. The default request inherits Solveig's
+-- | logical environment and working directory, has closed standard input, and
+-- | captures both output streams as arbitrary bytes.
+data Process = Process ProcessCommand ProcessConfig
 
 instance Eq Process where
-    (==) (Process leftProgram leftArguments) (Process rightProgram rightArguments) =
-        and (leftProgram == rightProgram) (leftArguments == rightArguments)
+    (==)
+        (Process leftCommand leftConfig)
+        (Process rightCommand rightConfig) =
+            and (leftCommand == rightCommand) (leftConfig == rightConfig)
 
 instance Show Process where
-    show (Process programName []) = "process " <> show programName
-    show (Process programName arguments) =
-        "process " <> show programName <> " " <> show arguments
+    show processValue =
+        "process "
+            <> show (processProgram processValue)
+            <> " "
+            <> show (processArguments processValue)
 
 -- | A child-process validation or host failure.
 data ProcessError =
@@ -45,27 +146,134 @@ process programName arguments =
     else if containsNull programName then Left (InvalidProcess "the program contains a null character")
     else if argumentsContainNull arguments then
         Left (InvalidProcess "an argument contains a null character")
-    else Right (Process programName arguments)
+    else
+        Right
+            (Process
+                (ProcessCommand programName arguments)
+                (ProcessConfig
+                    InheritWorkingDirectory
+                    (ProcessEnvironment InheritEnvironment [] [])
+                    (ProcessInput (stringToBytes ""))
+                    (ProcessOutputs CaptureOutput CaptureOutput)))
 
--- | Appends one argument to a process request.
+-- | Appends one argument in invocation order.
 withArgument : String -> Process -> Either ProcessError Process
-withArgument argument (Process programName arguments) =
-    process programName (append arguments [argument])
+withArgument argument processValue = withArguments [argument] processValue
 
--- | Appends arguments to a process request in their given order.
+-- | Appends arguments in invocation order.
 withArguments : [String] -> Process -> Either ProcessError Process
-withArguments extra (Process programName arguments) =
-    process programName (append arguments extra)
+withArguments extra (Process (ProcessCommand programName arguments) config) =
+    if argumentsContainNull extra then Left (InvalidProcess "an argument contains a null character")
+    else Right (Process (ProcessCommand programName (append arguments extra)) config)
 
--- | Returns the requested program spelling.
+-- | Runs the process relative to a specific working directory.
+withWorkingDirectory : Path -> Process -> Process
+withWorkingDirectory cwd (Process command (ProcessConfig _ environment input outputs)) =
+    Process command (ProcessConfig (WorkingDirectory cwd) environment input outputs)
+
+-- | Restores use of the runtime's logical working directory.
+inheritProcessWorkingDirectory : Process -> Process
+inheritProcessWorkingDirectory (Process command (ProcessConfig _ environment input outputs)) =
+    Process command (ProcessConfig InheritWorkingDirectory environment input outputs)
+
+-- | Uses the runtime's logical environment as the base for explicit changes.
+inheritProcessEnvironment : Process -> Process
+inheritProcessEnvironment (Process command (ProcessConfig cwd (ProcessEnvironment _ sets removals) input outputs)) =
+    Process command (ProcessConfig cwd (ProcessEnvironment InheritEnvironment sets removals) input outputs)
+
+-- | Starts from an empty environment and removes all previous changes.
+clearProcessEnvironment : Process -> Process
+clearProcessEnvironment (Process command (ProcessConfig cwd _ input outputs)) =
+    Process command (ProcessConfig cwd (ProcessEnvironment EmptyEnvironment [] []) input outputs)
+
+-- | Sets one environment variable for the child.
+withEnvironment : String -> String -> Process -> Either ProcessError Process
+withEnvironment name value (Process command (ProcessConfig cwd (ProcessEnvironment base sets removals) input outputs)) =
+    case validateEnvironment name value of
+        Left error => Left error
+        | Right _ =>
+            Right
+                (Process command
+                    (ProcessConfig cwd
+                        (ProcessEnvironment
+                            base
+                            (append (withoutEnvironmentEntry name sets) [(name, value)])
+                            (filter (fun removedName => removedName /= name) removals))
+                        input outputs))
+
+-- | Removes one inherited or explicitly set variable from the child.
+withoutEnvironment : String -> Process -> Either ProcessError Process
+withoutEnvironment name (Process command (ProcessConfig cwd (ProcessEnvironment base sets removals) input outputs)) =
+    if invalidEnvironmentName name then Left (InvalidProcess "an environment name is empty or contains '=' or a null character")
+    else
+        Right
+            (Process command
+                (ProcessConfig cwd
+                    (ProcessEnvironment
+                        base
+                        (withoutEnvironmentEntry name sets)
+                        (append (filter (fun removedName => removedName /= name) removals) [name]))
+                    input outputs))
+
+-- | Supplies arbitrary bytes to standard input and closes it after writing.
+withStandardInput : Bytes -> Process -> Process
+withStandardInput input (Process command (ProcessConfig cwd environment _ outputs)) =
+    Process command (ProcessConfig cwd environment (ProcessInput input) outputs)
+
+-- | Supplies UTF-8 text to standard input and closes it after writing.
+withStandardInputText : String -> Process -> Process
+withStandardInputText input = withStandardInput (stringToBytes input)
+
+-- | Supplies an immediate end-of-file on standard input.
+withoutStandardInput : Process -> Process
+withoutStandardInput = withStandardInput (stringToBytes "")
+
+-- | Retains standard output in the completed result.
+captureStandardOutput : Process -> Process
+captureStandardOutput (Process command (ProcessConfig cwd environment input (ProcessOutputs _ stderrPolicy))) =
+    Process command (ProcessConfig cwd environment input (ProcessOutputs CaptureOutput stderrPolicy))
+
+-- | Drains standard output without retaining it in memory.
+discardStandardOutput : Process -> Process
+discardStandardOutput (Process command (ProcessConfig cwd environment input (ProcessOutputs _ stderrPolicy))) =
+    Process command (ProcessConfig cwd environment input (ProcessOutputs DiscardOutput stderrPolicy))
+
+-- | Retains standard error in the completed result.
+captureStandardError : Process -> Process
+captureStandardError (Process command (ProcessConfig cwd environment input (ProcessOutputs stdoutPolicy _))) =
+    Process command (ProcessConfig cwd environment input (ProcessOutputs stdoutPolicy CaptureOutput))
+
+-- | Drains standard error without retaining it in memory.
+discardStandardError : Process -> Process
+discardStandardError (Process command (ProcessConfig cwd environment input (ProcessOutputs stdoutPolicy _))) =
+    Process command (ProcessConfig cwd environment input (ProcessOutputs stdoutPolicy DiscardOutput))
+
 processProgram : Process -> String
-processProgram (Process programName _) = programName
+processProgram (Process (ProcessCommand programName _) _) = programName
 
--- | Returns the process arguments in invocation order.
 processArguments : Process -> [String]
-processArguments (Process _ arguments) = arguments
+processArguments (Process (ProcessCommand _ arguments) _) = arguments
 
--- | A completed process's opaque exit status.
+processWorkingDirectory : Process -> Maybe Path
+processWorkingDirectory (Process _ (ProcessConfig cwd _ _ _)) = workingDirectoryPath cwd
+
+-- | Binary-safe captured output and status from a completed child process.
+data ProcessResult = MkProcessResult Int Bytes Bytes
+
+instance Eq ProcessResult where
+    (==) (MkProcessResult lc lo le) (MkProcessResult rc ro re) =
+        and (lc == rc) (and (lo == ro) (le == re))
+
+instance Show ProcessResult where
+    show result =
+        "ProcessResult "
+            <> show (processExitCode result)
+            <> " { stdoutBytes = "
+            <> show (bytesLength (processStdoutBytes result))
+            <> ", stderrBytes = "
+            <> show (bytesLength (processStderrBytes result))
+            <> " }"
+
 data ExitCode = ExitCode Int
 
 instance Eq ExitCode where
@@ -84,90 +292,127 @@ instance Show ExitCode where
 instance Hashable ExitCode where
     hashWithSalt salt (ExitCode value) = hashWithSalt salt value
 
--- | Converts an integer status to an exit code. Zero denotes success.
 exitCodeFromInt : Int -> ExitCode
 exitCodeFromInt = ExitCode
 
--- | Returns the integer status represented by an exit code.
 exitCodeToInt : ExitCode -> Int
 exitCodeToInt (ExitCode value) = value
 
--- | Reports whether an exit code denotes successful completion.
 isExitSuccess : ExitCode -> Bool
 isExitSuccess (ExitCode value) = value == 0
 
--- | Captured output and status from a completed child process.
-data ProcessResult = MkProcessResult Int String String
-
-instance Eq ProcessResult where
-    (==)
-        (MkProcessResult leftCode leftOutput leftError)
-        (MkProcessResult rightCode rightOutput rightError) =
-            and
-                (leftCode == rightCode)
-                (and (leftOutput == rightOutput) (leftError == rightError))
-
-instance Show ProcessResult where
-    show result =
-        "ProcessResult "
-            <> show (processExitCode result)
-            <> " "
-            <> show (processStdout result)
-            <> " "
-            <> show (processStderr result)
-
--- | Returns a child process's exit code.
 processExitCode : ProcessResult -> ExitCode
-processExitCode (MkProcessResult exitCode output errorOutput) = ExitCode exitCode
+processExitCode (MkProcessResult exitCode _ _) = ExitCode exitCode
 
--- | Returns a child process's captured standard output.
-processStdout : ProcessResult -> String
-processStdout (MkProcessResult exitCode output errorOutput) = output
+processStdoutBytes : ProcessResult -> Bytes
+processStdoutBytes (MkProcessResult _ output _) = output
 
--- | Returns a child process's captured standard error.
-processStderr : ProcessResult -> String
-processStderr (MkProcessResult exitCode output errorOutput) = errorOutput
+processStderrBytes : ProcessResult -> Bytes
+processStderrBytes (MkProcessResult _ _ errorOutput) = errorOutput
 
--- | Runs a child process and strictly captures its output without a library size limit.
+-- | Decodes captured standard output as UTF-8 without replacement.
+processStdoutText : ProcessResult -> Either Utf8Error String
+processStdoutText = bytesToString . processStdoutBytes
+
+-- | Decodes captured standard error as UTF-8 without replacement.
+processStderrText : ProcessResult -> Either Utf8Error String
+processStderrText = bytesToString . processStderrBytes
+
+-- | Runs a child and captures each requested output stream without a size limit.
 runProcess : Process -> IO ProcessError ProcessResult
-runProcess processValue =
-    mapError
-        (ProcessHostError processValue)
-        (prelude.prim.runProcess
-            (processProgram processValue)
-            (processArguments processValue))
+runProcess processValue = runProcessWithLimit processValue Nothing
 
--- | Runs a child process, capturing at most maximum bytes from each output stream.
+-- | Runs a child and captures at most maximum bytes from each captured stream.
 runProcessLimited : Process -> Int -> IO ProcessError ProcessResult
 runProcessLimited processValue maximum =
-    mapError
-        (ProcessHostError processValue)
-        (prelude.prim.runProcessLimited
-            (processProgram processValue)
-            (processArguments processValue)
-            maximum)
+    if maximum < 0 then failIO (InvalidProcess "the output limit must be non-negative")
+    else runProcessWithLimit processValue (Just maximum)
 
--- | Terminates the main program with a host exit status after cleanup.
-exitWith : forall a. ExitCode -> Task a
-exitWith status = prelude.prim.exitWith (exitCodeToInt status)
+-- | Runs a child until the duration expires.
+-- |
+-- | Expiry interrupts the blocked host request; the runtime closes the pipes,
+-- | terminates the direct child, and waits for it before returning Nothing.
+runProcessTimeout : Duration -> Process -> IO ProcessError (Maybe ProcessResult)
+runProcessTimeout duration processValue = timeout duration (runProcess processValue)
 
--- | Terminates the main program successfully after cleanup.
-exitSuccess : forall a. Task a
-exitSuccess = exitWith (ExitCode 0)
+runProcessWithLimit : Process -> Maybe Int -> IO ProcessError ProcessResult
+runProcessWithLimit processValue maximum =
+    case processValue of
+        Process
+            (ProcessCommand programName arguments)
+            (ProcessConfig
+                cwd
+                (ProcessEnvironment environmentBase environment removed)
+                (ProcessInput stdinBytes)
+                (ProcessOutputs stdoutPolicy stderrPolicy)) =>
+            mapError
+                (ProcessHostError processValue)
+                (prelude.prim.runProcessConfigured
+                    ( programName
+                    , arguments
+                    , ( workingDirectoryText cwd
+                      , inheritsEnvironment environmentBase
+                      , environment
+                      , removed
+                      , stdinBytes
+                      , captures stdoutPolicy
+                      , captures stderrPolicy
+                      , maximum
+                      )
+                    ))
 
--- | Terminates the main program unsuccessfully after cleanup.
-exitFailure : forall a. Task a
-exitFailure = exitWith (ExitCode 1)
+workingDirectoryPath : ProcessWorkingDirectory -> Maybe Path
+workingDirectoryPath InheritWorkingDirectory = Nothing
+workingDirectoryPath (WorkingDirectory cwd) = Just cwd
+
+workingDirectoryText : ProcessWorkingDirectory -> String
+workingDirectoryText InheritWorkingDirectory = ""
+workingDirectoryText (WorkingDirectory cwd) = pathToString cwd
+
+inheritsEnvironment : ProcessEnvironmentBase -> Bool
+inheritsEnvironment InheritEnvironment = True
+inheritsEnvironment EmptyEnvironment = False
+
+captures : ProcessOutputPolicy -> Bool
+captures CaptureOutput = True
+captures DiscardOutput = False
+
+validateEnvironment : String -> String -> Either ProcessError ()
+validateEnvironment name value =
+    if invalidEnvironmentName name then Left (InvalidProcess "an environment name is empty or contains '=' or a null character")
+    else if containsNull value then Left (InvalidProcess "an environment value contains a null character")
+    else Right ()
+
+invalidEnvironmentName : String -> Bool
+invalidEnvironmentName name =
+    or (name == "") (or (containsNull name) (containsEquals (stringToChars name)))
+
+withoutEnvironmentEntry : String -> [(String, String)] -> [(String, String)]
+withoutEnvironmentEntry name = filter (fun (entryName, _) => entryName /= name)
+
+containsEquals : [Char] -> Bool
+containsEquals [] = False
+containsEquals (character :: rest) =
+    if charToCodePoint character == 61 then True else containsEquals rest
 
 containsNull : String -> Bool
-containsNull text = charsContainNull (std.text.stringToChars text)
+containsNull text = charsContainNull (stringToChars text)
 
 charsContainNull : [Char] -> Bool
 charsContainNull [] = False
 charsContainNull (character :: rest) =
-    if std.text.charToCodePoint character == 0 then True else charsContainNull rest
+    if charToCodePoint character == 0 then True else charsContainNull rest
 
 argumentsContainNull : [String] -> Bool
 argumentsContainNull [] = False
 argumentsContainNull (argument :: rest) =
     if containsNull argument then True else argumentsContainNull rest
+
+exitWith : forall a. ExitCode -> Task a
+exitWith status = prelude.prim.exitWith (exitCodeToInt status)
+
+exitSuccess : forall a. Task a
+exitSuccess = exitWith (ExitCode 0)
+
+exitFailure : forall a. Task a
+exitFailure = exitWith (ExitCode 1)

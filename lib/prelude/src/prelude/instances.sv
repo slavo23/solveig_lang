@@ -19,6 +19,9 @@ instance Eq Char where
 instance Eq String where
     (==) x y = stringEq x y
 
+instance Eq Bytes where
+    (==) x y = bytesEq x y
+
 instance Eq () where
     (==) _ _ = True
 

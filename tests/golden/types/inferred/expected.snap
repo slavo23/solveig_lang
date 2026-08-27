@@ -54,6 +54,7 @@ prelude.prim.appendFile : String -> String -> IO HostError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 prelude.prim.bytesAppend : Bytes -> Bytes -> Bytes
 prelude.prim.bytesConcat : [Bytes] -> Bytes
+prelude.prim.bytesEq : Bytes -> Bytes -> Bool
 prelude.prim.bytesFindAny : Bytes -> Int -> Bytes -> Int
 prelude.prim.bytesFindBelow : Bytes -> Int -> Int -> Int
 prelude.prim.bytesIndex : Bytes -> Int -> Maybe Int
@@ -162,8 +163,7 @@ prelude.prim.removeFile : String -> IO HostError ()
 prelude.prim.renameFile : String -> String -> IO HostError ()
 prelude.prim.resolveHost : String -> IO HostError String
 prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
-prelude.prim.runProcess : String -> [String] -> IO HostError ProcessResult
-prelude.prim.runProcessLimited : String -> [String] -> Int -> IO HostError ProcessResult
+prelude.prim.runProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], Bytes, Bool, Bool, Maybe Int)) -> IO HostError ProcessResult
 prelude.prim.send : forall a. Chan a -> a -> IO HostError ()
 prelude.prim.sendBytes : Socket -> Bytes -> IO HostError ()
 prelude.prim.setCurrentDirectory : String -> IO HostError ()
@@ -706,24 +706,50 @@ std.path.pathFromHost : String -> Path
 std.path.pathFromString : String -> Either PathError Path
 std.path.pathToString : Path -> String
 std.process.argumentsContainNull : [String] -> Bool
+std.process.captureStandardError : Process -> Process
+std.process.captureStandardOutput : Process -> Process
+std.process.captures : ProcessOutputPolicy -> Bool
 std.process.charsContainNull : [Char] -> Bool
+std.process.clearProcessEnvironment : Process -> Process
+std.process.containsEquals : [Char] -> Bool
 std.process.containsNull : String -> Bool
+std.process.discardStandardError : Process -> Process
+std.process.discardStandardOutput : Process -> Process
 std.process.exitCodeFromInt : Int -> ExitCode
 std.process.exitCodeToInt : ExitCode -> Int
 std.process.exitFailure : forall a. IO HostError a
 std.process.exitSuccess : forall a. IO HostError a
 std.process.exitWith : forall a. ExitCode -> IO HostError a
+std.process.inheritProcessEnvironment : Process -> Process
+std.process.inheritProcessWorkingDirectory : Process -> Process
+std.process.inheritsEnvironment : ProcessEnvironmentBase -> Bool
+std.process.invalidEnvironmentName : String -> Bool
 std.process.isExitSuccess : ExitCode -> Bool
 std.process.process : String -> [String] -> Either ProcessError Process
 std.process.processArguments : Process -> [String]
 std.process.processExitCode : ProcessResult -> ExitCode
 std.process.processProgram : Process -> String
-std.process.processStderr : ProcessResult -> String
-std.process.processStdout : ProcessResult -> String
+std.process.processStderrBytes : ProcessResult -> Bytes
+std.process.processStderrText : ProcessResult -> Either Utf8Error String
+std.process.processStdoutBytes : ProcessResult -> Bytes
+std.process.processStdoutText : ProcessResult -> Either Utf8Error String
+std.process.processWorkingDirectory : Process -> Maybe Path
 std.process.runProcess : Process -> IO ProcessError ProcessResult
 std.process.runProcessLimited : Process -> Int -> IO ProcessError ProcessResult
+std.process.runProcessTimeout : Duration -> Process -> IO ProcessError (Maybe ProcessResult)
+std.process.runProcessWithLimit : Process -> Maybe Int -> IO ProcessError ProcessResult
+std.process.validateEnvironment : String -> String -> Either ProcessError ()
 std.process.withArgument : String -> Process -> Either ProcessError Process
 std.process.withArguments : [String] -> Process -> Either ProcessError Process
+std.process.withEnvironment : String -> String -> Process -> Either ProcessError Process
+std.process.withStandardInput : Bytes -> Process -> Process
+std.process.withStandardInputText : String -> Process -> Process
+std.process.withWorkingDirectory : Path -> Process -> Process
+std.process.withoutEnvironment : String -> Process -> Either ProcessError Process
+std.process.withoutEnvironmentEntry : String -> [(String, String)] -> [(String, String)]
+std.process.withoutStandardInput : Process -> Process
+std.process.workingDirectoryPath : ProcessWorkingDirectory -> Maybe Path
+std.process.workingDirectoryText : ProcessWorkingDirectory -> String
 std.queue.dequeue : forall a. Queue a -> Maybe (a, Queue a)
 std.queue.empty : forall a. Queue a
 std.queue.enqueue : forall a. Queue a -> a -> Queue a

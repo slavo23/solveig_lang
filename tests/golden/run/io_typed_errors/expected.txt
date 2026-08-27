@@ -14,7 +14,7 @@ write-file-error
 append-file-error
 openFile: permission denied: denied
 filesystem "settings.conf": openFile: permission denied: denied
-process "tool": openFile: permission denied: denied
+process "tool" []: openFile: permission denied: denied
 network example.test:443: openFile: permission denied: denied
 HTTP: openFile: permission denied: denied
 HTTP response body exceeds 1024 bytes

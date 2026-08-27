@@ -100,7 +100,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let http_response = tuple(names, &[int.clone(), headers, bytes.clone()]);
     let handle_specs =
         handles::handle_builtin_specs(names, &int, &string, &bytes, &bool_ty, &host_error);
-    let os_specs = os::os_builtin_specs(names, &int, &string, &bool_ty, &host_error);
+    let os_specs = os::os_builtin_specs(names, &int, &string, &bytes, &bool_ty, &host_error);
     let random_specs = random::random_builtin_specs(names, &int);
     let data_specs = data::data_builtin_specs(names);
 

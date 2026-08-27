@@ -6,6 +6,7 @@ pub(super) fn os_builtin_specs(
     names: &mut Names,
     int: &Ty,
     string: &Ty,
+    bytes: &Ty,
     bool_ty: &Ty,
     host_error: &Ty,
 ) -> Vec<PrimitiveBuiltinSpec> {
@@ -26,7 +27,25 @@ pub(super) fn os_builtin_specs(
         string.clone(),
     );
     let environment = Ty::make_app(Ty::make_con_id(prelude_list_tycon_id(names)), string_pair);
+    let maybe_int = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), int.clone());
     let process_result = Ty::make_con_id(std_process_result_tycon_id(names));
+    let process_config = tuple(
+        names,
+        &[
+            string.clone(),
+            bool_ty.clone(),
+            environment.clone(),
+            string_list.clone(),
+            bytes.clone(),
+            bool_ty.clone(),
+            bool_ty.clone(),
+            maybe_int,
+        ],
+    );
+    let process_request = tuple(
+        names,
+        &[string.clone(), string_list.clone(), process_config],
+    );
     let a_id = names.fresh_tyvar("a");
     let a = Ty::TyVar(a_id);
 
@@ -83,7 +102,7 @@ pub(super) fn os_builtin_specs(
             "listDirectory",
             BUILTIN_LIST_DIRECTORY,
             1,
-            unary(string.clone(), task(string_list.clone())),
+            unary(string.clone(), task(string_list)),
         ),
         prim_spec(
             "createDirectory",
@@ -152,22 +171,10 @@ pub(super) fn os_builtin_specs(
             unary(string.clone(), bool_ty.clone()),
         ),
         prim_spec(
-            "runProcess",
-            BUILTIN_RUN_PROCESS,
-            2,
-            arr(
-                &[string.clone(), string_list.clone()],
-                task(process_result.clone()),
-            ),
-        ),
-        prim_spec(
-            "runProcessLimited",
-            BUILTIN_RUN_PROCESS_LIMITED,
-            3,
-            arr(
-                &[string.clone(), string_list, int.clone()],
-                task(process_result),
-            ),
+            "runProcessConfigured",
+            BUILTIN_RUN_PROCESS_CONFIGURED,
+            1,
+            unary(process_request, task(process_result)),
         ),
         prim_spec(
             "exitWith",

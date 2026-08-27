@@ -59,15 +59,15 @@ impl Interpreter<'_> {
     fn alloc_process_result(
         &mut self,
         exit_code: i64,
-        stdout: &str,
-        stderr: &str,
+        stdout: &[u8],
+        stderr: &[u8],
     ) -> Result<Value, RuntimeError> {
         let checkpoint = self.temporary_roots.len();
         self.safe_point();
-        let stdout = self.heap.alloc_str(stdout);
+        let stdout = self.heap.alloc_bytes(stdout);
         self.temporary_roots.push(stdout);
         self.safe_point();
-        let stderr = self.heap.alloc_str(stderr);
+        let stderr = self.heap.alloc_bytes(stderr);
         self.temporary_roots.push(stderr);
         self.safe_point();
         let stdout = *self

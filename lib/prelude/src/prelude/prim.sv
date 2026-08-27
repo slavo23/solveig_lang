@@ -1,5 +1,5 @@
 export (
-    accept, appendFile, bindIO, bytesAppend, bytesConcat, bytesFindAny, bytesFindBelow,
+    accept, appendFile, bindIO, bytesAppend, bytesConcat, bytesEq, bytesFindAny, bytesFindBelow,
     bytesIndex, bytesLength, bytesSlice, bytesSliceToString, bytesSpanAny, bytesSpanRange,
     bytesUtf8ValidPrefix,
     bytesToString, bytesToStringReplacing, catchDefectIO, catchIO, charCompare,
@@ -18,7 +18,7 @@ export (
     pathExtension, pathFileName, pathIsAbsolute, pathJoin, pathNormalise, pathParent,
     randomRange, readFile, readFileBytes, readFileBytesLimited, readFileLimited,
     readLine, recv, recvBytes, removeFile, renameFile, resolveHost, restoreMaskIO,
-    runProcess, runProcessLimited, send, sendBytes, setCurrentDirectory, setEnv, sleep,
+    runProcessConfigured, send, sendBytes, setCurrentDirectory, setEnv, sleep,
     spawn, stderr, stdin, stdout, stringAppend, stringByteLength, stringByteSlice,
     stringCharAtByte,
     stringCharAt, stringCompare, stringEq, stringFindCharFrom, stringLength,

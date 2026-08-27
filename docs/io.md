@@ -441,25 +441,36 @@ operation and retains its path(s) plus the platform error message.
 process : String -> [String] -> Either ProcessError Process
 runProcess : Process -> IO ProcessError ProcessResult
 runProcessLimited : Process -> Int -> IO ProcessError ProcessResult
+runProcessTimeout : Duration -> Process -> IO ProcessError (Maybe ProcessResult)
 processExitCode : ProcessResult -> ExitCode
-processStdout : ProcessResult -> String
-processStderr : ProcessResult -> String
+processStdoutBytes : ProcessResult -> Bytes
+processStderrBytes : ProcessResult -> Bytes
+processStdoutText : ProcessResult -> Either Utf8Error String
+processStderrText : ProcessResult -> Either Utf8Error String
 ```
 
 `process program arguments` validates a request. `runProcess processValue`
 starts one child with the argument list exactly
 as supplied: it does not invoke a shell, expand wildcards, or perform quoting.
-The child inherits the runtime-local environment and logical working directory,
-while standard input is closed. Standard output and error are piped and
-strictly captured to completion. Non-zero child status is a successful
-`ProcessResult`, so programs can inspect and handle it as normal data.
+The default request inherits the runtime-local environment and logical working
+directory, closes standard input, and captures both output streams. Immutable
+transformations configure it: `withWorkingDirectory` and
+`inheritProcessWorkingDirectory`, `withEnvironment`, `withoutEnvironment`,
+`clearProcessEnvironment`, `withStandardInput` or `withStandardInputText`, and
+the capture/discard functions for stdout and stderr. Environment
+transformations are ordered: setting a removed name restores it, and removing
+a set name removes it. A discarded stream is still drained so it cannot fill a
+pipe and block the child. Non-zero status is a successful `ProcessResult`, so
+programs inspect it as normal data.
 
 The exit code is opaque; use `isExitSuccess` or `exitCodeToInt` explicitly.
 When a platform ends
 the child without an exit code, such as a Unix signal, Solveig reports `-1`.
-Both captured streams must be UTF-8 because `ProcessResult` exposes `String`;
-invalid output, failure to start or wait for the program, and other host
-capture failures return `ProcessHostError processValue hostError`. Use an absolute path
+Captured streams are arbitrary `Bytes`. Decode explicitly with
+`processStdoutText` or `processStderrText`; malformed UTF-8 remains
+`Utf8Error` rather than being misreported as a process failure. Failure to
+start, write input, read output, or wait returns
+`ProcessHostError processValue hostError`. Use an absolute path
 for a specific executable. A bare program name uses the host executable search
 path; a relative path containing components resolves against the logical cwd.
 
@@ -468,12 +479,13 @@ streams are trusted to fit memory. `runProcessLimited processValue
 maximumPerStream` stores at most the non-negative maximum from each of stdout
 and stderr. Either stream exceeding its limit terminates and reaps the child,
 then returns `ProcessError`; an invalid limit fails before the child starts.
-The maximum counts encoded bytes, so a successful result still decodes both
-complete streams as UTF-8.
+The maximum counts bytes and applies only to streams selected for capture.
+`runProcessTimeout duration processValue` returns `Nothing` after interrupting,
+terminating, and reaping the direct child; completion returns `Just result`.
 
 Process execution uses the bounded blocking pool. Each active capture drains
 stdout and stderr concurrently so one full pipe cannot deadlock the other, and
-allocates language strings only after the scheduler wakes the caller.
+allocates packed language bytes only after the scheduler wakes the caller.
 Interrupting the calling Solveig thread signals the owning worker, which
 terminates and reaps the direct child before reusing that worker. Runtime
 shutdown sends the same cancellation signal. Descendant processes started by
@@ -482,7 +494,7 @@ the child are outside this direct-child ownership contract.
 ## Program exit
 
 ```solveig
-exitWith : forall a. Int -> Task a
+exitWith : forall a. ExitCode -> Task a
 exitSuccess : forall a. Task a
 exitFailure : forall a. Task a
 ```

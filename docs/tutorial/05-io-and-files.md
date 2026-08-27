@@ -246,12 +246,23 @@ main =
         Left processError => printLine (show processError)
         | Right processValue => do
             result <- runProcess processValue
-            printStr (processStdout result)
+            case processStdoutText result of
+                Left utf8Error => printLine (show utf8Error)
+                | Right output => printStr output
 ```
 
 The program is invoked directly, not through a shell. Arguments are separate
 strings, which avoids shell quoting and expansion. `runProcessLimited` is the
 opt-in variant for untrusted or potentially unbounded child output.
+Captured output is `Bytes`, because programs are allowed to emit arbitrary
+binary data; the text accessor performs explicit UTF-8 validation. Use
+`withWorkingDirectory`, `withEnvironment`, `withoutEnvironment`, and
+`withStandardInputText` to derive a request without mutating process-global
+state. `inheritProcessWorkingDirectory` restores the default after a working
+directory was configured. `discardStandardError` drains stderr without
+retaining it.
+`runProcessTimeout duration request` returns `Nothing` only after the direct
+child has been terminated and reaped.
 `processExitCode` returns opaque `ExitCode`; use `isExitSuccess` for the
 common branch or `exitCodeToInt` at a host/protocol boundary.
 
