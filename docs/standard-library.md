@@ -476,13 +476,19 @@ import std.random(*)
 `sleep` and `timeout` accept `Duration`, constructed with `nanoseconds`,
 `microseconds`, `milliseconds`, or `seconds`. `getMonotonicTime` returns
 `Instant`; `getSystemTime` returns the distinct wall-clock `SystemTime`.
-`measure task` returns `(elapsedDuration, value)`.
+`measure task` returns `(elapsedDuration, value)`. Unit-bearing conversions
+such as `durationToMilliseconds` and `durationToSeconds` are explicit;
+construction and clock differences saturate rather than overflowing.
 
 Random draws use explicit immutable `StdGen` state. `mkStdGen` is reproducible;
 `newStdGen` obtains a runtime-local clock seed. `randomInt` returns
 `(value, nextGenerator)`; inclusive `randomRange` returns `Nothing` for
 reversed bounds and `Just (value, nextGenerator)` otherwise. This
-generator is not cryptographically secure.
+generator is not cryptographically secure. `secureRandomBytes count` is the
+separate cryptographic effect: it returns `IO SecureRandomError Bytes`, obtains
+host entropy on the bounded worker pool, and is intentionally neither seeded
+nor reproducible. Cancellation stops the caller from waiting but cannot cancel
+an operating-system entropy call already in progress.
 
 ## Networking
 

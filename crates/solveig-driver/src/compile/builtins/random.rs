@@ -2,7 +2,12 @@
 
 use super::*;
 
-pub(super) fn random_builtin_specs(names: &mut Names, int: &Ty) -> Vec<PrimitiveBuiltinSpec> {
+pub(super) fn random_builtin_specs(
+    names: &mut Names,
+    int: &Ty,
+    bytes: &Ty,
+    host_error: &Ty,
+) -> Vec<PrimitiveBuiltinSpec> {
     let std_gen = Ty::make_con_id(PRIM_TYS.std_gen);
     let pair_int_gen = Ty::make_app(
         Ty::make_app(
@@ -37,6 +42,12 @@ pub(super) fn random_builtin_specs(names: &mut Names, int: &Ty) -> Vec<Primitive
             BUILTIN_RANDOM_RANGE,
             3,
             arr(&[int.clone(), int.clone(), std_gen], pair_int_gen),
+        ),
+        prim_spec(
+            "secureRandomBytes",
+            BUILTIN_SECURE_RANDOM_BYTES,
+            1,
+            unary(int.clone(), io_of(host_error.clone(), bytes.clone())),
         ),
     ]
 }

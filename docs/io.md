@@ -16,7 +16,7 @@ import std.path     # validated paths
 import std.env      # arguments and environment
 import std.process  # child processes and exit
 import std.time     # clocks
-import std.random   # pseudorandom generators
+import std.random   # reproducible generators and secure host bytes
 import std.bytes    # byte conversion and manipulation
 ```
 
@@ -296,6 +296,7 @@ because Solveig `String` is UTF-8.
 ```solveig
 getMonotonicTime : IO e Instant
 getSystemTime : IO e SystemTime
+sleep : Duration -> Task ()
 ```
 
 The values are opaque and cannot be mixed accidentally. `getMonotonicTime`
@@ -306,6 +307,13 @@ a calendar clock. Use `instantDifference` to produce `Duration`.
 `getSystemTime` is a signed count since the Unix epoch and
 can move when the host clock is adjusted. Values outside the `Int` nanosecond
 range saturate instead of wrapping.
+
+Construct `Duration` values with `nanoseconds`, `microseconds`, `milliseconds`,
+or `seconds`; large conversions saturate at the signed nanosecond range.
+Convert back only through a unit-bearing name such as
+`durationToNanoseconds`, `durationToMilliseconds`, or `durationToSeconds`.
+Clock differences also saturate rather than overflowing. `Instant` and
+`SystemTime` have no cross-domain subtraction operation.
 
 The operations execute directly on the scheduler thread: neither blocks nor
 uses an IO worker. Normal execution reads the host clocks. Captured execution
@@ -348,6 +356,27 @@ Captured and deterministic execution begin that stream at seed zero, so tests
 remain exact. Clock-derived seeds can repeat across runtimes and are not host
 entropy. These APIs are pseudorandom and must not be used for keys, tokens,
 nonces, passwords, or any other cryptographic purpose.
+
+## Cryptographic host randomness
+
+```solveig
+secureRandomBytes : Int -> IO SecureRandomError Bytes
+```
+
+`secureRandomBytes count` asks the operating system's preferred
+cryptographically secure source for exactly `count` bytes. The function name
+states that the integer is a byte count, and a negative count returns
+`InvalidSecureRandomByteCount` without reaching the host. Host failures are
+retained as `SecureRandomHostError HostError`.
+
+This effect is intentionally unrelated to `StdGen`: it has no seed, returns no
+generator state, is not deterministic under captured or virtual-time execution,
+and cannot reproduce a test sequence. It runs on the existing bounded IO worker
+pool because the operating-system source may block during early system startup.
+Interrupting the Solveig action stops waiting for its result; an operating-system
+entropy call already in progress remains worker-owned until the host returns.
+Use it for secrets, keys, tokens, and nonces; use seeded `StdGen` for simulation,
+procedural generation, randomized algorithms, and reproducible tests.
 
 ## Filesystem and logical working directory
 

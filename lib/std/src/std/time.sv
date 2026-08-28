@@ -1,9 +1,11 @@
 export (
     Duration, Instant, SystemTime, nanoseconds, microseconds, milliseconds, seconds,
-    durationToNanoseconds, durationToMicroseconds, durationToMilliseconds,
+    durationToNanoseconds, durationToMicroseconds, durationToMilliseconds, durationToSeconds,
     instantDifference, systemTimeDifference, systemTimeNanoseconds, sleep,
     getMonotonicTime, getSystemTime, measure
 )
+
+private (maximumInt, minimumInt, saturatingScale, saturatingDifference, sleepMilliseconds)
 
 import prelude.prim(*)
 
@@ -68,17 +70,17 @@ instance Hashable SystemTime where
 nanoseconds : Int -> Duration
 nanoseconds = Duration
 
--- | Constructs a duration from microseconds.
+-- | Constructs a duration from microseconds, saturating at the nanosecond bounds.
 microseconds : Int -> Duration
-microseconds value = Duration (value * 1000)
+microseconds value = Duration (saturatingScale 1000 value)
 
--- | Constructs a duration from milliseconds.
+-- | Constructs a duration from milliseconds, saturating at the nanosecond bounds.
 milliseconds : Int -> Duration
-milliseconds value = Duration (value * 1000000)
+milliseconds value = Duration (saturatingScale 1000000 value)
 
--- | Constructs a duration from seconds.
+-- | Constructs a duration from seconds, saturating at the nanosecond bounds.
 seconds : Int -> Duration
-seconds value = Duration (value * 1000000000)
+seconds value = Duration (saturatingScale 1000000000 value)
 
 -- | Returns a duration as nanoseconds.
 durationToNanoseconds : Duration -> Int
@@ -92,14 +94,19 @@ durationToMicroseconds (Duration value) = div value 1000
 durationToMilliseconds : Duration -> Int
 durationToMilliseconds (Duration value) = div value 1000000
 
--- | Subtracts the first monotonic reading from the second.
-instantDifference : Instant -> Instant -> Duration
-instantDifference (Instant started) (Instant finished) = Duration (finished - started)
+-- | Returns whole seconds, truncating toward zero.
+durationToSeconds : Duration -> Int
+durationToSeconds (Duration value) = div value 1000000000
 
--- | Subtracts the first wall-clock reading from the second.
+-- | Subtracts the first monotonic reading from the second, saturating at the bounds.
+instantDifference : Instant -> Instant -> Duration
+instantDifference (Instant started) (Instant finished) =
+    Duration (saturatingDifference started finished)
+
+-- | Subtracts the first wall-clock reading from the second, saturating at the bounds.
 systemTimeDifference : SystemTime -> SystemTime -> Duration
 systemTimeDifference (SystemTime started) (SystemTime finished) =
-    Duration (finished - started)
+    Duration (saturatingDifference started finished)
 
 -- | Returns signed nanoseconds since the Unix epoch.
 systemTimeNanoseconds : SystemTime -> Int
@@ -119,6 +126,28 @@ sleepMilliseconds (Duration value) =
     else
         let whole = div value 1000000 in
         if mod value 1000000 == 0 then whole else whole + 1
+
+maximumInt : Int
+maximumInt = 9223372036854775807
+
+minimumInt : Int
+minimumInt = (-9223372036854775807) - 1
+
+saturatingScale : Int -> Int -> Int
+saturatingScale factor value =
+    if value > div maximumInt factor then maximumInt
+    else if value < div minimumInt factor then minimumInt
+    else value * factor
+
+saturatingDifference : Int -> Int -> Int
+saturatingDifference started finished =
+    if started < 0 then
+        if finished > maximumInt + started then maximumInt
+        else finished - started
+    else if started > 0 then
+        if finished < minimumInt + started then minimumInt
+        else finished - started
+    else finished
 
 -- | Returns a reading from an arbitrary runtime-local monotonic origin.
 getMonotonicTime : forall e. IO e Instant

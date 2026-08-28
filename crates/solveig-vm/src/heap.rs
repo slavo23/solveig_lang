@@ -118,6 +118,9 @@ pub enum IoAction {
     GetMonotonicTime,
     GetSystemTime,
     NewStdGen,
+    SecureRandomBytes {
+        count: i64,
+    },
     ResolveHost {
         host: Value,
     },

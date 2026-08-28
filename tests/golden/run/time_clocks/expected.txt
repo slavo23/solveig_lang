@@ -1,2 +1,5 @@
 monotonic delta: 5000000
 system delta: 5000000
+whole seconds: 3
+positive saturation: 9223372036854775807
+negative saturation: -9223372036854775808

@@ -187,6 +187,7 @@ prelude.prim.renameFile : String -> String -> IO HostError ()
 prelude.prim.resolveHost : String -> IO HostError String
 prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
 prelude.prim.runProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ProcessResult
+prelude.prim.secureRandomBytes : Int -> IO HostError Bytes
 prelude.prim.send : forall a. Chan a -> a -> IO HostError ()
 prelude.prim.sendBytes : Socket -> Bytes -> IO HostError ()
 prelude.prim.setCurrentDirectory : String -> IO HostError ()
@@ -806,6 +807,7 @@ std.random.mkStdGen : Int -> StdGen
 std.random.newStdGen : IO HostError StdGen
 std.random.randomInt : StdGen -> (Int, StdGen)
 std.random.randomRange : Int -> Int -> StdGen -> Maybe (Int, StdGen)
+std.random.secureRandomBytes : Int -> IO SecureRandomError Bytes
 std.set.delete : forall a. Ord a => a -> Set a -> Set a
 std.set.difference : forall a. Ord a => Set a -> Set a -> Set a
 std.set.differenceValues : forall a. Ord a => Set a -> [a] -> Set a -> Set a
@@ -903,13 +905,18 @@ std.thread.spawn : forall childError e. IO childError () -> IO e ThreadId
 std.time.durationToMicroseconds : Duration -> Int
 std.time.durationToMilliseconds : Duration -> Int
 std.time.durationToNanoseconds : Duration -> Int
+std.time.durationToSeconds : Duration -> Int
 std.time.getMonotonicTime : forall e. IO e Instant
 std.time.getSystemTime : forall e. IO e SystemTime
 std.time.instantDifference : Instant -> Instant -> Duration
+std.time.maximumInt : Int
 std.time.measure : forall e a. IO e a -> IO e (Duration, a)
 std.time.microseconds : Int -> Duration
 std.time.milliseconds : Int -> Duration
+std.time.minimumInt : Int
 std.time.nanoseconds : Int -> Duration
+std.time.saturatingDifference : Int -> Int -> Int
+std.time.saturatingScale : Int -> Int -> Int
 std.time.seconds : Int -> Duration
 std.time.sleep : Duration -> IO HostError ()
 std.time.sleepMilliseconds : Duration -> Int

@@ -12,6 +12,14 @@ pub(super) fn new_std_gen(ctx: &mut VmCtx<'_, '_>, _args: &[Value]) -> Result<Va
     Ok(ctx.alloc_io_action(IoAction::NewStdGen))
 }
 
+pub(super) fn secure_random_bytes(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let count = expect_int(args, 0, "secureRandomBytes")?;
+    Ok(ctx.alloc_io_action(IoAction::SecureRandomBytes { count }))
+}
+
 pub(super) fn random_int(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let generator = expect_std_gen(args, 0, "randomInt")?;
     let (value, next) = generator.next_int();

@@ -68,6 +68,7 @@ pub(super) enum IoRequest {
     WaitProcess(ChildProcessId),
     TerminateProcess(ChildProcessId),
     CloseProcess(ChildProcessId),
+    SecureRandomBytes(i64),
     ResolveHost(String),
     Connect {
         host: String,
@@ -135,6 +136,7 @@ pub(super) enum IoFailure {
         operation: &'static str,
         source: io::Error,
     },
+    SecureRandom(io::Error),
     ResolveHost {
         host: String,
         source: io::Error,
@@ -346,6 +348,7 @@ impl IoSubsystem {
             | IoRequest::WaitProcess(_)
             | IoRequest::TerminateProcess(_)
             | IoRequest::CloseProcess(_)
+            | IoRequest::SecureRandomBytes(_)
             | IoRequest::ResolveHost(_)
             | IoRequest::Http(_) => 1 + self.next_worker % (self.workers.len().saturating_sub(1)),
         };
@@ -819,6 +822,7 @@ fn perform_request(
         IoRequest::Process(_) | IoRequest::StartProcess(_) => {
             solveig_base::ice!("process request reached the non-cancellable worker path")
         }
+        IoRequest::SecureRandomBytes(count) => perform_secure_random_bytes(count),
         IoRequest::ResolveHost(host) => perform_resolve_host(host),
         IoRequest::Http(request) => match super::http::perform(http_agent, request) {
             Ok(response) => IoResult::Http(response),
@@ -847,6 +851,28 @@ fn perform_request(
         | IoRequest::CloseProcess(_) => {
             solveig_base::ice!("direct IO request reached the blocking worker pool")
         }
+    }
+}
+
+fn perform_secure_random_bytes(count: i64) -> IoResult {
+    let Ok(count) = usize::try_from(count) else {
+        return IoResult::Failed(IoFailure::SecureRandom(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "byte count must be non-negative and fit the host address space",
+        )));
+    };
+    let mut bytes = Vec::new();
+    if let Err(error) = bytes.try_reserve_exact(count) {
+        return IoResult::Failed(IoFailure::SecureRandom(io::Error::new(
+            io::ErrorKind::OutOfMemory,
+            error,
+        )));
+    }
+    bytes.resize(count, 0);
+
+    match getrandom::fill(&mut bytes) {
+        Ok(()) => IoResult::Bytes(bytes),
+        Err(error) => IoResult::Failed(IoFailure::SecureRandom(error.into())),
     }
 }
 

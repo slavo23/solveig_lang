@@ -434,6 +434,13 @@ impl Interpreter<'_> {
                     }
                     continue;
                 }
+                IoAction::SecureRandomBytes { count } => {
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::SecureRandomBytes(count));
+                }
                 IoAction::ResolveHost { host } => {
                     let host = self.expect_string_value(host, "resolveHost")?;
                     if let Some(interruption) = self.accept_pending_interruption_at_block() {

@@ -426,6 +426,9 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "newStdGen" => "Creates a fresh runtime-seeded pseudorandom generator.",
         "randomInt" => "Produces an integer and the next explicit generator state.",
         "randomRange" => "Produces an integer in an inclusive range and the next generator state.",
+        "secureRandomBytes" => {
+            "Obtains bytes from the host's cryptographically secure random source."
+        }
         "runProcess" => "Runs a child process and strictly captures its output and exit code.",
         "runProcessLimited" => "Runs a child process with bounded output capture.",
         "exitWith" => "Terminates the main program with a requested host status after cleanup.",

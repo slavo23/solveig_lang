@@ -20,7 +20,7 @@ export (
     readLine, recv, recvBytes, removeFile, renameFile, resolveHost, restoreMaskIO,
     runProcessConfigured, startProcessConfigured, readProcessStdout,
     readProcessStderr, writeProcessStdin, closeProcessStdin, waitProcess,
-    terminateProcess, closeProcess, send, sendBytes, setCurrentDirectory, setEnv, sleep,
+    terminateProcess, closeProcess, secureRandomBytes, send, sendBytes, setCurrentDirectory, setEnv, sleep,
     spawn, stderr, stdin, stdout, stringAppend, stringByteLength, stringByteSlice,
     stringCharAtByte,
     stringCharAt, stringCompare, stringEq, stringFindCharFrom, stringLength,

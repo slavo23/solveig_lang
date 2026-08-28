@@ -130,6 +130,7 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
         | IoAction::GetMonotonicTime
         | IoAction::GetSystemTime
         | IoAction::NewStdGen
+        | IoAction::SecureRandomBytes { .. }
         | IoAction::Listen { .. }
         | IoAction::Exit { .. } => {}
     }
@@ -235,6 +236,7 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
         | IoAction::GetMonotonicTime
         | IoAction::GetSystemTime
         | IoAction::NewStdGen
+        | IoAction::SecureRandomBytes { .. }
         | IoAction::Listen { .. }
         | IoAction::Exit { .. } => {}
     }

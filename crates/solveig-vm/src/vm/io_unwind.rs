@@ -363,6 +363,9 @@ impl Interpreter<'_> {
             IoFailure::ProcessStream { operation, source } => {
                 self.alloc_std_io_error(operation, &source)
             }
+            IoFailure::SecureRandom(source) => {
+                self.alloc_std_io_error("secureRandomBytes", &source)
+            }
             IoFailure::Filesystem(failure) => match failure {
                 FilesystemFailure::GetCurrentDirectory(source) => {
                     self.alloc_std_io_error("getCurrentDirectory", &source)

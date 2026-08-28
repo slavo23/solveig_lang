@@ -191,7 +191,7 @@ idempotent.
 withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
 race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
 concurrently : forall e a b. IO e a -> IO e b -> IO e (a, b)
-timeout : forall e a. Int -> IO e a -> IO e (Maybe a)
+timeout : forall e a. Duration -> IO e a -> IO e (Maybe a)
 ```
 
 These functions are implemented in `std.task` using Solveig, `bracket`,
@@ -206,7 +206,7 @@ These functions are implemented in `std.task` using Solveig, `bracket`,
 - `concurrently left right` returns `(leftValue, rightValue)` after both
   succeed. The first typed error or defect cancels the other action and
   propagates unchanged.
-- `timeout milliseconds action` races a timer against the action, returning
+- `timeout duration action` races a timer against the action, returning
   `Nothing` for the timer or `Just value` for successful completion.
 
 The central lifetime rule is: **a child created by a structured combinator
@@ -215,10 +215,11 @@ the scope waits until the child has run its installed cleanup.
 
 ## Timers and deterministic time
 
-`sleep : Int -> Task ()` parks only the current green thread. Non-positive
-durations complete immediately. Positive durations register a monotonic
-millisecond deadline in the scheduler. Equal deadlines wake in process-id
-order, which is process-creation order.
+`sleep : Duration -> Task ()` parks only the current green thread. Non-positive
+durations complete immediately. Positive nanosecond durations round up to the
+scheduler's next whole millisecond, so sleeping never shortens the requested
+duration. Equal deadlines wake in process-id order, which is process-creation
+order.
 
 Normal CLI execution uses monotonic host time. With
 `SOLVEIG_SCHED_DETERMINISTIC=1`, the runtime instead uses virtual time: when no

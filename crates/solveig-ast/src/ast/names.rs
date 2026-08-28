@@ -566,3 +566,4 @@ pub const BUILTIN_CLOSE_PROCESS_STDIN: BuiltinId = BuiltinId(150);
 pub const BUILTIN_WAIT_PROCESS: BuiltinId = BuiltinId(151);
 pub const BUILTIN_TERMINATE_PROCESS: BuiltinId = BuiltinId(152);
 pub const BUILTIN_CLOSE_PROCESS: BuiltinId = BuiltinId(153);
+pub const BUILTIN_SECURE_RANDOM_BYTES: BuiltinId = BuiltinId(154);

@@ -1,0 +1,7 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+secure bytes: 32
+empty bytes: 0
+invalid count: -1

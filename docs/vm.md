@@ -582,7 +582,9 @@ only once so shutdown cannot cancel the cleanup it just entered.
 
 ## Timers and virtual time
 
-`sleep : Int -> Task ()` is an inert action. Performing a positive duration
+The package-internal `sleep : Int -> Task ()` primitive accepts whole
+milliseconds; public `std.time.sleep : Duration -> Task ()` performs the
+unit conversion before constructing it. Performing a positive duration
 registers the current process in the scheduler-owned `TimerQueue` and parks it
 as `Blocked(Timer(deadline))`; non-positive durations complete immediately.
 `Deadline` is a monotonic millisecond instant local to one runtime, not a wall
@@ -628,6 +630,16 @@ state nor crosses the worker pool. Virtual clock mode starts the seeder at
 zero, giving captured tests a fixed sequence. The generator is intentionally
 non-cryptographic; runtime locality prevents global mutation, not seed
 prediction.
+
+`secureRandomBytes` follows a separate host path. The primitive constructs an
+inert byte-count action, and the scheduler submits it to the existing bounded
+IO worker pool. The worker allocates the requested initialized buffer with a
+fallible reservation and fills it through `getrandom`, which delegates to the
+operating system's preferred cryptographically secure source. The completion
+crosses back as ordinary owned bytes and is allocated only at the scheduler
+safe point. Negative or unrepresentable counts and host entropy failures become
+typed `HostError` values; no `StdGen`, timer, or runtime-local seeder state is
+read or changed.
 
 ## Typed channels
 

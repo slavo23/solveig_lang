@@ -1,0 +1,3 @@
+secure bytes: 32
+empty bytes: 0
+invalid count: -1
