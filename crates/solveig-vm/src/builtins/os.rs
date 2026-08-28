@@ -93,6 +93,67 @@ pub(super) fn run_process_configured_action(
     Ok(ctx.alloc_io_action(IoAction::RunProcess { request }))
 }
 
+pub(super) fn start_process_configured_action(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let builtin = "startProcessConfigured";
+    let request = expect_value(args, 0, builtin)?;
+    Ok(ctx.alloc_io_action(IoAction::StartProcess { request }))
+}
+
+macro_rules! process_action {
+    ($function:ident, $builtin:literal, $variant:ident) => {
+        pub(super) fn $function(
+            ctx: &mut VmCtx<'_, '_>,
+            args: &[Value],
+        ) -> Result<Value, RuntimeError> {
+            let process = expect_value(args, 0, $builtin)?;
+            Ok(ctx.alloc_io_action(IoAction::$variant { process }))
+        }
+    };
+}
+
+pub(super) fn read_process_stdout_action(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let process = expect_value(args, 0, "readProcessStdout")?;
+    let maximum = expect_int(args, 1, "readProcessStdout")?;
+    Ok(ctx.alloc_io_action(IoAction::ReadProcessStdout { process, maximum }))
+}
+
+pub(super) fn read_process_stderr_action(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let process = expect_value(args, 0, "readProcessStderr")?;
+    let maximum = expect_int(args, 1, "readProcessStderr")?;
+    Ok(ctx.alloc_io_action(IoAction::ReadProcessStderr { process, maximum }))
+}
+
+pub(super) fn write_process_stdin_action(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let process = expect_value(args, 0, "writeProcessStdin")?;
+    let bytes = expect_value(args, 1, "writeProcessStdin")?;
+    Ok(ctx.alloc_io_action(IoAction::WriteProcessStdin { process, bytes }))
+}
+
+process_action!(
+    close_process_stdin_action,
+    "closeProcessStdin",
+    CloseProcessStdin
+);
+process_action!(wait_process_action, "waitProcess", WaitProcess);
+process_action!(
+    terminate_process_action,
+    "terminateProcess",
+    TerminateProcess
+);
+process_action!(close_process_action, "closeProcess", CloseProcess);
+
 pub(super) fn exit_with(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let status = expect_int(args, 0, "exitWith")?;
     Ok(ctx.alloc_io_action(IoAction::Exit { status }))

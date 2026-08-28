@@ -75,11 +75,17 @@ singleton value = Stream (pureIO (StreamYield value emptyScoped))
 -- | retains the new state for the next pull. No transition runs ahead of next.
 -- | The source owns no external lifetime and therefore uses the neutral scope ().
 unfold : forall e state a. (state -> IO e (Maybe (a, state))) -> state -> Stream () e a
-unfold step state = Stream (fmap (unfoldStep step) (step state))
+unfold = unfoldScoped
 
-unfoldStep : forall e state a. (state -> IO e (Maybe (a, state))) -> Maybe (a, state) -> StreamStep () e a
-unfoldStep step Nothing = StreamDone
-unfoldStep step (Just (value, state)) = StreamYield value (unfold step state)
+-- Package-internal constructor used by rank-2 resource producers. Keeping the
+-- scope universally quantified preserves the public escape-safety boundary.
+unfoldScoped : forall scope e state a. (state -> IO e (Maybe (a, state))) -> state -> Stream scope e a
+unfoldScoped step state = Stream (fmap (unfoldScopedStep step) (step state))
+
+unfoldScopedStep : forall scope e state a. (state -> IO e (Maybe (a, state))) -> Maybe (a, state) -> StreamStep scope e a
+unfoldScopedStep step Nothing = StreamDone
+unfoldScopedStep step (Just (value, state)) =
+    StreamYield value (unfoldScoped step state)
 
 -- | Transforms each value in order without prefetching or extra buffering.
 map : forall scope e a b. (a -> b) -> Stream scope e a -> Stream scope e b

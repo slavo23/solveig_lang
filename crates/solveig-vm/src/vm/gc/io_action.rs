@@ -72,13 +72,17 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
             visit(path);
             visit(contents);
         }
-        IoAction::RunProcess { request } => visit(request),
+        IoAction::RunProcess { request } | IoAction::StartProcess { request } => visit(request),
         IoAction::Send { channel, value } => {
             visit(channel);
             visit(value);
         }
         IoAction::SendBytes { socket, bytes } => {
             visit(socket);
+            visit(bytes);
+        }
+        IoAction::WriteProcessStdin { process, bytes } => {
+            visit(process);
             visit(bytes);
         }
         IoAction::HttpRequest { request, limits } => {
@@ -98,7 +102,17 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
         | IoAction::IsHandleEof { handle: channel }
         | IoAction::SetHandleBuffering {
             handle: channel, ..
-        } => visit(channel),
+        }
+        | IoAction::ReadProcessStdout {
+            process: channel, ..
+        }
+        | IoAction::ReadProcessStderr {
+            process: channel, ..
+        }
+        | IoAction::CloseProcessStdin { process: channel }
+        | IoAction::WaitProcess { process: channel }
+        | IoAction::TerminateProcess { process: channel }
+        | IoAction::CloseProcess { process: channel } => visit(channel),
         IoAction::PutHandle { handle, text, .. }
         | IoAction::PutHandleBytes {
             handle,
@@ -163,13 +177,17 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
             visit(path);
             visit(contents);
         }
-        IoAction::RunProcess { request } => visit(request),
+        IoAction::RunProcess { request } | IoAction::StartProcess { request } => visit(request),
         IoAction::Send { channel, value } => {
             visit(channel);
             visit(value);
         }
         IoAction::SendBytes { socket, bytes } => {
             visit(socket);
+            visit(bytes);
+        }
+        IoAction::WriteProcessStdin { process, bytes } => {
+            visit(process);
             visit(bytes);
         }
         IoAction::HttpRequest { request, limits } => {
@@ -189,7 +207,17 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
         | IoAction::IsHandleEof { handle: channel }
         | IoAction::SetHandleBuffering {
             handle: channel, ..
-        } => visit(channel),
+        }
+        | IoAction::ReadProcessStdout {
+            process: channel, ..
+        }
+        | IoAction::ReadProcessStderr {
+            process: channel, ..
+        }
+        | IoAction::CloseProcessStdin { process: channel }
+        | IoAction::WaitProcess { process: channel }
+        | IoAction::TerminateProcess { process: channel }
+        | IoAction::CloseProcess { process: channel } => visit(channel),
         IoAction::PutHandle { handle, text, .. }
         | IoAction::PutHandleBytes {
             handle,

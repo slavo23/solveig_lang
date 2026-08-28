@@ -655,7 +655,8 @@ their channel keys and parked sender values are roots rewritten by collection.
 ## Blocking IO workers
 
 Blocking host IO does not run on the scheduler thread. `Runtime` owns an
-`IoSubsystem` with four scoped OS workers, one readiness-driven socket thread,
+`IoSubsystem` with four general scoped OS workers, one terminal-order worker,
+one readiness-driven socket thread,
 a typed request table, one host-handle side table distributed across those
 workers, and one multi-producer/single-consumer completion channel. Performing
 a handle operation, whole-file text/byte operation, `appendFile`, a
@@ -683,6 +684,19 @@ socket loop instead removes the exact readiness registration and immediately
 acknowledges cancellation. A process request additionally signals its owning
 worker to terminate and reap the direct child before completing. Only a
 still-owned request can wake a process.
+
+A live scoped child is registered in a separate runtime side table after a
+bounded worker performs spawn and pipe setup. One manager thread retains sole
+child ownership. Independent stdin/stdout/stderr threads receive typed commands
+containing the existing `RequestId`: captured output performs exactly one
+bounded read per stream pull, streamed stdin completes each request only after
+`write_all` and flush, and discarded output drains eagerly. Thus stdout and
+stderr can progress concurrently without an async runtime or VM values on host
+threads. Closing a scoped child removes it from the live table, closes all
+command channels, terminates and waits when necessary, joins the pipe threads,
+and only then completes cleanup. Cancellation uses the same request tombstone
+path, signals the manager, and cannot transfer a late completion to another
+request owner.
 
 The VM enforces managed process-stack and heap-object ceilings. The defaults
 are intentionally above the million-bind regression; tests and embedders may

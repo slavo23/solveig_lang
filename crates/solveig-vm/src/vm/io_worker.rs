@@ -17,9 +17,11 @@ use std::time::Duration;
 
 pub(super) mod filesystem;
 pub(super) mod process;
+pub(super) mod streaming_process;
 
 use filesystem::{FilesystemFailure, FilesystemRequest};
 use process::{ProcessFailure, ProcessOutput, ProcessRequest, ProcessSignal};
+use streaming_process::StreamingProcess;
 
 use super::socket::{SocketRequest, SocketSubsystem};
 
@@ -49,6 +51,23 @@ pub(super) enum IoRequest {
     },
     Filesystem(FilesystemRequest),
     Process(ProcessRequest),
+    StartProcess(ProcessRequest),
+    ReadProcessStdout {
+        process: ChildProcessId,
+        maximum: i64,
+    },
+    ReadProcessStderr {
+        process: ChildProcessId,
+        maximum: i64,
+    },
+    WriteProcessStdin {
+        process: ChildProcessId,
+        bytes: Vec<u8>,
+    },
+    CloseProcessStdin(ChildProcessId),
+    WaitProcess(ChildProcessId),
+    TerminateProcess(ChildProcessId),
+    CloseProcess(ChildProcessId),
     ResolveHost(String),
     Connect {
         host: String,
@@ -83,6 +102,7 @@ pub(super) enum IoResult {
     TextList(Vec<String>),
     DirectoryChanged(PathBuf),
     Process(ProcessOutput),
+    StreamingProcess(StreamingProcess),
     Http(HttpResponse),
     Failed(IoFailure),
 }
@@ -111,6 +131,10 @@ pub(super) enum IoFailure {
     SetEnv(String),
     Filesystem(FilesystemFailure),
     Process(ProcessFailure),
+    ProcessStream {
+        operation: &'static str,
+        source: io::Error,
+    },
     ResolveHost {
         host: String,
         source: io::Error,
@@ -143,6 +167,22 @@ enum IoWork {
         signals: mpsc::Receiver<ProcessSignal>,
         signal_tx: mpsc::Sender<ProcessSignal>,
     },
+    StartProcess {
+        id: RequestId,
+        request: ProcessRequest,
+        signals: mpsc::Receiver<ProcessSignal>,
+    },
+}
+
+enum IoCancellation {
+    StrictProcess(mpsc::Sender<ProcessSignal>),
+    StreamingProcess(ChildProcessId),
+}
+
+struct RequestSlot {
+    owner: Option<RequestOwner>,
+    cancellation: Option<IoCancellation>,
+    closing_process: Option<StreamingProcess>,
 }
 
 pub(super) struct IoCompletion {
@@ -160,8 +200,8 @@ pub(super) struct IoSubsystem {
     workers: Vec<mpsc::Sender<IoWork>>,
     sockets: SocketSubsystem,
     completions: mpsc::Receiver<IoCompletion>,
-    requests: Vec<Option<RequestOwner>>,
-    process_cancellations: Vec<Option<mpsc::Sender<ProcessSignal>>>,
+    requests: Vec<RequestSlot>,
+    streaming_processes: Vec<Option<StreamingProcess>>,
     free_requests: Vec<u32>,
     next_worker: usize,
     handle_workers: Vec<Option<usize>>,
@@ -179,7 +219,7 @@ impl IoSubsystem {
             sockets: SocketSubsystem::inactive(),
             completions,
             requests: Vec::new(),
-            process_cancellations: Vec::new(),
+            streaming_processes: Vec::new(),
             free_requests: Vec::new(),
             next_worker: 0,
             handle_workers: vec![None; FIRST_FILE_HANDLE as usize],
@@ -244,7 +284,7 @@ impl IoSubsystem {
             sockets,
             completions,
             requests: Vec::new(),
-            process_cancellations: Vec::new(),
+            streaming_processes: Vec::new(),
             free_requests: Vec::new(),
             next_worker: 0,
             handle_workers: vec![Some(0), Some(1), Some(2)],
@@ -298,6 +338,14 @@ impl IoSubsystem {
             | IoRequest::WriteFileBytes { .. }
             | IoRequest::Filesystem(_)
             | IoRequest::Process(_)
+            | IoRequest::StartProcess(_)
+            | IoRequest::ReadProcessStdout { .. }
+            | IoRequest::ReadProcessStderr { .. }
+            | IoRequest::WriteProcessStdin { .. }
+            | IoRequest::CloseProcessStdin(_)
+            | IoRequest::WaitProcess(_)
+            | IoRequest::TerminateProcess(_)
+            | IoRequest::CloseProcess(_)
             | IoRequest::ResolveHost(_)
             | IoRequest::Http(_) => 1 + self.next_worker % (self.workers.len().saturating_sub(1)),
         };
@@ -305,22 +353,25 @@ impl IoSubsystem {
             let Some(slot) = self.requests.get_mut(raw as usize) else {
                 solveig_base::ice!("free IO request id was outside the request table");
             };
-            if slot.replace(RequestOwner::Process(process)).is_some() {
+            if slot.owner.replace(RequestOwner::Process(process)).is_some() {
                 solveig_base::ice!("free IO request id was still in use");
             }
-            let Some(cancellation) = self.process_cancellations.get(raw as usize) else {
-                solveig_base::ice!("free IO request id had no cancellation-table slot");
-            };
-            if cancellation.is_some() {
+            if slot.cancellation.is_some() {
                 solveig_base::ice!("free IO request retained process cancellation state");
+            }
+            if slot.closing_process.is_some() {
+                solveig_base::ice!("free IO request retained a closing process");
             }
             RequestId(raw)
         } else {
             let raw = u32::try_from(self.requests.len()).map_err(|_too_many_requests| {
                 RuntimeError::builtin("IO request table exhausted".to_string())
             })?;
-            self.requests.push(Some(RequestOwner::Process(process)));
-            self.process_cancellations.push(None);
+            self.requests.push(RequestSlot {
+                owner: Some(RequestOwner::Process(process)),
+                cancellation: None,
+                closing_process: None,
+            });
             RequestId(raw)
         };
         self.next_worker = self.next_worker.wrapping_add(1);
@@ -340,10 +391,10 @@ impl IoSubsystem {
             IoRequest::CloseSocket(socket) => self.sockets.issue(id, SocketRequest::Close(socket)),
             IoRequest::Process(request) => {
                 let (signal_tx, signals) = mpsc::channel();
-                let Some(cancellation) = self.process_cancellations.get_mut(id.0 as usize) else {
-                    solveig_base::ice!("process request had no cancellation-table slot");
+                let Some(slot) = self.requests.get_mut(id.0 as usize) else {
+                    solveig_base::ice!("process request had no request-table slot");
                 };
-                *cancellation = Some(signal_tx.clone());
+                slot.cancellation = Some(IoCancellation::StrictProcess(signal_tx.clone()));
                 let Some(worker) = self.workers.get(worker_index) else {
                     solveig_base::ice!("IO request routing selected an absent worker");
                 };
@@ -358,6 +409,50 @@ impl IoSubsystem {
                         RuntimeError::builtin("IO worker pool stopped unexpectedly".to_string())
                     })
             }
+            IoRequest::StartProcess(request) => {
+                let (signal_tx, signals) = mpsc::channel();
+                let Some(slot) = self.requests.get_mut(id.0 as usize) else {
+                    solveig_base::ice!("process-start request had no request-table slot");
+                };
+                slot.cancellation = Some(IoCancellation::StrictProcess(signal_tx));
+                let Some(worker) = self.workers.get(worker_index) else {
+                    solveig_base::ice!("IO request routing selected an absent worker");
+                };
+                worker
+                    .send(IoWork::StartProcess {
+                        id,
+                        request,
+                        signals,
+                    })
+                    .map_err(|_disconnected| {
+                        RuntimeError::builtin("IO worker pool stopped unexpectedly".to_string())
+                    })
+            }
+            IoRequest::ReadProcessStdout { process, maximum } => {
+                self.issue_streaming_operation(id, process, |resource| {
+                    resource.read_stdout(id, maximum)
+                })
+            }
+            IoRequest::ReadProcessStderr { process, maximum } => {
+                self.issue_streaming_operation(id, process, |resource| {
+                    resource.read_stderr(id, maximum)
+                })
+            }
+            IoRequest::WriteProcessStdin { process, bytes } => {
+                self.issue_streaming_operation(id, process, move |resource| {
+                    resource.write_stdin(id, bytes)
+                })
+            }
+            IoRequest::CloseProcessStdin(process) => {
+                self.issue_streaming_operation(id, process, |resource| resource.close_stdin(id))
+            }
+            IoRequest::WaitProcess(process) => {
+                self.issue_streaming_operation(id, process, |resource| resource.wait(id))
+            }
+            IoRequest::TerminateProcess(process) => {
+                self.issue_streaming_operation(id, process, |resource| resource.terminate(id))
+            }
+            IoRequest::CloseProcess(process) => self.issue_close_process(id, process),
             request => {
                 let Some(worker) = self.workers.get(worker_index) else {
                     solveig_base::ice!("IO request routing selected an absent worker");
@@ -374,15 +469,77 @@ impl IoSubsystem {
             let Some(slot) = self.requests.get_mut(id.0 as usize) else {
                 solveig_base::ice!("failed IO request vanished from the request table");
             };
-            *slot = None;
-            let Some(cancellation) = self.process_cancellations.get_mut(id.0 as usize) else {
-                solveig_base::ice!("failed IO request had no cancellation-table slot");
-            };
-            *cancellation = None;
+            slot.owner = None;
+            slot.cancellation = None;
+            if let Some(process) = slot.closing_process.take() {
+                process.shutdown_and_join();
+            }
             self.free_requests.push(id.0);
             return Err(error);
         }
         Ok(id)
+    }
+
+    fn issue_streaming_operation(
+        &mut self,
+        request: RequestId,
+        process: ChildProcessId,
+        operation: impl FnOnce(&mut StreamingProcess) -> io::Result<()>,
+    ) -> Result<(), RuntimeError> {
+        operation(self.streaming_process_mut(process)?)
+            .map_err(|error| streaming_issue_error(&error))?;
+        self.track_streaming_cancellation(request, process);
+        Ok(())
+    }
+
+    fn issue_close_process(
+        &mut self,
+        request: RequestId,
+        process: ChildProcessId,
+    ) -> Result<(), RuntimeError> {
+        let Some(slot) = self.streaming_processes.get_mut(process.0 as usize) else {
+            return Err(unknown_streaming_process(process));
+        };
+        let Some(resource) = slot.take() else {
+            return Err(unknown_streaming_process(process));
+        };
+        if let Err(error) = resource.close(request) {
+            resource.shutdown_and_join();
+            return Err(streaming_issue_error(&error));
+        }
+        let Some(slot) = self.requests.get_mut(request.0 as usize) else {
+            solveig_base::ice!("close-process request had no request-table slot");
+        };
+        slot.closing_process = Some(resource);
+        Ok(())
+    }
+
+    fn track_streaming_cancellation(&mut self, request: RequestId, process: ChildProcessId) {
+        let Some(slot) = self.requests.get_mut(request.0 as usize) else {
+            solveig_base::ice!("streaming-process request had no request-table slot");
+        };
+        slot.cancellation = Some(IoCancellation::StreamingProcess(process));
+    }
+
+    fn streaming_process_mut(
+        &mut self,
+        process: ChildProcessId,
+    ) -> Result<&mut StreamingProcess, RuntimeError> {
+        self.streaming_processes
+            .get_mut(process.0 as usize)
+            .and_then(Option::as_mut)
+            .ok_or_else(|| unknown_streaming_process(process))
+    }
+
+    pub(super) fn register_streaming_process(
+        &mut self,
+        process: StreamingProcess,
+    ) -> Result<u32, RuntimeError> {
+        let raw = u32::try_from(self.streaming_processes.len()).map_err(|_too_many_processes| {
+            RuntimeError::builtin("child-process table exhausted".to_string())
+        })?;
+        self.streaming_processes.push(Some(process));
+        Ok(raw)
     }
 
     pub(super) fn issue_open_file(
@@ -456,28 +613,42 @@ impl IoSubsystem {
         let Some(slot) = self.requests.get_mut(id.0 as usize) else {
             solveig_base::ice!("cancelled IO request was outside the request table");
         };
-        match slot {
-            Some(RequestOwner::Process(owner)) if *owner == process => {
-                *slot = Some(RequestOwner::Cancelled);
-                let Some(cancellation) = self.process_cancellations.get_mut(id.0 as usize) else {
-                    solveig_base::ice!("cancelled IO request had no cancellation-table slot");
-                };
-                if let Some(cancellation) = cancellation.take() {
-                    drop(cancellation.send(ProcessSignal::Cancel));
+        let cancellation = match slot.owner {
+            Some(RequestOwner::Process(owner)) if owner == process => {
+                slot.owner = Some(RequestOwner::Cancelled);
+                if let Some(process) = slot.closing_process.as_ref() {
+                    process.cancel();
                 }
-                self.sockets.cancel(id)?;
+                slot.cancellation.take()
             }
             Some(RequestOwner::Process(_)) | Some(RequestOwner::Cancelled) | None => {
                 solveig_base::ice!("cancelled IO request did not belong to the blocked process")
             }
+        };
+        if let Some(cancellation) = cancellation {
+            match cancellation {
+                IoCancellation::StrictProcess(cancellation) => {
+                    drop(cancellation.send(ProcessSignal::Cancel));
+                }
+                IoCancellation::StreamingProcess(process) => {
+                    if let Some(process) = self
+                        .streaming_processes
+                        .get(process.0 as usize)
+                        .and_then(Option::as_ref)
+                    {
+                        process.cancel();
+                    }
+                }
+            }
         }
+        self.sockets.cancel(id)?;
         Ok(())
     }
 
     pub(super) fn has_wakeable_request(&self) -> bool {
         self.requests
             .iter()
-            .any(|request| matches!(request, Some(RequestOwner::Process(_))))
+            .any(|request| matches!(request.owner, Some(RequestOwner::Process(_))))
     }
 
     pub(super) fn args(&self) -> &[String] {
@@ -532,30 +703,47 @@ impl IoSubsystem {
         let Some(slot) = self.requests.get_mut(completion.id.0 as usize) else {
             solveig_base::ice!("IO completion referenced an unknown request");
         };
-        let Some(owner) = slot.take() else {
+        let Some(owner) = slot.owner.take() else {
             solveig_base::ice!("IO request completed more than once");
         };
-        let Some(cancellation) = self.process_cancellations.get_mut(completion.id.0 as usize)
-        else {
-            solveig_base::ice!("completed IO request had no cancellation-table slot");
-        };
-        *cancellation = None;
+        slot.cancellation = None;
+        if let Some(process) = slot.closing_process.take() {
+            process.join()?;
+        }
         self.free_requests.push(completion.id.0);
-        Ok(match owner {
-            RequestOwner::Process(process) => Some((completion.id, process, completion.result)),
-            RequestOwner::Cancelled => None,
+        Ok(match (owner, completion.result) {
+            (RequestOwner::Process(process), result) => Some((completion.id, process, result)),
+            (RequestOwner::Cancelled, IoResult::StreamingProcess(process)) => {
+                process.shutdown_and_join();
+                None
+            }
+            (RequestOwner::Cancelled, _result) => None,
         })
     }
 }
 
 impl Drop for IoSubsystem {
     fn drop(&mut self) {
-        for cancellation in &mut self.process_cancellations {
-            if let Some(cancellation) = cancellation.take() {
+        for slot in &mut self.requests {
+            if let Some(IoCancellation::StrictProcess(cancellation)) = slot.cancellation.take() {
                 drop(cancellation.send(ProcessSignal::Cancel));
             }
+            if let Some(process) = slot.closing_process.take() {
+                process.shutdown_and_join();
+            }
+        }
+        for process in self.streaming_processes.drain(..).flatten() {
+            process.shutdown_and_join();
         }
     }
+}
+
+fn unknown_streaming_process(process: ChildProcessId) -> RuntimeError {
+    RuntimeError::builtin(format!("unknown ChildProcess identity {}", process.0))
+}
+
+fn streaming_issue_error(error: &io::Error) -> RuntimeError {
+    RuntimeError::builtin(format!("failed to issue child-process IO: {error}"))
 }
 
 fn worker_loop(
@@ -581,6 +769,18 @@ fn worker_loop(
                 signals,
                 signal_tx,
             } => (id, process::perform(request, &signals, signal_tx)),
+            IoWork::StartProcess {
+                id,
+                request,
+                signals,
+            } => {
+                let result = match streaming_process::start(request, completions.clone(), &signals)
+                {
+                    Ok(process) => IoResult::StreamingProcess(process),
+                    Err(failure) => IoResult::Failed(IoFailure::Process(failure)),
+                };
+                (id, result)
+            }
         };
         if completions.send(IoCompletion { id, result }).is_err() {
             break;
@@ -616,7 +816,7 @@ fn perform_request(
             }),
         },
         IoRequest::Filesystem(request) => filesystem::perform(request),
-        IoRequest::Process(_) => {
+        IoRequest::Process(_) | IoRequest::StartProcess(_) => {
             solveig_base::ice!("process request reached the non-cancellable worker path")
         }
         IoRequest::ResolveHost(host) => perform_resolve_host(host),
@@ -637,8 +837,15 @@ fn perform_request(
         | IoRequest::Accept(_)
         | IoRequest::SendBytes { .. }
         | IoRequest::RecvBytes { .. }
-        | IoRequest::CloseSocket(_) => {
-            solveig_base::ice!("socket request reached the blocking worker pool")
+        | IoRequest::CloseSocket(_)
+        | IoRequest::ReadProcessStdout { .. }
+        | IoRequest::ReadProcessStderr { .. }
+        | IoRequest::WriteProcessStdin { .. }
+        | IoRequest::CloseProcessStdin(_)
+        | IoRequest::WaitProcess(_)
+        | IoRequest::TerminateProcess(_)
+        | IoRequest::CloseProcess(_) => {
+            solveig_base::ice!("direct IO request reached the blocking worker pool")
         }
     }
 }

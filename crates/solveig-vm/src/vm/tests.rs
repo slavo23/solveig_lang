@@ -830,7 +830,7 @@ fn interruption_terminates_and_reaps_an_active_child_process() {
                     cwd: std::env::current_dir()
                         .expect("process-test working directory should be available"),
                     environment,
-                    stdin: Vec::new(),
+                    input: io_worker::process::ProcessInput::Strict(Vec::new()),
                     capture_stdout: true,
                     capture_stderr: true,
                     maximum: None,
@@ -881,6 +881,155 @@ fn interruption_terminates_and_reaps_an_active_child_process() {
     });
 
     std::fs::remove_dir_all(&marker_root).expect("process-test markers should be removable");
+}
+
+#[test]
+fn interruption_terminates_and_reaps_a_live_scoped_child_process() {
+    let marker_root = std::env::temp_dir().join(format!(
+        "solveig-vm-streaming-process-cancel-{}",
+        std::process::id()
+    ));
+    let ready = marker_root.join("ready.marker");
+    let survived = marker_root.join("survived.marker");
+    match std::fs::remove_dir_all(&marker_root) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => solveig_base::ice!("failed to clear streaming-process markers: {error}"),
+    }
+    std::fs::create_dir_all(&marker_root)
+        .expect("streaming-process marker directory should be created");
+
+    let executable = std::env::current_exe().expect("test executable path should be available");
+    let mut environment = std::env::vars().collect::<Vec<_>>();
+    environment.retain(|(name, _value)| {
+        name != "SOLVEIG_PROCESS_READY" && name != "SOLVEIG_PROCESS_SURVIVED"
+    });
+    environment.push((
+        "SOLVEIG_PROCESS_READY".to_string(),
+        ready.to_string_lossy().into_owned(),
+    ));
+    environment.push((
+        "SOLVEIG_PROCESS_SURVIVED".to_string(),
+        survived.to_string_lossy().into_owned(),
+    ));
+
+    let program = program(vec![global("main", int(0))], vec![], &[]);
+    let bytecode = lower_to_bytecode(&program);
+    let mut input = Cursor::new(Vec::new());
+    let mut output = Vec::new();
+    let mut errors = Vec::new();
+    let input = Mutex::new(&mut input as &mut (dyn BufRead + Send));
+    let output = Mutex::new(&mut output as &mut (dyn Write + Send));
+    let errors = Mutex::new(&mut errors as &mut (dyn Write + Send));
+
+    thread::scope(|scope| {
+        let io = IoSubsystem::start(
+            scope,
+            &input,
+            &output,
+            &errors,
+            (false, false),
+            &[],
+            Path::new("."),
+        )
+        .expect("IO workers should start");
+        let mut runtime = Runtime::new_with_io(bytecode, io);
+        let blocked = runtime.allocate_process();
+        assert_eq!(runtime.run_queue.pop_front(), Some(blocked));
+        let start = runtime
+            .io
+            .issue(
+                blocked,
+                io_worker::IoRequest::StartProcess(io_worker::process::ProcessRequest {
+                    program: executable.display().to_string(),
+                    executable,
+                    arguments: vec![
+                        "--exact".to_string(),
+                        "vm::tests::cancellable_process_child_fixture".to_string(),
+                        "--ignored".to_string(),
+                    ],
+                    cwd: std::env::current_dir()
+                        .expect("process-test working directory should be available"),
+                    environment,
+                    input: io_worker::process::ProcessInput::Strict(Vec::new()),
+                    capture_stdout: true,
+                    capture_stderr: true,
+                    maximum: None,
+                }),
+            )
+            .expect("live child start should enter the worker pool");
+        runtime.processes[blocked].status = ProcStatus::Blocked(BlockReason::Io(start));
+        let Some((_request, owner, io_worker::IoResult::StreamingProcess(process))) = runtime
+            .io
+            .wait_completion()
+            .expect("live child start should complete")
+        else {
+            solveig_base::ice!("live child start returned an unexpected completion");
+        };
+        assert_eq!(owner, blocked);
+        let process = ChildProcessId(
+            runtime
+                .io
+                .register_streaming_process(process)
+                .expect("live child should enter the resource table"),
+        );
+        let wait = runtime
+            .io
+            .issue(blocked, io_worker::IoRequest::WaitProcess(process))
+            .expect("live child wait should be issued");
+        runtime.processes[blocked].status = ProcStatus::Blocked(BlockReason::Io(wait));
+
+        while !ready.exists() {
+            assert!(
+                runtime
+                    .io
+                    .try_completion()
+                    .expect("live child completion polling should succeed")
+                    .is_none(),
+                "live child exited before publishing readiness"
+            );
+            thread::yield_now();
+        }
+
+        let killer = runtime.allocate_process();
+        assert_eq!(runtime.run_queue.pop_front(), Some(killer));
+        let mut killer_process = runtime.take_process(killer);
+        {
+            let mut interpreter = Interpreter::new(&mut runtime, &mut killer_process);
+            interpreter
+                .interrupt_thread(Value::ThreadId(blocked.into_raw().into_u32()))
+                .expect("valid thread interruption should succeed");
+        }
+        runtime.restore_process(killer_process);
+
+        assert!(
+            runtime
+                .io
+                .wait_completion()
+                .expect("cancelled live child wait should complete")
+                .is_none(),
+            "cancelled live child completion must not wake its former process"
+        );
+        assert!(
+            !survived.exists(),
+            "cancelled live child must not finish its work"
+        );
+        let close = runtime
+            .io
+            .issue(killer, io_worker::IoRequest::CloseProcess(process))
+            .expect("cancelled live child should still close");
+        assert!(matches!(
+            runtime
+                .io
+                .wait_completion()
+                .expect("live child close should complete"),
+            Some((request, owner, io_worker::IoResult::Unit))
+                if request == close && owner == killer
+        ));
+    });
+
+    std::fs::remove_dir_all(&marker_root)
+        .expect("streaming-process markers should be removable after close");
 }
 
 #[test]

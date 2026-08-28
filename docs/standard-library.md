@@ -396,6 +396,8 @@ binary-safe `ProcessResult`, its byte and explicit UTF-8 accessors,
 request transformations for cwd (including restoring inherited cwd),
 environment, stdin, and capture/discard,
 `runProcess`, `runProcessLimited`, `runProcessTimeout`, and
+the scoped `withProcess`/`ProcessHandle` API with pull-based stdout/stderr,
+bounded backpressured stdin, waiting, and termination, plus
 `exitWith`/`exitSuccess`/`exitFailure`.
 
 `process program arguments` validates a request, which `runProcess` executes
@@ -407,6 +409,13 @@ Utf8Error String`. `runProcessLimited processValue maximumPerStream`
 bounds each stream in bytes; overflow terminates and reaps
 the child and raises `ProcessError`. Discarded streams are drained without
 retention. Timeout and interruption both terminate and reap the direct child.
+For large or interactive children, `withProcess chunkSize request callback`
+keeps the handle and its `Stream` values inside a rank-2 scope. Captured stdout
+and stderr are independently pullable and should be consumed with
+`concurrently` when both may fill; discarded streams drain automatically.
+`pipeStandardInput` enables acknowledged chunks no larger than `chunkSize`,
+and `closeProcessStdin` sends EOF. Every scope exit closes pipes and reaps the
+direct child.
 
 ## Channels, threads, and structured tasks
 
@@ -492,7 +501,8 @@ external integer and `anyPort` explicitly requests an ephemeral listener.
 
 The low-level `std.net` layer is TCP-oriented and byte-based. Use `std.http`
 for bounded HTTP/1.1 and verified HTTPS rather than hand-building wire frames.
-Streaming subprocess pipes, UDP, and general IPv6 selection are not provided.
+UDP and general IPv6 selection are not provided. Scoped streaming subprocess
+pipes are provided by `std.process`.
 
 ### HTTP and HTTPS
 

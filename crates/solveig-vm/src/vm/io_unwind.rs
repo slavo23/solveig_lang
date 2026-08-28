@@ -360,6 +360,9 @@ impl Interpreter<'_> {
                 "runProcess",
                 &format!("{}: {}", failure.program, failure.source),
             ),
+            IoFailure::ProcessStream { operation, source } => {
+                self.alloc_std_io_error(operation, &source)
+            }
             IoFailure::Filesystem(failure) => match failure {
                 FilesystemFailure::GetCurrentDirectory(source) => {
                     self.alloc_std_io_error("getCurrentDirectory", &source)
@@ -619,6 +622,19 @@ impl Interpreter<'_> {
         match value {
             Value::SocketId(id) => Ok(SocketId(id)),
             _ => Err(RuntimeError::builtin(format!("{context} expected Socket"))),
+        }
+    }
+
+    pub(super) fn expect_child_process_id(
+        &self,
+        value: Value,
+        context: &str,
+    ) -> Result<ChildProcessId, RuntimeError> {
+        match value {
+            Value::ChildProcessId(id) => Ok(ChildProcessId(id)),
+            _ => Err(RuntimeError::builtin(format!(
+                "{context} expected ChildProcess"
+            ))),
         }
     }
 

@@ -188,6 +188,10 @@ pub struct RequestId(u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SocketId(u32);
 
+/// Identifies one scoped child-process resource in the runtime side table.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct ChildProcessId(u32);
+
 /// Identifies one global slot in the runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct GlobalIndex(usize);

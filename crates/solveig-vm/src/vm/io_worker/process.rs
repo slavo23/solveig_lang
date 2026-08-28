@@ -13,10 +13,15 @@ pub(crate) struct ProcessRequest {
     pub arguments: Vec<String>,
     pub cwd: PathBuf,
     pub environment: Vec<(String, String)>,
-    pub stdin: Vec<u8>,
+    pub input: ProcessInput,
     pub capture_stdout: bool,
     pub capture_stderr: bool,
     pub maximum: Option<i64>,
+}
+
+pub(crate) enum ProcessInput {
+    Strict(Vec<u8>),
+    Streamed,
 }
 
 pub(crate) struct ProcessOutput {
@@ -57,12 +62,21 @@ fn capture(
         arguments,
         cwd,
         environment,
-        stdin,
+        input,
         capture_stdout,
         capture_stderr,
         maximum,
         ..
     } = request;
+    let stdin = match input {
+        ProcessInput::Strict(stdin) => stdin,
+        ProcessInput::Streamed => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "streamed standard input requires the scoped process API",
+            ));
+        }
+    };
     let maximum = capture_limit(maximum)?;
 
     match signals.try_recv() {
@@ -265,10 +279,17 @@ fn wait_for_child(
 }
 
 fn terminate_and_reap(child: &mut Child) -> io::Result<()> {
+    terminate_and_reap_status(child).map(|_status| ())
+}
+
+pub(super) fn terminate_and_reap_status(child: &mut Child) -> io::Result<ChildExitStatus> {
+    if let Some(status) = child.try_wait()? {
+        return Ok(status);
+    }
     let kill_error = child.kill().err();
     let wait_result = child.wait();
     match (kill_error, wait_result) {
-        (None, Ok(_status)) => Ok(()),
+        (None, Ok(status)) => Ok(status),
         (None, Err(wait_error)) => Err(wait_error),
         (Some(kill_error), Ok(_status)) => Err(kill_error),
         (Some(kill_error), Err(wait_error)) => Err(io::Error::other(format!(

@@ -4,7 +4,7 @@
 
 use super::io_worker::IoFailure;
 use super::io_worker::filesystem::{FilesystemFailure, FilesystemRequest};
-use super::io_worker::process::ProcessRequest;
+use super::io_worker::process::{ProcessInput, ProcessRequest};
 use super::*;
 use crate::builtins::VmCtx;
 use crate::heap::{EnvironmentAction, FilesystemAction, HeapObject};
@@ -178,6 +178,7 @@ impl Interpreter<'_> {
             self.io.resolve_path(&cwd)
         };
         let maximum = self.expect_optional_nonnegative_int(maximum, builtin)?;
+        let [stream_stdin, stdin] = self.expect_tuple::<2>(stdin, builtin)?;
         let program_path = std::path::Path::new(&program);
         let executable = if program_path.is_absolute() || program_path.components().count() == 1 {
             program_path.to_path_buf()
@@ -202,7 +203,11 @@ impl Interpreter<'_> {
             arguments,
             cwd,
             environment: host_environment.into_iter().collect(),
-            stdin: self.expect_bytes_value(stdin, builtin)?,
+            input: if self.expect_bool_value(stream_stdin, builtin)? {
+                ProcessInput::Streamed
+            } else {
+                ProcessInput::Strict(self.expect_bytes_value(stdin, builtin)?)
+            },
             capture_stdout: self.expect_bool_value(capture_stdout, builtin)?,
             capture_stderr: self.expect_bool_value(capture_stderr, builtin)?,
             maximum,
@@ -225,19 +230,27 @@ impl Interpreter<'_> {
         )?;
         let Value::Obj(id) = value else {
             return Err(RuntimeError::builtin(format!(
-                "{builtin} expected a {N}-tuple"
+                "{builtin} expected a {N}-tuple, got {value:?}"
             )));
         };
         let values = match self.heap.get(id) {
+            HeapObject::Data2 {
+                tag: actual_tag,
+                field0,
+                field1,
+            } if *actual_tag == tag => vec![*field0, *field1],
             HeapObject::DataN {
                 tag: actual_tag,
                 fields,
             } if *actual_tag == tag => self.heap.payload_slice(id, *fields).to_vec(),
             _ => Vec::new(),
         };
-        values
-            .try_into()
-            .map_err(|_values| RuntimeError::builtin(format!("{builtin} expected a {N}-tuple")))
+        values.try_into().map_err(|_values| {
+            RuntimeError::builtin(format!(
+                "{builtin} expected a {N}-tuple with tag {tag}, got {:?}",
+                self.heap.get(id),
+            ))
+        })
     }
 
     fn expect_bool_value(&self, value: Value, builtin: &str) -> Result<bool, RuntimeError> {

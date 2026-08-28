@@ -34,6 +34,7 @@ impl DisplayValue<'_> {
             Value::ThreadId(id) => format!("<thread {id}>"),
             Value::SocketId(id) => format!("<socket {id}>"),
             Value::HandleId(id) => format!("<handle {id}>"),
+            Value::ChildProcessId(id) => format!("<child-process {id}>"),
             Value::StdGen(_) => "<stdgen>".into(),
             Value::CtorFn { tag, .. } => {
                 format!("<ctor {}>", tag_name(self.arities, tag))

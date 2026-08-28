@@ -44,6 +44,11 @@ use solveig_ast::ast::{
     BUILTIN_WRITE_FILE_BYTES, BUILTIN_WRITE_FILE_BYTES_ATOMIC, BuiltinId, CtorRuntimeInfo,
     CtorRuntimeRole,
 };
+use solveig_ast::ast::{
+    BUILTIN_CLOSE_PROCESS, BUILTIN_CLOSE_PROCESS_STDIN, BUILTIN_READ_PROCESS_STDERR,
+    BUILTIN_READ_PROCESS_STDOUT, BUILTIN_START_PROCESS_CONFIGURED, BUILTIN_TERMINATE_PROCESS,
+    BUILTIN_WAIT_PROCESS, BUILTIN_WRITE_PROCESS_STDIN,
+};
 
 use crate::heap::{HeapObject, IoAction};
 use crate::values::Value;
@@ -560,6 +565,49 @@ static ALL_BUILTINS: &[Builtin] = &[
         "runProcessConfigured",
         1,
         run_process_configured_action
+    ),
+    builtin!(
+        BUILTIN_START_PROCESS_CONFIGURED,
+        "startProcessConfigured",
+        1,
+        start_process_configured_action
+    ),
+    builtin!(
+        BUILTIN_READ_PROCESS_STDOUT,
+        "readProcessStdout",
+        2,
+        read_process_stdout_action
+    ),
+    builtin!(
+        BUILTIN_READ_PROCESS_STDERR,
+        "readProcessStderr",
+        2,
+        read_process_stderr_action
+    ),
+    builtin!(
+        BUILTIN_WRITE_PROCESS_STDIN,
+        "writeProcessStdin",
+        2,
+        write_process_stdin_action
+    ),
+    builtin!(
+        BUILTIN_CLOSE_PROCESS_STDIN,
+        "closeProcessStdin",
+        1,
+        close_process_stdin_action
+    ),
+    builtin!(BUILTIN_WAIT_PROCESS, "waitProcess", 1, wait_process_action),
+    builtin!(
+        BUILTIN_TERMINATE_PROCESS,
+        "terminateProcess",
+        1,
+        terminate_process_action
+    ),
+    builtin!(
+        BUILTIN_CLOSE_PROCESS,
+        "closeProcess",
+        1,
+        close_process_action
     ),
     builtin!(BUILTIN_EXIT_WITH, "exitWith", 1, exit_with),
     builtin!(

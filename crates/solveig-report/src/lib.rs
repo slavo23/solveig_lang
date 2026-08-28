@@ -53,9 +53,19 @@ fn write_diagnostic<W: Write>(
     writer: &mut W,
     color: bool,
 ) -> io::Result<()> {
-    let anchor = diagnostic
-        .anchor_span()
-        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "diagnostic has no labels"))?;
+    let Some(anchor) = diagnostic.anchor_span() else {
+        writeln!(
+            writer,
+            "[{}] {}: {}",
+            diagnostic.code,
+            severity_name(diagnostic.severity),
+            diagnostic.message
+        )?;
+        for note in &diagnostic.notes {
+            writeln!(writer, "  note: {note}")?;
+        }
+        return Ok(());
+    };
 
     let anchor_span = ariadne_span(source_map, *anchor);
     let mut builder = Report::build(report_kind(diagnostic.severity), anchor_span)
@@ -75,6 +85,14 @@ fn write_diagnostic<W: Write>(
     }
 
     builder.finish().write(source_cache(source_map), writer)
+}
+
+fn severity_name(severity: Severity) -> &'static str {
+    match severity {
+        Severity::Error => "Error",
+        Severity::Warning => "Warning",
+        Severity::Note => "Note",
+    }
 }
 
 fn report_kind(severity: Severity) -> ReportKind<'static> {
@@ -120,5 +138,16 @@ mod tests {
         assert!(rendered.contains("Error: bad name"));
         assert!(rendered.contains("[T0001]"));
         assert!(rendered.contains("unknown here"));
+    }
+
+    #[test]
+    fn renders_diagnostic_without_source_labels() {
+        let diagnostic = Diagnostic::error("CORE0001", "core verification failed")
+            .with_note("inferred type did not match");
+
+        let rendered = render_diagnostics_no_color(&[diagnostic], &SourceMap::new()).unwrap();
+
+        assert!(rendered.contains("[CORE0001] Error: core verification failed"));
+        assert!(rendered.contains("note: inferred type did not match"));
     }
 }

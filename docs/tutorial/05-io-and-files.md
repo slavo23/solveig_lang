@@ -266,6 +266,45 @@ child has been terminated and reaped.
 `processExitCode` returns opaque `ExitCode`; use `isExitSuccess` for the
 common branch or `exitCodeToInt` at a host/protocol boundary.
 
+For a large-output or interactive child, use `withProcess`. Its callback owns
+a live `ProcessHandle` whose type-level scope prevents it and its streams from
+escaping:
+
+```solveig
+import std.bytes(bytesLength)
+import std.process(*)
+import std.stream(Stream, fold)
+import std.task(concurrently)
+
+countBytes : forall scope. Stream scope ProcessError Bytes -> IO ProcessError Int
+countBytes = fold (fun total chunk => total + bytesLength chunk) 0
+
+measureOutputs : Process -> IO ProcessError (Int, Int, ExitCode)
+measureOutputs request =
+    withProcess 32768 request (fun child => do
+        (stdoutBytes, stderrBytes) <- concurrently
+            (countBytes (processStdout child))
+            (countBytes (processStderr child))
+        status <- waitProcess child
+        pureIO (stdoutBytes, stderrBytes, status))
+```
+
+The positive size bounds every output pull. No output is read ahead. Drain
+stdout and stderr concurrently when both might be large; reading one to EOF
+first can allow the other operating-system pipe to fill and stop the child.
+If one stream is irrelevant, select `discardStandardOutput` or
+`discardStandardError`; the runtime drains it without retaining bytes.
+
+Interactive stdin is explicit. Derive the request with `pipeStandardInput`,
+then send chunks no larger than the `withProcess` size. Each write waits until
+the host pipe has accepted and flushed that chunk, providing backpressure.
+Call `closeProcessStdin` to deliver EOF; a repeated successful close is safe.
+`waitProcess` waits without consuming unread output, while `terminateProcess`
+stops and reaps the direct child and leaves captured streams readable to EOF.
+Returning from the callback for any reason closes all pipes and reaps a
+still-running direct child. Wrap the whole `withProcess` action in `timeout`
+when the complete session needs a deadline.
+
 ## Cleanup patterns
 
 Use the narrowest helper that owns the resource:
@@ -273,6 +312,7 @@ Use the narrowest helper that owns the resource:
 - `withFile` for handles;
 - `withConnection` for outgoing sockets;
 - `withListener` for listeners;
+- `withProcess` for live child pipes;
 - `withThread` for child tasks;
 - `bracket` for custom acquire/use/release lifetimes;
 - `finally` when only an unconditional cleanup action is needed.

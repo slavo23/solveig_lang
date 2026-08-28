@@ -204,6 +204,33 @@ pub enum IoAction {
     RunProcess {
         request: Value,
     },
+    StartProcess {
+        request: Value,
+    },
+    ReadProcessStdout {
+        process: Value,
+        maximum: i64,
+    },
+    ReadProcessStderr {
+        process: Value,
+        maximum: i64,
+    },
+    WriteProcessStdin {
+        process: Value,
+        bytes: Value,
+    },
+    CloseProcessStdin {
+        process: Value,
+    },
+    WaitProcess {
+        process: Value,
+    },
+    TerminateProcess {
+        process: Value,
+    },
+    CloseProcess {
+        process: Value,
+    },
     Exit {
         status: i64,
     },

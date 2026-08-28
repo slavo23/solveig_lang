@@ -1,6 +1,11 @@
 //! Type schemes for runtime environment and filesystem primitives.
 
 use super::*;
+use solveig_ast::ast::{
+    BUILTIN_CLOSE_PROCESS, BUILTIN_CLOSE_PROCESS_STDIN, BUILTIN_READ_PROCESS_STDERR,
+    BUILTIN_READ_PROCESS_STDOUT, BUILTIN_START_PROCESS_CONFIGURED, BUILTIN_TERMINATE_PROCESS,
+    BUILTIN_WAIT_PROCESS, BUILTIN_WRITE_PROCESS_STDIN,
+};
 
 pub(super) fn os_builtin_specs(
     names: &mut Names,
@@ -29,6 +34,8 @@ pub(super) fn os_builtin_specs(
     let environment = Ty::make_app(Ty::make_con_id(prelude_list_tycon_id(names)), string_pair);
     let maybe_int = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), int.clone());
     let process_result = Ty::make_con_id(std_process_result_tycon_id(names));
+    let child_process = Ty::make_con_id(PRIM_TYS.child_process);
+    let process_input = tuple(names, &[bool_ty.clone(), bytes.clone()]);
     let process_config = tuple(
         names,
         &[
@@ -36,7 +43,7 @@ pub(super) fn os_builtin_specs(
             bool_ty.clone(),
             environment.clone(),
             string_list.clone(),
-            bytes.clone(),
+            process_input,
             bool_ty.clone(),
             bool_ty.clone(),
             maybe_int,
@@ -174,7 +181,55 @@ pub(super) fn os_builtin_specs(
             "runProcessConfigured",
             BUILTIN_RUN_PROCESS_CONFIGURED,
             1,
-            unary(process_request, task(process_result)),
+            unary(process_request.clone(), task(process_result)),
+        ),
+        prim_spec(
+            "startProcessConfigured",
+            BUILTIN_START_PROCESS_CONFIGURED,
+            1,
+            unary(process_request, task(child_process.clone())),
+        ),
+        prim_spec(
+            "readProcessStdout",
+            BUILTIN_READ_PROCESS_STDOUT,
+            2,
+            arr(&[child_process.clone(), int.clone()], task(bytes.clone())),
+        ),
+        prim_spec(
+            "readProcessStderr",
+            BUILTIN_READ_PROCESS_STDERR,
+            2,
+            arr(&[child_process.clone(), int.clone()], task(bytes.clone())),
+        ),
+        prim_spec(
+            "writeProcessStdin",
+            BUILTIN_WRITE_PROCESS_STDIN,
+            2,
+            arr(&[child_process.clone(), bytes.clone()], task(Ty::TyUnit)),
+        ),
+        prim_spec(
+            "closeProcessStdin",
+            BUILTIN_CLOSE_PROCESS_STDIN,
+            1,
+            unary(child_process.clone(), task(Ty::TyUnit)),
+        ),
+        prim_spec(
+            "waitProcess",
+            BUILTIN_WAIT_PROCESS,
+            1,
+            unary(child_process.clone(), task(int.clone())),
+        ),
+        prim_spec(
+            "terminateProcess",
+            BUILTIN_TERMINATE_PROCESS,
+            1,
+            unary(child_process.clone(), task(int.clone())),
+        ),
+        prim_spec(
+            "closeProcess",
+            BUILTIN_CLOSE_PROCESS,
+            1,
+            unary(child_process, task(Ty::TyUnit)),
         ),
         prim_spec(
             "exitWith",

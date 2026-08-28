@@ -1,5 +1,6 @@
 export (
     Int, Float, Char, String, IO, Bool(..), ThreadId, Chan, Bytes, Socket, Handle, StdGen,
+    ChildProcess,
     Maybe(..), Either(..), Tuple2(..), Tuple3(..), Tuple4(..), Tuple5(..),
     Tuple6(..), Tuple7(..), Tuple8(..), Never, HostErrorKind(..), HostError(..),
     hostErrorKind, hostErrorOperation, hostErrorMessage, Utf8Error(..), Defect(..), Task,

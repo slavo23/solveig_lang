@@ -70,6 +70,8 @@ prelude.prim.charToCodePoint : Char -> Int
 prelude.prim.charToString : Char -> String
 prelude.prim.charsToString : [Char] -> String
 prelude.prim.closeChan : forall a. Chan a -> IO HostError ()
+prelude.prim.closeProcess : ChildProcess -> IO HostError ()
+prelude.prim.closeProcessStdin : ChildProcess -> IO HostError ()
 prelude.prim.closeSocket : Socket -> IO HostError ()
 prelude.prim.codePointToString : Int -> Maybe String
 prelude.prim.connect : String -> Int -> IO HostError Socket
@@ -153,19 +155,22 @@ prelude.prim.readFileBytes : String -> IO HostError Bytes
 prelude.prim.readFileBytesLimited : String -> Int -> IO HostError Bytes
 prelude.prim.readFileLimited : String -> Int -> IO HostError String
 prelude.prim.readLine : IO HostError String
+prelude.prim.readProcessStderr : ChildProcess -> Int -> IO HostError Bytes
+prelude.prim.readProcessStdout : ChildProcess -> Int -> IO HostError Bytes
 prelude.prim.recv : forall a. Chan a -> IO HostError a
 prelude.prim.recvBytes : Socket -> Int -> IO HostError Bytes
 prelude.prim.removeFile : String -> IO HostError ()
 prelude.prim.renameFile : String -> String -> IO HostError ()
 prelude.prim.resolveHost : String -> IO HostError String
 prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
-prelude.prim.runProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], Bytes, Bool, Bool, Maybe Int)) -> IO HostError ProcessResult
+prelude.prim.runProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ProcessResult
 prelude.prim.send : forall a. Chan a -> a -> IO HostError ()
 prelude.prim.sendBytes : Socket -> Bytes -> IO HostError ()
 prelude.prim.setCurrentDirectory : String -> IO HostError ()
 prelude.prim.setEnv : String -> String -> IO HostError ()
 prelude.prim.sleep : Int -> IO HostError ()
 prelude.prim.spawn : forall e f. IO e () -> IO f ThreadId
+prelude.prim.startProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ChildProcess
 prelude.prim.stderr : Handle
 prelude.prim.stdin : Handle
 prelude.prim.stdout : Handle
@@ -184,11 +189,14 @@ prelude.prim.stringToBytes : String -> Bytes
 prelude.prim.stringToChars : String -> [Char]
 prelude.prim.stringTrimAscii : String -> String
 prelude.prim.stringsConcat : [String] -> String
+prelude.prim.terminateProcess : ChildProcess -> IO HostError Int
 prelude.prim.tryRecv : forall a. Chan a -> IO HostError (Maybe a)
+prelude.prim.waitProcess : ChildProcess -> IO HostError Int
 prelude.prim.writeFile : String -> String -> IO HostError ()
 prelude.prim.writeFileAtomic : String -> String -> IO HostError ()
 prelude.prim.writeFileBytes : String -> Bytes -> IO HostError ()
 prelude.prim.writeFileBytesAtomic : String -> Bytes -> IO HostError ()
+prelude.prim.writeProcessStdin : ChildProcess -> Bytes -> IO HostError ()
 prelude.show.showCharPayload : Char -> String
 prelude.show.showListItems : forall a. Show a => [a] -> String
 prelude.show.showStringChars : [Char] -> String
@@ -707,6 +715,7 @@ std.process.captureStandardOutput : Process -> Process
 std.process.captures : ProcessOutputPolicy -> Bool
 std.process.charsContainNull : [Char] -> Bool
 std.process.clearProcessEnvironment : Process -> Process
+std.process.closeProcessStdin : forall scope. ProcessHandle scope -> IO ProcessError ()
 std.process.containsEquals : [Char] -> Bool
 std.process.containsNull : String -> Bool
 std.process.discardStandardError : Process -> Process
@@ -721,23 +730,36 @@ std.process.inheritProcessWorkingDirectory : Process -> Process
 std.process.inheritsEnvironment : ProcessEnvironmentBase -> Bool
 std.process.invalidEnvironmentName : String -> Bool
 std.process.isExitSuccess : ExitCode -> Bool
+std.process.mapProcessHostError : forall a. Process -> IO HostError a -> IO ProcessError a
+std.process.pipeStandardInput : Process -> Process
 std.process.process : String -> [String] -> Either ProcessError Process
 std.process.processArguments : Process -> [String]
 std.process.processExitCode : ProcessResult -> ExitCode
+std.process.processHandle : Process -> ChildProcess -> Int -> ProcessHandle ()
 std.process.processProgram : Process -> String
+std.process.processStderr : forall scope. ProcessHandle scope -> Stream scope ProcessError Bytes
 std.process.processStderrBytes : ProcessResult -> Bytes
+std.process.processStderrStep : Process -> ChildProcess -> Int -> () -> IO ProcessError (Maybe (Bytes, ()))
 std.process.processStderrText : ProcessResult -> Either Utf8Error String
+std.process.processStdout : forall scope. ProcessHandle scope -> Stream scope ProcessError Bytes
 std.process.processStdoutBytes : ProcessResult -> Bytes
+std.process.processStdoutStep : Process -> ChildProcess -> Int -> () -> IO ProcessError (Maybe (Bytes, ()))
 std.process.processStdoutText : ProcessResult -> Either Utf8Error String
 std.process.processWorkingDirectory : Process -> Maybe Path
 std.process.runProcess : Process -> IO ProcessError ProcessResult
 std.process.runProcessLimited : Process -> Int -> IO ProcessError ProcessResult
 std.process.runProcessTimeout : Duration -> Process -> IO ProcessError (Maybe ProcessResult)
 std.process.runProcessWithLimit : Process -> Maybe Int -> IO ProcessError ProcessResult
+std.process.streamBytes : Bytes -> IO ProcessError (Maybe (Bytes, ()))
+std.process.streamingInput : ProcessInput -> (Bool, Bytes)
+std.process.streamingProcessRequest : forall a. Process -> (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe a))
+std.process.terminateProcess : forall scope. ProcessHandle scope -> IO ProcessError ExitCode
 std.process.validateEnvironment : String -> String -> Either ProcessError ()
+std.process.waitProcess : forall scope. ProcessHandle scope -> IO ProcessError ExitCode
 std.process.withArgument : String -> Process -> Either ProcessError Process
 std.process.withArguments : [String] -> Process -> Either ProcessError Process
 std.process.withEnvironment : String -> String -> Process -> Either ProcessError Process
+std.process.withProcess : forall result. Int -> Process -> (forall scope. ProcessHandle scope -> IO ProcessError result) -> IO ProcessError result
 std.process.withStandardInput : Bytes -> Process -> Process
 std.process.withStandardInputText : String -> Process -> Process
 std.process.withWorkingDirectory : Path -> Process -> Process
@@ -746,6 +768,7 @@ std.process.withoutEnvironmentEntry : String -> [(String, String)] -> [(String, 
 std.process.withoutStandardInput : Process -> Process
 std.process.workingDirectoryPath : ProcessWorkingDirectory -> Maybe Path
 std.process.workingDirectoryText : ProcessWorkingDirectory -> String
+std.process.writeProcessStdin : forall scope. ProcessHandle scope -> Bytes -> IO ProcessError ()
 std.queue.dequeue : forall a. Queue a -> Maybe (a, Queue a)
 std.queue.empty : forall a. Queue a
 std.queue.enqueue : forall a. Queue a -> a -> Queue a
@@ -802,7 +825,8 @@ std.stream.takeNext : forall scope e a. Int -> Stream scope e a -> IO e (StreamS
 std.stream.textStep : forall e. String -> (Int, Int) -> IO e (Maybe (Char, (Int, Int)))
 std.stream.toListLimited : forall scope e a. Int -> Stream scope e a -> IO e (Either StreamError [a])
 std.stream.unfold : forall e state a. (state -> IO e (Maybe (a, state))) -> state -> Stream () e a
-std.stream.unfoldStep : forall e state a. (state -> IO e (Maybe (a, state))) -> Maybe (a, state) -> StreamStep () e a
+std.stream.unfoldScoped : forall scope e state a. (state -> IO e (Maybe (a, state))) -> state -> Stream scope e a
+std.stream.unfoldScopedStep : forall scope e state a. (state -> IO e (Maybe (a, state))) -> Maybe (a, state) -> StreamStep scope e a
 std.task.asConcurrentInfrastructure : forall e a. IO HostError a -> IO (ConcurrentError e) a
 std.task.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
 std.task.captureWorker : forall e a b. (a -> IO e b) -> a -> IO (ConcurrentError e) (Either e b)

@@ -4,19 +4,23 @@ export (
     inheritProcessEnvironment,
     clearProcessEnvironment, withEnvironment, withoutEnvironment,
     withStandardInput, withStandardInputText, withoutStandardInput,
+    pipeStandardInput,
     captureStandardOutput, discardStandardOutput, captureStandardError,
     discardStandardError, processProgram, processArguments,
     processWorkingDirectory, ProcessResult, processExitCode,
     processStdoutBytes, processStderrBytes, processStdoutText,
     processStderrText, ExitCode, exitCodeFromInt, exitCodeToInt,
     isExitSuccess, runProcess, runProcessLimited, runProcessTimeout,
+    ProcessHandle, withProcess, processStdout, processStderr,
+    writeProcessStdin, closeProcessStdin, waitProcess, terminateProcess,
     exitWith, exitSuccess, exitFailure
 )
 
-import prelude.prim(exitWith, runProcessConfigured)
+import prelude.prim(exitWith, runProcessConfigured, startProcessConfigured)
 import std.bytes(bytesLength, bytesToString, stringToBytes)
 import std.path(Path, pathToString)
-import std.task(timeout)
+import std.stream(Stream, emptyScoped, unfoldScoped)
+import std.task(bracket, timeout)
 import std.text(charToCodePoint, stringToChars)
 import std.time(Duration)
 
@@ -69,10 +73,14 @@ instance Eq ProcessEnvironment where
                 (leftBase == rightBase)
                 (and (leftSets == rightSets) (leftRemovals == rightRemovals))
 
-data ProcessInput = ProcessInput Bytes
+data ProcessInput =
+    StrictInput Bytes
+  | StreamInput
 
 instance Eq ProcessInput where
-    (==) (ProcessInput left) (ProcessInput right) = left == right
+    (==) (StrictInput left) (StrictInput right) = left == right
+    (==) StreamInput StreamInput = True
+    (==) _ _ = False
 
 data ProcessOutputs =
     ProcessOutputs ProcessOutputPolicy ProcessOutputPolicy
@@ -153,7 +161,7 @@ process programName arguments =
                 (ProcessConfig
                     InheritWorkingDirectory
                     (ProcessEnvironment InheritEnvironment [] [])
-                    (ProcessInput (stringToBytes ""))
+                    (StrictInput (stringToBytes ""))
                     (ProcessOutputs CaptureOutput CaptureOutput)))
 
 -- | Appends one argument in invocation order.
@@ -218,7 +226,7 @@ withoutEnvironment name (Process command (ProcessConfig cwd (ProcessEnvironment 
 -- | Supplies arbitrary bytes to standard input and closes it after writing.
 withStandardInput : Bytes -> Process -> Process
 withStandardInput input (Process command (ProcessConfig cwd environment _ outputs)) =
-    Process command (ProcessConfig cwd environment (ProcessInput input) outputs)
+    Process command (ProcessConfig cwd environment (StrictInput input) outputs)
 
 -- | Supplies UTF-8 text to standard input and closes it after writing.
 withStandardInputText : String -> Process -> Process
@@ -227,6 +235,13 @@ withStandardInputText input = withStandardInput (stringToBytes input)
 -- | Supplies an immediate end-of-file on standard input.
 withoutStandardInput : Process -> Process
 withoutStandardInput = withStandardInput (stringToBytes "")
+
+-- | Exposes bounded writes to the child's standard input inside withProcess.
+-- |
+-- | Strict runProcess calls reject this policy because no scoped handle exists.
+pipeStandardInput : Process -> Process
+pipeStandardInput (Process command (ProcessConfig cwd environment _ outputs)) =
+    Process command (ProcessConfig cwd environment StreamInput outputs)
 
 -- | Retains standard output in the completed result.
 captureStandardOutput : Process -> Process
@@ -343,23 +358,189 @@ runProcessWithLimit processValue maximum =
             (ProcessConfig
                 cwd
                 (ProcessEnvironment environmentBase environment removed)
-                (ProcessInput stdinBytes)
+                input
                 (ProcessOutputs stdoutPolicy stderrPolicy)) =>
-            mapError
-                (ProcessHostError processValue)
-                (prelude.prim.runProcessConfigured
-                    ( programName
-                    , arguments
-                    , ( workingDirectoryText cwd
-                      , inheritsEnvironment environmentBase
-                      , environment
-                      , removed
-                      , stdinBytes
-                      , captures stdoutPolicy
-                      , captures stderrPolicy
-                      , maximum
-                      )
-                    ))
+            case input of
+                StreamInput =>
+                    failIO
+                        (InvalidProcess
+                            "streamed standard input requires withProcess")
+                | StrictInput stdinBytes =>
+                    mapError
+                        (ProcessHostError processValue)
+                        (prelude.prim.runProcessConfigured
+                            ( programName
+                            , arguments
+                            , ( workingDirectoryText cwd
+                              , inheritsEnvironment environmentBase
+                              , environment
+                              , removed
+                              , (False, stdinBytes)
+                              , captures stdoutPolicy
+                              , captures stderrPolicy
+                              , maximum
+                              )
+                            ))
+
+-- | A live direct child whose lifetime cannot escape withProcess.
+data ProcessHandle scope =
+    ProcessHandle Process ChildProcess Int ProcessInput ProcessOutputs
+
+-- | Runs a child with demand-driven output streams and scoped cleanup.
+-- |
+-- | The positive chunk size bounds every stdout/stderr pull. CaptureOutput
+-- | exposes that stream through processStdout or processStderr; DiscardOutput
+-- | drains it concurrently and exposes an empty stream. Returning, failing,
+-- | raising a defect, or interruption terminates and reaps a still-running
+-- | child before the scope exits.
+withProcess : forall result. Int -> Process -> (forall scope. ProcessHandle scope -> IO ProcessError result) -> IO ProcessError result
+withProcess chunkSize processValue use =
+    if chunkSize <= 0 then
+        failIO (InvalidProcess "the process stream chunk size must be positive")
+    else
+        bracket
+            (mapProcessHostError
+                processValue
+                (prelude.prim.startProcessConfigured
+                    (streamingProcessRequest processValue)))
+            (fun child =>
+                mapProcessHostError processValue (prelude.prim.closeProcess child))
+            (fun child =>
+                use (processHandle processValue child chunkSize))
+
+-- The public callback is universal in scope, so this private implementation
+-- may instantiate the erased phantom with () without weakening escape safety.
+processHandle : Process -> ChildProcess -> Int -> ProcessHandle ()
+processHandle processValue child chunkSize =
+    case processValue of
+        Process _ (ProcessConfig _ _ input outputs) =>
+            ProcessHandle processValue child chunkSize input outputs
+
+-- | Pulls non-empty stdout chunks on demand, or ends immediately when discarded.
+-- |
+-- | Call once per handle and consume the returned stream through one continuation.
+processStdout : forall scope. ProcessHandle scope -> Stream scope ProcessError Bytes
+processStdout
+    (ProcessHandle processValue child chunkSize _ (ProcessOutputs stdoutPolicy _)) =
+        case stdoutPolicy of
+            DiscardOutput => emptyScoped
+            | CaptureOutput =>
+                unfoldScoped
+                    (processStdoutStep processValue child chunkSize)
+                    ()
+
+-- | Pulls non-empty stderr chunks on demand, or ends immediately when discarded.
+-- |
+-- | Call once per handle and consume the returned stream through one continuation.
+processStderr : forall scope. ProcessHandle scope -> Stream scope ProcessError Bytes
+processStderr
+    (ProcessHandle processValue child chunkSize _ (ProcessOutputs _ stderrPolicy)) =
+        case stderrPolicy of
+            DiscardOutput => emptyScoped
+            | CaptureOutput =>
+                unfoldScoped
+                    (processStderrStep processValue child chunkSize)
+                    ()
+
+processStdoutStep : Process -> ChildProcess -> Int -> () -> IO ProcessError (Maybe (Bytes, ()))
+processStdoutStep processValue child chunkSize _ = do
+    bytes <- mapProcessHostError
+        processValue
+        (prelude.prim.readProcessStdout child chunkSize)
+    streamBytes bytes
+
+processStderrStep : Process -> ChildProcess -> Int -> () -> IO ProcessError (Maybe (Bytes, ()))
+processStderrStep processValue child chunkSize _ = do
+    bytes <- mapProcessHostError
+        processValue
+        (prelude.prim.readProcessStderr child chunkSize)
+    streamBytes bytes
+
+streamBytes : Bytes -> IO ProcessError (Maybe (Bytes, ()))
+streamBytes bytes =
+    if bytesLength bytes == 0 then pureIO Nothing
+    else pureIO (Just (bytes, ()))
+
+-- | Writes one complete bounded chunk to streamed stdin with backpressure.
+-- |
+-- | Writes on one handle are intended to be sequenced rather than raced.
+writeProcessStdin : forall scope. ProcessHandle scope -> Bytes -> IO ProcessError ()
+writeProcessStdin
+    (ProcessHandle processValue child chunkSize input _)
+    bytes =
+        case input of
+            StrictInput _ =>
+                failIO
+                    (InvalidProcess
+                        "writeProcessStdin requires pipeStandardInput")
+            | StreamInput =>
+                if bytesLength bytes > chunkSize then
+                    failIO
+                        (InvalidProcess
+                            ("standard-input chunk exceeds withProcess chunk size of "
+                                <> show chunkSize
+                                <> " bytes"))
+                else
+                    mapProcessHostError
+                        processValue
+                        (prelude.prim.writeProcessStdin child bytes)
+
+-- | Flushes, closes streamed stdin, and is idempotent after a successful close.
+closeProcessStdin : forall scope. ProcessHandle scope -> IO ProcessError ()
+closeProcessStdin
+    (ProcessHandle processValue child _ input _) =
+        case input of
+            StrictInput _ =>
+                failIO
+                    (InvalidProcess
+                        "closeProcessStdin requires pipeStandardInput")
+            | StreamInput =>
+                mapProcessHostError
+                    processValue
+                    (prelude.prim.closeProcessStdin child)
+
+-- | Waits for natural child completion without closing unread output streams.
+waitProcess : forall scope. ProcessHandle scope -> IO ProcessError ExitCode
+waitProcess (ProcessHandle processValue child _ _ _) =
+    fmap
+        ExitCode
+        (mapProcessHostError processValue (prelude.prim.waitProcess child))
+
+-- | Terminates and reaps the direct child while leaving its pipes readable to EOF.
+terminateProcess : forall scope. ProcessHandle scope -> IO ProcessError ExitCode
+terminateProcess (ProcessHandle processValue child _ _ _) =
+    fmap
+        ExitCode
+        (mapProcessHostError processValue (prelude.prim.terminateProcess child))
+
+mapProcessHostError : forall a. Process -> IO HostError a -> IO ProcessError a
+mapProcessHostError processValue = mapError (ProcessHostError processValue)
+
+streamingProcessRequest processValue =
+    case processValue of
+        Process
+            (ProcessCommand programName arguments)
+            (ProcessConfig
+                cwd
+                (ProcessEnvironment environmentBase environment removed)
+                input
+                (ProcessOutputs stdoutPolicy stderrPolicy)) =>
+            ( programName
+            , arguments
+            , ( workingDirectoryText cwd
+              , inheritsEnvironment environmentBase
+              , environment
+              , removed
+              , streamingInput input
+              , captures stdoutPolicy
+              , captures stderrPolicy
+              , Nothing
+              )
+            )
+
+streamingInput : ProcessInput -> (Bool, Bytes)
+streamingInput (StrictInput bytes) = (False, bytes)
+streamingInput StreamInput = (True, stringToBytes "")
 
 workingDirectoryPath : ProcessWorkingDirectory -> Maybe Path
 workingDirectoryPath InheritWorkingDirectory = Nothing

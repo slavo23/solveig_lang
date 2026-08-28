@@ -470,7 +470,7 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
     })
 }
 
-fn compiler_type_entries() -> [(&'static str, TyConId); 12] {
+fn compiler_type_entries() -> [(&'static str, TyConId); 13] {
     [
         ("Int", PRIM_TYS.int),
         ("Float", PRIM_TYS.float),
@@ -484,6 +484,7 @@ fn compiler_type_entries() -> [(&'static str, TyConId); 12] {
         ("Socket", PRIM_TYS.socket),
         ("Handle", PRIM_TYS.handle),
         ("StdGen", PRIM_TYS.std_gen),
+        ("ChildProcess", PRIM_TYS.child_process),
     ]
 }
 

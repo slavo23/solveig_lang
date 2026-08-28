@@ -47,6 +47,10 @@ impl Interpreter<'_> {
             IoResult::Process(output) => {
                 self.alloc_process_result(output.exit_code, &output.stdout, &output.stderr)?
             }
+            IoResult::StreamingProcess(process) => {
+                let process = self.io.register_streaming_process(process)?;
+                Value::ChildProcessId(process)
+            }
             IoResult::Http(response) => self.alloc_http_response(&response)?,
             IoResult::Failed(failure) => {
                 self.io_current = Some(self.alloc_io_failure_action(failure)?);

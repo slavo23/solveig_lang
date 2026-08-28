@@ -203,6 +203,73 @@ impl Interpreter<'_> {
                     }
                     return self.block_on_io(IoRequest::Process(request));
                 }
+                IoAction::StartProcess { request } => {
+                    let request = self.prepare_process_request(request)?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::StartProcess(request));
+                }
+                IoAction::ReadProcessStdout { process, maximum } => {
+                    let process = self.expect_child_process_id(process, "readProcessStdout")?;
+                    validate_process_chunk_size(maximum, "readProcessStdout")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::ReadProcessStdout { process, maximum });
+                }
+                IoAction::ReadProcessStderr { process, maximum } => {
+                    let process = self.expect_child_process_id(process, "readProcessStderr")?;
+                    validate_process_chunk_size(maximum, "readProcessStderr")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::ReadProcessStderr { process, maximum });
+                }
+                IoAction::WriteProcessStdin { process, bytes } => {
+                    let process = self.expect_child_process_id(process, "writeProcessStdin")?;
+                    let bytes = self.expect_bytes_value(bytes, "writeProcessStdin")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::WriteProcessStdin { process, bytes });
+                }
+                IoAction::CloseProcessStdin { process } => {
+                    let process = self.expect_child_process_id(process, "closeProcessStdin")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::CloseProcessStdin(process));
+                }
+                IoAction::WaitProcess { process } => {
+                    let process = self.expect_child_process_id(process, "waitProcess")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::WaitProcess(process));
+                }
+                IoAction::TerminateProcess { process } => {
+                    let process = self.expect_child_process_id(process, "terminateProcess")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::TerminateProcess(process));
+                }
+                IoAction::CloseProcess { process } => {
+                    let process = self.expect_child_process_id(process, "closeProcess")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::CloseProcess(process));
+                }
                 IoAction::Spawn { action } => {
                     let thread_id = self.spawn_io_process(action);
                     if let Some(value) = self.resume_io_value(program, thread_id)? {
@@ -720,5 +787,15 @@ impl Interpreter<'_> {
                 }
             }
         }
+    }
+}
+
+fn validate_process_chunk_size(maximum: i64, operation: &str) -> Result<(), RuntimeError> {
+    if maximum > 0 && usize::try_from(maximum).is_ok() {
+        Ok(())
+    } else {
+        Err(RuntimeError::builtin(format!(
+            "{operation} chunk size must be a positive host-representable Int"
+        )))
     }
 }

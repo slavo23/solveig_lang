@@ -21,6 +21,7 @@ pub struct PrimTys {
     pub socket: TyConId,
     pub handle: TyConId,
     pub std_gen: TyConId,
+    pub child_process: TyConId,
     pub true_ctor: CtorId,
     pub false_ctor: CtorId,
 }
@@ -38,6 +39,7 @@ pub const PRIM_TYS: PrimTys = PrimTys {
     socket: TyConId(9),
     handle: TyConId(10),
     std_gen: TyConId(11),
+    child_process: TyConId(12),
     true_ctor: CtorId(0),
     false_ctor: CtorId(1),
 };
@@ -115,6 +117,13 @@ pub fn compiler_primitive_tycon_infos(names: &mut Names) -> Vec<(TyConId, TyConI
             "StdGen",
             Kind::Star,
         ),
+        compiler_primitive_tycon_info(
+            names,
+            PRIM_TYS.child_process,
+            COMPILER_CHILD_PROCESS_NAME,
+            "ChildProcess",
+            Kind::Star,
+        ),
     ]
 }
 
@@ -134,6 +143,7 @@ pub fn compiler_primitive_tycon_kinds() -> FxHashMap<TyConId, Kind> {
         (PRIM_TYS.socket, Kind::Star),
         (PRIM_TYS.handle, Kind::Star),
         (PRIM_TYS.std_gen, Kind::Star),
+        (PRIM_TYS.child_process, Kind::Star),
     ])
 }
 

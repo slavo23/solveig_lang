@@ -442,6 +442,14 @@ process : String -> [String] -> Either ProcessError Process
 runProcess : Process -> IO ProcessError ProcessResult
 runProcessLimited : Process -> Int -> IO ProcessError ProcessResult
 runProcessTimeout : Duration -> Process -> IO ProcessError (Maybe ProcessResult)
+pipeStandardInput : Process -> Process
+withProcess : forall result. Int -> Process -> (forall scope. ProcessHandle scope -> IO ProcessError result) -> IO ProcessError result
+processStdout : forall scope. ProcessHandle scope -> Stream scope ProcessError Bytes
+processStderr : forall scope. ProcessHandle scope -> Stream scope ProcessError Bytes
+writeProcessStdin : forall scope. ProcessHandle scope -> Bytes -> IO ProcessError ()
+closeProcessStdin : forall scope. ProcessHandle scope -> IO ProcessError ()
+waitProcess : forall scope. ProcessHandle scope -> IO ProcessError ExitCode
+terminateProcess : forall scope. ProcessHandle scope -> IO ProcessError ExitCode
 processExitCode : ProcessResult -> ExitCode
 processStdoutBytes : ProcessResult -> Bytes
 processStderrBytes : ProcessResult -> Bytes
@@ -483,13 +491,67 @@ The maximum counts bytes and applies only to streams selected for capture.
 `runProcessTimeout duration processValue` returns `Nothing` after interrupting,
 terminating, and reaping the direct child; completion returns `Just result`.
 
-Process execution uses the bounded blocking pool. Each active capture drains
+Use `withProcess chunkSize processValue callback` when output must be processed
+incrementally or stdin must be fed over time. The positive chunk size bounds
+each stdout/stderr pull and each call to `writeProcessStdin`; output streams do
+not read ahead, and a stdin write returns only after the host pipe accepted and
+flushed the complete chunk. Select `pipeStandardInput` before starting the
+child, write one or more chunks, and call `closeProcessStdin` to deliver EOF.
+Closing stdin is idempotent after its first successful close.
+
+`processStdout` and `processStderr` use the ordinary rank-2 scoped `Stream`
+type. A captured stream yields non-empty `Bytes` chunks and ends at EOF. A
+discarded stream is drained concurrently by the runtime and is exposed as an
+empty stream. When both captured streams may be large, consume them with
+`concurrently`; draining one complete stream before touching the other can let
+the unconsumed operating-system pipe fill and block the child.
+Obtain each output stream once and follow only the remaining stream returned by
+each pull. Sequence writes on one process handle; racing duplicate stream pulls
+or stdin writes is outside the resource protocol.
+
+```solveig
+import std.bytes(bytesLength)
+import std.process(*)
+import std.stream(Stream, fold)
+import std.task(concurrently)
+
+byteCount : forall scope. Stream scope ProcessError Bytes -> IO ProcessError Int
+byteCount = fold (fun total chunk => total + bytesLength chunk) 0
+
+inspect : Process -> IO ProcessError (Int, Int, ExitCode)
+inspect request =
+    withProcess 32768 request (fun child => do
+        (stdoutBytes, stderrBytes) <- concurrently
+            (byteCount (processStdout child))
+            (byteCount (processStderr child))
+        status <- waitProcess child
+        pureIO (stdoutBytes, stderrBytes, status))
+```
+
+`waitProcess` waits for natural completion without consuming or closing unread
+output, so the remaining streams can still be drained afterward.
+`terminateProcess` terminates and reaps a running child and leaves captured
+pipes readable to EOF. Returning from the callback—normally, by typed failure,
+defect, timeout, or interruption—closes every pipe, terminates a still-running
+direct child, waits for it, and only then leaves the scope. The rank-2 scope
+prevents either `ProcessHandle` or its streams from escaping. Apply `timeout`
+to the complete `withProcess` action when the whole interactive session needs
+a deadline.
+
+Strict process execution uses the bounded blocking pool. Each active capture drains
 stdout and stderr concurrently so one full pipe cannot deadlock the other, and
 allocates packed language bytes only after the scheduler wakes the caller.
 Interrupting the calling Solveig thread signals the owning worker, which
 terminates and reaps the direct child before reusing that worker. Runtime
 shutdown sends the same cancellation signal. Descendant processes started by
 the child are outside this direct-child ownership contract.
+
+Live processes use one manager that alone owns the host child plus independent
+blocking pipe workers. Captured output workers read only in response to stream
+pulls; discarded output drains eagerly; streamed stdin processes one
+acknowledged write at a time. This portable design uses no async runtime and
+means each live child consumes a small fixed number of host threads. Bound the
+number of simultaneous `withProcess` scopes with structured concurrency.
 
 ## Program exit
 

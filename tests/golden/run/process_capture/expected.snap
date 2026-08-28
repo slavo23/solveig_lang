@@ -17,4 +17,10 @@ discarded-stderr
 process-timeout
 failure-exit=2
 failure-stderr
+streaming-dual-pipe
+streaming-discard
+streaming-input-bound
+streaming-stdin
+streaming-terminate
+streaming-timeout
 run-process-error

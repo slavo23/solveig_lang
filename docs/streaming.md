@@ -110,6 +110,30 @@ Ordinary `readFile` remains available when reading a complete trusted file is
 the simpler operation; use the stream when memory must stay bounded or the
 consumer may stop early.
 
+## Scoped child pipes
+
+`std.process.withProcess` applies the same scope rule to a live direct child.
+`processStdout` and `processStderr` perform one bounded host read per pull and
+yield non-empty `Bytes`; no following chunk is prefetched. If both captured
+streams may exceed an operating-system pipe buffer, drain them as two separate
+streams with `std.task.concurrently`. Pulling stdout to EOF before starting
+stderr is not generally safe, because a full stderr pipe can stop the child
+before it closes stdout.
+Obtain each process output stream once and preserve the general stream
+single-consumer rule. Stdin writes on one handle are likewise sequential.
+
+The request chooses capture or discard independently. A discarded stream is
+exposed as empty while its host pipe drains eagerly, so ignoring it cannot
+deadlock the child. `pipeStandardInput` enables explicit writes. Each write is
+bounded by the same positive chunk size and completes only after the whole
+chunk is written and flushed; `closeProcessStdin` then delivers EOF.
+
+Returning from the callback closes all pipe workers and terminates and reaps a
+still-running direct child. `waitProcess` does not consume output, so a program
+may wait and then finish draining finite captured streams. A timeout or thread
+interruption follows the same cleanup path. Neither the handle nor either
+stream can escape the callback's fresh scope.
+
 ## Failure and cancellation
 
 A stream does not catch failures. Its `next`, `fold`, and `forEach` actions
