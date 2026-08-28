@@ -137,12 +137,12 @@ fetchStatus url = do
     pureIO (statusCode (responseStatus response))
 
 fetchAll : [String] -> IO (ConcurrentError HttpError) [Int]
-fetchAll = mapConcurrentlyBounded 4 fetchStatus
+fetchAll = mapConcurrentlyBoundedOrdered 4 fetchStatus
 ```
 
-The result follows URL input order. If you need live completion order for a UI,
-have workers send indexed results to a channel and let a collector display each
-arrival before creating the final ordered structure.
+The result follows URL input order. Use
+`mapConcurrentlyBoundedCompletionOrder` when a UI or probe should receive the
+same successful results in arrival order instead.
 
 A token for an authenticated API should come from `std.env.getEnv` or
 `requireEnv`, then be added as a header. Never put the secret directly in
@@ -193,7 +193,7 @@ project:
 1. Binds a loopback listener on an automatically selected port.
 2. Starts the server in a `withThread` scope.
 3. Accepts three connections and scopes every connection handler.
-4. Runs three `fetch` clients through `mapConcurrentlyBounded`.
+4. Runs three `fetch` clients through `mapConcurrentlyBoundedOrdered`.
 5. Waits for all handlers through a typed channel.
 6. Closes every socket, channel, listener, and child scope.
 

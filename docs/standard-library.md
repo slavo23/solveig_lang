@@ -33,9 +33,9 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.channel` | Typed channel creation and communication |
 | `std.thread` | Raw lightweight-thread creation and interruption |
 | `std.task` | Cleanup, masking, structured concurrency, and bounded concurrent mapping |
-| `std.testing` | Small pure assertion values for checks in ordinary programs |
+| `std.testing` | Assertions, explicit deterministic generators, property checks, and resource-aware checks |
 | `std.time` | Sleeping, clock readings, and monotonic measurement |
-| `std.random` | Explicit deterministic pseudorandom state |
+| `std.random` | Explicit deterministic pseudorandom state and separate host-secure bytes |
 | `std.net` | TCP sockets and hostname resolution |
 
 ## Lists and text
@@ -442,20 +442,22 @@ withThread : IO e a -> (ThreadId -> IO e b) -> IO e b
 concurrently : IO e a -> IO e b -> IO e (a, b)
 race : IO e a -> IO e b -> IO e (Either a b)
 timeout : Duration -> IO e a -> IO e (Maybe a)
-mapConcurrentlyBounded : Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
+mapConcurrentlyBoundedOrdered : Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
+mapConcurrentlyBoundedCompletionOrder : Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
 ```
 
-`mapConcurrentlyBounded` scopes and joins its worker group, caps in-flight
-operations, preserves worker errors separately from pool infrastructure, and
-returns results in input order even when completion order differs. Use it for
-independent IO operations; keep sequential `mapM` for
-small CPU-only transformations where scheduling would add overhead.
+Both bounded maps scope and join their worker group, cap active operations, and
+preserve worker errors separately from pool infrastructure. The ordered form
+returns input order; the completion-order form retains arrival order. A bounded
+job channel applies worker-count backpressure. Use these functions for
+independent IO operations; keep sequential `mapM` for small CPU-only
+transformations where scheduling would add overhead.
 
 ## Testing helpers
 
-`std.testing` provides pure `assert`, `assertEqual`, `checkAll`, and
-`failureMessage` operations returning `Either TestFailure`. It deliberately
-does not introduce another test runner, global registry, or exception path.
+`std.testing` provides pure assertions, IO/resource assertions, and explicitly
+seeded property generators. It deliberately does not introduce another test
+runner, global registry, discovery convention, or exception path.
 `TestFailure` has `Eq` and `Show`; use a program's `main` to render the result:
 
 ```solveig
@@ -465,6 +467,31 @@ checks = std.testing.checkAll
     , std.testing.assertEqual "queue length" 2 (std.queue.length queue)
     ]
 ```
+
+`Gen a` is opaque and pure. `generate` returns both the value and next
+`StdGen`; `chooseInt`, `listOf`, `mapGen`, `pairGen`, and `constantGen` compose
+without ambient generator state. `checkProperty` requires a positive exact case
+count and caller-provided `StdGen`; success returns the next generator state,
+while failure records the one-based case and displayed value. Reusing the same
+seed, generator, and case count reproduces the same run.
+
+```solveig
+case std.testing.chooseInt (-100) 100 of
+    Nothing => error "invalid generator bounds"
+    | Just integers =>
+        std.testing.checkProperty
+            "doubling is even"
+            100
+            integers
+            (even . (2 *))
+            (mkStdGen 42)
+```
+
+`assertIO` preserves the checked action's typed error. `assertWithResource`
+specializes `std.task.bracket`: it acquires once, evaluates an IO Boolean, and
+runs release after success, assertion failure, typed failure, defect, or
+interruption. It returns an ordinary `Either TestFailure ()` inside the same
+`IO e`; it does not catch or reclassify resource errors.
 
 ## Time and randomness
 

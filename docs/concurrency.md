@@ -192,6 +192,10 @@ withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
 race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
 concurrently : forall e a b. IO e a -> IO e b -> IO e (a, b)
 timeout : forall e a. Duration -> IO e a -> IO e (Maybe a)
+mapConcurrentlyBoundedOrdered : forall e a b.
+    Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
+mapConcurrentlyBoundedCompletionOrder : forall e a b.
+    Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
 ```
 
 These functions are implemented in `std.task` using Solveig, `bracket`,
@@ -208,6 +212,18 @@ These functions are implemented in `std.task` using Solveig, `bracket`,
   propagates unchanged.
 - `timeout duration action` races a timer against the action, returning
   `Nothing` for the timer or `Just value` for successful completion.
+- `mapConcurrentlyBoundedOrdered limit operation values` runs at most `limit`
+  operations and restores input order.
+- `mapConcurrentlyBoundedCompletionOrder limit operation values` uses the same
+  scoped pool but retains the order in which successful worker outcomes arrive.
+
+Both traversal forms preserve a worker's error type inside `ConcurrentWorker`
+and distinguish channel/setup failures as `ConcurrentInfrastructure`. Their job
+channel has capacity equal to the active worker count, so feeding a finite list
+applies backpressure through the existing channel scheduler. The result channel
+is bounded by the input length, which is also the unavoidable upper bound of
+the returned strict list. A first observed worker failure cancels the feeder and
+all remaining workers, then waits for their cleanup before returning.
 
 The central lifetime rule is: **a child created by a structured combinator
 never outlives that combinator's scope**. Cancellation is not merely requested;

@@ -2,7 +2,7 @@
 
 Release Radar is a compact end-to-end example of practical Solveig I/O:
 
-- forty repository requests run through `std.task.mapConcurrentlyBounded` with
+- forty repository requests run through `std.task.mapConcurrentlyBoundedOrdered` with
   a bounded four-worker pool;
 - each worker prints start and completion events immediately, while the final
   report remains in deterministic configuration order;

@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+samples=[-12, -20, -18, 0, 0]
+reproducible=True
+pair=(-6, "fixed")
+invalid-generators=True
+property=pass
+property=zero is positive: property failed at case 1 with value 0
+property=invalid count: property case count must be positive, got 0
+resource=pass,released=True

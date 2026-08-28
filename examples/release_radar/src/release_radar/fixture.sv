@@ -99,7 +99,7 @@ serveFixture listener total =
         (fun _ => ())
         (mapError
             std.task.concurrentHostError
-            (std.task.mapConcurrentlyBounded 8 (serveOne listener) (std.list.range 0 total)))
+            (std.task.mapConcurrentlyBoundedOrdered 8 (serveOne listener) (std.list.range 0 total)))
 
 withFixture : forall a. Int -> (String -> Task a) -> Task a
 withFixture requestCount action = do

@@ -1,5 +1,6 @@
 import std.task(*)
 import std.time(*)
+import std.channel(*)
 
 data WorkError = WorkFailed
 
@@ -13,15 +14,10 @@ pause milliseconds =
 
 logLine : String -> IO WorkError ()
 logLine text =
-    catchError
-        (printLine text)
-        (fun outputError => error "structured test output failed")
+    catchError (printLine text) (fun outputError => error "structured test output failed")
 
 slow : IO WorkError Int
-slow =
-    finally
-        (bindIO (pause 30) (fun elapsed => pureIO 99))
-        (logLine "slow-cleaned")
+slow = finally (bindIO (pause 30) (fun elapsed => pureIO 99)) (logLine "slow-cleaned")
 
 failFast : IO WorkError String
 failFast = do
@@ -40,12 +36,79 @@ rightSuccess = do
 
 pooledWork : Int -> Task Int
 pooledWork value = do
-    sleep (std.time.milliseconds ((5 - value) * 5))
+    sleep (std.time.milliseconds (pooledDelay value))
     pureIO (value * 10)
+
+pooledDelay : Int -> Int
+pooledDelay 1 = 40
+pooledDelay _ = 10
 
 pooledFailure : Int -> IO PooledError Int
 pooledFailure 2 = failIO PooledFailed
 pooledFailure value = pureIO (value * 10)
+
+boundedWork : Chan Int -> Chan () -> Int -> Task Int
+boundedWork started release value = do
+    send started value
+    _ <- recv release
+    pureIO value
+
+noImmediateValue : Maybe a -> Bool
+noImmediateValue Nothing = True
+noImmediateValue (Just _) = False
+
+runBoundedPool : Chan Int -> Chan () -> Chan [Int] -> Task ()
+runBoundedPool started release resultsChannel = do
+    results <-
+        mapError
+            concurrentHostError
+            (mapConcurrentlyBoundedOrdered 2 (boundedWork started release) [1, 2, 3])
+    send resultsChannel results
+
+checkBoundedPool : Chan Int -> Chan () -> Chan [Int] -> ThreadId -> Task ()
+checkBoundedPool started release resultsChannel _ = do
+    _ <- recv started
+    _ <- recv started
+    thirdBeforeRelease <- tryRecv started
+    send release ()
+    _ <- recv started
+    send release ()
+    send release ()
+    results <- recv resultsChannel
+    printLine ("bounded=" <> show (noImmediateValue thirdBeforeRelease) <> ":" <> show results)
+
+completionWork : Chan Int -> (Chan (), Chan (), Chan (), Chan ()) -> Int -> Task Int
+completionWork started gates value = do
+    send started value
+    case (gates, value) of
+        ((first, _, _, _), 1) => recv first
+        | ((_, second, _, _), 2) => recv second
+        | ((_, _, third, _), 3) => recv third
+        | ((_, _, _, fourth), _) => recv fourth
+    pureIO (value * 10)
+
+runCompletionPool : Chan Int -> (Chan (), Chan (), Chan (), Chan ()) -> Chan [Int] -> Task ()
+runCompletionPool started gates resultsChannel = do
+    results <-
+        mapError
+            concurrentHostError
+            (mapConcurrentlyBoundedCompletionOrder 2 (completionWork started gates) [1, 2, 3, 4])
+    send resultsChannel results
+
+checkCompletionPool : Chan Int -> (Chan (), Chan (), Chan (), Chan ()) -> Chan [Int] -> ThreadId -> Task ()
+checkCompletionPool started gates resultsChannel _ = do
+    _ <- recv started
+    _ <- recv started
+    case gates of
+        (first, second, third, fourth) => do
+            send second ()
+            _ <- recv started
+            send third ()
+            _ <- recv started
+            send fourth ()
+            send first ()
+    results <- recv resultsChannel
+    printLine ("completion=" <> show results)
 
 reportPooledFailure : ConcurrentError PooledError -> Task ()
 reportPooledFailure (ConcurrentWorker PooledFailed) = printLine "pooled-error=PooledFailed"
@@ -55,7 +118,7 @@ expectPooledFailure : Task ()
 expectPooledFailure =
     catchError
         (bindIO
-            (mapConcurrentlyBounded 2 pooledFailure [1, 2, 3, 4])
+            (mapConcurrentlyBoundedOrdered 2 pooledFailure [1, 2, 3, 4])
             (fun unexpected => error ("unexpected pooled success: " <> show unexpected)))
         reportPooledFailure
 
@@ -68,7 +131,7 @@ expectInvalidPool : Task ()
 expectInvalidPool =
     catchError
         (bindIO
-            (mapConcurrentlyBounded 0 pooledFailure [1])
+            (mapConcurrentlyBoundedOrdered 0 pooledFailure [1])
             (fun unexpected => error "unexpected invalid pool success"))
         reportInvalidPool
 
@@ -87,10 +150,26 @@ main = do
             (concurrently leftSuccess rightSuccess)
             (fun unexpected => error "unexpected concurrent failure")
     case pair of
-        (leftValue, rightValue) =>
-            printLine (appendString "pair=7," rightValue)
-    pooled <- mapError concurrentHostError (mapConcurrentlyBounded 2 pooledWork [1, 2, 3, 4])
-    printLine ("pooled=" <> show pooled)
+        (leftValue, rightValue) => printLine (appendString "pair=7," rightValue)
+    ordered <-
+        mapError concurrentHostError (mapConcurrentlyBoundedOrdered 2 pooledWork [1, 2, 3, 4])
+    printLine ("ordered=" <> show ordered)
+    completionStarted <- newChan
+    firstGate <- newChan
+    secondGate <- newChan
+    thirdGate <- newChan
+    fourthGate <- newChan
+    completionResults <- newChan
+    let completionGates = (firstGate, secondGate, thirdGate, fourthGate)
+    withThread
+        (runCompletionPool completionStarted completionGates completionResults)
+        (checkCompletionPool completionStarted completionGates completionResults)
+    started <- newChan
+    release <- newChan
+    boundedResults <- newChan
+    withThread
+        (runBoundedPool started release boundedResults)
+        (checkBoundedPool started release boundedResults)
     expectPooledFailure
     expectInvalidPool
     measured <- std.time.measure (pureIO 42)

@@ -833,25 +833,44 @@ std.task.asConcurrentInfrastructure : forall e a. IO HostError a -> IO (Concurre
 std.task.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
 std.task.captureWorker : forall e a b. (a -> IO e b) -> a -> IO (ConcurrentError e) (Either e b)
 std.task.catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
-std.task.collectPooled : forall e a. Chan (Int, Either e a) -> Int -> Map Int a -> IO (ConcurrentError e) (Map Int a)
+std.task.collectPooledCompletionOrder : forall e a. Chan (Int, Either e a) -> Int -> IO (ConcurrentError e) [a]
+std.task.collectPooledMap : forall e a. Chan (Int, Either e a) -> Int -> Map Int a -> IO (ConcurrentError e) (Map Int a)
+std.task.collectPooledOrdered : forall e a. Chan (Int, Either e a) -> Int -> IO (ConcurrentError e) [a]
+std.task.collectPooledReversed : forall e a. Chan (Int, Either e a) -> Int -> [a] -> IO (ConcurrentError e) [a]
 std.task.concurrentHostError : ConcurrentError HostError -> HostError
 std.task.concurrently : forall e a b. IO e a -> IO e b -> IO e (a, b)
 std.task.enqueuePooled : forall e a. Chan (Int, a) -> [a] -> Int -> IO (ConcurrentError e) ()
 std.task.finally : forall e a b. IO e a -> IO e b -> IO e a
-std.task.mapConcurrentlyBounded : forall e a b. Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
+std.task.invalidConcurrency : forall e. String -> Int -> ConcurrentError e
+std.task.mapConcurrentlyBoundedCompletionOrder : forall e a b. Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
+std.task.mapConcurrentlyBoundedOrdered : forall e a b. Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
+std.task.mapConcurrentlyBoundedWith : forall e a b. String -> (Chan (Int, Either e b) -> Int -> IO (ConcurrentError e) [b]) -> Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
 std.task.mask : forall e a. IO e a -> IO e a
 std.task.pooledWorker : forall e a b. (a -> IO e b) -> Chan (Int, a) -> Chan (Int, Either e b) -> IO (ConcurrentError e) ()
 std.task.pooledWorkerLoop : forall e a b. (a -> IO e b) -> Chan (Int, a) -> Chan (Int, Either e b) -> IO (ConcurrentError e) ()
 std.task.race : forall e a b. IO e a -> IO e b -> IO e (Either a b)
 std.task.retainWorkerError : forall e b. ConcurrentError e -> IO (ConcurrentError e) (Either e b)
-std.task.runPooled : forall e a b. Chan (Int, a) -> Chan (Int, Either e b) -> [a] -> Int -> IO (ConcurrentError e) [b]
+std.task.runPooled : forall e a b. (Chan (Int, Either e b) -> Int -> IO (ConcurrentError e) [b]) -> Chan (Int, a) -> Chan (Int, Either e b) -> [a] -> Int -> IO (ConcurrentError e) [b]
 std.task.timeout : forall e a. Duration -> IO e a -> IO e (Maybe a)
 std.task.withPooledWorkers : forall e a b result. Int -> (a -> IO e b) -> Chan (Int, a) -> Chan (Int, Either e b) -> IO (ConcurrentError e) result -> IO (ConcurrentError e) result
 std.task.withThread : forall e a b. IO e a -> (ThreadId -> IO e b) -> IO e b
 std.testing.assert : String -> Bool -> Either TestFailure ()
 std.testing.assertEqual : forall a. (Eq a, Show a) => String -> a -> a -> Either TestFailure ()
+std.testing.assertIO : forall e. String -> IO e Bool -> IO e (Either TestFailure ())
+std.testing.assertWithResource : forall e resource cleanup. String -> IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e Bool) -> IO e (Either TestFailure ())
 std.testing.checkAll : [Either TestFailure ()] -> Either TestFailure ()
+std.testing.checkProperty : forall a. Show a => String -> Int -> Gen a -> (a -> Bool) -> StdGen -> Either TestFailure StdGen
+std.testing.checkPropertyFrom : forall a. Show a => String -> Int -> Int -> Gen a -> (a -> Bool) -> StdGen -> Either TestFailure StdGen
+std.testing.chooseInt : Int -> Int -> Maybe (Gen Int)
+std.testing.constantGen : forall a. a -> Gen a
+std.testing.drawInt : Int -> Int -> StdGen -> (Int, StdGen)
+std.testing.drawList : forall a. Int -> Gen a -> StdGen -> ([a], StdGen)
+std.testing.drawListInto : forall a. Int -> Gen a -> StdGen -> [a] -> ([a], StdGen)
 std.testing.failureMessage : TestFailure -> String
+std.testing.generate : forall a. Gen a -> StdGen -> (a, StdGen)
+std.testing.listOf : forall a. Int -> Gen a -> Maybe (Gen [a])
+std.testing.mapGen : forall a b. (a -> b) -> Gen a -> Gen b
+std.testing.pairGen : forall a b. Gen a -> Gen b -> Gen (a, b)
 std.text.appendTextBuilder : TextBuilder -> TextBuilder -> TextBuilder
 std.text.buildText : TextBuilder -> String
 std.text.builderChunks : TextBuilder -> [String]

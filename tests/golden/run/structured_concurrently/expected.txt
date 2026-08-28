@@ -1,7 +1,9 @@
 slow-cleaned
 failed=WorkFailed
 pair=7,ok
-pooled=[10, 20, 30, 40]
+ordered=[10, 20, 30, 40]
+completion=[20, 30, 40, 10]
+bounded=True:[1, 2, 3]
 pooled-error=PooledFailed
 pooled-error=InvalidArgument
 measured=True:42

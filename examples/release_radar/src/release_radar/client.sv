@@ -80,7 +80,10 @@ fetchConcurrentObserved :
 fetchConcurrentObserved workers base token cache repositories =
     mapError
         std.task.concurrentHostError
-        (std.task.mapConcurrentlyBounded workers (fetchObserved base token cache) repositories)
+        (std.task.mapConcurrentlyBoundedOrdered
+            workers
+            (fetchObserved base token cache)
+            repositories)
 
 fetchObserved :
     String ->

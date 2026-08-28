@@ -73,10 +73,10 @@ after the action eventually finishes.
 ## Bounded concurrent mapping
 
 For a list of independent `Task` operations, use
-`mapConcurrentlyBounded`:
+`mapConcurrentlyBoundedOrdered`:
 
 ```solveig
-import std.task(concurrentHostError, mapConcurrentlyBounded)
+import std.task(concurrentHostError, mapConcurrentlyBoundedOrdered)
 import std.time(milliseconds, sleep)
 
 process : Int -> Task Int
@@ -86,7 +86,7 @@ process value = do
 
 main : Task ()
 main = do
-    results <- mapError concurrentHostError (mapConcurrentlyBounded 3 process [1, 2, 3, 4])
+    results <- mapError concurrentHostError (mapConcurrentlyBoundedOrdered 3 process [1, 2, 3, 4])
     printLine ("results: " <> show results)
 ```
 
@@ -94,6 +94,11 @@ This complete program is in [`concurrent_jobs`](code/concurrent_jobs/). Three
 workers may be active at once. The larger-numbered jobs deliberately wait less,
 but the result is still `[1, 4, 9, 16]` because the combinator restores input
 order.
+
+Use `mapConcurrentlyBoundedCompletionOrder` when arrival order is itself the
+result—for example, progressive UI updates or latency-ranked probes. It has the
+same worker bound, typed errors, cancellation, cleanup, and channel backpressure
+as the ordered form; only the returned list order differs.
 
 The bound is part of correctness as well as performance. It prevents a list of
 ten thousand URLs from immediately creating ten thousand in-flight requests.

@@ -110,7 +110,7 @@ data ConcurrentError e =
     ConcurrentInfrastructure HostError
   | ConcurrentWorker e
 
-mapConcurrentlyBounded :
+mapConcurrentlyBoundedOrdered :
     Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
 ```
 

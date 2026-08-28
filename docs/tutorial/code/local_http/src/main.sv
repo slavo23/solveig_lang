@@ -82,7 +82,7 @@ fetchOne url = do
 runClients : Port -> Task [String]
 runClients port =
     let url = "http://127.0.0.1:" <> show port <> "/message" in
-    mapError concurrentHostError (mapConcurrentlyBounded 3 fetchOne [url, url, url])
+    mapError concurrentHostError (mapConcurrentlyBoundedOrdered 3 fetchOne [url, url, url])
 
 main : Task ()
 main =
