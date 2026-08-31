@@ -33,15 +33,17 @@ word =
         (some textInputOps (satisfy textInputOps "lowercase letter" isLower))
 ```
 
-Run it against complete text:
+Run it against complete text with the text facade:
 
 ```solveig
 reply : ParseReply TextInput () String
-reply = runComplete textInputOps word (textInput "solveig")
+reply = parseText word "solveig"
 ```
 
-`runComplete` requires end-of-input. `runParser` permits a successful prefix
-and returns the remaining cursor.
+`parseText`, `parseBytes`, and `parseTokenList` are complete-input facades for
+the supplied cursor types. `runComplete` is the general form for a custom
+`InputOps`; `runParser` permits a successful prefix and returns the remaining
+cursor.
 
 ## Understand replies
 
@@ -119,6 +121,32 @@ byte. Text input tracks Unicode characters and line/column positions. The input
 adapter owns checkpoint restoration, so parsers do not assume that input is a
 `String` or even that it arrived all at once.
 
+For an effectful scoped source, adapt each pull to a token chunk and call
+`parseStream`:
+
+```solveig
+import std.stream
+
+wordFromStream : Parser (StreamInput Char) () String
+wordFromStream =
+    let ops = streamInputOps show in
+    mapResult charsToString
+        (some ops (satisfy ops "lowercase letter" isLower))
+
+parseChunks : forall scope e.
+    std.stream.Stream scope e [Char] ->
+    IO e (Either (ParseError ()) String)
+parseChunks chunks =
+    parseStream show wordFromStream chunks
+```
+
+The source is pulled only when the parser is awaiting input. Upstream failures
+remain the stream's `IO e`; a grammar rejection is the inner `Left`. This shape
+fits rank-2 file and process stream callbacks without translating a resource
+error into a parse error. `StreamInput` retains all supplied tokens until parsing
+ends. `attempt` and `cut` control grammar work, not storage reclamation; this is
+incremental input, not a bounded-memory parser.
+
 ## Parse JSON
 
 `std.json` parses RFC 8259 bytes and returns the generic parser reply:
@@ -154,14 +182,69 @@ representation directly:
 import std.json(*)
 import std.vector(*)
 
-namesDecoder : Decoder (std.vector.Vector String)
+namesDecoder : Decoder () (std.vector.Vector String)
 namesDecoder = arrayDecoder stringDecoder
 ```
 
-Available building blocks include `stringDecoder`, `boolDecoder`,
+Available direct building blocks include `stringDecoder`, `boolDecoder`,
 `numberDecoder`, `nullDecoder`, `arrayDecoder`, `objectDecoder`, and
 `nullableDecoder`. Direct decoding avoids allocating an intermediate tree for
 the decoded values.
+
+Heterogeneous objects use applicative `FieldDecoder` values:
+
+```solveig
+data User = User String Bool
+
+userDecoder : Decoder () User
+userDecoder =
+    recordDecoder
+        (User <$> requiredField "name" stringDecoder <*>
+            optionalFieldWithDefault "active" True boolDecoder)
+```
+
+`requiredField`, `optionalField`, and `optionalFieldWithDefault` distinguish a
+missing field from a present `null` or malformed value. Nested failures render
+paths such as `$["users"][2]["name"]`. Unknown object fields are ignored.
+`taggedDecoder tagName variants` chooses a record-shaped variant by a required
+string tag and reports missing, mistyped, and unknown tags at the tag path.
+
+The first parameter of `Decoder e a` is the application's validation error.
+Use `()` when there is none, or add a typed check:
+
+```solveig
+data NameError = EmptyName
+
+nonemptyName : String -> Either NameError String
+nonemptyName "" = Left EmptyName
+nonemptyName name = Right name
+
+nameDecoder : Decoder NameError String
+nameDecoder = validateDecoder nonemptyName stringDecoder
+```
+
+`decodeJson` keeps syntax positions and expected tokens in `ParseError`.
+Its custom errors are `DecodeError e`: `JsonDecodingError` wraps JSON failures;
+`CustomDecodeError path e` preserves validation data without requiring `Show e`.
+Fields, arrays, and objects preserve that path in both direct and value decoding.
+`mapDecoderError` changes only the application's error type. Validation runs
+after successful decoding and never silently chooses a default. For human
+output, provide `Show NameError`; `show` then handles the complete parse error.
+
+Encoding is symmetric and explicit. `Encoder` has string, Boolean, exact
+number, null, array, object, nullable, and raw-JSON encoders.
+`requiredFieldEncoder` and `optionalFieldEncoder` build `recordEncoder` values;
+optional `Nothing` is omitted rather than silently encoded as null.
+`variantEncoder` plus `taggedEncoder` encodes tagged sums from mutually
+exclusive projections. `encodeJson limits encoder value` validates and renders
+in deterministic object-key order, while `encodeJsonValue` stops at `Json`.
+Primitive and homogeneous decoders remain direct; heterogeneous records and
+tagged variants construct one bounded tree at that boundary. `decodeJsonValue`
+instead traverses an existing tree, without reapplying input-byte limits.
+
+`jsonNumberToInt` handles fractions and exponents from the exact decimal
+spelling. It returns `Just` only when the mathematical value is integral and
+inside the signed `Int` range; it never rounds through `Float`.
 
 Use `renderJson` for default rendering limits and `renderJsonWith` for an
 application-specific policy. Smart constructors validate number spellings;

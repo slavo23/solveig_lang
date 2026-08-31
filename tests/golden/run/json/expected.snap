@@ -17,6 +17,28 @@ number limit: line 1, column 4 (offset 3): parse failed; JSON number exceeds max
 container limit: line 1, column 5 (offset 4): parse failed; JSON container exceeds maximum 1 items
 direct strings: ["one", "two"]
 direct object: ["a", "b"] => [True, False]
+record default: Person "Ada" True Nothing
+present null is not default: line 1, column 29 (offset 28): parse failed; JSON decode at $["active"]: expected boolean, found null
+record encode: {"active":false,"name":"Ada"}
+nested path: line 1, column 43 (offset 42): parse failed; JSON decode at $["people"][1]["name"]: expected string, found boolean
+tagged decode: Started "build"
+tagged encode: {"clean":true,"type":"stopped"}
+unknown tag: line 1, column 18 (offset 17): parse failed; JSON decode at $["type"]: unknown variant tag "paused"
+exact ints: [Just 1, Just 1200, Nothing, Just 1, Just 123, Just 9223372036854775807, Just -9223372036854775808, Nothing, Nothing, Just 0]
+forged exact int: Nothing
+long exact numbers: [Just 1, Just 1, Just -1, Just 0, Nothing, Nothing]
+large array round trip: True:20000
+record round trip: Person "Ada" False Just "A"
+variant round trip: Started "build"
+typed direct path: 1:name
+typed value path: 1:name
+mapped validation: line 1, column 28 (offset 27): parse failed; JSON decode at $[1]["name"]: "empty name"
+direct record path: line 1, column 24 (offset 23): parse failed; JSON decode at $["team"][0]["name"]: expected string, found boolean
+direct syntax path: line 1, column 7 (offset 6): unexpected 102; expected double quote; in $[1]
+duplicate encoder field: JSON encode at $["x"]: duplicate encoded field
+encoder tag collision: JSON encode at $["type"]: duplicate encoded field
+unmatched encoder variant: JSON encode at $: no tagged encoder variant matched
+encoder nested failure: JSON encode at $[1]: invalid JSON number "NaN"
 render escapes: {"flag":true,"line\n":"tab\tquote\""}
 render round trip: {"flag":true,"line\n":"tab\tquote\""}
 forged number: invalid JSON number "NaN"

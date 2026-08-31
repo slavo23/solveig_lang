@@ -24,7 +24,7 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.bytes` | Strict/replacement UTF-8 decoding, packed byte scans, and linear binary construction |
 | `std.stream` | Strict pull streams, scoped resource lifetimes, bounded collection, and finite adapters |
 | `std.parser` | Generic parser combinators with structured errors and streaming input |
-| `std.json` | Bounded byte-level JSON, exact numbers, deterministic rendering, and direct decoders |
+| `std.json` | Bounded byte-level JSON, exact numbers, path-aware decoders, and symmetric encoders |
 | `std.http` | Convenient bounded GETs plus explicit HTTP/HTTPS requests, verified TLS, statuses, headers, and chunk folds |
 | `std.io` | Handles, buffering, and whole-file IO |
 | `std.fs` | Directory, path, and file-metadata operations |
@@ -253,7 +253,8 @@ word =
 
 Build grammars from `satisfy`, `token`, and `tokens`; combine them with
 `mapResult`, `applyParser`, `andThen`, `choice`, `many`, `optional`, and
-`between`; then use `runComplete` when trailing input must be rejected. Choice
+`between`; then use `parseText`, `parseBytes`, or `parseTokenList` for the
+built-in complete inputs, or `runComplete` for a custom cursor. Choice
 retries only failures that consumed nothing. Put `attempt` narrowly around a
 branch with an ambiguous consumed prefix, and put `cut` after a prefix that
 unambiguously selects a branch. `defer` supports non-left-recursive recursive
@@ -265,6 +266,16 @@ structure, `<*` and `*>` for delimiters, and `do` or `>>=` only when a parsed
 value selects later parsing. `parser <?> "name"` replaces the expected item on
 an empty failure. Choice remains `choice ops left right` because correct
 incremental backtracking needs the explicit input adapter.
+
+`parseStream describe parser chunks` bridges the same pure engine to a
+`Stream scope e [token]`. It pulls only when the parser is awaiting input,
+preserves upstream failures as `IO e`, and returns grammar rejection as
+`Either (ParseError custom) value`. That result shape composes directly inside
+rank-2 resource callbacks; neither their scope nor their typed errors are
+erased. The feedable cursor retains all supplied tokens until parsing ends;
+neither incremental pulling nor `cut` promises bounded parser memory. There is
+no second stream protocol. `mapCustomError` transforms application errors while
+preserving positions, expectations, consumption, and suspension.
 
 Every public parser operation has an API doc comment describing its behavior,
 including failure, consumption, backtracking, and streaming details where they
@@ -295,6 +306,8 @@ so rendering is deterministic regardless of insertion order.
 `Float`. Construct it with `jsonNumberFromInt`, `jsonNumberFromString`, or
 `jsonNumberFromFloat`; the float constructor rejects NaN and infinities.
 Rendering revalidates even a directly constructed `JsonNumber`.
+`jsonNumberToInt` performs exact decimal/exponent conversion and returns
+`Nothing` for a fractional mathematical value or signed-`Int` overflow.
 
 Use `parseJson` when the whole `Json` tree is useful. Use `decodeJson` with
 `stringDecoder`, `boolDecoder`, `numberDecoder`, `nullDecoder`,
@@ -303,7 +316,7 @@ can be built directly. For example, this creates a vector of strings without
 first allocating a vector of `JsonString` nodes:
 
 ```solveig
-names : std.parser.ParseReply std.parser.ByteInput std.json.JsonError
+names : std.parser.ParseReply std.parser.ByteInput (std.json.DecodeError ())
     (std.vector.Vector String)
 names =
     std.json.decodeJson std.json.defaultJsonLimits
@@ -312,10 +325,30 @@ names =
 ```
 
 Both entry points require complete input apart from JSON whitespace and return
-the same structured `std.parser.ParseReply`. Render custom failures with
-`std.json.renderJsonError` through `std.parser.renderError`. When the custom
-error itself has `Show`, `ParseError custom` does too, so `show error` is the
-concise equivalent.
+the same structured `std.parser.ParseReply`. `parseJson` reports `JsonError`;
+`decodeJson` reports `DecodeError e`, separating `JsonDecodingError JsonError`
+from `CustomDecodeError path e`. Both support `show` (the latter when `e` does).
+Use `Decoder () a` when no application validation is needed. `validateDecoder`
+accepts `a -> Either e b` and keeps failures as typed values at their field/index
+path; `mapDecoderError` maps only application errors, leaving JSON errors intact.
+
+For heterogeneous objects, combine `requiredField`, `optionalField`, and
+`optionalFieldWithDefault` applicatively and finish with `recordDecoder`.
+Missing is distinct from present null or malformed data. Nested failures carry
+paths such as `$["users"][2]["name"]` with zero-based array indices; unknown fields are ignored.
+`taggedDecoder` selects record-shaped variants through a required string tag.
+These composition boundaries reuse one bounded `Json` value, while primitive,
+homogeneous-array, and homogeneous-object decoding remains direct.
+
+The symmetric `Encoder` surface includes primitive, array, object, nullable,
+record, and tagged-sum builders. Record encoders use named field projections;
+an optional `Nothing` is omitted, not encoded as null. Tagged sums use
+`variantEncoder` projections and `taggedEncoder`. `encodeJson` applies explicit
+limits and deterministic rendering, while `encodeJsonValue` returns `Json`
+when another format-independent transformation needs it.
+Value encoding constructs strict `Json` data; final rendering enforces limits
+and validates even forged number spellings. `decodeJsonValue` traverses an
+already-built tree and does not apply byte-input limits retroactively.
 
 ## Handles and files
 

@@ -497,76 +497,150 @@ std.io.withFile : forall a. String -> IOMode -> (Handle -> IO HostError a) -> IO
 std.io.withFileByteStream : forall result. Int -> String -> (forall scope. Stream scope HostError Bytes -> IO HostError result) -> IO HostError result
 std.io.writeFile : String -> String -> IO HostError ()
 std.io.writeFileBytes : String -> Bytes -> IO HostError ()
-std.json.arrayDecoder : forall a. Decoder a -> Decoder (Vector a)
-std.json.arrayItems : forall a. JsonLimits -> Parser ByteInput JsonError a -> [a] -> Int -> Parser ByteInput JsonError (Vector a)
-std.json.arrayWith : forall a. JsonLimits -> Int -> Parser ByteInput JsonError a -> Parser ByteInput JsonError (Vector a)
-std.json.boolDecoder : Decoder Bool
-std.json.boolToken : Parser ByteInput JsonError Bool
+std.json.accumulateDigits : Int -> Int -> Int -> [Int] -> Maybe Int
+std.json.accumulateZeros : Int -> Int -> Int -> Int -> Maybe Int
+std.json.allZeroDigits : [Int] -> Bool
+std.json.appendPath : [JsonPathElement] -> JsonPathElement -> [JsonPathElement]
+std.json.applyFieldDecoder : forall e a b. FieldDecoder e (a -> b) -> FieldDecoder e a -> FieldDecoder e b
+std.json.arrayDecoder : forall e a. Decoder e a -> Decoder e (Vector a)
+std.json.arrayEncoder : forall a. Encoder a -> Encoder (Vector a)
+std.json.arrayItems : forall e a. (JsonError -> e) -> JsonLimits -> (Int -> Parser ByteInput e a) -> [a] -> Int -> Parser ByteInput e (Vector a)
+std.json.arrayWith : forall e a. (JsonError -> e) -> JsonLimits -> Int -> (Int -> Parser ByteInput e a) -> Parser ByteInput e (Vector a)
+std.json.atJsonPath : JsonPathElement -> JsonError -> JsonError
+std.json.boolDecoder : forall e. Decoder e Bool
+std.json.boolEncoder : Encoder Bool
+std.json.boolToken : forall e. Parser ByteInput e Bool
+std.json.boundedExponent : Int -> [Char] -> Int -> Int
 std.json.byteAt : Bytes -> Int -> Int
 std.json.byteInputValue : ByteInput -> Maybe Int
+std.json.collectExactDigits : Bool -> [Char] -> [Int] -> Int -> Bool -> Maybe Int
+std.json.completeJson : forall e a. (JsonError -> e) -> JsonLimits -> Parser ByteInput e a -> Bytes -> ParseReply ByteInput e a
 std.json.consumedRejectJson : forall a. ByteInput -> JsonError -> ParseReply ByteInput JsonError a
+std.json.contramapEncoder : forall a b. (b -> a) -> Encoder a -> Encoder b
+std.json.decimalDigit : Char -> Int
+std.json.decodeArrayItems : forall e a. Decoder e a -> [JsonPathElement] -> Int -> [Json] -> [a] -> Either (DecodeError e) [a]
+std.json.decodeArrayValue : forall e a. Decoder e a -> [JsonPathElement] -> Json -> Either (DecodeError e) (Vector a)
+std.json.decodeAt : forall e a. Decoder e a -> [JsonPathElement] -> Json -> Either (DecodeError e) a
+std.json.decodeBoolValue : forall e. [JsonPathElement] -> Json -> Either (DecodeError e) Bool
 std.json.decodeEscape : Bytes -> Int -> Either JsonError (String, Int)
-std.json.decodeJson : forall a. JsonLimits -> Decoder a -> Bytes -> ParseReply ByteInput JsonError a
+std.json.decodeJson : forall e a. JsonLimits -> Decoder e a -> Bytes -> ParseReply ByteInput (DecodeError e) a
+std.json.decodeJsonValue : forall e a. Decoder e a -> Json -> Either (DecodeError e) a
+std.json.decodeNullValue : forall e. [JsonPathElement] -> Json -> Either (DecodeError e) ()
+std.json.decodeNullableValue : forall e a. Decoder e a -> [JsonPathElement] -> Json -> Either (DecodeError e) (Maybe a)
+std.json.decodeNumberValue : forall e. [JsonPathElement] -> Json -> Either (DecodeError e) JsonNumber
+std.json.decodeObjectItems : forall e a. Decoder e a -> [JsonPathElement] -> [(String, Json)] -> Map String a -> Either (DecodeError e) (Map String a)
+std.json.decodeObjectValue : forall e a. Decoder e a -> [JsonPathElement] -> Json -> Either (DecodeError e) (Map String a)
+std.json.decodeStringValue : forall e. [JsonPathElement] -> Json -> Either (DecodeError e) String
+std.json.decodeTaggedFields : forall e a. [(String, FieldDecoder e a)] -> [JsonPathElement] -> [JsonPathElement] -> String -> Map String Json -> Either (DecodeError e) a
+std.json.decodeTaggedValue : forall e a. String -> [(String, FieldDecoder e a)] -> [JsonPathElement] -> Json -> Either (DecodeError e) a
 std.json.decodeUnicodeEscape : Bytes -> Int -> Either JsonError (String, Int)
-std.json.decoderParser : forall a. Decoder a -> JsonLimits -> Int -> Parser ByteInput JsonError a
+std.json.decoderFromValue : forall e a. ([JsonPathElement] -> Json -> Either (DecodeError e) a) -> Decoder e a
+std.json.decoderParser : forall e a. Decoder e a -> JsonLimits -> Int -> Parser ByteInput (DecodeError e) a
 std.json.defaultJsonLimits : JsonLimits
 std.json.dispatchJsonValue : JsonLimits -> Int -> ByteInput -> ParseReply ByteInput JsonError Json
+std.json.encodeArrayItems : forall a. Encoder a -> Int -> [a] -> [Json] -> Either JsonError [Json]
+std.json.encodeArrayValue : forall a. Encoder a -> Vector a -> Either JsonError Json
+std.json.encodeAt : forall a. Encoder a -> a -> Either JsonError Json
+std.json.encodeFields : forall a. [FieldEncoder a] -> a -> Map String Json -> Either JsonError (Map String Json)
+std.json.encodeJson : forall a. JsonLimits -> Encoder a -> a -> Either JsonError String
+std.json.encodeJsonValue : forall a. Encoder a -> a -> Either JsonError Json
+std.json.encodeNumberValue : JsonNumber -> Either JsonError Json
+std.json.encodeObjectItems : forall a. Encoder a -> [(String, a)] -> Map String Json -> Either JsonError (Map String Json)
+std.json.encodeObjectValue : forall a. Encoder a -> Map String a -> Either JsonError Json
+std.json.encodeTaggedVariant : forall a. String -> [VariantEncoder a] -> a -> Either JsonError Json
 std.json.escapeCharacterInto : Char -> [Char] -> [Char]
 std.json.escapeStringInto : [Char] -> [Char] -> [Char]
 std.json.escapedStringLength : [Char] -> Int -> Int
+std.json.exactIntFromChars : [Char] -> Maybe Int
+std.json.finishExactExponent : Bool -> [Int] -> Int -> [Char] -> Maybe Int
+std.json.finishExactInt : Bool -> [Int] -> Int -> Int -> Maybe Int
 std.json.finishExponent : JsonLimits -> Bytes -> Int -> Int -> ParseReply ByteInput JsonError JsonNumber
 std.json.finishInteger : JsonLimits -> Bytes -> Int -> Int -> ParseReply ByteInput JsonError JsonNumber
 std.json.finishNumber : JsonLimits -> Bytes -> Int -> Int -> ParseReply ByteInput JsonError JsonNumber
+std.json.fromOptional : forall a. a -> Maybe a -> a
 std.json.hexCharacter : Int -> Char
 std.json.hexDigit : Int -> Maybe Int
 std.json.invalidLimits : JsonLimits -> Maybe JsonError
 std.json.isDigitByte : Int -> Bool
-std.json.jsonDecoder : Decoder Json
-std.json.jsonLexeme : forall a. Parser ByteInput JsonError a -> Parser ByteInput JsonError a
+std.json.jsonDecoder : forall e. Decoder e Json
+std.json.jsonEncoder : Encoder Json
+std.json.jsonKind : Json -> String
+std.json.jsonLexeme : forall e a. Parser ByteInput e a -> Parser ByteInput e a
 std.json.jsonNumberFromFloat : Float -> Maybe JsonNumber
 std.json.jsonNumberFromInt : Int -> JsonNumber
 std.json.jsonNumberFromString : String -> Maybe JsonNumber
 std.json.jsonNumberText : JsonNumber -> String
+std.json.jsonNumberToInt : JsonNumber -> Maybe Int
+std.json.jsonParserAt : forall e a. [JsonPathElement] -> Parser ByteInput JsonError a -> Parser ByteInput (DecodeError e) a
 std.json.jsonStringSpecialBytes : Bytes
-std.json.jsonSymbol : Int -> String -> Parser ByteInput JsonError Int
+std.json.jsonSymbol : forall e. Int -> String -> Parser ByteInput e Int
 std.json.jsonValueAt : JsonLimits -> Int -> Parser ByteInput JsonError Json
-std.json.jsonWhitespace : Parser ByteInput JsonError ()
+std.json.jsonWhitespace : forall e. Parser ByteInput e ()
 std.json.jsonWhitespaceBytes : Bytes
-std.json.mapDecoder : forall a b. (a -> b) -> Decoder a -> Decoder b
+std.json.mapDecodeError : forall e f. (e -> f) -> DecodeError e -> DecodeError f
+std.json.mapDecoder : forall e a b. (a -> b) -> Decoder e a -> Decoder e b
+std.json.mapDecoderError : forall e f a. (e -> f) -> Decoder e a -> Decoder f a
+std.json.mapFieldDecoder : forall e a b. (a -> b) -> FieldDecoder e a -> FieldDecoder e b
 std.json.maximumContainerItems : JsonLimits -> Int
 std.json.maximumDepth : JsonLimits -> Int
 std.json.maximumInputBytes : JsonLimits -> Int
+std.json.maximumInt : Int
 std.json.maximumNumberBytes : JsonLimits -> Int
 std.json.maximumStringBytes : JsonLimits -> Int
-std.json.nullDecoder : Decoder ()
-std.json.nullToken : Parser ByteInput JsonError ()
-std.json.nullableDecoder : forall a. Decoder a -> Decoder (Maybe a)
-std.json.numberDecoder : Decoder JsonNumber
+std.json.minimumInt : Int
+std.json.nullDecoder : forall e. Decoder e ()
+std.json.nullEncoder : Encoder ()
+std.json.nullToken : forall e. Parser ByteInput e ()
+std.json.nullableDecoder : forall e a. Decoder e a -> Decoder e (Maybe a)
+std.json.nullableEncoder : forall a. Encoder a -> Encoder (Maybe a)
+std.json.numberDecoder : forall e. Decoder e JsonNumber
+std.json.numberEncoder : Encoder JsonNumber
 std.json.numberToken : JsonLimits -> Parser ByteInput JsonError JsonNumber
-std.json.objectDecoder : forall a. Decoder a -> Decoder (Map String a)
-std.json.objectItems : forall a. JsonLimits -> Parser ByteInput JsonError a -> Map String a -> Int -> Parser ByteInput JsonError (Map String a)
-std.json.objectWith : forall a. JsonLimits -> Int -> Parser ByteInput JsonError a -> Parser ByteInput JsonError (Map String a)
+std.json.objectDecoder : forall e a. Decoder e a -> Decoder e (Map String a)
+std.json.objectEncoder : forall a. Encoder a -> Encoder (Map String a)
+std.json.objectItems : forall e a. (JsonError -> e) -> JsonLimits -> (String -> Parser ByteInput e a) -> Map String a -> Int -> Parser ByteInput e (Map String a)
+std.json.objectWith : forall e a. (JsonError -> e) -> JsonLimits -> Int -> (String -> Parser ByteInput e a) -> Parser ByteInput e (Map String a)
+std.json.optionalField : forall e a. String -> Decoder e a -> FieldDecoder e (Maybe a)
+std.json.optionalFieldEncoder : forall record field. String -> (record -> Maybe field) -> Encoder field -> FieldEncoder record
+std.json.optionalFieldWithDefault : forall e a. String -> a -> Decoder e a -> FieldDecoder e a
 std.json.parseJson : JsonLimits -> Bytes -> ParseReply ByteInput JsonError Json
+std.json.parseScaledInt : Bool -> [Int] -> Int -> Maybe Int
+std.json.parsedDecodedValue : forall e a b. (a -> Either (DecodeError e) b) -> a -> Parser ByteInput (DecodeError e) b
 std.json.prependChars : String -> [Char] -> [Char]
 std.json.prependCharsList : [Char] -> [Char] -> [Char]
 std.json.prependReversed : forall a. [a] -> [a] -> [a]
 std.json.prependReversedInto : forall a. [a] -> [a] -> [a]
 std.json.readHex4 : Bytes -> Int -> Maybe Int
+std.json.recordDecoder : forall e a. FieldDecoder e a -> Decoder e a
+std.json.recordEncoder : forall a. [FieldEncoder a] -> Encoder a
 std.json.rejectJson : forall a. ByteInput -> JsonError -> ParseReply ByteInput JsonError a
 std.json.renderArrayReverse : JsonLimits -> Int -> [Json] -> Bool -> [Char] -> Either JsonError [Char]
 std.json.renderJson : Json -> Either JsonError String
 std.json.renderJsonError : JsonError -> String
+std.json.renderJsonPath : [JsonPathElement] -> String
+std.json.renderJsonPathElements : [JsonPathElement] -> String
 std.json.renderJsonWith : JsonLimits -> Json -> Either JsonError String
 std.json.renderObjectReverse : JsonLimits -> Int -> [(String, Json)] -> Bool -> [Char] -> Either JsonError [Char]
 std.json.renderStringInto : JsonLimits -> String -> [Char] -> Either JsonError [Char]
 std.json.renderValueInto : JsonLimits -> Int -> Json -> [Char] -> Either JsonError [Char]
+std.json.requiredField : forall e a. String -> Decoder e a -> FieldDecoder e a
+std.json.requiredFieldEncoder : forall record field. String -> (record -> field) -> Encoder field -> FieldEncoder record
 std.json.scalarString : Int -> Int -> Either JsonError (String, Int)
 std.json.scanNumber : JsonLimits -> ByteInput -> ParseReply ByteInput JsonError JsonNumber
 std.json.scanString : JsonLimits -> ByteInput -> ParseReply ByteInput JsonError String
 std.json.scanStringAt : JsonLimits -> Bytes -> Int -> Int -> [Char] -> ParseReply ByteInput JsonError String
-std.json.stringDecoder : Decoder String
+std.json.signedExponent : Int -> [Char] -> Int
+std.json.stringDecoder : forall e. Decoder e String
+std.json.stringEncoder : Encoder String
 std.json.stringToken : JsonLimits -> Parser ByteInput JsonError String
+std.json.taggedDecoder : forall e a. String -> [(String, FieldDecoder e a)] -> Decoder e a
+std.json.taggedEncoder : forall a. String -> [VariantEncoder a] -> Encoder a
+std.json.taggedRecordEncoder : forall a. String -> String -> [FieldEncoder a] -> Encoder a
+std.json.typeMismatch : forall e a. [JsonPathElement] -> String -> Json -> Either (DecodeError e) a
+std.json.validateAt : forall e a b. (a -> Either e b) -> [JsonPathElement] -> a -> Either (DecodeError e) b
+std.json.validateDecoder : forall e a b. (a -> Either e b) -> Decoder e a -> Decoder e b
 std.json.validateNumberWith : JsonLimits -> String -> Maybe JsonNumber
+std.json.variantEncoder : forall sum payload. String -> (sum -> Maybe payload) -> [FieldEncoder payload] -> VariantEncoder sum
 std.list.drop : forall a. Int -> [a] -> [a]
 std.list.dropWhile : forall a. (a -> Bool) -> [a] -> [a]
 std.list.isEmpty : forall a. [a] -> Bool
@@ -663,6 +737,7 @@ std.parser.expected : forall input token custom value. InputOps input token -> S
 std.parser.feedStream : forall token. StreamInput token -> [token] -> Maybe (StreamInput token)
 std.parser.finishReply : forall token custom value. ParseReply (StreamInput token) custom value -> ParseReply (StreamInput token) custom value
 std.parser.finishStream : forall token. StreamInput token -> StreamInput token
+std.parser.finishStreamReply : forall input custom value upstream. ParseReply input custom value -> IO upstream (Either (ParseError custom) value)
 std.parser.foldReply : forall input custom value result. (Consumption -> value -> input -> result) -> (Consumption -> input -> ParseError custom -> result) -> (Consumption -> input -> (input -> ParseReply input custom value) -> result) -> ParseReply input custom value -> result
 std.parser.inputPosition : forall input token. InputOps input token -> input -> Position
 std.parser.joinStrings : String -> [String] -> String
@@ -679,7 +754,9 @@ std.parser.many : forall input token custom value. InputOps input token -> Parse
 std.parser.manyFold : forall input token custom value accumulator. InputOps input token -> Parser input custom value -> accumulator -> (accumulator -> value -> accumulator) -> Parser input custom accumulator
 std.parser.manyFoldLoop : forall input token custom value accumulator. InputOps input token -> Parser input custom value -> (accumulator -> value -> accumulator) -> Consumption -> accumulator -> input -> ParseReply input custom accumulator
 std.parser.manyFoldReply : forall input token custom value accumulator. InputOps input token -> Parser input custom value -> (accumulator -> value -> accumulator) -> Consumption -> accumulator -> ParseReply input custom value -> ParseReply input custom accumulator
+std.parser.mapCustomError : forall input e f a. (e -> f) -> Parser input e a -> Parser input f a
 std.parser.mapReply : forall input custom a b. (a -> b) -> ParseReply input custom a -> ParseReply input custom b
+std.parser.mapReplyError : forall input e f a. (e -> f) -> ParseReply input e a -> ParseReply input f a
 std.parser.mapResult : forall input custom a b. (a -> b) -> Parser input custom a -> Parser input custom b
 std.parser.mergeConsumption : Consumption -> Consumption -> Consumption
 std.parser.mergeErrors : forall custom. ParseError custom -> ParseError custom -> ParseError custom
@@ -687,6 +764,11 @@ std.parser.mergeErrorsAtSamePosition : forall custom. ParseError custom -> Parse
 std.parser.nextInput : forall input token. InputOps input token -> input -> InputStep input token
 std.parser.optional : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom (Maybe value)
 std.parser.pair : forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom (a, b)
+std.parser.parseBytes : forall custom value. Parser ByteInput custom value -> Bytes -> ParseReply ByteInput custom value
+std.parser.parseStream : forall scope upstream token custom value. (token -> String) -> Parser (StreamInput token) custom value -> Stream scope upstream [token] -> IO upstream (Either (ParseError custom) value)
+std.parser.parseStreamReply : forall scope upstream token custom value. ParseReply (StreamInput token) custom value -> Stream scope upstream [token] -> IO upstream (Either (ParseError custom) value)
+std.parser.parseText : forall custom value. Parser TextInput custom value -> String -> ParseReply TextInput custom value
+std.parser.parseTokenList : forall token custom value. (token -> String) -> Parser (ListInput token) custom value -> [token] -> ParseReply (ListInput token) custom value
 std.parser.positionColumn : Position -> Int
 std.parser.positionLine : Position -> Int
 std.parser.positionOffset : Position -> Int

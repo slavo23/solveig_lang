@@ -1,20 +1,83 @@
-export (
-    Position, positionOffset, positionLine, positionColumn, Consumption(..),
-    InputStep(..), InputOps(..), nextInput, inputPosition, restoreInput,
-    describeInputToken, ParseError, errorPosition, errorUnexpected, errorExpected,
-    errorContexts, errorCustom, errorReason, ParseReply(..), Parser, foldReply, runParser,
-    resume, runComplete, succeed, mapResult, andThen, applyParser, pair, keepRight, keepLeft,
-    choice, attempt, cut, label, (<?>), context, expected, customFailure, defer,
-    anyToken, satisfy, token, tokens, tokensExact, endOfInput, manyFold, many, some,
-    skipMany, optional, between, separatedBy, ListInput, listInput, listInputOps,
-    TextInput, textInput, textInputOps, ByteInput, byteInput, byteInputOps, StreamInput,
-    streamInput, streamInputOps, feedStream, finishStream, supply, finishReply,
-    renderError
-)
+export (Position,
+    positionOffset,
+    positionLine,
+    positionColumn,
+    Consumption(..),
+    InputStep(..),
+    InputOps(..),
+    nextInput,
+    inputPosition,
+    restoreInput,
+    describeInputToken,
+    ParseError,
+    errorPosition,
+    errorUnexpected,
+    errorExpected,
+    errorContexts,
+    errorCustom,
+    errorReason,
+    ParseReply(..),
+    Parser,
+    foldReply,
+    runParser,
+    resume,
+    runComplete,
+    succeed,
+    mapResult,
+    mapCustomError,
+    andThen,
+    applyParser,
+    pair,
+    keepRight,
+    keepLeft,
+    choice,
+    attempt,
+    cut,
+    label,
+    (<?>),
+    context,
+    expected,
+    customFailure,
+    defer,
+    anyToken,
+    satisfy,
+    token,
+    tokens,
+    tokensExact,
+    endOfInput,
+    manyFold,
+    many,
+    some,
+    skipMany,
+    optional,
+    between,
+    separatedBy,
+    ListInput,
+    listInput,
+    listInputOps,
+    TextInput,
+    textInput,
+    textInputOps,
+    ByteInput,
+    byteInput,
+    byteInputOps,
+    StreamInput,
+    streamInput,
+    streamInputOps,
+    feedStream,
+    finishStream,
+    supply,
+    finishReply,
+    parseText,
+    parseBytes,
+    parseTokenList,
+    parseStream,
+    renderError)
 
 import std.bytes(*)
 import std.list(*)
 import std.set(*)
+import std.stream(Stream, StreamStep(..))
 import std.text(*)
 import std.vector(*)
 
@@ -235,6 +298,23 @@ mapReply transform (Rejected consumption rest error) =
     Rejected consumption rest error
 mapReply transform (Awaiting consumption suspended continue) =
     Awaiting consumption suspended (fun input => mapReply transform (continue input))
+
+-- | Maps custom failures, preserving positions, expectations, commitment, and suspension.
+mapCustomError : forall input e f a. (e -> f) -> Parser input e a -> Parser input f a
+mapCustomError transform parser = Parser (mapReplyError transform . runParser parser)
+
+mapReplyError : forall input e f a. (e -> f) -> ParseReply input e a -> ParseReply input f a
+mapReplyError _ (Parsed consumption value rest) = Parsed consumption value rest
+mapReplyError transform (Rejected
+        consumption
+        rest
+        (ParseError position unexpected expected contexts custom reason)) =
+    Rejected
+        consumption
+        rest
+        (ParseError position unexpected expected contexts (map transform custom) reason)
+mapReplyError transform (Awaiting consumption suspended continue) =
+    Awaiting consumption suspended (mapReplyError transform . continue)
 
 -- | Sequences a parser with a value-dependent continuation.
 -- |
@@ -707,6 +787,70 @@ finishReply : forall token custom value. ParseReply (StreamInput token) custom v
 finishReply (Awaiting _ suspended continue) = continue (finishStream suspended)
 finishReply (Parsed consumption value rest) = Parsed consumption value rest
 finishReply (Rejected consumption rest error) = Rejected consumption rest error
+
+-- | Parses one complete Unicode text value with the supplied text grammar.
+-- |
+-- | This is the concise form of
+-- | `runComplete textInputOps parser (textInput source)`.
+parseText :
+    forall custom value. Parser TextInput custom value ->
+    String -> ParseReply TextInput custom value
+parseText parser source = runComplete textInputOps parser (textInput source)
+
+-- | Parses one complete immutable byte value with the supplied byte grammar.
+-- |
+-- | Each parser token is an integer byte in the inclusive range 0 through 255.
+parseBytes :
+    forall custom value. Parser ByteInput custom value -> Bytes -> ParseReply ByteInput custom value
+parseBytes parser bytes = runComplete byteInputOps parser (byteInput bytes)
+
+-- | Parses one complete finite token list with caller-defined diagnostics.
+-- |
+-- | Build the grammar with `listInputOps describe`; this runner constructs the
+-- | equivalent complete cursor and rejects trailing tokens.
+parseTokenList :
+    forall token custom value. (token -> String) ->
+    Parser (ListInput token) custom value -> [token] -> ParseReply (ListInput token) custom value
+parseTokenList describe parser values =
+    runComplete (listInputOps describe) parser (listInput values)
+
+-- | Demand-drives a complete parser from a scoped stream of token chunks.
+-- |
+-- | The stream is pulled only while the parser reports Awaiting. Every chunk is
+-- | supplied in source order, an empty chunk is harmless, and StreamDone marks
+-- | final end-of-input. The rank-2 scope supplied by resource producers remains
+-- | inside this IO action, so neither the stream nor its parser cursor escapes.
+-- | Upstream failures retain the Stream's IO error type. A grammar rejection is
+-- | returned as Left inside that IO so the facade composes directly with scoped
+-- | resource callbacks without erasing either error domain.
+-- | StreamInput retains all supplied tokens until parsing ends. Incremental
+-- | pulling is not bounded-memory parsing; cut reduces work, not retained input.
+parseStream :
+    forall scope upstream token custom value. (token -> String) ->
+    Parser (StreamInput token) custom value ->
+    std.stream.Stream scope upstream [token] -> IO upstream (Either (ParseError custom) value)
+parseStream describe parser stream =
+    parseStreamReply (runComplete (streamInputOps describe) parser streamInput) stream
+
+parseStreamReply :
+    forall scope upstream token custom value. ParseReply (StreamInput token) custom value ->
+    std.stream.Stream scope upstream [token] -> IO upstream (Either (ParseError custom) value)
+parseStreamReply (Parsed _ value _) _ = pureIO (Right value)
+parseStreamReply (Rejected _ _ error) _ = pureIO (Left error)
+parseStreamReply (Awaiting consumption suspended continue) stream = do
+    step <- std.stream.next stream
+    case step of
+        std.stream.StreamDone =>
+            finishStreamReply (finishReply (Awaiting consumption suspended continue))
+        | std.stream.StreamYield chunk rest =>
+            parseStreamReply (supply (Awaiting consumption suspended continue) chunk) rest
+
+finishStreamReply :
+    forall input custom value upstream. ParseReply input custom value ->
+    IO upstream (Either (ParseError custom) value)
+finishStreamReply (Parsed _ value _) = pureIO (Right value)
+finishStreamReply (Rejected _ _ error) = pureIO (Left error)
+finishStreamReply (Awaiting _ _ _) = error "std.parser finished stream reply remained suspended"
 
 -- | Advances a stream cursor, awaits another chunk, or reports final end.
 streamNext : forall token. StreamInput token -> InputStep (StreamInput token) token

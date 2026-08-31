@@ -1,5 +1,10 @@
 section app {mode=truly;nested=[alpha,[beta,true]]}
 section app {mode=truly;nested=[alpha,[beta,true]]}
+section app {mode=truly;nested=[alpha,[beta,true]]}
+stream upstream: parser chunks
+scoped file: section app {mode=truly;nested=[alpha,[beta,true]]}
+early stream rejection: line 1, column 1 (offset 0): unexpected 'n'; expected section
+mapped streaming error: line 1, column 17 (offset 16): parse failed; reserved name "reserved"
 line 1, column 17 (offset 16): parse failed; reserved name "reserved"
 [1, 2, 3]
 line 1, column 2 (offset 1): unexpected 'c'; expected 'b'

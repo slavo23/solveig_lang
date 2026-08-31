@@ -110,6 +110,37 @@ Ordinary `readFile` remains available when reading a complete trusted file is
 the simpler operation; use the stream when memory must stay bounded or the
 consumer may stop early.
 
+## Parsing scoped chunks
+
+`std.parser.parseStream` consumes the existing stream protocol rather than
+introducing a parser-specific effectful source. Its stream elements are token
+chunks, so a UTF-8 text stream can be adapted with one ordinary `map`:
+
+```solveig
+import std.parser
+import std.stream
+import std.text
+
+parseTextChunks : forall scope e custom value.
+    std.parser.Parser (std.parser.StreamInput Char) custom value ->
+    std.stream.Stream scope e String ->
+    IO e (Either (std.parser.ParseError custom) value)
+parseTextChunks parser chunks =
+    std.parser.parseStream
+        show
+        parser
+        (std.stream.map std.text.stringToChars chunks)
+```
+
+The parser requests another chunk only after returning `Awaiting`; the bridge
+does not read ahead. Stream failures remain typed `IO e` failures. Grammar
+rejections are returned in the inner `Either`, retaining their structured
+position and custom error values. This separation lets the action run directly
+inside a rank-2 resource callback without returning a stream or cursor.
+The current `StreamInput` retains **all supplied tokens** until parsing ends;
+incremental pulling does not promise bounded parser memory. Narrow `attempt`
+and well-placed `cut` reduce backtracking work but do not release that storage.
+
 ## Scoped child pipes
 
 `std.process.withProcess` applies the same scope rule to a live direct child.

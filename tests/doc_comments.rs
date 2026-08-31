@@ -100,6 +100,10 @@ fn checked_project_docs_include_importable_declarations() {
                 .to_string()
         )
     );
+    assert!(
+        docs.get("std.parser.parseStream")
+            .is_some_and(|text| text.contains("Demand-drives a complete parser"))
+    );
 
     let json_project = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/golden/run/json");
     let docs = solveig_driver::checked_project_docs(&json_project)
@@ -115,7 +119,7 @@ fn checked_project_docs_include_importable_declarations() {
     assert_eq!(
         docs.get("std.json.Decoder"),
         Some(
-            &"A direct JSON decoder that parses only the requested representation.\n\nDecoders operate on the same ByteInput parser semantics as Json values.\nPrimitive, array, and homogeneous-object decoders avoid allocating an\nintermediate Json tree."
+            &"A JSON decoder with direct byte parsing and composable value decoding.\n\nDecoders operate on the same ByteInput parser semantics as Json values.\nPrimitive, array, and homogeneous-object decoders avoid allocating an\nintermediate Json tree. Heterogeneous record and tagged decoders reuse one\nbounded Json value at that composition boundary rather than adding another\nparser or forcing every Decoder through a tree."
                 .to_string()
         )
     );
@@ -125,5 +129,17 @@ fn checked_project_docs_include_importable_declarations() {
             &"Runs one direct decoder on complete bounded UTF-8 JSON bytes.\n\nLeading and trailing JSON whitespace are accepted. The returned\nParseReply retains structured position, expected-set, and custom errors."
                 .to_string()
         )
+    );
+    assert!(
+        docs.get("std.json.Encoder")
+            .is_some_and(|text| text.contains("symmetric value encoder"))
+    );
+    assert!(
+        docs.get("std.json.requiredField")
+            .is_some_and(|text| text.contains("field's path"))
+    );
+    assert!(
+        docs.get("std.json.jsonNumberToInt")
+            .is_some_and(|text| text.contains("No Float conversion"))
     );
 }
