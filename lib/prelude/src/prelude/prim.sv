@@ -11,7 +11,7 @@ export (
     getArgs, getCurrentDirectory, getEnv, getEnvironment, getFileSize,
     getModificationTime, getMonotonicTime, getProgName, getSystemTime, hClose, hFlush,
     hGetBytes, hGetContents, hGetLine, hIsEOF, hPutBytes, hPutStr, hPutStrLn,
-    hSetBuffering, httpRequestRaw, intAdd, intCompare, intDiv, intEq, intGe, intGt,
+    hSetBuffering, httpOpenRaw, httpRequestRaw, intAdd, intCompare, intDiv, intEq, intGe, intGt,
     intLe, intLt, intMod, intMul, intNeg, intSub, intToFloat, intToString,
     killThread, listDirectory, listen, maskIO, mkStdGen, newBoundedChan, newChan,
     newStdGen, openFile, printLine, printStr, pureIO, raiseDefectIO, randomInt,

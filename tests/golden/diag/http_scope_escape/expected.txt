@@ -1,0 +1,10 @@
+[TC0005] Error: type mismatch
+   ╭─[ $WORKSPACE/tests/golden/diag/http_scope_escape/src/main.sv:6:66 ]
+   │
+ 6 │ escape requestValue = withResponse requestValue (fun _ _ body => pureIO body)
+   │                                                                  ─────┬─────
+   │                                                                       ╰─────── this expression has type `IO a^2 (Stream scope HttpError Bytes)`
+   │
+   │ Note: but it was required to have type `IO HttpError a^1`
+───╯
+type error

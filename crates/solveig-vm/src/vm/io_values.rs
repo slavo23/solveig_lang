@@ -51,7 +51,16 @@ impl Interpreter<'_> {
                 let process = self.io.register_streaming_process(process)?;
                 Value::ChildProcessId(process)
             }
-            IoResult::Http(response) => self.alloc_http_response(&response)?,
+            IoResult::Http(response) => {
+                self.safe_point();
+                let body = self.heap.alloc_bytes(&response.body);
+                self.alloc_http_response(response.status, &response.headers, body)?
+            }
+            IoResult::HttpOpened(response) => self.alloc_http_response(
+                response.status,
+                &response.headers,
+                Value::HandleId(response.body.0),
+            )?,
             IoResult::Failed(failure) => {
                 self.io_current = Some(self.alloc_io_failure_action(failure)?);
                 return Ok(None);
@@ -95,10 +104,13 @@ impl Interpreter<'_> {
 
     fn alloc_http_response(
         &mut self,
-        response: &super::http::HttpResponse,
+        status: i64,
+        headers: &[(String, String)],
+        body: Value,
     ) -> Result<Value, RuntimeError> {
         let checkpoint = self.temporary_roots.len();
-        for (name, value) in &response.headers {
+        self.temporary_roots.push(body);
+        for (name, value) in headers {
             self.safe_point();
             let name = self.heap.alloc_str(name);
             self.temporary_roots.push(name);
@@ -127,29 +139,26 @@ impl Interpreter<'_> {
             self.temporary_roots.push(pair);
         }
         let headers = VmCtx::new(self).alloc_list_from_root_range(
-            checkpoint,
-            response.headers.len(),
+            checkpoint + 1,
+            headers.len(),
             "httpRequestRaw",
         )?;
-        self.temporary_roots.truncate(checkpoint);
+        self.temporary_roots.truncate(checkpoint + 1);
         self.temporary_roots.push(headers);
-        self.safe_point();
-        let body = self.heap.alloc_bytes(&response.body);
-        self.temporary_roots.push(body);
         self.safe_point();
         let headers = self
             .temporary_roots
-            .get(checkpoint)
+            .get(checkpoint + 1)
             .copied()
             .expect("ICE: HTTP header-list root disappeared");
         let body = self
             .temporary_roots
-            .get(checkpoint + 1)
+            .get(checkpoint)
             .copied()
             .expect("ICE: HTTP body root disappeared");
         let result = VmCtx::new(self).alloc_data3_ctor(
             CtorRuntimeRole::PreludeTuple(3),
-            Value::Int(response.status),
+            Value::Int(status),
             headers,
             body,
             "httpRequestRaw",

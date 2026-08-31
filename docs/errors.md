@@ -208,6 +208,12 @@ Here `release resource` runs before `reportDefect`. If cleanup itself returns a
 typed error or raises a defect, that cleanup failure replaces the saved
 outcome. This prevents a failed release from being hidden.
 
+Because Solveig is strict, applying `use resource` can raise a defect even
+before it returns an IO action. `bracket` delays that application until cleanup
+is installed, and delays `release resource` until cleanup runs. A defect while
+constructing the use action therefore still releases the resource; a defect
+constructing the release action occurs after use, not before it.
+
 Interruption-safe installation uses masking so cancellation cannot land between
 acquisition and installing the cleanup frame. `bracket` masks acquisition and
 cleanup, restores the caller's interruption state for the use action, and runs

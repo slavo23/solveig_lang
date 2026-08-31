@@ -7,13 +7,15 @@ export (
     responseStatus, statusCode, isSuccessful, responseHeaders, responseBody, findHeader,
     responseText, bodyChunks, foldBodyChunks, headersFromList, withMaximumHeaderBytes,
     withMaximumBodyBytes, withHttpTimeout, withRedirectPolicy, maximumHeaderBytes,
-    maximumBodyBytes, httpTimeout, redirectPolicy
+    maximumBodyBytes, httpTimeout, redirectPolicy, withResponse, withResponseWith
 )
 
-import prelude.prim(httpRequestRaw, stringLength, stringSlice)
+import prelude.prim(httpOpenRaw, httpRequestRaw, hClose, hGetBytes, stringLength, stringSlice)
 import std.bytes(*)
 import std.text(*)
 import std.time(Duration, durationToMilliseconds, milliseconds)
+import std.stream(Stream, unfold)
+import std.task(bracket)
 
 -- | An absolute HTTP or HTTPS URL validated by urlFromString.
 data Url = Url String
@@ -291,15 +293,78 @@ request : HttpLimits -> Request -> IO HttpError Response
 request limits requestValue =
     case validateRequest limits requestValue of
         Left policyError => failIO policyError
-        | Right (Request method (Url url) headers body) =>
-            case limits of
-                HttpLimits maximumHeaders maximumBody timeout redirects =>
-                    fmap
-                        responseFromRaw
-                        (mapError (httpHostError limits)
-                            (prelude.prim.httpRequestRaw
-                                (methodText method, url, map headerToRaw headers, body)
-                                (maximumHeaders, maximumBody, durationToMilliseconds timeout, redirectCount redirects)))
+        | Right valid =>
+            fmap
+                responseFromRaw
+                (mapError
+                    (httpHostError limits)
+                    (prelude.prim.httpRequestRaw (requestToRaw valid) (limitsToRaw limits)))
+
+-- | Uses an HTTP response as a scoped byte stream with default limits and 32 KiB pulls.
+withResponse :
+    forall result. Request ->
+    (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) ->
+    IO HttpError result
+withResponse requestValue use = withResponseWith defaultHttpLimits 32768 requestValue use
+
+-- | Acquires headers, then demand-reads a single-consumer response body in a scope.
+-- |
+-- | The positive chunk size bounds each pull; maximumBodyBytes bounds all
+-- | bytes read, not just retained bytes. Exhaustion probes one additional byte.
+-- | No body pull occurs until demanded, though the host protocol buffer may
+-- | already contain bytes received with headers. An early return discards the
+-- | unread body rather than draining it. Status and headers may escape; the
+-- | rank-2 Stream may not (Launchbury and Peyton Jones, PLDI 1994).
+-- |
+-- | Cleanup runs on success, typed error, defect, and cancellation. An in-flight
+-- | blocking read finishes or reaches the original whole-request host timeout
+-- | before close completes; cancellation cleanup is not instantaneous. Request
+-- | bodies remain strict bytes, and redirects use the same policy as request.
+withResponseWith :
+    forall result. HttpLimits ->
+    Int ->
+    Request ->
+    (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) ->
+    IO HttpError result
+withResponseWith limits chunkSize requestValue use =
+    if chunkSize <= 0
+        then failIO (InvalidHttpLimit "chunk bytes" chunkSize)
+        else case validateRequest limits requestValue of
+            Left policyError => failIO policyError
+            | Right valid =>
+                bracket
+                    (mapError
+                        (httpHostError limits)
+                        (prelude.prim.httpOpenRaw (requestToRaw valid) (limitsToRaw limits)))
+                    closeResponse
+                    (fun (code, headers, handle) =>
+                        use
+                            (Status code)
+                            (map headerFromRaw headers)
+                            (unfold (responseByteStep limits chunkSize handle) ())
+                    )
+
+closeResponse : (Int, [(String, String)], Handle) -> IO HttpError ()
+closeResponse (_, _, handle) = mapError HttpHostError (prelude.prim.hClose handle)
+
+responseByteStep : HttpLimits -> Int -> Handle -> () -> IO HttpError (Maybe (Bytes, ()))
+responseByteStep limits chunkSize handle _ = do
+    bytes <- mapError (responseReadError limits) (prelude.prim.hGetBytes handle chunkSize)
+    if bytesLength bytes == 0 then pureIO Nothing else pureIO (Just (bytes, ()))
+
+responseReadError : HttpLimits -> HostError -> HttpError
+responseReadError limits hostError =
+    if hostErrorOperation hostError == "httpResponseBody"
+        then httpHostError limits hostError
+        else TransportError hostError
+
+requestToRaw : Request -> (String, String, [(String, String)], Maybe Bytes)
+requestToRaw (Request method (Url url) headers body) =
+    (methodText method, url, map headerToRaw headers, body)
+
+limitsToRaw : HttpLimits -> (Int, Int, Int, Int)
+limitsToRaw (HttpLimits headers body timeout redirects) =
+    (headers, body, durationToMilliseconds timeout, redirectCount redirects)
 
 httpHostError : HttpLimits -> HostError -> HttpError
 httpHostError (HttpLimits maximumHeaders maximumBody _ _) hostError =

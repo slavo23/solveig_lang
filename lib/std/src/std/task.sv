@@ -57,12 +57,15 @@ finally action cleanup =
 
 -- | Acquires a resource and releases it after its use action finishes.
 bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
+-- In a strict language, constructing either callback's IO action can itself
+-- raise a defect. Delay those applications until the cleanup scope is installed.
 bracket acquire release use =
     mask
         (bindIO acquire (fun resource =>
             prelude.prim.finallyIO
-                (prelude.prim.restoreMaskIO (use resource))
-                (release resource)))
+                (prelude.prim.restoreMaskIO
+                    (bindIO (pureIO ()) (fun _ => use resource)))
+                (bindIO (pureIO ()) (fun _ => release resource))))
 
 -- | Runs a child action within a scope and waits for its cancellation on exit.
 -- | Peyton Jones, Gordon, and Finne, "Concurrent Haskell" (POPL 1996), section

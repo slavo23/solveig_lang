@@ -432,6 +432,11 @@ impl Interpreter<'_> {
                 HandleFailure::SetBuffering { label, source } => {
                     self.alloc_labeled_io_error("hSetBuffering", &label, &source)
                 }
+                HandleFailure::HttpBodyTooLarge { maximum } => self.alloc_host_error(
+                    CtorRuntimeRole::PreludeHostResourceExhausted,
+                    "httpResponseBody",
+                    &format!("response body exceeds {maximum} bytes"),
+                ),
             },
             IoFailure::Connect { host, port, source } => self.alloc_host_error(
                 host_error_kind(&source),

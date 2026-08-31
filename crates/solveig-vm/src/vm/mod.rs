@@ -27,6 +27,7 @@ mod http;
 mod interruption;
 mod io;
 mod io_os;
+mod io_resume;
 mod io_unwind;
 mod io_values;
 mod io_worker;

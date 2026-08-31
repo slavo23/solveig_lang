@@ -142,4 +142,20 @@ fn checked_project_docs_include_importable_declarations() {
         docs.get("std.json.jsonNumberToInt")
             .is_some_and(|text| text.contains("No Float conversion"))
     );
+
+    let http_project =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/http_stream_client");
+    let docs =
+        solveig_driver::checked_project_docs(&http_project).expect("HTTP documentation checks");
+    assert_eq!(
+        docs.get("std.http.withResponse"),
+        Some(
+            &"Uses an HTTP response as a scoped byte stream with default limits and 32 KiB pulls."
+                .to_string()
+        )
+    );
+    assert!(
+        docs.get("std.http.withResponseWith")
+            .is_some_and(|text| text.contains("cancellation cleanup is not instantaneous"))
+    );
 }

@@ -72,6 +72,14 @@ The complete response body is already bounded when the value reaches Solveig.
 constructing another full list, but they do not turn the client into an
 unbounded streaming API.
 
+For a response that should be processed as it arrives, use `withResponse`.
+Its callback receives status, headers, and a scoped `Stream` of binary chunks.
+`withResponseWith limits chunkBytes request callback` selects the total body
+bound and the maximum bytes per pull. A stream fold can count or process the
+body without retaining it; returning early closes without draining the rest.
+The stream cannot escape its callback. An in-flight host read may delay cleanup
+until its original HTTP deadline. See [scoped downloads](../http.md#scoped-downloads).
+
 ## Build non-GET requests
 
 For staged request construction:

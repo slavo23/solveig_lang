@@ -56,7 +56,7 @@ HTTP 4xx and 5xx responses are not transport errors. This lets applications
 handle 304 caching, 404 absence, authentication responses, and rate limits by
 status and headers without losing their bounded response bodies.
 
-## Bodies and cleanup
+## Strict bodies
 
 The host validates content length and chunk framing, reads at most the body
 limit plus one detection byte, then drops the host response before returning.
@@ -77,14 +77,61 @@ countBytes = std.http.foldBodyChunks
 These APIs are incremental consumption of an already bounded body, not an
 unbounded streaming escape hatch.
 
+## Scoped downloads
+
+`withResponse request callback` makes the status and headers available before
+consuming the response body. Its callback receives a single-consumer
+`Stream scope HttpError Bytes`. Use `withResponseWith limits chunkBytes request
+callback` to choose the total response limit and the maximum bytes per pull.
+Defaults are the ordinary HTTP limits and 32 KiB pulls.
+
+```solveig
+import std.bytes(bytesLength)
+import std.http(HttpError, Request, withResponse)
+import std.stream
+
+downloadSize : Request -> IO HttpError Int
+downloadSize requestValue =
+    withResponse requestValue (fun _ _ body =>
+        std.stream.fold (fun total bytes => total + bytesLength bytes) 0 body)
+```
+
+The fresh scope prevents returning the body or a transformed body from the
+callback. Status, headers, and computed results can escape. Feed chunks to an
+existing file writer or parser, or use `take` to stop early. Collecting chunks
+in a `BytesBuilder` is explicitly whole-body storage, not bounded-memory use.
+
+Each demand performs one bounded host read; no Solveig producer or queue reads
+ahead. `ureq` still owns a bounded protocol buffer, which can include bytes
+received with the headers. `maximumBodyBytes` is cumulative, not a per-chunk
+limit, and an exhausted allowance uses one extra byte to distinguish EOF from
+overflow. Early return does not promise that the unread remainder is valid or
+within the total limit: it closes without inspecting that remainder.
+
+Returning normally, raising a typed error or defect, and cancelling the
+callback all close the body. Unread data is discarded, not drained. The shared
+host client may reuse a connection only after a fully consumed valid response;
+an unfinished response is dropped by the host library. There is no GC finalizer
+and no new connection pool. Streams must be consumed once, in order.
+
+Request bodies are still strict `Bytes` (or explicitly encoded text). This
+download API does not add streamed uploads, automatic retries, or a replayable
+body abstraction. Redirects use the existing request policy; file/stream upload
+and replay policy remain a separate unfinished part of V3.
+
 ## Cancellation and timeouts
 
 HTTP calls run on the existing blocking IO pool, so they do not stall Solveig
 green-thread scheduling. `std.task.timeout` can cancel the waiting Solveig
 thread promptly. A blocking host call already inside the transport is not
-forcefully interrupted mid-system-call; it owns and drops its response no later
-than the configured HTTP timeout. Keep timeouts finite and size request
-concurrency to the four-worker host pool.
+forcefully interrupted mid-system-call. For an acquired scoped body, close is
+queued behind its current read; scope cleanup waits until that read completes
+or reaches the original whole-request host deadline. Time spent in the callback
+does not reset that deadline, although an idle callback itself is not timed out
+by the host: use `std.task.timeout` for a deadline on the complete action.
+Cancellation during header acquisition tombstones the request and closes any
+late body on its owning worker. Keep timeouts finite and size active host IO
+concurrency to the four-worker pool. Idle body scopes do not occupy workers.
 
 ## HTTPS and caching
 

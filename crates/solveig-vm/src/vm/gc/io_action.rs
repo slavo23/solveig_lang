@@ -85,7 +85,7 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
             visit(process);
             visit(bytes);
         }
-        IoAction::HttpRequest { request, limits } => {
+        IoAction::HttpRequest { request, limits } | IoAction::HttpOpen { request, limits } => {
             visit(request);
             visit(limits);
         }
@@ -191,7 +191,7 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
             visit(process);
             visit(bytes);
         }
-        IoAction::HttpRequest { request, limits } => {
+        IoAction::HttpRequest { request, limits } | IoAction::HttpOpen { request, limits } => {
             visit(request);
             visit(limits);
         }

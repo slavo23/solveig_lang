@@ -1,4 +1,4 @@
-//! Host file and standard-stream resources behind opaque Solveig handles.
+//! Host file, HTTP body, and standard-stream resources behind opaque handles.
 //! Each table belongs to one blocking worker, so requests for one handle stay
 //! FIFO while separate workers can make progress on separate handles.
 
@@ -8,8 +8,11 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 
 mod file;
+mod http;
 
 use file::open_host_file;
+use http::HttpBody;
+pub(crate) use http::normalize_http_read_error;
 
 const DEFAULT_BLOCK_SIZE: usize = 8 * 1024;
 
@@ -124,6 +127,7 @@ pub(crate) enum HandleFailure {
     Read { label: String, source: io::Error },
     Write { label: String, source: io::Error },
     SetBuffering { label: String, source: io::Error },
+    HttpBodyTooLarge { maximum: usize },
 }
 
 enum HandleSlot {
@@ -144,6 +148,7 @@ enum HostHandle {
         pending: Vec<u8>,
     },
     File(HostFile),
+    Http(HttpBody),
 }
 
 #[derive(Clone, Copy)]
@@ -167,6 +172,10 @@ pub(crate) struct HandleTable {
 }
 
 impl HandleTable {
+    pub(crate) fn insert_http_body(&mut self, handle: HandleId, body: ureq::Body, maximum: usize) {
+        *self.slot_mut(handle) = HandleSlot::Open(HostHandle::Http(HttpBody::new(body, maximum)));
+    }
+
     pub(crate) fn for_worker(worker: usize, terminal_outputs: (bool, bool)) -> Self {
         let mut slots = vec![HandleSlot::Vacant, HandleSlot::Vacant, HandleSlot::Vacant];
         match worker {
@@ -334,6 +343,7 @@ impl HandleTable {
         let result = match slot {
             HandleSlot::Open(HostHandle::Input { .. }) => read_standard_line(stdin),
             HandleSlot::Open(HostHandle::File(file)) => file.read_line(),
+            HandleSlot::Open(HostHandle::Http(_)) => Err(http_bytes_only()),
             HandleSlot::Open(HostHandle::Output { .. }) => Err(not_readable_error()),
             HandleSlot::Closed { .. } | HandleSlot::Vacant => Err(closed_error(&label)),
         };
@@ -352,6 +362,7 @@ impl HandleTable {
         let result = match slot {
             HandleSlot::Open(HostHandle::Input { .. }) => read_standard_contents(stdin),
             HandleSlot::Open(HostHandle::File(file)) => file.read_contents(),
+            HandleSlot::Open(HostHandle::Http(_)) => Err(http_bytes_only()),
             HandleSlot::Open(HostHandle::Output { .. }) => Err(not_readable_error()),
             HandleSlot::Closed { .. } | HandleSlot::Vacant => Err(closed_error(&label)),
         };
@@ -371,6 +382,9 @@ impl HandleTable {
         let result = match slot {
             HandleSlot::Open(HostHandle::Input { .. }) => read_standard_bytes(stdin, maximum),
             HandleSlot::Open(HostHandle::File(file)) => file.read_bytes(maximum),
+            HandleSlot::Open(HostHandle::Http(body)) => {
+                return body.read_http_chunk(maximum).map(HandleOutput::Bytes);
+            }
             HandleSlot::Open(HostHandle::Output { .. }) => Err(not_readable_error()),
             HandleSlot::Closed { .. } | HandleSlot::Vacant => Err(closed_error(&label)),
         };
@@ -396,7 +410,9 @@ impl HandleTable {
                 ..
             }) => write_standard(*stream, *buffering, pending, bytes, stdout, stderr),
             HandleSlot::Open(HostHandle::File(file)) => file.write(bytes),
-            HandleSlot::Open(HostHandle::Input { .. }) => Err(not_writable_error()),
+            HandleSlot::Open(HostHandle::Input { .. } | HostHandle::Http(_)) => {
+                Err(not_writable_error())
+            }
             HandleSlot::Closed { .. } | HandleSlot::Vacant => Err(closed_error(&label)),
         };
         result
@@ -414,6 +430,7 @@ impl HandleTable {
         let result = match slot {
             HandleSlot::Open(HostHandle::Input { .. }) => standard_is_eof(stdin),
             HandleSlot::Open(HostHandle::File(file)) => file.is_eof(),
+            HandleSlot::Open(HostHandle::Http(_)) => Err(http_bytes_only()),
             HandleSlot::Open(HostHandle::Output { .. }) => Err(not_readable_error()),
             HandleSlot::Closed { .. } | HandleSlot::Vacant => Err(closed_error(&label)),
         };
@@ -442,6 +459,7 @@ impl HandleTable {
                         buffering: current, ..
                     } => *current = buffering,
                     HostHandle::File(file) => file.set_buffering(buffering)?,
+                    HostHandle::Http(_) => return Err(http_bytes_only()),
                 }
                 Ok(())
             }
@@ -470,6 +488,7 @@ fn slot_label(slot: &HandleSlot, handle: HandleId) -> String {
         | HandleSlot::Open(HostHandle::Output { label, .. })
         | HandleSlot::Closed { label } => label.clone(),
         HandleSlot::Open(HostHandle::File(file)) => file.path.display().to_string(),
+        HandleSlot::Open(HostHandle::Http(_)) => "HTTP response body".to_string(),
         HandleSlot::Vacant => format!("handle {}", handle.0),
     }
 }
@@ -480,12 +499,19 @@ fn flush_host(
     stderr: &Mutex<&mut (dyn Write + Send)>,
 ) -> io::Result<()> {
     match host {
-        HostHandle::Input { .. } => Ok(()),
+        HostHandle::Input { .. } | HostHandle::Http(_) => Ok(()),
         HostHandle::Output {
             stream, pending, ..
         } => flush_standard(*stream, pending, stdout, stderr),
         HostHandle::File(file) => file.flush(),
     }
+}
+
+fn http_bytes_only() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::Unsupported,
+        "HTTP bodies support bounded byte reads and close",
+    )
 }
 
 fn read_standard_line(stdin: &Mutex<&mut (dyn BufRead + Send)>) -> io::Result<String> {

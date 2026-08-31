@@ -11,6 +11,9 @@ use std::time::Duration;
 
 use solveig_driver::run_project_capture_with_stdin_and_args;
 
+#[path = "http_stream_runtime.rs"]
+mod streaming;
+
 #[test]
 fn bounded_http_handles_framing_redirects_status_limits_and_cancellation() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("HTTP fixture should bind");

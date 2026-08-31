@@ -165,6 +165,22 @@ may wait and then finish draining finite captured streams. A timeout or thread
 interruption follows the same cleanup path. Neither the handle nor either
 stream can escape the callback's fresh scope.
 
+## Scoped HTTP responses
+
+`std.http.withResponse` exposes status, headers, and a scoped `Bytes` stream.
+`withResponseWith` additionally selects HTTP limits and a positive chunk size.
+The callback is entered after headers arrive; each subsequent pull reads at
+most one chunk. The host protocol buffer is bounded, but it may already hold
+some body bytes received with the headers. There is no whole-response buffer
+unless the consumer builds one.
+
+The existing HTTP total-byte limit remains cumulative across pulls. Returning
+early closes without draining or validating the unread suffix. Cleanup also
+runs after failure, defect, and interruption. An already-blocked host read must
+finish or reach the original HTTP deadline before queued close completes; this
+is timeout-bounded cleanup, not immediate socket cancellation. See
+[HTTP and HTTPS](http.md) for the complete policy and a counting example.
+
 ## Failure and cancellation
 
 A stream does not catch failures. Its `next`, `fold`, and `forEach` actions

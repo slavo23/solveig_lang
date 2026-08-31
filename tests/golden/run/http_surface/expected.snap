@@ -5,3 +5,4 @@ expression: actual
 url: https://example.com/releases
 chunks: [3, 3, 1]
 header: Just "v1"
+invalid HTTP chunk bytes limit 0

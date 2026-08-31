@@ -97,7 +97,11 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         &[string.clone(), string.clone(), headers.clone(), maybe_bytes],
     );
     let http_limits = tuple(names, &[int.clone(), int.clone(), int.clone(), int.clone()]);
-    let http_response = tuple(names, &[int.clone(), headers, bytes.clone()]);
+    let http_response = tuple(names, &[int.clone(), headers.clone(), bytes.clone()]);
+    let http_stream = tuple(
+        names,
+        &[int.clone(), headers, Ty::make_con_id(PRIM_TYS.handle)],
+    );
     let handle_specs =
         handles::handle_builtin_specs(names, &int, &string, &bytes, &bool_ty, &host_error);
     let os_specs = os::os_builtin_specs(names, &int, &string, &bytes, &bool_ty, &host_error);
@@ -273,8 +277,17 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             BUILTIN_HTTP_REQUEST_RAW,
             2,
             arr(
-                &[http_request, http_limits],
+                &[http_request.clone(), http_limits.clone()],
                 io_of(host_error.clone(), http_response),
+            ),
+        ),
+        prim_spec(
+            "httpOpenRaw",
+            BUILTIN_HTTP_OPEN_RAW,
+            2,
+            arr(
+                &[http_request, http_limits],
+                io_of(host_error.clone(), http_stream),
             ),
         ),
         prim_spec(

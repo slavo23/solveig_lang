@@ -31,6 +31,15 @@ pub(super) fn listen(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, R
     Ok(ctx.alloc_io_action(IoAction::Listen { port }))
 }
 
+pub(super) fn http_open_raw(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let request = expect_value(args, 0, "httpOpenRaw")?;
+    let limits = expect_value(args, 1, "httpOpenRaw")?;
+    Ok(ctx.alloc_io_action(IoAction::HttpOpen { request, limits }))
+}
+
 pub(super) fn accept(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let socket = expect_value(args, 0, "accept")?;
     Ok(ctx.alloc_io_action(IoAction::Accept { socket }))

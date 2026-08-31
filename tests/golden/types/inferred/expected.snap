@@ -118,6 +118,7 @@ prelude.prim.hPutBytes : Handle -> Bytes -> IO HostError ()
 prelude.prim.hPutStr : Handle -> String -> IO HostError ()
 prelude.prim.hPutStrLn : Handle -> String -> IO HostError ()
 prelude.prim.hSetBuffering : Handle -> BufferMode -> IO HostError ()
+prelude.prim.httpOpenRaw : (String, String, [(String, String)], Maybe Bytes) -> (Int, Int, Int, Int) -> IO HostError (Int, [(String, String)], Handle)
 prelude.prim.httpRequestRaw : (String, String, [(String, String)], Maybe Bytes) -> (Int, Int, Int, Int) -> IO HostError (Int, [(String, String)], Bytes)
 prelude.prim.intAdd : Int -> Int -> Int
 prelude.prim.intCompare : Int -> Int -> Ordering
@@ -388,6 +389,7 @@ std.http.asciiCode : Char -> Int
 std.http.asciiStringEqual : String -> String -> Bool
 std.http.bodyChunks : Int -> Response -> Either HttpError [Bytes]
 std.http.chunksFrom : Int -> Bytes -> Int -> [Bytes]
+std.http.closeResponse : (Int, [(String, String)], Handle) -> IO HttpError ()
 std.http.containsCodePoint : Int -> [Int] -> Bool
 std.http.defaultHttpLimits : HttpLimits
 std.http.delete : Url -> Request
@@ -410,6 +412,7 @@ std.http.httpHostError : HttpLimits -> HostError -> HttpError
 std.http.httpTimeout : HttpLimits -> Duration
 std.http.isHeaderNameChar : Char -> Bool
 std.http.isSuccessful : Status -> Bool
+std.http.limitsToRaw : HttpLimits -> (Int, Int, Int, Int)
 std.http.maximumBodyBytes : HttpLimits -> Int
 std.http.maximumHeaderBytes : HttpLimits -> Int
 std.http.methodText : Method -> String
@@ -422,11 +425,14 @@ std.http.request : HttpLimits -> Request -> IO HttpError Response
 std.http.requestBody : Request -> Maybe Bytes
 std.http.requestHeaders : Request -> [Header]
 std.http.requestMethod : Request -> Method
+std.http.requestToRaw : Request -> (String, String, [(String, String)], Maybe Bytes)
 std.http.requestUrl : Request -> Url
 std.http.response : Status -> [Header] -> Bytes -> Response
 std.http.responseBody : Response -> Bytes
+std.http.responseByteStep : HttpLimits -> Int -> Handle -> () -> IO HttpError (Maybe (Bytes, ()))
 std.http.responseFromRaw : (Int, [(String, String)], Bytes) -> Response
 std.http.responseHeaders : Response -> [Header]
+std.http.responseReadError : HttpLimits -> HostError -> HttpError
 std.http.responseStatus : Response -> Status
 std.http.responseText : Response -> Either HttpError String
 std.http.send : Request -> IO HttpError Response
@@ -451,6 +457,8 @@ std.http.withHttpTimeout : Duration -> HttpLimits -> HttpLimits
 std.http.withMaximumBodyBytes : Int -> HttpLimits -> HttpLimits
 std.http.withMaximumHeaderBytes : Int -> HttpLimits -> HttpLimits
 std.http.withRedirectPolicy : RedirectPolicy -> HttpLimits -> HttpLimits
+std.http.withResponse : forall result. Request -> (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) -> IO HttpError result
+std.http.withResponseWith : forall result. HttpLimits -> Int -> Request -> (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) -> IO HttpError result
 std.http.withTextBody : String -> Request -> Request
 std.http.withoutBody : Request -> Request
 std.io.appendFile : String -> String -> IO HostError ()

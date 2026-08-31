@@ -25,7 +25,7 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.stream` | Strict pull streams, scoped resource lifetimes, bounded collection, and finite adapters |
 | `std.parser` | Generic parser combinators with structured errors and streaming input |
 | `std.json` | Bounded byte-level JSON, exact numbers, path-aware decoders, and symmetric encoders |
-| `std.http` | Convenient bounded GETs plus explicit HTTP/HTTPS requests, verified TLS, statuses, headers, and chunk folds |
+| `std.http` | Bounded HTTP/HTTPS requests, verified TLS, and scoped response-body streams |
 | `std.io` | Handles, buffering, and whole-file IO |
 | `std.fs` | Directory, path, and file-metadata operations |
 | `std.env` | Arguments, environment lookup, bounded dotenv loading, and program identity |
@@ -601,10 +601,18 @@ methods and bodies; `send` applies default limits to a prepared request.
 Every request applies response-header, response-body, timeout, and redirect
 bounds. Statuses such as 404 remain ordinary `Response` values;
 transport, certificate/TLS, timeout, redirect, and size failures are typed.
-HTTPS verifies certificates through the host platform policy. Response bodies
+HTTPS verifies certificates through the host platform policy. Strict response bodies
 are fully bounded before entering the Solveig heap. Use `bodyChunks` when a
 list of bounded pieces is convenient, or `foldBodyChunks` to process those
 pieces without allocating that list.
+
+`withResponse request callback` instead provides status, headers, and a rank-2
+scoped `Stream scope HttpError Bytes` before the body is consumed. Default pulls
+are at most 32 KiB; `withResponseWith limits chunkBytes request callback`
+selects both total limits and per-pull size. Early return closes without
+draining. Errors, defects, and cancellation also close; an in-flight host read
+must finish or reach its original deadline first. Request upload bodies remain
+strict bytes in this slice.
 
 Header validation rejects invalid names and newline injection. Header lookup
 is ASCII case-insensitive. The [networking tutorial](tutorial/07-networking-and-http.md)

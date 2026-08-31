@@ -1,6 +1,6 @@
-//! Blocking host IO workers and scheduler-facing request/completion state.
-//! Workers own no VM values or heap references; completions cross back as plain
-//! Rust data and are converted only after the scheduler wakes the process.
+//! Scheduler-facing IO routing, cancellation, and request/completion ownership.
+//! Blocking workers, sockets, and live children exchange plain Rust data here;
+//! no VM values or heap references cross the host boundary.
 
 use super::http::{HttpFailure, HttpRequest, HttpResponse};
 use super::*;
@@ -15,6 +15,12 @@ use std::sync::{Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
 
+mod blocking;
+mod request;
+use blocking::worker_loop;
+use request::IoWork;
+pub(super) use request::{IoFailure, IoRequest, IoResult};
+
 pub(super) mod filesystem;
 pub(super) mod process;
 pub(super) mod streaming_process;
@@ -28,153 +34,6 @@ use super::socket::{SocketRequest, SocketSubsystem};
 // Worker zero preserves terminal ordering; four general workers provide the
 // bounded host concurrency used by std.http and other blocking operations.
 const IO_WORKER_COUNT: usize = 5;
-
-pub(super) enum IoRequest {
-    Print(String),
-    ReadLine,
-    ReadFile {
-        path: PathBuf,
-        maximum: Option<i64>,
-    },
-    ReadFileBytes {
-        path: PathBuf,
-        maximum: Option<i64>,
-    },
-    WriteFile {
-        path: PathBuf,
-        contents: String,
-        append: bool,
-    },
-    WriteFileBytes {
-        path: PathBuf,
-        contents: Vec<u8>,
-    },
-    Filesystem(FilesystemRequest),
-    Process(ProcessRequest),
-    StartProcess(ProcessRequest),
-    ReadProcessStdout {
-        process: ChildProcessId,
-        maximum: i64,
-    },
-    ReadProcessStderr {
-        process: ChildProcessId,
-        maximum: i64,
-    },
-    WriteProcessStdin {
-        process: ChildProcessId,
-        bytes: Vec<u8>,
-    },
-    CloseProcessStdin(ChildProcessId),
-    WaitProcess(ChildProcessId),
-    TerminateProcess(ChildProcessId),
-    CloseProcess(ChildProcessId),
-    SecureRandomBytes(i64),
-    ResolveHost(String),
-    Connect {
-        host: String,
-        port: i64,
-    },
-    Listen {
-        port: i64,
-    },
-    Accept(SocketId),
-    SendBytes {
-        socket: SocketId,
-        bytes: Vec<u8>,
-    },
-    RecvBytes {
-        socket: SocketId,
-        maximum: i64,
-    },
-    CloseSocket(SocketId),
-    Handle(HandleRequest),
-    Http(HttpRequest),
-}
-
-pub(super) enum IoResult {
-    Unit,
-    Text(String),
-    Bytes(Vec<u8>),
-    Socket(SocketId),
-    Listener { socket: SocketId, port: u16 },
-    Handle(HandleId),
-    Bool(bool),
-    Int(i64),
-    TextList(Vec<String>),
-    DirectoryChanged(PathBuf),
-    Process(ProcessOutput),
-    StreamingProcess(StreamingProcess),
-    Http(HttpResponse),
-    Failed(IoFailure),
-}
-
-pub(super) enum IoFailure {
-    Print(io::Error),
-    ReadLine(io::Error),
-    ReadFile {
-        path: PathBuf,
-        source: io::Error,
-    },
-    ReadFileLimited {
-        path: PathBuf,
-        source: io::Error,
-    },
-    ReadFileTooLarge {
-        path: PathBuf,
-        maximum: i64,
-    },
-    WriteFile {
-        path: PathBuf,
-        append: bool,
-        source: io::Error,
-    },
-    GetEnv(String),
-    SetEnv(String),
-    Filesystem(FilesystemFailure),
-    Process(ProcessFailure),
-    ProcessStream {
-        operation: &'static str,
-        source: io::Error,
-    },
-    SecureRandom(io::Error),
-    ResolveHost {
-        host: String,
-        source: io::Error,
-    },
-    Connect {
-        host: String,
-        port: i64,
-        source: io::Error,
-    },
-    Listen {
-        port: i64,
-        source: io::Error,
-    },
-    Accept(io::Error),
-    Send(io::Error),
-    Recv(io::Error),
-    CloseSocket(io::Error),
-    Handle(HandleFailure),
-    Http(HttpFailure),
-}
-
-enum IoWork {
-    Request {
-        id: RequestId,
-        request: IoRequest,
-    },
-    Process {
-        id: RequestId,
-        request: ProcessRequest,
-        signals: mpsc::Receiver<ProcessSignal>,
-        signal_tx: mpsc::Sender<ProcessSignal>,
-    },
-    StartProcess {
-        id: RequestId,
-        request: ProcessRequest,
-        signals: mpsc::Receiver<ProcessSignal>,
-    },
-}
 
 enum IoCancellation {
     StrictProcess(mpsc::Sender<ProcessSignal>),
@@ -334,6 +193,11 @@ impl IoSubsystem {
                         RuntimeError::builtin(format!("unknown Handle identity {}", handle.0))
                     })?
             }
+            IoRequest::OpenHttp { handle, .. } => self
+                .handle_workers
+                .get(handle.0 as usize)
+                .and_then(|worker| *worker)
+                .expect("ICE: reserved HTTP handle has a worker"),
             IoRequest::ReadFile { .. }
             | IoRequest::ReadFileBytes { .. }
             | IoRequest::WriteFile { .. }
@@ -551,19 +415,30 @@ impl IoSubsystem {
         path: PathBuf,
         mode: FileMode,
     ) -> Result<RequestId, RuntimeError> {
+        let worker = self.next_worker % self.workers.len();
+        let handle = self.reserve_handle(worker)?;
+        self.issue(
+            process,
+            IoRequest::Handle(HandleRequest::OpenFile { handle, path, mode }),
+        )
+    }
+
+    pub(super) fn issue_open_http(
+        &mut self,
+        process: ProcessId,
+        request: HttpRequest,
+    ) -> Result<RequestId, RuntimeError> {
+        let worker = 1 + self.next_worker % self.workers.len().saturating_sub(1);
+        let handle = self.reserve_handle(worker)?;
+        self.issue(process, IoRequest::OpenHttp { handle, request })
+    }
+
+    fn reserve_handle(&mut self, worker: usize) -> Result<HandleId, RuntimeError> {
         let raw = u32::try_from(self.handle_workers.len()).map_err(|_too_many_handles| {
             RuntimeError::builtin("handle table exhausted".to_string())
         })?;
-        let worker = self.next_worker % self.workers.len();
         self.handle_workers.push(Some(worker));
-        self.issue(
-            process,
-            IoRequest::Handle(HandleRequest::OpenFile {
-                handle: HandleId(raw),
-                path,
-                mode,
-            }),
-        )
+        Ok(HandleId(raw))
     }
 
     pub(super) fn try_completion(
@@ -720,6 +595,22 @@ impl IoSubsystem {
                 process.shutdown_and_join();
                 None
             }
+            (RequestOwner::Cancelled, IoResult::HttpOpened(response)) => {
+                let worker = self
+                    .handle_workers
+                    .get(response.body.0 as usize)
+                    .and_then(|worker| *worker)
+                    .and_then(|index| self.workers.get(index))
+                    .expect("ICE: acquired HTTP handle has a live worker");
+                worker
+                    .send(IoWork::CloseHttp(response.body))
+                    .map_err(|_disconnected| {
+                        RuntimeError::builtin(
+                            "IO worker stopped before cancelled HTTP cleanup".to_string(),
+                        )
+                    })?;
+                None
+            }
             (RequestOwner::Cancelled, _result) => None,
         })
     }
@@ -749,208 +640,6 @@ fn streaming_issue_error(error: &io::Error) -> RuntimeError {
     RuntimeError::builtin(format!("failed to issue child-process IO: {error}"))
 }
 
-fn worker_loop(
-    worker_index: usize,
-    work: &mpsc::Receiver<IoWork>,
-    completions: &mpsc::Sender<IoCompletion>,
-    stdin: &Mutex<&mut (dyn BufRead + Send)>,
-    stdout: &Mutex<&mut (dyn Write + Send)>,
-    stderr: &Mutex<&mut (dyn Write + Send)>,
-    terminal_outputs: (bool, bool),
-) {
-    let mut handles = HandleTable::for_worker(worker_index, terminal_outputs);
-    let http_agent = super::http::agent();
-    while let Ok(work) = work.recv() {
-        let (id, result) = match work {
-            IoWork::Request { id, request } => (
-                id,
-                perform_request(request, stdin, stdout, stderr, &mut handles, &http_agent),
-            ),
-            IoWork::Process {
-                id,
-                request,
-                signals,
-                signal_tx,
-            } => (id, process::perform(request, &signals, signal_tx)),
-            IoWork::StartProcess {
-                id,
-                request,
-                signals,
-            } => {
-                let result = match streaming_process::start(request, completions.clone(), &signals)
-                {
-                    Ok(process) => IoResult::StreamingProcess(process),
-                    Err(failure) => IoResult::Failed(IoFailure::Process(failure)),
-                };
-                (id, result)
-            }
-        };
-        if completions.send(IoCompletion { id, result }).is_err() {
-            break;
-        }
-    }
-    handles.shutdown(stdout, stderr);
-}
-
-fn perform_request(
-    request: IoRequest,
-    stdin: &Mutex<&mut (dyn BufRead + Send)>,
-    stdout: &Mutex<&mut (dyn Write + Send)>,
-    stderr: &Mutex<&mut (dyn Write + Send)>,
-    handles: &mut HandleTable,
-    http_agent: &ureq::Agent,
-) -> IoResult {
-    match request {
-        IoRequest::Print(text) => write_stdout(stdout, &text),
-        IoRequest::ReadLine => perform_read_line(stdin),
-        IoRequest::ReadFile { path, maximum } => perform_read_file(path, maximum, true),
-        IoRequest::ReadFileBytes { path, maximum } => perform_read_file(path, maximum, false),
-        IoRequest::WriteFile {
-            path,
-            contents,
-            append,
-        } => perform_write_file(path, &contents, append),
-        IoRequest::WriteFileBytes { path, contents } => match fs::write(&path, contents) {
-            Ok(()) => IoResult::Unit,
-            Err(source) => IoResult::Failed(IoFailure::WriteFile {
-                path,
-                append: false,
-                source,
-            }),
-        },
-        IoRequest::Filesystem(request) => filesystem::perform(request),
-        IoRequest::Process(_) | IoRequest::StartProcess(_) => {
-            solveig_base::ice!("process request reached the non-cancellable worker path")
-        }
-        IoRequest::SecureRandomBytes(count) => perform_secure_random_bytes(count),
-        IoRequest::ResolveHost(host) => perform_resolve_host(host),
-        IoRequest::Http(request) => match super::http::perform(http_agent, request) {
-            Ok(response) => IoResult::Http(response),
-            Err(failure) => IoResult::Failed(IoFailure::Http(failure)),
-        },
-        IoRequest::Handle(request) => match handles.perform(request, stdin, stdout, stderr) {
-            Ok(HandleOutput::Unit) => IoResult::Unit,
-            Ok(HandleOutput::Opened(handle)) => IoResult::Handle(handle),
-            Ok(HandleOutput::Text(text)) => IoResult::Text(text),
-            Ok(HandleOutput::Bytes(bytes)) => IoResult::Bytes(bytes),
-            Ok(HandleOutput::Bool(value)) => IoResult::Bool(value),
-            Err(failure) => IoResult::Failed(IoFailure::Handle(failure)),
-        },
-        IoRequest::Connect { .. }
-        | IoRequest::Listen { .. }
-        | IoRequest::Accept(_)
-        | IoRequest::SendBytes { .. }
-        | IoRequest::RecvBytes { .. }
-        | IoRequest::CloseSocket(_)
-        | IoRequest::ReadProcessStdout { .. }
-        | IoRequest::ReadProcessStderr { .. }
-        | IoRequest::WriteProcessStdin { .. }
-        | IoRequest::CloseProcessStdin(_)
-        | IoRequest::WaitProcess(_)
-        | IoRequest::TerminateProcess(_)
-        | IoRequest::CloseProcess(_) => {
-            solveig_base::ice!("direct IO request reached the blocking worker pool")
-        }
-    }
-}
-
-fn perform_secure_random_bytes(count: i64) -> IoResult {
-    let Ok(count) = usize::try_from(count) else {
-        return IoResult::Failed(IoFailure::SecureRandom(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "byte count must be non-negative and fit the host address space",
-        )));
-    };
-    let mut bytes = Vec::new();
-    if let Err(error) = bytes.try_reserve_exact(count) {
-        return IoResult::Failed(IoFailure::SecureRandom(io::Error::new(
-            io::ErrorKind::OutOfMemory,
-            error,
-        )));
-    }
-    bytes.resize(count, 0);
-
-    match getrandom::fill(&mut bytes) {
-        Ok(()) => IoResult::Bytes(bytes),
-        Err(error) => IoResult::Failed(IoFailure::SecureRandom(error.into())),
-    }
-}
-
-fn perform_read_file(path: PathBuf, maximum: Option<i64>, text: bool) -> IoResult {
-    let contents = match maximum {
-        None => fs::read(&path).map_err(|source| IoFailure::ReadFile {
-            path: path.clone(),
-            source,
-        }),
-        Some(maximum) => read_file_limited(&path, maximum),
-    };
-    let contents = match contents {
-        Ok(contents) => contents,
-        Err(failure) => return IoResult::Failed(failure),
-    };
-    if !text {
-        return IoResult::Bytes(contents);
-    }
-    match String::from_utf8(contents) {
-        Ok(contents) => IoResult::Text(contents),
-        Err(error) => {
-            let source = io::Error::new(io::ErrorKind::InvalidData, error);
-            let failure = if maximum.is_some() {
-                IoFailure::ReadFileLimited { path, source }
-            } else {
-                IoFailure::ReadFile { path, source }
-            };
-            IoResult::Failed(failure)
-        }
-    }
-}
-
-fn read_file_limited(path: &Path, maximum: i64) -> Result<Vec<u8>, IoFailure> {
-    if maximum < 0 {
-        return Err(IoFailure::ReadFileLimited {
-            path: path.to_path_buf(),
-            source: io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "maximum byte count must be non-negative",
-            ),
-        });
-    }
-    let maximum = usize::try_from(maximum).map_err(|_out_of_range| IoFailure::ReadFileLimited {
-        path: path.to_path_buf(),
-        source: io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "maximum byte count is not representable by this host",
-        ),
-    })?;
-    let read_limit = maximum
-        .checked_add(1)
-        .ok_or_else(|| IoFailure::ReadFileLimited {
-            path: path.to_path_buf(),
-            source: io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "maximum byte count is not representable by this host",
-            ),
-        })?;
-    let file = fs::File::open(path).map_err(|source| IoFailure::ReadFileLimited {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    let mut contents = Vec::new();
-    file.take(read_limit as u64)
-        .read_to_end(&mut contents)
-        .map_err(|source| IoFailure::ReadFileLimited {
-            path: path.to_path_buf(),
-            source,
-        })?;
-    if contents.len() > maximum {
-        return Err(IoFailure::ReadFileTooLarge {
-            path: path.to_path_buf(),
-            maximum: maximum as i64,
-        });
-    }
-    Ok(contents)
-}
-
 fn validate_environment_name(name: &str) -> Result<(), String> {
     if name.is_empty() {
         Err("environment variable names cannot be empty".to_string())
@@ -958,82 +647,5 @@ fn validate_environment_name(name: &str) -> Result<(), String> {
         Err("environment variable names cannot contain '=' or NUL".to_string())
     } else {
         Ok(())
-    }
-}
-
-fn perform_resolve_host(host: String) -> IoResult {
-    let addresses = match (host.as_str(), 0).to_socket_addrs() {
-        Ok(addresses) => addresses,
-        Err(source) => return IoResult::Failed(IoFailure::ResolveHost { host, source }),
-    };
-    match addresses.into_iter().find(|address| address.is_ipv4()) {
-        Some(address) => IoResult::Text(address.ip().to_string()),
-        None => IoResult::Failed(IoFailure::ResolveHost {
-            host,
-            source: io::Error::new(io::ErrorKind::AddrNotAvailable, "host has no IPv4 address"),
-        }),
-    }
-}
-
-fn write_stdout(stdout: &Mutex<&mut (dyn Write + Send)>, text: &str) -> IoResult {
-    let mut stdout = match stdout.lock() {
-        Ok(stdout) => stdout,
-        Err(_) => {
-            return IoResult::Failed(IoFailure::Print(io::Error::other(
-                "stdout lock was poisoned",
-            )));
-        }
-    };
-    match stdout
-        .write_all(text.as_bytes())
-        .and_then(|()| stdout.flush())
-    {
-        Ok(()) => IoResult::Unit,
-        Err(error) => IoResult::Failed(IoFailure::Print(error)),
-    }
-}
-
-fn perform_read_line(stdin: &Mutex<&mut (dyn BufRead + Send)>) -> IoResult {
-    let mut stdin = match stdin.lock() {
-        Ok(stdin) => stdin,
-        Err(_) => {
-            return IoResult::Failed(IoFailure::ReadLine(io::Error::other(
-                "stdin lock was poisoned",
-            )));
-        }
-    };
-    let mut line = String::new();
-    match stdin.read_line(&mut line) {
-        Ok(0) => IoResult::Text(String::new()),
-        Ok(_) => {
-            if line.ends_with('\n') {
-                line.pop();
-                if line.ends_with('\r') {
-                    line.pop();
-                }
-            }
-            IoResult::Text(line)
-        }
-        Err(error) => IoResult::Failed(IoFailure::ReadLine(error)),
-    }
-}
-
-fn perform_write_file(path: PathBuf, contents: &str, append: bool) -> IoResult {
-    let result = if append {
-        OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)
-            .and_then(|mut file| file.write_all(contents.as_bytes()))
-    } else {
-        fs::write(&path, contents)
-    };
-    match result {
-        Ok(()) => IoResult::Unit,
-        Err(source) => IoResult::Failed(IoFailure::WriteFile {
-            path,
-            append,
-            source,
-        }),
     }
 }

@@ -1,6 +1,6 @@
 //! Bounded HTTP request preparation and blocking host execution.
 //! VM values are decoded on the scheduler thread; workers receive only owned
-//! Rust data and return one bounded response value.
+//! Rust data; strict collection and scoped acquisition share one protocol path.
 
 use super::*;
 use crate::builtins::VmCtx;
@@ -22,10 +22,10 @@ pub(super) struct HttpRequest {
     pub(super) maximum_redirects: u32,
 }
 
-pub(super) struct HttpResponse {
+pub(super) struct HttpResponse<B> {
     pub(super) status: i64,
     pub(super) headers: Vec<(String, String)>,
-    pub(super) body: Vec<u8>,
+    pub(super) body: B,
 }
 
 pub(super) enum HttpFailure {
@@ -204,10 +204,10 @@ pub(super) fn agent() -> ureq::Agent {
         .new_agent()
 }
 
-pub(super) fn perform(
+pub(super) fn open_response(
     agent: &ureq::Agent,
     request: HttpRequest,
-) -> Result<HttpResponse, HttpFailure> {
+) -> Result<HttpResponse<ureq::Body>, HttpFailure> {
     let secure = request.url.starts_with("https://");
     let method = ureq::http::Method::from_bytes(request.method.as_bytes())
         .map_err(|error| HttpFailure::Transport(error.to_string()))?;
@@ -256,29 +256,42 @@ pub(super) fn perform(
         .map_err(|error| {
             HttpFailure::Transport(format!("invalid response header value: {error}"))
         })?;
+    Ok(HttpResponse {
+        status,
+        headers,
+        body: response.into_body(),
+    })
+}
+
+pub(super) fn perform(
+    agent: &ureq::Agent,
+    request: HttpRequest,
+) -> Result<HttpResponse<Vec<u8>>, HttpFailure> {
+    let maximum = request.maximum_body;
+    let response = open_response(agent, request)?;
     let mut body = Vec::new();
-    let read_limit = request
-        .maximum_body
+    let read_limit = maximum
         .checked_add(1)
-        .ok_or(HttpFailure::BodyTooLarge(request.maximum_body))?;
+        .ok_or(HttpFailure::BodyTooLarge(maximum))?;
     response
-        .into_body()
+        .body
         .into_reader()
         .take(u64::try_from(read_limit).unwrap_or(u64::MAX))
         .read_to_end(&mut body)
         .map_err(|error| {
+            let error = crate::handle::normalize_http_read_error(error);
             if error.kind() == std::io::ErrorKind::TimedOut {
                 HttpFailure::Timeout(error.to_string())
             } else {
                 HttpFailure::Transport(error.to_string())
             }
         })?;
-    if body.len() > request.maximum_body {
-        return Err(HttpFailure::BodyTooLarge(request.maximum_body));
+    if body.len() > maximum {
+        return Err(HttpFailure::BodyTooLarge(maximum));
     }
     Ok(HttpResponse {
-        status,
-        headers,
+        status: response.status,
+        headers: response.headers,
         body,
     })
 }

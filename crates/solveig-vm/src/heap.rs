@@ -128,6 +128,10 @@ pub enum IoAction {
         request: Value,
         limits: Value,
     },
+    HttpOpen {
+        request: Value,
+        limits: Value,
+    },
     Connect {
         host: Value,
         port: i64,

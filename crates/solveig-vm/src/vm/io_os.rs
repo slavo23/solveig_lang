@@ -6,6 +6,19 @@ use super::io_worker::IoFailure;
 use super::io_worker::filesystem::{FilesystemFailure, FilesystemRequest};
 use super::io_worker::process::{ProcessInput, ProcessRequest};
 use super::*;
+
+pub(super) fn validate_process_chunk_size(
+    maximum: i64,
+    operation: &str,
+) -> Result<(), RuntimeError> {
+    if maximum > 0 && usize::try_from(maximum).is_ok() {
+        Ok(())
+    } else {
+        Err(RuntimeError::builtin(format!(
+            "{operation} chunk size must be a positive host-representable Int"
+        )))
+    }
+}
 use crate::builtins::VmCtx;
 use crate::heap::{EnvironmentAction, FilesystemAction, HeapObject};
 use crate::values::Value;
