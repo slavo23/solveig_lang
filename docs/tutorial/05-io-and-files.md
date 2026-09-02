@@ -310,8 +310,9 @@ when the complete session needs a deadline.
 Use the narrowest helper that owns the resource:
 
 - `withFile` for handles;
-- `withConnection` for outgoing sockets;
-- `withListener` for listeners;
+- `withTcpConnection` for outgoing TCP streams;
+- `withTcpListener` and `withAcceptedTcpConnection` for TCP servers;
+- `withUdpSocket` for UDP datagrams;
 - `withProcess` for live child pipes;
 - `withThread` for child tasks;
 - `bracket` for custom acquire/use/release lifetimes;

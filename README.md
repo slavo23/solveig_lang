@@ -1,7 +1,7 @@
 # Solveig
 
 Solveig is an experimental, statically typed functional language for writing
-clear programs that also need practical effects: files, processes, TCP,
+clear programs that also need practical effects: files, processes, TCP/UDP,
 HTTP/HTTPS, timers, channels, and structured concurrency. Programs are compiled
 to bytecode and run on Solveig's own virtual machine.
 

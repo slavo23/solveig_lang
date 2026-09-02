@@ -84,8 +84,13 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let b = Ty::TyVar(b_id);
     let chan_a = Ty::make_app(Ty::make_con_id(PRIM_TYS.chan), a.clone());
     let maybe_a = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), a.clone());
-    let resolve_host = unary(string.clone(), io_of(host_error.clone(), string.clone()));
+    let resolve_host = unary(
+        string.clone(),
+        io_of(host_error.clone(), string_list.clone()),
+    );
     let listener_result = tuple(names, &[socket.clone(), int.clone()]);
+    let datagram_result = tuple(names, &[bytes.clone(), string.clone(), int.clone()]);
+    let datagram_send = tuple(names, &[string.clone(), int.clone(), bytes.clone()]);
     let header = tuple(names, &[string.clone(), string.clone()]);
     let headers = Ty::make_app(list, header);
     let maybe_bytes = Ty::make_app(
@@ -366,7 +371,10 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "listen",
             BUILTIN_LISTEN,
             1,
-            unary(int.clone(), io_of(host_error.clone(), listener_result)),
+            unary(
+                int.clone(),
+                io_of(host_error.clone(), listener_result.clone()),
+            ),
         ),
         prim_spec(
             "accept",
@@ -396,7 +404,31 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "closeSocket",
             BUILTIN_CLOSE_SOCKET,
             1,
-            unary(socket, io_of(host_error.clone(), Ty::TyUnit)),
+            unary(socket.clone(), io_of(host_error.clone(), Ty::TyUnit)),
+        ),
+        prim_spec(
+            "bindUdp",
+            BUILTIN_BIND_UDP,
+            1,
+            unary(int.clone(), io_of(host_error.clone(), listener_result)),
+        ),
+        prim_spec(
+            "sendDatagram",
+            BUILTIN_SEND_DATAGRAM,
+            2,
+            arr(
+                &[socket.clone(), datagram_send],
+                io_of(host_error.clone(), Ty::TyUnit),
+            ),
+        ),
+        prim_spec(
+            "recvDatagram",
+            BUILTIN_RECV_DATAGRAM,
+            2,
+            arr(
+                &[socket, int.clone()],
+                io_of(host_error.clone(), datagram_result),
+            ),
         ),
         prim_spec(
             "pureIO",

@@ -185,7 +185,7 @@ pub enum BlockReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct RequestId(u32);
 
-/// Identifies one explicitly managed TCP resource in the runtime side table.
+/// Identifies one explicitly managed TCP or UDP resource in the runtime side table.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct SocketId(u32);
 

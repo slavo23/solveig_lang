@@ -9,21 +9,10 @@ emptyBytes = std.bytes.stringToBytes ""
 
 netToHost : std.net.NetError -> HostError
 netToHost (std.net.NetHostError _ hostError) = hostError
+netToHost error = HostError InvalidArgument "network" (show error)
 
-acceptTask : Socket -> Task Socket
-acceptTask listener = mapError netToHost (std.net.accept listener)
-
-recvBytesTask : Socket -> Int -> Task Bytes
-recvBytesTask socket maximum = mapError netToHost (std.net.recvBytes socket maximum)
-
-sendBytesTask : Socket -> Bytes -> Task ()
-sendBytesTask socket bytes = mapError netToHost (std.net.sendBytes socket bytes)
-
-closeSocketTask : Socket -> Task ()
-closeSocketTask socket = mapError netToHost (std.net.closeSocket socket)
-
-listenTask : Port -> Task (Socket, Port)
-listenTask port = mapError netToHost (std.net.listen port)
+hostToNet : HostError -> std.net.NetError
+hostToNet hostError = std.net.NetHostError "fixture" hostError
 
 fixtureBody : String
 fixtureBody =
@@ -57,21 +46,21 @@ byteAtIs bytes index expected =
         Just value => value == expected
         | Nothing => False
 
-readRequestHeaders : Socket -> Bytes -> Task Bytes
+readRequestHeaders : forall scope. TcpConnection scope -> Bytes -> IO std.net.NetError Bytes
 readRequestHeaders connection accumulated =
     case findHeaderEnd accumulated 0 of
         Just _ => pureIO accumulated
         | Nothing =>
             do
-                chunk <- recvBytesTask connection 1024
+                chunk <- std.net.receiveTcpBytes connection 1024
                 if std.bytes.bytesLength chunk == 0
                     then pureIO accumulated
                     else readRequestHeaders connection (std.bytes.bytesAppend accumulated chunk)
 
-sendFixtureResponse : Socket -> Bytes -> Task ()
+sendFixtureResponse : forall scope. TcpConnection scope -> Bytes -> IO std.net.NetError ()
 sendFixtureResponse connection request = do
-    std.time.sleep (std.time.milliseconds (requestDelay request))
-    sendBytesTask connection (std.bytes.stringToBytes fixtureResponse)
+    mapError hostToNet (std.time.sleep (std.time.milliseconds (requestDelay request)))
+    std.net.sendTcpBytes connection (std.bytes.stringToBytes fixtureResponse)
 
 requestDelay : Bytes -> Int
 requestDelay request = 30 + mod (byteSum request 0 0) 170
@@ -82,32 +71,34 @@ byteSum bytes index total =
         Nothing => total
         | Just value => byteSum bytes (index + 1) (total + value)
 
-serveOne : Socket -> Int -> Task ()
-serveOne listener _ =
-    std.task.bracket
-        (acceptTask listener)
-        closeSocketTask
-        (fun connection =>
-            do
-                request <- readRequestHeaders connection emptyBytes
-                sendFixtureResponse connection request
-        )
+serveConnection : forall scope. TcpConnection scope -> IO std.net.NetError ()
+serveConnection connection = do
+    request <- readRequestHeaders connection emptyBytes
+    sendFixtureResponse connection request
 
-serveFixture : Socket -> Int -> Task ()
+serveOne : forall scope. TcpListener scope -> Int -> IO std.net.NetError ()
+serveOne listener _ = std.net.withAcceptedTcpConnection listener serveConnection
+
+concurrentToNet : std.task.ConcurrentError std.net.NetError -> std.net.NetError
+concurrentToNet (std.task.ConcurrentInfrastructure hostError) =
+    std.net.NetHostError "fixture server" hostError
+concurrentToNet (std.task.ConcurrentWorker networkError) = networkError
+
+serveFixture : forall scope. TcpListener scope -> Int -> IO std.net.NetError ()
 serveFixture listener total =
     fmap
         (fun _ => ())
         (mapError
-            std.task.concurrentHostError
+            concurrentToNet
             (std.task.mapConcurrentlyBoundedOrdered 8 (serveOne listener) (std.list.range 0 total)))
 
 withFixture : forall a. Int -> (String -> Task a) -> Task a
-withFixture requestCount action = do
-    listenerInfo <- listenTask std.net.anyPort
-    case listenerInfo of
-        (listener, port) =>
-            std.task.finally
-                (std.task.withThread
-                    (serveFixture listener requestCount)
-                    (fun server => action ("http://127.0.0.1:" <> show port)))
-                (closeSocketTask listener)
+withFixture requestCount action =
+    mapError netToHost (std.net.withTcpListener std.net.anyPort (runFixture requestCount action))
+
+runFixture :
+    forall a scope. Int -> (String -> Task a) -> TcpListener scope -> Port -> IO std.net.NetError a
+runFixture requestCount action listener port =
+    std.task.withThread
+        (serveFixture listener requestCount)
+        (fun _ => mapError hostToNet (action ("http://127.0.0.1:" <> show port)))

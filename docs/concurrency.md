@@ -40,7 +40,7 @@ standard-library code.
 | Layer | Operations | Responsibility |
 |---|---|---|
 | Public runtime-backed operations | `spawn`, `killThread`, `mask`, `sleep`, `newChan`, `newBoundedChan`, `send`, `recv`, `tryRecv`, `closeChan` | Create or suspend processes, deliver interruption, and mutate channel state. |
-| Network runtime-backed operations | `resolveHost`, `connect`, `listen`, `accept`, `sendBytes`, `recvBytes`, `closeSocket` | Cross the host DNS and TCP boundary without blocking the scheduler. |
+| Package-internal network primitives | `resolveHost`, TCP connect/listen/accept/read/write, UDP bind/send/receive, socket close | Cross host DNS and readiness-driven socket boundaries without blocking the scheduler. |
 | Private runtime primitives in `prelude.prim` | `maskIO`, `restoreMaskIO`, `finallyIO`, `raiseDefectIO` | Preserve mask state and exact outcomes while public cleanup/combinator code is expressed in Solveig. |
 | Public `std.task` library | `finally`, `bracket`, `withThread`, `race`, `concurrently`, `timeout` | Define cleanup, child lifetime, result propagation, and cancellation policy using the primitives above. |
 
@@ -181,9 +181,9 @@ Cleanup runs masked after success, typed failure, defect, or interruption. A
 cleanup typed failure or defect replaces the saved outcome. A later
 interruption can still stop cleanup if cleanup blocks.
 
-Use `bracket` for channels, sockets, and handles. The GC
-does not own external-resource lifetime, and `closeSocket` is explicit and
-idempotent.
+Use `bracket` for channels and handles and the rank-2 `std.net` owners for
+sockets. The GC does not own external-resource lifetime; socket closure is
+explicit inside those owners and idempotent at the host boundary.
 
 ## Structured concurrency
 
@@ -260,45 +260,49 @@ completion can wake only the process that still owns that request. Cancelling
 a blocking request leaves a tombstone until its worker finishes, so stale
 completion data cannot wake a different process.
 
-TCP does not consume those four workers. One `mio` event-loop thread owns every
-listener and stream in a monotonic `SocketId` side table. It records pending
-accept, connect, send, and receive operations and reports readiness through the
-same scheduler completion path. Many green threads can therefore wait on
-different sockets without exhausting a thread pool.
+TCP and UDP do not consume those four workers. One `mio` event-loop thread owns
+every listener, byte stream, and datagram socket in a monotonic `SocketId` side
+table. It records pending accept, connect, send, receive, send-to, and
+receive-from operations and reports readiness through the same scheduler
+completion path. Many green threads can therefore wait on different sockets
+without exhausting a thread pool.
 
 ```solveig
-resolveHost : String -> IO NetError String
-connect : String -> Port -> IO NetError Socket
-listen : Port -> IO NetError (Socket, Port)
-accept : Socket -> IO NetError Socket
-sendBytes : Socket -> Bytes -> IO NetError ()
-recvBytes : Socket -> Int -> IO NetError Bytes
-closeSocket : Socket -> IO NetError ()
-withConnection : String -> Port -> (Socket -> IO NetError a) -> IO NetError a
-withListener : Port -> ((Socket, Port) -> IO NetError a) -> IO NetError a
-withAcceptedConnection : Socket -> (Socket -> IO NetError a) -> IO NetError a
+resolveHost : String -> IO NetError [IpAddress]
+withTcpConnection : String -> Port -> (forall scope. TcpConnection scope -> IO NetError a) -> IO NetError a
+withTcpListener : Port -> (forall scope. TcpListener scope -> Port -> IO NetError a) -> IO NetError a
+withAcceptedTcpConnection : TcpListener listenerScope -> (forall scope. TcpConnection scope -> IO NetError a) -> IO NetError a
+sendTcpBytes : TcpConnection scope -> Bytes -> IO NetError ()
+receiveTcpBytes : TcpConnection scope -> Int -> IO NetError Bytes
+tcpBytes : TcpConnection scope -> Int -> Stream scope NetError Bytes
+withUdpSocket : Port -> (forall scope. UdpSocket scope -> Port -> IO NetError a) -> IO NetError a
+sendDatagram : UdpSocket scope -> String -> Port -> Bytes -> IO NetError ()
+receiveDatagram : UdpSocket scope -> Int -> IO NetError Datagram
+datagrams : UdpSocket scope -> Int -> Stream scope NetError Datagram
 ```
 
 `resolveHost` performs blocking standard-library DNS on the worker pool and
-returns one IPv4 literal. `connect` accepts that literal or `localhost`; it
-does not perform DNS itself. `listen` binds IPv4 loopback, and `anyPort` asks
-the OS to choose a free port returned as `(listener, actualPort)`.
+returns every distinct address in host order within each family, with IPv4
+first for portable loopback binding. `withTcpConnection` resolves a host and
+tries addresses in order. Listener and UDP bind helpers use IPv4 loopback;
+`anyPort` asks the OS for an ephemeral port passed separately to the callback.
 
-Prefer `withConnection`, `withListener`, and `withAcceptedConnection` for
-owned sockets. They use `bracket`, so the resource closes after success, a
-typed error, a defect, or interruption. `closeListener` closes the socket in
-the tuple returned by `listen`; raw `closeSocket` remains available when
-ownership must cross a larger scope.
+Every public socket is rank-2 scoped. TCP connections, listeners, their byte
+streams, and UDP sockets cannot escape the callback that owns the underlying
+host resource. The shared `bracket` path closes them after success, typed
+failure, defect, cancellation, timeout, or early stream termination.
 
-`sendBytes` completes after the whole buffer is sent. `recvBytes` returns at
-most its non-negative maximum and returns empty bytes at EOF. Socket values
-contain only opaque identities: descriptors never live in the moving heap, GC
-never closes sockets, and ids are not reused. Use `bracket` or `finally` with
-`closeSocket`.
+`sendTcpBytes` completes after the whole buffer is sent. `receiveTcpBytes`
+requires a positive bound and returns empty bytes only at TCP EOF; `tcpBytes`
+turns repeated bounded reads into the common demand-driven stream. UDP keeps
+message boundaries: each `sendDatagram` is one message, and each
+`receiveDatagram` returns one `Datagram` with its source `Endpoint`. Oversized
+messages are consumed and rejected rather than silently truncated.
 
-The low-level surface is TCP plus basic IPv4 resolution. `std.http` adds bounded
-HTTP/1.1, chunked decoding, redirects, and platform-verified HTTPS on the
-blocking worker pool. UDP and general IPv6 selection are not provided.
+The raw `Socket` identity remains package-internal plumbing. Descriptors never
+live in the moving heap, GC never closes sockets, and ids are not reused.
+`std.http` remains the platform-verified HTTPS client. General raw TLS is a
+separate trust-policy surface and is not implied by TCP.
 
 The [networking tutorial](tutorial/07-networking-and-http.md) combines a local
 TCP service with bounded concurrent HTTP clients. It also explains why stable

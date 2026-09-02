@@ -87,3 +87,26 @@ pub(super) fn close_socket(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Va
     let socket = expect_value(args, 0, "closeSocket")?;
     Ok(ctx.alloc_io_action(IoAction::CloseSocket { socket }))
 }
+
+pub(super) fn bind_udp(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
+    let port = expect_int(args, 0, "bindUdp")?;
+    Ok(ctx.alloc_io_action(IoAction::BindUdp { port }))
+}
+
+pub(super) fn send_datagram(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let socket = expect_value(args, 0, "sendDatagram")?;
+    let request = expect_value(args, 1, "sendDatagram")?;
+    Ok(ctx.alloc_io_action(IoAction::SendDatagram { socket, request }))
+}
+
+pub(super) fn recv_datagram(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let socket = expect_value(args, 0, "recvDatagram")?;
+    let maximum = expect_int(args, 1, "recvDatagram")?;
+    Ok(ctx.alloc_io_action(IoAction::RecvDatagram { socket, maximum }))
+}

@@ -1,7 +1,8 @@
 # Concurrent downloader
 
-By default, this example resolves `neverssl.com` and downloads four plain-HTTP
-resources through a two-worker bounded-channel pool. It demonstrates real DNS,
+By default, this example connects to `neverssl.com` and downloads four plain-HTTP
+resources through a two-worker bounded-channel pool. `withTcpConnection`
+performs DNS automatically and tries the resolved addresses in order. It demonstrates real DNS,
 internet TCP readiness, bounded-channel backpressure, response processing,
 progress reporting, typed failure recovery, and concurrent file output.
 
@@ -20,9 +21,10 @@ Run it from the repository root with:
 cargo run -- --project-root examples/concurrent_downloader
 ```
 
-This is deliberately a minimal HTTP/1.0 demo. It downloads public, untrusted
+This is deliberately a minimal HTTP/1.0-over-TCP demo. It downloads public, untrusted
 content over unencrypted HTTP and does not implement TLS, redirects, chunked
-transfer decoding, or a production HTTP client.
+transfer decoding, or a production HTTP client. Use `std.http` for those
+production HTTP/HTTPS responsibilities.
 
 For a deterministic offline run, pass `--local` to start the in-program
 loopback server:

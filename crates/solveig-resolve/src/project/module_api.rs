@@ -319,7 +319,9 @@ fn compiler_type_doc(name: &str) -> Option<&'static str> {
         "ThreadId" => "An opaque identity for one lightweight thread.",
         "Chan" => "A typed FIFO channel shared by lightweight threads.",
         "Bytes" => "An immutable sequence of arbitrary bytes.",
-        "Socket" => "An opaque identity for an explicitly managed TCP resource.",
+        "Socket" => {
+            "A package-internal opaque identity for an explicitly managed TCP or UDP resource."
+        }
         "StdGen" => "Explicit immutable state for deterministic pseudorandom generation.",
         _ => return None,
     })
@@ -384,13 +386,16 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
         "bytesAppend" => "Concatenates two byte strings.",
         "connect" => "Opens a TCP connection to an IP address or localhost.",
         "resolveHost" => {
-            "Resolves a host name to an IPv4 address without blocking other green threads."
+            "Resolves a host name to distinct IP addresses without blocking other green threads."
         }
         "listen" => "Binds a loopback TCP listener and returns its actual port.",
         "accept" => "Accepts the next connection from a TCP listener.",
         "sendBytes" => "Sends an entire byte string on a connected TCP socket.",
         "recvBytes" => "Receives up to a requested number of bytes from a TCP socket.",
-        "closeSocket" => "Explicitly closes a TCP listener or connection.",
+        "closeSocket" => "Explicitly closes an internal TCP or UDP resource.",
+        "bindUdp" => "Binds a loopback UDP socket and returns its actual port.",
+        "sendDatagram" => "Sends one complete UDP datagram to a resolved endpoint.",
+        "recvDatagram" => "Receives one bounded UDP datagram and its source endpoint.",
         "pureIO" => "Creates an IO action that immediately returns a value.",
         "bindIO" => "Sequences an IO action and passes its result to the next action.",
         "error" => "Raises a defect from pure code.",

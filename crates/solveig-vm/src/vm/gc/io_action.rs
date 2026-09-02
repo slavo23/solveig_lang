@@ -44,6 +44,7 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
         | IoAction::Connect { host: value, .. }
         | IoAction::Accept { socket: value }
         | IoAction::RecvBytes { socket: value, .. }
+        | IoAction::RecvDatagram { socket: value, .. }
         | IoAction::CloseSocket { socket: value } => visit(value),
         IoAction::Bind {
             action,
@@ -80,6 +81,10 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
         IoAction::SendBytes { socket, bytes } => {
             visit(socket);
             visit(bytes);
+        }
+        IoAction::SendDatagram { socket, request } => {
+            visit(socket);
+            visit(request);
         }
         IoAction::WriteProcessStdin { process, bytes } => {
             visit(process);
@@ -139,6 +144,7 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
         | IoAction::NewStdGen
         | IoAction::SecureRandomBytes { .. }
         | IoAction::Listen { .. }
+        | IoAction::BindUdp { .. }
         | IoAction::Exit { .. } => {}
     }
 }
@@ -157,6 +163,7 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
         | IoAction::Connect { host: value, .. }
         | IoAction::Accept { socket: value }
         | IoAction::RecvBytes { socket: value, .. }
+        | IoAction::RecvDatagram { socket: value, .. }
         | IoAction::CloseSocket { socket: value } => visit(value),
         IoAction::Bind {
             action,
@@ -193,6 +200,10 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
         IoAction::SendBytes { socket, bytes } => {
             visit(socket);
             visit(bytes);
+        }
+        IoAction::SendDatagram { socket, request } => {
+            visit(socket);
+            visit(request);
         }
         IoAction::WriteProcessStdin { process, bytes } => {
             visit(process);
@@ -252,6 +263,7 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
         | IoAction::NewStdGen
         | IoAction::SecureRandomBytes { .. }
         | IoAction::Listen { .. }
+        | IoAction::BindUdp { .. }
         | IoAction::Exit { .. } => {}
     }
 }

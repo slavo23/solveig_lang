@@ -1,0 +1,10 @@
+[TC0005] Error: type mismatch
+   ╭─[ $WORKSPACE/tests/golden/diag/udp_scope_escape/src/main.sv:5:49 ]
+   │
+ 5 │ escape = withUdpSocket anyPort (fun socket _ => pureIO socket)
+   │                                                 ──────┬──────
+   │                                                       ╰──────── this expression has type `IO a^2 (UdpSocket scope)`
+   │
+   │ Note: but it was required to have type `IO NetError a^1`
+───╯
+type error

@@ -147,8 +147,9 @@ file, a refused connection, invalid input, or an HTTP transport error. Use
 
 `finally action cleanup` runs cleanup when `action` succeeds or raises a typed
 error. `bracket acquire release use` protects the whole resource lifetime.
-Higher-level helpers such as `withFile`, `withConnection`, `withListener`, and
-`withThread` are built around that ownership model.
+Higher-level helpers such as `withFile`, `withTcpConnection`,
+`withTcpListener`, `withUdpSocket`, and `withThread` are built around that
+ownership model.
 
 The compiler also rejects non-exhaustive patterns before the program runs, so
 a missing data case is not turned into an implicit runtime error.

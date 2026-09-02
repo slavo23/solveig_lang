@@ -457,6 +457,18 @@ impl Interpreter<'_> {
             IoFailure::Send(error) => self.alloc_std_io_error("sendBytes", &error),
             IoFailure::Recv(error) => self.alloc_std_io_error("recvBytes", &error),
             IoFailure::CloseSocket(error) => self.alloc_std_io_error("closeSocket", &error),
+            IoFailure::BindUdp { port, source } => self.alloc_host_error(
+                host_error_kind(&source),
+                "bindUdp",
+                &format!("port {port}: {source}"),
+            ),
+            IoFailure::SendDatagram(error) => self.alloc_std_io_error("sendDatagram", &error),
+            IoFailure::RecvDatagram(error) => self.alloc_std_io_error("recvDatagram", &error),
+            IoFailure::DatagramTooLarge { maximum } => self.alloc_host_error(
+                CtorRuntimeRole::PreludeHostResourceExhausted,
+                "recvDatagram",
+                &format!("datagram exceeds {maximum} bytes"),
+            ),
             IoFailure::Http(failure) => match failure {
                 super::http::HttpFailure::Transport(message) => self.alloc_host_error(
                     CtorRuntimeRole::PreludeHostProtocolError,

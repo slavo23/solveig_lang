@@ -725,9 +725,9 @@ table contains the process association rather than encoding it in the id.
 Terminal reads and writes share worker zero and therefore retain submission
 order on the caller-provided streams. File, filesystem-metadata, directory,
 and DNS requests are distributed round-robin across the other three workers
-and may finish in a different order;
-each completion wakes only its requesting process. DNS produces an owned IPv4
-address string before `connect` submits it to the socket thread. Stream
+and may finish in a different order; each completion wakes only its requesting
+process. DNS produces an owned list of distinct address strings, with IPv4
+before IPv6, before `std.net` submits one resolved address to the socket thread. Stream
 references are borrowed by scoped workers and protected by `Mutex` because
 multiple worker threads exist, but the mutex does not protect compiler or VM
 heap state.
@@ -757,17 +757,22 @@ child and flushes all open output handles before its scoped host thread joins;
 this also happens when its completion receiver has already closed during
 program exit.
 
-TCP resources live only in the socket thread's monotonic side table keyed by
-`SocketId`. A Solveig `Socket` value is the typed id, never an OS descriptor or
-a heap slot, so copying collection cannot move or duplicate the resource.
-`mio::Poll` registers interest only while an accept, connect, send, or receive
-is pending. Readiness is treated as a hint: operations drain until
-`WouldBlock`, partial writes retain their owned buffer and offset, and
-spurious connect readiness is checked with `take_error` and `peer_addr`.
+TCP and UDP resources live only in the socket thread's monotonic side table
+keyed by `SocketId`. A package-internal Solveig `Socket` value is the typed id,
+never an OS descriptor or a heap slot, so copying collection cannot move or
+duplicate the resource. Public `TcpConnection scope`, `TcpListener scope`, and
+`UdpSocket scope` values wrap that identity behind rank-2 owners.
+`mio::Poll` registers interest only while an accept, connect, stream send/read,
+or datagram send/receive is pending. Readiness is treated as a hint: operations
+drain until `WouldBlock`, partial TCP writes retain their owned buffer and
+offset, each UDP operation preserves one message, and spurious connect
+readiness is checked with `take_error` and `peer_addr`.
 All socket completions enter the same request table and scheduler wakeup path
 as blocking IO. Explicit close removes the side-table entry and wakes any
 outstanding operations with their specific typed error; ids are not reused,
-so a stale closed `Socket` cannot alias a later OS resource.
+so a stale closed identity cannot alias a later OS resource. UDP receives use
+one detection byte beyond the public bound and reject oversized messages rather
+than exposing silent truncation.
 
 Every scheduler iteration first drains ready completions. If the run queue is
 empty while IO requests remain, it blocks on the completion receiver rather

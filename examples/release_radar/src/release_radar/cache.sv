@@ -9,6 +9,7 @@ data Cache = Cache (std.map.Map String String)
 
 fsToHost : std.fs.FsError -> HostError
 fsToHost (std.fs.FsHostError _ hostError) = hostError
+fsToHost error = HostError InvalidArgument "filesystem" (show error)
 
 empty : Cache
 empty = Cache std.map.empty

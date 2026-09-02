@@ -203,8 +203,8 @@ they wake instead of keeping a parent stuck forever.
 
 Use `finally` or `bracket` for cleanup. `mask` defers interruption during a
 small critical region except while an operation is blocked. Most application
-code should rely on `withFile`, `withConnection`, `withListener`, and
-`withThread` rather than using `mask` directly.
+code should rely on `withFile`, `withTcpConnection`, `withTcpListener`,
+`withUdpSocket`, and `withThread` rather than using `mask` directly.
 
 Never use a channel protocol in which every participant waits to receive before
 any participant can send. Concurrency cannot repair a logical deadlock. State

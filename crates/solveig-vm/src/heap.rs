@@ -164,6 +164,17 @@ pub enum IoAction {
     CloseSocket {
         socket: Value,
     },
+    BindUdp {
+        port: i64,
+    },
+    SendDatagram {
+        socket: Value,
+        request: Value,
+    },
+    RecvDatagram {
+        socket: Value,
+        maximum: i64,
+    },
     ReadFile {
         path: Value,
         maximum: Option<i64>,

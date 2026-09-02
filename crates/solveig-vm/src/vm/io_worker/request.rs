@@ -61,6 +61,19 @@ pub(in crate::vm) enum IoRequest {
         maximum: i64,
     },
     CloseSocket(SocketId),
+    BindUdp {
+        port: i64,
+    },
+    SendDatagram {
+        socket: SocketId,
+        host: String,
+        port: i64,
+        bytes: Vec<u8>,
+    },
+    RecvDatagram {
+        socket: SocketId,
+        maximum: i64,
+    },
     Handle(HandleRequest),
     Http(HttpRequest),
     OpenHttp {
@@ -83,11 +96,20 @@ pub(in crate::vm) enum IoResult {
     Text(String),
     Bytes(Vec<u8>),
     Socket(SocketId),
-    Listener { socket: SocketId, port: u16 },
+    Listener {
+        socket: SocketId,
+        port: u16,
+    },
+    Datagram {
+        bytes: Vec<u8>,
+        host: String,
+        port: u16,
+    },
     Handle(HandleId),
     Bool(bool),
     Int(i64),
     TextList(Vec<String>),
+    ResolvedAddresses(Vec<String>),
     DirectoryChanged(PathBuf),
     Process(ProcessOutput),
     StreamingProcess(StreamingProcess),
@@ -144,6 +166,15 @@ pub(in crate::vm) enum IoFailure {
     Send(io::Error),
     Recv(io::Error),
     CloseSocket(io::Error),
+    BindUdp {
+        port: i64,
+        source: io::Error,
+    },
+    SendDatagram(io::Error),
+    RecvDatagram(io::Error),
+    DatagramTooLarge {
+        maximum: i64,
+    },
     Handle(HandleFailure),
     Http(HttpFailure),
 }

@@ -57,45 +57,28 @@ httpAsHostError error = HostError InvalidArgument "HTTP" (show error)
 
 netToHost : std.net.NetError -> HostError
 netToHost (std.net.NetHostError _ hostError) = hostError
+netToHost error = HostError InvalidArgument "network" (show error)
 
-acceptTask : Socket -> Task Socket
-acceptTask listener = mapError netToHost (std.net.accept listener)
+hostToNet : HostError -> std.net.NetError
+hostToNet hostError = std.net.NetHostError "fixture" hostError
 
-recvBytesTask : Socket -> Int -> Task Bytes
-recvBytesTask socket maximum = mapError netToHost (std.net.recvBytes socket maximum)
+serveConnection : forall scope. TcpConnection scope -> IO std.net.NetError ()
+serveConnection connection = do
+    _ <- std.net.receiveTcpBytes connection 4096
+    std.net.sendTcpBytes connection (std.bytes.stringToBytes fixtureResponse)
 
-sendBytesTask : Socket -> Bytes -> Task ()
-sendBytesTask socket bytes = mapError netToHost (std.net.sendBytes socket bytes)
-
-closeSocketTask : Socket -> Task ()
-closeSocketTask socket = mapError netToHost (std.net.closeSocket socket)
-
-listenTask : Port -> Task (Socket, Port)
-listenTask port = mapError netToHost (std.net.listen port)
-
-serveOnce : Socket -> Task ()
-serveOnce listener =
-    bracket
-        (acceptTask listener)
-        closeSocketTask
-        (fun connection =>
-            do
-                _ <- recvBytesTask connection 4096
-                sendBytesTask connection (std.bytes.stringToBytes fixtureResponse)
-        )
+serveOnce : forall scope. TcpListener scope -> IO std.net.NetError ()
+serveOnce listener = std.net.withAcceptedTcpConnection listener serveConnection
 
 withFixture : forall a. (String -> Task a) -> Task a
-withFixture action =
-    bracket
-        (listenTask anyPort)
-        (fun (listener, _) => closeSocketTask listener)
-        (fun listenerInfo =>
-            case listenerInfo of
-                (listener, port) =>
-                    std.task.withThread
-                        (serveOnce listener)
-                        (fun _ => action ("http://127.0.0.1:" <> show port))
-        )
+withFixture action = mapError netToHost (std.net.withTcpListener anyPort (runFixture action))
+
+runFixture :
+    forall a scope. (String -> Task a) -> TcpListener scope -> Port -> IO std.net.NetError a
+runFixture action listener port =
+    std.task.withThread
+        (serveOnce listener)
+        (fun _ => mapError hostToNet (action ("http://127.0.0.1:" <> show port)))
 
 fetchNames : String -> Task (Either std.testing.TestFailure (Int, (std.vector.Vector String)))
 fetchNames base = do

@@ -1,10 +1,10 @@
-//! Readiness-driven TCP resources for the VM IO subsystem.
+//! Readiness-driven TCP and UDP resources for the VM IO subsystem.
 //! One event-loop thread owns every OS socket, while the scheduler exchanges
 //! typed ids, owned byte buffers, and ordinary IO completions with it.
 
 use super::io_worker::{IoCompletion, IoFailure, IoResult};
 use super::*;
-use mio::net::{TcpListener, TcpStream};
+use mio::net::{TcpListener, TcpStream, UdpSocket};
 use mio::{Events, Interest, Poll, Token, Waker};
 use std::collections::VecDeque;
 use std::io;
@@ -19,11 +19,35 @@ const WAKE_TOKEN: Token = Token(0);
 const EVENT_CAPACITY: usize = 128;
 
 pub(super) enum SocketRequest {
-    Connect { host: String, port: i64 },
-    Listen { port: i64 },
+    Connect {
+        host: String,
+        port: i64,
+    },
+    Listen {
+        port: i64,
+    },
     Accept(SocketId),
-    Send { socket: SocketId, bytes: Vec<u8> },
-    Recv { socket: SocketId, maximum: i64 },
+    Send {
+        socket: SocketId,
+        bytes: Vec<u8>,
+    },
+    Recv {
+        socket: SocketId,
+        maximum: i64,
+    },
+    BindUdp {
+        port: i64,
+    },
+    SendDatagram {
+        socket: SocketId,
+        host: String,
+        port: i64,
+        bytes: Vec<u8>,
+    },
+    RecvDatagram {
+        socket: SocketId,
+        maximum: i64,
+    },
     Close(SocketId),
 }
 
@@ -178,6 +202,16 @@ impl SocketLoop {
             SocketRequest::Accept(socket) => self.accept(id, socket),
             SocketRequest::Send { socket, bytes } => self.send(id, socket, bytes),
             SocketRequest::Recv { socket, maximum } => self.recv(id, socket, maximum),
+            SocketRequest::BindUdp { port } => self.bind_udp(id, port),
+            SocketRequest::SendDatagram {
+                socket,
+                host,
+                port,
+                bytes,
+            } => self.send_datagram(id, socket, &host, port, bytes),
+            SocketRequest::RecvDatagram { socket, maximum } => {
+                self.recv_datagram(id, socket, maximum);
+            }
             SocketRequest::Close(socket) => self.close(id, socket),
         }
     }
@@ -264,7 +298,7 @@ impl SocketLoop {
         };
         match entry {
             SocketEntry::Listener { accepts, .. } => accepts.push_back(id),
-            SocketEntry::Stream { .. } => {
+            SocketEntry::Stream { .. } | SocketEntry::Datagram { .. } => {
                 self.complete(
                     id,
                     IoResult::Failed(IoFailure::Accept(io::Error::new(
@@ -295,7 +329,7 @@ impl SocketLoop {
                     written: 0,
                 });
             }
-            SocketEntry::Listener { .. } => {
+            SocketEntry::Listener { .. } | SocketEntry::Datagram { .. } => {
                 self.complete(
                     id,
                     IoResult::Failed(IoFailure::Send(io::Error::new(
@@ -333,12 +367,126 @@ impl SocketLoop {
                 return;
             }
             SocketEntry::Stream { reads, .. } => reads.push_back(ReadRequest { id, maximum }),
-            SocketEntry::Listener { .. } => {
+            SocketEntry::Listener { .. } | SocketEntry::Datagram { .. } => {
                 self.complete(
                     id,
                     IoResult::Failed(IoFailure::Recv(io::Error::new(
                         io::ErrorKind::InvalidInput,
                         "recvBytes requires a connected socket",
+                    ))),
+                );
+                return;
+            }
+        }
+        self.refresh(socket_id);
+    }
+
+    fn bind_udp(&mut self, id: RequestId, port: i64) {
+        let socket = loopback_address(port).and_then(UdpSocket::bind);
+        let socket = match socket {
+            Ok(socket) => socket,
+            Err(source) => {
+                self.complete(id, IoResult::Failed(IoFailure::BindUdp { port, source }));
+                return;
+            }
+        };
+        let actual_port = match socket.local_addr() {
+            Ok(address) => address.port(),
+            Err(source) => {
+                self.complete(id, IoResult::Failed(IoFailure::BindUdp { port, source }));
+                return;
+            }
+        };
+        let socket_id = self.next_socket_id();
+        self.insert_socket(
+            socket_id,
+            SocketEntry::Datagram {
+                socket,
+                reads: VecDeque::new(),
+                writes: VecDeque::new(),
+                registered: false,
+            },
+        );
+        self.complete(
+            id,
+            IoResult::Listener {
+                socket: socket_id,
+                port: actual_port,
+            },
+        );
+    }
+
+    fn send_datagram(
+        &mut self,
+        id: RequestId,
+        socket_id: SocketId,
+        host: &str,
+        port: i64,
+        bytes: Vec<u8>,
+    ) {
+        let address = match socket_address(host, port) {
+            Ok(address) => address,
+            Err(error) => {
+                self.complete(id, IoResult::Failed(IoFailure::SendDatagram(error)));
+                return;
+            }
+        };
+        let Some(entry) = self.socket_mut(socket_id) else {
+            self.complete(
+                id,
+                IoResult::Failed(IoFailure::SendDatagram(closed_socket_error())),
+            );
+            return;
+        };
+        match entry {
+            SocketEntry::Datagram { writes, .. } => {
+                writes.push_back(DatagramWriteRequest { id, address, bytes });
+            }
+            SocketEntry::Listener { .. } | SocketEntry::Stream { .. } => {
+                self.complete(
+                    id,
+                    IoResult::Failed(IoFailure::SendDatagram(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "sendDatagram requires a UDP socket",
+                    ))),
+                );
+                return;
+            }
+        }
+        self.refresh(socket_id);
+    }
+
+    fn recv_datagram(&mut self, id: RequestId, socket_id: SocketId, maximum: i64) {
+        let maximum = match usize::try_from(maximum) {
+            Ok(maximum) if (1..=65_535).contains(&maximum) => maximum,
+            Ok(_) | Err(_) => {
+                self.complete(
+                    id,
+                    IoResult::Failed(IoFailure::RecvDatagram(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "recvDatagram maximum must be between 1 and 65535 bytes",
+                    ))),
+                );
+                return;
+            }
+        };
+        let Some(entry) = self.socket_mut(socket_id) else {
+            self.complete(
+                id,
+                IoResult::Failed(IoFailure::RecvDatagram(closed_socket_error())),
+            );
+            return;
+        };
+        match entry {
+            SocketEntry::Datagram { reads, .. } => {
+                reads.push_back(DatagramReadRequest { id, maximum });
+            }
+            SocketEntry::Listener { .. } | SocketEntry::Stream { .. } => {
+                self.complete(
+                    id,
+                    IoResult::Failed(IoFailure::RecvDatagram(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "recvDatagram requires a UDP socket",
                     ))),
                 );
                 return;
@@ -485,6 +633,20 @@ impl SocketLoop {
                     drive_reads(socket, reads, &mut results);
                 }
                 keep
+            }
+            SocketEntry::Datagram {
+                socket,
+                reads,
+                writes,
+                ..
+            } => {
+                if event.is_writable() {
+                    drive_datagram_writes(socket, writes, &mut results);
+                }
+                if event.is_readable() {
+                    drive_datagram_reads(socket, reads, &mut results);
+                }
+                true
             }
         };
 

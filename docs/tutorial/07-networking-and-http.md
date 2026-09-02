@@ -139,7 +139,8 @@ remove the service's usage policy; handle status and rate-limit headers.
 
 ## TCP clients
 
-`withConnection host port body` owns an outgoing socket:
+`withTcpConnection host port body` resolves the hostname and owns an outgoing
+connection in a fresh type-level scope:
 
 ```solveig
 import std.bytes(*)
@@ -147,27 +148,48 @@ import std.net(*)
 
 echo : String -> Port -> String -> IO NetError String
 echo host port message =
-    withConnection host port (fun socket => do
-        sendBytes socket (stringToBytes message)
-        reply <- recvBytes socket 4096
+    withTcpConnection host port (fun connection => do
+        sendTcpBytes connection (stringToBytes message)
+        reply <- receiveTcpBytes connection 4096
         case bytesToString reply of
             Right text => pureIO text
-            | Left error => failIO error)
+            | Left error => failIO (NetHostError "decode echo" $
+                HostError InvalidArgument "bytesToString" (show error)))
 ```
 
-TCP is a byte stream, not a message protocol. One `sendBytes` is not guaranteed
-to correspond to one `recvBytes`. A real protocol must define framing—for
-example, a delimiter or a length prefix—and loop until a complete frame is
-available.
+TCP is a byte stream, not a message protocol. One `sendTcpBytes` is not
+guaranteed to correspond to one `receiveTcpBytes`. A real protocol must define
+framing—for example, a delimiter or a length prefix—and loop until a complete
+frame is available. `tcpBytes connection chunkSize` supplies the same bounded,
+demand-driven loop as a scoped `Stream`; it performs no read-ahead.
 
 ## TCP listeners
 
-`withListener port body` binds a listener. Pass `anyPort` to ask the
-operating system for an available port; it returns
-`(listener, actualPort)`. Validate externally supplied integers with
-`portFromInt`. `accept` waits for a
-connection. Each accepted socket must be closed, normally with `finally` or a
-small ownership helper.
+`withTcpListener port body` binds IPv4 loopback. Pass `anyPort` to ask the
+operating system for an available port; the callback receives the listener and
+actual port separately. Validate externally supplied integers with
+`portFromInt`. `withAcceptedTcpConnection` waits for one client and introduces
+a nested connection scope. Both resources close through `bracket` on normal
+return, typed failure, defect, cancellation, and timeout; neither can escape its
+callback.
+
+## UDP datagrams
+
+Use `withUdpSocket anyPort body` for connectionless messages. Unlike TCP, UDP
+preserves message boundaries:
+
+```solveig
+sendDatagram sender "localhost" receiverPort (stringToBytes "ping")
+message <- receiveDatagram receiver 4096
+let senderEndpoint = datagramSource message in
+pureIO (datagramBytes message)
+```
+
+`sendDatagramTo` accepts an already resolved `Endpoint`. `receiveDatagram`
+returns one complete payload and source endpoint. Its explicit bound must be
+between 1 and 65,535 bytes; a larger message is consumed and reported as an
+error rather than silently truncated. `datagrams` exposes repeated receives as
+a scoped stream, one demand per message.
 
 Solveig does not currently provide a high-level HTTP server framework. The
 tutorial's local program writes the small HTTP response itself over TCP so the
@@ -180,9 +202,9 @@ project:
 
 1. Binds a loopback listener on an automatically selected port.
 2. Starts the server in a `withThread` scope.
-3. Accepts three connections and scopes every connection handler.
+3. Accepts three connections and scopes every connection.
 4. Runs three `get` clients through `mapConcurrentlyBoundedOrdered`.
-5. Waits for all handlers through a typed channel.
+5. Closes the listener and every accepted connection through rank-2 scopes.
 6. Closes every socket, channel, listener, and child scope.
 
 Run it without internet access:

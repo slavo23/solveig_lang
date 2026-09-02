@@ -31,6 +31,9 @@ impl Interpreter<'_> {
                     "listen",
                 )?
             }
+            IoResult::Datagram { bytes, host, port } => {
+                self.alloc_datagram_result(&bytes, &host, port)?
+            }
             IoResult::Handle(handle) => Value::HandleId(handle.0),
             IoResult::Bool(value) => {
                 if value {
@@ -41,6 +44,9 @@ impl Interpreter<'_> {
             }
             IoResult::Int(value) => Value::Int(value),
             IoResult::TextList(values) => self.alloc_string_list(&values, "listDirectory")?,
+            IoResult::ResolvedAddresses(values) => {
+                self.alloc_string_list(&values, "resolveHost")?
+            }
             IoResult::DirectoryChanged(path) => {
                 self.io.set_current_directory(path);
                 Value::Unit
@@ -108,6 +114,39 @@ impl Interpreter<'_> {
             stdout,
             stderr,
             "runProcess",
+        );
+        self.temporary_roots.truncate(checkpoint);
+        result
+    }
+
+    fn alloc_datagram_result(
+        &mut self,
+        bytes: &[u8],
+        host: &str,
+        port: u16,
+    ) -> Result<Value, RuntimeError> {
+        let checkpoint = self.temporary_roots.len();
+        self.safe_point();
+        let bytes = self.heap.alloc_bytes(bytes);
+        self.temporary_roots.push(bytes);
+        self.safe_point();
+        let host = self.heap.alloc_str(host);
+        self.temporary_roots.push(host);
+        self.safe_point();
+        let bytes = *self
+            .temporary_roots
+            .get(checkpoint)
+            .expect("ICE: datagram bytes root disappeared during allocation");
+        let host = *self
+            .temporary_roots
+            .get(checkpoint + 1)
+            .expect("ICE: datagram host root disappeared during allocation");
+        let result = VmCtx::new(self).alloc_data3_ctor(
+            CtorRuntimeRole::PreludeTuple(3),
+            bytes,
+            host,
+            Value::Int(i64::from(port)),
+            "recvDatagram",
         );
         self.temporary_roots.truncate(checkpoint);
         result

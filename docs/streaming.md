@@ -165,6 +165,22 @@ may wait and then finish draining finite captured streams. A timeout or thread
 interruption follows the same cleanup path. Neither the handle nor either
 stream can escape the callback's fresh scope.
 
+## Scoped TCP and UDP input
+
+`std.net.tcpBytes connection chunkSize` performs one positive, bounded TCP read
+for each demand and ends only when the byte stream reaches EOF. It shares the
+fresh scope introduced by `withTcpConnection` or
+`withAcceptedTcpConnection`, so neither the connection nor its stream can
+escape. `sendTcpBytes` remains an explicit whole-buffer operation; application
+protocol framing is not inferred from stream chunks.
+
+`std.net.datagrams socket maximumBytes` performs one UDP receive per demand.
+Each element is a complete `Datagram` containing its source `Endpoint` and
+payload. The bound is per message, not cumulative. The host reads one detection
+byte beyond it and rejects an oversized message instead of yielding a silently
+truncated value. UDP has no EOF; the stream ends only when its owner returns or
+a pull fails or is interrupted.
+
 ## Scoped HTTP responses
 
 `std.http.withResponse` exposes status, headers, and a scoped `Bytes` stream.

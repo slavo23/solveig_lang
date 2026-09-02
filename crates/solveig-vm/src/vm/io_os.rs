@@ -227,7 +227,7 @@ impl Interpreter<'_> {
         })
     }
 
-    fn expect_tuple<const N: usize>(
+    pub(super) fn expect_tuple<const N: usize>(
         &mut self,
         value: Value,
         builtin: &str,

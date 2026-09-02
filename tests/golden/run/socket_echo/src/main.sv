@@ -1,35 +1,41 @@
-import std.net(*)
 import std.bytes(*)
+import std.net(*)
+import std.stream(fold)
 import std.task(*)
 
 netToHost : NetError -> HostError
 netToHost (NetHostError _ hostError) = hostError
+netToHost error = HostError InvalidArgument "network" (show error)
 
 netTask : forall a. IO NetError a -> Task a
 netTask = mapError netToHost
 
-echoConnection : Socket -> Task ()
+echoConnection : forall scope. TcpConnection scope -> IO NetError ()
 echoConnection connection = do
-    request <- netTask (recvBytes connection 1024)
-    netTask (sendBytes connection request)
+    request <- receiveTcpBytes connection 1024
+    sendTcpBytes connection request
 
-runClient : Port -> Task ()
+serveOnce : forall scope. TcpListener scope -> IO NetError ()
+serveOnce listener = withAcceptedTcpConnection listener echoConnection
+
+runClient : Port -> IO NetError String
 runClient port =
-    bracket
-        (netTask (connect "127.0.0.1" port))
-        (netTask . closeSocket)
-        (fun connection => do
-            netTask (sendBytes connection (stringToBytes "echo over TCP"))
-            reply <- netTask (recvBytes connection 1024)
-            case bytesToString reply of
-                Right text => printLine text
-                | Left error => printLine "invalid reply")
+    withTcpConnection
+        "localhost"
+        port
+        (fun connection =>
+            do
+                sendTcpBytes connection (stringToBytes "echo over TCP")
+                reply <- fold bytesAppend (stringToBytes "") (tcpBytes connection 4)
+                case bytesToString reply of
+                    Right text => pureIO text
+                    | Left _ => pureIO "invalid reply"
+        )
+
+runFixture : forall scope. TcpListener scope -> Port -> IO NetError String
+runFixture listener port = withThread (serveOnce listener) (fun _ => runClient port)
 
 main : Task ()
-main =
-    bracket (netTask (listen anyPort)) (fun (listener, _) => netTask (closeSocket listener)) (fun listenerInfo =>
-        case listenerInfo of
-            (listener, port) =>
-                withThread
-                    (bracket (netTask (accept listener)) (netTask . closeSocket) echoConnection)
-                    (fun thread => runClient port))
+main = do
+    reply <- netTask (withTcpListener anyPort runFixture)
+    printLine reply

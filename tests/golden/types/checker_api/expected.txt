@@ -71,6 +71,7 @@ prelude.list.reverseListInto : forall a. [a] -> [a] -> [a]
 prelude.prim.accept : Socket -> IO HostError Socket
 prelude.prim.appendFile : String -> String -> IO HostError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
+prelude.prim.bindUdp : Int -> IO HostError (Socket, Int)
 prelude.prim.bytesAppend : Bytes -> Bytes -> Bytes
 prelude.prim.bytesConcat : [Bytes] -> Bytes
 prelude.prim.bytesEq : Bytes -> Bytes -> Bool
@@ -186,14 +187,16 @@ prelude.prim.readProcessStderr : ChildProcess -> Int -> IO HostError Bytes
 prelude.prim.readProcessStdout : ChildProcess -> Int -> IO HostError Bytes
 prelude.prim.recv : forall a. Chan a -> IO HostError a
 prelude.prim.recvBytes : Socket -> Int -> IO HostError Bytes
+prelude.prim.recvDatagram : Socket -> Int -> IO HostError (Bytes, String, Int)
 prelude.prim.removeFile : String -> IO HostError ()
 prelude.prim.renameFile : String -> String -> IO HostError ()
-prelude.prim.resolveHost : String -> IO HostError String
+prelude.prim.resolveHost : String -> IO HostError [String]
 prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
 prelude.prim.runProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ProcessResult
 prelude.prim.secureRandomBytes : Int -> IO HostError Bytes
 prelude.prim.send : forall a. Chan a -> a -> IO HostError ()
 prelude.prim.sendBytes : Socket -> Bytes -> IO HostError ()
+prelude.prim.sendDatagram : Socket -> (String, Int, Bytes) -> IO HostError ()
 prelude.prim.setCurrentDirectory : String -> IO HostError ()
 prelude.prim.setEnv : String -> String -> IO HostError ()
 prelude.prim.sleep : Int -> IO HostError ()
@@ -739,21 +742,45 @@ std.map.toAscList : forall k v. Map k v -> [(k, v)]
 std.map.toAscListInto : forall k v. Map k v -> [(k, v)] -> [(k, v)]
 std.map.values : forall k v. Map k v -> [v]
 std.map.valuesInto : forall k v. Map k v -> [v] -> [v]
-std.net.accept : Socket -> IO NetError Socket
 std.net.anyPort : Port
 std.net.atEndpoint : forall a. String -> IO HostError a -> IO NetError a
-std.net.closeListener : (Socket, Port) -> IO NetError ()
-std.net.closeSocket : Socket -> IO NetError ()
-std.net.connect : String -> Port -> IO NetError Socket
-std.net.listen : Port -> IO NetError (Socket, Port)
+std.net.closeTcpConnection : forall scope. TcpConnection scope -> IO NetError ()
+std.net.closeTcpListener : forall scope. (TcpListener scope, Port) -> IO NetError ()
+std.net.closeUdpSocket : forall scope. (UdpSocket scope, Port) -> IO NetError ()
+std.net.connectAddress : IpAddress -> Port -> IO NetError Socket
+std.net.connectAddresses : String -> Port -> [IpAddress] -> IO NetError Socket
+std.net.datagramBytes : Datagram -> Bytes
+std.net.datagramFromRaw : (Bytes, String, Int) -> Datagram
+std.net.datagramSource : Datagram -> Endpoint
+std.net.datagramStep : forall scope. UdpSocket scope -> Int -> () -> IO NetError (Maybe (Datagram, ()))
+std.net.datagrams : forall scope. UdpSocket scope -> Int -> Stream scope NetError Datagram
+std.net.endpoint : IpAddress -> Port -> Endpoint
+std.net.endpointAddress : Endpoint -> IpAddress
+std.net.endpointKey : Endpoint -> (IpAddress, Port)
+std.net.endpointPort : Endpoint -> Port
+std.net.ipAddressToString : IpAddress -> String
+std.net.openAcceptedTcpConnection : forall listenerScope. TcpListener listenerScope -> IO NetError (TcpConnection ())
+std.net.openTcpConnection : String -> Port -> IO NetError (TcpConnection ())
+std.net.openTcpListener : Port -> IO NetError (TcpListener (), Port)
+std.net.openUdpSocket : Port -> IO NetError (UdpSocket (), Port)
 std.net.portFromInt : Int -> Either PortError Port
 std.net.portToInt : Port -> Int
-std.net.recvBytes : Socket -> Int -> IO NetError Bytes
-std.net.resolveHost : String -> IO NetError String
-std.net.sendBytes : Socket -> Bytes -> IO NetError ()
-std.net.withAcceptedConnection : forall a. Socket -> (Socket -> IO NetError a) -> IO NetError a
-std.net.withConnection : forall a. String -> Port -> (Socket -> IO NetError a) -> IO NetError a
-std.net.withListener : forall a. Port -> ((Socket, Port) -> IO NetError a) -> IO NetError a
+std.net.receiveDatagram : forall scope. UdpSocket scope -> Int -> IO NetError Datagram
+std.net.receiveTcpBytes : forall scope. TcpConnection scope -> Int -> IO NetError Bytes
+std.net.resolveHost : String -> IO NetError [IpAddress]
+std.net.sendDatagram : forall scope. UdpSocket scope -> String -> Port -> Bytes -> IO NetError ()
+std.net.sendDatagramAddresses : forall scope. UdpSocket scope -> String -> Port -> Bytes -> [IpAddress] -> IO NetError ()
+std.net.sendDatagramTo : forall scope. UdpSocket scope -> Endpoint -> Bytes -> IO NetError ()
+std.net.sendTcpBytes : forall scope. TcpConnection scope -> Bytes -> IO NetError ()
+std.net.tcpByteStep : forall scope. TcpConnection scope -> Int -> () -> IO NetError (Maybe (Bytes, ()))
+std.net.tcpBytes : forall scope. TcpConnection scope -> Int -> Stream scope NetError Bytes
+std.net.useTcpListener : forall result. (forall scope. TcpListener scope -> Port -> IO NetError result) -> (TcpListener (), Port) -> IO NetError result
+std.net.useUdpSocket : forall result. (forall scope. UdpSocket scope -> Port -> IO NetError result) -> (UdpSocket (), Port) -> IO NetError result
+std.net.withAcceptedTcpConnection : forall listenerScope result. TcpListener listenerScope -> (forall connectionScope. TcpConnection connectionScope -> IO NetError result) -> IO NetError result
+std.net.withTcpConnection : forall result. String -> Port -> (forall scope. TcpConnection scope -> IO NetError result) -> IO NetError result
+std.net.withTcpListener : forall result. Port -> (forall scope. TcpListener scope -> Port -> IO NetError result) -> IO NetError result
+std.net.withUdpSocket : forall result. Port -> (forall scope. UdpSocket scope -> Port -> IO NetError result) -> IO NetError result
+std.net.wrapAddress : String -> IpAddress
 std.parser.<?> : forall input custom value. Parser input custom value -> String -> Parser input custom value
 std.parser.addConsumption : forall input custom value. Consumption -> ParseReply input custom value -> ParseReply input custom value
 std.parser.andThen : forall input custom a b. Parser input custom a -> (a -> Parser input custom b) -> Parser input custom b

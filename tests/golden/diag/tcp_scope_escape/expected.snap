@@ -1,0 +1,14 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[TC0005] Error: type mismatch
+   ╭─[ $WORKSPACE/tests/golden/diag/tcp_scope_escape/src/main.sv:5:50 ]
+   │
+ 5 │ escape port = withTcpConnection "localhost" port pureIO
+   │                                                  ───┬──
+   │                                                     ╰──── this expression has type `a^3 -> IO a^2 a^3`
+   │
+   │ Note: but it was required to have type `TcpConnection scope -> IO NetError a^1`
+───╯
+type error

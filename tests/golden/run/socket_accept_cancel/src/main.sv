@@ -3,23 +3,18 @@ import std.task(*)
 
 netToHost : NetError -> HostError
 netToHost (NetHostError _ hostError) = hostError
+netToHost error = HostError InvalidArgument "network" (show error)
 
-netTask : forall a. IO NetError a -> Task a
-netTask = mapError netToHost
+waitForClient : forall scope. TcpListener scope -> IO NetError ()
+waitForClient listener = withAcceptedTcpConnection listener (fun _ => pureIO ())
 
-waitForClient : Socket -> Task ()
-waitForClient listener = do
-    connection <- netTask (accept listener)
-    netTask (closeSocket connection)
+finishScope : ThreadId -> IO NetError ()
+finishScope _ = pureIO ()
 
-finishScope : ThreadId -> Task ()
-finishScope thread = printLine "scope-body"
+cancelAccept : forall scope. TcpListener scope -> Port -> IO NetError ()
+cancelAccept listener _ = withThread (waitForClient listener) finishScope
 
 main : Task ()
 main = do
-    listenerInfo <- netTask (listen anyPort)
-    case listenerInfo of
-        (listener, port) => do
-            withThread (waitForClient listener) finishScope
-            netTask (closeSocket listener)
-            printLine "accept-cancelled"
+    mapError netToHost (withTcpListener anyPort cancelAccept)
+    printLine "accept-cancelled"

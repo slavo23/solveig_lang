@@ -192,6 +192,9 @@ impl IoSubsystem {
             | IoRequest::SendBytes { .. }
             | IoRequest::RecvBytes { .. }
             | IoRequest::CloseSocket(_)
+            | IoRequest::BindUdp { .. }
+            | IoRequest::SendDatagram { .. }
+            | IoRequest::RecvDatagram { .. }
             | IoRequest::StartHttpUpload { .. }
             | IoRequest::ContinueHttpUpload { .. }
             | IoRequest::CloseHttpUpload(_) => 0,
@@ -275,6 +278,24 @@ impl IoSubsystem {
                 .sockets
                 .issue(id, SocketRequest::Recv { socket, maximum }),
             IoRequest::CloseSocket(socket) => self.sockets.issue(id, SocketRequest::Close(socket)),
+            IoRequest::BindUdp { port } => self.sockets.issue(id, SocketRequest::BindUdp { port }),
+            IoRequest::SendDatagram {
+                socket,
+                host,
+                port,
+                bytes,
+            } => self.sockets.issue(
+                id,
+                SocketRequest::SendDatagram {
+                    socket,
+                    host,
+                    port,
+                    bytes,
+                },
+            ),
+            IoRequest::RecvDatagram { socket, maximum } => self
+                .sockets
+                .issue(id, SocketRequest::RecvDatagram { socket, maximum }),
             IoRequest::Process(request) => {
                 let (signal_tx, signals) = mpsc::channel();
                 let Some(slot) = self.requests.get_mut(id.0 as usize) else {

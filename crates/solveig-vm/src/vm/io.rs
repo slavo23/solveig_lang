@@ -552,6 +552,43 @@ impl Interpreter<'_> {
                     }
                     return self.block_on_io(IoRequest::CloseSocket(socket));
                 }
+                IoAction::BindUdp { port } => {
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::BindUdp { port });
+                }
+                IoAction::SendDatagram { socket, request } => {
+                    let socket = self.expect_socket_id(socket, "sendDatagram")?;
+                    let [host, port, bytes] = self.expect_tuple::<3>(request, "sendDatagram")?;
+                    let host = self.expect_string_value(host, "sendDatagram")?;
+                    let Value::Int(port) = port else {
+                        return Err(RuntimeError::builtin(
+                            "sendDatagram expected an Int port".to_string(),
+                        )
+                        .into());
+                    };
+                    let bytes = self.expect_bytes_value(bytes, "sendDatagram")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::SendDatagram {
+                        socket,
+                        host,
+                        port,
+                        bytes,
+                    });
+                }
+                IoAction::RecvDatagram { socket, maximum } => {
+                    let socket = self.expect_socket_id(socket, "recvDatagram")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::RecvDatagram { socket, maximum });
+                }
                 IoAction::ReadFile { path, maximum } => {
                     let builtin = if maximum.is_some() {
                         "readFileLimited"

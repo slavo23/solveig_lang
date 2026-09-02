@@ -20,30 +20,19 @@ maxResponseBytes = 1048576
 
 netToHost : NetError -> HostError
 netToHost (NetHostError _ hostError) = hostError
+netToHost error = HostError InvalidArgument "network" (show error)
+
+hostToNet : HostError -> NetError
+hostToNet hostError = NetHostError "downloader" hostError
+
+netTask : forall a. IO NetError a -> Task a
+netTask = mapError netToHost
+
+taskToNet : forall a. Task a -> IO NetError a
+taskToNet = mapError hostToNet
 
 utf8ToHost : Utf8Error -> HostError
 utf8ToHost error = HostError InvalidArgument "bytesToString" (show error)
-
-recvBytesTask : Socket -> Int -> Task Bytes
-recvBytesTask socket maximum = mapError netToHost (std.net.recvBytes socket maximum)
-
-sendBytesTask : Socket -> Bytes -> Task ()
-sendBytesTask socket bytes = mapError netToHost (std.net.sendBytes socket bytes)
-
-closeSocketTask : Socket -> Task ()
-closeSocketTask socket = mapError netToHost (std.net.closeSocket socket)
-
-acceptTask : Socket -> Task Socket
-acceptTask listener = mapError netToHost (std.net.accept listener)
-
-connectTask : String -> Port -> Task Socket
-connectTask host port = mapError netToHost (std.net.connect host port)
-
-listenTask : Port -> Task (Socket, Port)
-listenTask port = mapError netToHost (std.net.listen port)
-
-resolveHostTask : String -> Task String
-resolveHostTask host = mapError netToHost (std.net.resolveHost host)
 
 writeFileTask : String -> String -> Task ()
 writeFileTask path contents = std.io.writeFile path contents
@@ -66,24 +55,32 @@ findHeaderEnd bytes index =
             then Just (index + 4)
             else findHeaderEnd bytes (index + 1)
 
-readHeaders : Socket -> Bytes -> Task Bytes
+readHeaders : forall scope. TcpConnection scope -> Bytes -> Task Bytes
 readHeaders socket accumulated =
     case findHeaderEnd accumulated 0 of
         Just end => pureIO accumulated
         | Nothing =>
             do
-                chunk <- recvBytesTask socket 1024
+                chunk <- netTask (receiveTcpBytes socket 1024)
                 if bytesLength chunk == 0
-                    then failIO (HostError EndOfFile "readHeaders" "connection ended before the HTTP headers")
+                    then failIO
+                        (HostError
+                            EndOfFile
+                            "readHeaders"
+                            "connection ended before the HTTP headers")
                     else readHeaders socket (bytesAppend accumulated chunk)
 
-readResponse : Socket -> Bytes -> Task Bytes
+readResponse : forall scope. TcpConnection scope -> Bytes -> Task Bytes
 readResponse socket accumulated = do
-    chunk <- recvBytesTask socket 1024
+    chunk <- netTask (receiveTcpBytes socket 1024)
     if bytesLength chunk == 0
         then pureIO accumulated
         else if bytesLength accumulated + bytesLength chunk > maxResponseBytes
-            then failIO (HostError ResourceExhausted "readResponse" "HTTP response exceeded the one-megabyte limit")
+            then failIO
+                (HostError
+                    ResourceExhausted
+                    "readResponse"
+                    "HTTP response exceeded the one-megabyte limit")
             else readResponse socket (bytesAppend accumulated chunk)
 
 makeRequest : String -> String -> String
@@ -118,23 +115,22 @@ responseFor request =
                 then makeResponse "200 OK" "charlie"
                 else makeResponse "404 Not Found" "not found"
 
-serveConnection : Socket -> Task ()
-serveConnection connection = finally (serveConnectionBody connection) (closeSocketTask connection)
-
-serveConnectionBody : Socket -> Task ()
+serveConnectionBody : forall scope. TcpConnection scope -> Task ()
 serveConnectionBody connection = do
     requestBytes <- readHeaders connection emptyBytes
     case bytesToString requestBytes of
-        Right request => sendBytesTask connection (stringToBytes (responseFor request))
+        Right request => netTask (sendTcpBytes connection (stringToBytes (responseFor request)))
         | Left error => failIO (utf8ToHost error)
 
-serve : Socket -> Int -> Task ()
+serveConnection : forall scope. TcpConnection scope -> IO NetError ()
+serveConnection connection = taskToNet (serveConnectionBody connection)
+
+serve : forall scope. TcpListener scope -> Int -> Task ()
 serve listener remaining =
     if remaining == 0
         then pureIO ()
         else do
-            connection <- acceptTask listener
-            serveConnection connection
+            netTask (withAcceptedTcpConnection listener serveConnection)
             serve listener (remaining - 1)
 
 successfulStatus : Bytes -> Bool
@@ -145,11 +141,12 @@ responseBody : Bytes -> Either HostError Bytes
 responseBody response =
     case findHeaderEnd response 0 of
         Just start => Right (bytesSlice response start (bytesLength response - start))
-        | Nothing => Left (HostError ProtocolError "responseBody" "HTTP response has no header terminator")
+        | Nothing =>
+            Left (HostError ProtocolError "responseBody" "HTTP response has no header terminator")
 
-fetchWith : String -> String -> Socket -> Task Bytes
+fetchWith : forall scope. String -> String -> TcpConnection scope -> Task Bytes
 fetchWith host path socket = do
-    sendBytesTask socket (stringToBytes (makeRequest host path))
+    netTask (sendTcpBytes socket (stringToBytes (makeRequest host path)))
     response <- readResponse socket emptyBytes
     if successfulStatus response
         then case responseBody response of
@@ -158,7 +155,12 @@ fetchWith host path socket = do
         else failIO (HostError ProtocolError "fetch" (appendString "HTTP request failed: " path))
 
 fetch : String -> Port -> String -> String -> Task Bytes
-fetch address port host path = bracket (connectTask address port) closeSocketTask (fetchWith host path)
+fetch address port host path =
+    netTask
+        (withTcpConnection
+            address
+            port
+            (fun connection => taskToNet (fetchWith host path connection)))
 
 download :
     Chan DownloadResult ->
@@ -175,8 +177,7 @@ fetchLocal address port host path = do
     pureIO (Just body)
 
 fetchInternet : String -> Port -> String -> String -> Task (Maybe Bytes)
-fetchInternet address port host path =
-    timeout (milliseconds 5000) (fetch address port host path)
+fetchInternet address port host path = timeout (milliseconds 5000) (fetch address port host path)
 
 downloadAttempt :
     Chan DownloadResult ->
@@ -193,19 +194,22 @@ downloadAttempt results fetcher address port host path output = do
                         writeFileTask output contents
                         send results (Downloaded (bytesLength body))
                 | Left error => failIO (utf8ToHost error)
-        | Nothing => failIO (HostError TimeExpired "download" "HTTP request timed out after five seconds")
+        | Nothing =>
+            failIO (HostError TimeExpired "download" "HTTP request timed out after five seconds")
 
 worker :
     Chan DownloadJob ->
     Chan DownloadResult ->
-    (String -> Port -> String -> String -> Task (Maybe Bytes)) -> String -> Port -> String -> Task ()
+    (String -> Port -> String -> String -> Task (Maybe Bytes)) ->
+    String -> Port -> String -> Task ()
 worker jobs results fetcher address port host =
     catchError (workerStep jobs results fetcher address port host) (fun error => pureIO ())
 
 workerStep :
     Chan DownloadJob ->
     Chan DownloadResult ->
-    (String -> Port -> String -> String -> Task (Maybe Bytes)) -> String -> Port -> String -> Task ()
+    (String -> Port -> String -> String -> Task (Maybe Bytes)) ->
+    String -> Port -> String -> Task ()
 workerStep jobs results fetcher address port host = do
     job <- recv jobs
     download results fetcher address port host job
@@ -278,28 +282,24 @@ runPool fetcher address port host enqueue = do
                 )
         )
 
-runLocalExample : String -> Socket -> Port -> Task ()
+runLocalExample : forall scope. String -> TcpListener scope -> Port -> Task ()
 runLocalExample address listener port =
-    finally
-        (withThread
-            (serve listener 4)
-            (fun server => runPool fetchLocal address port "localhost" enqueueLocalJobs))
-        (closeSocketTask listener)
+    withThread
+        (serve listener 4)
+        (fun _ => runPool fetchLocal address port "localhost" enqueueLocalJobs)
+
+runLocalScoped : forall scope. TcpListener scope -> Port -> IO NetError ()
+runLocalScoped listener port = taskToNet (runLocalExample "localhost" listener port)
 
 runLocal : Task ()
-runLocal = do
-    address <- resolveHostTask "localhost"
-    listenerInfo <- listenTask anyPort
-    case listenerInfo of
-        (listener, port) => runLocalExample address listener port
+runLocal = netTask (withTcpListener anyPort runLocalScoped)
 
 runInternet : Task ()
 runInternet = do
     printLine "downloading from http://neverssl.com with two workers"
-    address <- resolveHostTask "neverssl.com"
     case portFromInt 80 of
         Left error => failIO (HostError InvalidArgument "portFromInt" (show error))
-        | Right port => runPool fetchInternet address port "neverssl.com" enqueueInternetJobs
+        | Right port => runPool fetchInternet "neverssl.com" port "neverssl.com" enqueueInternetJobs
 
 useLocalServer : List String -> Bool
 useLocalServer args =

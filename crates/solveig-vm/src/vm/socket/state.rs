@@ -2,7 +2,7 @@
 
 use crate::vm::io_worker::{IoFailure, IoResult};
 use crate::vm::{RequestId, SocketId};
-use mio::net::{TcpListener, TcpStream};
+use mio::net::{TcpListener, TcpStream, UdpSocket};
 use mio::{Interest, Registry, Token};
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
@@ -19,6 +19,12 @@ pub(super) enum SocketEntry {
         connect: Option<ConnectRequest>,
         reads: VecDeque<ReadRequest>,
         writes: VecDeque<WriteRequest>,
+        registered: bool,
+    },
+    Datagram {
+        socket: UdpSocket,
+        reads: VecDeque<DatagramReadRequest>,
+        writes: VecDeque<DatagramWriteRequest>,
         registered: bool,
     },
 }
@@ -40,10 +46,23 @@ pub(super) struct WriteRequest {
     pub(super) written: usize,
 }
 
+pub(super) struct DatagramReadRequest {
+    pub(super) id: RequestId,
+    pub(super) maximum: usize,
+}
+
+pub(super) struct DatagramWriteRequest {
+    pub(super) id: RequestId,
+    pub(super) address: SocketAddr,
+    pub(super) bytes: Vec<u8>,
+}
+
 impl SocketEntry {
     pub(super) fn is_registered(&self) -> bool {
         match self {
-            Self::Listener { registered, .. } | Self::Stream { registered, .. } => *registered,
+            Self::Listener { registered, .. }
+            | Self::Stream { registered, .. }
+            | Self::Datagram { registered, .. } => *registered,
         }
     }
 
@@ -57,6 +76,13 @@ impl SocketEntry {
                 result
             }
             Self::Stream {
+                socket, registered, ..
+            } => {
+                let result = registry.deregister(socket);
+                *registered = false;
+                result
+            }
+            Self::Datagram {
                 socket, registered, ..
             } => {
                 let result = registry.deregister(socket);
@@ -97,8 +123,22 @@ impl SocketEntry {
                     Ok(())
                 }
             }
+            (
+                Self::Datagram {
+                    socket, registered, ..
+                },
+                Some(interest),
+            ) => {
+                if *registered {
+                    registry.reregister(socket, token, interest)
+                } else {
+                    registry.register(socket, token, interest)?;
+                    *registered = true;
+                    Ok(())
+                }
+            }
             (entry, None) if entry.is_registered() => entry.deregister(registry),
-            (Self::Listener { .. } | Self::Stream { .. }, None) => Ok(()),
+            (Self::Listener { .. } | Self::Stream { .. } | Self::Datagram { .. }, None) => Ok(()),
         }
     }
 
@@ -111,6 +151,12 @@ impl SocketEntry {
                 writes,
                 ..
             } => match (!reads.is_empty(), connect.is_some() || !writes.is_empty()) {
+                (true, true) => Some(Interest::READABLE | Interest::WRITABLE),
+                (true, false) => Some(Interest::READABLE),
+                (false, true) => Some(Interest::WRITABLE),
+                (false, false) => None,
+            },
+            Self::Datagram { reads, writes, .. } => match (!reads.is_empty(), !writes.is_empty()) {
                 (true, true) => Some(Interest::READABLE | Interest::WRITABLE),
                 (true, false) => Some(Interest::READABLE),
                 (false, true) => Some(Interest::WRITABLE),
@@ -138,6 +184,17 @@ impl SocketEntry {
                     *connect = None;
                     CancelEffect::Close
                 } else if let Some(index) = reads.iter().position(|request| request.id == id) {
+                    reads.remove(index);
+                    CancelEffect::Keep
+                } else if let Some(index) = writes.iter().position(|request| request.id == id) {
+                    writes.remove(index);
+                    CancelEffect::Keep
+                } else {
+                    CancelEffect::Absent
+                }
+            }
+            Self::Datagram { reads, writes, .. } => {
+                if let Some(index) = reads.iter().position(|request| request.id == id) {
                     reads.remove(index);
                     CancelEffect::Keep
                 } else if let Some(index) = writes.iter().position(|request| request.id == id) {
@@ -187,6 +244,21 @@ impl SocketEntry {
                 }));
                 failures
             }
+            Self::Datagram { reads, writes, .. } => reads
+                .into_iter()
+                .map(|request| {
+                    (
+                        request.id,
+                        IoFailure::RecvDatagram(io::Error::other(message.to_string())),
+                    )
+                })
+                .chain(writes.into_iter().map(|request| {
+                    (
+                        request.id,
+                        IoFailure::SendDatagram(io::Error::other(message.to_string())),
+                    )
+                }))
+                .collect(),
         }
     }
 }
@@ -265,6 +337,92 @@ pub(super) fn drive_writes(
     }
 }
 
+/// Drives whole UDP messages according to RFC 768 datagram boundaries.
+pub(super) fn drive_datagram_reads(
+    socket: &mut UdpSocket,
+    reads: &mut VecDeque<DatagramReadRequest>,
+    results: &mut Vec<(RequestId, IoResult)>,
+) {
+    while let Some(request) = reads.front() {
+        let Some(buffer_size) = request.maximum.checked_add(1) else {
+            solveig_base::ice!("validated datagram receive bound overflowed")
+        };
+        let mut bytes = vec![0; buffer_size];
+        match socket.recv_from(&mut bytes) {
+            Ok((read, address)) => {
+                let Some(request) = reads.pop_front() else {
+                    solveig_base::ice!("datagram read vanished after successful receive")
+                };
+                if read > request.maximum {
+                    let maximum = i64::try_from(request.maximum)
+                        .unwrap_or_else(|_| solveig_base::ice!("datagram bound exceeded Int"));
+                    results.push((
+                        request.id,
+                        IoResult::Failed(IoFailure::DatagramTooLarge { maximum }),
+                    ));
+                    continue;
+                }
+                bytes.truncate(read);
+                results.push((
+                    request.id,
+                    IoResult::Datagram {
+                        bytes,
+                        host: address.ip().to_string(),
+                        port: address.port(),
+                    },
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return,
+            Err(error) => {
+                let Some(request) = reads.pop_front() else {
+                    solveig_base::ice!("datagram read vanished after failed receive")
+                };
+                results.push((request.id, IoResult::Failed(IoFailure::RecvDatagram(error))));
+            }
+        }
+    }
+}
+
+/// Sends one UDP message per request without coalescing or splitting it.
+pub(super) fn drive_datagram_writes(
+    socket: &mut UdpSocket,
+    writes: &mut VecDeque<DatagramWriteRequest>,
+    results: &mut Vec<(RequestId, IoResult)>,
+) {
+    while let Some(request) = writes.front() {
+        match socket.send_to(&request.bytes, request.address) {
+            Ok(written) if written == request.bytes.len() => {
+                let Some(request) = writes.pop_front() else {
+                    solveig_base::ice!("datagram write vanished after successful send")
+                };
+                results.push((request.id, IoResult::Unit));
+            }
+            Ok(written) => {
+                let Some(request) = writes.pop_front() else {
+                    solveig_base::ice!("datagram write vanished after partial send")
+                };
+                results.push((
+                    request.id,
+                    IoResult::Failed(IoFailure::SendDatagram(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        format!(
+                            "datagram send wrote {written} of {} bytes",
+                            request.bytes.len()
+                        ),
+                    ))),
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return,
+            Err(error) => {
+                let Some(request) = writes.pop_front() else {
+                    solveig_base::ice!("datagram write vanished after failed send")
+                };
+                results.push((request.id, IoResult::Failed(IoFailure::SendDatagram(error))));
+            }
+        }
+    }
+}
+
 fn remove_request(requests: &mut VecDeque<RequestId>, id: RequestId) -> bool {
     let Some(index) = requests.iter().position(|request| *request == id) else {
         return false;
@@ -299,7 +457,7 @@ fn valid_port(port: i64) -> io::Result<u16> {
     u16::try_from(port).map_err(|_range| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            "TCP port must be between 0 and 65535",
+            "network port must be between 0 and 65535",
         )
     })
 }

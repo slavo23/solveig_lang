@@ -103,6 +103,10 @@ generic protocol failure. Strict UTF-8 decoding is pure
 and uses `Utf8Error` (`InvalidUtf8 byteOffset`) rather than pretending that a
 decoding problem is host IO.
 
+`NetError` distinguishes invalid TCP chunk and UDP datagram bounds, the
+defensive no-address case, and `NetHostError context cause`. Oversized UDP
+messages use a resource-exhausted host cause and are never returned truncated.
+
 Bounded worker traversal also preserves the distinction:
 
 ```solveig

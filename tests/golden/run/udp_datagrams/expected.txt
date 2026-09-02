@@ -1,0 +1,5 @@
+resolved=True
+hello UDP
+source-port=True
+empty-bytes=0
+network receive UDP datagram: recvDatagram: resource exhausted: datagram exceeds 3 bytes | after

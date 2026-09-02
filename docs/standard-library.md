@@ -36,7 +36,7 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.testing` | Assertions, explicit deterministic generators, property checks, and resource-aware checks |
 | `std.time` | Sleeping, clock readings, and monotonic measurement |
 | `std.random` | Explicit deterministic pseudorandom state and separate host-secure bytes |
-| `std.net` | TCP sockets and hostname resolution |
+| `std.net` | Scoped TCP streams, UDP datagrams, endpoints, and hostname resolution |
 
 ## Lists and text
 
@@ -557,18 +557,27 @@ import std.bytes(*)
 import std.net(*)
 ```
 
-`std.net` provides `connect`, `resolveHost`, `listen`, `accept`, `sendBytes`,
-`recvBytes`, `closeSocket`, and `closeListener`. Prefer `withConnection`,
-`withListener`, and `withAcceptedConnection`; their bracketed scopes close
-owned sockets after success, typed errors, defects, or interruption. These
-actions use `NetError`, retaining endpoint context and the host cause.
-Network operations accept validated `Port` values; `portFromInt` checks an
-external integer and `anyPort` explicitly requests an ephemeral listener.
+`resolveHost` returns distinct opaque `IpAddress` values from the system
+resolver. `Endpoint` pairs one with a validated `Port`; `portFromInt` checks an
+external integer and `anyPort` requests an ephemeral loopback binding.
 
-The low-level `std.net` layer is TCP-oriented and byte-based. Use `std.http`
-for bounded HTTP/1.1 and verified HTTPS rather than hand-building wire frames.
-UDP and general IPv6 selection are not provided. Scoped streaming subprocess
-pipes are provided by `std.process`.
+`withTcpConnection`, `withTcpListener`, and
+`withAcceptedTcpConnection` introduce rank-2 `TcpConnection` and `TcpListener`
+scopes. `sendTcpBytes` sends a whole buffer, `receiveTcpBytes` performs one
+bounded read, and `tcpBytes` exposes demand-driven chunks through `std.stream`.
+Hostname connection resolves automatically and tries returned addresses in
+order.
+
+`withUdpSocket` introduces an owned loopback `UdpSocket`. `sendDatagram` accepts
+a hostname while `sendDatagramTo` accepts a resolved `Endpoint`;
+`receiveDatagram` and `datagrams` preserve complete message boundaries and
+source endpoints. A receive bound from 1 through 65,535 bytes is mandatory;
+oversized messages fail instead of returning truncated data. All operations use
+`NetError`, retaining validation or endpoint/host context.
+
+Use `std.http` for HTTP/HTTPS rather than hand-building wire frames. Its TLS
+verification is not a raw-TLS socket API. Scoped subprocess pipes remain in
+`std.process`.
 
 ### HTTP and HTTPS
 

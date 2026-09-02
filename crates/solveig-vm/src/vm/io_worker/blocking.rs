@@ -2,6 +2,7 @@
 //! Each worker owns its file and HTTP handles and returns only plain Rust results.
 
 use super::*;
+use std::net::SocketAddr;
 
 pub(super) fn worker_loop(
     worker_index: usize,
@@ -116,6 +117,9 @@ fn perform_request(
         | IoRequest::SendBytes { .. }
         | IoRequest::RecvBytes { .. }
         | IoRequest::CloseSocket(_)
+        | IoRequest::BindUdp { .. }
+        | IoRequest::SendDatagram { .. }
+        | IoRequest::RecvDatagram { .. }
         | IoRequest::ReadProcessStdout { .. }
         | IoRequest::ReadProcessStderr { .. }
         | IoRequest::WriteProcessStdin { .. }
@@ -230,16 +234,36 @@ fn read_file_limited(path: &Path, maximum: i64) -> Result<Vec<u8>, IoFailure> {
 
 fn perform_resolve_host(host: String) -> IoResult {
     let addresses = match (host.as_str(), 0).to_socket_addrs() {
-        Ok(addresses) => addresses,
+        Ok(addresses) => addresses.collect::<Vec<_>>(),
         Err(source) => return IoResult::Failed(IoFailure::ResolveHost { host, source }),
     };
-    match addresses.into_iter().find(|address| address.is_ipv4()) {
-        Some(address) => IoResult::Text(address.ip().to_string()),
-        None => IoResult::Failed(IoFailure::ResolveHost {
+    let resolved = distinct_ip_spellings(&addresses);
+    if resolved.is_empty() {
+        IoResult::Failed(IoFailure::ResolveHost {
             host,
-            source: io::Error::new(io::ErrorKind::AddrNotAvailable, "host has no IPv4 address"),
-        }),
+            source: io::Error::new(io::ErrorKind::AddrNotAvailable, "host has no IP address"),
+        })
+    } else {
+        IoResult::ResolvedAddresses(resolved)
     }
+}
+
+fn distinct_ip_spellings(addresses: &[SocketAddr]) -> Vec<String> {
+    let mut ipv4 = Vec::new();
+    let mut ipv6 = Vec::new();
+    for address in addresses {
+        let spelling = address.ip().to_string();
+        let family = if address.is_ipv4() {
+            &mut ipv4
+        } else {
+            &mut ipv6
+        };
+        if !family.contains(&spelling) {
+            family.push(spelling);
+        }
+    }
+    ipv4.extend(ipv6);
+    ipv4
 }
 
 fn write_stdout(stdout: &Mutex<&mut (dyn Write + Send)>, text: &str) -> IoResult {
@@ -302,5 +326,30 @@ fn perform_write_file(path: PathBuf, contents: &str, append: bool) -> IoResult {
             append,
             source,
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolved_addresses_are_distinct_and_ipv4_first() {
+        let addresses = [
+            "[::1]:3".parse().expect("valid IPv6 loopback endpoint"),
+            "127.0.0.1:1".parse().expect("valid IPv4 loopback endpoint"),
+            "[::1]:4".parse().expect("valid duplicate IPv6 endpoint"),
+            "192.0.2.1:2"
+                .parse()
+                .expect("valid IPv4 documentation endpoint"),
+            "127.0.0.1:5"
+                .parse()
+                .expect("valid duplicate IPv4 endpoint"),
+        ];
+
+        assert_eq!(
+            distinct_ip_spellings(&addresses),
+            ["127.0.0.1", "192.0.2.1", "::1"]
+        );
     }
 }

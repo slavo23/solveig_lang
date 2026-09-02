@@ -2,5 +2,4 @@
 source: tests/snapshot_support.rs
 expression: actual
 ---
-scope-body
 accept-cancelled
