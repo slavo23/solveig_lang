@@ -266,7 +266,11 @@ impl Interpreter<'_> {
         })
     }
 
-    fn expect_bool_value(&self, value: Value, builtin: &str) -> Result<bool, RuntimeError> {
+    pub(super) fn expect_bool_value(
+        &self,
+        value: Value,
+        builtin: &str,
+    ) -> Result<bool, RuntimeError> {
         if value == self.bool_value(true) {
             Ok(true)
         } else if value == self.bool_value(false) {
@@ -278,7 +282,7 @@ impl Interpreter<'_> {
         }
     }
 
-    fn expect_optional_nonnegative_int(
+    pub(super) fn expect_optional_nonnegative_int(
         &mut self,
         value: Value,
         builtin: &str,
@@ -307,7 +311,7 @@ impl Interpreter<'_> {
         }
     }
 
-    fn expect_string_pair_list_value(
+    pub(super) fn expect_string_pair_list_value(
         &mut self,
         mut current: Value,
         builtin: &str,

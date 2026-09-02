@@ -18,37 +18,34 @@ import std.http(*)
 
 downloadText : String -> IO HttpError String
 downloadText url = do
-    response <- fetch url
+    response <- get url
     case responseText response of
         Right text => pureIO text
         | Left error => failIO error
 ```
 
-`fetch` performs a GET with `defaultHttpLimits`: at most 64 KiB of response
-headers, an 8 MiB body, a 15-second whole-request timeout, and five redirects.
-Those defaults protect the program without burdening the simple call site.
+`get` uses practical defaults: at most 64 KiB of response headers, an 8 MiB
+buffered body, a 15-second whole-request timeout, and five redirects. Those
+defaults protect the program without burdening the simple call site.
 
-Use `fetchWith` only when the application needs a different policy or request
-headers:
+Use `getWith` only when the application needs headers, query parameters, or a
+different policy:
 
 ```solveig
 import std.time(milliseconds)
 
-fetchWith
-    (withRedirectPolicy
-        NoRedirects
-        (withHttpTimeout
-            (milliseconds 5000)
-            (withMaximumBodyBytes
-                1048576
-                (withMaximumHeaderBytes 65536 defaultHttpLimits))))
-    [("Accept", "application/json")]
+getWith
+    (withHeader "Accept" "application/json" $
+        withQuery [("kind", "release"), ("tag", "stable")] $
+            withRedirectPolicy NoRedirects $
+                withTimeout (milliseconds 5000) $
+                    withMaximumBufferedBodyBytes 1048576 defaultOptions)
     url
 ```
 
-`HttpLimits` is opaque: named transformations make it clear which policy is
-being changed. Explicit limits belong at a trust boundary, not on every
-beginner example.
+`HttpOptions` is opaque and immutable: named transformations make each change
+clear. Query names and values are host-encoded and may contain Unicode.
+Explicit byte bounds belong at a trust boundary, not on every beginner example.
 
 ## Status, headers, and body
 
@@ -74,64 +71,47 @@ unbounded streaming API.
 
 For a response that should be processed as it arrives, use `withResponse`.
 Its callback receives status, headers, and a scoped `Stream` of binary chunks.
-`withResponseWith limits chunkBytes request callback` selects the total body
-bound and the maximum bytes per pull. A stream fold can count or process the
-body without retaining it; returning early closes without draining the rest.
-The stream cannot escape its callback. An in-flight host read may delay cleanup
-until its original HTTP deadline. See [scoped downloads](../http.md#scoped-downloads).
+`withResponseWith options method url callback` selects policy; configure
+`withChunkBytes` for the per-pull bound and `withMaximumResponseBytes` for an
+optional cumulative quota. A stream fold can process the body without retaining
+it; returning early closes without draining the rest. The stream cannot escape
+its callback. See [streaming uploads and downloads](../http.md#streaming-uploads-and-downloads).
 
 ## Build non-GET requests
 
-For staged request construction:
+Each familiar verb has a `With` form for reusable options:
 
 ```solveig
 import std.http(*)
+import std.json(Json)
 
-postJson : String -> String -> IO HttpError Response
-postJson spelling body =
-    case urlFromString spelling of
-        Left error => failIO error
-        | Right url =>
-            case header "Content-Type" "application/json" of
-                Left error => failIO error
-                | Right contentType =>
-                    send (withTextBody body (withHeader contentType (post url)))
+postJson : String -> Json -> IO HttpError Response
+postJson url value =
+    postWith
+        (withHeader "Accept" "application/json" $ withJsonBody value defaultOptions)
+        url
 ```
 
-`urlFromString` accepts absolute `http` and `https` URLs. Header constructors
-validate names and values before network work begins. Builders include `get`,
-`head`, `post`, `put`, `patch`, `delete`, `withHeader`, `withHeaders`,
-`withTextBody`, and `withBody`. `send` uses the defaults; `request` accepts an
-explicit `HttpLimits`.
+`withTextBody`, `withJsonBody`, and `withFormBody` choose useful content types;
+an explicit header overrides the default. `withBody` sends strict bytes,
+`withBuilderBody` avoids joining existing chunks, and `withFileBody` uploads a
+file incrementally. The client owns framing headers such as `Content-Length`.
+Use `request method url` only when code selects the method dynamically.
+
+`requestStream` sends a demand-driven stream of binary chunks. A streamed body
+is one-shot: a redirect that requires replay fails explicitly. Use
+`withStreamResponse` when both upload and response should remain incremental.
 
 HTTPS verifies certificates. The public API has no switch that disables
 verification.
 
 ## Typed HTTP errors
 
-`HttpError` keeps pure request validation separate from host IO:
-
-```solveig
-data HttpError =
-    InvalidUrl String
-  | InvalidHeaderName String
-  | InvalidHeaderValue String
-  | InvalidStatus Int
-  | InvalidHttpLimit String Int
-  | TransportError HostError
-  | TlsError HostError
-  | RedirectError HostError
-  | ResponseHeadersTooLarge Int
-  | ResponseBodyTooLarge Int
-  | HttpHostError HostError
-  | InvalidResponseUtf8 Utf8Error
-```
-
-The transport, TLS, redirect, and response-limit cases retain domain policy;
-`HttpHostError` wraps other host failures such as timeouts.
-`InvalidResponseUtf8` remains a decoding failure. A function can
-retain this precise error type or translate it at an application boundary with
-`mapError`. Every case has a useful `Show` representation.
+`HttpError` keeps pure validation separate from host IO. It distinguishes URL,
+header, option, transport, TLS, redirect, replay, request-file, response-bound,
+UTF-8, managed-header, and unexpected-status failures. A function can retain
+this precise type or translate it at an application boundary with `mapError`.
+Every case has a useful `Show` representation.
 
 ## Concurrent requests
 
@@ -141,7 +121,7 @@ preserve the precise HTTP error type:
 ```solveig
 fetchStatus : String -> IO HttpError Int
 fetchStatus url = do
-    response <- fetch url
+    response <- get url
     pureIO (statusCode (responseStatus response))
 
 fetchAll : [String] -> IO (ConcurrentError HttpError) [Int]
@@ -201,7 +181,7 @@ project:
 1. Binds a loopback listener on an automatically selected port.
 2. Starts the server in a `withThread` scope.
 3. Accepts three connections and scopes every connection handler.
-4. Runs three `fetch` clients through `mapConcurrentlyBoundedOrdered`.
+4. Runs three `get` clients through `mapConcurrentlyBoundedOrdered`.
 5. Waits for all handlers through a typed channel.
 6. Closes every socket, channel, listener, and child scope.
 

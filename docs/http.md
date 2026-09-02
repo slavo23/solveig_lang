@@ -1,147 +1,179 @@
 # HTTP and HTTPS
 
-`std.http` is the practical client layer above `std.net`. It owns URL and
-header validation, request policy, response limits, status/header access, and
-chunk-oriented body consumption. The VM owns blocking host execution and TLS.
+`std.http` is Solveig's high-level web client. The common API starts with a URL
+string and a familiar verb: `get`, `post`, `put`, `patch`, `delete`, `head`, or
+`options`. It validates request metadata, follows redirects, verifies HTTPS,
+and returns a bounded `Response`. Resource policy is available through
+`HttpOptions`, but it is not part of the simplest call.
 
-## Safe request flow
-
-The common GET path accepts a URL string directly and retains the bounded
-response, including status and headers:
+## Common requests
 
 ```solveig
 import std.http(*)
-import std.time
 
-showPage : String -> IO std.http.HttpError String
-showPage spelling = do
-    response <- std.http.fetch spelling
-    case std.http.responseText response of
+showPage : String -> IO HttpError String
+showPage url = do
+    result <- get url
+    case responseText result of
         Right text => pureIO text
-        | Left error => failIO error
+        | Left problem => failIO problem
 ```
 
-`fetchWith limits headers spelling` keeps the same one-call shape when an
-application needs tighter resource policy or request headers. Headers are
-ordinary `(String, String)` values and are validated before network work:
+4xx and 5xx statuses are ordinary responses. This preserves response headers
+and error bodies for authentication, caching, rate-limit, and application
+logic. Use `ensureSuccess` when a particular call should reject statuses from
+400 upward.
+
+`findHeader` compares names without ASCII case sensitivity. `responseBody`
+returns binary `Bytes`; `responseText` performs strict UTF-8 decoding.
+
+## Headers, query parameters, and bodies
+
+Start from `defaultOptions`, apply only the settings a request needs, then use
+the corresponding `With` verb:
 
 ```solveig
-response <- std.http.fetchWith
-    (std.http.withRedirectPolicy
-        std.http.NoRedirects
-        (std.http.withHttpTimeout
-            (std.time.milliseconds 5000)
-            (std.http.withMaximumBodyBytes
-                1048576
-                (std.http.withMaximumHeaderBytes 65536 std.http.defaultHttpLimits))))
-    [ ("Accept", "application/json")
-    , ("Authorization", "Bearer " <> token)
-    ]
-    "https://api.example.test/releases"
+import std.http(*)
+
+search : String -> String -> IO HttpError Response
+search token term =
+    getWith
+        (withHeader "Authorization" ("Bearer " <> token) $
+            withHeader "Accept" "application/json" $
+                withQuery [("q", term), ("tag", "stable"), ("tag", "typed")] defaultOptions)
+        "https://api.example.test/search"
 ```
 
-For other methods, bodies, or staged construction, the explicit layer remains:
-validate with `urlFromString` and `header`, build with
-`get`/`post`/`withHeader`/`withHeaders`/`withBody`/`withTextBody`, then call
-`send` for default limits or `request` for explicit limits.
+Query and form pairs preserve order and duplicate keys. The host `url` library
+performs UTF-8 percent encoding, so callers should supply semantic names and
+values rather than constructing encoded query text themselves.
 
-`HttpLimits` is opaque. Start from `defaultHttpLimits`, then use
-`withMaximumHeaderBytes`, `withMaximumBodyBytes`, `withHttpTimeout`, and
-`withRedirectPolicy`. The corresponding accessors make policy inspection
-explicit. Header bytes must be positive, body bytes non-negative, timeout
-positive, and redirect count non-negative. The default is 64 KiB, 8 MiB,
-15 seconds, and five redirects.
+Body setters replace any earlier body:
 
-HTTP 4xx and 5xx responses are not transport errors. This lets applications
-handle 304 caching, 404 absence, authentication responses, and rate limits by
-status and headers without losing their bounded response bodies.
+- `withBody` sends strict binary `Bytes`.
+- `withTextBody` sends UTF-8 and defaults to `text/plain; charset=utf-8`.
+- `withJsonBody` renders `Json` and defaults to `application/json`.
+- `withFormBody` encodes pairs as `application/x-www-form-urlencoded`.
+- `withBuilderBody` sends retained `BytesBuilder` chunks without first joining
+  them into one `Bytes` value.
+- `withFileBody` opens and uploads a file incrementally in binary mode.
+- `withoutBody` removes a configured body.
 
-## Strict bodies
+An explicit `Content-Type` header overrides a body setter's default. The client
+owns `Host`, `Content-Length`, and `Transfer-Encoding`; trying to set one fails
+with `ManagedRequestHeader` before network work.
 
-The host validates content length and chunk framing, reads at most the body
-limit plus one detection byte, then drops the host response before returning.
-Only the bounded byte string crosses into the moving VM heap. This gives whole
-response ownership a simple cleanup rule and prevents unbounded network input.
-
-`bodyChunks size response` returns bounded slices. `foldBodyChunks` visits the
-same slices without constructing a list:
+For example:
 
 ```solveig
-countBytes : std.http.Response -> Either std.http.HttpError Int
-countBytes = std.http.foldBodyChunks
-    16384
-    (fun total chunk => total + std.bytes.bytesLength chunk)
-    0
+postJson : String -> Json -> IO HttpError Response
+postJson url value =
+    postWith
+        (withHeader "Accept" "application/json" $ withJsonBody value defaultOptions)
+        url
 ```
 
-These APIs are incremental consumption of an already bounded body, not an
-unbounded streaming escape hatch.
+`request method url` and `requestWith options method url` cover code that
+selects a method dynamically. `urlFromString` and `header` remain useful pure
+validators, but normal callers do not need to stage a low-level request value.
 
-## Scoped downloads
+## Streaming uploads and downloads
 
-`withResponse request callback` makes the status and headers available before
-consuming the response body. Its callback receives a single-consumer
-`Stream scope HttpError Bytes`. Use `withResponseWith limits chunkBytes request
-callback` to choose the total response limit and the maximum bytes per pull.
-Defaults are the ordinary HTTP limits and 32 KiB pulls.
+`requestStream method body url` sends a `Stream scope HttpError Bytes` and
+buffers the bounded response. The transport pulls one non-empty chunk at a
+time; empty chunks are skipped, no global generator or upload queue is used,
+and a source failure stops the request.
+
+Use `withResponse` when the response should be processed incrementally:
 
 ```solveig
 import std.bytes(bytesLength)
-import std.http(HttpError, Request, withResponse)
+import std.http(*)
 import std.stream
 
-downloadSize : Request -> IO HttpError Int
-downloadSize requestValue =
-    withResponse requestValue (fun _ _ body =>
-        std.stream.fold (fun total bytes => total + bytesLength bytes) 0 body)
+downloadSize : String -> IO HttpError Int
+downloadSize url =
+    withResponse Get url (fun _ _ body =>
+        std.stream.fold (fun total chunk => total + bytesLength chunk) 0 body)
 ```
 
-The fresh scope prevents returning the body or a transformed body from the
-callback. Status, headers, and computed results can escape. Feed chunks to an
-existing file writer or parser, or use `take` to stop early. Collecting chunks
-in a `BytesBuilder` is explicitly whole-body storage, not bounded-memory use.
+`withStreamResponse` combines a streamed upload with a scoped streamed
+response. Its rank-2 callback prevents the response stream from escaping the
+connection lifetime. Each body pull is bounded and demand-driven. Returning
+early closes without draining the unread suffix.
 
-Each demand performs one bounded host read; no Solveig producer or queue reads
-ahead. `ureq` still owns a bounded protocol buffer, which can include bytes
-received with the headers. `maximumBodyBytes` is cumulative, not a per-chunk
-limit, and an exhausted allowance uses one extra byte to distinguish EOF from
-overflow. Early return does not promise that the unread remainder is valid or
-within the total limit: it closes without inspecting that remainder.
+Every upload has one joined host owner thread because the underlying HTTP
+transport is synchronous. The VM uses a one-slot rendezvous: each host demand
+completes one Solveig IO action, and only then can the producer supply another
+chunk. Success, typed failure, defects, interruption, and early callback return
+all close the resource and join that owner. There is no detached thread or GC
+finalizer.
 
-Returning normally, raising a typed error or defect, and cancelling the
-callback all close the body. Unread data is discarded, not drained. The shared
-host client may reuse a connection only after a fully consumed valid response;
-an unfinished response is dropped by the host library. There is no GC finalizer
-and no new connection pool. Streams must be consumed once, in order.
+`bodyChunks` and `foldBodyChunks` operate on an already-buffered `Response`.
+They avoid another whole-body list, but are not network streaming APIs.
 
-Request bodies are still strict `Bytes` (or explicitly encoded text). This
-download API does not add streamed uploads, automatic retries, or a replayable
-body abstraction. Redirects use the existing request policy; file/stream upload
-and replay policy remain a separate unfinished part of V3.
+## Practical defaults and explicit policy
 
-## Cancellation and timeouts
+`defaultOptions` provides the policy most applications should start with:
 
-HTTP calls run on the existing blocking IO pool, so they do not stall Solveig
-green-thread scheduling. `std.task.timeout` can cancel the waiting Solveig
-thread promptly. A blocking host call already inside the transport is not
-forcefully interrupted mid-system-call. For an acquired scoped body, close is
-queued behind its current read; scope cleanup waits until that read completes
-or reaches the original whole-request host deadline. Time spent in the callback
-does not reset that deadline, although an idle callback itself is not timed out
-by the host: use `std.task.timeout` for a deadline on the complete action.
-Cancellation during header acquisition tombstones the request and closes any
-late body on its owning worker. Keep timeouts finite and size active host IO
-concurrency to the four-worker pool. Idle body scopes do not occupy workers.
+- a 15-second whole-request deadline;
+- up to five redirects;
+- 64 KiB of response headers;
+- at most 8 MiB when a response is buffered;
+- 32 KiB per scoped response pull;
+- no total-byte quota on a scoped response unless requested.
 
-## HTTPS and caching
+Policy is configured by meaningful names rather than positional integers:
+`withTimeout`, `withRedirectPolicy`, `withReplayPolicy`,
+`withMaximumHeaderBytes`, `withMaximumBufferedBodyBytes`,
+`withMaximumResponseBytes`, and `withChunkBytes`. The byte bounds are advanced
+trust-boundary controls; they do not appear in ordinary request examples.
+
+```solveig
+import std.http(*)
+import std.time(seconds)
+
+smallRequest : HttpOptions
+smallRequest =
+    withTimeout (seconds 5) $
+        withRedirectPolicy NoRedirects $
+            withMaximumBufferedBodyBytes 1048576 defaultOptions
+```
+
+Invalid options are typed `InvalidHttpOption` values. Header and chunk limits
+must be positive; buffered and total response byte limits may be zero; timeout
+must be positive; redirect counts cannot be negative.
+
+## Redirect and replay semantics
+
+`NoRedirects` returns the first redirect response. `FollowRedirects count`
+bounds the number followed. Relative `Location` values are resolved with the
+host URL library. Cross-origin redirects remove `Authorization`, `Cookie`, and
+`Proxy-Authorization`.
+
+`ReplayableBodies` permits a redirect to resend strict bytes, text, JSON, form,
+builder chunks, or a file. Files are rewound, not copied into memory.
+`NoReplay` rejects a redirect that would resend any body. Stream uploads are
+always one-shot and fail with `BodyReplayError` when a 307 or 308 would require
+replay. Standard POST-to-GET handling for 301, 302, and 303 drops the body and
+its content headers.
+
+## Timeouts, cancellation, and HTTPS
+
+The timeout is one deadline across connection setup, redirects, upload, and
+host response reads; redirects do not reset it. Time spent in a scoped callback
+does not itself consume transport work, so wrap the whole action with
+`std.task.timeout` when application processing also needs a deadline.
+
+HTTP uses the existing blocking IO machinery, so a waiting request does not
+stall other runnable Solveig threads. A system call already executing in the
+host cannot always be interrupted immediately; cleanup waits for it to finish
+or reach the request deadline. Keep request deadlines finite.
 
 HTTPS uses Rustls with platform certificate verification. There is no API for
-disabling verification. Redirects are bounded and failures are typed.
-
-For ETag caching, retain the response's `ETag` header and send it later as
-`If-None-Match`. Treat status 304 as a successful cache validation. Prefer one
-bounded, overwritten cache file or a bounded key set; do not create a new file
-on every request.
+disabling verification. `HttpError` distinguishes validation, transport, TLS,
+redirect, replay, request-file, response-bound, UTF-8, and unexpected-status
+failures while retaining the relevant structured cause.
 
 The [networking and HTTP tutorial](tutorial/07-networking-and-http.md) includes
 a runnable loopback service and concurrent clients without requiring internet

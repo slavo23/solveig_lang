@@ -11,7 +11,7 @@ mod file;
 mod http;
 
 use file::open_host_file;
-use http::HttpBody;
+pub(crate) use http::HttpBody;
 pub(crate) use http::normalize_http_read_error;
 
 const DEFAULT_BLOCK_SIZE: usize = 8 * 1024;
@@ -172,7 +172,12 @@ pub(crate) struct HandleTable {
 }
 
 impl HandleTable {
-    pub(crate) fn insert_http_body(&mut self, handle: HandleId, body: ureq::Body, maximum: usize) {
+    pub(crate) fn insert_http_body(
+        &mut self,
+        handle: HandleId,
+        body: ureq::Body,
+        maximum: Option<usize>,
+    ) {
         *self.slot_mut(handle) = HandleSlot::Open(HostHandle::Http(HttpBody::new(body, maximum)));
     }
 

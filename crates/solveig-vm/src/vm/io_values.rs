@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::builtins::VmCtx;
+use crate::handle::HandleId;
 use solveig_ast::ast::CtorRuntimeRole;
 
 impl Interpreter<'_> {
@@ -61,6 +62,16 @@ impl Interpreter<'_> {
                 &response.headers,
                 Value::HandleId(response.body.0),
             )?,
+            IoResult::HttpUploadDemand(handle) => self.alloc_http_upload_event(handle, None)?,
+            IoResult::HttpUploadOpened(response) => {
+                let handle = response.body;
+                let response = self.alloc_http_response(
+                    response.status,
+                    &response.headers,
+                    Value::HandleId(handle.0),
+                )?;
+                self.alloc_http_upload_event(handle, Some(response))?
+            }
             IoResult::Failed(failure) => {
                 self.io_current = Some(self.alloc_io_failure_action(failure)?);
                 return Ok(None);
@@ -164,6 +175,29 @@ impl Interpreter<'_> {
             "httpRequestRaw",
         );
         self.temporary_roots.truncate(checkpoint);
+        result
+    }
+
+    fn alloc_http_upload_event(
+        &mut self,
+        handle: HandleId,
+        response: Option<Value>,
+    ) -> Result<Value, RuntimeError> {
+        let response = self.alloc_maybe_value(response)?;
+        let root = self.temporary_roots.len();
+        self.temporary_roots.push(response);
+        self.safe_point();
+        let response = *self
+            .temporary_roots
+            .get(root)
+            .expect("ICE: HTTP upload event root disappeared");
+        let result = VmCtx::new(self).alloc_data2_ctor(
+            CtorRuntimeRole::PreludeTuple(2),
+            Value::HandleId(handle.0),
+            response,
+            "httpUploadStartRaw",
+        );
+        self.temporary_roots.truncate(root);
         result
     }
 

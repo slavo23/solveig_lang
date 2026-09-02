@@ -10,11 +10,13 @@ responseBody = "{\"message\":\"hello from Solveig\"}"
 
 responseText : String
 responseText =
-    "HTTP/1.1 200 OK\u{d}\n"
-        <> "Content-Type: application/json\u{d}\n"
-        <> "Content-Length: " <> show (bytesLength (stringToBytes responseBody)) <> "\u{d}\n"
-        <> "Connection: close\u{d}\n\u{d}\n"
-        <> responseBody
+    "HTTP/1.1 200 OK\u{d}\n" <>
+        "Content-Type: application/json\u{d}\n" <>
+        "Content-Length: " <>
+        show (bytesLength (stringToBytes responseBody)) <>
+        "\u{d}\n" <>
+        "Connection: close\u{d}\n\u{d}\n" <>
+        responseBody
 
 netToHost : NetError -> HostError
 netToHost (NetHostError _ hostError) = hostError
@@ -74,24 +76,35 @@ httpAsHostError error = HostError InvalidArgument "HTTP" (show error)
 
 fetchOne : String -> Task String
 fetchOne url = do
-    response <- mapError httpAsHostError (fetch url)
+    response <- mapError httpAsHostError (get url)
     case std.http.responseText response of
         Right text => pureIO text
         | Left error => failIO (httpAsHostError error)
 
 runClients : Port -> Task [String]
 runClients port =
-    let url = "http://127.0.0.1:" <> show port <> "/message" in
-    mapError concurrentHostError (mapConcurrentlyBoundedOrdered 3 fetchOne [url, url, url])
+    let url =
+        "http://127.0.0.1:" <> show port <> "/message"
+    in mapError concurrentHostError (mapConcurrentlyBoundedOrdered 3 fetchOne [url, url, url])
 
 main : Task ()
 main =
-    bracket (listenTask anyPort) (fun (listener, _) => closeSocketTask listener) (fun listenerInfo =>
-        case listenerInfo of
-            (listener, port) =>
-                withThread
-                    (serveBatch listener 3)
-                    (fun _ => do
-                        bodies <- runClients port
-                        printLine ("responses: " <> show (length bodies))
-                        printLine (case bodies of first :: _ => first | [] => "none")))
+    bracket
+        (listenTask anyPort)
+        (fun (listener, _) => closeSocketTask listener)
+        (fun listenerInfo =>
+            case listenerInfo of
+                (listener, port) =>
+                    withThread
+                        (serveBatch listener 3)
+                        (fun _ =>
+                            do
+                                bodies <- runClients port
+                                printLine ("responses: " <> show (length bodies))
+                                printLine
+                                    (case bodies of
+                                        first :: _ => first
+                                        | [] => "none"
+                                    )
+                        )
+        )

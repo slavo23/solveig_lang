@@ -2,8 +2,8 @@
 import std.http(*)
 import std.stream(Stream)
 
-escape : Request -> IO HttpError (Stream () HttpError Bytes)
-escape requestValue = withResponse requestValue (fun _ _ body => pureIO body)
+escape : String -> IO HttpError (Stream () HttpError Bytes)
+escape spelling = withResponse Get spelling (fun _ _ body => pureIO body)
 
 main : Task ()
 main = pureIO ()

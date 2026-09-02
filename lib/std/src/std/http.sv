@@ -1,20 +1,93 @@
-export (
-    Url, Method(..), Header, Request, Status, Response, RedirectPolicy(..), HttpLimits,
-    HttpError(..), defaultHttpLimits, fetch, fetchWith, send, urlFromString, urlToString,
-    header, headerName, headerValue, get, head, post, put, patch, delete, withHeader,
-    withHeaders, withTextBody, withBody, withoutBody, requestMethod, requestUrl,
-    requestHeaders, requestBody, request, getUrl, statusFromInt, response,
-    responseStatus, statusCode, isSuccessful, responseHeaders, responseBody, findHeader,
-    responseText, bodyChunks, foldBodyChunks, headersFromList, withMaximumHeaderBytes,
-    withMaximumBodyBytes, withHttpTimeout, withRedirectPolicy, maximumHeaderBytes,
-    maximumBodyBytes, httpTimeout, redirectPolicy, withResponse, withResponseWith
-)
+export (Url,
+    Method(..),
+    Header,
+    Status,
+    Response,
+    HttpError(..),
+    RedirectPolicy(..),
+    ReplayPolicy(..),
+    HttpOptions,
+    defaultOptions,
+    urlFromString,
+    urlToString,
+    header,
+    headerName,
+    headerValue,
+    headersFromList,
+    withHeader,
+    withHeaders,
+    withQuery,
+    withBody,
+    withTextBody,
+    withBuilderBody,
+    withFileBody,
+    withJsonBody,
+    withFormBody,
+    withoutBody,
+    withTimeout,
+    withRedirectPolicy,
+    withReplayPolicy,
+    withMaximumHeaderBytes,
+    withMaximumBufferedBodyBytes,
+    withMaximumResponseBytes,
+    withChunkBytes,
+    requestTimeout,
+    redirectPolicy,
+    replayPolicy,
+    maximumHeaderBytes,
+    maximumBufferedBodyBytes,
+    maximumResponseBytes,
+    chunkBytes,
+    get,
+    getWith,
+    head,
+    headWith,
+    post,
+    postWith,
+    put,
+    putWith,
+    patch,
+    patchWith,
+    delete,
+    deleteWith,
+    options,
+    optionsWith,
+    request,
+    requestWith,
+    requestStream,
+    requestStreamWith,
+    withResponse,
+    withResponseWith,
+    withStreamResponse,
+    withStreamResponseWith,
+    statusFromInt,
+    response,
+    responseStatus,
+    statusCode,
+    isSuccessful,
+    ensureSuccess,
+    responseHeaders,
+    responseBody,
+    findHeader,
+    responseText,
+    bodyChunks,
+    foldBodyChunks)
 
-import prelude.prim(httpOpenRaw, httpRequestRaw, hClose, hGetBytes, stringLength, stringSlice)
+import prelude.prim(httpOpenRaw,
+    httpRequestRaw,
+    httpUploadStartRaw,
+    httpUploadChunkRaw,
+    httpUploadCloseRaw,
+    hClose,
+    hGetBytes,
+    stringLength,
+    stringSlice)
 import std.bytes(*)
 import std.text(*)
-import std.time(Duration, durationToMilliseconds, milliseconds)
-import std.stream(Stream, unfold)
+import std.path(Path, pathToString)
+import std.json(Json, JsonError, renderJson)
+import std.time(Duration, seconds, durationToMilliseconds)
+import std.stream(Stream, StreamStep(..), next, unfold)
 import std.task(bracket)
 
 -- | An absolute HTTP or HTTPS URL validated by urlFromString.
@@ -30,14 +103,7 @@ instance Hashable Url where
     hashWithSalt salt (Url value) = hashWithSalt salt value
 
 -- | Standard HTTP request methods.
-data Method =
-    Get
-  | Head
-  | Post
-  | Put
-  | Patch
-  | Delete
-  | Options
+data Method = Get | Head | Post | Put | Patch | Delete | Options
 
 instance Eq Method where
     (==) Get Get = True
@@ -62,9 +128,6 @@ instance Eq Header where
 instance Show Header where
     show (Header name value) = name <> ": " <> value
 
--- | An HTTP request with explicit headers and an optional bounded byte body.
-data Request = Request Method Url [Header] (Maybe Bytes)
-
 -- | A three-digit HTTP response status.
 data Status = Status Int
 
@@ -86,67 +149,33 @@ instance Hashable Status where
 -- | A bounded HTTP response. The body is never larger than maximumBodyBytes.
 data Response = Response Status [Header] Bytes
 
--- | Redirect behavior. FollowRedirects zero behaves like NoRedirects.
-data RedirectPolicy = NoRedirects | FollowRedirects Int
-
-instance Eq RedirectPolicy where
-    (==) NoRedirects NoRedirects = True
-    (==) (FollowRedirects left) (FollowRedirects right) = left == right
-    (==) _ _ = False
-
-instance Show RedirectPolicy where
-    show NoRedirects = "NoRedirects"
-    show (FollowRedirects count) = "FollowRedirects " <> show count
-
--- | Resource limits for one request.
--- |
--- | Fields are maximum response-header bytes, maximum response-body bytes,
--- | the whole-request duration, and redirect policy.
-data HttpLimits = HttpLimits Int Int Duration RedirectPolicy
-
-instance Eq HttpLimits where
-    (==)
-        (HttpLimits leftHeaders leftBody leftTimeout leftRedirects)
-        (HttpLimits rightHeaders rightBody rightTimeout rightRedirects) =
-            and
-                (leftHeaders == rightHeaders)
-                (and
-                    (leftBody == rightBody)
-                    (and (leftTimeout == rightTimeout) (leftRedirects == rightRedirects)))
-
-instance Show HttpLimits where
-    show (HttpLimits headers body timeout redirects) =
-        "HttpLimits { maximumHeaderBytes = "
-            <> show headers
-            <> ", maximumBodyBytes = "
-            <> show body
-            <> ", timeout = "
-            <> show timeout
-            <> ", redirects = "
-            <> show redirects
-            <> " }"
-
 -- | Pure request-policy errors or a typed host HTTP failure.
 data HttpError =
     InvalidUrl String
-  | InvalidHeaderName String
-  | InvalidHeaderValue String
-  | InvalidStatus Int
-  | InvalidHttpLimit String Int
-  | TransportError HostError
-  | TlsError HostError
-  | RedirectError HostError
-  | ResponseHeadersTooLarge Int
-  | ResponseBodyTooLarge Int
-  | HttpHostError HostError
-  | InvalidResponseUtf8 Utf8Error
+    | InvalidHeaderName String
+    | InvalidHeaderValue String
+    | InvalidStatus Int
+    | InvalidHttpOption String Int
+    | TransportError HostError
+    | TlsError HostError
+    | RedirectError HostError
+    | ResponseHeadersTooLarge Int
+    | ResponseBodyTooLarge Int
+    | HttpHostError HostError
+    | InvalidResponseUtf8 Utf8Error
+    | ManagedRequestHeader String
+    | RequestFileError Path HostError
+    | RequestJsonError JsonError
+    | BodyReplayError HostError
+    | ConflictingRequestBody
+    | UnexpectedStatus Status
 
 instance Eq HttpError where
     (==) (InvalidUrl left) (InvalidUrl right) = left == right
     (==) (InvalidHeaderName left) (InvalidHeaderName right) = left == right
     (==) (InvalidHeaderValue left) (InvalidHeaderValue right) = left == right
     (==) (InvalidStatus left) (InvalidStatus right) = left == right
-    (==) (InvalidHttpLimit leftName leftValue) (InvalidHttpLimit rightName rightValue) =
+    (==) (InvalidHttpOption leftName leftValue) (InvalidHttpOption rightName rightValue) =
         and (leftName == rightName) (leftValue == rightValue)
     (==) (TransportError left) (TransportError right) = left == right
     (==) (TlsError left) (TlsError right) = left == right
@@ -155,6 +184,13 @@ instance Eq HttpError where
     (==) (ResponseBodyTooLarge left) (ResponseBodyTooLarge right) = left == right
     (==) (HttpHostError left) (HttpHostError right) = left == right
     (==) (InvalidResponseUtf8 left) (InvalidResponseUtf8 right) = left == right
+    (==) (ManagedRequestHeader left) (ManagedRequestHeader right) = left == right
+    (==) (RequestFileError leftPath left) (RequestFileError rightPath right) =
+        and (leftPath == rightPath) (left == right)
+    (==) (RequestJsonError left) (RequestJsonError right) = left == right
+    (==) (BodyReplayError left) (BodyReplayError right) = left == right
+    (==) ConflictingRequestBody ConflictingRequestBody = True
+    (==) (UnexpectedStatus left) (UnexpectedStatus right) = left == right
     (==) _ _ = False
 
 instance Show HttpError where
@@ -162,45 +198,25 @@ instance Show HttpError where
     show (InvalidHeaderName name) = "invalid HTTP header name " <> show name
     show (InvalidHeaderValue value) = "invalid HTTP header value " <> show value
     show (InvalidStatus code) = "invalid HTTP status " <> show code
-    show (InvalidHttpLimit name value) =
-        "invalid HTTP " <> name <> " limit " <> show value
+    show (InvalidHttpOption name value) = "invalid HTTP " <> name <> " limit " <> show value
     show (TransportError hostError) = "HTTP transport: " <> show hostError
     show (TlsError hostError) = "HTTP TLS: " <> show hostError
     show (RedirectError hostError) = "HTTP redirect: " <> show hostError
     show (ResponseHeadersTooLarge maximum) =
         "HTTP response headers exceed " <> show maximum <> " bytes"
-    show (ResponseBodyTooLarge maximum) =
-        "HTTP response body exceeds " <> show maximum <> " bytes"
+    show (ResponseBodyTooLarge maximum) = "HTTP response body exceeds " <> show maximum <> " bytes"
     show (HttpHostError hostError) = "HTTP: " <> show hostError
     show (InvalidResponseUtf8 utf8Error) = "HTTP response: " <> show utf8Error
-
--- | Practical defaults: 64 KiB headers, 8 MiB body, 15 seconds, five redirects.
-defaultHttpLimits : HttpLimits
-defaultHttpLimits = HttpLimits 65536 8388608 (milliseconds 15000) (FollowRedirects 5)
-
--- | Performs a bounded GET from a URL string with practical default limits.
-fetch : String -> IO HttpError Response
-fetch spelling = fetchWith defaultHttpLimits [] spelling
-
--- | Performs a bounded GET from a URL string with validated string-pair headers.
-fetchWith : HttpLimits -> [(String, String)] -> String -> IO HttpError Response
-fetchWith limits rawHeaders spelling =
-    case urlFromString spelling of
-        Left urlError => failIO urlError
-        | Right url =>
-            case headersFromList rawHeaders of
-                Left headerError => failIO headerError
-                | Right headers => request limits (withHeaders headers (get url))
-
--- | Performs a prepared request with practical default limits.
-send : Request -> IO HttpError Response
-send requestValue = request defaultHttpLimits requestValue
+    show (ManagedRequestHeader name) = "HTTP manages the request header " <> show name
+    show (RequestFileError path hostError) = "HTTP upload " <> show path <> ": " <> show hostError
+    show (RequestJsonError jsonError) = "HTTP request JSON: " <> show jsonError
+    show (BodyReplayError hostError) = "HTTP body replay: " <> show hostError
+    show ConflictingRequestBody = "HTTP stream upload conflicts with the configured request body"
+    show (UnexpectedStatus status) = "unexpected HTTP status " <> show status
 
 -- | Validates an absolute URL. Only http and https schemes are accepted.
 urlFromString : String -> Either HttpError Url
-urlFromString text =
-    if validUrlText text then Right (Url text)
-    else Left (InvalidUrl text)
+urlFromString text = if validUrlText text then Right (Url text) else Left (InvalidUrl text)
 
 -- | Returns the absolute spelling retained by a URL.
 urlToString : Url -> String
@@ -209,9 +225,11 @@ urlToString (Url text) = text
 -- | Builds and validates one HTTP header.
 header : String -> String -> Either HttpError Header
 header name value =
-    if not (validHeaderName name) then Left (InvalidHeaderName name)
-    else if not (validHeaderValue value) then Left (InvalidHeaderValue value)
-    else Right (Header name value)
+    if not (validHeaderName name)
+        then Left (InvalidHeaderName name)
+        else if not (validHeaderValue value)
+            then Left (InvalidHeaderValue value)
+            else Right (Header name value)
 
 -- | Returns a header's field name.
 headerName : Header -> String
@@ -221,184 +239,14 @@ headerName (Header name _) = name
 headerValue : Header -> String
 headerValue (Header _ value) = value
 
--- | Builds a GET request without headers or a body.
-get : Url -> Request
-get url = Request Get url [] Nothing
-
--- | Builds a HEAD request without headers or a body.
-head : Url -> Request
-head url = Request Head url [] Nothing
-
--- | Builds a POST request without headers or a body.
-post : Url -> Request
-post url = Request Post url [] Nothing
-
--- | Builds a PUT request without headers or a body.
-put : Url -> Request
-put url = Request Put url [] Nothing
-
--- | Builds a PATCH request without headers or a body.
-patch : Url -> Request
-patch url = Request Patch url [] Nothing
-
--- | Builds a DELETE request without headers or a body.
-delete : Url -> Request
-delete url = Request Delete url [] Nothing
-
--- | Adds a previously validated header before existing request headers.
-withHeader : Header -> Request -> Request
-withHeader value (Request method url headers body) =
-    Request method url (value :: headers) body
-
--- | Adds validated headers in list order before a request's existing headers.
-withHeaders : [Header] -> Request -> Request
-withHeaders headers requestValue = foldr withHeader requestValue headers
-
--- | Replaces a request body with UTF-8 text bytes.
-withTextBody : String -> Request -> Request
-withTextBody text requestValue =
-    withBody (std.bytes.stringToBytes text) requestValue
-
--- | Replaces the request body with bytes.
-withBody : Bytes -> Request -> Request
-withBody body (Request method url headers _) =
-    Request method url headers (Just body)
-
--- | Removes a request body.
-withoutBody : Request -> Request
-withoutBody (Request method url headers _) =
-    Request method url headers Nothing
-
--- | Returns a request's method.
-requestMethod : Request -> Method
-requestMethod (Request method _ _ _) = method
-
--- | Returns a request's URL.
-requestUrl : Request -> Url
-requestUrl (Request _ url _ _) = url
-
--- | Returns request headers in wire order.
-requestHeaders : Request -> [Header]
-requestHeaders (Request _ _ headers _) = headers
-
--- | Returns a request's optional strict body.
-requestBody : Request -> Maybe Bytes
-requestBody (Request _ _ _ body) = body
-
--- | Performs one bounded request without blocking other Solveig green threads.
--- |
--- | 4xx and 5xx statuses are returned normally. Transport, TLS, timeout,
--- | redirect, and response-limit failures retain their specific HttpError form.
-request : HttpLimits -> Request -> IO HttpError Response
-request limits requestValue =
-    case validateRequest limits requestValue of
-        Left policyError => failIO policyError
-        | Right valid =>
-            fmap
-                responseFromRaw
-                (mapError
-                    (httpHostError limits)
-                    (prelude.prim.httpRequestRaw (requestToRaw valid) (limitsToRaw limits)))
-
--- | Uses an HTTP response as a scoped byte stream with default limits and 32 KiB pulls.
-withResponse :
-    forall result. Request ->
-    (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) ->
-    IO HttpError result
-withResponse requestValue use = withResponseWith defaultHttpLimits 32768 requestValue use
-
--- | Acquires headers, then demand-reads a single-consumer response body in a scope.
--- |
--- | The positive chunk size bounds each pull; maximumBodyBytes bounds all
--- | bytes read, not just retained bytes. Exhaustion probes one additional byte.
--- | No body pull occurs until demanded, though the host protocol buffer may
--- | already contain bytes received with headers. An early return discards the
--- | unread body rather than draining it. Status and headers may escape; the
--- | rank-2 Stream may not (Launchbury and Peyton Jones, PLDI 1994).
--- |
--- | Cleanup runs on success, typed error, defect, and cancellation. An in-flight
--- | blocking read finishes or reaches the original whole-request host timeout
--- | before close completes; cancellation cleanup is not instantaneous. Request
--- | bodies remain strict bytes, and redirects use the same policy as request.
-withResponseWith :
-    forall result. HttpLimits ->
-    Int ->
-    Request ->
-    (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) ->
-    IO HttpError result
-withResponseWith limits chunkSize requestValue use =
-    if chunkSize <= 0
-        then failIO (InvalidHttpLimit "chunk bytes" chunkSize)
-        else case validateRequest limits requestValue of
-            Left policyError => failIO policyError
-            | Right valid =>
-                bracket
-                    (mapError
-                        (httpHostError limits)
-                        (prelude.prim.httpOpenRaw (requestToRaw valid) (limitsToRaw limits)))
-                    closeResponse
-                    (fun (code, headers, handle) =>
-                        use
-                            (Status code)
-                            (map headerFromRaw headers)
-                            (unfold (responseByteStep limits chunkSize handle) ())
-                    )
-
-closeResponse : (Int, [(String, String)], Handle) -> IO HttpError ()
-closeResponse (_, _, handle) = mapError HttpHostError (prelude.prim.hClose handle)
-
-responseByteStep : HttpLimits -> Int -> Handle -> () -> IO HttpError (Maybe (Bytes, ()))
-responseByteStep limits chunkSize handle _ = do
-    bytes <- mapError (responseReadError limits) (prelude.prim.hGetBytes handle chunkSize)
-    if bytesLength bytes == 0 then pureIO Nothing else pureIO (Just (bytes, ()))
-
-responseReadError : HttpLimits -> HostError -> HttpError
-responseReadError limits hostError =
-    if hostErrorOperation hostError == "httpResponseBody"
-        then httpHostError limits hostError
-        else TransportError hostError
-
-requestToRaw : Request -> (String, String, [(String, String)], Maybe Bytes)
-requestToRaw (Request method (Url url) headers body) =
-    (methodText method, url, map headerToRaw headers, body)
-
-limitsToRaw : HttpLimits -> (Int, Int, Int, Int)
-limitsToRaw (HttpLimits headers body timeout redirects) =
-    (headers, body, durationToMilliseconds timeout, redirectCount redirects)
-
-httpHostError : HttpLimits -> HostError -> HttpError
-httpHostError (HttpLimits maximumHeaders maximumBody _ _) hostError =
-    case hostErrorOperation hostError of
-        "httpTransport" => TransportError hostError
-        | "httpTls" => TlsError hostError
-        | "httpRedirect" => RedirectError hostError
-        | "httpResponseHeaders" => ResponseHeadersTooLarge maximumHeaders
-        | "httpResponseBody" => ResponseBodyTooLarge maximumBody
-        | _ => HttpHostError hostError
-
-responseFromRaw : (Int, [(String, String)], Bytes) -> Response
-responseFromRaw (code, rawHeaders, body) =
-    Response (Status code) (map headerFromRaw rawHeaders) body
-
-headerToRaw : Header -> (String, String)
-headerToRaw (Header name value) = (name, value)
-
-headerFromRaw : (String, String) -> Header
-headerFromRaw (name, value) = Header name value
-
 -- | Validates an integer as a three-digit HTTP status.
 statusFromInt : Int -> Either HttpError Status
 statusFromInt code =
-    if and (code >= 100) (code <= 599) then Right (Status code)
-    else Left (InvalidStatus code)
+    if and (code >= 100) (code <= 599) then Right (Status code) else Left (InvalidStatus code)
 
 -- | Constructs a strict response value from validated components.
 response : Status -> [Header] -> Bytes -> Response
 response = Response
-
--- | Performs a GET with default limits.
-getUrl : Url -> IO HttpError Response
-getUrl url = request defaultHttpLimits (get url)
 
 -- | Returns a response's status.
 responseStatus : Response -> Status
@@ -411,42 +259,6 @@ statusCode (Status code) = code
 -- | Reports whether a status is in the successful 2xx range.
 isSuccessful : Status -> Bool
 isSuccessful (Status code) = and (code >= 200) (code < 300)
-
--- | Changes the maximum accepted response-header bytes.
-withMaximumHeaderBytes : Int -> HttpLimits -> HttpLimits
-withMaximumHeaderBytes maximum (HttpLimits _ body timeout redirects) =
-    HttpLimits maximum body timeout redirects
-
--- | Changes the maximum accepted response-body bytes.
-withMaximumBodyBytes : Int -> HttpLimits -> HttpLimits
-withMaximumBodyBytes maximum (HttpLimits headers _ timeout redirects) =
-    HttpLimits headers maximum timeout redirects
-
--- | Changes the whole-request timeout.
-withHttpTimeout : Duration -> HttpLimits -> HttpLimits
-withHttpTimeout timeout (HttpLimits headers body _ redirects) =
-    HttpLimits headers body timeout redirects
-
--- | Changes redirect behavior.
-withRedirectPolicy : RedirectPolicy -> HttpLimits -> HttpLimits
-withRedirectPolicy redirects (HttpLimits headers body timeout _) =
-    HttpLimits headers body timeout redirects
-
--- | Returns the maximum accepted response-header bytes.
-maximumHeaderBytes : HttpLimits -> Int
-maximumHeaderBytes (HttpLimits maximum _ _ _) = maximum
-
--- | Returns the maximum accepted response-body bytes.
-maximumBodyBytes : HttpLimits -> Int
-maximumBodyBytes (HttpLimits _ maximum _ _) = maximum
-
--- | Returns the whole-request timeout.
-httpTimeout : HttpLimits -> Duration
-httpTimeout (HttpLimits _ _ timeout _) = timeout
-
--- | Returns redirect behavior.
-redirectPolicy : HttpLimits -> RedirectPolicy
-redirectPolicy (HttpLimits _ _ _ redirects) = redirects
 
 -- | Returns all response headers in wire order.
 responseHeaders : Response -> [Header]
@@ -463,8 +275,7 @@ findHeader name (Response _ headers _) = findHeaderIn name headers
 findHeaderIn : String -> [Header] -> Maybe String
 findHeaderIn name [] = Nothing
 findHeaderIn name (Header candidate value :: rest) =
-    if asciiStringEqual name candidate then Just value
-    else findHeaderIn name rest
+    if asciiStringEqual name candidate then Just value else findHeaderIn name rest
 
 -- | Strictly decodes the bounded body as UTF-8.
 responseText : Response -> Either HttpError String
@@ -479,59 +290,38 @@ responseText response =
 -- | hard whole-body allocation bound. Non-positive chunk sizes are rejected.
 bodyChunks : Int -> Response -> Either HttpError [Bytes]
 bodyChunks size response =
-    if size <= 0 then Left (InvalidHttpLimit "chunk bytes" size)
-    else Right (chunksFrom size (responseBody response) 0)
+    if size <= 0
+        then Left (InvalidHttpOption "chunk bytes" size)
+        else Right (chunksFrom size (responseBody response) 0)
 
 -- | Folds bounded body chunks without allocating a list of chunks.
-foldBodyChunks : forall state. Int -> (state -> Bytes -> state) -> state -> Response -> Either HttpError state
+foldBodyChunks :
+    forall state. Int -> (state -> Bytes -> state) -> state -> Response -> Either HttpError state
 foldBodyChunks size step initial response =
-    if size <= 0 then Left (InvalidHttpLimit "chunk bytes" size)
-    else Right (foldChunksFrom size step initial (responseBody response) 0)
+    if size <= 0
+        then Left (InvalidHttpOption "chunk bytes" size)
+        else Right (foldChunksFrom size step initial (responseBody response) 0)
 
 chunksFrom : Int -> Bytes -> Int -> [Bytes]
 chunksFrom size bytes offset =
-    let total = std.bytes.bytesLength bytes in
-    if offset >= total then []
-    else std.bytes.bytesSlice bytes offset size :: chunksFrom size bytes (offset + size)
+    let total =
+        std.bytes.bytesLength bytes
+    in if offset >= total
+        then []
+        else std.bytes.bytesSlice bytes offset size :: chunksFrom size bytes (offset + size)
 
 foldChunksFrom : forall state. Int -> (state -> Bytes -> state) -> state -> Bytes -> Int -> state
 foldChunksFrom size step state bytes offset =
-    let total = std.bytes.bytesLength bytes in
-    if offset >= total then state
-    else foldChunksFrom
-        size
-        step
-        (step state (std.bytes.bytesSlice bytes offset size))
-        bytes
-        (offset + size)
-
-validateRequest : HttpLimits -> Request -> Either HttpError Request
-validateRequest (HttpLimits maximumHeaders maximumBody timeout redirects) requestValue =
-    if maximumHeaders <= 0 then Left (InvalidHttpLimit "response header bytes" maximumHeaders)
-    else if maximumBody < 0 then Left (InvalidHttpLimit "response body bytes" maximumBody)
-    else if durationToMilliseconds timeout <= 0 then
-        Left (InvalidHttpLimit "timeout milliseconds" (durationToMilliseconds timeout))
-    else case redirects of
-        FollowRedirects count =>
-            if count < 0 then Left (InvalidHttpLimit "redirect count" count)
-            else validateRequestFields requestValue
-        | NoRedirects => validateRequestFields requestValue
-
-validateRequestFields : Request -> Either HttpError Request
-validateRequestFields (Request method (Url url) headers body) =
-    if not (validUrlText url) then Left (InvalidUrl url)
-    else validateHeaders headers (Request method (Url url) headers body)
-
-validateHeaders : [Header] -> Request -> Either HttpError Request
-validateHeaders [] requestValue = Right requestValue
-validateHeaders (Header name value :: rest) requestValue =
-    if not (validHeaderName name) then Left (InvalidHeaderName name)
-    else if not (validHeaderValue value) then Left (InvalidHeaderValue value)
-    else validateHeaders rest requestValue
-
-redirectCount : RedirectPolicy -> Int
-redirectCount NoRedirects = 0
-redirectCount (FollowRedirects count) = count
+    let total =
+        std.bytes.bytesLength bytes
+    in if offset >= total
+        then state
+        else foldChunksFrom
+            size
+            step
+            (step state (std.bytes.bytesSlice bytes offset size))
+            bytes
+            (offset + size)
 
 methodText : Method -> String
 methodText Get = "GET"
@@ -545,63 +335,55 @@ methodText Options = "OPTIONS"
 validUrlText : String -> Bool
 validUrlText text =
     let start =
-        if std.text.startsWith "https://" text then 8
-        else if std.text.startsWith "http://" text then 7
-        else -1
+        if std.text.startsWith "https://" text
+            then 8
+            else if std.text.startsWith "http://" text then 7 else -1
     in and
         (start >= 0)
         (validUrlTail (prelude.prim.stringSlice text start (prelude.prim.stringLength text)))
 
 validUrlTail : String -> Bool
-validUrlTail tail =
-    validUrlAuthority (std.text.stringToChars tail) 0
+validUrlTail tail = validUrlAuthority (std.text.stringToChars tail) 0
 
 validUrlAuthority : [Char] -> Int -> Bool
 validUrlAuthority [] count = count > 0
 validUrlAuthority (character :: rest) count =
-    if or (character == '/') (character == '?') then
-        and (count > 0) (validUrlChars rest)
-    else
-        let point = std.text.charToCodePoint character in
-        if or
-            (or
-                (and (point >= 48) (point <= 57))
-                (and (point >= 65) (point <= 90)))
-            (or
-                (and (point >= 97) (point <= 122))
-                (containsCodePoint point [45, 46, 58, 91, 93]))
-        then validUrlAuthority rest (count + 1)
-        else False
+    if or (character == '/') (character == '?')
+        then and (count > 0) (validUrlChars rest)
+        else let point =
+            std.text.charToCodePoint character
+        in if or
+                (or (and (point >= 48) (point <= 57)) (and (point >= 65) (point <= 90)))
+                (or
+                    (and (point >= 97) (point <= 122))
+                    (containsCodePoint point [45, 46, 58, 91, 93]))
+            then validUrlAuthority rest (count + 1)
+            else False
 
 validUrlChars : [Char] -> Bool
 validUrlChars [] = True
 validUrlChars (character :: rest) =
-    let point = std.text.charToCodePoint character in
-    and
-        (and (point > 32) (point < 127))
-        (and (character /= '#') (validUrlChars rest))
+    let point =
+        std.text.charToCodePoint character
+    in and (and (point > 32) (point < 127)) (and (character /= '#') (validUrlChars rest))
 
 validHeaderName : String -> Bool
 validHeaderName name =
-    and
-        (prelude.prim.stringLength name > 0)
-        (allHeaderNameChars (std.text.stringToChars name))
+    and (prelude.prim.stringLength name > 0) (allHeaderNameChars (std.text.stringToChars name))
 
 allHeaderNameChars : [Char] -> Bool
 allHeaderNameChars [] = True
-allHeaderNameChars (character :: rest) =
-    and (isHeaderNameChar character) (allHeaderNameChars rest)
+allHeaderNameChars (character :: rest) = and (isHeaderNameChar character) (allHeaderNameChars rest)
 
 isHeaderNameChar : Char -> Bool
 isHeaderNameChar character =
-    let point = std.text.charToCodePoint character in
-    if or
-        (and (point >= 48) (point <= 57))
-        (or
-            (and (point >= 65) (point <= 90))
-            (and (point >= 97) (point <= 122)))
-    then True
-    else containsCodePoint point [33, 35, 36, 37, 38, 39, 42, 43, 45, 46, 94, 95, 96, 124, 126]
+    let point =
+        std.text.charToCodePoint character
+    in if or
+            (and (point >= 48) (point <= 57))
+            (or (and (point >= 65) (point <= 90)) (and (point >= 97) (point <= 122)))
+        then True
+        else containsCodePoint point [33, 35, 36, 37, 38, 39, 42, 43, 45, 46, 94, 95, 96, 124, 126]
 
 containsCodePoint : Int -> [Int] -> Bool
 containsCodePoint _ [] = False
@@ -614,10 +396,9 @@ validHeaderValue value = validHeaderValueChars (std.text.stringToChars value)
 validHeaderValueChars : [Char] -> Bool
 validHeaderValueChars [] = True
 validHeaderValueChars (character :: rest) =
-    let point = std.text.charToCodePoint character in
-    and
-        (and (point /= 13) (point /= 10))
-        (and (point /= 0) (validHeaderValueChars rest))
+    let point =
+        std.text.charToCodePoint character
+    in and (and (point /= 13) (point /= 10)) (and (point /= 0) (validHeaderValueChars rest))
 
 -- | Validates ordinary string-pair headers for use with the low-level request API.
 headersFromList : [(String, String)] -> Either HttpError [Header]
@@ -637,12 +418,640 @@ asciiStringEqual left right =
 asciiCharsEqual : [Char] -> [Char] -> Bool
 asciiCharsEqual [] [] = True
 asciiCharsEqual (left :: leftRest) (right :: rightRest) =
-    and
-        (asciiCode left == asciiCode right)
-        (asciiCharsEqual leftRest rightRest)
+    and (asciiCode left == asciiCode right) (asciiCharsEqual leftRest rightRest)
 asciiCharsEqual _ _ = False
 
 asciiCode : Char -> Int
 asciiCode character =
-    let point = std.text.charToCodePoint character in
-    if and (point >= 65) (point <= 90) then point + 32 else point
+    let point =
+        std.text.charToCodePoint character
+    in if and (point >= 65) (point <= 90) then point + 32 else point
+
+-- | Rejects 4xx and 5xx responses while preserving all other response values.
+-- | HTTP requests themselves return these statuses normally.
+ensureSuccess : Response -> Either HttpError Response
+ensureSuccess value =
+    if statusCode (responseStatus value) >= 400
+        then Left (UnexpectedStatus (responseStatus value))
+        else Right value
+
+-- | Redirect behavior. Following zero redirects returns the original response.
+data RedirectPolicy = NoRedirects | FollowRedirects Int
+
+instance Eq RedirectPolicy where
+    (==) NoRedirects NoRedirects = True
+    (==) (FollowRedirects left) (FollowRedirects right) = left == right
+    (==) _ _ = False
+
+instance Show RedirectPolicy where
+    show NoRedirects = "NoRedirects"
+    show (FollowRedirects count) = "FollowRedirects " <> show count
+
+-- | Whether a redirect may resend a repeatable request body.
+-- | Streams are one-shot under either policy. Files are rewound, not snapshotted.
+data ReplayPolicy = ReplayableBodies | NoReplay
+
+instance Eq ReplayPolicy where
+    (==) ReplayableBodies ReplayableBodies = True
+    (==) NoReplay NoReplay = True
+    (==) _ _ = False
+
+instance Show ReplayPolicy where
+    show ReplayableBodies = "ReplayableBodies"
+    show NoReplay = "NoReplay"
+
+data RequestBody =
+    EmptyBody
+    | StrictBody Bytes
+    | TextBody String
+    | BuilderBody BytesBuilder
+    | FileBody Path
+    | JsonBody Json
+    | FormBody [(String, String)]
+
+data RequestContent = RequestContent [(String, String)] [(String, String)] RequestBody
+
+data ResponsePolicy = ResponsePolicy Int Int (Maybe Int) Int
+
+-- | Reusable immutable request options, validated when a request is performed.
+-- | Start from defaultOptions; only configure behavior the request needs.
+-- | These values own no live connection, file, stream, or ambient client state.
+data HttpOptions = HttpOptions RequestContent ResponsePolicy Duration RedirectPolicy ReplayPolicy
+
+-- | Uses no custom headers, query parameters, or body, and follows five redirects.
+-- | The request deadline is 15 seconds. Headers are bounded to 64 KiB and whole
+-- | response buffering to 8 MiB. Scoped responses use 32 KiB pulls without a
+-- | total-byte quota; withMaximumResponseBytes adds an explicit transfer quota.
+defaultOptions : HttpOptions
+defaultOptions =
+    HttpOptions
+        (RequestContent [] [] EmptyBody)
+        (ResponsePolicy 65536 8388608 Nothing 32768)
+        (seconds 15)
+        (FollowRedirects 5)
+        ReplayableBodies
+
+-- | Sets a request header, replacing an earlier value with the same ASCII name.
+-- | Invalid names or values fail the request before host work. Framing headers
+-- | Host, Content-Length, and Transfer-Encoding are owned by the HTTP client.
+withHeader : String -> String -> HttpOptions -> HttpOptions
+withHeader name value = mapContent (setHeader name value)
+
+-- | Sets ordinary string-pair headers in order; the last value for a name wins.
+withHeaders : [(String, String)] -> HttpOptions -> HttpOptions
+withHeaders headers options = foldl addHeaderPair options headers
+
+-- | Replaces additional query parameters, preserving pair order and duplicate keys.
+-- | UTF-8 names and values are encoded by the host URL library, not interpolated.
+withQuery : [(String, String)] -> HttpOptions -> HttpOptions
+withQuery pairs = mapContent (setQuery pairs)
+
+-- | Replaces the body with arbitrary strict bytes, without a text conversion.
+withBody : Bytes -> HttpOptions -> HttpOptions
+withBody bytes = mapContent (setBody (StrictBody bytes))
+
+-- | Replaces the body with explicitly UTF-8-encoded text.
+-- | The default content type is text/plain; charset=utf-8 unless overridden.
+withTextBody : String -> HttpOptions -> HttpOptions
+withTextBody text = mapContent (setBody (TextBody text))
+
+-- | Sends a builder's existing chunks in order without building one combined Bytes.
+-- | The builder is finite and repeatable; its chunk references remain retained.
+withBuilderBody : BytesBuilder -> HttpOptions -> HttpOptions
+withBuilderBody builder = mapContent (setBody (BuilderBody builder))
+
+-- | Uploads a file incrementally in binary mode and closes it after the request.
+-- | Redirect replay rewinds the same file; callers must not modify it during use.
+withFileBody : Path -> HttpOptions -> HttpOptions
+withFileBody path = mapContent (setBody (FileBody path))
+
+-- | Encodes a JSON value with std.json and defaults Content-Type to application/json.
+-- | Rendering failures remain structured RequestJsonError values before host work.
+withJsonBody : Json -> HttpOptions -> HttpOptions
+withJsonBody value = mapContent (setBody (JsonBody value))
+
+-- | Sends UTF-8 application/x-www-form-urlencoded fields, preserving duplicate keys.
+withFormBody : [(String, String)] -> HttpOptions -> HttpOptions
+withFormBody pairs = mapContent (setBody (FormBody pairs))
+
+-- | Removes the request body without changing explicitly supplied headers.
+withoutBody : HttpOptions -> HttpOptions
+withoutBody = mapContent (setBody EmptyBody)
+
+-- | Changes the positive whole-request deadline, including upload and response reads.
+-- | Time spent in a scoped callback does not reset the transport deadline.
+withTimeout : Duration -> HttpOptions -> HttpOptions
+withTimeout duration (HttpOptions content response _ redirects replay) =
+    HttpOptions content response duration redirects replay
+
+-- | Changes whether redirects are followed and their maximum count.
+withRedirectPolicy : RedirectPolicy -> HttpOptions -> HttpOptions
+withRedirectPolicy redirects (HttpOptions content response duration _ replay) =
+    HttpOptions content response duration redirects replay
+
+-- | Changes permission to resend repeatable bodies; never makes a stream replayable.
+withReplayPolicy : ReplayPolicy -> HttpOptions -> HttpOptions
+withReplayPolicy replay (HttpOptions content response duration redirects _) =
+    HttpOptions content response duration redirects replay
+
+-- | Bounds response headers in bytes; the limit must be positive.
+withMaximumHeaderBytes : Int -> HttpOptions -> HttpOptions
+withMaximumHeaderBytes maximum = mapResponsePolicy (setHeaderBytes maximum)
+
+-- | Bounds whole-response buffering in bytes, without restricting scoped transfers.
+-- | The non-negative limit applies to get, post, request, and their With variants.
+withMaximumBufferedBodyBytes : Int -> HttpOptions -> HttpOptions
+withMaximumBufferedBodyBytes maximum = mapResponsePolicy (setBufferedBytes maximum)
+
+-- | Sets an optional non-negative quota on all response bytes read.
+-- | Nothing permits a large streamed transfer; it does not disable chunk bounds.
+withMaximumResponseBytes : Maybe Int -> HttpOptions -> HttpOptions
+withMaximumResponseBytes maximum = mapResponsePolicy (setResponseBytes maximum)
+
+-- | Bounds each scoped response pull in bytes; the count must be positive.
+withChunkBytes : Int -> HttpOptions -> HttpOptions
+withChunkBytes maximum = mapResponsePolicy (setChunkBytes maximum)
+
+-- | Returns the whole-request deadline.
+requestTimeout : HttpOptions -> Duration
+requestTimeout (HttpOptions _ _ duration _ _) = duration
+
+-- | Returns redirect behavior.
+redirectPolicy : HttpOptions -> RedirectPolicy
+redirectPolicy (HttpOptions _ _ _ redirects _) = redirects
+
+-- | Returns body replay permission.
+replayPolicy : HttpOptions -> ReplayPolicy
+replayPolicy (HttpOptions _ _ _ _ replay) = replay
+
+-- | Returns the response-header byte bound.
+maximumHeaderBytes : HttpOptions -> Int
+maximumHeaderBytes (HttpOptions _ (ResponsePolicy maximum _ _ _) _ _ _) = maximum
+
+-- | Returns the whole-response buffering byte bound.
+maximumBufferedBodyBytes : HttpOptions -> Int
+maximumBufferedBodyBytes (HttpOptions _ (ResponsePolicy _ maximum _ _) _ _ _) = maximum
+
+-- | Returns the optional total response-transfer byte quota.
+maximumResponseBytes : HttpOptions -> Maybe Int
+maximumResponseBytes (HttpOptions _ (ResponsePolicy _ _ maximum _) _ _ _) = maximum
+
+-- | Returns the maximum bytes per scoped response pull.
+chunkBytes : HttpOptions -> Int
+chunkBytes (HttpOptions _ (ResponsePolicy _ _ _ maximum) _ _ _) = maximum
+
+mapContent : (RequestContent -> RequestContent) -> HttpOptions -> HttpOptions
+mapContent transform (HttpOptions content response duration redirects replay) =
+    HttpOptions (transform content) response duration redirects replay
+
+mapResponsePolicy : (ResponsePolicy -> ResponsePolicy) -> HttpOptions -> HttpOptions
+mapResponsePolicy transform (HttpOptions content response duration redirects replay) =
+    HttpOptions content (transform response) duration redirects replay
+
+setHeader : String -> String -> RequestContent -> RequestContent
+setHeader name value (RequestContent headers query body) =
+    RequestContent ((name, value) :: filter (differentHeader name) headers) query body
+
+differentHeader : String -> (String, String) -> Bool
+differentHeader name (candidate, _) = not (asciiStringEqual name candidate)
+
+addHeaderPair : HttpOptions -> (String, String) -> HttpOptions
+addHeaderPair options (name, value) = withHeader name value options
+
+setQuery : [(String, String)] -> RequestContent -> RequestContent
+setQuery query (RequestContent headers _ body) = RequestContent headers query body
+
+setBody : RequestBody -> RequestContent -> RequestContent
+setBody body (RequestContent headers query _) = RequestContent headers query body
+
+setHeaderBytes : Int -> ResponsePolicy -> ResponsePolicy
+setHeaderBytes maximum (ResponsePolicy _ buffered total chunk) =
+    ResponsePolicy maximum buffered total chunk
+
+setBufferedBytes : Int -> ResponsePolicy -> ResponsePolicy
+setBufferedBytes maximum (ResponsePolicy headers _ total chunk) =
+    ResponsePolicy headers maximum total chunk
+
+setResponseBytes : Maybe Int -> ResponsePolicy -> ResponsePolicy
+setResponseBytes maximum (ResponsePolicy headers buffered _ chunk) =
+    ResponsePolicy headers buffered maximum chunk
+
+setChunkBytes : Int -> ResponsePolicy -> ResponsePolicy
+setChunkBytes maximum (ResponsePolicy headers buffered total _) =
+    ResponsePolicy headers buffered total maximum
+
+validateOptions : HttpOptions -> Either HttpError ()
+validateOptions options =
+    let headers =
+        maximumHeaderBytes options
+    in let buffered =
+        maximumBufferedBodyBytes options
+    in let chunk =
+        chunkBytes options
+    in let milliseconds =
+        durationToMilliseconds (requestTimeout options)
+    in if headers <= 0
+        then Left (InvalidHttpOption "response header bytes" headers)
+        else if buffered < 0
+            then Left (InvalidHttpOption "buffered response bytes" buffered)
+            else if chunk <= 0
+            then Left (InvalidHttpOption "chunk bytes" chunk)
+            else if milliseconds <= 0
+            then Left (InvalidHttpOption "timeout milliseconds" milliseconds)
+            else case maximumResponseBytes options of
+                Just maximum =>
+                    if maximum < 0
+                    then Left (InvalidHttpOption "response bytes" maximum)
+                    else validateRedirects (redirectPolicy options)
+                | Nothing => validateRedirects (redirectPolicy options)
+
+validateRedirects : RedirectPolicy -> Either HttpError ()
+validateRedirects NoRedirects = Right ()
+validateRedirects (FollowRedirects count) =
+    if count < 0 then Left (InvalidHttpOption "redirect count" count) else Right ()
+
+requestContent : HttpOptions -> RequestContent
+requestContent (HttpOptions content _ _ _ _) = content
+
+-- | Performs a bounded GET with practical defaults.
+get : String -> IO HttpError Response
+get = request Get
+
+-- | Performs a GET with explicit immutable options.
+getWith : HttpOptions -> String -> IO HttpError Response
+getWith configured = requestWith configured Get
+
+-- | Performs a bounded HEAD with practical defaults.
+head : String -> IO HttpError Response
+head = request Head
+
+-- | Performs a HEAD with explicit immutable options.
+headWith : HttpOptions -> String -> IO HttpError Response
+headWith configured = requestWith configured Head
+
+-- | Performs a bounded POST with practical defaults.
+post : String -> IO HttpError Response
+post = request Post
+
+-- | Performs a POST with explicit immutable options and request body.
+postWith : HttpOptions -> String -> IO HttpError Response
+postWith configured = requestWith configured Post
+
+-- | Performs a bounded PUT with practical defaults.
+put : String -> IO HttpError Response
+put = request Put
+
+-- | Performs a PUT with explicit immutable options and request body.
+putWith : HttpOptions -> String -> IO HttpError Response
+putWith configured = requestWith configured Put
+
+-- | Performs a bounded PATCH with practical defaults.
+patch : String -> IO HttpError Response
+patch = request Patch
+
+-- | Performs a PATCH with explicit immutable options and request body.
+patchWith : HttpOptions -> String -> IO HttpError Response
+patchWith configured = requestWith configured Patch
+
+-- | Performs a bounded DELETE with practical defaults.
+delete : String -> IO HttpError Response
+delete = request Delete
+
+-- | Performs a DELETE with explicit immutable options.
+deleteWith : HttpOptions -> String -> IO HttpError Response
+deleteWith configured = requestWith configured Delete
+
+-- | Performs a bounded OPTIONS request with practical defaults.
+options : String -> IO HttpError Response
+options = request Options
+
+-- | Performs an OPTIONS request with explicit immutable options.
+optionsWith : HttpOptions -> String -> IO HttpError Response
+optionsWith configured = requestWith configured Options
+
+-- | Performs any supported method with practical defaults.
+-- | 4xx and 5xx statuses are returned normally; use ensureSuccess when wanted.
+request : Method -> String -> IO HttpError Response
+request = requestWith defaultOptions
+
+-- | Performs any supported method with reusable request options.
+-- | Response buffering is bounded independently from scoped transfer quotas.
+requestWith : HttpOptions -> Method -> String -> IO HttpError Response
+requestWith configured method spelling =
+    case prepareRequest configured method spelling of
+        Left policyError => failIO policyError
+        | Right prepared =>
+            let maximum =
+                bufferedMaximum configured
+            in fmap responseFromRaw $
+                mapError (httpHostError configured (Just maximum)) $
+                prelude.prim.httpRequestRaw prepared (limitsToRaw configured (Just maximum))
+
+-- | Sends a one-shot scoped byte stream and buffers the bounded response.
+-- | The stream is pulled only when the transport requests more input.
+requestStream :
+    forall upload. Method -> Stream upload HttpError Bytes -> String -> IO HttpError Response
+requestStream = requestStreamWith defaultOptions
+
+-- | Sends a one-shot scoped byte stream with explicit request options.
+-- | Redirects that would resend the body fail with BodyReplayError.
+requestStreamWith :
+    forall upload. HttpOptions ->
+    Method -> Stream upload HttpError Bytes -> String -> IO HttpError Response
+requestStreamWith configured method upload spelling =
+    let maximum =
+        bufferedMaximum configured
+    in withStreamResponseWith
+        (withMaximumResponseBytes (Just maximum) configured)
+        method
+        upload
+        spelling
+        collectStrictResponse
+
+collectStrictResponse :
+    forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError Response
+collectStrictResponse status headers body =
+    fmap (response status headers . buildBytes) $ collectResponseChunks emptyBytesBuilder body
+
+collectResponseChunks :
+    forall scope. BytesBuilder -> Stream scope HttpError Bytes -> IO HttpError BytesBuilder
+collectResponseChunks builder body = do
+    step <- next body
+    case step of
+        StreamDone => pureIO builder
+        | StreamYield bytes rest => collectResponseChunks (builder <> bytesBuilder bytes) rest
+
+-- | Uses a response body as a scoped, demand-driven byte stream.
+-- | The default pull size is 32 KiB and the total streamed size is unbounded.
+withResponse :
+    forall result. Method ->
+    String ->
+    (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) ->
+    IO HttpError result
+withResponse method spelling use = withResponseWith defaultOptions method spelling use
+
+-- | Acquires headers, then uses a single-consumer response stream in a fresh scope.
+-- | withChunkBytes bounds every pull; withMaximumResponseBytes optionally bounds
+-- | the whole transfer. Returning early drops the unread body without draining it.
+withResponseWith :
+    forall result. HttpOptions ->
+    Method ->
+    String ->
+    (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) ->
+    IO HttpError result
+withResponseWith configured method spelling use =
+    case prepareRequest configured method spelling of
+        Left policyError => failIO policyError
+        | Right prepared =>
+            bracket
+                (mapError (httpHostError configured (maximumResponseBytes configured)) $
+                    prelude.prim.httpOpenRaw
+                        prepared
+                        (limitsToRaw configured (maximumResponseBytes configured)))
+                closeResponse
+                (fun (code, rawHeaders, handle) =>
+                    use
+                        (Status code)
+                        (map headerFromRaw rawHeaders)
+                        (unfold (responseByteStep configured handle) ())
+                )
+
+-- | Sends a one-shot scoped byte stream and exposes the response as another scope.
+withStreamResponse :
+    forall upload result. Method ->
+    Stream upload HttpError Bytes ->
+    String ->
+    (forall response. Status ->
+    [Header] -> Stream response HttpError Bytes -> IO HttpError result) ->
+    IO HttpError result
+withStreamResponse method upload spelling use =
+    withStreamResponseWith defaultOptions method upload spelling use
+
+-- | Drives upload chunks only on host demand, then transfers the same resource
+-- | into the rank-2 response callback. Cleanup joins the upload owner thread on
+-- | success, typed failure, defect, and cancellation.
+withStreamResponseWith :
+    forall upload result. HttpOptions ->
+    Method ->
+    Stream upload HttpError Bytes ->
+    String ->
+    (forall response. Status ->
+    [Header] -> Stream response HttpError Bytes -> IO HttpError result) ->
+    IO HttpError result
+withStreamResponseWith configured method upload spelling use =
+    case prepareStreamRequest configured method spelling of
+        Left policyError => failIO policyError
+        | Right prepared =>
+            bracket
+                (mapError (httpHostError configured (maximumResponseBytes configured)) $
+                    prelude.prim.httpUploadStartRaw
+                        prepared
+                        (limitsToRaw configured (maximumResponseBytes configured)))
+                closeUpload
+                (feedAndUseUpload configured upload use)
+
+type RawUploadEvent = (Handle, Maybe (Int, [(String, String)], Handle))
+
+feedAndUseUpload :
+    forall upload result. HttpOptions ->
+    Stream upload HttpError Bytes ->
+    (forall response. Status ->
+    [Header] -> Stream response HttpError Bytes -> IO HttpError result) ->
+    RawUploadEvent -> IO HttpError result
+feedAndUseUpload configured upload use event = do
+    (_, responseValue) <- feedUpload configured upload event
+    case responseValue of
+        (code, rawHeaders, handle) =>
+            use
+                (Status code)
+                (map headerFromRaw rawHeaders)
+                (unfold (responseByteStep configured handle) ())
+
+feedUpload :
+    forall upload. HttpOptions ->
+    Stream upload HttpError Bytes ->
+    RawUploadEvent -> IO HttpError (Handle, (Int, [(String, String)], Handle))
+feedUpload configured upload (handle, responseValue) =
+    case responseValue of
+        Just responseValue => pureIO (handle, responseValue)
+        | Nothing =>
+            do
+                step <- next upload
+                case step of
+                    StreamDone => continueUpload configured handle Nothing
+                    | StreamYield bytes rest =>
+                        if bytesLength bytes == 0
+                            then feedUpload configured rest (handle, Nothing)
+                            else do
+                                event <-
+                                    mapError
+                                            (httpHostError
+                                            configured
+                                            (maximumResponseBytes configured)) $
+                                        prelude.prim.httpUploadChunkRaw handle (Just bytes)
+                                feedUpload configured rest event
+
+continueUpload :
+    HttpOptions -> Handle -> Maybe Bytes -> IO HttpError (Handle, (Int, [(String, String)], Handle))
+continueUpload configured handle bytes = do
+    event <-
+        mapError (httpHostError configured (maximumResponseBytes configured)) $
+            prelude.prim.httpUploadChunkRaw handle bytes
+    case event of
+        (nextHandle, Just responseValue) => pureIO (nextHandle, responseValue)
+        | (nextHandle, Nothing) => continueUpload configured nextHandle Nothing
+
+closeUpload : RawUploadEvent -> IO HttpError ()
+closeUpload (handle, _) = mapError HttpHostError $ prelude.prim.httpUploadCloseRaw handle
+
+type RawBody = (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])
+type RawRequest = (String, String, [(String, String)], [(String, String)], RawBody)
+
+prepareRequest : HttpOptions -> Method -> String -> Either HttpError RawRequest
+prepareRequest configured method spelling =
+    case validateOptions configured of
+        Left error => Left error
+        | Right _ =>
+            case urlFromString spelling of
+                Left error => Left error
+                | Right url => prepareContent configured method url
+
+prepareStreamRequest : HttpOptions -> Method -> String -> Either HttpError RawRequest
+prepareStreamRequest configured method spelling =
+    let RequestContent _ _ body =
+        requestContent configured
+    in case body of
+        EmptyBody => fmap markStreamBody (prepareRequest configured method spelling)
+        | _ => Left ConflictingRequestBody
+
+markStreamBody : RawRequest -> RawRequest
+markStreamBody (method, url, headers, query, _) =
+    (method, url, headers, query, (5, Nothing, [], Nothing, []))
+
+prepareContent : HttpOptions -> Method -> Url -> Either HttpError RawRequest
+prepareContent configured method url =
+    let RequestContent rawHeaders query body =
+        requestContent configured
+    in case bodyToRaw body of
+        Left error => Left error
+        | Right (rawBody, defaultContentType) =>
+            let headers =
+                addDefaultContentType defaultContentType rawHeaders
+            in case validateRequestHeaders headers of
+                Left error => Left error
+                | Right validHeaders =>
+                    Right (methodText method, urlToString url, validHeaders, query, rawBody)
+
+bodyToRaw : RequestBody -> Either HttpError (RawBody, Maybe String)
+bodyToRaw EmptyBody = Right ((0, Nothing, [], Nothing, []), Nothing)
+bodyToRaw (StrictBody bytes) = Right ((1, Just bytes, [], Nothing, []), Nothing)
+bodyToRaw (TextBody text) =
+    Right
+        (
+            (1, Just (std.bytes.stringToBytes text), [], Nothing, []),
+            Just "text/plain; charset=utf-8"
+        )
+bodyToRaw (BuilderBody builder) =
+    Right ((2, Nothing, std.bytes.builderChunks builder, Nothing, []), Nothing)
+bodyToRaw (FileBody path) = Right ((3, Nothing, [], Just (pathToString path), []), Nothing)
+bodyToRaw (JsonBody value) =
+    case renderJson value of
+        Left error => Left (RequestJsonError error)
+        | Right text =>
+            Right
+                ((1, Just (std.bytes.stringToBytes text), [], Nothing, []), Just "application/json")
+bodyToRaw (FormBody pairs) =
+    Right ((4, Nothing, [], Nothing, pairs), Just "application/x-www-form-urlencoded")
+
+addDefaultContentType : Maybe String -> [(String, String)] -> [(String, String)]
+addDefaultContentType Nothing headers = headers
+addDefaultContentType (Just value) headers =
+    if hasHeader "content-type" headers then headers else ("Content-Type", value) :: headers
+
+hasHeader : String -> [(String, String)] -> Bool
+hasHeader _ [] = False
+hasHeader name ((candidate, _) :: rest) = or (asciiStringEqual name candidate) (hasHeader name rest)
+
+validateRequestHeaders : [(String, String)] -> Either HttpError [(String, String)]
+validateRequestHeaders [] = Right []
+validateRequestHeaders ((name, value) :: rest) =
+    if isManagedHeader name
+        then Left (ManagedRequestHeader name)
+        else case header name value of
+            Left error => Left error
+            | Right _ => fmap (fun valid => (name, value) :: valid) (validateRequestHeaders rest)
+
+isManagedHeader : String -> Bool
+isManagedHeader name =
+    or
+        (asciiStringEqual name "host")
+        (or (asciiStringEqual name "content-length") (asciiStringEqual name "transfer-encoding"))
+
+bufferedMaximum : HttpOptions -> Int
+bufferedMaximum configured =
+    let buffered =
+        maximumBufferedBodyBytes configured
+    in case maximumResponseBytes configured of
+        Nothing => buffered
+        | Just total => if buffered <= total then buffered else total
+
+limitsToRaw : HttpOptions -> Maybe Int -> (Int, Maybe Int, Int, Int, Bool)
+limitsToRaw configured maximum =
+    (
+        maximumHeaderBytes configured,
+        maximum,
+        durationToMilliseconds (requestTimeout configured),
+        redirectCount (redirectPolicy configured),
+        replayPolicy configured == ReplayableBodies
+    )
+
+redirectCount : RedirectPolicy -> Int
+redirectCount NoRedirects = 0
+redirectCount (FollowRedirects count) = count
+
+httpHostError : HttpOptions -> Maybe Int -> HostError -> HttpError
+httpHostError configured maximum hostError =
+    case hostErrorOperation hostError of
+        "httpTransport" => TransportError hostError
+        | "httpTls" => TlsError hostError
+        | "httpRedirect" => RedirectError hostError
+        | "httpBodyReplay" => BodyReplayError hostError
+        | "httpRequestFile" => requestFileError configured hostError
+        | "httpResponseHeaders" => ResponseHeadersTooLarge (maximumHeaderBytes configured)
+        | "httpResponseBody" => responseBodyLimitError maximum hostError
+        | _ => HttpHostError hostError
+
+requestFileError : HttpOptions -> HostError -> HttpError
+requestFileError configured hostError =
+    let RequestContent _ _ body =
+        requestContent configured
+    in case body of
+        FileBody path => RequestFileError path hostError
+        | _ => HttpHostError hostError
+
+responseBodyLimitError : Maybe Int -> HostError -> HttpError
+responseBodyLimitError (Just maximum) _ = ResponseBodyTooLarge maximum
+responseBodyLimitError Nothing hostError = HttpHostError hostError
+
+closeResponse : (Int, [(String, String)], Handle) -> IO HttpError ()
+closeResponse (_, _, handle) = mapError HttpHostError $ prelude.prim.hClose handle
+
+responseByteStep : HttpOptions -> Handle -> () -> IO HttpError (Maybe (Bytes, ()))
+responseByteStep configured handle _ = do
+    bytes <-
+        mapError (responseReadError configured) $
+            prelude.prim.hGetBytes handle (chunkBytes configured)
+    if bytesLength bytes == 0 then pureIO Nothing else pureIO (Just (bytes, ()))
+
+responseReadError : HttpOptions -> HostError -> HttpError
+responseReadError configured hostError =
+    if hostErrorOperation hostError == "httpResponseBody"
+        then responseBodyLimitError (maximumResponseBytes configured) hostError
+        else TransportError hostError
+
+responseFromRaw : (Int, [(String, String)], Bytes) -> Response
+responseFromRaw (code, rawHeaders, body) =
+    Response (Status code) (map headerFromRaw rawHeaders) body
+
+headerFromRaw : (String, String) -> Header
+headerFromRaw (name, value) = Header name value

@@ -14,6 +14,7 @@ solveig-ast = { path = "../solveig-ast" }
 solveig-base = { path = "../solveig-base" }
 solveig-lower = { path = "../solveig-lower" }
 ureq = { version = "3.4.0", default-features = false, features = ["rustls", "platform-verifier"] }
+url = "2.5.8"
 
 [lints]
 workspace = true

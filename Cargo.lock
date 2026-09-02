@@ -1659,6 +1659,7 @@ dependencies = [
  "solveig-base",
  "solveig-lower",
  "ureq",
+ "url",
 ]
 
 [[package]]

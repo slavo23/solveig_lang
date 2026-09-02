@@ -8,18 +8,12 @@ import std.channel
 import std.task(withThread, catchDefect)
 import std.time(milliseconds)
 
-requireUrl : String -> Url
-requireUrl spelling =
-    case urlFromString spelling of
-        Right url => url
-        | Left problem => error (show problem)
+requestAt : String -> String -> String
+requestAt base path = base <> path
 
-requestAt : String -> String -> Request
-requestAt base path = get (requireUrl (base <> path))
-
-limits : Int -> HttpLimits
+limits : Int -> HttpOptions
 limits maximum =
-    withMaximumBodyBytes maximum (withHttpTimeout (milliseconds 1000) defaultHttpLimits)
+    withMaximumResponseBytes (Just maximum) (withTimeout (milliseconds 1000) defaultOptions)
 
 collect : forall scope. Stream scope HttpError Bytes -> IO HttpError Bytes
 collect body =
@@ -44,10 +38,12 @@ report label action =
 lengthAt : String -> String -> Int -> IO HttpError String
 lengthAt base path maximum =
     withResponseWith
-        (limits maximum)
-        2
+        (withChunkBytes 2 (limits maximum))
+        Get
         (requestAt base path)
-        (fun _ _ body => fmap show (Streams.fold (fun total bytes => total + bytesLength bytes) 0 body))
+        (fun _ _ body =>
+            fmap show (Streams.fold (fun total bytes => total + bytesLength bytes) 0 body)
+        )
 
 appendCheckedChunk : (BytesBuilder, Bool) -> Bytes -> (BytesBuilder, Bool)
 appendCheckedChunk (builder, bounded) chunk =
@@ -56,18 +52,18 @@ appendCheckedChunk (builder, bounded) chunk =
 gated : String -> IO HttpError ()
 gated base =
     withResponseWith
-        (limits 6)
-        2
+        (withChunkBytes 2 (limits 6))
+        Get
         (requestAt base "/gated")
         (fun status _ body =>
             do
-                _ <- send (requestAt base "/headers-seen")
+                _ <- get (requestAt base "/headers-seen")
                 first <- Streams.next body
                 case first of
                     StreamDone => say "gated:unexpected-eof"
                     | StreamYield bytes rest =>
                         do
-                            _ <- send (requestAt base "/chunk-seen")
+                            _ <- get (requestAt base "/chunk-seen")
                             (builder, bounded) <-
                                 Streams.fold
                                     appendCheckedChunk
@@ -100,36 +96,40 @@ run base = do
     report
         "redirect"
         (withResponse
+            Get
             (requestAt base "/redirect")
             (fun status _ _ => pureIO (show (statusCode status))))
     report
         "no-redirect"
         (withResponseWith
             (withRedirectPolicy NoRedirects (limits 6))
-            2
+            Get
             (requestAt base "/redirect")
             (fun status _ _ => pureIO (show (statusCode status))))
-    withResponse (requestAt base "/early") (fun _ _ _ => pureIO ())
+    withResponse Get (requestAt base "/early") (fun _ _ _ => pureIO ())
     say "early:closed"
     catchError
-        (withResponse (requestAt base "/failure") (fun _ _ _ => failIO (InvalidStatus 0)))
+        (withResponse Get (requestAt base "/failure") (fun _ _ _ => failIO (InvalidStatus 0)))
         (fun _ => pureIO ())
     say "error:closed"
     catchDefect
-        (withResponse (requestAt base "/defect") (fun _ _ _ => pureIO (error "callback defect")))
+        (withResponse
+            Get
+            (requestAt base "/defect")
+            (fun _ _ _ => pureIO (error "callback defect")))
         (fun _ => pureIO ())
     say "defect:closed"
     entered <- std.channel.newChan
     parked <- std.channel.newChan
     withThread
-        (withResponse (requestAt base "/cancel") (parkBody entered parked))
+        (withResponse Get (requestAt base "/cancel") (parkBody entered parked))
         (fun _ => mapError HttpHostError (std.channel.recv entered))
     say "cancel:closed"
     report
         "blocked"
         (withResponseWith
-            (withHttpTimeout (milliseconds 200) (limits 100))
-            2
+            (withChunkBytes 2 (withTimeout (milliseconds 200) (limits 100)))
+            Get
             (requestAt base "/blocked")
             (fun _ _ body => fmap (show . bytesLength) (collect body)))
 

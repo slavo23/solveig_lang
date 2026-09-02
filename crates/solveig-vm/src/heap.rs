@@ -132,6 +132,17 @@ pub enum IoAction {
         request: Value,
         limits: Value,
     },
+    HttpUploadStart {
+        request: Value,
+        limits: Value,
+    },
+    HttpUploadChunk {
+        handle: Value,
+        bytes: Value,
+    },
+    HttpUploadClose {
+        handle: Value,
+    },
     Connect {
         host: Value,
         port: i64,

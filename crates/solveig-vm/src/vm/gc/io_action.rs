@@ -85,13 +85,20 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
             visit(process);
             visit(bytes);
         }
-        IoAction::HttpRequest { request, limits } | IoAction::HttpOpen { request, limits } => {
+        IoAction::HttpRequest { request, limits }
+        | IoAction::HttpOpen { request, limits }
+        | IoAction::HttpUploadStart { request, limits } => {
             visit(request);
             visit(limits);
+        }
+        IoAction::HttpUploadChunk { handle, bytes } => {
+            visit(handle);
+            visit(bytes);
         }
         IoAction::Recv { channel }
         | IoAction::TryRecv { channel }
         | IoAction::CloseChan { channel }
+        | IoAction::HttpUploadClose { handle: channel }
         | IoAction::CloseHandle { handle: channel }
         | IoAction::FlushHandle { handle: channel }
         | IoAction::GetHandleLine { handle: channel }
@@ -191,13 +198,20 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
             visit(process);
             visit(bytes);
         }
-        IoAction::HttpRequest { request, limits } | IoAction::HttpOpen { request, limits } => {
+        IoAction::HttpRequest { request, limits }
+        | IoAction::HttpOpen { request, limits }
+        | IoAction::HttpUploadStart { request, limits } => {
             visit(request);
             visit(limits);
+        }
+        IoAction::HttpUploadChunk { handle, bytes } => {
+            visit(handle);
+            visit(bytes);
         }
         IoAction::Recv { channel }
         | IoAction::TryRecv { channel }
         | IoAction::CloseChan { channel }
+        | IoAction::HttpUploadClose { handle: channel }
         | IoAction::CloseHandle { handle: channel }
         | IoAction::FlushHandle { handle: channel }
         | IoAction::GetHandleLine { handle: channel }

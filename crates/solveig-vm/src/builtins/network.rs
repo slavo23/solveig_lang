@@ -40,6 +40,32 @@ pub(super) fn http_open_raw(
     Ok(ctx.alloc_io_action(IoAction::HttpOpen { request, limits }))
 }
 
+pub(super) fn http_upload_start_raw(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let request = expect_value(args, 0, "httpUploadStartRaw")?;
+    let limits = expect_value(args, 1, "httpUploadStartRaw")?;
+    Ok(ctx.alloc_io_action(IoAction::HttpUploadStart { request, limits }))
+}
+
+pub(super) fn http_upload_chunk_raw(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let handle = expect_value(args, 0, "httpUploadChunkRaw")?;
+    let bytes = expect_value(args, 1, "httpUploadChunkRaw")?;
+    Ok(ctx.alloc_io_action(IoAction::HttpUploadChunk { handle, bytes }))
+}
+
+pub(super) fn http_upload_close_raw(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let handle = expect_value(args, 0, "httpUploadCloseRaw")?;
+    Ok(ctx.alloc_io_action(IoAction::HttpUploadClose { handle }))
+}
+
 pub(super) fn accept(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let socket = expect_value(args, 0, "accept")?;
     Ok(ctx.alloc_io_action(IoAction::Accept { socket }))

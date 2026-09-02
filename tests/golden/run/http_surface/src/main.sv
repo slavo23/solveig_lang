@@ -43,16 +43,13 @@ surface =
 
 rejectInvalidScope : Task ()
 rejectInvalidScope =
-    case urlFromString "http://127.0.0.1:1/never-requested" of
-        Left _ => error "valid fixture URL"
-        | Right url =>
-            catchError
-                (withResponseWith
-                    defaultHttpLimits
-                    0
-                    (get url)
-                    (fun _ _ _ => error "invalid chunk size reached callback"))
-                (fun problem => printLine (show problem))
+    catchError
+        (withResponseWith
+            (withChunkBytes 0 defaultOptions)
+            Get
+            "http://127.0.0.1:1/never-requested"
+            (fun _ _ _ => error "invalid chunk size reached callback"))
+        (fun problem => printLine (show problem))
 
 main : Task ()
 main = do

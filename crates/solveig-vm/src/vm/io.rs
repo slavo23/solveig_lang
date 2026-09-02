@@ -467,6 +467,43 @@ impl Interpreter<'_> {
                     self.status = ProcStatus::Blocked(BlockReason::Io(request_id));
                     return Err(StepOutcome::Blocked);
                 }
+                IoAction::HttpUploadStart { request, limits } => {
+                    let request = self.prepare_http_request(request, limits)?;
+                    if !matches!(request.body, super::http::HttpRequestBody::StreamPending) {
+                        return Err(RuntimeError::builtin(
+                            "httpUploadStartRaw requires a stream request body".to_string(),
+                        )
+                        .into());
+                    }
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    let request_id = self.io.issue_start_http_upload(self.id, request)?;
+                    self.status = ProcStatus::Blocked(BlockReason::Io(request_id));
+                    return Err(StepOutcome::Blocked);
+                }
+                IoAction::HttpUploadChunk { handle, bytes } => {
+                    let handle = self.expect_handle_id(handle, "httpUploadChunkRaw")?;
+                    let bytes = self.expect_optional_http_body(bytes)?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    let request_id = self.io.issue_continue_http_upload(self.id, handle, bytes)?;
+                    self.status = ProcStatus::Blocked(BlockReason::Io(request_id));
+                    return Err(StepOutcome::Blocked);
+                }
+                IoAction::HttpUploadClose { handle } => {
+                    let handle = self.expect_handle_id(handle, "httpUploadCloseRaw")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    let request_id = self.io.issue_close_http_upload(self.id, handle)?;
+                    self.status = ProcStatus::Blocked(BlockReason::Io(request_id));
+                    return Err(StepOutcome::Blocked);
+                }
                 IoAction::Connect { host, port } => {
                     let host = self.expect_string_value(host, "connect")?;
                     if let Some(interruption) = self.accept_pending_interruption_at_block() {

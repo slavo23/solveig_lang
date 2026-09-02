@@ -168,17 +168,27 @@ stream can escape the callback's fresh scope.
 ## Scoped HTTP responses
 
 `std.http.withResponse` exposes status, headers, and a scoped `Bytes` stream.
-`withResponseWith` additionally selects HTTP limits and a positive chunk size.
+`withResponseWith` additionally accepts immutable `HttpOptions`; `withChunkBytes`
+chooses a positive per-pull bound and `withMaximumResponseBytes` optionally
+sets a cumulative transfer quota.
 The callback is entered after headers arrive; each subsequent pull reads at
 most one chunk. The host protocol buffer is bounded, but it may already hold
 some body bytes received with the headers. There is no whole-response buffer
 unless the consumer builds one.
 
-The existing HTTP total-byte limit remains cumulative across pulls. Returning
-early closes without draining or validating the unread suffix. Cleanup also
-runs after failure, defect, and interruption. An already-blocked host read must
-finish or reach the original HTTP deadline before queued close completes; this
-is timeout-bounded cleanup, not immediate socket cancellation. See
+`requestStream` applies the same pull protocol to an upload. The synchronous
+host transport requests one chunk, then waits for that exact Solveig pull to
+complete; a one-slot rendezvous prevents read-ahead. `withStreamResponse`
+transfers the same scoped resource from upload ownership to response-body
+ownership after headers arrive. Stream request bodies are one-shot and cannot
+be replayed across a 307 or 308 redirect.
+
+Returning early closes without draining or validating an unread response
+suffix. Cleanup also runs after upload-source failure, response failure,
+defect, and interruption, and joins the host owner thread. An already-blocked
+host operation must finish or reach the original HTTP deadline before queued
+close completes; this is timeout-bounded cleanup, not immediate socket
+cancellation. See
 [HTTP and HTTPS](http.md) for the complete policy and a counting example.
 
 ## Failure and cancellation

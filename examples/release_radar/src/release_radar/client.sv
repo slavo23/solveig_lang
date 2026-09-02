@@ -4,15 +4,15 @@ import std.time(*)
 import release_radar.cache(*)
 import release_radar.model(*)
 
-httpLimits : std.http.HttpLimits
-httpLimits =
+httpOptions : std.http.HttpOptions
+httpOptions =
     std.http.withRedirectPolicy
         std.http.NoRedirects
-        (std.http.withHttpTimeout
+        (std.http.withTimeout
             (std.time.milliseconds 10000)
-            (std.http.withMaximumBodyBytes
+            (std.http.withMaximumBufferedBodyBytes
                 1048576
-                (std.http.withMaximumHeaderBytes 65536 std.http.defaultHttpLimits)))
+                (std.http.withMaximumHeaderBytes 65536 std.http.defaultOptions)))
 
 commonHeaders : [(String, String)]
 commonHeaders =
@@ -42,7 +42,9 @@ checkAccess base token =
     catchError
         (fmap
             release_radar.model.decodeAccess
-            (std.http.fetchWith httpLimits (accessHeaders token) (base <> "/rate_limit")))
+            (std.http.getWith
+                (std.http.withHeaders (accessHeaders token) httpOptions)
+                (base <> "/rate_limit")))
         (pureIO .
             release_radar.model.GitHubAccessFailed .
             release_radar.model.RequestFailure .
@@ -57,9 +59,8 @@ fetchRelease base token cache repository =
             (release_radar.model.decodeResponse
                 repository
                 (release_radar.cache.etagFor repository cache))
-            (std.http.fetchWith
-                httpLimits
-                (requestHeaders token cache repository)
+            (std.http.getWith
+                (std.http.withHeaders (requestHeaders token cache repository) httpOptions)
                 (base <> "/repos/" <> repository <> "/releases/latest")))
         (pureIO .
             release_radar.model.ReleaseFailed repository .

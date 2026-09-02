@@ -67,6 +67,15 @@ pub(in crate::vm) enum IoRequest {
         handle: HandleId,
         request: HttpRequest,
     },
+    StartHttpUpload {
+        handle: HandleId,
+        request: HttpRequest,
+    },
+    ContinueHttpUpload {
+        handle: HandleId,
+        bytes: Option<Vec<u8>>,
+    },
+    CloseHttpUpload(HandleId),
 }
 
 pub(in crate::vm) enum IoResult {
@@ -84,6 +93,8 @@ pub(in crate::vm) enum IoResult {
     StreamingProcess(StreamingProcess),
     Http(HttpResponse<Vec<u8>>),
     HttpOpened(HttpResponse<HandleId>),
+    HttpUploadDemand(HandleId),
+    HttpUploadOpened(HttpResponse<HandleId>),
     Failed(IoFailure),
 }
 

@@ -150,12 +150,20 @@ fn checked_project_docs_include_importable_declarations() {
     assert_eq!(
         docs.get("std.http.withResponse"),
         Some(
-            &"Uses an HTTP response as a scoped byte stream with default limits and 32 KiB pulls."
-                .to_string()
+            &"Uses a response body as a scoped, demand-driven byte stream.\nThe default pull size is 32 KiB and the total streamed size is unbounded."
+                .to_string(),
         )
     );
     assert!(
         docs.get("std.http.withResponseWith")
-            .is_some_and(|text| text.contains("cancellation cleanup is not instantaneous"))
+            .is_some_and(|text| text.contains("single-consumer response stream"))
+    );
+    assert!(
+        docs.get("std.http.requestStream")
+            .is_some_and(|text| text.contains("transport requests more input"))
+    );
+    assert!(
+        docs.get("std.http.withStreamResponseWith")
+            .is_some_and(|text| text.contains("Cleanup joins the upload owner thread"))
     );
 }

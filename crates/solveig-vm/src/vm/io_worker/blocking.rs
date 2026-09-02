@@ -122,7 +122,10 @@ fn perform_request(
         | IoRequest::CloseProcessStdin(_)
         | IoRequest::WaitProcess(_)
         | IoRequest::TerminateProcess(_)
-        | IoRequest::CloseProcess(_) => {
+        | IoRequest::CloseProcess(_)
+        | IoRequest::StartHttpUpload { .. }
+        | IoRequest::ContinueHttpUpload { .. }
+        | IoRequest::CloseHttpUpload(_) => {
             solveig_base::ice!("direct IO request reached the blocking worker pool")
         }
     }

@@ -23,10 +23,12 @@ pub(super) use request::{IoFailure, IoRequest, IoResult};
 
 pub(super) mod filesystem;
 pub(super) mod process;
+mod streaming_http_upload;
 pub(super) mod streaming_process;
 
 use filesystem::{FilesystemFailure, FilesystemRequest};
 use process::{ProcessFailure, ProcessOutput, ProcessRequest, ProcessSignal};
+use streaming_http_upload::StreamingHttpUpload;
 use streaming_process::StreamingProcess;
 
 use super::socket::{SocketRequest, SocketSubsystem};
@@ -38,12 +40,14 @@ const IO_WORKER_COUNT: usize = 5;
 enum IoCancellation {
     StrictProcess(mpsc::Sender<ProcessSignal>),
     StreamingProcess(ChildProcessId),
+    StreamingHttpUpload(HandleId),
 }
 
 struct RequestSlot {
     owner: Option<RequestOwner>,
     cancellation: Option<IoCancellation>,
     closing_process: Option<StreamingProcess>,
+    closing_http_upload: Option<StreamingHttpUpload>,
 }
 
 pub(super) struct IoCompletion {
@@ -61,8 +65,10 @@ pub(super) struct IoSubsystem {
     workers: Vec<mpsc::Sender<IoWork>>,
     sockets: SocketSubsystem,
     completions: mpsc::Receiver<IoCompletion>,
+    completion_tx: mpsc::Sender<IoCompletion>,
     requests: Vec<RequestSlot>,
     streaming_processes: Vec<Option<StreamingProcess>>,
+    streaming_http_uploads: Vec<Option<StreamingHttpUpload>>,
     free_requests: Vec<u32>,
     next_worker: usize,
     handle_workers: Vec<Option<usize>>,
@@ -74,13 +80,15 @@ pub(super) struct IoSubsystem {
 
 impl IoSubsystem {
     pub(super) fn inactive() -> Self {
-        let (_completion_tx, completions) = mpsc::channel();
+        let (completion_tx, completions) = mpsc::channel();
         Self {
             workers: Vec::new(),
             sockets: SocketSubsystem::inactive(),
             completions,
+            completion_tx,
             requests: Vec::new(),
             streaming_processes: Vec::new(),
+            streaming_http_uploads: (0..FIRST_FILE_HANDLE).map(|_| None).collect(),
             free_requests: Vec::new(),
             next_worker: 0,
             handle_workers: vec![None; FIRST_FILE_HANDLE as usize],
@@ -138,14 +146,14 @@ impl IoSubsystem {
             drop(handle);
             workers.push(work_tx);
         }
-        drop(completion_tx);
-
         Ok(Self {
             workers,
             sockets,
             completions,
+            completion_tx,
             requests: Vec::new(),
             streaming_processes: Vec::new(),
+            streaming_http_uploads: (0..FIRST_FILE_HANDLE).map(|_| None).collect(),
             free_requests: Vec::new(),
             next_worker: 0,
             handle_workers: vec![Some(0), Some(1), Some(2)],
@@ -183,15 +191,22 @@ impl IoSubsystem {
             | IoRequest::Accept(_)
             | IoRequest::SendBytes { .. }
             | IoRequest::RecvBytes { .. }
-            | IoRequest::CloseSocket(_) => 0,
+            | IoRequest::CloseSocket(_)
+            | IoRequest::StartHttpUpload { .. }
+            | IoRequest::ContinueHttpUpload { .. }
+            | IoRequest::CloseHttpUpload(_) => 0,
             IoRequest::Handle(request) => {
                 let handle = request.handle();
-                self.handle_workers
-                    .get(handle.0 as usize)
-                    .and_then(|worker| *worker)
-                    .ok_or_else(|| {
-                        RuntimeError::builtin(format!("unknown Handle identity {}", handle.0))
-                    })?
+                if self.streaming_http_upload(handle).is_ok() {
+                    0
+                } else {
+                    self.handle_workers
+                        .get(handle.0 as usize)
+                        .and_then(|worker| *worker)
+                        .ok_or_else(|| {
+                            RuntimeError::builtin(format!("unknown Handle identity {}", handle.0))
+                        })?
+                }
             }
             IoRequest::OpenHttp { handle, .. } => self
                 .handle_workers
@@ -229,6 +244,9 @@ impl IoSubsystem {
             if slot.closing_process.is_some() {
                 solveig_base::ice!("free IO request retained a closing process");
             }
+            if slot.closing_http_upload.is_some() {
+                solveig_base::ice!("free IO request retained a closing HTTP upload");
+            }
             RequestId(raw)
         } else {
             let raw = u32::try_from(self.requests.len()).map_err(|_too_many_requests| {
@@ -238,6 +256,7 @@ impl IoSubsystem {
                 owner: Some(RequestOwner::Process(process)),
                 cancellation: None,
                 closing_process: None,
+                closing_http_upload: None,
             });
             RequestId(raw)
         };
@@ -320,6 +339,36 @@ impl IoSubsystem {
                 self.issue_streaming_operation(id, process, |resource| resource.terminate(id))
             }
             IoRequest::CloseProcess(process) => self.issue_close_process(id, process),
+            IoRequest::StartHttpUpload { handle, request } => {
+                let resource =
+                    streaming_http_upload::start(handle, request, id, self.completion_tx.clone())
+                        .map_err(|error| {
+                        RuntimeError::builtin(format!("failed to start HTTP upload: {error}"))
+                    })?;
+                let Some(slot) = self.streaming_http_uploads.get_mut(handle.0 as usize) else {
+                    solveig_base::ice!("reserved HTTP upload handle vanished")
+                };
+                *slot = Some(resource);
+                self.track_http_upload_cancellation(id, handle);
+                Ok(())
+            }
+            IoRequest::ContinueHttpUpload { handle, bytes } => {
+                self.streaming_http_upload(handle)?
+                    .supply(id, bytes)
+                    .map_err(|error| streaming_http_upload_issue_error(&error))?;
+                self.track_http_upload_cancellation(id, handle);
+                Ok(())
+            }
+            IoRequest::CloseHttpUpload(handle) => self.issue_close_http_upload_resource(id, handle),
+            IoRequest::Handle(HandleRequest::GetBytes { handle, maximum })
+                if self.streaming_http_upload(handle).is_ok() =>
+            {
+                self.streaming_http_upload(handle)?
+                    .read(id, maximum)
+                    .map_err(|error| streaming_http_upload_issue_error(&error))?;
+                self.track_http_upload_cancellation(id, handle);
+                Ok(())
+            }
             request => {
                 let Some(worker) = self.workers.get(worker_index) else {
                     solveig_base::ice!("IO request routing selected an absent worker");
@@ -340,6 +389,9 @@ impl IoSubsystem {
             slot.cancellation = None;
             if let Some(process) = slot.closing_process.take() {
                 process.shutdown_and_join();
+            }
+            if let Some(upload) = slot.closing_http_upload.take() {
+                upload.shutdown_and_join();
             }
             self.free_requests.push(id.0);
             return Err(error);
@@ -388,6 +440,46 @@ impl IoSubsystem {
         slot.cancellation = Some(IoCancellation::StreamingProcess(process));
     }
 
+    fn track_http_upload_cancellation(&mut self, request: RequestId, handle: HandleId) {
+        let Some(slot) = self.requests.get_mut(request.0 as usize) else {
+            solveig_base::ice!("HTTP upload request had no request-table slot");
+        };
+        slot.cancellation = Some(IoCancellation::StreamingHttpUpload(handle));
+    }
+
+    fn streaming_http_upload(
+        &self,
+        handle: HandleId,
+    ) -> Result<&StreamingHttpUpload, RuntimeError> {
+        self.streaming_http_uploads
+            .get(handle.0 as usize)
+            .and_then(Option::as_ref)
+            .ok_or_else(|| {
+                RuntimeError::builtin(format!("unknown HTTP upload Handle identity {}", handle.0))
+            })
+    }
+
+    fn issue_close_http_upload_resource(
+        &mut self,
+        request: RequestId,
+        handle: HandleId,
+    ) -> Result<(), RuntimeError> {
+        let Some(slot) = self.streaming_http_uploads.get_mut(handle.0 as usize) else {
+            return Err(unknown_http_upload(handle));
+        };
+        let Some(resource) = slot.take() else {
+            return Err(unknown_http_upload(handle));
+        };
+        resource
+            .close(request)
+            .map_err(|error| streaming_http_upload_issue_error(&error))?;
+        let Some(request_slot) = self.requests.get_mut(request.0 as usize) else {
+            solveig_base::ice!("close-upload request had no request-table slot");
+        };
+        request_slot.closing_http_upload = Some(resource);
+        Ok(())
+    }
+
     fn streaming_process_mut(
         &mut self,
         process: ChildProcessId,
@@ -433,11 +525,47 @@ impl IoSubsystem {
         self.issue(process, IoRequest::OpenHttp { handle, request })
     }
 
+    pub(super) fn issue_start_http_upload(
+        &mut self,
+        process: ProcessId,
+        request: HttpRequest,
+    ) -> Result<RequestId, RuntimeError> {
+        let handle = self.reserve_http_upload_handle()?;
+        self.issue(process, IoRequest::StartHttpUpload { handle, request })
+    }
+
+    pub(super) fn issue_continue_http_upload(
+        &mut self,
+        process: ProcessId,
+        handle: HandleId,
+        bytes: Option<Vec<u8>>,
+    ) -> Result<RequestId, RuntimeError> {
+        self.issue(process, IoRequest::ContinueHttpUpload { handle, bytes })
+    }
+
+    pub(super) fn issue_close_http_upload(
+        &mut self,
+        process: ProcessId,
+        handle: HandleId,
+    ) -> Result<RequestId, RuntimeError> {
+        self.issue(process, IoRequest::CloseHttpUpload(handle))
+    }
+
     fn reserve_handle(&mut self, worker: usize) -> Result<HandleId, RuntimeError> {
         let raw = u32::try_from(self.handle_workers.len()).map_err(|_too_many_handles| {
             RuntimeError::builtin("handle table exhausted".to_string())
         })?;
         self.handle_workers.push(Some(worker));
+        self.streaming_http_uploads.push(None);
+        Ok(HandleId(raw))
+    }
+
+    fn reserve_http_upload_handle(&mut self) -> Result<HandleId, RuntimeError> {
+        let raw = u32::try_from(self.handle_workers.len()).map_err(|_too_many_handles| {
+            RuntimeError::builtin("handle table exhausted".to_string())
+        })?;
+        self.handle_workers.push(None);
+        self.streaming_http_uploads.push(None);
         Ok(HandleId(raw))
     }
 
@@ -497,6 +625,9 @@ impl IoSubsystem {
                 if let Some(process) = slot.closing_process.as_ref() {
                     process.cancel();
                 }
+                if let Some(upload) = slot.closing_http_upload.as_ref() {
+                    upload.cancel(id);
+                }
                 slot.cancellation.take()
             }
             Some(RequestOwner::Process(_)) | Some(RequestOwner::Cancelled) | None => {
@@ -515,6 +646,11 @@ impl IoSubsystem {
                         .and_then(Option::as_ref)
                     {
                         process.cancel();
+                    }
+                }
+                IoCancellation::StreamingHttpUpload(handle) => {
+                    if let Ok(upload) = self.streaming_http_upload(handle) {
+                        upload.cancel(id);
                     }
                 }
             }
@@ -588,6 +724,9 @@ impl IoSubsystem {
         if let Some(process) = slot.closing_process.take() {
             process.join()?;
         }
+        if let Some(upload) = slot.closing_http_upload.take() {
+            upload.join()?;
+        }
         self.free_requests.push(completion.id.0);
         Ok(match (owner, completion.result) {
             (RequestOwner::Process(process), result) => Some((completion.id, process, result)),
@@ -625,9 +764,15 @@ impl Drop for IoSubsystem {
             if let Some(process) = slot.closing_process.take() {
                 process.shutdown_and_join();
             }
+            if let Some(upload) = slot.closing_http_upload.take() {
+                upload.shutdown_and_join();
+            }
         }
         for process in self.streaming_processes.drain(..).flatten() {
             process.shutdown_and_join();
+        }
+        for upload in self.streaming_http_uploads.drain(..).flatten() {
+            upload.shutdown_and_join();
         }
     }
 }
@@ -638,6 +783,14 @@ fn unknown_streaming_process(process: ChildProcessId) -> RuntimeError {
 
 fn streaming_issue_error(error: &io::Error) -> RuntimeError {
     RuntimeError::builtin(format!("failed to issue child-process IO: {error}"))
+}
+
+fn unknown_http_upload(handle: HandleId) -> RuntimeError {
+    RuntimeError::builtin(format!("unknown HTTP upload Handle identity {}", handle.0))
+}
+
+fn streaming_http_upload_issue_error(error: &io::Error) -> RuntimeError {
+    RuntimeError::builtin(format!("failed to issue HTTP upload IO: {error}"))
 }
 
 fn validate_environment_name(name: &str) -> Result<(), String> {

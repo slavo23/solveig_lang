@@ -9,7 +9,7 @@ showHttpError (InvalidUrl _) = "invalid-url"
 showHttpError (InvalidHeaderName _) = "invalid-header-name"
 showHttpError (InvalidHeaderValue _) = "invalid-header-value"
 showHttpError (InvalidStatus _) = "invalid-status"
-showHttpError (InvalidHttpLimit _ _) = "invalid-limit"
+showHttpError (InvalidHttpOption _ _) = "invalid-limit"
 showHttpError (TransportError _) = "transport"
 showHttpError (TlsError _) = "tls"
 showHttpError (RedirectError _) = "redirect"
@@ -20,29 +20,34 @@ showHttpError (HttpHostError hostError) =
         TimeExpired => "timeout"
         | _ => "host"
 showHttpError (InvalidResponseUtf8 _) = "invalid-response-utf8"
+showHttpError (ManagedRequestHeader _) = "managed-header"
+showHttpError (RequestFileError _ _) = "request-file"
+showHttpError (RequestJsonError _) = "request-json"
+showHttpError (BodyReplayError _) = "body-replay"
+showHttpError ConflictingRequestBody = "conflicting-body"
+showHttpError (UnexpectedStatus _) = "unexpected-status"
 
 printResponse : String -> std.http.Response -> IO std.http.HttpError ()
 printResponse label response =
     case std.http.responseText response of
         Left error => failIO error
         | Right body =>
-            mapError HttpHostError (printLine
-                (label
-                    <> ":"
-                    <> show (std.http.statusCode (std.http.responseStatus response))
-                    <> ":"
-                    <> show (std.http.findHeader "etag" response)
-                    <> ":"
-                    <> body))
+            mapError
+                HttpHostError
+                (printLine
+                    (label <>
+                        ":" <>
+                        show (std.http.statusCode (std.http.responseStatus response)) <>
+                        ":" <>
+                        show (std.http.findHeader "etag" response) <>
+                        ":" <>
+                        body))
 
-fetch : String -> std.http.HttpLimits -> String -> Task ()
-fetch label limits spelling =
-    case std.http.urlFromString spelling of
-        Left error => printLine (label <> ":" <> showHttpError error)
-        | Right url =>
-            catchError
-                (std.http.request limits (std.http.get url) >>= printResponse label)
-                (fun error => printLine (label <> ":" <> showHttpError error))
+fetch : String -> std.http.HttpOptions -> String -> Task ()
+fetch label configured spelling =
+    catchError
+        (std.http.getWith configured spelling >>= printResponse label)
+        (fun error => printLine (label <> ":" <> showHttpError error))
 
 baseArgument : [String] -> String
 baseArgument (base :: _) = base
@@ -52,29 +57,22 @@ tlsArgument : [String] -> String
 tlsArgument (_ :: tlsBase :: _) = tlsBase
 tlsArgument _ = "https://127.0.0.1:1"
 
-requireUrl : String -> std.http.Url
-requireUrl spelling =
-    case std.http.urlFromString spelling of
-        Right url => url
-        | Left _ => error "fixture URL invalid"
-
-limits : Int -> Int -> Int -> RedirectPolicy -> HttpLimits
+limits : Int -> Int -> Int -> RedirectPolicy -> HttpOptions
 limits headerBytes bodyBytes timeoutMilliseconds redirects =
     withRedirectPolicy
         redirects
-        (withHttpTimeout
+        (withTimeout
             (milliseconds timeoutMilliseconds)
-            (withMaximumBodyBytes
+            (withMaximumBufferedBodyBytes
                 bodyBytes
-                (withMaximumHeaderBytes headerBytes defaultHttpLimits)))
+                (withMaximumHeaderBytes headerBytes defaultOptions)))
 
 cancelSlowRequest : String -> Task (Maybe std.http.Response)
 cancelSlowRequest base =
     catchError
-        (timeout (milliseconds 20)
-            (std.http.request
-                (limits 65536 1024 1000 std.http.NoRedirects)
-                (std.http.get (requireUrl (base <> "/slow")))))
+        (timeout
+            (milliseconds 20)
+            (std.http.getWith (limits 65536 1024 1000 std.http.NoRedirects) (base <> "/slow")))
         (fun requestError => pureIO Nothing)
 
 main : Task ()
@@ -83,11 +81,12 @@ main = do
     let base = baseArgument args
     let tlsBase = tlsArgument args
     catchError
-        (std.http.fetchWith
-            (limits 65536 1024 1000 std.http.NoRedirects)
-            [("Accept", "text/plain")]
-            (base <> "/chunked")
-            >>= printResponse "fetch")
+        (std.http.getWith
+                (withHeaders
+                    [("Accept", "text/plain")]
+                    (limits 65536 1024 1000 std.http.NoRedirects))
+                (base <> "/chunked") >>=
+            printResponse "fetch")
         (fun error => printLine ("fetch:" <> showHttpError error))
     fetch "chunked" (limits 65536 1024 1000 (std.http.FollowRedirects 2)) (base <> "/chunked")
     fetch "redirect" (limits 65536 1024 1000 (std.http.FollowRedirects 2)) (base <> "/redirect")
@@ -95,8 +94,15 @@ main = do
     fetch "body-limit" (limits 65536 4 1000 std.http.NoRedirects) (base <> "/large")
     fetch "header-limit" (limits 80 1024 1000 std.http.NoRedirects) (base <> "/large-header")
     fetch "malformed" (limits 65536 1024 1000 std.http.NoRedirects) (base <> "/malformed")
-    fetch "redirect-limit" (limits 65536 1024 1000 (std.http.FollowRedirects 1)) (base <> "/redirect-loop")
+    fetch
+        "redirect-limit"
+        (limits 65536 1024 1000 (std.http.FollowRedirects 1))
+        (base <> "/redirect-loop")
     fetch "host-timeout" (limits 65536 1024 20 std.http.NoRedirects) (base <> "/slow-timeout")
     fetch "tls" (limits 65536 1024 1000 std.http.NoRedirects) (tlsBase <> "/secure")
     timed <- cancelSlowRequest base
-    printLine (case timed of Nothing => "cancelled:prompt" | Just _ => "cancelled:late")
+    printLine
+        (case timed of
+            Nothing => "cancelled:prompt"
+            | Just _ => "cancelled:late"
+        )

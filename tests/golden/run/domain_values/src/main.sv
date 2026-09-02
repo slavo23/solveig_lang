@@ -9,9 +9,12 @@ printPath =
     case (pathFromString "", pathFromString "data/input.txt") of
         (Left EmptyPath, Right path) =>
             printLine
-                ("path=" <> pathToString path
-                    <> ":" <> show (path == path)
-                    <> ":" <> show (hash path == hash path))
+                ("path=" <>
+                    pathToString path <>
+                    ":" <>
+                    show (path == path) <>
+                    ":" <>
+                    show (hash path == hash path))
         | _ => printLine "path=wrong"
 
 printPort : Task ()
@@ -23,14 +26,15 @@ printPort =
 
 printTime : Task ()
 printTime =
-    let duration = milliseconds 1250 in
-    printLine
-        ("duration="
-            <> show (durationToMilliseconds duration)
-            <> ":"
-            <> show (durationToMicroseconds duration)
-            <> ":"
-            <> show (duration > nanoseconds 0))
+    let duration =
+        milliseconds 1250
+    in printLine
+        ("duration=" <>
+            show (durationToMilliseconds duration) <>
+            ":" <>
+            show (durationToMicroseconds duration) <>
+            ":" <>
+            show (duration > nanoseconds 0))
 
 requireUrl : String -> Url
 requireUrl spelling =
@@ -52,38 +56,45 @@ requireHeader name value =
 
 printHttp : Task ()
 printHttp =
-    let url = requireUrl "https://example.com/items" in
-    let field = requireHeader "Accept" "application/json" in
-    let prepared = withHeader field (get url) in
-    let limits =
+    let url =
+        requireUrl "https://example.com/items"
+    in let field =
+        requireHeader "Accept" "application/json"
+    in let configured =
         withRedirectPolicy
             NoRedirects
-            (withHttpTimeout
+            (withTimeout
                 (seconds 2)
-                (withMaximumBodyBytes 4096 defaultHttpLimits))
-    in case
-        ( statusFromInt 99
-        , header "Bad Name" "value"
-        , header "X-Test" "bad\nvalue"
-        , urlFromString "relative/path"
-        )
-    of
-        (Left (InvalidStatus _), Left (InvalidHeaderName _), Left (InvalidHeaderValue _), Left (InvalidUrl _)) =>
+                (withMaximumBufferedBodyBytes
+                    4096
+                    (withHeader "Accept" "application/json" defaultOptions)))
+    in case (
+        statusFromInt 99,
+        header "Bad Name" "value",
+        header "X-Test" "bad\nvalue",
+        urlFromString "relative/path"
+    ) of
+        (
+                Left (InvalidStatus _),
+                Left (InvalidHeaderName _),
+                Left (InvalidHeaderValue _),
+                Left (InvalidUrl _)
+            ) =>
             printLine
-                ("http="
-                    <> show (requestMethod prepared)
-                    <> ":"
-                    <> urlToString (requestUrl prepared)
-                    <> ":"
-                    <> headerName field
-                    <> "="
-                    <> headerValue field
-                    <> ":"
-                    <> show (statusCode (requireStatus 204))
-                    <> ":"
-                    <> show (maximumBodyBytes limits)
-                    <> ":"
-                    <> show (durationToMilliseconds (httpTimeout limits)))
+                ("http=" <>
+                    show Get <>
+                    ":" <>
+                    urlToString url <>
+                    ":" <>
+                    headerName field <>
+                    "=" <>
+                    headerValue field <>
+                    ":" <>
+                    show (statusCode (requireStatus 204)) <>
+                    ":" <>
+                    show (maximumBufferedBodyBytes configured) <>
+                    ":" <>
+                    show (durationToMilliseconds (requestTimeout configured)))
         | _ => printLine "http=wrong"
 
 printProcess : Task ()
@@ -93,21 +104,23 @@ printProcess =
             case withArgument "world" initial of
                 Left _ => printLine "process=wrong"
                 | Right processValue =>
-                    let success = exitCodeFromInt 0 in
-                    let failure = exitCodeFromInt 7 in
-                    printLine
-                        ("process="
-                            <> processProgram processValue
-                            <> ":"
-                            <> show (processArguments processValue)
-                            <> ":"
-                            <> show success
-                            <> ":"
-                            <> show failure
-                            <> ":"
-                            <> show (isExitSuccess success)
-                            <> ":"
-                            <> show (exitCodeToInt failure))
+                    let success =
+                        exitCodeFromInt 0
+                    in let failure =
+                        exitCodeFromInt 7
+                    in printLine
+                        ("process=" <>
+                            processProgram processValue <>
+                            ":" <>
+                            show (processArguments processValue) <>
+                            ":" <>
+                            show success <>
+                            ":" <>
+                            show failure <>
+                            ":" <>
+                            show (isExitSuccess success) <>
+                            ":" <>
+                            show (exitCodeToInt failure))
         | _ => printLine "process=wrong"
 
 main : Task ()

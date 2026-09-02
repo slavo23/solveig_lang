@@ -3,11 +3,11 @@ source: tests/snapshot_support.rs
 expression: actual
 ---
 [TC0005] Error: type mismatch
-   ╭─[ $WORKSPACE/tests/golden/diag/http_scope_escape/src/main.sv:6:66 ]
+   ╭─[ $WORKSPACE/tests/golden/diag/http_scope_escape/src/main.sv:6:62 ]
    │
- 6 │ escape requestValue = withResponse requestValue (fun _ _ body => pureIO body)
-   │                                                                  ─────┬─────
-   │                                                                       ╰─────── this expression has type `IO a^2 (Stream scope HttpError Bytes)`
+ 6 │ escape spelling = withResponse Get spelling (fun _ _ body => pureIO body)
+   │                                                              ─────┬─────
+   │                                                                   ╰─────── this expression has type `IO a^2 (Stream scope HttpError Bytes)`
    │
    │ Note: but it was required to have type `IO HttpError a^1`
 ───╯

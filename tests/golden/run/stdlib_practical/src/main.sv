@@ -16,10 +16,10 @@ fixtureBody = "{\"names\":[\"Ada\",\"Grace\",\"Linus\",\"Margaret\"]}"
 
 fixtureResponse : String
 fixtureResponse =
-    "HTTP/1.1 200 OK\u{d}\nContent-Type: application/json\u{d}\nContent-Length: "
-        <> show (std.bytes.bytesLength (std.bytes.stringToBytes fixtureBody))
-        <> "\u{d}\nConnection: close\u{d}\n\u{d}\n"
-        <> fixtureBody
+    "HTTP/1.1 200 OK\u{d}\nContent-Type: application/json\u{d}\nContent-Length: " <>
+        show (std.bytes.bytesLength (std.bytes.stringToBytes fixtureBody)) <>
+        "\u{d}\nConnection: close\u{d}\n\u{d}\n" <>
+        fixtureBody
 
 isDigit : Char -> Bool
 isDigit character = and (character >= '0') (character <= '9')
@@ -33,10 +33,7 @@ digitsValue = foldl (fun total character => total * 10 + digitValue character) 0
 workersParser : std.parser.Parser std.parser.TextInput () Int
 workersParser =
     std.parser.keepRight
-        (std.parser.tokens
-            std.parser.textInputOps
-            "workers="
-            (std.text.stringToChars "workers="))
+        (std.parser.tokens std.parser.textInputOps "workers=" (std.text.stringToChars "workers="))
         (std.parser.mapResult
             digitsValue
             (std.parser.some
@@ -81,22 +78,28 @@ serveOnce listener =
     bracket
         (acceptTask listener)
         closeSocketTask
-        (fun connection => do
-            _ <- recvBytesTask connection 4096
-            sendBytesTask connection (std.bytes.stringToBytes fixtureResponse))
+        (fun connection =>
+            do
+                _ <- recvBytesTask connection 4096
+                sendBytesTask connection (std.bytes.stringToBytes fixtureResponse)
+        )
 
 withFixture : forall a. (String -> Task a) -> Task a
 withFixture action =
-    bracket (listenTask anyPort) (fun (listener, _) => closeSocketTask listener) (fun listenerInfo =>
-        case listenerInfo of
-            (listener, port) =>
-                std.task.withThread
-                    (serveOnce listener)
-                    (fun _ => action ("http://127.0.0.1:" <> show port)))
+    bracket
+        (listenTask anyPort)
+        (fun (listener, _) => closeSocketTask listener)
+        (fun listenerInfo =>
+            case listenerInfo of
+                (listener, port) =>
+                    std.task.withThread
+                        (serveOnce listener)
+                        (fun _ => action ("http://127.0.0.1:" <> show port))
+        )
 
 fetchNames : String -> Task (Either std.testing.TestFailure (Int, (std.vector.Vector String)))
 fetchNames base = do
-    response <- mapError httpAsHostError (std.http.fetch (base <> "/names"))
+    response <- mapError httpAsHostError (std.http.get (base <> "/names"))
     let status = std.http.statusCode (std.http.responseStatus response)
     pureIO
         (std.parser.foldReply
@@ -105,7 +108,8 @@ fetchNames base = do
             (fun _ _ _ => Left (TestFailure "HTTP JSON requested more input"))
             (std.json.parseJson std.json.defaultJsonLimits (std.http.responseBody response)))
 
-namesFromJson : Int -> std.json.Json -> Either std.testing.TestFailure (Int, (std.vector.Vector String))
+namesFromJson :
+    Int -> std.json.Json -> Either std.testing.TestFailure (Int, (std.vector.Vector String))
 namesFromJson status (JsonObject object) =
     case std.map.lookup "names" object of
         Just (JsonArray values) =>
@@ -126,9 +130,14 @@ jsonStrings (_ :: _) = Nothing
 invalidUrlIsTyped : Task Bool
 invalidUrlIsTyped =
     catchError
-        (fmap (fun _ => False) (std.http.fetch "not-a-url"))
-        (fun httpError => pureIO
-            (case httpError of InvalidUrl _ => True | _ => False))
+        (fmap (fun _ => False) (std.http.get "not-a-url"))
+        (fun httpError =>
+            pureIO
+                (case httpError of
+                    InvalidUrl _ => True
+                    | _ => False
+                )
+        )
 
 resultOrExit : Either std.testing.TestFailure a -> Task a
 resultOrExit (Right value) = pureIO value
@@ -145,15 +154,17 @@ main = do
     fetched <- withFixture fetchNames
     response <- resultOrExit fetched
     typedInvalid <- invalidUrlIsTyped
-    cancelled <- std.task.timeout (std.time.milliseconds 5) (std.time.sleep (std.time.milliseconds 100))
+    cancelled <-
+        std.task.timeout (std.time.milliseconds 5) (std.time.sleep (std.time.milliseconds 100))
     case response of
         (status, names) =>
             resultOrExit
                 (std.testing.checkAll
-                    [ std.testing.assertEqual "worker count" 4 workers
-                    , std.testing.assertEqual "HTTP status" 200 status
-                    , std.testing.assertEqual "JSON vector length" 4 (std.vector.length names)
-                    , std.testing.assert "invalid URL is typed" typedInvalid
-                    , std.testing.assert "timeout cancels" (isNothing cancelled)
+                    [
+                        std.testing.assertEqual "worker count" 4 workers,
+                        std.testing.assertEqual "HTTP status" 200 status,
+                        std.testing.assertEqual "JSON vector length" 4 (std.vector.length names),
+                        std.testing.assert "invalid URL is typed" typedInvalid,
+                        std.testing.assert "timeout cancels" (isNothing cancelled)
                     ])
     printLine "stdlib practical: pass"

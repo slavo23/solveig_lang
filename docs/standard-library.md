@@ -578,43 +578,39 @@ import std.time
 
 fetchRelease : String -> IO std.http.HttpError std.http.Response
 fetchRelease repository =
-    std.http.fetchWith
-        (std.http.withRedirectPolicy
-            std.http.NoRedirects
-            (std.http.withHttpTimeout
-                (std.time.milliseconds 5000)
-                (std.http.withMaximumBodyBytes
-                    1048576
-                    (std.http.withMaximumHeaderBytes
-                        65536
-                        std.http.defaultHttpLimits))))
-        [("Accept", "application/json")]
+    std.http.getWith
+        (std.http.withHeader "Accept" "application/json" $
+            std.http.withRedirectPolicy std.http.NoRedirects $
+                std.http.withTimeout (std.time.seconds 5) $
+                    std.http.withMaximumBufferedBodyBytes 1048576 std.http.defaultOptions)
         ("https://api.example.test/repos/" <> repository <> "/release")
 ```
 
-Use `fetch spelling` for a bounded GET with practical defaults, and
-`fetchWith limits headers spelling` when policy or headers differ. Both
-validate URL and header strings before performing IO. The lower-level
-`Url`/`Header`/`Request` builders and `request` remain available for other
-methods and bodies; `send` applies default limits to a prepared request.
+Use `get url` for the common bounded request. `post`, `put`, `patch`, `delete`,
+`head`, and `options` have the same direct shape. Their `With` variants accept
+immutable `HttpOptions` built from `defaultOptions`; `withHeader`, `withQuery`,
+and the body setters cover ordinary API clients without exposing wire framing.
+`request method url` handles a dynamically chosen method.
 
-Every request applies response-header, response-body, timeout, and redirect
-bounds. Statuses such as 404 remain ordinary `Response` values;
+Every buffered request applies practical response-header, response-body,
+timeout, and redirect bounds. Statuses such as 404 remain ordinary `Response` values;
 transport, certificate/TLS, timeout, redirect, and size failures are typed.
 HTTPS verifies certificates through the host platform policy. Strict response bodies
 are fully bounded before entering the Solveig heap. Use `bodyChunks` when a
 list of bounded pieces is convenient, or `foldBodyChunks` to process those
 pieces without allocating that list.
 
-`withResponse request callback` instead provides status, headers, and a rank-2
+`withResponse method url callback` instead provides status, headers, and a rank-2
 scoped `Stream scope HttpError Bytes` before the body is consumed. Default pulls
-are at most 32 KiB; `withResponseWith limits chunkBytes request callback`
-selects both total limits and per-pull size. Early return closes without
-draining. Errors, defects, and cancellation also close; an in-flight host read
-must finish or reach its original deadline first. Request upload bodies remain
-strict bytes in this slice.
+are at most 32 KiB; `withResponseWith options method url callback` can add a
+total quota and change the pull bound. `requestStream` and `withStreamResponse`
+send a demand-driven one-shot byte stream. Builder bodies retain chunks and
+file bodies upload incrementally. Early return, producer failure, defects, and
+cancellation close resources; streaming upload owner threads are always joined.
 
-Header validation rejects invalid names and newline injection. Header lookup
-is ASCII case-insensitive. The [networking tutorial](tutorial/07-networking-and-http.md)
-demonstrates typed failures and bounded concurrent fetches against a local
+Header validation rejects invalid names, newline injection, and attempts to set
+client-managed framing headers. Query and form encoding uses the host URL
+library. Header lookup is ASCII case-insensitive. The
+[networking tutorial](tutorial/07-networking-and-http.md)
+demonstrates typed failures and bounded concurrent requests against a local
 service. See [HTTP and HTTPS](http.md) for the complete client policy.

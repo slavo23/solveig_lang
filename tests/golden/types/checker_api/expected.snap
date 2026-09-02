@@ -141,8 +141,11 @@ prelude.prim.hPutBytes : Handle -> Bytes -> IO HostError ()
 prelude.prim.hPutStr : Handle -> String -> IO HostError ()
 prelude.prim.hPutStrLn : Handle -> String -> IO HostError ()
 prelude.prim.hSetBuffering : Handle -> BufferMode -> IO HostError ()
-prelude.prim.httpOpenRaw : (String, String, [(String, String)], Maybe Bytes) -> (Int, Int, Int, Int) -> IO HostError (Int, [(String, String)], Handle)
-prelude.prim.httpRequestRaw : (String, String, [(String, String)], Maybe Bytes) -> (Int, Int, Int, Int) -> IO HostError (Int, [(String, String)], Bytes)
+prelude.prim.httpOpenRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Int, [(String, String)], Handle)
+prelude.prim.httpRequestRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Int, [(String, String)], Bytes)
+prelude.prim.httpUploadChunkRaw : Handle -> Maybe Bytes -> IO HostError (Handle, Maybe (Int, [(String, String)], Handle))
+prelude.prim.httpUploadCloseRaw : Handle -> IO HostError ()
+prelude.prim.httpUploadStartRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Handle, Maybe (Int, [(String, String)], Handle))
 prelude.prim.intAdd : Int -> Int -> Int
 prelude.prim.intCompare : Int -> Int -> Ordering
 prelude.prim.intDiv : Int -> Int -> Int
@@ -406,59 +409,93 @@ std.hashset.size : forall a. HashSet a -> Int
 std.hashset.toAscList : forall a. Ord a => HashSet a -> [a]
 std.hashset.toList : forall a. HashSet a -> [a]
 std.hashset.union : forall a. Hashable a => HashSet a -> HashSet a -> HashSet a
+std.http.addDefaultContentType : Maybe String -> [(String, String)] -> [(String, String)]
+std.http.addHeaderPair : HttpOptions -> (String, String) -> HttpOptions
 std.http.allHeaderNameChars : [Char] -> Bool
 std.http.asciiCharsEqual : [Char] -> [Char] -> Bool
 std.http.asciiCode : Char -> Int
 std.http.asciiStringEqual : String -> String -> Bool
 std.http.bodyChunks : Int -> Response -> Either HttpError [Bytes]
+std.http.bodyToRaw : RequestBody -> Either HttpError ((Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)]), Maybe String)
+std.http.bufferedMaximum : HttpOptions -> Int
+std.http.chunkBytes : HttpOptions -> Int
 std.http.chunksFrom : Int -> Bytes -> Int -> [Bytes]
 std.http.closeResponse : (Int, [(String, String)], Handle) -> IO HttpError ()
+std.http.closeUpload : (Handle, Maybe (Int, [(String, String)], Handle)) -> IO HttpError ()
+std.http.collectResponseChunks : forall scope. BytesBuilder -> Stream scope HttpError Bytes -> IO HttpError BytesBuilder
+std.http.collectStrictResponse : forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError Response
 std.http.containsCodePoint : Int -> [Int] -> Bool
-std.http.defaultHttpLimits : HttpLimits
-std.http.delete : Url -> Request
-std.http.fetch : String -> IO HttpError Response
-std.http.fetchWith : HttpLimits -> [(String, String)] -> String -> IO HttpError Response
+std.http.continueUpload : HttpOptions -> Handle -> Maybe Bytes -> IO HttpError (Handle, (Int, [(String, String)], Handle))
+std.http.defaultOptions : HttpOptions
+std.http.delete : String -> IO HttpError Response
+std.http.deleteWith : HttpOptions -> String -> IO HttpError Response
+std.http.differentHeader : String -> (String, String) -> Bool
+std.http.ensureSuccess : Response -> Either HttpError Response
+std.http.feedAndUseUpload : forall upload result. HttpOptions -> Stream upload HttpError Bytes -> (forall response. Status -> [Header] -> Stream response HttpError Bytes -> IO HttpError result) -> (Handle, Maybe (Int, [(String, String)], Handle)) -> IO HttpError result
+std.http.feedUpload : forall upload. HttpOptions -> Stream upload HttpError Bytes -> (Handle, Maybe (Int, [(String, String)], Handle)) -> IO HttpError (Handle, (Int, [(String, String)], Handle))
 std.http.findHeader : String -> Response -> Maybe String
 std.http.findHeaderIn : String -> [Header] -> Maybe String
 std.http.foldBodyChunks : forall state. Int -> (state -> Bytes -> state) -> state -> Response -> Either HttpError state
 std.http.foldChunksFrom : forall state. Int -> (state -> Bytes -> state) -> state -> Bytes -> Int -> state
-std.http.get : Url -> Request
-std.http.getUrl : Url -> IO HttpError Response
-std.http.head : Url -> Request
+std.http.get : String -> IO HttpError Response
+std.http.getWith : HttpOptions -> String -> IO HttpError Response
+std.http.hasHeader : String -> [(String, String)] -> Bool
+std.http.head : String -> IO HttpError Response
+std.http.headWith : HttpOptions -> String -> IO HttpError Response
 std.http.header : String -> String -> Either HttpError Header
 std.http.headerFromRaw : (String, String) -> Header
 std.http.headerName : Header -> String
-std.http.headerToRaw : Header -> (String, String)
 std.http.headerValue : Header -> String
 std.http.headersFromList : [(String, String)] -> Either HttpError [Header]
-std.http.httpHostError : HttpLimits -> HostError -> HttpError
-std.http.httpTimeout : HttpLimits -> Duration
+std.http.httpHostError : HttpOptions -> Maybe Int -> HostError -> HttpError
 std.http.isHeaderNameChar : Char -> Bool
+std.http.isManagedHeader : String -> Bool
 std.http.isSuccessful : Status -> Bool
-std.http.limitsToRaw : HttpLimits -> (Int, Int, Int, Int)
-std.http.maximumBodyBytes : HttpLimits -> Int
-std.http.maximumHeaderBytes : HttpLimits -> Int
+std.http.limitsToRaw : HttpOptions -> Maybe Int -> (Int, Maybe Int, Int, Int, Bool)
+std.http.mapContent : (RequestContent -> RequestContent) -> HttpOptions -> HttpOptions
+std.http.mapResponsePolicy : (ResponsePolicy -> ResponsePolicy) -> HttpOptions -> HttpOptions
+std.http.markStreamBody : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)]))
+std.http.maximumBufferedBodyBytes : HttpOptions -> Int
+std.http.maximumHeaderBytes : HttpOptions -> Int
+std.http.maximumResponseBytes : HttpOptions -> Maybe Int
 std.http.methodText : Method -> String
-std.http.patch : Url -> Request
-std.http.post : Url -> Request
-std.http.put : Url -> Request
+std.http.options : String -> IO HttpError Response
+std.http.optionsWith : HttpOptions -> String -> IO HttpError Response
+std.http.patch : String -> IO HttpError Response
+std.http.patchWith : HttpOptions -> String -> IO HttpError Response
+std.http.post : String -> IO HttpError Response
+std.http.postWith : HttpOptions -> String -> IO HttpError Response
+std.http.prepareContent : HttpOptions -> Method -> Url -> Either HttpError (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)]))
+std.http.prepareRequest : HttpOptions -> Method -> String -> Either HttpError (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)]))
+std.http.prepareStreamRequest : HttpOptions -> Method -> String -> Either HttpError (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)]))
+std.http.put : String -> IO HttpError Response
+std.http.putWith : HttpOptions -> String -> IO HttpError Response
 std.http.redirectCount : RedirectPolicy -> Int
-std.http.redirectPolicy : HttpLimits -> RedirectPolicy
-std.http.request : HttpLimits -> Request -> IO HttpError Response
-std.http.requestBody : Request -> Maybe Bytes
-std.http.requestHeaders : Request -> [Header]
-std.http.requestMethod : Request -> Method
-std.http.requestToRaw : Request -> (String, String, [(String, String)], Maybe Bytes)
-std.http.requestUrl : Request -> Url
+std.http.redirectPolicy : HttpOptions -> RedirectPolicy
+std.http.replayPolicy : HttpOptions -> ReplayPolicy
+std.http.request : Method -> String -> IO HttpError Response
+std.http.requestContent : HttpOptions -> RequestContent
+std.http.requestFileError : HttpOptions -> HostError -> HttpError
+std.http.requestStream : forall upload. Method -> Stream upload HttpError Bytes -> String -> IO HttpError Response
+std.http.requestStreamWith : forall upload. HttpOptions -> Method -> Stream upload HttpError Bytes -> String -> IO HttpError Response
+std.http.requestTimeout : HttpOptions -> Duration
+std.http.requestWith : HttpOptions -> Method -> String -> IO HttpError Response
 std.http.response : Status -> [Header] -> Bytes -> Response
 std.http.responseBody : Response -> Bytes
-std.http.responseByteStep : HttpLimits -> Int -> Handle -> () -> IO HttpError (Maybe (Bytes, ()))
+std.http.responseBodyLimitError : Maybe Int -> HostError -> HttpError
+std.http.responseByteStep : HttpOptions -> Handle -> () -> IO HttpError (Maybe (Bytes, ()))
 std.http.responseFromRaw : (Int, [(String, String)], Bytes) -> Response
 std.http.responseHeaders : Response -> [Header]
-std.http.responseReadError : HttpLimits -> HostError -> HttpError
+std.http.responseReadError : HttpOptions -> HostError -> HttpError
 std.http.responseStatus : Response -> Status
 std.http.responseText : Response -> Either HttpError String
-std.http.send : Request -> IO HttpError Response
+std.http.setBody : RequestBody -> RequestContent -> RequestContent
+std.http.setBufferedBytes : Int -> ResponsePolicy -> ResponsePolicy
+std.http.setChunkBytes : Int -> ResponsePolicy -> ResponsePolicy
+std.http.setHeader : String -> String -> RequestContent -> RequestContent
+std.http.setHeaderBytes : Int -> ResponsePolicy -> ResponsePolicy
+std.http.setQuery : [(String, String)] -> RequestContent -> RequestContent
+std.http.setResponseBytes : Maybe Int -> ResponsePolicy -> ResponsePolicy
 std.http.statusCode : Status -> Int
 std.http.statusFromInt : Int -> Either HttpError Status
 std.http.urlFromString : String -> Either HttpError Url
@@ -470,20 +507,30 @@ std.http.validUrlAuthority : [Char] -> Int -> Bool
 std.http.validUrlChars : [Char] -> Bool
 std.http.validUrlTail : String -> Bool
 std.http.validUrlText : String -> Bool
-std.http.validateHeaders : [Header] -> Request -> Either HttpError Request
-std.http.validateRequest : HttpLimits -> Request -> Either HttpError Request
-std.http.validateRequestFields : Request -> Either HttpError Request
-std.http.withBody : Bytes -> Request -> Request
-std.http.withHeader : Header -> Request -> Request
-std.http.withHeaders : [Header] -> Request -> Request
-std.http.withHttpTimeout : Duration -> HttpLimits -> HttpLimits
-std.http.withMaximumBodyBytes : Int -> HttpLimits -> HttpLimits
-std.http.withMaximumHeaderBytes : Int -> HttpLimits -> HttpLimits
-std.http.withRedirectPolicy : RedirectPolicy -> HttpLimits -> HttpLimits
-std.http.withResponse : forall result. Request -> (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) -> IO HttpError result
-std.http.withResponseWith : forall result. HttpLimits -> Int -> Request -> (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) -> IO HttpError result
-std.http.withTextBody : String -> Request -> Request
-std.http.withoutBody : Request -> Request
+std.http.validateOptions : HttpOptions -> Either HttpError ()
+std.http.validateRedirects : RedirectPolicy -> Either HttpError ()
+std.http.validateRequestHeaders : [(String, String)] -> Either HttpError [(String, String)]
+std.http.withBody : Bytes -> HttpOptions -> HttpOptions
+std.http.withBuilderBody : BytesBuilder -> HttpOptions -> HttpOptions
+std.http.withChunkBytes : Int -> HttpOptions -> HttpOptions
+std.http.withFileBody : Path -> HttpOptions -> HttpOptions
+std.http.withFormBody : [(String, String)] -> HttpOptions -> HttpOptions
+std.http.withHeader : String -> String -> HttpOptions -> HttpOptions
+std.http.withHeaders : [(String, String)] -> HttpOptions -> HttpOptions
+std.http.withJsonBody : Json -> HttpOptions -> HttpOptions
+std.http.withMaximumBufferedBodyBytes : Int -> HttpOptions -> HttpOptions
+std.http.withMaximumHeaderBytes : Int -> HttpOptions -> HttpOptions
+std.http.withMaximumResponseBytes : Maybe Int -> HttpOptions -> HttpOptions
+std.http.withQuery : [(String, String)] -> HttpOptions -> HttpOptions
+std.http.withRedirectPolicy : RedirectPolicy -> HttpOptions -> HttpOptions
+std.http.withReplayPolicy : ReplayPolicy -> HttpOptions -> HttpOptions
+std.http.withResponse : forall result. Method -> String -> (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) -> IO HttpError result
+std.http.withResponseWith : forall result. HttpOptions -> Method -> String -> (forall scope. Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError result) -> IO HttpError result
+std.http.withStreamResponse : forall upload result. Method -> Stream upload HttpError Bytes -> String -> (forall response. Status -> [Header] -> Stream response HttpError Bytes -> IO HttpError result) -> IO HttpError result
+std.http.withStreamResponseWith : forall upload result. HttpOptions -> Method -> Stream upload HttpError Bytes -> String -> (forall response. Status -> [Header] -> Stream response HttpError Bytes -> IO HttpError result) -> IO HttpError result
+std.http.withTextBody : String -> HttpOptions -> HttpOptions
+std.http.withTimeout : Duration -> HttpOptions -> HttpOptions
+std.http.withoutBody : HttpOptions -> HttpOptions
 std.io.appendFile : String -> String -> IO HostError ()
 std.io.fileByteStep : Int -> Handle -> () -> IO HostError (Maybe (Bytes, ()))
 std.io.fileByteStream : Int -> Handle -> Stream () HostError Bytes

@@ -5,23 +5,29 @@
 use super::HandleFailure;
 use std::io::{self, Read};
 
-pub(super) struct HttpBody {
-    // None records a terminal limit failure after dropping the transport.
-    body: Option<ureq::Body>,
-    remaining: usize,
-    maximum: usize,
+pub(crate) enum HttpBody {
+    Unbounded(ureq::Body),
+    Bounded {
+        body: ureq::Body,
+        remaining: usize,
+        maximum: usize,
+    },
+    Exceeded(usize),
 }
 
 impl HttpBody {
-    pub(super) fn new(body: ureq::Body, maximum: usize) -> Self {
-        Self {
-            body: Some(body),
-            remaining: maximum,
-            maximum,
+    pub(crate) fn new(body: ureq::Body, maximum: Option<usize>) -> Self {
+        match maximum {
+            Some(maximum) => Self::Bounded {
+                body,
+                remaining: maximum,
+                maximum,
+            },
+            None => Self::Unbounded(body),
         }
     }
 
-    pub(super) fn read_http_chunk(&mut self, maximum: i64) -> Result<Vec<u8>, HandleFailure> {
+    pub(crate) fn read_http_chunk(&mut self, maximum: i64) -> Result<Vec<u8>, HandleFailure> {
         let maximum = usize::try_from(maximum)
             .ok()
             .filter(|size| *size > 0)
@@ -33,23 +39,32 @@ impl HttpBody {
             })?;
         // Only a subsequent pull probes beyond the total bound. Early consumers
         // do not demand EOF, and an exactly-sized body still succeeds at EOF.
-        let body = self.body.as_mut().ok_or(HandleFailure::HttpBodyTooLarge {
-            maximum: self.maximum,
-        })?;
-        let size = maximum.min(self.remaining.max(1));
+        let (body, size) = match self {
+            Self::Unbounded(body) => (body, maximum),
+            Self::Bounded {
+                body, remaining, ..
+            } => (body, maximum.min((*remaining).max(1))),
+            Self::Exceeded(maximum) => {
+                return Err(HandleFailure::HttpBodyTooLarge { maximum: *maximum });
+            }
+        };
         let mut bytes = Vec::new();
         bytes
             .try_reserve_exact(size)
             .map_err(|source| read_failure(io::Error::new(io::ErrorKind::OutOfMemory, source)))?;
         bytes.resize(size, 0);
         let count = body.as_reader().read(&mut bytes).map_err(read_failure)?;
-        if count > self.remaining {
-            self.body = None;
-            return Err(HandleFailure::HttpBodyTooLarge {
-                maximum: self.maximum,
-            });
+        if let Self::Bounded {
+            remaining, maximum, ..
+        } = self
+        {
+            if count > *remaining {
+                let maximum = *maximum;
+                *self = Self::Exceeded(maximum);
+                return Err(HandleFailure::HttpBodyTooLarge { maximum });
+            }
+            *remaining -= count;
         }
-        self.remaining -= count;
         bytes.truncate(count);
         Ok(bytes)
     }
@@ -92,7 +107,7 @@ mod tests {
 
     #[test]
     fn binary_pulls_preserve_the_bound_across_readers_and_eof() {
-        let mut body = HttpBody::new(ureq::Body::builder().data(vec![0, 255, 128, 1]), 4);
+        let mut body = HttpBody::new(ureq::Body::builder().data(vec![0, 255, 128, 1]), Some(4));
         assert!(matches!(
             body.read_http_chunk(0),
             Err(HandleFailure::Read { .. })
@@ -105,7 +120,7 @@ mod tests {
 
     #[test]
     fn overflow_is_probed_only_when_demanded_including_zero_limit() {
-        let mut body = HttpBody::new(ureq::Body::builder().data(b"abcd".to_vec()), 3);
+        let mut body = HttpBody::new(ureq::Body::builder().data(b"abcd".to_vec()), Some(3));
         assert_eq!(body.read_http_chunk(3).ok(), Some(b"abc".to_vec()));
         assert!(matches!(
             body.read_http_chunk(3),
@@ -116,12 +131,21 @@ mod tests {
             Err(HandleFailure::HttpBodyTooLarge { maximum: 3 })
         ));
 
-        let mut empty = HttpBody::new(ureq::Body::builder().data(vec![]), 0);
+        let mut empty = HttpBody::new(ureq::Body::builder().data(vec![]), Some(0));
         assert_eq!(empty.read_http_chunk(1).ok(), Some(vec![]));
-        let mut nonempty = HttpBody::new(ureq::Body::builder().data(vec![42]), 0);
+        let mut nonempty = HttpBody::new(ureq::Body::builder().data(vec![42]), Some(0));
         assert!(matches!(
             nonempty.read_http_chunk(1),
             Err(HandleFailure::HttpBodyTooLarge { maximum: 0 })
         ));
+    }
+
+    #[test]
+    fn unbounded_transfers_still_bound_each_pull() {
+        let mut body = HttpBody::new(ureq::Body::builder().data(b"abcdefg".to_vec()), None);
+        assert_eq!(body.read_http_chunk(3).ok(), Some(b"abc".to_vec()));
+        assert_eq!(body.read_http_chunk(3).ok(), Some(b"def".to_vec()));
+        assert_eq!(body.read_http_chunk(3).ok(), Some(b"g".to_vec()));
+        assert_eq!(body.read_http_chunk(3).ok(), Some(vec![]));
     }
 }

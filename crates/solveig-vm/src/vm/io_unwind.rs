@@ -478,6 +478,16 @@ impl Interpreter<'_> {
                     "httpRedirect",
                     &message,
                 ),
+                super::http::HttpFailure::Replay(message) => self.alloc_host_error(
+                    CtorRuntimeRole::PreludeHostProtocolError,
+                    "httpBodyReplay",
+                    &message,
+                ),
+                super::http::HttpFailure::RequestFile(message) => self.alloc_host_error(
+                    CtorRuntimeRole::PreludeHostProtocolError,
+                    "httpRequestFile",
+                    &message,
+                ),
                 super::http::HttpFailure::HeadersTooLarge(maximum) => self.alloc_host_error(
                     CtorRuntimeRole::PreludeHostResourceExhausted,
                     "httpResponseHeaders",

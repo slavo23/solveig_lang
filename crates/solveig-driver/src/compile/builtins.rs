@@ -92,15 +92,54 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         Ty::make_con_id(prelude_maybe_tycon_id(names)),
         bytes.clone(),
     );
+    let bytes_list = Ty::make_app(Ty::make_con_id(prelude_list_tycon_id(names)), bytes.clone());
+    let maybe_string = Ty::make_app(
+        Ty::make_con_id(prelude_maybe_tycon_id(names)),
+        string.clone(),
+    );
+    let maybe_int = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), int.clone());
+    let http_body = tuple(
+        names,
+        &[
+            int.clone(),
+            maybe_bytes,
+            bytes_list,
+            maybe_string,
+            headers.clone(),
+        ],
+    );
     let http_request = tuple(
         names,
-        &[string.clone(), string.clone(), headers.clone(), maybe_bytes],
+        &[
+            string.clone(),
+            string.clone(),
+            headers.clone(),
+            headers.clone(),
+            http_body,
+        ],
     );
-    let http_limits = tuple(names, &[int.clone(), int.clone(), int.clone(), int.clone()]);
+    let http_limits = tuple(
+        names,
+        &[
+            int.clone(),
+            maybe_int,
+            int.clone(),
+            int.clone(),
+            bool_ty.clone(),
+        ],
+    );
     let http_response = tuple(names, &[int.clone(), headers.clone(), bytes.clone()]);
     let http_stream = tuple(
         names,
         &[int.clone(), headers, Ty::make_con_id(PRIM_TYS.handle)],
+    );
+    let maybe_http_stream = Ty::make_app(
+        Ty::make_con_id(prelude_maybe_tycon_id(names)),
+        http_stream.clone(),
+    );
+    let http_upload_event = tuple(
+        names,
+        &[Ty::make_con_id(PRIM_TYS.handle), maybe_http_stream],
     );
     let handle_specs =
         handles::handle_builtin_specs(names, &int, &string, &bytes, &bool_ty, &host_error);
@@ -286,8 +325,41 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             BUILTIN_HTTP_OPEN_RAW,
             2,
             arr(
-                &[http_request, http_limits],
+                &[http_request.clone(), http_limits.clone()],
                 io_of(host_error.clone(), http_stream),
+            ),
+        ),
+        prim_spec(
+            "httpUploadStartRaw",
+            BUILTIN_HTTP_UPLOAD_START_RAW,
+            2,
+            arr(
+                &[http_request, http_limits],
+                io_of(host_error.clone(), http_upload_event.clone()),
+            ),
+        ),
+        prim_spec(
+            "httpUploadChunkRaw",
+            BUILTIN_HTTP_UPLOAD_CHUNK_RAW,
+            2,
+            arr(
+                &[
+                    Ty::make_con_id(PRIM_TYS.handle),
+                    Ty::make_app(
+                        Ty::make_con_id(prelude_maybe_tycon_id(names)),
+                        bytes.clone(),
+                    ),
+                ],
+                io_of(host_error.clone(), http_upload_event),
+            ),
+        ),
+        prim_spec(
+            "httpUploadCloseRaw",
+            BUILTIN_HTTP_UPLOAD_CLOSE_RAW,
+            1,
+            unary(
+                Ty::make_con_id(PRIM_TYS.handle),
+                io_of(host_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec(

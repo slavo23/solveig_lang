@@ -13,6 +13,8 @@ use solveig_driver::run_project_capture_with_stdin_and_args;
 
 #[path = "http_stream_runtime.rs"]
 mod streaming;
+#[path = "http_upload_runtime.rs"]
+mod uploads;
 
 #[test]
 fn bounded_http_handles_framing_redirects_status_limits_and_cancellation() {

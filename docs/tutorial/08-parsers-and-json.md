@@ -166,7 +166,7 @@ Object ordering is deterministic. Duplicate keys are rejected. `JsonNumber`
 retains a validated decimal spelling instead of forcing every number through a
 `Float`.
 
-Unlike ordinary `readFile` and `fetch`, JSON parsing necessarily receives a
+Unlike ordinary `readFile` and `get`, JSON parsing necessarily receives a
 policy because the parser itself is consuming potentially adversarial nested
 data. `defaultJsonLimits` is the normal choice: 16 MiB input, nesting depth 128,
 1 MiB per string, one million items in one container, and 1024 bytes in one
