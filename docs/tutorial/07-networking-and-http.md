@@ -1,13 +1,14 @@
 # 7. Networking and HTTP
 
-Solveig has two networking layers:
+Solveig has three networking layers:
 
 - `std.net` exposes TCP connections and listeners as byte streams.
+- `std.tls` adds verified encryption to an outgoing byte stream.
 - `std.http` provides a validated, bounded HTTP/HTTPS client with convenient
   defaults.
 
-Use `std.http` for web APIs. Use `std.net` for a custom protocol or when you are
-implementing the server side yourself.
+Use `std.http` for web APIs. Use `std.tls` for a custom encrypted client
+protocol, and `std.net` for plaintext custom protocols or server-side TCP/UDP.
 
 ## A normal HTTP GET
 
@@ -162,6 +163,46 @@ guaranteed to correspond to one `receiveTcpBytes`. A real protocol must define
 framing—for example, a delimiter or a length prefix—and loop until a complete
 frame is available. `tcpBytes connection chunkSize` supplies the same bounded,
 demand-driven loop as a scoped `Stream`; it performs no read-ahead.
+
+## Raw TLS clients
+
+For HTTP and HTTPS, keep using `std.http`: it owns URLs, headers, redirects,
+status codes, and practical limits. `std.tls` is for a non-HTTP protocol that
+needs a verified encrypted byte stream:
+
+```solveig
+import std.bytes(stringToBytes)
+import std.net(Port)
+import std.tls(*)
+
+sendGreeting : String -> Port -> IO TlsError Bytes
+sendGreeting host port =
+    withTlsConnection host port $ fun connection => do
+        sendTlsBytes connection (stringToBytes "hello\n")
+        receiveTlsBytes connection 4096
+```
+
+The default verifies both the certificate chain and `host` through the
+operating system's trust policy. Advanced callers can build immutable options:
+
+```solveig
+options : Bytes -> TlsOptions
+options certificate =
+    withTlsServerName "service.example" $
+        withTrustedCertificatesPem certificate defaultTlsOptions
+```
+
+The PEM certificate set replaces platform trust and is intended for private
+PKI and hermetic tests. A name override changes the DNS name that must appear
+in the certificate; it does not weaken verification. Solveig intentionally
+offers no “accept any certificate” switch.
+
+As with TCP, TLS does not infer application-message framing. `receiveTlsBytes`
+requires a positive maximum and returns one available plaintext chunk;
+`tlsBytes` repeats that operation only when demanded. A clean peer shutdown is
+empty bytes. A TCP EOF without TLS `close_notify` is rejected as truncated.
+The scoped connection and stream cannot escape `withTlsConnection` or
+`withTlsConnectionWith`.
 
 ## TCP listeners
 

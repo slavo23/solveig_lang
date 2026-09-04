@@ -512,6 +512,23 @@ impl Interpreter<'_> {
                     }
                     return self.block_on_io(IoRequest::Connect { host, port });
                 }
+                IoAction::StartTlsClient { socket, config } => {
+                    let socket = self.expect_socket_id(socket, "startTlsClient")?;
+                    let [server_name, trust_pem] =
+                        self.expect_tuple::<2>(config, "startTlsClient")?;
+                    let server_name = self.expect_string_value(server_name, "startTlsClient")?;
+                    let trust_pem =
+                        self.expect_optional_bytes_value(trust_pem, "startTlsClient")?;
+                    if let Some(interruption) = self.accept_pending_interruption_at_block() {
+                        self.resume_io_interruption(program, interruption)?;
+                        continue;
+                    }
+                    return self.block_on_io(IoRequest::StartTlsClient {
+                        socket,
+                        server_name,
+                        trust_pem,
+                    });
+                }
                 IoAction::Listen { port } => {
                     if let Some(interruption) = self.accept_pending_interruption_at_block() {
                         self.resume_io_interruption(program, interruption)?;

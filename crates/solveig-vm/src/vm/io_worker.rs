@@ -19,7 +19,7 @@ mod blocking;
 mod request;
 use blocking::worker_loop;
 use request::IoWork;
-pub(super) use request::{IoFailure, IoRequest, IoResult};
+pub(super) use request::{IoFailure, IoRequest, IoResult, TlsFailure};
 
 pub(super) mod filesystem;
 pub(super) mod process;
@@ -187,6 +187,7 @@ impl IoSubsystem {
             IoRequest::Print(_)
             | IoRequest::ReadLine
             | IoRequest::Connect { .. }
+            | IoRequest::StartTlsClient { .. }
             | IoRequest::Listen { .. }
             | IoRequest::Accept(_)
             | IoRequest::SendBytes { .. }
@@ -269,6 +270,18 @@ impl IoSubsystem {
             IoRequest::Connect { host, port } => self
                 .sockets
                 .issue(id, SocketRequest::Connect { host, port }),
+            IoRequest::StartTlsClient {
+                socket,
+                server_name,
+                trust_pem,
+            } => self.sockets.issue(
+                id,
+                SocketRequest::StartTlsClient {
+                    socket,
+                    server_name,
+                    trust_pem,
+                },
+            ),
             IoRequest::Listen { port } => self.sockets.issue(id, SocketRequest::Listen { port }),
             IoRequest::Accept(socket) => self.sockets.issue(id, SocketRequest::Accept(socket)),
             IoRequest::SendBytes { socket, bytes } => self

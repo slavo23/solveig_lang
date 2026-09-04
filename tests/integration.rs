@@ -11,6 +11,8 @@ mod a2_runtime_regressions;
 mod a3_editor_token_sweeps;
 #[path = "http_runtime.rs"]
 mod a4_http_runtime;
+#[path = "tls_runtime.rs"]
+mod a5_tls_runtime;
 
 mod bytecode_specialization;
 mod checker_type_golden;

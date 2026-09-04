@@ -198,28 +198,7 @@ impl Interpreter<'_> {
         &mut self,
         value: Value,
     ) -> Result<Option<Vec<u8>>, RuntimeError> {
-        let builtin = "httpRequestRaw";
-        let nothing = VmCtx::new(self).ctor_tag_with_arity(
-            CtorRuntimeRole::PreludeMaybeNothing,
-            0,
-            builtin,
-        )?;
-        let just =
-            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludeMaybeJust, 1, builtin)?;
-        let Value::Obj(id) = value else {
-            return Err(RuntimeError::builtin(
-                "httpRequestRaw expected Maybe Bytes".to_string(),
-            ));
-        };
-        match self.heap.get(id) {
-            HeapObject::Data0 { tag } if *tag == nothing => Ok(None),
-            HeapObject::Data1 { tag, field } if *tag == just => {
-                self.expect_bytes_value(*field, builtin).map(Some)
-            }
-            _ => Err(RuntimeError::builtin(
-                "httpRequestRaw expected Maybe Bytes".to_string(),
-            )),
-        }
+        self.expect_optional_bytes_value(value, "httpRequestRaw")
     }
 
     fn expect_optional_http_path(&mut self, value: Value) -> Result<Option<String>, RuntimeError> {

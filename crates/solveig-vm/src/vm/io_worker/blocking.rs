@@ -112,6 +112,7 @@ fn perform_request(
             Err(failure) => IoResult::Failed(IoFailure::Handle(failure)),
         },
         IoRequest::Connect { .. }
+        | IoRequest::StartTlsClient { .. }
         | IoRequest::Listen { .. }
         | IoRequest::Accept(_)
         | IoRequest::SendBytes { .. }

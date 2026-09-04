@@ -166,4 +166,20 @@ fn checked_project_docs_include_importable_declarations() {
         docs.get("std.http.withStreamResponseWith")
             .is_some_and(|text| text.contains("Cleanup joins the upload owner thread"))
     );
+
+    let tls_project = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/tls_client");
+    let docs =
+        solveig_driver::checked_project_docs(&tls_project).expect("TLS documentation checks");
+    assert!(
+        docs.get("std.tls.withTlsConnection")
+            .is_some_and(|text| text.contains("Platform certificate trust"))
+    );
+    assert!(
+        docs.get("std.tls.TlsTrust")
+            .is_some_and(|text| text.contains("Neither policy disables"))
+    );
+    assert!(
+        docs.get("std.tls.receiveTlsBytes")
+            .is_some_and(|text| text.contains("truncated TLS"))
+    );
 }

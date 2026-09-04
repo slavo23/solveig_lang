@@ -206,6 +206,7 @@ prelude.prim.setEnv : String -> String -> IO HostError ()
 prelude.prim.sleep : Int -> IO HostError ()
 prelude.prim.spawn : forall e f. IO e () -> IO f ThreadId
 prelude.prim.startProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ChildProcess
+prelude.prim.startTlsClient : Socket -> (String, Maybe Bytes) -> IO HostError ()
 prelude.prim.stderr : Handle
 prelude.prim.stdin : Handle
 prelude.prim.stdout : Handle
@@ -1110,6 +1111,22 @@ std.time.sleepMilliseconds : Duration -> Int
 std.time.systemTimeDifference : SystemTime -> SystemTime -> Duration
 std.time.systemTimeFromNanoseconds : Int -> SystemTime
 std.time.systemTimeNanoseconds : SystemTime -> Int
+std.tls.closeTlsTcp : forall scope. TcpConnection scope -> IO TlsError ()
+std.tls.defaultTlsOptions : TlsOptions
+std.tls.receiveTlsBytes : forall scope. TlsConnection scope -> Int -> IO TlsError Bytes
+std.tls.sendTlsBytes : forall scope. TlsConnection scope -> Bytes -> IO TlsError ()
+std.tls.startTlsAndUse : forall scope result. TlsOptions -> String -> (TlsConnection scope -> IO TlsError result) -> TcpConnection scope -> IO TlsError result
+std.tls.tlsByteStep : forall scope. TlsConnection scope -> Int -> () -> IO TlsError (Maybe (Bytes, ()))
+std.tls.tlsBytes : forall scope. TlsConnection scope -> Int -> Stream scope TlsError Bytes
+std.tls.tlsServerName : TlsOptions -> Maybe String
+std.tls.tlsTrust : TlsOptions -> TlsTrust
+std.tls.trustPem : TlsTrust -> Maybe Bytes
+std.tls.verifiedName : String -> TlsOptions -> String
+std.tls.withTlsConnection : forall result. String -> Port -> (forall scope. TlsConnection scope -> IO TlsError result) -> IO TlsError result
+std.tls.withTlsConnectionWith : forall result. TlsOptions -> String -> Port -> (forall scope. TlsConnection scope -> IO TlsError result) -> IO TlsError result
+std.tls.withTlsServerName : String -> TlsOptions -> TlsOptions
+std.tls.withTlsTrust : TlsTrust -> TlsOptions -> TlsOptions
+std.tls.withTrustedCertificatesPem : Bytes -> TlsOptions -> TlsOptions
 std.vector.balance : forall a. Vector a -> Vector a -> Vector a
 std.vector.buildVector : forall a. [Vector a] -> Vector a
 std.vector.empty : forall a. Vector a

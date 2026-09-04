@@ -37,6 +37,7 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.time` | Sleeping, clock readings, and monotonic measurement |
 | `std.random` | Explicit deterministic pseudorandom state and separate host-secure bytes |
 | `std.net` | Scoped TCP streams, UDP datagrams, endpoints, and hostname resolution |
+| `std.tls` | Verified scoped TLS client streams with platform or explicit PEM trust |
 
 ## Lists and text
 
@@ -575,9 +576,39 @@ source endpoints. A receive bound from 1 through 65,535 bytes is mandatory;
 oversized messages fail instead of returning truncated data. All operations use
 `NetError`, retaining validation or endpoint/host context.
 
-Use `std.http` for HTTP/HTTPS rather than hand-building wire frames. Its TLS
-verification is not a raw-TLS socket API. Scoped subprocess pipes remain in
-`std.process`.
+Use `std.http` for HTTP/HTTPS rather than hand-building wire frames. Use
+`std.tls` when a non-HTTP client protocol needs an encrypted byte stream.
+Scoped subprocess pipes remain in `std.process`.
+
+### TLS client streams
+
+```solveig
+import std.net(Port)
+import std.tls(*)
+
+exchange : String -> Port -> Bytes -> IO TlsError Bytes
+exchange host port request =
+    withTlsConnection host port $ fun connection => do
+        sendTlsBytes connection request
+        receiveTlsBytes connection 4096
+```
+
+`withTlsConnection` resolves and connects to the host, verifies the server
+certificate and hostname using operating-system trust, and closes the
+connection unconditionally. Its rank-2 `TlsConnection scope` and any
+`tlsBytes` stream derived from it cannot escape the callback. Writes are
+binary-safe and complete only after the whole plaintext input is accepted and
+its TLS records are flushed. Reads require a positive explicit bound; empty
+bytes mean the peer sent TLS `close_notify`, while an unannounced TCP EOF is a
+typed protocol failure.
+
+For private services, tests, or a tunnel whose connection address differs from
+the certificate name, start from `defaultTlsOptions` and apply
+`withTrustedCertificatesPem` or `withTlsServerName`. Custom PEM roots replace
+platform trust; they never disable chain or hostname verification. There is no
+insecure mode and no mutable global TLS configuration. This module is a raw
+client byte stream, so it does not add HTTP framing, redirects, status handling,
+or a TLS server API.
 
 ### HTTP and HTTPS
 

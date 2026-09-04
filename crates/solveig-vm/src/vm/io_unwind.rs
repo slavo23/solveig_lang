@@ -1,7 +1,7 @@
 //! IO outcome unwinding, typed failure construction, and operand decoding.
 
-use super::io_worker::IoFailure;
 use super::io_worker::filesystem::FilesystemFailure;
+use super::io_worker::{IoFailure, TlsFailure};
 use super::*;
 
 fn host_error_kind(error: &std::io::Error) -> CtorRuntimeRole {
@@ -443,6 +443,21 @@ impl Interpreter<'_> {
                 "connect",
                 &format!("{host}:{port}: {source}"),
             ),
+            IoFailure::Tls(failure) => match failure {
+                TlsFailure::Configuration(message) => self.alloc_host_error(
+                    CtorRuntimeRole::PreludeHostInvalidArgument,
+                    "startTlsClient",
+                    &message,
+                ),
+                TlsFailure::Protocol { operation, message } => self.alloc_host_error(
+                    CtorRuntimeRole::PreludeHostProtocolError,
+                    operation,
+                    &message,
+                ),
+                TlsFailure::Transport { operation, source } => {
+                    self.alloc_host_error(host_error_kind(&source), operation, &source.to_string())
+                }
+            },
             IoFailure::ResolveHost { host, source } => self.alloc_host_error(
                 host_error_kind(&source),
                 "resolveHost",
@@ -641,6 +656,34 @@ impl Interpreter<'_> {
                 _ => Err(RuntimeError::builtin(format!("{context} expected Bytes"))),
             },
             _ => Err(RuntimeError::builtin(format!("{context} expected Bytes"))),
+        }
+    }
+
+    pub(super) fn expect_optional_bytes_value(
+        &mut self,
+        value: Value,
+        context: &str,
+    ) -> Result<Option<Vec<u8>>, RuntimeError> {
+        let nothing = VmCtx::new(self).ctor_tag_with_arity(
+            CtorRuntimeRole::PreludeMaybeNothing,
+            0,
+            context,
+        )?;
+        let just =
+            VmCtx::new(self).ctor_tag_with_arity(CtorRuntimeRole::PreludeMaybeJust, 1, context)?;
+        let Value::Obj(id) = value else {
+            return Err(RuntimeError::builtin(format!(
+                "{context} expected Maybe Bytes"
+            )));
+        };
+        match self.heap.get(id) {
+            HeapObject::Data0 { tag } if *tag == nothing => Ok(None),
+            HeapObject::Data1 { tag, field } if *tag == just => {
+                self.expect_bytes_value(*field, context).map(Some)
+            }
+            _ => Err(RuntimeError::builtin(format!(
+                "{context} expected Maybe Bytes"
+            ))),
         }
     }
 

@@ -97,6 +97,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         Ty::make_con_id(prelude_maybe_tycon_id(names)),
         bytes.clone(),
     );
+    let tls_config = tuple(names, &[string.clone(), maybe_bytes.clone()]);
     let bytes_list = Ty::make_app(Ty::make_con_id(prelude_list_tycon_id(names)), bytes.clone());
     let maybe_string = Ty::make_app(
         Ty::make_con_id(prelude_maybe_tycon_id(names)),
@@ -313,6 +314,15 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             arr(
                 &[string.clone(), int.clone()],
                 io_of(host_error.clone(), socket.clone()),
+            ),
+        ),
+        prim_spec(
+            "startTlsClient",
+            BUILTIN_START_TLS_CLIENT,
+            2,
+            arr(
+                &[socket.clone(), tls_config],
+                io_of(host_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec("resolveHost", BUILTIN_RESOLVE_HOST, 1, resolve_host),

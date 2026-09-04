@@ -181,6 +181,13 @@ byte beyond it and rejects an oversized message instead of yielding a silently
 truncated value. UDP has no EOF; the stream ends only when its owner returns or
 a pull fails or is interrupted.
 
+`std.tls.tlsBytes connection chunkSize` has the same one-bounded-read-per-demand
+shape as `tcpBytes`, but yields decrypted application bytes and belongs to a
+`TlsConnection` scope. Empty bytes require a peer `close_notify`; an
+unannounced transport EOF is a protocol error rather than a successful stream
+end. TLS records are deliberately not exposed as stream elements and do not
+define application-message boundaries.
+
 ## Scoped HTTP responses
 
 `std.http.withResponse` exposes status, headers, and a scoped `Bytes` stream.

@@ -1,0 +1,10 @@
+[TC0005] Error: type mismatch
+   ╭─[ $WORKSPACE/tests/golden/diag/tls_scope_escape/src/main.sv:6:50 ]
+   │
+ 6 │ escape port = withTlsConnection "localhost" port pureIO
+   │                                                  ───┬──
+   │                                                     ╰──── this expression has type `a^3 -> IO a^2 a^3`
+   │
+   │ Note: but it was required to have type `TlsConnection scope -> IO TlsError a^1`
+───╯
+type error

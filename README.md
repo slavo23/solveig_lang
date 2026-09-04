@@ -164,7 +164,7 @@ and includes runnable projects owned by the documentation itself.
 - [Functions, modules, and typeclasses](docs/tutorial/04-abstraction.md)
 - [IO and files](docs/tutorial/05-io-and-files.md)
 - [Concurrency](docs/tutorial/06-concurrency.md)
-- [Networking and HTTP](docs/tutorial/07-networking-and-http.md)
+- [Networking, TLS, and HTTP](docs/tutorial/07-networking-and-http.md)
 - [Parsers and JSON](docs/tutorial/08-parsers-and-json.md)
 - [Packages, CLI, and editor](docs/tutorial/09-packages-and-tooling.md)
 
@@ -231,8 +231,9 @@ maximum width with `solveig.formatting.lineWidth`.
 
 Solveig packages currently use local path dependencies. There is no registry,
 version solver, lockfile, or package-install command. Tuples support arities two
-through eight. HTTP/HTTPS is a client API; a high-level web-server framework is
-not part of `std`, although TCP listeners are available in `std.net`.
+through eight. HTTP/HTTPS and raw TLS are client APIs; a high-level web-server
+framework and TLS server API are not part of `std`, although TCP listeners are
+available in `std.net`.
 
 These boundaries are stated so examples remain honest about what the language
 can do today.

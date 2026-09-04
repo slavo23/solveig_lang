@@ -12,6 +12,15 @@ pub(super) fn connect(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, 
     Ok(ctx.alloc_io_action(IoAction::Connect { host, port }))
 }
 
+pub(super) fn start_tls_client(
+    ctx: &mut VmCtx<'_, '_>,
+    args: &[Value],
+) -> Result<Value, RuntimeError> {
+    let socket = expect_value(args, 0, "startTlsClient")?;
+    let config = expect_value(args, 1, "startTlsClient")?;
+    Ok(ctx.alloc_io_action(IoAction::StartTlsClient { socket, config }))
+}
+
 pub(super) fn resolve_host(ctx: &mut VmCtx<'_, '_>, args: &[Value]) -> Result<Value, RuntimeError> {
     let host = expect_value(args, 0, "resolveHost")?;
     Ok(ctx.alloc_io_action(IoAction::ResolveHost { host }))

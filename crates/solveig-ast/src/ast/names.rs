@@ -574,3 +574,4 @@ pub const BUILTIN_HTTP_UPLOAD_CLOSE_RAW: BuiltinId = BuiltinId(158);
 pub const BUILTIN_BIND_UDP: BuiltinId = BuiltinId(159);
 pub const BUILTIN_SEND_DATAGRAM: BuiltinId = BuiltinId(160);
 pub const BUILTIN_RECV_DATAGRAM: BuiltinId = BuiltinId(161);
+pub const BUILTIN_START_TLS_CLIENT: BuiltinId = BuiltinId(162);

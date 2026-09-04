@@ -48,6 +48,11 @@ pub(in crate::vm) enum IoRequest {
         host: String,
         port: i64,
     },
+    StartTlsClient {
+        socket: SocketId,
+        server_name: String,
+        trust_pem: Option<Vec<u8>>,
+    },
     Listen {
         port: i64,
     },
@@ -158,6 +163,7 @@ pub(in crate::vm) enum IoFailure {
         port: i64,
         source: io::Error,
     },
+    Tls(TlsFailure),
     Listen {
         port: i64,
         source: io::Error,
@@ -177,6 +183,18 @@ pub(in crate::vm) enum IoFailure {
     },
     Handle(HandleFailure),
     Http(HttpFailure),
+}
+
+pub(in crate::vm) enum TlsFailure {
+    Configuration(String),
+    Protocol {
+        operation: &'static str,
+        message: String,
+    },
+    Transport {
+        operation: &'static str,
+        source: io::Error,
+    },
 }
 
 pub(super) enum IoWork {

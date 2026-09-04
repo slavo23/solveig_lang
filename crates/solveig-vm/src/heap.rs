@@ -147,6 +147,10 @@ pub enum IoAction {
         host: Value,
         port: i64,
     },
+    StartTlsClient {
+        socket: Value,
+        config: Value,
+    },
     Listen {
         port: i64,
     },

@@ -774,6 +774,16 @@ so a stale closed identity cannot alias a later OS resource. UDP receives use
 one detection byte beyond the public bound and reject oversized messages rather
 than exposing silent truncation.
 
+A client TLS upgrade retains that same `SocketId` and installs a Rustls session
+beside an idle connected TCP stream. Handshake and record IO are advanced only
+from the socket loop's readiness events; bounded plaintext buffering prevents
+Rustls from becoming an unbounded queue. The default verifier delegates trust
+policy to the host platform, while explicit PEM roots and the verified server
+name are copied into one connection-local configuration. Cancelling a
+handshake closes the connection; cancelling a pending application read or
+write removes only that operation. Scoped close emits `close_notify` on a
+best-effort basis and then follows the ordinary deterministic socket cleanup.
+
 Every scheduler iteration first drains ready completions. If the run queue is
 empty while IO requests remain, it blocks on the completion receiver rather
 than polling or sleeping. If the queue is empty and no request can complete,

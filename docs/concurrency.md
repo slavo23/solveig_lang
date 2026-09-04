@@ -301,8 +301,11 @@ messages are consumed and rejected rather than silently truncated.
 
 The raw `Socket` identity remains package-internal plumbing. Descriptors never
 live in the moving heap, GC never closes sockets, and ids are not reused.
-`std.http` remains the platform-verified HTTPS client. General raw TLS is a
-separate trust-policy surface and is not implied by TCP.
+`std.http` remains the high-level platform-verified HTTPS client. `std.tls`
+provides a separate rank-2-scoped raw client stream, using platform trust by
+default or explicit PEM roots without an insecure verification mode. TLS
+handshake, reads, writes, cancellation, and close share the existing socket
+owner and poller rather than creating another scheduler.
 
 The [networking tutorial](tutorial/07-networking-and-http.md) combines a local
 TCP service with bounded concurrent HTTP clients. It also explains why stable

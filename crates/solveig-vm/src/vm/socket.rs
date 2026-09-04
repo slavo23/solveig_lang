@@ -2,7 +2,7 @@
 //! One event-loop thread owns every OS socket, while the scheduler exchanges
 //! typed ids, owned byte buffers, and ordinary IO completions with it.
 
-use super::io_worker::{IoCompletion, IoFailure, IoResult};
+use super::io_worker::{IoCompletion, IoFailure, IoResult, TlsFailure};
 use super::*;
 use mio::net::{TcpListener, TcpStream, UdpSocket};
 use mio::{Events, Interest, Poll, Token, Waker};
@@ -12,8 +12,10 @@ use std::sync::mpsc;
 use std::thread;
 
 mod state;
+mod tls;
 
 use state::*;
+use tls::{TlsDriveFailure, TlsState};
 
 const WAKE_TOKEN: Token = Token(0);
 const EVENT_CAPACITY: usize = 128;
@@ -22,6 +24,11 @@ pub(super) enum SocketRequest {
     Connect {
         host: String,
         port: i64,
+    },
+    StartTlsClient {
+        socket: SocketId,
+        server_name: String,
+        trust_pem: Option<Vec<u8>>,
     },
     Listen {
         port: i64,
@@ -198,6 +205,11 @@ impl SocketLoop {
     fn issue(&mut self, id: RequestId, request: SocketRequest) {
         match request {
             SocketRequest::Connect { host, port } => self.connect(id, host, port),
+            SocketRequest::StartTlsClient {
+                socket,
+                server_name,
+                trust_pem,
+            } => self.start_tls_client(id, socket, server_name, trust_pem),
             SocketRequest::Listen { port } => self.listen(id, port),
             SocketRequest::Accept(socket) => self.accept(id, socket),
             SocketRequest::Send { socket, bytes } => self.send(id, socket, bytes),
@@ -246,11 +258,54 @@ impl SocketLoop {
             SocketEntry::Stream {
                 socket,
                 connect: Some(ConnectRequest { id, host, port }),
+                tls: None,
                 reads: VecDeque::new(),
                 writes: VecDeque::new(),
                 registered: true,
             },
         );
+    }
+
+    fn start_tls_client(
+        &mut self,
+        id: RequestId,
+        socket_id: SocketId,
+        server_name: String,
+        trust_pem: Option<Vec<u8>>,
+    ) {
+        let Some(mut entry) = self.take_socket(socket_id) else {
+            self.complete(
+                id,
+                IoResult::Failed(IoFailure::Tls(TlsFailure::Configuration(
+                    "TLS requires an open connected socket".to_string(),
+                ))),
+            );
+            return;
+        };
+        let result = match &mut entry {
+            SocketEntry::Stream {
+                connect,
+                tls,
+                reads,
+                writes,
+                ..
+            } if connect.is_none() && tls.is_none() && reads.is_empty() && writes.is_empty() => {
+                TlsState::new(id, server_name, trust_pem).map(|state| *tls = Some(Box::new(state)))
+            }
+            SocketEntry::Stream { .. } => Err(TlsFailure::Configuration(
+                "TLS requires an idle, connected, non-TLS socket".to_string(),
+            )),
+            SocketEntry::Listener { .. } | SocketEntry::Datagram { .. } => Err(
+                TlsFailure::Configuration("TLS requires a connected TCP socket".to_string()),
+            ),
+        };
+        self.put_socket(socket_id, entry);
+        match result {
+            Ok(()) => self.refresh(socket_id),
+            Err(failure) => {
+                self.complete(id, IoResult::Failed(IoFailure::Tls(failure)));
+            }
+        }
     }
 
     fn listen(&mut self, id: RequestId, port: i64) {
@@ -340,7 +395,7 @@ impl SocketLoop {
                 return;
             }
         }
-        self.refresh(socket_id);
+        self.drive_tls_without_event(socket_id);
     }
 
     fn recv(&mut self, id: RequestId, socket_id: SocketId, maximum: i64) {
@@ -378,7 +433,7 @@ impl SocketLoop {
                 return;
             }
         }
-        self.refresh(socket_id);
+        self.drive_tls_without_event(socket_id);
     }
 
     fn bind_udp(&mut self, id: RequestId, port: i64) {
@@ -500,6 +555,14 @@ impl SocketLoop {
             self.complete(id, IoResult::Unit);
             return;
         };
+        if let SocketEntry::Stream {
+            socket,
+            tls: Some(tls),
+            ..
+        } = &mut entry
+        {
+            tls.send_close_notify(socket);
+        }
         let close_error = entry
             .is_registered()
             .then(|| entry.deregister(self.poll.registry()))
@@ -573,12 +636,13 @@ impl SocketLoop {
             SocketEntry::Stream {
                 socket,
                 connect,
+                tls,
                 reads,
                 writes,
                 ..
             } => {
                 let mut keep = true;
-                if event.is_writable() {
+                if tls.is_none() && event.is_writable() {
                     if let Some(request) = connect.as_ref() {
                         match socket.take_error() {
                             Ok(None) => match socket.peer_addr() {
@@ -629,8 +693,39 @@ impl SocketLoop {
                         drive_writes(socket, writes, &mut results);
                     }
                 }
-                if keep && event.is_readable() {
+                if keep && tls.is_none() && event.is_readable() {
                     drive_reads(socket, reads, &mut results);
+                }
+                if let Some(tls) = tls {
+                    if keep && tls.handshake_request().is_some() {
+                        match tls.drive_handshake(socket) {
+                            Ok(Some(id)) => results.push((id, IoResult::Unit)),
+                            Ok(None) => {}
+                            Err(failure) => {
+                                if let Some(id) = tls.handshake_request() {
+                                    tls.cancel(id);
+                                    results.push((id, IoResult::Failed(IoFailure::Tls(failure))));
+                                }
+                                keep = false;
+                            }
+                        }
+                    }
+                    if keep
+                        && tls.handshake_request().is_none()
+                        && event.is_writable()
+                        && let Err(failure) = tls.drive_writes(socket, writes, &mut results)
+                    {
+                        record_tls_failure(failure, reads, writes, &mut results);
+                        keep = false;
+                    }
+                    if keep
+                        && tls.handshake_request().is_none()
+                        && event.is_readable()
+                        && let Err(failure) = tls.drive_reads(socket, reads, &mut results)
+                    {
+                        record_tls_failure(failure, reads, writes, &mut results);
+                        keep = false;
+                    }
                 }
                 keep
             }
@@ -663,6 +758,7 @@ impl SocketLoop {
                 SocketEntry::Stream {
                     socket: stream,
                     connect: None,
+                    tls: None,
                     reads: VecDeque::new(),
                     writes: VecDeque::new(),
                     registered: false,
@@ -692,6 +788,41 @@ impl SocketLoop {
                 solveig_base::ice!("socket vanished after registration failure")
             };
             self.fail_entry(entry, &format!("socket registration failed: {error}"));
+        }
+    }
+
+    fn drive_tls_without_event(&mut self, socket_id: SocketId) {
+        let Some(mut entry) = self.take_socket(socket_id) else {
+            return;
+        };
+        let mut results = Vec::new();
+        let mut keep = true;
+        if let SocketEntry::Stream {
+            socket,
+            tls: Some(tls),
+            reads,
+            writes,
+            ..
+        } = &mut entry
+            && tls.handshake_request().is_none()
+        {
+            if let Err(failure) = tls.drive_writes(socket, writes, &mut results) {
+                record_tls_failure(failure, reads, writes, &mut results);
+                keep = false;
+            }
+            if keep && let Err(failure) = tls.drive_reads(socket, reads, &mut results) {
+                record_tls_failure(failure, reads, writes, &mut results);
+                keep = false;
+            }
+        }
+        if keep {
+            self.put_socket(socket_id, entry);
+            self.refresh(socket_id);
+        } else {
+            self.fail_entry(entry, "TLS connection failed");
+        }
+        for (id, result) in results {
+            self.complete(id, result);
         }
     }
 
@@ -741,4 +872,21 @@ impl SocketLoop {
             solveig_base::ice!("returned socket replaced a live side-table entry")
         }
     }
+}
+
+fn record_tls_failure(
+    failure: TlsDriveFailure,
+    reads: &mut VecDeque<ReadRequest>,
+    writes: &mut VecDeque<WriteRequest>,
+    results: &mut Vec<(RequestId, IoResult)>,
+) {
+    let Some(id) = failure.request else {
+        return;
+    };
+    if let Some(index) = reads.iter().position(|request| request.id == id) {
+        reads.remove(index);
+    } else if let Some(index) = writes.iter().position(|request| request.id == id) {
+        writes.remove(index);
+    }
+    results.push((id, IoResult::Failed(IoFailure::Tls(failure.failure))));
 }

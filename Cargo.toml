@@ -23,6 +23,7 @@ tracing-subscriber = "0.3"
 criterion = "0.7"
 insta = "1"
 pretty_assertions = "1"
+rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
 solveig-ast = { path = "crates/solveig-ast", version = "0.1.0" }
 solveig-vm = { path = "crates/solveig-vm", version = "0.1.0" }
 tempfile = "3"

@@ -1,6 +1,7 @@
 //! Per-resource TCP state and readiness-driven IO operations.
 
-use crate::vm::io_worker::{IoFailure, IoResult};
+use super::tls::TlsState;
+use crate::vm::io_worker::{IoFailure, IoResult, TlsFailure};
 use crate::vm::{RequestId, SocketId};
 use mio::net::{TcpListener, TcpStream, UdpSocket};
 use mio::{Interest, Registry, Token};
@@ -17,6 +18,7 @@ pub(super) enum SocketEntry {
     Stream {
         socket: TcpStream,
         connect: Option<ConnectRequest>,
+        tls: Option<Box<TlsState>>,
         reads: VecDeque<ReadRequest>,
         writes: VecDeque<WriteRequest>,
         registered: bool,
@@ -147,14 +149,18 @@ impl SocketEntry {
             Self::Listener { accepts, .. } => (!accepts.is_empty()).then_some(Interest::READABLE),
             Self::Stream {
                 connect,
+                tls,
                 reads,
                 writes,
                 ..
-            } => match (!reads.is_empty(), connect.is_some() || !writes.is_empty()) {
-                (true, true) => Some(Interest::READABLE | Interest::WRITABLE),
-                (true, false) => Some(Interest::READABLE),
-                (false, true) => Some(Interest::WRITABLE),
-                (false, false) => None,
+            } => match tls {
+                Some(tls) => tls.interest(!reads.is_empty(), !writes.is_empty()),
+                None => match (!reads.is_empty(), connect.is_some() || !writes.is_empty()) {
+                    (true, true) => Some(Interest::READABLE | Interest::WRITABLE),
+                    (true, false) => Some(Interest::READABLE),
+                    (false, true) => Some(Interest::WRITABLE),
+                    (false, false) => None,
+                },
             },
             Self::Datagram { reads, writes, .. } => match (!reads.is_empty(), !writes.is_empty()) {
                 (true, true) => Some(Interest::READABLE | Interest::WRITABLE),
@@ -176,12 +182,15 @@ impl SocketEntry {
             }
             Self::Stream {
                 connect,
+                tls,
                 reads,
                 writes,
                 ..
             } => {
                 if connect.as_ref().is_some_and(|request| request.id == id) {
                     *connect = None;
+                    CancelEffect::Close
+                } else if tls.as_mut().is_some_and(|tls| tls.cancel(id)) {
                     CancelEffect::Close
                 } else if let Some(index) = reads.iter().position(|request| request.id == id) {
                     reads.remove(index);
@@ -215,6 +224,7 @@ impl SocketEntry {
                 .collect(),
             Self::Stream {
                 connect,
+                tls,
                 reads,
                 writes,
                 ..
@@ -228,6 +238,15 @@ impl SocketEntry {
                             port: id.port,
                             source: io::Error::other(message.to_string()),
                         },
+                    ));
+                }
+                if let Some(id) = tls.and_then(|state| state.handshake_request()) {
+                    failures.push((
+                        id,
+                        IoFailure::Tls(TlsFailure::Transport {
+                            operation: "startTlsClient",
+                            source: io::Error::other(message.to_string()),
+                        }),
                     ));
                 }
                 failures.extend(reads.into_iter().map(|request| {

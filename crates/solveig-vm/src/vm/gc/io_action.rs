@@ -78,7 +78,11 @@ fn visit_action_mut(action: &mut IoAction, mut visit: impl FnMut(&mut Value)) {
             visit(channel);
             visit(value);
         }
-        IoAction::SendBytes { socket, bytes } => {
+        IoAction::SendBytes { socket, bytes }
+        | IoAction::StartTlsClient {
+            socket,
+            config: bytes,
+        } => {
             visit(socket);
             visit(bytes);
         }
@@ -197,7 +201,11 @@ fn visit_action(action: IoAction, mut visit: impl FnMut(Value)) {
             visit(channel);
             visit(value);
         }
-        IoAction::SendBytes { socket, bytes } => {
+        IoAction::SendBytes { socket, bytes }
+        | IoAction::StartTlsClient {
+            socket,
+            config: bytes,
+        } => {
             visit(socket);
             visit(bytes);
         }
