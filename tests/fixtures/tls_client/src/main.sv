@@ -1,7 +1,8 @@
 import std.bytes(*)
 import std.env(getArgs)
-import std.io(readFileBytes)
+import std.fs(FsError(..))
 import std.net(Port, portFromInt)
+import std.path(Path, pathFromString)
 import std.stream(fold)
 import std.task(withThread)
 import std.text(charToCodePoint, stringToChars)
@@ -21,9 +22,16 @@ fixturePort (spelling :: _) =
         | Left _ => error "invalid fixture port"
 fixturePort [] = error "missing fixture port"
 
-certificatePath : [String] -> String
-certificatePath (_ :: path :: _) = path
+certificatePath : [String] -> Path
+certificatePath (_ :: spelling :: _) =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error (show pathError)
 certificatePath _ = error "missing fixture certificate path"
+
+fsToHost : FsError -> HostError
+fsToHost (FsHostError _ hostError) = hostError
+fsToHost error = HostError InvalidArgument "filesystem" (show error)
 
 optionsFor : Bytes -> TlsOptions
 optionsFor certificate =
@@ -86,7 +94,7 @@ cancelThenCollect connection = do
 main : Task ()
 main = do
     arguments <- getArgs
-    certificate <- readFileBytes (certificatePath arguments)
+    certificate <- mapError fsToHost (std.fs.readFileBytes (certificatePath arguments))
     let port = fixturePort arguments
     let options = optionsFor certificate
     reply <- tlsTask $ withTlsConnectionWith options "localhost" port collectReply

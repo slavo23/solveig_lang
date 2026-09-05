@@ -242,8 +242,11 @@ impl<'a> Resolver<'a> {
         imported: &ResolverImports,
     ) -> Result<ResolvedDataDefs, KindError> {
         let mut data_tycon_kind_env = imported.tycon_kind_ids.clone();
+        data_tycon_kind_env.extend(compiler_module_primitive_tycon_kinds(
+            self.session,
+            module_name,
+        ));
         if module_name.as_string(self.session) == COMPILER_PRELUDE_BUILTINS_MODULE {
-            data_tycon_kind_env.extend(compiler_primitive_tycon_kinds());
             data_tycon_kind_env.insert(PRIM_TYS.bool, Kind::Star);
         }
 

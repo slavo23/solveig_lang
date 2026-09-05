@@ -1,10 +1,13 @@
-import std.bytes(
-    BytesBuilder, buildBytes, bytesBuilder, bytesToString, emptyBytesBuilder,
-    stringToBytes
-)
+import std.bytes(BytesBuilder,
+    buildBytes,
+    bytesBuilder,
+    bytesToString,
+    emptyBytesBuilder,
+    stringToBytes)
 import std.channel(newChan, recv, send, tryRecv)
-import std.io(withFileByteStream)
+import std.fs(FsError(..))
 import std.list(range)
+import std.path(Path, pathFromString)
 import std.stream
 import std.task(catchDefect, finally)
 import std.thread(killThread, spawn)
@@ -13,10 +16,31 @@ data PullError = PlannedPull
 
 data ObservedError = ObservedPull
 
+fsToHost : FsError -> HostError
+fsToHost (FsHostError _ hostError) = hostError
+fsToHost error = HostError InvalidArgument "filesystem" (show error)
+
+requiredPath : String -> Path
+requiredPath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error (show pathError)
+
+withFileByteStream :
+    forall result. Int ->
+    String -> (forall scope. std.stream.Stream scope HostError Bytes -> Task result) -> Task result
+withFileByteStream chunkSize spelling use =
+    let path =
+        requiredPath spelling
+    in mapError fsToHost $
+        std.fs.withFileByteStream
+            chunkSize
+            path
+            (fun stream => mapError (FsHostError path) $ use (std.stream.mapError fsToHost stream))
+
 ensure : String -> Bool -> Task ()
 ensure label condition =
-    if condition then printLine ("ok: " <> label)
-    else error ("failed: " <> label)
+    if condition then printLine ("ok: " <> label) else error ("failed: " <> label)
 
 sumValues : Int -> Int -> Int
 sumValues total value = total + value
@@ -33,9 +57,7 @@ checkFiniteAlgebra = do
                 5
                 (std.stream.filter
                     even
-                    (std.stream.map
-                        (fun value => value + 1)
-                        (std.stream.fromList values))))
+                    (std.stream.map (fun value => value + 1) (std.stream.fromList values))))
     chunks <-
         case std.stream.chunksOf 3 (std.stream.fromList [1, 2, 3, 4, 5, 6, 7, 8]) of
             Left streamError => pureIO (Left streamError)
@@ -58,7 +80,8 @@ emptyIntValues = Right []
 
 checkFiniteAdapters : Task ()
 checkFiniteAdapters = do
-    scalarCount <- std.stream.fold (fun count character => count + 1) 0 (std.stream.fromText "aé👩‍🔬é")
+    scalarCount <-
+        std.stream.fold (fun count character => count + 1) 0 (std.stream.fromText "aé👩‍🔬é")
     byteValues <- std.stream.toListLimited 3 (std.stream.fromBytes (stringToBytes "Aé"))
     ensure
         "packed text and byte adapters"
@@ -66,19 +89,17 @@ checkFiniteAdapters = do
 
 countedStep : Chan Int -> Int -> Task (Maybe (Int, Int))
 countedStep observed value =
-    if value == 10 then pureIO Nothing
-    else do
-        send observed value
-        pureIO (Just (value, value + 1))
+    if value == 10
+        then pureIO Nothing
+        else do
+            send observed value
+            pureIO (Just (value, value + 1))
 
 checkBackpressure : Task ()
 checkBackpressure = do
     observed <- newChan
     total <-
-        std.stream.fold
-            sumValues
-            0
-            (std.stream.take 3 (std.stream.unfold (countedStep observed) 0))
+        std.stream.fold sumValues 0 (std.stream.take 3 (std.stream.unfold (countedStep observed) 0))
     first <- tryRecv observed
     second <- tryRecv observed
     third <- tryRecv observed
@@ -101,13 +122,11 @@ checkBackpressure = do
                         (and
                             (extra == Nothing)
                             (and
-                                (orderedFirst == 3)
-                                (and (orderedSecond == 1) (orderedThird == 2))))))))
+                            (orderedFirst == 3)
+                            (and (orderedSecond == 1) (orderedThird == 2))))))))
 
 failingStep : Int -> IO PullError (Maybe (Int, Int))
-failingStep value =
-    if value == 3 then failIO PlannedPull
-    else pureIO (Just (value, value + 1))
+failingStep value = if value == 3 then failIO PlannedPull else pureIO (Just (value, value + 1))
 
 observePullError : ObservedError -> Task Int
 observePullError ObservedPull = pureIO (-1)
@@ -144,7 +163,8 @@ checkBounds = do
 invalidChunkResult : Either std.stream.StreamError (std.stream.Stream () HostError [Int])
 invalidChunkResult = std.stream.chunksOf 0 (std.stream.fromList [1])
 
-isInvalidChunk : forall scope e a. Either std.stream.StreamError (std.stream.Stream scope e [a]) -> Bool
+isInvalidChunk :
+    forall scope e a. Either std.stream.StreamError (std.stream.Stream scope e [a]) -> Bool
 isInvalidChunk (Left (std.stream.InvalidChunkSize 0)) = True
 isInvalidChunk _ = False
 
@@ -162,18 +182,17 @@ typedStreamFailure : forall scope. std.stream.Stream scope HostError Bytes -> Ta
 typedStreamFailure stream = failIO (HostError OtherError "stream-consumer" "planned")
 
 reportTypedStreamFailure : HostError -> Task Bool
-reportTypedStreamFailure hostError =
-    pureIO (hostErrorOperation hostError == "stream-consumer")
+reportTypedStreamFailure hostError = pureIO (hostErrorOperation hostError == "stream-consumer")
 
 defectStreamFailure : forall scope. std.stream.Stream scope HostError Bytes -> Task ()
-defectStreamFailure stream =
-    bindIO (pureIO ()) (fun ignored => pureIO (error "stream defect"))
+defectStreamFailure stream = bindIO (pureIO ()) (fun ignored => pureIO (error "stream defect"))
 
 reportDefect : Defect -> Task Bool
 reportDefect (Error "stream defect") = pureIO True
 reportDefect _ = pureIO False
 
-interruptUse : forall scope. Chan () -> Chan () -> std.stream.Stream scope HostError Bytes -> Task ()
+interruptUse :
+    forall scope. Chan () -> Chan () -> std.stream.Stream scope HostError Bytes -> Task ()
 interruptUse ready gate stream = do
     first <- std.stream.next stream
     send ready ()
@@ -183,10 +202,7 @@ interruptUse ready gate stream = do
 streamWorker : Chan () -> Chan () -> Chan () -> Task ()
 streamWorker ready gate cleaned =
     finally
-        (withFileByteStream
-            2
-            "input.txt"
-            (fun stream => interruptUse ready gate stream))
+        (withFileByteStream 2 "input.txt" (fun stream => interruptUse ready gate stream))
         (send cleaned ())
 
 checkScopedFile : Task ()
@@ -211,9 +227,7 @@ checkScopedFile = do
     started <- recv ready
     killThread worker
     finished <- recv cleaned
-    ensure
-        "rank-2 file scope cleanup"
-        (and (prefix == "abcdef") (and typed defect))
+    ensure "rank-2 file scope cleanup" (and (prefix == "abcdef") (and typed defect))
 
 main : Task ()
 main = do

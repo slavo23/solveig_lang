@@ -3,12 +3,22 @@ source: tests/snapshot_support.rs
 expression: actual
 ---
 [TC0005] Error: type mismatch
-    ╭─[ $WORKSPACE/tests/golden/diag/stream_scope_escape/src/main.sv:12:23 ]
+   ╭─[ $WORKSPACE/tests/golden/diag/stream_scope_escape/src/main.sv:9:23 ]
+   │
+ 9 │ escapeStream stream = pureIO stream
+   │                       ──────┬──────
+   │                             ╰──────── this expression has type `IO a^1 (Stream scope FsError Bytes)`
+   │
+   │ Note: but it was required to have type `IO FsError (Stream () FsError Bytes)`
+───╯
+[TC0005] Error: type mismatch
+    ╭─[ $WORKSPACE/tests/golden/diag/stream_scope_escape/src/main.sv:13:5 ]
     │
- 12 │ escapeStream stream = pureIO stream
-    │                       ──────┬──────
-    │                             ╰──────── this expression has type `IO a^1 (Stream scope HostError Bytes)`
+ 13 │ ╭─▶     escaped <- escape
+ 14 │ ├─▶     pureIO ()
+    │ │
+    │ ╰─────────────────── this expression has type `IO FsError ()`
     │
-    │ Note: but it was required to have type `IO HostError (Stream () HostError Bytes)`
+    │     Note: but it was required to have type `IO HostError ()`
 ────╯
 type error

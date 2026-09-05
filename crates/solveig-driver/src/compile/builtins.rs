@@ -1,5 +1,6 @@
 //! Compiler-known primitive builtin API construction.
-//! These specs seed the virtual `prelude.prim` module before resolution and checking.
+//! These specs seed the core `prelude.prim` and package-private `std.prim`
+//! modules before resolution and checking.
 
 use super::*;
 
@@ -27,18 +28,26 @@ fn seed_primitive_builtin_terms(
     modules: &ModuleTable,
     api: &mut BuiltinApi,
 ) {
-    let prim_module = compiler_prelude_prim_module(session);
-    let Some(module_id) = modules.id(&prim_module) else {
+    let prelude_prim = compiler_prelude_prim_module(session);
+    let std_prim = compiler_std_prim_module(session);
+    let (Some(prelude_module_id), Some(std_module_id)) =
+        (modules.id(&prelude_prim), modules.id(&std_prim))
+    else {
         return;
     };
 
     for spec in primitive_builtin_specs(names) {
+        let (module_id, module_name) = if is_prelude_primitive(spec.short_name) {
+            (prelude_module_id, COMPILER_PRELUDE_PRIM_MODULE)
+        } else {
+            (std_module_id, COMPILER_STD_PRIM_MODULE)
+        };
         let symbol = session.intern(spec.short_name);
         let id = DefId {
             module: module_id,
             name: symbol,
         };
-        let full_name = format!("{COMPILER_PRELUDE_PRIM_MODULE}.{}", spec.short_name);
+        let full_name = format!("{module_name}.{}", spec.short_name);
 
         names.register_symbol(symbol, spec.short_name);
         names.register_def(id, &full_name);
@@ -52,6 +61,78 @@ fn seed_primitive_builtin_terms(
             scheme: spec.scheme,
         });
     }
+}
+
+fn is_prelude_primitive(name: &str) -> bool {
+    // Defaulting new primitives to private std ownership prevents an omitted
+    // classification from accidentally publishing a host operation.
+    matches!(
+        name,
+        "bindIO"
+            | "bytesEq"
+            | "catchDefectIO"
+            | "catchIO"
+            | "charCompare"
+            | "charEq"
+            | "charToCodePoint"
+            | "charToString"
+            | "charsToString"
+            | "codePointToString"
+            | "error"
+            | "failIO"
+            | "floatAdd"
+            | "floatDiv"
+            | "floatEq"
+            | "floatGe"
+            | "floatGt"
+            | "floatLe"
+            | "floatLt"
+            | "floatMul"
+            | "floatNeg"
+            | "floatSub"
+            | "floatToInt"
+            | "floatToString"
+            | "floatTotalCompare"
+            | "finallyIO"
+            | "hFlush"
+            | "hGetLine"
+            | "hPutStr"
+            | "hPutStrLn"
+            | "intAdd"
+            | "intCompare"
+            | "intDiv"
+            | "intEq"
+            | "intGe"
+            | "intGt"
+            | "intLe"
+            | "intLt"
+            | "intMod"
+            | "intMul"
+            | "intNeg"
+            | "intSub"
+            | "intToFloat"
+            | "intToString"
+            | "maskIO"
+            | "pureIO"
+            | "raiseDefectIO"
+            | "restoreMaskIO"
+            | "stdin"
+            | "stdout"
+            | "stringAppend"
+            | "stringByteLength"
+            | "stringByteSlice"
+            | "stringCharAt"
+            | "stringCharAtByte"
+            | "stringCompare"
+            | "stringEq"
+            | "stringFindCharFrom"
+            | "stringLength"
+            | "stringSlice"
+            | "stringStartsWith"
+            | "stringToChars"
+            | "stringTrimAscii"
+            | "stringsConcat"
+    )
 }
 
 pub(super) struct PrimitiveBuiltinSpec {

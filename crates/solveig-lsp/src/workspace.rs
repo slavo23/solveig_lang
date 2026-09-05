@@ -814,6 +814,7 @@ pub(crate) mod tests {
             "std/src/std/map.sv",
             "std/src/std/net.sv",
             "std/src/std/path.sv",
+            "std/src/std/prim.sv",
             "std/src/std/process.sv",
             "std/src/std/random.sv",
             "std/src/std/stream.sv",

@@ -73,15 +73,14 @@ export (Url,
     bodyChunks,
     foldBodyChunks)
 
-import prelude.prim(httpOpenRaw,
+import prelude.prim as CorePrim(stringLength, stringSlice)
+import std.prim as HostPrim(httpOpenRaw,
     httpRequestRaw,
     httpUploadStartRaw,
     httpUploadChunkRaw,
     httpUploadCloseRaw,
     hClose,
-    hGetBytes,
-    stringLength,
-    stringSlice)
+    hGetBytes)
 import std.bytes(*)
 import std.text(*)
 import std.path(Path, pathToString)
@@ -146,7 +145,7 @@ instance Show Status where
 instance Hashable Status where
     hashWithSalt salt (Status code) = hashWithSalt salt code
 
--- | A bounded HTTP response. The body is never larger than maximumBodyBytes.
+-- | A bounded HTTP response. Its body obeys the request's buffered-body limit.
 data Response = Response Status [Header] Bytes
 
 -- | Pure request-policy errors or a typed host HTTP failure.
@@ -340,7 +339,7 @@ validUrlText text =
             else if std.text.startsWith "http://" text then 7 else -1
     in and
         (start >= 0)
-        (validUrlTail (prelude.prim.stringSlice text start (prelude.prim.stringLength text)))
+        (validUrlTail (CorePrim.stringSlice text start (CorePrim.stringLength text)))
 
 validUrlTail : String -> Bool
 validUrlTail tail = validUrlAuthority (std.text.stringToChars tail) 0
@@ -369,7 +368,7 @@ validUrlChars (character :: rest) =
 
 validHeaderName : String -> Bool
 validHeaderName name =
-    and (prelude.prim.stringLength name > 0) (allHeaderNameChars (std.text.stringToChars name))
+    and (CorePrim.stringLength name > 0) (allHeaderNameChars (std.text.stringToChars name))
 
 allHeaderNameChars : [Char] -> Bool
 allHeaderNameChars [] = True
@@ -745,7 +744,7 @@ requestWith configured method spelling =
                 bufferedMaximum configured
             in fmap responseFromRaw $
                 mapError (httpHostError configured (Just maximum)) $
-                prelude.prim.httpRequestRaw prepared (limitsToRaw configured (Just maximum))
+                HostPrim.httpRequestRaw prepared (limitsToRaw configured (Just maximum))
 
 -- | Sends a one-shot scoped byte stream and buffers the bounded response.
 -- | The stream is pulled only when the transport requests more input.
@@ -805,7 +804,7 @@ withResponseWith configured method spelling use =
         | Right prepared =>
             bracket
                 (mapError (httpHostError configured (maximumResponseBytes configured)) $
-                    prelude.prim.httpOpenRaw
+                    HostPrim.httpOpenRaw
                         prepared
                         (limitsToRaw configured (maximumResponseBytes configured)))
                 closeResponse
@@ -844,7 +843,7 @@ withStreamResponseWith configured method upload spelling use =
         | Right prepared =>
             bracket
                 (mapError (httpHostError configured (maximumResponseBytes configured)) $
-                    prelude.prim.httpUploadStartRaw
+                    HostPrim.httpUploadStartRaw
                         prepared
                         (limitsToRaw configured (maximumResponseBytes configured)))
                 closeUpload
@@ -888,7 +887,7 @@ feedUpload configured upload (handle, responseValue) =
                                             (httpHostError
                                             configured
                                             (maximumResponseBytes configured)) $
-                                        prelude.prim.httpUploadChunkRaw handle (Just bytes)
+                                        HostPrim.httpUploadChunkRaw handle (Just bytes)
                                 feedUpload configured rest event
 
 continueUpload :
@@ -896,13 +895,13 @@ continueUpload :
 continueUpload configured handle bytes = do
     event <-
         mapError (httpHostError configured (maximumResponseBytes configured)) $
-            prelude.prim.httpUploadChunkRaw handle bytes
+            HostPrim.httpUploadChunkRaw handle bytes
     case event of
         (nextHandle, Just responseValue) => pureIO (nextHandle, responseValue)
         | (nextHandle, Nothing) => continueUpload configured nextHandle Nothing
 
 closeUpload : RawUploadEvent -> IO HttpError ()
-closeUpload (handle, _) = mapError HttpHostError $ prelude.prim.httpUploadCloseRaw handle
+closeUpload (handle, _) = mapError HttpHostError $ HostPrim.httpUploadCloseRaw handle
 
 type RawBody = (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])
 type RawRequest = (String, String, [(String, String)], [(String, String)], RawBody)
@@ -1034,13 +1033,12 @@ responseBodyLimitError (Just maximum) _ = ResponseBodyTooLarge maximum
 responseBodyLimitError Nothing hostError = HttpHostError hostError
 
 closeResponse : (Int, [(String, String)], Handle) -> IO HttpError ()
-closeResponse (_, _, handle) = mapError HttpHostError $ prelude.prim.hClose handle
+closeResponse (_, _, handle) = mapError HttpHostError $ HostPrim.hClose handle
 
 responseByteStep : HttpOptions -> Handle -> () -> IO HttpError (Maybe (Bytes, ()))
 responseByteStep configured handle _ = do
     bytes <-
-        mapError (responseReadError configured) $
-            prelude.prim.hGetBytes handle (chunkBytes configured)
+        mapError (responseReadError configured) $ HostPrim.hGetBytes handle (chunkBytes configured)
     if bytesLength bytes == 0 then pureIO Nothing else pureIO (Just (bytes, ()))
 
 responseReadError : HttpOptions -> HostError -> HttpError

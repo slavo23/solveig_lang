@@ -163,7 +163,22 @@ fn byte_file_and_handle_io_preserves_invalid_utf8() {
     let project_root = write_temp_project(
         "binary_io",
         r#"import std.bytes(*)
+import std.fs(FsError(..))
 import std.io(*)
+import std.path(Path, pathFromString)
+
+fsToHost : FsError -> HostError
+fsToHost (FsHostError _ hostError) = hostError
+fsToHost error = HostError InvalidArgument "filesystem" (show error)
+
+requiredPath : String -> Path
+requiredPath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error (show pathError)
+
+asTask : forall a. IO FsError a -> Task a
+asTask = mapError fsToHost
 
 readBytes : Handle -> Task Bytes;
 readBytes input = hGetBytes input 64;
@@ -179,11 +194,11 @@ describeUtf8 result =
 
 main : Task ();
 main = do
-    whole <- readFileBytes "invalid.bin"
+    whole <- asTask (std.fs.readFileBytes (requiredPath "invalid.bin"))
     handleWrite <- withFile "handle-copy.bin" WriteMode (writeBytes whole)
     throughHandle <- withFile "invalid.bin" ReadMode readBytes
-    writeFileBytes "whole-copy.bin" throughHandle
-    copied <- readFileBytes "whole-copy.bin"
+    asTask (std.fs.writeFileBytes (requiredPath "whole-copy.bin") throughHandle)
+    copied <- asTask (std.fs.readFileBytes (requiredPath "whole-copy.bin"))
     printLine (show (bytesLength copied))
     describeUtf8 (bytesToString copied);
 "#,
@@ -352,13 +367,25 @@ fn file_io_reads_writes_and_appends_project_relative_text() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
         "file_io",
-        r#"import std.io(*)
+        r#"import std.fs(FsError(..))
+import std.path(Path, pathFromString)
+
+fsToHost : FsError -> HostError
+fsToHost (FsHostError _ hostError) = hostError
+fsToHost error = HostError InvalidArgument "filesystem" (show error)
+
+requiredPath : String -> Path
+requiredPath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error (show pathError)
 
 main : Task ()
 main = do
-    writeFile "score.txt" "seed\n"
-    appendFile "score.txt" "extra\n"
-    contents <- readFile "score.txt"
+    let score = requiredPath "score.txt"
+    mapError fsToHost (std.fs.writeFile score "seed\n")
+    mapError fsToHost (std.fs.appendFile score "extra\n")
+    contents <- mapError fsToHost (std.fs.readFile score)
     printStr contents
 "#,
     );

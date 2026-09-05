@@ -105,7 +105,7 @@ impl<'a> FrontendState<'a> {
             let package = project.module_table.package(module_id);
             match build_module_api(package, module_id, parsed.get(session, module_name)) {
                 Ok(mut api) => {
-                    seed_compiler_prelude_module_api(
+                    seed_compiler_module_api(
                         session,
                         module_name,
                         module_id,

@@ -1,3 +1,2 @@
 ok: platform path algebra
-ok: incremental UTF-8 boundary
 ok: strict and scoped filesystem text

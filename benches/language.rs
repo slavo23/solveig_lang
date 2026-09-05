@@ -37,9 +37,6 @@ fn benchmark_language(c: &mut Criterion) {
     benchmark_pure(c, "association_lookup", "associationLookupMain", "2045360");
     benchmark_pure(c, "queue", "queueMain", "500500");
     benchmark_pure(c, "naive_queue", "naiveQueueMain", "500500");
-    benchmark_pure(c, "json_scan_bulk", "jsonScanBulkMain", "128000");
-    benchmark_pure(c, "json_scan_scalar", "jsonScanScalarMain", "128000");
-
     let input = Path::new(PROJECT_ROOT).join("src/main.sv");
     benchmark_io(c, "file_io", "fileIoMain", "64\n", &[path_arg(&input)]);
     benchmark_io(c, "channels", "channelMain", "50005000\n", &[]);

@@ -10,6 +10,8 @@ bad surrogate: line 1, column 2 (offset 1): parse failed; invalid JSON Unicode e
 unescaped control: line 1, column 6 (offset 5): parse failed; unescaped control byte 10 in JSON string
 invalid UTF-8 JSON: line 1, column 3 (offset 2): parse failed; invalid UTF-8 in JSON string at byte 0
 number grammar: [True, True, True, True, True, False, False, False, False, False, False]
+named limits: [2, 3, 4, 5, 6]
+invalid limit: line 1, column 1 (offset 0): parse failed; invalid JSON limit maximumDepth: -1
 string limit: line 1, column 6 (offset 5): parse failed; JSON string exceeds maximum 3 raw bytes
 depth limit: line 1, column 2 (offset 1): unexpected 91; expected ]; JSON nesting exceeds maximum depth 1
 input limit: line 1, column 1 (offset 0): parse failed; JSON input/output has 4 bytes; maximum is 2
@@ -25,7 +27,7 @@ tagged decode: Started "build"
 tagged encode: {"clean":true,"type":"stopped"}
 unknown tag: line 1, column 18 (offset 17): parse failed; JSON decode at $["type"]: unknown variant tag "paused"
 exact ints: [Just 1, Just 1200, Nothing, Just 1, Just 123, Just 9223372036854775807, Just -9223372036854775808, Nothing, Nothing, Just 0]
-forged exact int: Nothing
+invalid exact number: False
 long exact numbers: [Just 1, Just 1, Just -1, Just 0, Nothing, Nothing]
 large array round trip: True:20000
 record round trip: Person "Ada" False Just "A"
@@ -38,10 +40,7 @@ direct syntax path: line 1, column 7 (offset 6): unexpected 102; expected double
 duplicate encoder field: JSON encode at $["x"]: duplicate encoded field
 encoder tag collision: JSON encode at $["type"]: duplicate encoded field
 unmatched encoder variant: JSON encode at $: no tagged encoder variant matched
-encoder nested failure: JSON encode at $[1]: invalid JSON number "NaN"
+encoder nested failure: JSON encode at $[1]: no tagged encoder variant matched
 render escapes: {"flag":true,"line\n":"tab\tquote\""}
 render round trip: {"flag":true,"line\n":"tab\tquote\""}
-forged number: invalid JSON number "NaN"
-bulk scans: [3, 3, 4, 5]
-UTF-8 slice: ☃
-invalid UTF-8 slice: invalid UTF-8
+invalid number: False

@@ -164,14 +164,32 @@ reply =
 JSON objects use `std.map.Map String Json`; arrays use `std.vector.Vector Json`.
 Object ordering is deterministic. Duplicate keys are rejected. `JsonNumber`
 retains a validated decimal spelling instead of forcing every number through a
-`Float`.
+`Float`. Its constructor is private, so every `JsonNumber` satisfies that
+invariant. Use `jsonNumberFromInt`, `jsonNumberFromString`, or
+`jsonNumberFromFloat`. If a domain intentionally permits number tokens longer
+than the default 1024 bytes, use `jsonNumberFromStringWith` and an explicit
+`withMaximumNumberBytes` policy.
 
 Unlike ordinary `readFile` and `get`, JSON parsing necessarily receives a
 policy because the parser itself is consuming potentially adversarial nested
 data. `defaultJsonLimits` is the normal choice: 16 MiB input, nesting depth 128,
 1 MiB per string, one million items in one container, and 1024 bytes in one
-number token. Construct `JsonLimits` explicitly only when the domain needs a
-different boundary.
+number token. `JsonLimits` is opaque, so a changed policy names what it changes:
+
+```solveig
+import std.json(JsonLimits, defaultJsonLimits, withMaximumDepth, withMaximumInputBytes)
+
+apiLimits : JsonLimits
+apiLimits =
+    withMaximumDepth 32 $
+        withMaximumInputBytes 2097152 defaultJsonLimits
+```
+
+The application operator `$` keeps a chain of immutable updates readable. This
+policy accepts at most 2 MiB of input and 32 nested arrays or objects while
+retaining the other defaults. Negative settings are configuration errors,
+reported as `InvalidJsonLimit` when the policy is used; they never mean
+"unbounded."
 
 ## Decode directly
 
@@ -247,8 +265,9 @@ spelling. It returns `Just` only when the mathematical value is integral and
 inside the signed `Int` range; it never rounds through `Float`.
 
 Use `renderJson` for default rendering limits and `renderJsonWith` for an
-application-specific policy. Smart constructors validate number spellings;
-rendering also revalidates a directly constructed `JsonNumber`.
+application-specific policy. Because the `JsonNumber` representation is
+private, rendering only needs to enforce the selected output limits; invalid
+number spellings cannot enter a `Json` value through the public API.
 
 ## Parser design checklist
 

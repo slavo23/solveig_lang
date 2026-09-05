@@ -83,7 +83,7 @@ solveig --project-root path/to/hello
 The Prelude is available automatically. Standard-library modules are explicit:
 
 ```solveig
-import std.io(readFile)
+import std.fs(readFile)
 import std.text(lines)
 ```
 
@@ -96,7 +96,7 @@ Library modules publish a deliberate external API while keeping unlisted
 definitions reusable inside their package:
 
 ```solveig
-import std.io(readFile)
+import std.fs(readFile)
 
 export (Config, loadConfig)
 private (validateRawConfig)
@@ -126,11 +126,22 @@ describe (Just value) = "value: " <> show value
 Effects are visible in types and sequenced with `do`:
 
 ```solveig
-import std.io(readFile)
+import std.fs(FsError(..), readFile)
+import std.path(Path, pathFromString)
+
+messagePath : Path
+messagePath =
+    case pathFromString "message.txt" of
+        Right path => path
+        | Left pathError => error (show pathError)
+
+fsToHost : FsError -> HostError
+fsToHost (FsHostError _ hostError) = hostError
+fsToHost fileError = HostError InvalidArgument "filesystem" (show fileError)
 
 main : Task ()
 main = do
-    text <- readFile "message.txt"
+    text <- mapError fsToHost (readFile messagePath)
     printStr text
 ```
 

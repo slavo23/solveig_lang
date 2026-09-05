@@ -1,4 +1,4 @@
-import std.bytes(bytesAppend, bytesLength, bytesSlice, bytesUtf8ValidPrefix, stringToBytes)
+import std.bytes(bytesAppend, bytesLength, bytesSlice, stringToBytes)
 import std.fs(FsError(..))
 import std.list(length)
 import std.path(*)
@@ -21,27 +21,29 @@ asTask = mapError fsToHost
 
 ensure : String -> Bool -> Task ()
 ensure label condition =
-    if condition then printLine ("ok: " <> label)
-    else error ("failed: " <> label)
+    if condition then printLine ("ok: " <> label) else error ("failed: " <> label)
 
 checkPaths : Task ()
 checkPaths =
-    let base = fixturePath "data" in
-    let joined = base </> fixturePath "items/file.txt" in
-    let reduced = normalise (fixturePath "data/./items/../file.txt") in
-    ensure
+    let base =
+        fixturePath "data"
+    in let joined =
+        base </> fixturePath "items/file.txt"
+    in let reduced =
+        normalise (fixturePath "data/./items/../file.txt")
+    in ensure
         "platform path algebra"
         (and
             (joined == fixturePath "data/items/file.txt")
             (and
                 (reduced == fixturePath "data/file.txt")
                 (and
-                    (parent joined == Just (fixturePath "data/items"))
-                    (and
-                        (fileName joined == Just "file.txt")
-                        (and
-                            (extension joined == Just "txt")
-                            (and (isRelative joined) (not (isAbsolute joined))))))))
+                (parent joined == Just (fixturePath "data/items"))
+                (and
+                (fileName joined == Just "file.txt")
+                (and
+                (extension joined == Just "txt")
+                (and (isRelative joined) (not (isAbsolute joined))))))))
 
 appendText : String -> String -> String
 appendText = (<>)
@@ -49,7 +51,9 @@ appendText = (<>)
 collectText : forall scope. std.stream.Stream scope FsError String -> IO FsError String
 collectText = std.stream.fold appendText ""
 
-collectLines : forall scope. std.stream.Stream scope FsError String -> IO FsError (Either std.stream.StreamError [String])
+collectLines :
+    forall scope. std.stream.Stream scope FsError String ->
+    IO FsError (Either std.stream.StreamError [String])
 collectLines = std.stream.toListLimited 8
 
 countBytes : Int -> Bytes -> Int
@@ -67,15 +71,6 @@ observeInvalid expected action =
     catchError
         (bindIO action (fun ignored => pureIO False))
         (fun fsError => pureIO (isInvalidAt expected fsError))
-
-checkUtf8Prefix : Task ()
-checkUtf8Prefix =
-    let incomplete = bytesSlice (stringToBytes "é") 0 1 in
-    ensure
-        "incremental UTF-8 boundary"
-        (and
-            (bytesUtf8ValidPrefix incomplete False == Right 0)
-            (bytesUtf8ValidPrefix incomplete True == Left (InvalidUtf8 0)))
 
 checkFiles : Task ()
 checkFiles = do
@@ -98,10 +93,7 @@ checkFiles = do
     let malformed = bytesAppend (stringToBytes "ok") incomplete
     asTask (std.fs.writeFileBytes invalidPath malformed)
     strictInvalid <- observeInvalid 2 (std.fs.readFile invalidPath)
-    streamInvalid <-
-        observeInvalid
-            2
-            (std.fs.withFileTextStream 2 invalidPath collectText)
+    streamInvalid <- observeInvalid 2 (std.fs.withFileTextStream 2 invalidPath collectText)
     ensure
         "strict and scoped filesystem text"
         (and
@@ -121,5 +113,4 @@ checkFiles = do
 main : Task ()
 main = do
     checkPaths
-    checkUtf8Prefix
     checkFiles

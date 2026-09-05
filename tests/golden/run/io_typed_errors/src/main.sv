@@ -1,4 +1,3 @@
-import prelude.prim
 import std.env(EnvError(..))
 import std.fs(FsError(..))
 import std.http(HttpError(..))
@@ -23,24 +22,31 @@ toHostError Missing = testHostError "mapped"
 
 reportOperation : String -> String -> HostError -> Task ()
 reportOperation expected label hostError =
-    if hostErrorOperation hostError == expected then printLine label
-    else printLine ("unexpected operation " <> hostErrorOperation hostError)
+    if hostErrorOperation hostError == expected
+        then printLine label
+        else printLine ("unexpected operation " <> hostErrorOperation hostError)
 
 reportMapped : HostError -> Task ()
 reportMapped error = reportOperation "mapped" "mapped-error" error
 
-reportRead : HostError -> Task ()
-reportRead error = reportOperation "readFile" "read-file-error" error
-
 reportWrite : HostError -> Task ()
 reportWrite error = reportOperation "writeFile" "write-file-error" error
 
-reportAppend : HostError -> Task ()
-reportAppend error = reportOperation "appendFile" "append-file-error" error
+reportFs : String -> String -> FsError -> Task ()
+reportFs operation label (FsHostError _ hostError) = reportOperation operation label hostError
+reportFs _ label (FsInvalidUtf8 _ _) = printLine ("unexpected UTF-8 failure in " <> label)
+
+reportReadFs : FsError -> Task ()
+reportReadFs = reportFs "readFile" "read-file-error"
+
+reportWriteFs : FsError -> Task ()
+reportWriteFs = reportFs "writeFile" "write-file-error"
+
+reportAppendFs : FsError -> Task ()
+reportAppendFs = reportFs "appendFile" "append-file-error"
 
 infrastructureError : ConcurrentError DomainError
-infrastructureError =
-    ConcurrentInfrastructure (HostError PermissionDenied "openFile" "denied")
+infrastructureError = ConcurrentInfrastructure (HostError PermissionDenied "openFile" "denied")
 
 fixturePath : String -> Path
 fixturePath spelling =
@@ -59,9 +65,7 @@ releaseResource name = printLine (appendString "release " name)
 
 useResource : String -> Task ()
 useResource name =
-    bindIO
-        (printLine (appendString "use " name))
-        (fun value => failIO (testHostError "use"))
+    bindIO (printLine (appendString "use " name)) (fun value => failIO (testHostError "use"))
 
 cleanupFailure : Task ()
 cleanupFailure =
@@ -76,10 +80,7 @@ releaseFailure : Task ()
 releaseFailure = failIO (testHostError "writeFile")
 
 cleanupReplacesFailure : Task ()
-cleanupReplacesFailure =
-    catchError
-        (finally bodyFailure releaseFailure)
-        reportWrite
+cleanupReplacesFailure = catchError (finally bodyFailure releaseFailure) reportWrite
 
 bracketFailure : Task ()
 bracketFailure =
@@ -96,9 +97,7 @@ stopAction = failIO (testHostError "stop")
 skippedBind : Task ()
 skippedBind =
     catchError
-        (bindIO
-            stopAction
-            (fun value => printLine "bind-ran"))
+        (bindIO stopAction (fun value => printLine "bind-ran"))
         (fun error => printLine "bind-skipped")
 
 main : Task ()
@@ -112,10 +111,10 @@ main = do
     fallbackAction
     skippedBind
     catchError
-        (bindIO (prelude.prim.readFile "missing.txt") (fun contents => pureIO ()))
-        reportRead
-    catchError (prelude.prim.writeFile "missing/child.txt" "text") reportWrite
-    catchError (prelude.prim.appendFile "missing/child.txt" "text") reportAppend
+        (bindIO (std.fs.readFile (fixturePath "missing.txt")) (fun contents => pureIO ()))
+        reportReadFs
+    catchError (std.fs.writeFile (fixturePath "missing/child.txt") "text") reportWriteFs
+    catchError (std.fs.appendFile (fixturePath "missing/child.txt") "text") reportAppendFs
     let denied = HostError PermissionDenied "openFile" "denied"
     printLine (show denied)
     printLine (show (FsHostError (fixturePath "settings.conf") denied))

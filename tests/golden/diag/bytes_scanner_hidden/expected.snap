@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0014] Error: module `std.bytes` does not export `bytesSpanRange`
+   ╭─[ $WORKSPACE/tests/golden/diag/bytes_scanner_hidden/src/main.sv:1:18 ]
+   │
+ 1 │ import std.bytes(bytesSpanRange, stringToBytes)
+   │                  ───────┬──────
+   │                         ╰──────── `bytesSpanRange` is not exported by this module
+───╯
+resolve error

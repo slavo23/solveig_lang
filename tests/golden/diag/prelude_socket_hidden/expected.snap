@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0014] Error: module `prelude.builtins` does not export `Socket`
+   ╭─[ $WORKSPACE/tests/golden/diag/prelude_socket_hidden/src/main.sv:1:25 ]
+   │
+ 1 │ import prelude.builtins(Socket)
+   │                         ───┬──
+   │                            ╰──── `Socket` is not exported by this module
+───╯
+resolve error

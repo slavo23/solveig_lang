@@ -1,7 +1,6 @@
 import std.fs(*)
-import std.io(*)
 import std.map(*)
-import std.path(*)
+import std.path(Path)
 import std.text(*)
 import release_radar.model(*)
 
@@ -26,10 +25,12 @@ insertCacheLine entries line =
         Nothing => entries
         | Just (repository, etag) => std.map.insert repository etag entries
 
-loadCache : String -> Task Cache
+loadCache : Path -> Task Cache
 loadCache path = do
-    exists <- mapError fsToHost (std.fs.doesFileExist (requiredPath path))
-    if exists then fmap parseCache (std.io.readFileLimited path 65536) else pureIO empty
+    exists <- mapError fsToHost (std.fs.doesFileExist path)
+    if exists
+        then fmap parseCache (mapError fsToHost (std.fs.readFileLimited path 65536))
+        else pureIO empty
 
 updateCache : Cache -> [release_radar.model.ReleaseResult] -> Cache
 updateCache (Cache entries) results = Cache (foldl updateEntry entries results)
@@ -47,11 +48,5 @@ cacheText (Cache entries) = foldr appendCacheEntry "" (std.map.toAscList entries
 appendCacheEntry : (String, String) -> String -> String
 appendCacheEntry (repository, etag) rest = repository <> "\t" <> etag <> "\n" <> rest
 
-writeCache : String -> Cache -> Task ()
-writeCache path = std.io.writeFile path . cacheText
-
-requiredPath : String -> Path
-requiredPath spelling =
-    case pathFromString spelling of
-        Right path => path
-        | Left pathError => error ("invalid Release Radar path: " <> show pathError)
+writeCache : Path -> Cache -> Task ()
+writeCache path = mapError fsToHost . std.fs.writeFile path . cacheText

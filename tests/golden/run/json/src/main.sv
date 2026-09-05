@@ -117,6 +117,12 @@ exactInt text =
         Nothing => Nothing
         | Just number => std.json.jsonNumberToInt number
 
+exactIntWith : std.json.JsonLimits -> String -> Maybe Int
+exactIntWith limits text =
+    case std.json.jsonNumberFromStringWith limits text of
+        Nothing => Nothing
+        | Just number => std.json.jsonNumberToInt number
+
 -- No Show instance: validation errors must survive decoding as typed data.
 data NameError = EmptyName
 
@@ -187,8 +193,10 @@ longExactNumbers : [Maybe Int]
 longExactNumbers =
     let zeros =
         std.text.charsToString (map (const '0') (std.list.range 0 2999))
+    in let limits =
+        std.json.withMaximumNumberBytes 4096 std.json.defaultJsonLimits
     in map
-        (std.json.jsonNumberToInt . std.json.JsonNumber)
+        (exactIntWith limits)
         [
             "0." <> zeros <> "1e3000",
             "1" <> zeros <> "0e-3000",
@@ -218,11 +226,6 @@ roundTrip value =
             replyText
                 renderedJson
                 (std.json.parseJson std.json.defaultJsonLimits (std.bytes.stringToBytes text))
-
-utf8SliceText : Either Utf8Error String -> String
-utf8SliceText (Right text) = text
-utf8SliceText (Left (InvalidUtf8 _)) = "invalid UTF-8"
-utf8SliceText (Left _) = "unexpected error"
 
 validNumber : String -> Bool
 validNumber text =
@@ -280,40 +283,63 @@ main = do
             (map
                 validNumber
                 ["0", "-0", "1.25", "1e2", "1E-2", "+1", ".1", "1.", "1e", "00", "--1"]))
+    let namedLimits =
+        std.json.withMaximumInputBytes 2 $
+            std.json.withMaximumDepth 3 $
+            std.json.withMaximumStringBytes 4 $
+            std.json.withMaximumContainerItems 5 $
+            std.json.withMaximumNumberBytes 6 std.json.defaultJsonLimits
+    printCase
+        "named limits"
+        (show
+            [
+                std.json.maximumInputBytes namedLimits,
+                std.json.maximumDepth namedLimits,
+                std.json.maximumStringBytes namedLimits,
+                std.json.maximumContainerItems namedLimits,
+                std.json.maximumNumberBytes namedLimits
+            ])
+    printCase
+        "invalid limit"
+        (replyText
+            renderedJson
+            (std.json.parseJson
+                (std.json.withMaximumDepth (-1) std.json.defaultJsonLimits)
+                (std.bytes.stringToBytes "null")))
     printCase
         "string limit"
         (replyText
             renderedJson
             (std.json.parseJson
-                (std.json.JsonLimits 100 8 3 10 20)
+                (std.json.withMaximumStringBytes 3 std.json.defaultJsonLimits)
                 (std.bytes.stringToBytes "\"four\"")))
     printCase
         "depth limit"
         (replyText
             renderedJson
             (std.json.parseJson
-                (std.json.JsonLimits 100 1 20 10 20)
+                (std.json.withMaximumDepth 1 std.json.defaultJsonLimits)
                 (std.bytes.stringToBytes "[[0]]")))
     printCase
         "input limit"
         (replyText
             renderedJson
             (std.json.parseJson
-                (std.json.JsonLimits 2 8 20 10 20)
+                (std.json.withMaximumInputBytes 2 std.json.defaultJsonLimits)
                 (std.bytes.stringToBytes "true")))
     printCase
         "number limit"
         (replyText
             renderedJson
             (std.json.parseJson
-                (std.json.JsonLimits 100 8 20 10 2)
+                (std.json.withMaximumNumberBytes 2 std.json.defaultJsonLimits)
                 (std.bytes.stringToBytes "123")))
     printCase
         "container limit"
         (replyText
             renderedJson
             (std.json.parseJson
-                (std.json.JsonLimits 100 8 20 1 20)
+                (std.json.withMaximumContainerItems 1 std.json.defaultJsonLimits)
                 (std.bytes.stringToBytes "[1,2]")))
     printCase
         "direct strings"
@@ -393,7 +419,7 @@ main = do
                     "-9223372036854775809",
                     "0e999"
                 ]))
-    printCase "forged exact int" (show (std.json.jsonNumberToInt (std.json.JsonNumber "01")))
+    printCase "invalid exact number" (show (validNumber "01"))
     printCase "long exact numbers" (show longExactNumbers)
     printCase "large array round trip" largeArrayRoundTrip
     printCase
@@ -463,21 +489,11 @@ main = do
     printCase
         "encoder nested failure"
         (encoded
-            (std.json.arrayEncoder std.json.numberEncoder)
-            (std.vector.fromList [std.json.JsonNumber "1", std.json.JsonNumber "NaN"]))
+            (std.json.arrayEncoder
+                (std.json.taggedEncoder
+                    "type"
+                    [std.json.variantEncoder "started" startedProjection []]))
+            (std.vector.fromList [Started "ok", Stopped False]))
     printCase "render escapes" (renderedJson manualJson)
     printCase "render round trip" (roundTrip manualJson)
-    printCase "forged number" (renderedJson (std.json.JsonNumberValue (std.json.JsonNumber "NaN")))
-    let scanBytes = std.bytes.stringToBytes "123,\n"
-    printCase
-        "bulk scans"
-        (show
-            [
-                std.bytes.bytesSpanRange scanBytes 0 48 57,
-                std.bytes.bytesFindAny scanBytes 0 (std.bytes.stringToBytes ","),
-                std.bytes.bytesFindBelow scanBytes 0 32,
-                std.bytes.bytesSpanAny scanBytes 4 (std.bytes.stringToBytes "\n")
-            ])
-    let snowmanBytes = std.bytes.stringToBytes "☃"
-    printCase "UTF-8 slice" (utf8SliceText (std.bytes.bytesSliceToString snowmanBytes 0 3))
-    printCase "invalid UTF-8 slice" (utf8SliceText (std.bytes.bytesSliceToString snowmanBytes 0 1))
+    printCase "invalid number" (show (validNumber "NaN"))

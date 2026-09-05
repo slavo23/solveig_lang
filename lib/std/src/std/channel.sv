@@ -1,17 +1,19 @@
 export (newChan, newBoundedChan, send, recv, tryRecv, closeChan)
 
-import prelude.prim(newChan, newBoundedChan, send, recv, tryRecv, closeChan)
+import std.prim(newChan, newBoundedChan, send, recv, tryRecv, closeChan)
 
 -- | Creates an unbounded typed channel.
 newChan : forall e a. IO e (Chan a)
-newChan = prelude.prim.newChan
+newChan = std.prim.newChan
 
 -- | Creates a typed channel with a supported positive capacity.
 newBoundedChan : forall a. Int -> Task (Chan a)
 newBoundedChan capacity =
-    if capacity < 1 then failIO (invalidCapacity capacity)
-    else if capacity > 4294967295 then failIO (invalidCapacity capacity)
-    else prelude.prim.newBoundedChan capacity
+    if capacity < 1
+        then failIO (invalidCapacity capacity)
+        else if capacity > 4294967295
+            then failIO (invalidCapacity capacity)
+            else std.prim.newBoundedChan capacity
 
 invalidCapacity : Int -> HostError
 invalidCapacity capacity =
@@ -22,16 +24,16 @@ invalidCapacity capacity =
 
 -- | Sends a value, blocking while a bounded channel is full.
 send : forall a. Chan a -> a -> Task ()
-send channel value = prelude.prim.send channel value
+send channel value = std.prim.send channel value
 
 -- | Receives the oldest queued value, blocking while an open channel is empty.
 recv : forall a. Chan a -> Task a
-recv channel = prelude.prim.recv channel
+recv channel = std.prim.recv channel
 
 -- | Receives the oldest queued value when one is immediately available.
 tryRecv : forall a. Chan a -> Task (Maybe a)
-tryRecv channel = prelude.prim.tryRecv channel
+tryRecv channel = std.prim.tryRecv channel
 
 -- | Closes a channel and wakes its blocked senders and receivers.
 closeChan : forall a. Chan a -> Task ()
-closeChan channel = prelude.prim.closeChan channel
+closeChan channel = std.prim.closeChan channel

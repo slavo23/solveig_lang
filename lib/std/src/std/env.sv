@@ -1,22 +1,29 @@
-export (
-    EnvError(..), getArgs, getEnv, getEnvOr, requireEnv, setEnv, getEnvironment,
-    getProgName, parseEnvFile, loadEnvFile, loadEnvFileLimited, loadEnvFileIfExists
-)
+export (EnvError(..),
+    getArgs,
+    getEnv,
+    getEnvOr,
+    requireEnv,
+    setEnv,
+    getEnvironment,
+    getProgName,
+    parseEnvFile,
+    loadEnvFile,
+    loadEnvFileLimited,
+    loadEnvFileIfExists)
 
-import prelude.prim(getArgs, getEnv, setEnv, getEnvironment, getProgName)
+import std.prim(getArgs, getEnv, setEnv, getEnvironment, getProgName)
 import std.fs(*)
-import std.io(*)
 import std.list(reverse)
 import std.map(*)
-import std.path(Path, pathToString)
+import std.path(Path)
 import std.text(*)
 
 -- | A failure while resolving or loading application environment settings.
 data EnvError =
     EnvHostError HostError
-  | EnvFileError FsError
-  | MissingEnv String
-  | InvalidEnvLine Int String
+    | EnvFileError FsError
+    | MissingEnv String
+    | InvalidEnvLine Int String
 
 instance Eq EnvError where
     (==) (EnvHostError left) (EnvHostError right) = left == right
@@ -35,16 +42,21 @@ instance Show EnvError where
 
 -- | Reads the command-line arguments passed to the program.
 getArgs : forall e. IO e [String]
-getArgs = prelude.prim.getArgs
+getArgs = std.prim.getArgs
 
 -- | Reads a runtime-local environment variable when it is present.
 getEnv : String -> Task (Maybe String)
-getEnv name = prelude.prim.getEnv name
+getEnv name = std.prim.getEnv name
 
 -- | Reads an environment variable, returning the fallback when it is absent.
 getEnvOr : String -> String -> Task String
 getEnvOr name fallback =
-    fmap (fun value => case value of Nothing => fallback | Just found => found) (getEnv name)
+    fmap
+        (fun value =>
+            case value of
+                Nothing => fallback
+                | Just found => found
+        ) (getEnv name)
 
 -- | Reads a required environment variable or returns MissingEnv.
 requireEnv : String -> IO EnvError String
@@ -56,15 +68,15 @@ requireEnv name = do
 
 -- | Sets a runtime-local environment variable inherited by child processes.
 setEnv : String -> String -> Task ()
-setEnv name value = prelude.prim.setEnv name value
+setEnv name value = std.prim.setEnv name value
 
 -- | Returns the runtime environment sorted by variable name.
 getEnvironment : Task [(String, String)]
-getEnvironment = prelude.prim.getEnvironment
+getEnvironment = std.prim.getEnvironment
 
 -- | Returns the current Solveig project's directory name.
 getProgName : Task String
-getProgName = prelude.prim.getProgName
+getProgName = std.prim.getProgName
 
 -- | Parses strict dotenv assignments without interpolation or shell expansion.
 -- |
@@ -73,8 +85,7 @@ getProgName = prelude.prim.getProgName
 -- | Duplicate names and invalid ASCII environment names are rejected without
 -- | retaining the possibly secret source line in the error.
 parseEnvFile : String -> Either EnvError [(String, String)]
-parseEnvFile text =
-    parseEnvLines (std.text.lines text) 1 std.map.empty []
+parseEnvFile text = parseEnvLines (std.text.lines text) 1 std.map.empty []
 
 -- | Loads a dotenv file no larger than 64 KiB without replacing existing variables.
 loadEnvFile : Path -> IO EnvError ()
@@ -83,9 +94,7 @@ loadEnvFile path = loadEnvFileLimited path 65536
 -- | Loads a bounded dotenv file without replacing variables already in the process environment.
 loadEnvFileLimited : Path -> Int -> IO EnvError ()
 loadEnvFileLimited path maximum = do
-    contents <- mapError
-        (fun hostError => EnvFileError (FsHostError path hostError))
-        (std.io.readFileLimited (pathToString path) maximum)
+    contents <- mapError EnvFileError (std.fs.readFileLimited path maximum)
     case parseEnvFile contents of
         Left parseError => failIO parseError
         | Right entries => setMissingEntries entries
@@ -94,33 +103,38 @@ loadEnvFileLimited path maximum = do
 loadEnvFileIfExists : Path -> IO EnvError Bool
 loadEnvFileIfExists path = do
     exists <- mapError EnvFileError (std.fs.doesFileExist path)
-    if exists then do
-        loadEnvFile path
-        pureIO True
-    else pureIO False
+    if exists
+        then do
+            loadEnvFile path
+            pureIO True
+        else pureIO False
 
-parseEnvLines : [String] -> Int -> std.map.Map String () -> [(String, String)] -> Either EnvError [(String, String)]
+parseEnvLines :
+    [String] ->
+    Int -> std.map.Map String () -> [(String, String)] -> Either EnvError [(String, String)]
 parseEnvLines [] _ _ reversedEntries = Right (reverse reversedEntries)
 parseEnvLines (sourceLine :: rest) lineNumber names reversedEntries =
-    let line = std.text.trimAscii sourceLine in
-    if or (std.text.isEmpty line) (std.text.startsWith "#" line) then
-        parseEnvLines rest (lineNumber + 1) names reversedEntries
-    else
-        let assignment = case std.text.stripPrefix "export " line of
-            Nothing => line
-            | Just exported => std.text.trimAscii exported
+    let line =
+        std.text.trimAscii sourceLine
+    in if or (std.text.isEmpty line) (std.text.startsWith "#" line)
+        then parseEnvLines rest (lineNumber + 1) names reversedEntries
+        else let assignment =
+            case std.text.stripPrefix "export " line of
+                Nothing => line
+                | Just exported => std.text.trimAscii exported
         in case std.text.splitOnce '=' assignment of
             Nothing => Left (InvalidEnvLine lineNumber "expected NAME=VALUE")
             | Just (rawName, rawValue) =>
-                let name = std.text.trimAscii rawName in
-                if not (validEnvName name) then
-                    Left (InvalidEnvLine lineNumber "invalid variable name")
-                else if std.map.member name names then
-                    Left (InvalidEnvLine lineNumber "duplicate variable name")
-                else case envValue lineNumber (std.text.trimAscii rawValue) of
-                    Left valueError => Left valueError
-                    | Right value =>
-                        parseEnvLines
+                let name =
+                    std.text.trimAscii rawName
+                in if not (validEnvName name)
+                    then Left (InvalidEnvLine lineNumber "invalid variable name")
+                    else if std.map.member name names
+                    then Left (InvalidEnvLine lineNumber "duplicate variable name")
+                    else case envValue lineNumber (std.text.trimAscii rawValue) of
+                        Left valueError => Left valueError
+                        | Right value =>
+                            parseEnvLines
                             rest
                             (lineNumber + 1)
                             (std.map.insert name () names)
@@ -134,18 +148,18 @@ validEnvName name =
 
 validEnvNameStart : Char -> Bool
 validEnvNameStart character =
-    let point = std.text.charToCodePoint character in
-    or
+    let point =
+        std.text.charToCodePoint character
+    in or
         (character == '_')
-        (or
-            (and (point >= 65) (point <= 90))
-            (and (point >= 97) (point <= 122)))
+        (or (and (point >= 65) (point <= 90)) (and (point >= 97) (point <= 122)))
 
 allValidEnvNameChars : [Char] -> Bool
 allValidEnvNameChars [] = True
 allValidEnvNameChars (character :: rest) =
-    let point = std.text.charToCodePoint character in
-    and
+    let point =
+        std.text.charToCodePoint character
+    in and
         (or (validEnvNameStart character) (and (point >= 48) (point <= 57)))
         (allValidEnvNameChars rest)
 
@@ -161,8 +175,9 @@ quotedEnvValue : Int -> Char -> [Char] -> Either EnvError String
 quotedEnvValue lineNumber quote characters =
     case reverse characters of
         closing :: reversedValue =>
-            if closing == quote then Right (std.text.charsToString (reverse reversedValue))
-            else Left (InvalidEnvLine lineNumber "unterminated quoted value")
+            if closing == quote
+                then Right (std.text.charsToString (reverse reversedValue))
+                else Left (InvalidEnvLine lineNumber "unterminated quoted value")
         | [] => Left (InvalidEnvLine lineNumber "unterminated quoted value")
 
 setMissingEntries : [(String, String)] -> IO EnvError ()

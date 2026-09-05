@@ -658,7 +658,7 @@ wakes the oldest parked sender. `tryRecv` performs the same dequeue without
 parking and returns `Nothing` only for an open empty channel.
 
 `closeChan` is idempotent and retains values already queued. Once those values
-are drained, `recv` and `tryRecv` fail with `ChannelClosed`; `send` fails with
+are drained, `recv` and `tryRecv` fail with `HostError ResourceVanished`; `send` fails with
 the same typed `HostError ResourceVanished` immediately. Closing wakes every parked sender and
 receiver with that failure. Sender and receiver waiter queues are independently
 FIFO, as are queued values. Wait queues live in `Runtime`, not the heap object:

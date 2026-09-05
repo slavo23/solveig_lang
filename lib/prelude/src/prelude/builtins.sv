@@ -1,12 +1,48 @@
-export (
-    Int, Float, Char, String, IO, Bool(..), ThreadId, Chan, Bytes, Socket, Handle, StdGen,
-    ChildProcess,
-    Maybe(..), Either(..), Tuple2(..), Tuple3(..), Tuple4(..), Tuple5(..),
-    Tuple6(..), Tuple7(..), Tuple8(..), Never, HostErrorKind(..), HostError(..),
-    hostErrorKind, hostErrorOperation, hostErrorMessage, Utf8Error(..), Defect(..), Task,
-    pureIO, bindIO, failIO, error, catchError, mapError, orElse, printLine, printStr,
-    readLine, appendString, even, odd, not, and, or
-)
+export (Int,
+    Float,
+    Char,
+    String,
+    IO,
+    Bool(..),
+    ThreadId,
+    Chan,
+    Bytes,
+    Handle,
+    StdGen,
+    Maybe(..),
+    Either(..),
+    Tuple2(..),
+    Tuple3(..),
+    Tuple4(..),
+    Tuple5(..),
+    Tuple6(..),
+    Tuple7(..),
+    Tuple8(..),
+    Never,
+    HostErrorKind(..),
+    HostError(..),
+    hostErrorKind,
+    hostErrorOperation,
+    hostErrorMessage,
+    Utf8Error(..),
+    Defect(..),
+    Task,
+    pureIO,
+    bindIO,
+    failIO,
+    error,
+    catchError,
+    mapError,
+    orElse,
+    printLine,
+    printStr,
+    readLine,
+    appendString,
+    even,
+    odd,
+    not,
+    and,
+    or)
 
 import prelude.prim(*)
 
@@ -14,14 +50,14 @@ import prelude.prim(*)
 data Maybe a =
     -- | Wraps a present value.
     Just a
-  | -- | Represents the absence of a value.
+    | -- | Represents the absence of a value.
     Nothing
 
 -- | A value that can hold one of two alternatives.
 data Either a b =
     -- | Holds a value from the left side.
     Left a
-  | -- | Holds a value from the right side.
+    | -- | Holds a value from the right side.
     Right b
 
 -- | A heterogeneous product of two values, written `(a, b)`.
@@ -54,21 +90,21 @@ data Never
 -- | operations. Domain libraries add paths, endpoints, or policy context.
 data HostErrorKind =
     AlreadyExists
-  | DoesNotExist
-  | PermissionDenied
-  | ResourceBusy
-  | ResourceExhausted
-  | EndOfFile
-  | InvalidArgument
-  | UnsupportedOperation
-  | TimeExpired
-  | ResourceVanished
-  | Interrupted
-  | NetworkUnreachable
-  | ConnectionRefused
-  | AddressInUse
-  | ProtocolError
-  | OtherError
+    | DoesNotExist
+    | PermissionDenied
+    | ResourceBusy
+    | ResourceExhausted
+    | EndOfFile
+    | InvalidArgument
+    | UnsupportedOperation
+    | TimeExpired
+    | ResourceVanished
+    | Interrupted
+    | NetworkUnreachable
+    | ConnectionRefused
+    | AddressInUse
+    | ProtocolError
+    | OtherError
 
 -- | A low-level failure with a stable category, operation, and host message.
 data HostError = HostError HostErrorKind String String
@@ -94,11 +130,11 @@ data Utf8Error =
 data Defect =
     -- | An explicit unrecoverable condition raised by user code.
     Error String
-  | -- | Integer division or modulo used a zero divisor.
+    | -- | Integer division or modulo used a zero divisor.
     DivisionByZero
-  | -- | A process exceeded the managed VM stack limit.
+    | -- | A process exceeded the managed VM stack limit.
     StackExhausted
-  | -- | The runtime exceeded the managed heap-object limit.
+    | -- | The runtime exceeded the managed heap-object limit.
     HeapExhausted
 
 -- | An IO action that can fail at the low-level host boundary.
@@ -126,8 +162,7 @@ catchError action handler = prelude.prim.catchIO action handler
 
 -- | Transforms the typed error of an IO action.
 mapError : forall e f a. (e -> f) -> IO e a -> IO f a
-mapError transform action =
-    catchError action (fun actionError => failIO (transform actionError))
+mapError transform action = catchError action (fun actionError => failIO (transform actionError))
 
 -- | Uses a fallback action when the first action fails.
 orElse : forall e f a. IO e a -> IO f a -> IO f a

@@ -74,24 +74,23 @@ Use `mapError` to transform that typed pull error.
 
 ## Scoped files and early release
 
-`std.io.withFileByteStream` is the first resource producer using this protocol:
+`std.fs.withFileByteStream` is the file resource producer using this protocol:
 
 ```solveig
 import std.bytes(bytesLength)
-import std.io(withFileByteStream)
+import std.fs(FsError, withFileByteStream)
+import std.path(Path)
 import std.stream(Stream, fold, take)
 
-countFirstChunks : forall scope. Stream scope HostError Bytes -> Task Int
+countFirstChunks : forall scope. Stream scope FsError Bytes -> IO FsError Int
 countFirstChunks stream =
     fold
         (fun total bytes => total + bytesLength bytes)
         0
         (take 3 stream)
 
-main : Task ()
-main = do
-    byteCount <- withFileByteStream 4096 "events.bin" countFirstChunks
-    printLine ("read " <> show byteCount <> " bytes")
+countFilePrefix : Path -> IO FsError Int
+countFilePrefix path = withFileByteStream 4096 path countFirstChunks
 ```
 
 The first argument is the maximum bytes in each pull. The function opens the
@@ -106,9 +105,9 @@ escape the file lifetime. This is a compile-time ownership boundary rather
 than a garbage-collector finalizer.
 
 The positive chunk size is a buffering choice, not a total file-size limit.
-Ordinary `readFile` remains available when reading a complete trusted file is
-the simpler operation; use the stream when memory must stay bounded or the
-consumer may stop early.
+`std.fs.readFile` remains available when reading a complete trusted file is the
+simpler operation; use the stream when memory must stay bounded or the consumer
+may stop early.
 
 ## Parsing scoped chunks
 

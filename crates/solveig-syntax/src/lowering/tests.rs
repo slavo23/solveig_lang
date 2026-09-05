@@ -118,14 +118,21 @@ fn multiline_module_entity_lists_lower() {
 }
 
 #[test]
-fn compiler_primitive_export_surface_lowers() {
-    let source = include_str!("../../../../lib/prelude/src/prelude/prim.sv");
+fn compiler_primitive_module_surfaces_lower() {
+    let prelude_source = include_str!("../../../../lib/prelude/src/prelude/prim.sv");
     let session = Session::new();
-    let file = session.add_file("prim.sv", source);
-    let parsed = parse_source(&session, file, source);
+    let prelude_file = session.add_file("prelude.prim.sv", prelude_source);
+    let prelude = parse_source(&session, prelude_file, prelude_source);
 
-    assert_eq!(parsed.directives.exports.len(), 1);
-    assert!(parsed.directives.exports[0].entities.len() > 100);
+    let std_source = include_str!("../../../../lib/std/src/std/prim.sv");
+    let std_file = session.add_file("std.prim.sv", std_source);
+    let std = parse_source(&session, std_file, std_source);
+
+    assert!(session.diagnostics().is_empty());
+    assert_eq!(prelude.directives.exports.len(), 1);
+    assert!(!prelude.directives.exports[0].entities.is_empty());
+    assert_eq!(std.directives.exports.len(), 1);
+    assert!(std.directives.exports[0].entities.is_empty());
 }
 
 #[test]

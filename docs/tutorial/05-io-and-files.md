@@ -1,12 +1,19 @@
 # 5. IO and files
 
-Pure functions always produce the same result for the same input. Reading a
-file, printing, asking the clock, and starting a process depend on the outside
-world, so Solveig represents them as `IO` values.
+Pure expressions describe values. Reading a file, printing, asking the clock,
+and starting a process depend on the outside world, so Solveig represents them
+as `IO` values. The type records both the failure type and the successful
+result:
 
-## `Task` and `do`
+```solveig
+IO error result
+```
 
-For ordinary system IO, use `Task a`, which is `IO HostError a`:
+`Task result` is the common alias `IO HostError result`. More specific modules
+use more informative errors—for example, filesystem actions return
+`IO FsError result` so a failure retains its `Path`.
+
+## Sequencing actions with `do`
 
 ```solveig
 main : Task ()
@@ -16,11 +23,12 @@ main = do
     printLine ("Hello, " <> name)
 ```
 
-`<-` runs an action and binds its successful result. A line without `<-` is
-still an action; its result is discarded. The last line determines the result
-of the whole block.
+`<-` performs an action and binds its successful result. A line without `<-`
+still performs an action, but discards its result. The final line determines
+the result of the whole block. Constructing an `IO` value does not perform it;
+the runtime begins interpreting the action only when it runs `main`.
 
-Use `let` for pure computation inside `do`:
+Use `let` for a pure intermediate value:
 
 ```solveig
 main : Task ()
@@ -30,58 +38,117 @@ main = do
     printLine message
 ```
 
-Pure `let` bindings are evaluated when their value is demanded. Merely naming
-a computation does not turn it into IO or force it eagerly.
+Pure `let` bindings are evaluated when demanded. Naming an expression neither
+turns it into IO nor forces it eagerly.
+
+## Choose the file abstraction
+
+Solveig has two complementary file layers:
+
+- `std.fs` is the normal application API. It accepts validated `Path` values,
+  retains path context in `FsError`, offers strict and bounded reads, atomic
+  writes, and scoped streams.
+- `std.io` is the lower-level handle API. Use it when a program needs explicit
+  open modes, buffering, mixed text/byte operations, or manual flushing.
+
+There is only one high-level whole-file surface: `std.fs`. This avoids two
+nearly identical APIs whose only difference is whether a path and its failure
+context were accidentally erased.
+
+## Construct paths deliberately
+
+`Path` is not a synonym for `String`. `pathFromString` rejects empty spellings
+and embedded NUL characters before an operating-system call is attempted:
+
+```solveig
+import std.path(Path, PathError, pathFromString)
+
+parseRequestedPath : String -> Either PathError Path
+parseRequestedPath = pathFromString
+```
+
+For a programmer-owned literal, it is reasonable to treat an invalid spelling
+as a defect because it is a bug in the program rather than user input:
+
+```solveig
+requiredPath : String -> Path
+requiredPath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error (show pathError)
+```
+
+Do not use that helper for untrusted text. Keep the `Either PathError Path` and
+report or recover from `Left` explicitly.
+
+Relative paths are resolved against the Solveig runtime's current directory,
+initially the package root selected by `--project-root`.
 
 ## Read and write whole files
 
-The normal API is deliberately small:
+The ordinary strict operations are small and composable:
 
 ```solveig
-import std.io(*)
+import std.fs(FsError, readFile, writeFile)
+import std.path(Path)
 
-copyText : String -> String -> Task ()
+copyText : Path -> Path -> IO FsError ()
 copyText source destination = do
     contents <- readFile source
     writeFile destination contents
 ```
 
-- `readFile` reads a complete UTF-8 text file.
-- `writeFile` replaces a file.
-- `appendFile` adds text at the end.
-- `readFileBytes` and `writeFileBytes` work with arbitrary bytes.
+- `readFile` decodes a complete UTF-8 file.
+- `writeFile` creates or replaces a UTF-8 file.
+- `appendFile` appends UTF-8 text.
+- The corresponding `...Bytes` operations preserve arbitrary bytes.
+- `writeFileAtomic` and `writeFileBytesAtomic` replace a destination through a
+  synced sibling temporary file and one host rename.
 
-You do not need to choose a size limit for ordinary use. The `...Limited`
-variants are opt-in resource policies for trust boundaries. For example, a
-service that reads a path supplied by a remote client may choose:
+The unrestricted readers are convenient when a complete trusted file
+comfortably fits memory. At a trust boundary, choose a total byte policy:
 
 ```solveig
-readUntrustedConfig : String -> Task String
-readUntrustedConfig path = readFileLimited path 1048576
+readUntrustedConfig : Path -> IO FsError String
+readUntrustedConfig path = std.fs.readFileLimited path 1048576
 ```
 
-That program has made a one-megabyte policy explicit. A local command-line tool
-can simply use `readFile`.
+That one-megabyte bound is checked while reading; it is not a racy metadata
+pre-check. The host reads at most one byte past the limit to distinguish an
+exact fit from overflow. When input may not fit memory at all, use a scoped
+stream instead of inventing a very large limit.
 
 ## A complete file program
 
 The tutorial's [`file_summary`](code/file_summary/) project reads four lines,
-writes a summary, and prints it:
+writes a summary, and prints it. Its filesystem error is converted to
+`HostError` only where it joins the Prelude printing actions in `main`:
 
 ```solveig
-import std.io(*)
+import std.fs(FsError(..))
 import std.list(length)
+import std.path(Path, pathFromString)
 import std.text(lines, trimAscii)
+
+fsToHost : FsError -> HostError
+fsToHost (FsHostError _ hostError) = hostError
+fsToHost fileError = HostError InvalidArgument "filesystem" (show fileError)
+
+requiredPath : String -> Path
+requiredPath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error (show pathError)
 
 nonEmpty : String -> Bool
 nonEmpty text = text /= ""
 
 main : Task ()
 main = do
-    contents <- readFile "input/readings.txt"
+    contents <- mapError fsToHost (std.fs.readFile (requiredPath "input/readings.txt"))
     let readings = filter nonEmpty (lines (trimAscii contents))
     let report = "readings: " <> show (length readings) <> "\n"
-    writeFile "summary.txt" report
+    mapError fsToHost (std.fs.writeFile (requiredPath "summary.txt") report)
     printStr report
 ```
 
@@ -91,91 +158,112 @@ Run it from the repository root:
 solveig --project-root docs/tutorial/code/file_summary
 ```
 
-Paths are resolved against the Solveig runtime's current directory, initially
-the package root selected by `--project-root`.
+The output is:
+
+```text
+readings: 4
+```
+
+`mapError` changes only the error channel; it does not catch a failure or turn
+it into a successful value. A larger application would often define its own
+sum error type instead of collapsing `FsError` into `HostError`.
 
 ## Handle-based IO
 
-Whole-file helpers are best for small and medium strict inputs. Handles support
-incremental reads, appending, and explicit buffering:
+Whole-file helpers are best for strict inputs. Handles support incremental
+reads, appending, and explicit buffering:
 
 ```solveig
-import std.io(*)
+import std.io(AppendMode, hFlush, hPutStrLn, withFile)
+import std.path(Path, pathToString)
 
-writeLog : String -> Task ()
-writeLog message =
-    withFile "application.log" AppendMode (fun handle => do
+writeLog : Path -> String -> Task ()
+writeLog path message =
+    withFile (pathToString path) AppendMode (fun handle => do
         hPutStrLn handle message
         hFlush handle)
 ```
 
-`withFile` opens the handle, passes it to the body, and closes it after success,
-typed failure, or interruption. Prefer it to manual `openFile`/`hClose` when the
-handle does not need to escape.
+`withFile` opens the handle, passes it to the callback, and closes it after
+success, typed failure, a defect, or interruption. Prefer it to manual
+`openFile`/`hClose` when the handle does not need to cross a larger ownership
+boundary. Garbage collection never closes handles.
 
 The modes are `ReadMode`, `WriteMode`, `AppendMode`, and `ReadWriteMode`.
 Buffer modes are `NoBuffering`, `LineBuffering`, and `BlockBuffering (Maybe
-Int)`. `hGetLine` reads one line, `hGetContents` reads the remaining text,
-`hGetBytes` reads at most a requested chunk, and `hIsEOF` checks for EOF.
+Int)`. `hGetLine` reads one line, `hGetContents` strictly reads all remaining
+text, `hGetBytes` reads at most a requested byte count, and `hIsEOF` checks for
+EOF. Text operations validate UTF-8; byte operations do not decode.
 
 ## Stream a large file
 
-Manual handle loops are useful at a low level, but ordinary incremental
-consumers use the shared strict stream API. This example reads at most three
-chunks, counts their bytes, and closes the file immediately:
+A file stream performs one bounded host read only when the consumer asks for
+the next chunk:
 
 ```solveig
 import std.bytes(bytesLength)
-import std.io(withFileByteStream)
+import std.fs(FsError, withFileByteStream)
+import std.path(Path)
 import std.stream(Stream, fold, take)
 
-countThreeChunks : forall scope. Stream scope HostError Bytes -> Task Int
+countThreeChunks : forall scope. Stream scope FsError Bytes -> IO FsError Int
 countThreeChunks stream =
     fold
         (fun total chunk => total + bytesLength chunk)
         0
         (take 3 stream)
 
-main : Task ()
-main = do
-    byteCount <- withFileByteStream 65536 "archive.bin" countThreeChunks
-    printLine ("inspected " <> show byteCount <> " bytes")
+inspectPrefix : Path -> IO FsError Int
+inspectPrefix path = withFileByteStream 65536 path countThreeChunks
 ```
 
-`65536` is the maximum size of one chunk, not a maximum file size. The stream
-does no background read-ahead, and `take 3` never requests a fourth chunk. The
-callback accepts a stream with a fresh `scope`; the type checker prevents that
-stream from being returned and used after the file closes. Cleanup also runs
-if the callback returns a typed error, raises a defect, or is interrupted.
+`65536` is the maximum size of one pull, not a maximum file size. The stream
+does no background read-ahead, and `take 3` never requests a fourth chunk.
+The callback accepts a stream with a fresh `scope`; the type checker prevents
+that stream, or a transformed stream derived from it, from escaping after the
+file closes.
 
-A resource stream is single-consumer. Use the remaining stream returned by
-each pull—normally through `fold`, `forEach`, or another combinator—and do not
-pull the same value concurrently. The [strict-stream guide](../streaming.md)
-explains the protocol, finite adapters, buffering, failures, and cancellation.
+A resource stream is single-consumer. Continue with the remaining stream
+returned by each pull—normally through `fold`, `forEach`, or another
+combinator—and never pull the same stream value concurrently. Cleanup runs if
+the callback succeeds, returns a typed error, raises a defect, or is
+interrupted. The [strict-stream guide](../streaming.md) develops that protocol
+in detail.
 
-## Recover from file errors
+`withFileTextStream` preserves incomplete UTF-8 scalars across byte-chunk
+boundaries. `withFileLineStream` yields lines without terminators, accepts LF
+and CRLF, and retains blank lines. A chunk bound limits each host read; one
+exceptionally long line can still require proportional memory.
 
-Low-level whole-file operations fail through `HostError`, not by returning an
-empty string. Match its stable kind instead of a platform-specific message:
+## Recover from filesystem errors
+
+Missing data is not represented by an empty string. Recover only from the
+failure intended by the program and re-raise everything else:
 
 ```solveig
-import std.io(readFile)
+import std.fs(FsError(..), readFile)
+import std.path(Path)
 
-readOrDefault : String -> String -> Task String
+readOrDefault : Path -> String -> IO FsError String
 readOrDefault path fallback =
     catchError
         (readFile path)
-        (fun hostError =>
-            if hostErrorKind hostError == DoesNotExist then pureIO fallback
-            else failIO hostError)
+        (fun fileError =>
+            case fileError of
+                FsHostError _ hostError =>
+                    if hostErrorKind hostError == DoesNotExist
+                        then pureIO fallback
+                        else failIO fileError
+                | FsInvalidUtf8 _ _ => failIO fileError)
 ```
 
-Matching a constructor lets you recover only from the condition you intended.
-Re-raising `other` prevents unrelated failures from being hidden.
+Matching `DoesNotExist` avoids hiding permission failures, malformed UTF-8,
+resource exhaustion, or unrelated host errors. `FsInvalidUtf8` preserves both
+the path and the invalid byte offset.
 
-## Filesystem operations
+## Filesystem state and atomic replacement
 
-`std.fs` provides:
+`std.fs` also provides directory and metadata operations:
 
 - `getCurrentDirectory` and `setCurrentDirectory`;
 - `doesFileExist` and `doesDirectoryExist`;
@@ -183,30 +271,18 @@ Re-raising `other` prevents unrelated failures from being hidden.
 - `removeFile` and `renameFile`;
 - `getFileSize` and `getModificationTime`.
 
-It also owns the high-level file operations. These accept `Path`, retain path
-context in `FsError`, and report invalid UTF-8 separately from host failures:
+`getModificationTime` returns `SystemTime`, keeping wall-clock values distinct
+from monotonic `Instant` readings and integer units. The current directory is
+runtime state shared by the program. Changing it while other threads resolve
+relative paths can produce surprising results, so concurrent code should
+prefer stable `Path` values over frequent directory changes.
 
-```solveig
-readConfig : Path -> IO FsError String
-readConfig = std.fs.readFile
-
-saveConfig : Path -> String -> IO FsError ()
-saveConfig = std.fs.writeFileAtomic
-```
-
-Use `readFile` for an ordinary trusted file, `readFileLimited` at an untrusted
-finite-input boundary, and `withFileByteStream`, `withFileTextStream`, or
-`withFileLineStream` when the input may not fit memory. A stream's chunk size
-bounds each read; it is not a total download or file limit.
-
-They return `IO FsError a`, retaining filesystem path context around the host
-cause. Filesystem operations accept an opaque `Path`; validate external text
-with `pathFromString` and convert back only with `pathToString`.
-`getModificationTime` returns `SystemTime`, keeping wall-clock values
-distinct from monotonic `Instant` readings and integer units. The current
-directory is runtime state shared by the program, so
-changing it concurrently can make relative paths surprising. In
-concurrent code, prefer stable paths over frequent directory changes.
+An ordinary `writeFile` can expose a partially written new file if the process
+or host fails mid-write. Use `writeFileAtomic` for configuration, cache, and
+state files whose readers must observe either the old complete contents or the
+new complete contents. Atomic replacement does not make concurrent logical
+updates transactional: two writers can still compute from the same old state
+and the later rename wins.
 
 ## Environment and arguments
 
@@ -228,97 +304,8 @@ Run it with:
 solveig --project-root path/to/app -- first second
 ```
 
-`getEnv` returns `Maybe String`; `requireEnv` uses the typed `EnvError` channel.
-`loadEnvFileIfExists` can load a local dotenv-style file without treating a
-missing file as an error. Do not print secrets read from the environment.
+Environment values belong to the runtime-local environment snapshot inherited
+by child processes. They are text, not secrets management; avoid printing
+tokens merely because retrieval is convenient.
 
-## Child processes
-
-`std.process.runProcess processValue` waits for a validated child-process
-request and returns its exit code, stdout, and stderr:
-
-```solveig
-import std.process(*)
-
-main : Task ()
-main =
-    case process "git" ["--version"] of
-        Left processError => printLine (show processError)
-        | Right processValue => do
-            result <- runProcess processValue
-            case processStdoutText result of
-                Left utf8Error => printLine (show utf8Error)
-                | Right output => printStr output
-```
-
-The program is invoked directly, not through a shell. Arguments are separate
-strings, which avoids shell quoting and expansion. `runProcessLimited` is the
-opt-in variant for untrusted or potentially unbounded child output.
-Captured output is `Bytes`, because programs are allowed to emit arbitrary
-binary data; the text accessor performs explicit UTF-8 validation. Use
-`withWorkingDirectory`, `withEnvironment`, `withoutEnvironment`, and
-`withStandardInputText` to derive a request without mutating process-global
-state. `inheritProcessWorkingDirectory` restores the default after a working
-directory was configured. `discardStandardError` drains stderr without
-retaining it.
-`runProcessTimeout duration request` returns `Nothing` only after the direct
-child has been terminated and reaped.
-`processExitCode` returns opaque `ExitCode`; use `isExitSuccess` for the
-common branch or `exitCodeToInt` at a host/protocol boundary.
-
-For a large-output or interactive child, use `withProcess`. Its callback owns
-a live `ProcessHandle` whose type-level scope prevents it and its streams from
-escaping:
-
-```solveig
-import std.bytes(bytesLength)
-import std.process(*)
-import std.stream(Stream, fold)
-import std.task(concurrently)
-
-countBytes : forall scope. Stream scope ProcessError Bytes -> IO ProcessError Int
-countBytes = fold (fun total chunk => total + bytesLength chunk) 0
-
-measureOutputs : Process -> IO ProcessError (Int, Int, ExitCode)
-measureOutputs request =
-    withProcess 32768 request (fun child => do
-        (stdoutBytes, stderrBytes) <- concurrently
-            (countBytes (processStdout child))
-            (countBytes (processStderr child))
-        status <- waitProcess child
-        pureIO (stdoutBytes, stderrBytes, status))
-```
-
-The positive size bounds every output pull. No output is read ahead. Drain
-stdout and stderr concurrently when both might be large; reading one to EOF
-first can allow the other operating-system pipe to fill and stop the child.
-If one stream is irrelevant, select `discardStandardOutput` or
-`discardStandardError`; the runtime drains it without retaining bytes.
-
-Interactive stdin is explicit. Derive the request with `pipeStandardInput`,
-then send chunks no larger than the `withProcess` size. Each write waits until
-the host pipe has accepted and flushed that chunk, providing backpressure.
-Call `closeProcessStdin` to deliver EOF; a repeated successful close is safe.
-`waitProcess` waits without consuming unread output, while `terminateProcess`
-stops and reaps the direct child and leaves captured streams readable to EOF.
-Returning from the callback for any reason closes all pipes and reaps a
-still-running direct child. Wrap the whole `withProcess` action in `timeout`
-when the complete session needs a deadline.
-
-## Cleanup patterns
-
-Use the narrowest helper that owns the resource:
-
-- `withFile` for handles;
-- `withTcpConnection` for outgoing TCP streams;
-- `withTcpListener` and `withAcceptedTcpConnection` for TCP servers;
-- `withUdpSocket` for UDP datagrams;
-- `withProcess` for live child pipes;
-- `withThread` for child tasks;
-- `bracket` for custom acquire/use/release lifetimes;
-- `finally` when only an unconditional cleanup action is needed.
-
-This rule becomes especially important once several actions can run
-concurrently.
-
-Next: [Concurrency](06-concurrency.md).
+Next: [Errors and resource safety](06-errors-and-resources.md).

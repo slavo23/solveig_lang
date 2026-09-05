@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0003] Error: unknown constructor `JsonNumber`
+   ╭─[ $WORKSPACE/tests/golden/diag/json_number_constructor_hidden/src/main.sv:3:8 ]
+   │
+ 3 │ main = JsonNumber "NaN"
+   │        ─────┬────
+   │             ╰────── no constructor named `JsonNumber` is in scope here
+───╯
+resolve error

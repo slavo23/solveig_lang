@@ -10,8 +10,8 @@ Host-facing APIs live in explicit standard-library modules rather than the
 implicit Prelude. Import only the capabilities a module uses:
 
 ```solveig
-import std.io       # handles and whole-file IO
-import std.fs       # filesystem queries and mutations
+import std.io       # handles and buffering
+import std.fs       # typed whole-file, streaming, and filesystem operations
 import std.path     # validated paths
 import std.env      # arguments and environment
 import std.process  # child processes and exit
@@ -58,20 +58,19 @@ memory or the consumer may stop early:
 
 ```solveig
 import std.bytes(bytesLength)
-import std.io(withFileByteStream)
+import std.fs(FsError, withFileByteStream)
+import std.path(Path)
 import std.stream(Stream, fold, take)
 
-countPrefix : forall scope. Stream scope HostError Bytes -> Task Int
+countPrefix : forall scope. Stream scope FsError Bytes -> IO FsError Int
 countPrefix stream =
     fold
         (fun total bytes => total + bytesLength bytes)
         0
         (take 4 stream)
 
-main : Task ()
-main = do
-    byteCount <- withFileByteStream 8192 "input.bin" countPrefix
-    printLine (show byteCount)
+countFilePrefix : Path -> IO FsError Int
+countFilePrefix path = withFileByteStream 8192 path countPrefix
 ```
 
 Each pull returns at most 8 KiB in this example and there is no read-ahead.
@@ -166,7 +165,7 @@ buffering; redirected/captured streams and files default to block buffering.
 `stdin` is line-oriented. The embedding API supplies `BufRead`/`Write` streams,
 so host-side buffering below Solveig may add another layer.
 
-The compatibility wrappers are handle-based:
+The standard-handle conveniences are handle-based:
 
 ```solveig
 stdin : Handle
@@ -187,22 +186,6 @@ writes, and flushes, including when a standard handle was explicitly closed.
 ## Whole-file text input
 
 ```solveig
-readFile : String -> Task String
-readFileLimited : String -> Int -> Task String
-```
-
-Both operations strictly decode UTF-8 before succeeding. `readFile` has no
-library size bound and should be used only when the complete input comfortably
-fits memory. `readFileLimited path maximum` counts encoded bytes, reads at most
-`maximum + 1`, and raises `HostError ResourceExhausted` when the input is larger
-or `HostError InvalidArgument` when the maximum is invalid. This is a runtime-enforced bound, not a metadata
-pre-check that can race with file growth.
-
-For application code, prefer the `Path`-typed `std.fs` facade. It keeps path
-context on every failure and distinguishes malformed text from an operating
-system failure:
-
-```solveig
 data FsError =
     FsHostError Path HostError
   | FsInvalidUtf8 Path Utf8Error
@@ -219,6 +202,14 @@ appendFile : Path -> String -> IO FsError ()
 appendFileBytes : Path -> Bytes -> IO FsError ()
 ```
 
+`std.fs` is the sole high-level whole-file API. Both text readers decode UTF-8
+before succeeding and retain the path in `FsError`. `readFile` has no library
+size bound and should be used only when the complete input comfortably fits
+memory. `readFileLimited path maximum` counts encoded bytes, reads at most
+`maximum + 1`, and reports a wrapped `HostError ResourceExhausted` when the
+input is larger or `InvalidArgument` when the maximum is invalid. This is a
+runtime-enforced bound, not a metadata pre-check that can race with file growth.
+
 The unrestricted readers are deliberately convenient for ordinary trusted
 files; callers do not have to invent an arbitrary limit. Use the bounded forms
 at an untrusted-input boundary and scoped streams when input may not fit in
@@ -230,9 +221,9 @@ the old destination remains intact and the temporary file is removed.
 ## Byte input and output
 
 ```solveig
-readFileBytes : String -> Task Bytes
-readFileBytesLimited : String -> Int -> Task Bytes
-writeFileBytes : String -> Bytes -> Task ()
+readFileBytes : Path -> IO FsError Bytes
+readFileBytesLimited : Path -> Int -> IO FsError Bytes
+writeFileBytes : Path -> Bytes -> IO FsError ()
 hGetBytes : Handle -> Int -> Task Bytes
 hPutBytes : Handle -> Bytes -> Task ()
 ```
@@ -243,11 +234,12 @@ no library size bound. `readFileBytesLimited path maximum` reads at most the
 non-negative byte limit and raises `HostError ResourceExhausted` if the file has
 even one more byte; the runtime reads no more than `maximum + 1` bytes to make
 that decision, so it does not rely on racy file metadata. A negative or
-host-unrepresentable maximum also raises `HostError InvalidArgument`.
+host-unrepresentable maximum also reports a wrapped `HostError InvalidArgument`.
 
 `writeFileBytes` creates or replaces a file just like `writeFile`, but writes
 the supplied bytes unchanged. They bypass handle buffering and raise a
-`HostError` carrying `readFileBytes` or `writeFileBytes` as its operation.
+`FsError` containing a `HostError` carrying `readFileBytes` or
+`writeFileBytes` as its operation.
 
 `hGetBytes handle maximum` reads at most the non-negative `maximum`. It returns
 fewer bytes at EOF and returns empty bytes when called at EOF or with zero.

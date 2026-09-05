@@ -72,24 +72,8 @@ prelude.list.map : forall a b. (a -> b) -> [a] -> [b]
 prelude.list.mapInto : forall a b. (a -> b) -> [a] -> [b] -> [b]
 prelude.list.reverseList : forall a. [a] -> [a]
 prelude.list.reverseListInto : forall a. [a] -> [a] -> [a]
-prelude.prim.accept : Socket -> IO HostError Socket
-prelude.prim.appendFile : String -> String -> IO HostError ()
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
-prelude.prim.bindUdp : Int -> IO HostError (Socket, Int)
-prelude.prim.bytesAppend : Bytes -> Bytes -> Bytes
-prelude.prim.bytesConcat : [Bytes] -> Bytes
 prelude.prim.bytesEq : Bytes -> Bytes -> Bool
-prelude.prim.bytesFindAny : Bytes -> Int -> Bytes -> Int
-prelude.prim.bytesFindBelow : Bytes -> Int -> Int -> Int
-prelude.prim.bytesIndex : Bytes -> Int -> Maybe Int
-prelude.prim.bytesLength : Bytes -> Int
-prelude.prim.bytesSlice : Bytes -> Int -> Int -> Bytes
-prelude.prim.bytesSliceToString : Bytes -> Int -> Int -> Either Utf8Error String
-prelude.prim.bytesSpanAny : Bytes -> Int -> Bytes -> Int
-prelude.prim.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
-prelude.prim.bytesToString : Bytes -> Either Utf8Error String
-prelude.prim.bytesToStringReplacing : Bytes -> String
-prelude.prim.bytesUtf8ValidPrefix : Bytes -> Bool -> Either Utf8Error Int
 prelude.prim.catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
 prelude.prim.catchIO : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.prim.charCompare : Char -> Char -> Ordering
@@ -97,17 +81,8 @@ prelude.prim.charEq : Char -> Char -> Bool
 prelude.prim.charToCodePoint : Char -> Int
 prelude.prim.charToString : Char -> String
 prelude.prim.charsToString : [Char] -> String
-prelude.prim.closeChan : forall a. Chan a -> IO HostError ()
-prelude.prim.closeProcess : ChildProcess -> IO HostError ()
-prelude.prim.closeProcessStdin : ChildProcess -> IO HostError ()
-prelude.prim.closeSocket : Socket -> IO HostError ()
 prelude.prim.codePointToString : Int -> Maybe String
-prelude.prim.connect : String -> Int -> IO HostError Socket
-prelude.prim.createDirectory : String -> IO HostError ()
-prelude.prim.doesDirectoryExist : String -> IO HostError Bool
-prelude.prim.doesFileExist : String -> IO HostError Bool
 prelude.prim.error : forall a. String -> a
-prelude.prim.exitWith : forall a. Int -> IO HostError a
 prelude.prim.failIO : forall e a. e -> IO e a
 prelude.prim.finallyIO : forall e a b. IO e a -> IO e b -> IO e a
 prelude.prim.floatAdd : Float -> Float -> Float
@@ -123,30 +98,10 @@ prelude.prim.floatSub : Float -> Float -> Float
 prelude.prim.floatToInt : Float -> Int
 prelude.prim.floatToString : Float -> String
 prelude.prim.floatTotalCompare : Float -> Float -> Ordering
-prelude.prim.getArgs : forall e. IO e [String]
-prelude.prim.getCurrentDirectory : IO HostError String
-prelude.prim.getEnv : String -> IO HostError (Maybe String)
-prelude.prim.getEnvironment : IO HostError [(String, String)]
-prelude.prim.getFileSize : String -> IO HostError Int
-prelude.prim.getModificationTime : String -> IO HostError Int
-prelude.prim.getMonotonicTime : forall e. IO e Int
-prelude.prim.getProgName : IO HostError String
-prelude.prim.getSystemTime : forall e. IO e Int
-prelude.prim.hClose : Handle -> IO HostError ()
 prelude.prim.hFlush : Handle -> IO HostError ()
-prelude.prim.hGetBytes : Handle -> Int -> IO HostError Bytes
-prelude.prim.hGetContents : Handle -> IO HostError String
 prelude.prim.hGetLine : Handle -> IO HostError String
-prelude.prim.hIsEOF : Handle -> IO HostError Bool
-prelude.prim.hPutBytes : Handle -> Bytes -> IO HostError ()
 prelude.prim.hPutStr : Handle -> String -> IO HostError ()
 prelude.prim.hPutStrLn : Handle -> String -> IO HostError ()
-prelude.prim.hSetBuffering : Handle -> BufferMode -> IO HostError ()
-prelude.prim.httpOpenRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Int, [(String, String)], Handle)
-prelude.prim.httpRequestRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Int, [(String, String)], Bytes)
-prelude.prim.httpUploadChunkRaw : Handle -> Maybe Bytes -> IO HostError (Handle, Maybe (Int, [(String, String)], Handle))
-prelude.prim.httpUploadCloseRaw : Handle -> IO HostError ()
-prelude.prim.httpUploadStartRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Handle, Maybe (Int, [(String, String)], Handle))
 prelude.prim.intAdd : Int -> Int -> Int
 prelude.prim.intCompare : Int -> Int -> Ordering
 prelude.prim.intDiv : Int -> Int -> Int
@@ -161,53 +116,10 @@ prelude.prim.intNeg : Int -> Int
 prelude.prim.intSub : Int -> Int -> Int
 prelude.prim.intToFloat : Int -> Float
 prelude.prim.intToString : Int -> String
-prelude.prim.killThread : ThreadId -> IO HostError ()
-prelude.prim.listDirectory : String -> IO HostError [String]
-prelude.prim.listen : Int -> IO HostError (Socket, Int)
 prelude.prim.maskIO : forall e a. IO e a -> IO e a
-prelude.prim.mkStdGen : Int -> StdGen
-prelude.prim.newBoundedChan : forall e a. Int -> IO e (Chan a)
-prelude.prim.newChan : forall e a. IO e (Chan a)
-prelude.prim.newStdGen : forall e. IO e StdGen
-prelude.prim.openFile : String -> IOMode -> IO HostError Handle
-prelude.prim.pathExtension : String -> Maybe String
-prelude.prim.pathFileName : String -> Maybe String
-prelude.prim.pathIsAbsolute : String -> Bool
-prelude.prim.pathJoin : String -> String -> String
-prelude.prim.pathNormalise : String -> String
-prelude.prim.pathParent : String -> Maybe String
-prelude.prim.printLine : String -> IO HostError ()
-prelude.prim.printStr : String -> IO HostError ()
 prelude.prim.pureIO : forall e a. a -> IO e a
 prelude.prim.raiseDefectIO : forall e a. Defect -> IO e a
-prelude.prim.randomInt : StdGen -> (Int, StdGen)
-prelude.prim.randomRange : Int -> Int -> StdGen -> (Int, StdGen)
-prelude.prim.readFile : String -> IO HostError String
-prelude.prim.readFileBytes : String -> IO HostError Bytes
-prelude.prim.readFileBytesLimited : String -> Int -> IO HostError Bytes
-prelude.prim.readFileLimited : String -> Int -> IO HostError String
-prelude.prim.readLine : IO HostError String
-prelude.prim.readProcessStderr : ChildProcess -> Int -> IO HostError Bytes
-prelude.prim.readProcessStdout : ChildProcess -> Int -> IO HostError Bytes
-prelude.prim.recv : forall a. Chan a -> IO HostError a
-prelude.prim.recvBytes : Socket -> Int -> IO HostError Bytes
-prelude.prim.recvDatagram : Socket -> Int -> IO HostError (Bytes, String, Int)
-prelude.prim.removeFile : String -> IO HostError ()
-prelude.prim.renameFile : String -> String -> IO HostError ()
-prelude.prim.resolveHost : String -> IO HostError [String]
 prelude.prim.restoreMaskIO : forall e a. IO e a -> IO e a
-prelude.prim.runProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ProcessResult
-prelude.prim.secureRandomBytes : Int -> IO HostError Bytes
-prelude.prim.send : forall a. Chan a -> a -> IO HostError ()
-prelude.prim.sendBytes : Socket -> Bytes -> IO HostError ()
-prelude.prim.sendDatagram : Socket -> (String, Int, Bytes) -> IO HostError ()
-prelude.prim.setCurrentDirectory : String -> IO HostError ()
-prelude.prim.setEnv : String -> String -> IO HostError ()
-prelude.prim.sleep : Int -> IO HostError ()
-prelude.prim.spawn : forall e f. IO e () -> IO f ThreadId
-prelude.prim.startProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ChildProcess
-prelude.prim.startTlsClient : Socket -> (String, Maybe Bytes) -> IO HostError ()
-prelude.prim.stderr : Handle
 prelude.prim.stdin : Handle
 prelude.prim.stdout : Handle
 prelude.prim.stringAppend : String -> String -> String
@@ -221,18 +133,9 @@ prelude.prim.stringFindCharFrom : String -> Int -> Char -> Int
 prelude.prim.stringLength : String -> Int
 prelude.prim.stringSlice : String -> Int -> Int -> String
 prelude.prim.stringStartsWith : String -> String -> Bool
-prelude.prim.stringToBytes : String -> Bytes
 prelude.prim.stringToChars : String -> [Char]
 prelude.prim.stringTrimAscii : String -> String
 prelude.prim.stringsConcat : [String] -> String
-prelude.prim.terminateProcess : ChildProcess -> IO HostError Int
-prelude.prim.tryRecv : forall a. Chan a -> IO HostError (Maybe a)
-prelude.prim.waitProcess : ChildProcess -> IO HostError Int
-prelude.prim.writeFile : String -> String -> IO HostError ()
-prelude.prim.writeFileAtomic : String -> String -> IO HostError ()
-prelude.prim.writeFileBytes : String -> Bytes -> IO HostError ()
-prelude.prim.writeFileBytesAtomic : String -> Bytes -> IO HostError ()
-prelude.prim.writeProcessStdin : ChildProcess -> Bytes -> IO HostError ()
 prelude.show.showCharPayload : Char -> String
 prelude.show.showListItems : forall a. Show a => [a] -> String
 prelude.show.showStringChars : [Char] -> String
@@ -535,9 +438,6 @@ std.http.withStreamResponseWith : forall upload result. HttpOptions -> Method ->
 std.http.withTextBody : String -> HttpOptions -> HttpOptions
 std.http.withTimeout : Duration -> HttpOptions -> HttpOptions
 std.http.withoutBody : HttpOptions -> HttpOptions
-std.io.appendFile : String -> String -> IO HostError ()
-std.io.fileByteStep : Int -> Handle -> () -> IO HostError (Maybe (Bytes, ()))
-std.io.fileByteStream : Int -> Handle -> Stream () HostError Bytes
 std.io.hClose : Handle -> IO HostError ()
 std.io.hFlush : Handle -> IO HostError ()
 std.io.hGetBytes : Handle -> Int -> IO HostError Bytes
@@ -549,17 +449,10 @@ std.io.hPutStr : Handle -> String -> IO HostError ()
 std.io.hPutStrLn : Handle -> String -> IO HostError ()
 std.io.hSetBuffering : Handle -> BufferMode -> IO HostError ()
 std.io.openFile : String -> IOMode -> IO HostError Handle
-std.io.readFile : String -> IO HostError String
-std.io.readFileBytes : String -> IO HostError Bytes
-std.io.readFileBytesLimited : String -> Int -> IO HostError Bytes
-std.io.readFileLimited : String -> Int -> IO HostError String
 std.io.stderr : Handle
 std.io.stdin : Handle
 std.io.stdout : Handle
 std.io.withFile : forall a. String -> IOMode -> (Handle -> IO HostError a) -> IO HostError a
-std.io.withFileByteStream : forall result. Int -> String -> (forall scope. Stream scope HostError Bytes -> IO HostError result) -> IO HostError result
-std.io.writeFile : String -> String -> IO HostError ()
-std.io.writeFileBytes : String -> Bytes -> IO HostError ()
 std.json.accumulateDigits : Int -> Int -> Int -> [Int] -> Maybe Int
 std.json.accumulateZeros : Int -> Int -> Int -> Int -> Maybe Int
 std.json.allZeroDigits : [Int] -> Bool
@@ -632,6 +525,7 @@ std.json.jsonLexeme : forall e a. Parser ByteInput e a -> Parser ByteInput e a
 std.json.jsonNumberFromFloat : Float -> Maybe JsonNumber
 std.json.jsonNumberFromInt : Int -> JsonNumber
 std.json.jsonNumberFromString : String -> Maybe JsonNumber
+std.json.jsonNumberFromStringWith : JsonLimits -> String -> Maybe JsonNumber
 std.json.jsonNumberText : JsonNumber -> String
 std.json.jsonNumberToInt : JsonNumber -> Maybe Int
 std.json.jsonParserAt : forall e a. [JsonPathElement] -> Parser ByteInput JsonError a -> Parser ByteInput (DecodeError e) a
@@ -704,6 +598,11 @@ std.json.validateAt : forall e a b. (a -> Either e b) -> [JsonPathElement] -> a 
 std.json.validateDecoder : forall e a b. (a -> Either e b) -> Decoder e a -> Decoder e b
 std.json.validateNumberWith : JsonLimits -> String -> Maybe JsonNumber
 std.json.variantEncoder : forall sum payload. String -> (sum -> Maybe payload) -> [FieldEncoder payload] -> VariantEncoder sum
+std.json.withMaximumContainerItems : Int -> JsonLimits -> JsonLimits
+std.json.withMaximumDepth : Int -> JsonLimits -> JsonLimits
+std.json.withMaximumInputBytes : Int -> JsonLimits -> JsonLimits
+std.json.withMaximumNumberBytes : Int -> JsonLimits -> JsonLimits
+std.json.withMaximumStringBytes : Int -> JsonLimits -> JsonLimits
 std.list.drop : forall a. Int -> [a] -> [a]
 std.list.dropWhile : forall a. (a -> Bool) -> [a] -> [a]
 std.list.isEmpty : forall a. [a] -> Bool
@@ -902,6 +801,103 @@ std.path.parent : Path -> Maybe Path
 std.path.pathFromHost : String -> Path
 std.path.pathFromString : String -> Either PathError Path
 std.path.pathToString : Path -> String
+std.prim.accept : Socket -> IO HostError Socket
+std.prim.appendFile : String -> String -> IO HostError ()
+std.prim.bindUdp : Int -> IO HostError (Socket, Int)
+std.prim.bytesAppend : Bytes -> Bytes -> Bytes
+std.prim.bytesConcat : [Bytes] -> Bytes
+std.prim.bytesFindAny : Bytes -> Int -> Bytes -> Int
+std.prim.bytesFindBelow : Bytes -> Int -> Int -> Int
+std.prim.bytesIndex : Bytes -> Int -> Maybe Int
+std.prim.bytesLength : Bytes -> Int
+std.prim.bytesSlice : Bytes -> Int -> Int -> Bytes
+std.prim.bytesSliceToString : Bytes -> Int -> Int -> Either Utf8Error String
+std.prim.bytesSpanAny : Bytes -> Int -> Bytes -> Int
+std.prim.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
+std.prim.bytesToString : Bytes -> Either Utf8Error String
+std.prim.bytesToStringReplacing : Bytes -> String
+std.prim.bytesUtf8ValidPrefix : Bytes -> Bool -> Either Utf8Error Int
+std.prim.closeChan : forall a. Chan a -> IO HostError ()
+std.prim.closeProcess : ChildProcess -> IO HostError ()
+std.prim.closeProcessStdin : ChildProcess -> IO HostError ()
+std.prim.closeSocket : Socket -> IO HostError ()
+std.prim.connect : String -> Int -> IO HostError Socket
+std.prim.createDirectory : String -> IO HostError ()
+std.prim.doesDirectoryExist : String -> IO HostError Bool
+std.prim.doesFileExist : String -> IO HostError Bool
+std.prim.exitWith : forall a. Int -> IO HostError a
+std.prim.getArgs : forall e. IO e [String]
+std.prim.getCurrentDirectory : IO HostError String
+std.prim.getEnv : String -> IO HostError (Maybe String)
+std.prim.getEnvironment : IO HostError [(String, String)]
+std.prim.getFileSize : String -> IO HostError Int
+std.prim.getModificationTime : String -> IO HostError Int
+std.prim.getMonotonicTime : forall e. IO e Int
+std.prim.getProgName : IO HostError String
+std.prim.getSystemTime : forall e. IO e Int
+std.prim.hClose : Handle -> IO HostError ()
+std.prim.hGetBytes : Handle -> Int -> IO HostError Bytes
+std.prim.hGetContents : Handle -> IO HostError String
+std.prim.hIsEOF : Handle -> IO HostError Bool
+std.prim.hPutBytes : Handle -> Bytes -> IO HostError ()
+std.prim.hSetBuffering : Handle -> BufferMode -> IO HostError ()
+std.prim.httpOpenRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Int, [(String, String)], Handle)
+std.prim.httpRequestRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Int, [(String, String)], Bytes)
+std.prim.httpUploadChunkRaw : Handle -> Maybe Bytes -> IO HostError (Handle, Maybe (Int, [(String, String)], Handle))
+std.prim.httpUploadCloseRaw : Handle -> IO HostError ()
+std.prim.httpUploadStartRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Handle, Maybe (Int, [(String, String)], Handle))
+std.prim.killThread : ThreadId -> IO HostError ()
+std.prim.listDirectory : String -> IO HostError [String]
+std.prim.listen : Int -> IO HostError (Socket, Int)
+std.prim.mkStdGen : Int -> StdGen
+std.prim.newBoundedChan : forall e a. Int -> IO e (Chan a)
+std.prim.newChan : forall e a. IO e (Chan a)
+std.prim.newStdGen : forall e. IO e StdGen
+std.prim.openFile : String -> IOMode -> IO HostError Handle
+std.prim.pathExtension : String -> Maybe String
+std.prim.pathFileName : String -> Maybe String
+std.prim.pathIsAbsolute : String -> Bool
+std.prim.pathJoin : String -> String -> String
+std.prim.pathNormalise : String -> String
+std.prim.pathParent : String -> Maybe String
+std.prim.printLine : String -> IO HostError ()
+std.prim.printStr : String -> IO HostError ()
+std.prim.randomInt : StdGen -> (Int, StdGen)
+std.prim.randomRange : Int -> Int -> StdGen -> (Int, StdGen)
+std.prim.readFile : String -> IO HostError String
+std.prim.readFileBytes : String -> IO HostError Bytes
+std.prim.readFileBytesLimited : String -> Int -> IO HostError Bytes
+std.prim.readFileLimited : String -> Int -> IO HostError String
+std.prim.readLine : IO HostError String
+std.prim.readProcessStderr : ChildProcess -> Int -> IO HostError Bytes
+std.prim.readProcessStdout : ChildProcess -> Int -> IO HostError Bytes
+std.prim.recv : forall a. Chan a -> IO HostError a
+std.prim.recvBytes : Socket -> Int -> IO HostError Bytes
+std.prim.recvDatagram : Socket -> Int -> IO HostError (Bytes, String, Int)
+std.prim.removeFile : String -> IO HostError ()
+std.prim.renameFile : String -> String -> IO HostError ()
+std.prim.resolveHost : String -> IO HostError [String]
+std.prim.runProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ProcessResult
+std.prim.secureRandomBytes : Int -> IO HostError Bytes
+std.prim.send : forall a. Chan a -> a -> IO HostError ()
+std.prim.sendBytes : Socket -> Bytes -> IO HostError ()
+std.prim.sendDatagram : Socket -> (String, Int, Bytes) -> IO HostError ()
+std.prim.setCurrentDirectory : String -> IO HostError ()
+std.prim.setEnv : String -> String -> IO HostError ()
+std.prim.sleep : Int -> IO HostError ()
+std.prim.spawn : forall e f. IO e () -> IO f ThreadId
+std.prim.startProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ChildProcess
+std.prim.startTlsClient : Socket -> (String, Maybe Bytes) -> IO HostError ()
+std.prim.stderr : Handle
+std.prim.stringToBytes : String -> Bytes
+std.prim.terminateProcess : ChildProcess -> IO HostError Int
+std.prim.tryRecv : forall a. Chan a -> IO HostError (Maybe a)
+std.prim.waitProcess : ChildProcess -> IO HostError Int
+std.prim.writeFile : String -> String -> IO HostError ()
+std.prim.writeFileAtomic : String -> String -> IO HostError ()
+std.prim.writeFileBytes : String -> Bytes -> IO HostError ()
+std.prim.writeFileBytesAtomic : String -> Bytes -> IO HostError ()
+std.prim.writeProcessStdin : ChildProcess -> Bytes -> IO HostError ()
 std.process.argumentsContainNull : [String] -> Bool
 std.process.captureStandardError : Process -> Process
 std.process.captureStandardOutput : Process -> Process

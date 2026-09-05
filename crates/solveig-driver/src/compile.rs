@@ -49,13 +49,13 @@ use solveig_ast::ast::{
     BUILTIN_STRING_STARTS_WITH, BUILTIN_STRING_TO_BYTES, BUILTIN_STRING_TO_CHARS,
     BUILTIN_STRING_TRIM_ASCII, BUILTIN_STRINGS_CONCAT, BUILTIN_TRY_RECV_CHAN, BUILTIN_WRITE_FILE,
     BUILTIN_WRITE_FILE_ATOMIC, BUILTIN_WRITE_FILE_BYTES, BUILTIN_WRITE_FILE_BYTES_ATOMIC,
-    BuiltinDefinition, BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, ClassDefinition, ClassId,
-    ClassTable, CtorId, CtorTable, DefId, Ev, InstanceId, Kind, ModuleId, Names, PRIM_TYS,
-    PrettyTables, Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId, TyConTable, TyVarId,
-    VarRef, prelude_defect_tycon_id, prelude_either_tycon_id, prelude_host_error_tycon_id,
-    prelude_list_tycon_id, prelude_maybe_tycon_id, prelude_ordering_tycon_id,
-    prelude_tuple_tycon_id, prelude_utf8_error_tycon_id, std_buffer_mode_tycon_id,
-    std_io_mode_tycon_id, std_process_result_tycon_id,
+    BuiltinDefinition, BuiltinId, COMPILER_PRELUDE_PRIM_MODULE, COMPILER_STD_PRIM_MODULE,
+    ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Ev, InstanceId, Kind, ModuleId,
+    Names, PRIM_TYS, PrettyTables, Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId,
+    TyConTable, TyVarId, VarRef, prelude_defect_tycon_id, prelude_either_tycon_id,
+    prelude_host_error_tycon_id, prelude_list_tycon_id, prelude_maybe_tycon_id,
+    prelude_ordering_tycon_id, prelude_tuple_tycon_id, prelude_utf8_error_tycon_id,
+    std_buffer_mode_tycon_id, std_io_mode_tycon_id, std_process_result_tycon_id,
 };
 use solveig_base::{Diagnostic, Severity, TypeError};
 use solveig_base::{FileId, FileSpan, IntoDiagnostic, Session, SourceFile, SourceMap, Symbol};
@@ -73,9 +73,9 @@ use solveig_resolve::project::{
     BuiltinApi, EffectiveImport, ImportedApi, ImportedTypedApi, ModuleApi, ModuleContext,
     ModuleTable, ParsedProject, Project, ResolveError, SharedModuleApi, SharedTypedModuleApi,
     TypeAlias, TypedDisplayMaps, apply_module_reexports, apply_module_visibility, build_module_api,
-    build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module, effective_imports,
-    module_order_checked, project_module_selection_diagnostics, seed_compiler_prelude_module_api,
-    validate_instance_coherence,
+    build_typed_module_api, compiler_builtin_api, compiler_prelude_prim_module,
+    compiler_std_prim_module, effective_imports, module_order_checked,
+    project_module_selection_diagnostics, seed_compiler_module_api, validate_instance_coherence,
 };
 use solveig_resolve::resolver::{Resolver, ResolverError, ResolverImports};
 use solveig_syntax::ast::{ModuleName, ModuleSelection, ParsedModule};

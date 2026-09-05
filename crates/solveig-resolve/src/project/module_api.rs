@@ -213,6 +213,7 @@ pub type ImportedTypedApi = Imported<TypedModuleApi>;
 
 const COMPILER_PRELUDE_BUILTINS_SEGMENTS: [&str; 2] = ["prelude", "builtins"];
 const COMPILER_PRELUDE_PRIM_SEGMENTS: [&str; 2] = ["prelude", "prim"];
+const COMPILER_STD_PRIM_SEGMENTS: [&str; 2] = ["std", "prim"];
 
 #[derive(Debug, Clone, Default)]
 pub struct BuiltinApi {
@@ -243,28 +244,46 @@ pub fn compiler_prelude_prim_module(session: &Session) -> ModuleName {
     )
 }
 
+pub fn compiler_std_prim_module(session: &Session) -> ModuleName {
+    ModuleName(
+        COMPILER_STD_PRIM_SEGMENTS
+            .iter()
+            .map(|segment| session.intern(segment))
+            .collect(),
+    )
+}
+
 pub fn compiler_builtin_api(session: &Session, modules: &ModuleTable) -> BuiltinApi {
     let mut api = BuiltinApi::default();
     let prelude_builtins = compiler_prelude_builtins_module(session);
-    let Some(module_id) = modules.id(&prelude_builtins) else {
+    let std_prim = compiler_std_prim_module(session);
+    let (Some(prelude_module_id), Some(std_module_id)) =
+        (modules.id(&prelude_builtins), modules.id(&std_prim))
+    else {
         return api;
     };
 
-    for (name, id) in compiler_type_entries() {
+    for (name, id) in compiler_prelude_type_entries() {
         let symbol = session.intern(name);
-        api.type_ids.insert(local_def_id(module_id, symbol), id);
+        api.type_ids
+            .insert(local_def_id(prelude_module_id, symbol), id);
+    }
+
+    for (name, id) in compiler_std_type_entries() {
+        let symbol = session.intern(name);
+        api.type_ids.insert(local_def_id(std_module_id, symbol), id);
     }
 
     for (name, id) in compiler_constructor_entries() {
         let symbol = session.intern(name);
         api.constructor_ids
-            .insert(local_def_id(module_id, symbol), id);
+            .insert(local_def_id(prelude_module_id, symbol), id);
     }
 
     api
 }
 
-pub fn seed_compiler_prelude_module_api(
+pub fn seed_compiler_module_api(
     session: &Session,
     module_name: &ModuleName,
     module_id: ModuleId,
@@ -272,7 +291,7 @@ pub fn seed_compiler_prelude_module_api(
     api: &mut ModuleApi,
 ) {
     if module_name == &compiler_prelude_builtins_module(session) {
-        for (name, _id) in compiler_type_entries() {
+        for (name, _id) in compiler_prelude_type_entries() {
             let symbol = session.intern(name);
             let def_id = local_def_id(module_id, symbol);
             api.types.insert(symbol, def_id);
@@ -290,6 +309,13 @@ pub fn seed_compiler_prelude_module_api(
             session.intern("Bool"),
             vec![session.intern("True"), session.intern("False")],
         );
+    } else if module_name == &compiler_std_prim_module(session) {
+        for (name, _id) in compiler_std_type_entries() {
+            let symbol = session.intern(name);
+            let def_id = local_def_id(module_id, symbol);
+            api.types.insert(symbol, def_id);
+            insert_compiler_doc(api, def_id, compiler_type_doc(name));
+        }
     }
 
     for builtin in &builtins.builtin_defs {
@@ -478,7 +504,7 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
     })
 }
 
-fn compiler_type_entries() -> [(&'static str, TyConId); 13] {
+fn compiler_prelude_type_entries() -> [(&'static str, TyConId); 11] {
     [
         ("Int", PRIM_TYS.int),
         ("Float", PRIM_TYS.float),
@@ -489,9 +515,14 @@ fn compiler_type_entries() -> [(&'static str, TyConId); 13] {
         ("ThreadId", PRIM_TYS.thread_id),
         ("Chan", PRIM_TYS.chan),
         ("Bytes", PRIM_TYS.bytes),
-        ("Socket", PRIM_TYS.socket),
         ("Handle", PRIM_TYS.handle),
         ("StdGen", PRIM_TYS.std_gen),
+    ]
+}
+
+fn compiler_std_type_entries() -> [(&'static str, TyConId); 2] {
+    [
+        ("Socket", PRIM_TYS.socket),
         ("ChildProcess", PRIM_TYS.child_process),
     ]
 }

@@ -21,13 +21,13 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.hashset` | Persistent hash sets with expected constant-time membership |
 | `std.queue` | Persistent FIFO queues |
 | `std.text` | Packed UTF-8 scans, explicit scalar/byte operations, and linear text construction |
-| `std.bytes` | Strict/replacement UTF-8 decoding, packed byte scans, and linear binary construction |
+| `std.bytes` | Strict/replacement UTF-8 decoding, binary slicing, and linear binary construction |
 | `std.stream` | Strict pull streams, scoped resource lifetimes, bounded collection, and finite adapters |
 | `std.parser` | Generic parser combinators with structured errors and streaming input |
 | `std.json` | Bounded byte-level JSON, exact numbers, path-aware decoders, and symmetric encoders |
 | `std.http` | Bounded HTTP/HTTPS requests, verified TLS, and scoped response-body streams |
-| `std.io` | Handles, buffering, and whole-file IO |
-| `std.fs` | Directory, path, and file-metadata operations |
+| `std.io` | Explicit handles and buffering |
+| `std.fs` | Typed whole-file, streaming, directory, and metadata operations |
 | `std.env` | Arguments, environment lookup, bounded dotenv loading, and program identity |
 | `std.process` | Child processes and structured program exit |
 | `std.channel` | Typed channel creation and communication |
@@ -187,13 +187,6 @@ returns `Either` instead of silently replacing invalid input.
 `bytesToStringReplacing` is the explicitly named alternative that substitutes
 U+FFFD for malformed sequences.
 
-The bulk `bytesSpanAny`, `bytesFindAny`, `bytesFindBelow`, and
-`bytesSpanRange` operations scan without constructing a `Maybe` for each byte.
-`bytesSliceToString` validates one slice without first allocating another
-`Bytes` value. These operations are useful when implementing byte-oriented
-formats; ordinary callers should prefer the higher-level parser for that
-format.
-
 `BytesBuilder` provides the binary counterpart to `TextBuilder`. Wrap chunks
 with `bytesBuilder`, combine them using `(<>)` or `appendBytesBuilder`, and call
 `buildBytes` once. This retains chunk values while building the plan, then
@@ -221,7 +214,7 @@ them to another representation.
 
 Resource producers use a rank-2 callback. For example,
 `withFileByteStream chunkSize path callback` supplies
-`forall scope. Stream scope HostError Bytes` to the callback and closes the
+`forall scope. Stream scope FsError Bytes` to the callback and closes the
 file when it returns, fails, defects, or is interrupted. The fresh scope cannot
 appear in the callback result, so the stream cannot outlive its file. See the
 [strict-stream guide](streaming.md) for the pull protocol, bounded-memory rules,
@@ -306,9 +299,17 @@ so rendering is deterministic regardless of insertion order.
 `JsonNumber` retains a validated decimal spelling instead of rounding through
 `Float`. Construct it with `jsonNumberFromInt`, `jsonNumberFromString`, or
 `jsonNumberFromFloat`; the float constructor rejects NaN and infinities.
-Rendering revalidates even a directly constructed `JsonNumber`.
+The representation is private, so invalid spellings cannot enter `Json`
+through the public API. `jsonNumberFromStringWith` accepts an explicit
+`JsonLimits` value when the default 1024-byte number-token limit is too small.
 `jsonNumberToInt` performs exact decimal/exponent conversion and returns
 `Nothing` for a fractional mathematical value or signed-`Int` overflow.
+
+`JsonLimits` is also opaque. Begin with `defaultJsonLimits`, inspect it through
+the `maximum...` accessors, and change one named policy with
+`withMaximumInputBytes`, `withMaximumDepth`, `withMaximumStringBytes`,
+`withMaximumContainerItems`, or `withMaximumNumberBytes`. These functions
+return new values; they do not mutate shared configuration.
 
 Use `parseJson` when the whole `Json` tree is useful. Use `decodeJson` with
 `stringDecoder`, `boolDecoder`, `numberDecoder`, `nullDecoder`,
@@ -348,8 +349,8 @@ an optional `Nothing` is omitted, not encoded as null. Tagged sums use
 limits and deterministic rendering, while `encodeJsonValue` returns `Json`
 when another format-independent transformation needs it.
 Value encoding constructs strict `Json` data; final rendering enforces limits
-and validates even forged number spellings. `decodeJsonValue` traverses an
-already-built tree and does not apply byte-input limits retroactively.
+over that data. `decodeJsonValue` traverses an already-built tree and does not
+apply byte-input limits retroactively.
 
 ## Handles and files
 
@@ -357,24 +358,18 @@ already-built tree and does not apply byte-input limits retroactively.
 import std.io(*)
 ```
 
-`std.io` owns the low-level `String`-path boundary: `IOMode`, `BufferMode`, the
-standard handles, incremental handle operations, `withFile`, and the strict whole-file functions `readFile`,
-`readFileLimited`, `readFileBytes`, `readFileBytesLimited`, `writeFile`,
-`writeFileBytes`, and `appendFile`.
-
-The unrestricted readers allocate the complete input. Prefer
-`readFileLimited path maximumBytes` or
-`readFileBytesLimited path maximumBytes` when input size is not already
-trusted; they fail with `HostError ResourceExhausted` after reading at most one
-byte beyond the bound. Text limits count encoded UTF-8 bytes. Use handles for genuinely
-streaming input.
+`std.io` is the explicit low-level handle boundary: `IOMode`, `BufferMode`, the
+standard handles, incremental text/byte operations, and `withFile`. Whole-file
+and resource-streaming application operations live only in `std.fs`, where
+paths and filesystem-specific failures retain their meaning.
 
 ```solveig
 copyText : String -> String -> Task ()
 copyText source destination =
     withFile source ReadMode (fun input => do
         contents <- hGetContents input
-        writeFile destination contents)
+        withFile destination WriteMode (fun output =>
+            hPutStr output contents))
 ```
 
 The garbage collector does not close handles. Prefer `withFile`; it uses

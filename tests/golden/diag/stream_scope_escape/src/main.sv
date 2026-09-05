@@ -1,14 +1,11 @@
-import std.io(withFileByteStream)
+import std.fs(FsError, withFileByteStream)
+import std.path(currentPath)
 import std.stream(Stream)
 
-escape : Task (Stream () HostError Bytes)
-escape =
-    withFileByteStream
-        8
-        "input.txt"
-        escapeStream
+escape : IO FsError (Stream () FsError Bytes)
+escape = withFileByteStream 8 currentPath escapeStream
 
-escapeStream : forall scope. Stream scope HostError Bytes -> Task (Stream () HostError Bytes)
+escapeStream : forall scope. Stream scope FsError Bytes -> IO FsError (Stream () FsError Bytes)
 escapeStream stream = pureIO stream
 
 main : Task ()

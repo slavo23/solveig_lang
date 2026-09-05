@@ -1,13 +1,25 @@
-export (
-    Duration, Instant, SystemTime, nanoseconds, microseconds, milliseconds, seconds,
-    durationToNanoseconds, durationToMicroseconds, durationToMilliseconds, durationToSeconds,
-    instantDifference, systemTimeDifference, systemTimeNanoseconds, sleep,
-    getMonotonicTime, getSystemTime, measure
-)
+export (Duration,
+    Instant,
+    SystemTime,
+    nanoseconds,
+    microseconds,
+    milliseconds,
+    seconds,
+    durationToNanoseconds,
+    durationToMicroseconds,
+    durationToMilliseconds,
+    durationToSeconds,
+    instantDifference,
+    systemTimeDifference,
+    systemTimeNanoseconds,
+    sleep,
+    getMonotonicTime,
+    getSystemTime,
+    measure)
 
 private (maximumInt, minimumInt, saturatingScale, saturatingDifference, sleepMilliseconds)
 
-import prelude.prim(*)
+import std.prim(*)
 
 -- | A signed span of time stored as nanoseconds.
 -- |
@@ -118,14 +130,13 @@ systemTimeFromNanoseconds = SystemTime
 
 -- | Suspends the current thread for at least the requested duration.
 sleep : Duration -> Task ()
-sleep duration = prelude.prim.sleep (sleepMilliseconds duration)
+sleep duration = std.prim.sleep (sleepMilliseconds duration)
 
 sleepMilliseconds : Duration -> Int
 sleepMilliseconds (Duration value) =
-    if value <= 0 then 0
-    else
-        let whole = div value 1000000 in
-        if mod value 1000000 == 0 then whole else whole + 1
+    if value <= 0
+        then 0
+        else let whole = div value 1000000 in if mod value 1000000 == 0 then whole else whole + 1
 
 maximumInt : Int
 maximumInt = 9223372036854775807
@@ -135,27 +146,25 @@ minimumInt = (-9223372036854775807) - 1
 
 saturatingScale : Int -> Int -> Int
 saturatingScale factor value =
-    if value > div maximumInt factor then maximumInt
-    else if value < div minimumInt factor then minimumInt
-    else value * factor
+    if value > div maximumInt factor
+        then maximumInt
+        else if value < div minimumInt factor then minimumInt else value * factor
 
 saturatingDifference : Int -> Int -> Int
 saturatingDifference started finished =
-    if started < 0 then
-        if finished > maximumInt + started then maximumInt
-        else finished - started
-    else if started > 0 then
-        if finished < minimumInt + started then minimumInt
-        else finished - started
-    else finished
+    if started < 0
+        then if finished > maximumInt + started then maximumInt else finished - started
+        else if started > 0
+            then if finished < minimumInt + started then minimumInt else finished - started
+            else finished
 
 -- | Returns a reading from an arbitrary runtime-local monotonic origin.
 getMonotonicTime : forall e. IO e Instant
-getMonotonicTime = fmap Instant prelude.prim.getMonotonicTime
+getMonotonicTime = fmap Instant std.prim.getMonotonicTime
 
 -- | Returns the current wall-clock time relative to the Unix epoch.
 getSystemTime : forall e. IO e SystemTime
-getSystemTime = fmap SystemTime prelude.prim.getSystemTime
+getSystemTime = fmap SystemTime std.prim.getSystemTime
 
 -- | Runs an operation and returns its monotonic elapsed duration with its result.
 measure : forall e a. IO e a -> IO e (Duration, a)
@@ -163,4 +172,4 @@ measure operation = do
     started <- getMonotonicTime
     value <- operation
     finished <- getMonotonicTime
-    prelude.prim.pureIO (instantDifference started finished, value)
+    pureIO (instantDifference started finished, value)

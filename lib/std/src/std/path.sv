@@ -1,9 +1,18 @@
-export (
-    Path, PathError(..), pathFromString, pathToString, currentPath, joinPath, (</>),
-    parent, fileName, extension, normalise, isAbsolute, isRelative
-)
+export (Path,
+    PathError(..),
+    pathFromString,
+    pathToString,
+    currentPath,
+    joinPath,
+    (</>),
+    parent,
+    fileName,
+    extension,
+    normalise,
+    isAbsolute,
+    isRelative)
 
-import prelude.prim(pathExtension, pathFileName, pathIsAbsolute, pathJoin, pathNormalise, pathParent)
+import std.prim(pathExtension, pathFileName, pathIsAbsolute, pathJoin, pathNormalise, pathParent)
 import std.text(charToCodePoint, stringToChars)
 
 infixr 5 </>
@@ -45,9 +54,9 @@ instance Hashable Path where
 -- | Validates a host path spelling.
 pathFromString : String -> Either PathError Path
 pathFromString spelling =
-    if spelling == "" then Left EmptyPath
-    else if hasNull (stringToChars spelling) then Left NullPath
-    else Right (Path spelling)
+    if spelling == ""
+        then Left EmptyPath
+        else if hasNull (stringToChars spelling) then Left NullPath else Right (Path spelling)
 
 -- | Returns the host spelling retained by a path.
 pathToString : Path -> String
@@ -67,7 +76,7 @@ currentPath = Path "."
 -- | An absolute second path replaces the first path. The operation is lexical:
 -- | it neither accesses the filesystem nor resolves symbolic links.
 joinPath : Path -> Path -> Path
-joinPath (Path base) (Path child) = Path (prelude.prim.pathJoin base child)
+joinPath (Path base) (Path child) = Path (std.prim.pathJoin base child)
 
 -- | Infix form of joinPath, with the same precedence as Haskell's (</>).
 (</>) : Path -> Path -> Path
@@ -75,20 +84,20 @@ joinPath (Path base) (Path child) = Path (prelude.prim.pathJoin base child)
 
 -- | Returns the lexical parent, or Nothing when the path has no non-empty parent.
 parent : Path -> Maybe Path
-parent (Path spelling) = fmap Path (prelude.prim.pathParent spelling)
+parent (Path spelling) = fmap Path (std.prim.pathParent spelling)
 
 -- | Returns the final normal path component.
 -- |
 -- | Root paths and paths ending in `.` or `..` have no file name.
 fileName : Path -> Maybe String
-fileName (Path spelling) = prelude.prim.pathFileName spelling
+fileName (Path spelling) = std.prim.pathFileName spelling
 
 -- | Returns the final component's extension without the leading dot.
 -- |
 -- | A leading dot alone does not introduce an extension, so `.gitignore` has
 -- | no extension. A trailing dot produces Just "".
 extension : Path -> Maybe String
-extension (Path spelling) = prelude.prim.pathExtension spelling
+extension (Path spelling) = std.prim.pathExtension spelling
 
 -- | Lexically removes redundant `.` components and collapses `name/..` pairs.
 -- |
@@ -96,11 +105,11 @@ extension (Path spelling) = prelude.prim.pathExtension spelling
 -- | walk above a root are ignored. This does not access the filesystem,
 -- | canonicalise case, or resolve symbolic links.
 normalise : Path -> Path
-normalise (Path spelling) = Path (prelude.prim.pathNormalise spelling)
+normalise (Path spelling) = Path (std.prim.pathNormalise spelling)
 
 -- | Reports whether the host platform treats a path as absolute.
 isAbsolute : Path -> Bool
-isAbsolute (Path spelling) = prelude.prim.pathIsAbsolute spelling
+isAbsolute (Path spelling) = std.prim.pathIsAbsolute spelling
 
 -- | Reports whether the host platform treats a path as relative.
 isRelative : Path -> Bool
@@ -108,5 +117,4 @@ isRelative = not . isAbsolute
 
 hasNull : [Char] -> Bool
 hasNull [] = False
-hasNull (character :: rest) =
-    if charToCodePoint character == 0 then True else hasNull rest
+hasNull (character :: rest) = if charToCodePoint character == 0 then True else hasNull rest

@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0014] Error: module `std.prim` does not export `connect`
+   ╭─[ $WORKSPACE/tests/golden/diag/std_prim_private/src/main.sv:1:17 ]
+   │
+ 1 │ import std.prim(connect)
+   │                 ───┬───
+   │                    ╰───── `connect` is not exported by this module
+───╯
+resolve error

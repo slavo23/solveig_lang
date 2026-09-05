@@ -18,9 +18,11 @@ Every ordinary module implicitly imports:
 - `prelude.show`
 - `prelude.instances`
 
-`prelude.prim` is the compiler bridge used to implement the public libraries.
-Application code should import `std.*`, not `prelude.prim`, unless it is
-deliberately testing or extending the primitive boundary.
+`prelude.prim` is the small compiler bridge used to implement the Prelude's
+scalar, text, and effect vocabulary. It is not an application API. Host
+operations are hidden in the standard library's package-private implementation
+module, so programs use typed `std.*` facades rather than raw runtime resources
+or request tuples.
 
 ## Primitive types
 
@@ -37,13 +39,15 @@ IO error value
 ThreadId
 Chan value
 Bytes
-Socket
 Handle
 StdGen
 ```
 
 The opaque runtime types have no numeric operations. Their values are created
-and consumed through the appropriate explicit standard-library module.
+and consumed through the appropriate explicit standard-library module. Raw
+socket and child-process identities are not Prelude types; rank-2-scoped
+`TcpConnection`, `TlsConnection`, `UdpSocket`, and `ProcessHandle` values keep
+those resources behind their domain APIs.
 
 ## Fundamental data
 
@@ -191,16 +195,17 @@ and : Bool -> Bool -> Bool
 or : Bool -> Bool -> Bool
 ```
 
-Text conversion, packed scanning, scalar-versus-byte indexing, and
-`TextBuilder` are in `std.text`. UTF-8 conversion, packed byte scanning, and
-`BytesBuilder` are in `std.bytes`.
+Text conversion, scalar-versus-byte indexing, and `TextBuilder` are in
+`std.text`. UTF-8 conversion, binary indexing and slicing, and `BytesBuilder`
+are in `std.bytes`. Parser-oriented packed scans remain implementation details
+of higher-level format and streaming modules.
 
 ## Importing explicit functionality
 
 Import a whole module when most of its vocabulary is relevant:
 
 ```solveig
-import std.io(*)
+import std.fs(*)
 import std.task(*)
 ```
 

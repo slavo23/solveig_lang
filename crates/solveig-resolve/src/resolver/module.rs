@@ -34,7 +34,7 @@ impl<'a> Resolver<'a> {
 
         let (mut data_defs, mut local_tycon_kind_ids, mut constructor_types) =
             self.resolve_data_defs(module_name, &raw_data_defs, imported)?;
-        self.seed_compiler_prelude_defs(
+        self.seed_compiler_module_defs(
             module_name,
             &mut data_defs,
             &mut local_tycon_kind_ids,
@@ -119,21 +119,23 @@ impl<'a> Resolver<'a> {
         })
     }
 
-    fn seed_compiler_prelude_defs(
+    fn seed_compiler_module_defs(
         &self,
         module_name: &ModuleName,
         data_defs: &mut Vec<DataDefinition>,
         local_tycon_kind_ids: &mut FxHashMap<TyConId, Kind>,
         constructor_types: &mut FxHashMap<CtorId, Ty>,
     ) {
-        if module_name.as_string(self.session) != COMPILER_PRELUDE_BUILTINS_MODULE {
-            return;
-        }
+        local_tycon_kind_ids.extend(compiler_module_primitive_tycon_kinds(
+            self.session,
+            module_name,
+        ));
 
-        data_defs.insert(0, compiler_bool_data_definition());
-        local_tycon_kind_ids.extend(compiler_primitive_tycon_kinds());
-        local_tycon_kind_ids.insert(PRIM_TYS.bool, Kind::Star);
-        constructor_types.extend(compiler_bool_constructor_types());
+        if module_name.as_string(self.session).as_str() == COMPILER_PRELUDE_BUILTINS_MODULE {
+            data_defs.insert(0, compiler_bool_data_definition());
+            local_tycon_kind_ids.insert(PRIM_TYS.bool, Kind::Star);
+            constructor_types.extend(compiler_bool_constructor_types());
+        }
     }
 
     fn seed_compiler_builtin_terms(
@@ -151,4 +153,24 @@ impl<'a> Resolver<'a> {
             builtin_defs.push(builtin.clone());
         }
     }
+}
+
+fn is_std_primitive_type(id: TyConId) -> bool {
+    id == PRIM_TYS.socket || id == PRIM_TYS.child_process
+}
+
+fn compiler_module_primitive_tycon_kinds(
+    session: &Session,
+    module_name: &ModuleName,
+) -> FxHashMap<TyConId, Kind> {
+    let keep_std_types = match module_name.as_string(session).as_str() {
+        COMPILER_PRELUDE_BUILTINS_MODULE => false,
+        COMPILER_STD_PRIM_MODULE => true,
+        _ => return FxHashMap::default(),
+    };
+
+    compiler_primitive_tycon_kinds()
+        .into_iter()
+        .filter(|(id, _)| is_std_primitive_type(*id) == keep_std_types)
+        .collect()
 }

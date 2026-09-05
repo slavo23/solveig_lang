@@ -303,6 +303,7 @@ fn named_display_name(id: u32, start: u32, names: &[String]) -> Option<String> {
 
 pub const COMPILER_PRELUDE_BUILTINS_MODULE: &str = "prelude.builtins";
 pub const COMPILER_PRELUDE_PRIM_MODULE: &str = "prelude.prim";
+pub const COMPILER_STD_PRIM_MODULE: &str = "std.prim";
 pub const COMPILER_INT_NAME: &str = "prelude.builtins.Int";
 pub const COMPILER_FLOAT_NAME: &str = "prelude.builtins.Float";
 pub const COMPILER_CHAR_NAME: &str = "prelude.builtins.Char";
@@ -311,10 +312,10 @@ pub const COMPILER_IO_NAME: &str = "prelude.builtins.IO";
 pub const COMPILER_THREAD_ID_NAME: &str = "prelude.builtins.ThreadId";
 pub const COMPILER_CHAN_NAME: &str = "prelude.builtins.Chan";
 pub const COMPILER_BYTES_NAME: &str = "prelude.builtins.Bytes";
-pub const COMPILER_SOCKET_NAME: &str = "prelude.builtins.Socket";
+pub const COMPILER_SOCKET_NAME: &str = "std.prim.Socket";
 pub const COMPILER_HANDLE_NAME: &str = "prelude.builtins.Handle";
 pub const COMPILER_STD_GEN_NAME: &str = "prelude.builtins.StdGen";
-pub const COMPILER_CHILD_PROCESS_NAME: &str = "prelude.builtins.ChildProcess";
+pub const COMPILER_CHILD_PROCESS_NAME: &str = "std.prim.ChildProcess";
 pub const COMPILER_BOOL_NAME: &str = "prelude.builtins.Bool";
 pub const COMPILER_TRUE_NAME: &str = "prelude.builtins.True";
 pub const COMPILER_FALSE_NAME: &str = "prelude.builtins.False";

@@ -1,6 +1,5 @@
 import std.env(*)
 import std.fs(FsError(..))
-import std.io(*)
 import std.list(length)
 import std.path(*)
 import std.time(SystemTime, systemTimeNanoseconds)
@@ -30,9 +29,7 @@ doesDirectoryExist path = mapError fsToHost (std.fs.doesDirectoryExist path)
 
 listDirectory : String -> Task [String]
 listDirectory path =
-    fmap
-        (map pathToString)
-        (mapError fsToHost (std.fs.listDirectory (fixturePath path)))
+    fmap (map pathToString) (mapError fsToHost (std.fs.listDirectory (fixturePath path)))
 
 createDirectory : String -> Task ()
 createDirectory path = mapError fsToHost (std.fs.createDirectory (fixturePath path))
@@ -48,64 +45,95 @@ getFileSize : String -> Task Int
 getFileSize path = mapError fsToHost (std.fs.getFileSize (fixturePath path))
 
 getModificationTime : String -> Task SystemTime
-getModificationTime path =
-    mapError fsToHost (std.fs.getModificationTime (fixturePath path))
+getModificationTime path = mapError fsToHost (std.fs.getModificationTime (fixturePath path))
 
-lookupEnvironment : String -> [(String, String)] -> Maybe String;
-lookupEnvironment name [] = Nothing;
+readFile : String -> Task String
+readFile = mapError fsToHost . std.fs.readFile . fixturePath
+
+writeFile : String -> String -> Task ()
+writeFile path = mapError fsToHost . std.fs.writeFile (fixturePath path)
+
+lookupEnvironment : String -> [(String, String)] -> Maybe String
+;
+lookupEnvironment name [] = Nothing
+;
 lookupEnvironment name ((key, value) :: rest) =
-    if name == key then Just value else lookupEnvironment name rest;
+    if name == key then Just value else lookupEnvironment name rest
+;
 
-printMaybe : Maybe String -> Task ();
+printMaybe : Maybe String -> Task ()
+;
 printMaybe value =
     case value of
         Just text => printLine text
-        | Nothing => printLine "missing";
+        | Nothing => printLine "missing" ;
 
-printRequired : String -> Task ();
+printRequired : String -> Task ()
+;
 printRequired name =
     catchError
         (bindIO (requireEnv name) (mapError EnvHostError . printLine))
-        (fun envError => printLine (show envError));
+        (fun envError => printLine (show envError))
+;
 
-loadSettings : String -> Task ();
+loadSettings : String -> Task ()
+;
 loadSettings path =
-    catchError
-        (loadEnvFile (fixturePath path))
-        (fun envError => printLine (show envError));
+    catchError (loadEnvFile (fixturePath path)) (fun envError => printLine (show envError))
+;
 
-missingEnvFile : EnvError -> Task Bool;
+missingEnvFile : EnvError -> Task Bool
+;
 missingEnvFile envError = do
     printLine (show envError)
-    pureIO False;
+    pureIO False
 
-printEnvParse : Either EnvError [(String, String)] -> Task ();
-printEnvParse (Right entries) = printLine ("env entries " <> show (length entries));
-printEnvParse (Left envError) = printLine (show envError);
+printEnvParse : Either EnvError [(String, String)] -> Task ()
+;
+printEnvParse (Right entries) = printLine ("env entries " <> show (length entries))
+;
+printEnvParse (Left envError) = printLine (show envError)
+;
 
-ignoreExistingDirectory : HostError -> Task ();
+ignoreExistingDirectory : HostError -> Task ()
+;
 ignoreExistingDirectory ioError =
-    if hostErrorOperation ioError == "createDirectory" then pureIO ()
-    else failIO ioError;
+    if hostErrorOperation ioError == "createDirectory" then pureIO () else failIO ioError
+;
 
-reportError : HostError -> Task ();
+reportError : HostError -> Task ()
+;
 reportError ioError =
-    let operation = hostErrorOperation ioError in
-    if operation == "getEnv" then printLine "get-env-error"
-    else if operation == "setEnv" then printLine "set-env-error"
-    else if operation == "setCurrentDirectory" then printLine "set-cwd-error"
-    else if operation == "listDirectory" then printLine "list-error"
-    else if operation == "createDirectory" then printLine "create-error"
-    else if operation == "removeFile" then printLine "remove-error"
-    else if operation == "renameFile" then printLine "rename-error"
-    else if operation == "getFileSize" then printLine "size-error"
-    else if operation == "getModificationTime" then printLine "modified-error"
-    else printLine "wrong-error";
+    let operation =
+        hostErrorOperation ioError
+    in if operation == "getEnv"
+        then printLine "get-env-error"
+        else if operation == "setEnv"
+            then printLine "set-env-error"
+            else if operation == "setCurrentDirectory"
+                then printLine "set-cwd-error"
+                else if operation == "listDirectory"
+                    then printLine "list-error"
+                    else if operation == "createDirectory"
+                        then printLine "create-error"
+                        else if operation == "removeFile"
+                        then printLine "remove-error"
+                        else if operation == "renameFile"
+                        then printLine "rename-error"
+                        else if operation == "getFileSize"
+                        then printLine "size-error"
+                        else if operation == "getModificationTime"
+                        then printLine "modified-error"
+                        else printLine "wrong-error"
+;
 
-failAfter : Task a -> Task ();
-failAfter action = catchError (bindIO action (fun value => printLine "wrong-success")) reportError;
+failAfter : Task a -> Task ()
+;
+failAfter action = catchError (bindIO action (fun value => printLine "wrong-success")) reportError
+;
 
-main : Task ();
+main : Task ()
+;
 main = do
     program <- getProgName
     printLine program
@@ -120,7 +148,6 @@ main = do
     printLine fallback
     printRequired "SOLVEIG_L3_COLOR"
     printRequired "SOLVEIG_L3_GOLDEN_MISSING_9D42"
-
     cwd <- getCurrentDirectory
     cwdExists <- doesDirectoryExist cwd
     if cwdExists then printLine "cwd" else printLine "wrong-cwd"
@@ -130,7 +157,6 @@ main = do
     printLine (show missingFile)
     fixtureDirectory <- doesDirectoryExist (fixturePath "fixture")
     printLine (show fixtureDirectory)
-
     created <- catchError (createDirectory "generated") ignoreExistingDirectory
     writeFile "generated/data.txt" "abc"
     size <- getFileSize "generated/data.txt"
@@ -139,7 +165,6 @@ main = do
     if systemTimeNanoseconds modified > 0 then printLine "modified" else printLine "wrong-time"
     entries <- listDirectory "generated"
     mapIO_ printLine entries
-
     writeFile
         "generated/settings.env"
         "# application settings\nSOLVEIG_L3_COLOR=red\nexport SOLVEIG_L3_FROM_FILE='azure'\nSOLVEIG_L3_EMPTY=\n"
@@ -150,9 +175,8 @@ main = do
     printMaybe loadedFile
     loadedEmpty <- getEnv "SOLVEIG_L3_EMPTY"
     printMaybe loadedEmpty
-    missingDotEnv <- catchError
-        (loadEnvFileIfExists (fixturePath "generated/missing.env"))
-        missingEnvFile
+    missingDotEnv <-
+        catchError (loadEnvFileIfExists (fixturePath "generated/missing.env")) missingEnvFile
     printLine (show missingDotEnv)
     printEnvParse (parseEnvFile "GOOD=one\nSECOND=two\n")
     printEnvParse (parseEnvFile "BAD-NAME=value\n")
@@ -166,12 +190,10 @@ main = do
     removeFile "generated/renamed.txt"
     removedExists <- doesFileExist "generated/renamed.txt"
     printLine (show removedExists)
-
     setCurrentDirectory "fixture"
     contents <- readFile "input.txt"
     printStr contents
     setCurrentDirectory ".."
-
     failAfter (getEnv "")
     failAfter (setEnv "bad=name" "value")
     failAfter (setCurrentDirectory "missing")
@@ -180,4 +202,4 @@ main = do
     failAfter (removeFile "missing")
     failAfter (renameFile "missing" "other")
     failAfter (getFileSize "missing")
-    failAfter (getModificationTime "missing");
+    failAfter (getModificationTime "missing")

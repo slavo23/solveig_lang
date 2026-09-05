@@ -1,6 +1,6 @@
-export (JsonNumber(..),
+export (JsonNumber,
     Json(..),
-    JsonLimits(..),
+    JsonLimits,
     JsonPathElement(..),
     JsonError(..),
     DecodeError(..),
@@ -15,8 +15,14 @@ export (JsonNumber(..),
     maximumStringBytes,
     maximumContainerItems,
     maximumNumberBytes,
+    withMaximumInputBytes,
+    withMaximumDepth,
+    withMaximumStringBytes,
+    withMaximumContainerItems,
+    withMaximumNumberBytes,
     jsonNumberText,
     jsonNumberFromInt,
+    jsonNumberFromStringWith,
     jsonNumberFromString,
     jsonNumberFromFloat,
     jsonNumberToInt,
@@ -73,9 +79,10 @@ import std.vector(*)
 -- | An exact RFC 8259 number spelling.
 -- |
 -- | The representation retains decimal digits and exponent text rather than
--- | rounding through Float. Use the smart constructors; renderJsonWith rejects
--- | a directly forged invalid spelling. A future BigInt constructor can be
--- | added without changing Json's number case.
+-- | rounding through Float. The representation is private: use the smart
+-- | constructors to preserve the invariant that every JsonNumber is valid.
+-- | A future BigInt representation can be added without changing Json's
+-- | number case.
 data JsonNumber = JsonNumber String
 
 -- | A JSON value with persistent arrays and deterministically ordered objects.
@@ -89,9 +96,10 @@ data Json =
 
 -- | Explicit resource bounds for parsing, decoding, and rendering JSON.
 -- |
--- | Fields are maximum input bytes, nesting depth, raw bytes inside one string,
--- | items in one array or object, and bytes in one number token. Negative
--- | values are invalid limits rather than requests for an unbounded operation.
+-- | The representation is private so call sites name the policy they change.
+-- | Start with defaultJsonLimits and use the withMaximum... functions. Negative
+-- | values are rejected by parsing, decoding, encoding, and rendering rather
+-- | than interpreted as requests for unbounded work.
 data JsonLimits = JsonLimits Int Int Int Int Int
 
 -- | One typed segment in a JSON decoding path.
@@ -214,6 +222,31 @@ maximumContainerItems (JsonLimits _ _ _ value _) = value
 maximumNumberBytes : JsonLimits -> Int
 maximumNumberBytes (JsonLimits _ _ _ _ value) = value
 
+-- | Replaces the maximum accepted input or rendered output size in bytes.
+withMaximumInputBytes : Int -> JsonLimits -> JsonLimits
+withMaximumInputBytes maximum (JsonLimits _ depth stringBytes containerItems numberBytes) =
+    JsonLimits maximum depth stringBytes containerItems numberBytes
+
+-- | Replaces the maximum array/object nesting depth; zero permits only scalars.
+withMaximumDepth : Int -> JsonLimits -> JsonLimits
+withMaximumDepth maximum (JsonLimits inputBytes _ stringBytes containerItems numberBytes) =
+    JsonLimits inputBytes maximum stringBytes containerItems numberBytes
+
+-- | Replaces the maximum raw bytes between one string's quotes.
+withMaximumStringBytes : Int -> JsonLimits -> JsonLimits
+withMaximumStringBytes maximum (JsonLimits inputBytes depth _ containerItems numberBytes) =
+    JsonLimits inputBytes depth maximum containerItems numberBytes
+
+-- | Replaces the maximum items accepted in one array or object.
+withMaximumContainerItems : Int -> JsonLimits -> JsonLimits
+withMaximumContainerItems maximum (JsonLimits inputBytes depth stringBytes _ numberBytes) =
+    JsonLimits inputBytes depth stringBytes maximum numberBytes
+
+-- | Replaces the maximum bytes accepted in one exact number spelling.
+withMaximumNumberBytes : Int -> JsonLimits -> JsonLimits
+withMaximumNumberBytes maximum (JsonLimits inputBytes depth stringBytes containerItems _) =
+    JsonLimits inputBytes depth stringBytes containerItems maximum
+
 -- | Returns the exact validated decimal spelling of a JSON number.
 jsonNumberText : JsonNumber -> String
 jsonNumberText (JsonNumber text) = text
@@ -222,9 +255,19 @@ jsonNumberText (JsonNumber text) = text
 jsonNumberFromInt : Int -> JsonNumber
 jsonNumberFromInt value = JsonNumber (show value)
 
--- | Validates one complete number spelling without accepting surrounding space.
+-- | Validates one complete number spelling under an explicit number-byte limit.
+-- |
+-- | Surrounding whitespace is not accepted. Only maximumNumberBytes affects
+-- | this single-token operation; the other limits apply when parsing or
+-- | rendering complete JSON values.
+jsonNumberFromStringWith : JsonLimits -> String -> Maybe JsonNumber
+jsonNumberFromStringWith limits text = validateNumberWith limits text
+
+-- | Validates one complete number spelling with defaultJsonLimits.
+-- |
+-- | Surrounding whitespace is not accepted.
 jsonNumberFromString : String -> Maybe JsonNumber
-jsonNumberFromString text = validateNumberWith defaultJsonLimits text
+jsonNumberFromString = jsonNumberFromStringWith defaultJsonLimits
 
 validateNumberWith : JsonLimits -> String -> Maybe JsonNumber
 validateNumberWith limits text =
@@ -252,12 +295,7 @@ jsonNumberFromFloat value = jsonNumberFromString (show value)
 -- | spelling. No Float conversion or rounding occurs, so values such as 1.0
 -- | and 12e2 succeed while 1.5 and an overflowing integer return Nothing.
 jsonNumberToInt : JsonNumber -> Maybe Int
-jsonNumberToInt (JsonNumber text) =
-    case validateNumberWith
-        (JsonLimits maximumInt maximumInt maximumInt maximumInt maximumInt)
-        text of
-        Nothing => Nothing
-        | Just _ => exactIntFromChars (std.text.stringToChars text)
+jsonNumberToInt (JsonNumber text) = exactIntFromChars (std.text.stringToChars text)
 
 -- | Maps a direct decoder's successful result without building a Json value.
 mapDecoder : forall e a b. (a -> b) -> Decoder e a -> Decoder e b
@@ -969,12 +1007,7 @@ renderJsonPathElements (JsonIndex index :: rest) =
     "[" <> show index <> "]" <> renderJsonPathElements rest
 
 encodeNumberValue : JsonNumber -> Either JsonError Json
-encodeNumberValue (JsonNumber text) =
-    case validateNumberWith
-        (JsonLimits maximumInt maximumInt maximumInt maximumInt maximumInt)
-        text of
-        Nothing => Left (JsonInvalidNumber text)
-        | Just number => Right (JsonNumberValue number)
+encodeNumberValue = Right . JsonNumberValue
 
 encodeArrayValue : forall a. Encoder a -> std.vector.Vector a -> Either JsonError Json
 encodeArrayValue encoder values =
@@ -1454,9 +1487,7 @@ renderValueInto _ _ (JsonBool False) suffix = Right ('f' :: 'a' :: 'l' :: 's' ::
 renderValueInto limits _ (JsonNumberValue (JsonNumber number)) suffix =
     if std.bytes.bytesLength (std.bytes.stringToBytes number) > maximumNumberBytes limits
         then Left (JsonNumberTooLarge (maximumNumberBytes limits))
-        else case validateNumberWith limits number of
-            Nothing => Left (JsonInvalidNumber number)
-            | Just _ => Right (prependChars number suffix)
+        else Right (prependChars number suffix)
 renderValueInto limits _ (JsonString value) suffix = renderStringInto limits value suffix
 renderValueInto limits depth (JsonArray values) suffix =
     if depth >= maximumDepth limits

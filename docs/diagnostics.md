@@ -101,5 +101,5 @@ main = "left" + "right"
 ```
 
 produces `TC0013`, because `+` is the `Num` method and `String` has no `Num`
-instance. Use `appendString` or `prelude.prim.stringAppend` for string
+instance. Use `appendString` for string
 concatenation.

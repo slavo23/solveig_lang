@@ -1,147 +1,94 @@
-export (
-    IOMode(..), BufferMode(..), stdin, stdout, stderr, openFile, hClose, hFlush,
-    hGetLine, hGetContents, hGetBytes, hPutStr, hPutStrLn, hPutBytes, hIsEOF,
-    hSetBuffering, withFile, readFile, readFileLimited, readFileBytes,
-    readFileBytesLimited, writeFile, writeFileBytes, appendFile, withFileByteStream
-)
+export (IOMode(..),
+    BufferMode(..),
+    stdin,
+    stdout,
+    stderr,
+    openFile,
+    hClose,
+    hFlush,
+    hGetLine,
+    hGetContents,
+    hGetBytes,
+    hPutStr,
+    hPutStrLn,
+    hPutBytes,
+    hIsEOF,
+    hSetBuffering,
+    withFile)
 
-import prelude.prim(*)
-import std.bytes
-import std.stream(Stream, unfold)
+import prelude.prim as CorePrim(hFlush, hGetLine, hPutStr, hPutStrLn, stdin, stdout)
+import std.prim as HostPrim(hClose,
+    hGetBytes,
+    hGetContents,
+    hIsEOF,
+    hPutBytes,
+    hSetBuffering,
+    openFile,
+    stderr)
 import std.task(bracket)
 
 -- | How a file is opened.
-data IOMode =
-    ReadMode
-  | WriteMode
-  | AppendMode
-  | ReadWriteMode
+data IOMode = ReadMode | WriteMode | AppendMode | ReadWriteMode
 
 -- | A handle's buffering policy. Nothing selects the platform default block size.
-data BufferMode =
-    NoBuffering
-  | LineBuffering
-  | BlockBuffering (Maybe Int)
+data BufferMode = NoBuffering | LineBuffering | BlockBuffering (Maybe Int)
 
 -- | The process standard-input handle.
 stdin : Handle
-stdin = prelude.prim.stdin
+stdin = CorePrim.stdin
 
 -- | The process standard-output handle.
 stdout : Handle
-stdout = prelude.prim.stdout
+stdout = CorePrim.stdout
 
 -- | The process standard-error handle.
 stderr : Handle
-stderr = prelude.prim.stderr
+stderr = HostPrim.stderr
 
 -- | Opens a file handle. The handle must be closed explicitly.
 openFile : String -> IOMode -> Task Handle
-openFile path mode = prelude.prim.openFile path mode
+openFile path mode = HostPrim.openFile path mode
 
 -- | Closes a handle, flushing pending output first.
 hClose : Handle -> Task ()
-hClose handle = prelude.prim.hClose handle
+hClose handle = HostPrim.hClose handle
 
 -- | Flushes pending output from a handle.
 hFlush : Handle -> Task ()
-hFlush handle = prelude.prim.hFlush handle
+hFlush handle = CorePrim.hFlush handle
 
 -- | Reads one line without its line terminator.
 hGetLine : Handle -> Task String
-hGetLine handle = prelude.prim.hGetLine handle
+hGetLine handle = CorePrim.hGetLine handle
 
 -- | Strictly reads all remaining text from a handle.
 hGetContents : Handle -> Task String
-hGetContents handle = prelude.prim.hGetContents handle
+hGetContents handle = HostPrim.hGetContents handle
 
 -- | Reads at most the requested number of arbitrary bytes, returning empty at EOF.
 hGetBytes : Handle -> Int -> Task Bytes
-hGetBytes handle maximum = prelude.prim.hGetBytes handle maximum
+hGetBytes handle maximum = HostPrim.hGetBytes handle maximum
 
 -- | Writes text to a handle.
 hPutStr : Handle -> String -> Task ()
-hPutStr handle text = prelude.prim.hPutStr handle text
+hPutStr handle text = CorePrim.hPutStr handle text
 
 -- | Writes text followed by a newline to a handle.
 hPutStrLn : Handle -> String -> Task ()
-hPutStrLn handle text = prelude.prim.hPutStrLn handle text
+hPutStrLn handle text = CorePrim.hPutStrLn handle text
 
 -- | Writes arbitrary bytes to a handle.
 hPutBytes : Handle -> Bytes -> Task ()
-hPutBytes handle bytes = prelude.prim.hPutBytes handle bytes
+hPutBytes handle bytes = HostPrim.hPutBytes handle bytes
 
 -- | Reports whether a readable handle is at end of input.
 hIsEOF : Handle -> Task Bool
-hIsEOF handle = prelude.prim.hIsEOF handle
+hIsEOF handle = HostPrim.hIsEOF handle
 
 -- | Changes a handle's buffering policy, flushing pending output first.
 hSetBuffering : Handle -> BufferMode -> Task ()
-hSetBuffering handle mode = prelude.prim.hSetBuffering handle mode
+hSetBuffering handle mode = HostPrim.hSetBuffering handle mode
 
 -- | Opens a file and closes it after use, including errors and interruption.
 withFile : forall a. String -> IOMode -> (Handle -> Task a) -> Task a
 withFile path mode use = bracket (openFile path mode) hClose use
-
--- | Opens a file as a scoped stream of non-empty byte chunks.
--- |
--- | The positive chunk size bounds each pull; the stream performs no read
--- | ahead. The rank-2 callback prevents the stream from escaping its Handle.
--- | Returning early, typed failure, a defect, or interruption closes the file.
--- |
--- | The scoped callback follows Launchbury and Peyton Jones, "Lazy Functional
--- | State Threads" (PLDI 1994): universal scope quantification keeps a
--- | resource-dependent value from escaping the operation that owns it.
-withFileByteStream : forall result. Int -> String -> (forall scope. Stream scope HostError Bytes -> Task result) -> Task result
-withFileByteStream chunkSize path use =
-    if chunkSize <= 0 then
-        prelude.builtins.failIO
-            (HostError
-                InvalidArgument
-                "withFileByteStream"
-                ("chunk size must be positive, got " <> show chunkSize))
-    else
-        bracket
-            (openFile path ReadMode)
-            hClose
-            (fun handle => use (fileByteStream chunkSize handle))
-
--- The public callback is universal in scope, so this private implementation
--- may instantiate that erased phantom with () without weakening escape safety.
-fileByteStream : Int -> Handle -> Stream () HostError Bytes
-fileByteStream chunkSize handle =
-    unfold (fileByteStep chunkSize handle) ()
-
-fileByteStep : Int -> Handle -> () -> Task (Maybe (Bytes, ()))
-fileByteStep chunkSize handle _ = do
-    bytes <- hGetBytes handle chunkSize
-    if std.bytes.bytesLength bytes == 0 then prelude.builtins.pureIO Nothing
-    else prelude.builtins.pureIO (Just (bytes, ()))
-
--- | Strictly reads an entire file as text without a library size limit.
-readFile : String -> Task String
-readFile path = prelude.prim.readFile path
-
--- | Strictly reads at most maximum bytes as text and fails if the file is larger.
-readFileLimited : String -> Int -> Task String
-readFileLimited path maximum = prelude.prim.readFileLimited path maximum
-
--- | Strictly reads an entire file as arbitrary bytes without a library size limit.
-readFileBytes : String -> Task Bytes
-readFileBytes path = prelude.prim.readFileBytes path
-
--- | Strictly reads at most maximum arbitrary bytes and fails if the file is larger.
-readFileBytesLimited : String -> Int -> Task Bytes
-readFileBytesLimited path maximum = prelude.prim.readFileBytesLimited path maximum
-
--- | Writes text to a file, replacing its previous contents.
-writeFile : String -> String -> Task ()
-writeFile path contents = prelude.prim.writeFile path contents
-
--- | Writes arbitrary bytes to a file, replacing its previous contents.
-writeFileBytes : String -> Bytes -> Task ()
-writeFileBytes path contents = prelude.prim.writeFileBytes path contents
-
--- | Appends text to the end of a file.
-appendFile : String -> String -> Task ()
-appendFile path contents = prelude.prim.appendFile path contents

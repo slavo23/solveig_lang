@@ -1,5 +1,5 @@
 import std.env(*)
-import std.io(*)
+import std.fs(*)
 import std.list(length, isEmpty)
 import std.process(exitFailure)
 import std.path(*)
@@ -10,17 +10,17 @@ import release_radar.client(*)
 import release_radar.fixture(*)
 import release_radar.model(*)
 
-repositoryPath : String
-repositoryPath = "repos.txt"
+repositoryPath : Path
+repositoryPath = requiredPath "repos.txt"
 
-cachePath : String
-cachePath = ".release-radar-cache"
+cachePath : Path
+cachePath = requiredPath ".release-radar-cache"
 
 workerCount : Int
 workerCount = 4
 
-envPath : String
-envPath = ".env"
+envPath : Path
+envPath = requiredPath ".env"
 
 repositoriesFromText : String -> [String]
 repositoriesFromText = filter repositoryLine . map trimAscii . lines
@@ -38,7 +38,8 @@ printSummary repositories results = do
             "-worker pool")
     printResults results
 
-reportLocalComparison : [String] -> Duration -> [release_radar.model.ReleaseResult] -> Duration -> Task ()
+reportLocalComparison :
+    [String] -> Duration -> [release_radar.model.ReleaseResult] -> Duration -> Task ()
 reportLocalComparison repositories sequentialNanos results concurrentNanos =
     if concurrentNanos >= sequentialNanos
         then error "local concurrency comparison did not beat sequential execution"
@@ -80,7 +81,7 @@ runLocal repositories =
 
 liveToken : IO std.env.EnvError (Maybe String)
 liveToken = do
-    _ <- std.env.loadEnvFileIfExists (requiredPath envPath)
+    _ <- std.env.loadEnvFileIfExists envPath
     fmap usableToken (mapError std.env.EnvHostError (std.env.getEnv "GITHUB_TOKEN"))
 
 requiredPath : String -> Path
@@ -100,9 +101,9 @@ tokenOrExit =
         liveToken
         (fun envError =>
             do
-                printLine
-                    ("release radar configuration error: " <> show envError)
-                exitFailure)
+                printLine ("release radar configuration error: " <> show envError)
+                exitFailure
+        )
 
 runLive : release_radar.cache.Cache -> [String] -> Task ()
 runLive cache repositories = do
@@ -143,7 +144,7 @@ liveMode _ = False
 
 main : Task ()
 main = do
-    repositoryText <- readFileLimited repositoryPath 65536
+    repositoryText <- mapError fsToHost (std.fs.readFileLimited repositoryPath 65536)
     let repositories = repositoriesFromText repositoryText
     if std.list.isEmpty repositories
         then error "repos.txt must contain at least one repository"

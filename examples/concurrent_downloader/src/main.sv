@@ -3,10 +3,11 @@ import std.bytes(*)
 import std.task(*)
 import std.channel(*)
 import std.env(*)
-import std.io(*)
+import std.fs(FsError(..))
+import std.path(Path, pathFromString)
 import std.time(milliseconds)
 
-data DownloadJob = DownloadJob String String
+data DownloadJob = DownloadJob String Path
 
 data DownloadResult = Downloaded Int | DownloadFailed
 
@@ -34,8 +35,18 @@ taskToNet = mapError hostToNet
 utf8ToHost : Utf8Error -> HostError
 utf8ToHost error = HostError InvalidArgument "bytesToString" (show error)
 
-writeFileTask : String -> String -> Task ()
-writeFileTask path contents = std.io.writeFile path contents
+fsToHost : FsError -> HostError
+fsToHost (FsHostError _ hostError) = hostError
+fsToHost error = HostError InvalidArgument "filesystem" (show error)
+
+requiredPath : String -> Path
+requiredPath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error (show pathError)
+
+writeFileTask : Path -> String -> Task ()
+writeFileTask path = mapError fsToHost . std.fs.writeFile path
 
 byteIs : Bytes -> Int -> Int -> Bool
 byteIs bytes index expected =
@@ -182,7 +193,7 @@ fetchInternet address port host path = timeout (milliseconds 5000) (fetch addres
 downloadAttempt :
     Chan DownloadResult ->
     (String -> Port -> String -> String -> Task (Maybe Bytes)) ->
-    String -> Port -> String -> String -> String -> Task ()
+    String -> Port -> String -> String -> Path -> Task ()
 downloadAttempt results fetcher address port host path output = do
     writeFileTask output ""
     fetched <- fetcher address port host path
@@ -217,18 +228,18 @@ workerStep jobs results fetcher address port host = do
 
 enqueueLocalJobs : Chan DownloadJob -> Task ()
 enqueueLocalJobs jobs = do
-    send jobs (DownloadJob "/alpha" "downloads/download-1.txt")
-    send jobs (DownloadJob "/missing" "downloads/download-2.txt")
-    send jobs (DownloadJob "/bravo" "downloads/download-3.txt")
-    send jobs (DownloadJob "/charlie" "downloads/download-4.txt")
+    send jobs (DownloadJob "/alpha" (requiredPath "downloads/download-1.txt"))
+    send jobs (DownloadJob "/missing" (requiredPath "downloads/download-2.txt"))
+    send jobs (DownloadJob "/bravo" (requiredPath "downloads/download-3.txt"))
+    send jobs (DownloadJob "/charlie" (requiredPath "downloads/download-4.txt"))
     closeChan jobs
 
 enqueueInternetJobs : Chan DownloadJob -> Task ()
 enqueueInternetJobs jobs = do
-    send jobs (DownloadJob "/?solveig=1" "downloads/download-1.txt")
-    send jobs (DownloadJob "/?solveig=2" "downloads/download-2.txt")
-    send jobs (DownloadJob "/?solveig=3" "downloads/download-3.txt")
-    send jobs (DownloadJob "/?solveig=4" "downloads/download-4.txt")
+    send jobs (DownloadJob "/?solveig=1" (requiredPath "downloads/download-1.txt"))
+    send jobs (DownloadJob "/?solveig=2" (requiredPath "downloads/download-2.txt"))
+    send jobs (DownloadJob "/?solveig=3" (requiredPath "downloads/download-3.txt"))
+    send jobs (DownloadJob "/?solveig=4" (requiredPath "downloads/download-4.txt"))
     closeChan jobs
 
 collect : Chan DownloadResult -> Int -> Int -> Int -> Int -> Task DownloadStats

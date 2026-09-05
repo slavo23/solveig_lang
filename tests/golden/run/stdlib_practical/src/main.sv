@@ -1,10 +1,11 @@
 import std.bytes(*)
+import std.fs(FsError(..))
 import std.http(*)
-import std.io(*)
 import std.json(*)
 import std.map(*)
 import std.net(*)
 import std.parser(*)
+import std.path(Path, pathFromString)
 import std.task(*)
 import std.testing(*)
 import std.text(*)
@@ -130,9 +131,20 @@ isNothing : Maybe a -> Bool
 isNothing Nothing = True
 isNothing (Just _) = False
 
+fsToHost : FsError -> HostError
+fsToHost (FsHostError _ hostError) = hostError
+fsToHost error = HostError InvalidArgument "filesystem" (show error)
+
+requiredPath : String -> Path
+requiredPath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error (show pathError)
+
 main : Task ()
 main = do
-    settings <- std.io.readFileLimited "fixture/settings.txt" 1024
+    settings <-
+        mapError fsToHost (std.fs.readFileLimited (requiredPath "fixture/settings.txt") 1024)
     workers <- resultOrExit (parseWorkers settings)
     fetched <- withFixture fetchNames
     response <- resultOrExit fetched

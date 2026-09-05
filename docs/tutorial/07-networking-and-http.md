@@ -10,6 +10,34 @@ Solveig has three networking layers:
 Use `std.http` for web APIs. Use `std.tls` for a custom encrypted client
 protocol, and `std.net` for plaintext custom protocols or server-side TCP/UDP.
 
+## Build the right mental model
+
+The layers solve different problems; none is merely a differently named way to
+send the same value:
+
+```text
+application value
+    │  JSON, form data, or another application format
+HTTP request and response
+    │  method, URL, status, headers, and body framing
+TLS connection (for HTTPS)
+    │  encryption, certificate-chain verification, and server-name verification
+TCP connection
+    │  reliable ordered bytes with no message boundaries
+IP endpoint
+       resolved address plus a validated port
+```
+
+A normal `get "https://example.test/items"` asks `std.http` to own the whole
+stack: validate the URL, resolve the host, connect, negotiate and verify TLS,
+write a correctly framed request, parse the response, follow the configured
+redirect policy, and return a bounded body. Application code should not
+reproduce those steps unless it is implementing a non-HTTP protocol.
+
+UDP sits beside TCP rather than above it. It preserves individual datagrams but
+does not provide TCP's reliable ordered byte stream. TLS and HTTP in Solveig use
+TCP.
+
 ## A normal HTTP GET
 
 The common path does not ask the caller to configure limits:
@@ -28,6 +56,11 @@ downloadText url = do
 `get` uses practical defaults: at most 64 KiB of response headers, an 8 MiB
 buffered body, a 15-second whole-request timeout, and five redirects. Those
 defaults protect the program without burdening the simple call site.
+
+This is the intended requests-style API: URL-only verbs are the common
+surface, `Response` owns status/headers/body, and advanced policy remains in an
+immutable `HttpOptions` value. There is no public raw socket tuple or framing
+record to assemble for an ordinary web request.
 
 Use `getWith` only when the application needs headers, query parameters, or a
 different policy:
@@ -48,6 +81,21 @@ getWith
 clear. Query names and values are host-encoded and may contain Unicode.
 Explicit byte bounds belong at a trust boundary, not on every beginner example.
 
+The four response bounds answer different questions:
+
+- `withMaximumHeaderBytes` limits response metadata received before the body.
+- `withMaximumBufferedBodyBytes` limits verbs such as `get` that return a
+  complete strict `Response`.
+- `withChunkBytes` limits one pull from a scoped streaming response.
+- `withMaximumResponseBytes` optionally limits the cumulative bytes pulled
+  from that stream.
+
+A per-pull chunk bound controls working memory but does not limit total
+transfer. Conversely, a total quota does not describe how much one pull may
+allocate. Most programs need neither override because the defaults already
+bound strict requests; introduce one when the application's trust or storage
+policy requires it.
+
 ## Status, headers, and body
 
 An HTTP 404 or 500 is a valid `Response`, not a transport failure. Inspect it:
@@ -65,6 +113,18 @@ summarize response =
 case-insensitively. `responseBody` returns `Bytes`; `responseText` performs
 strict UTF-8 decoding and can fail.
 
+This distinction matters in recovery logic:
+
+- “The server returned 404 with a JSON explanation” is a completed HTTP
+  exchange. The status, headers, and body are useful application data.
+- “DNS failed,” “the certificate was rejected,” “the deadline expired,” or
+  “the response exceeded policy” means no usable `Response` was produced and
+  appears as `HttpError`.
+
+Use `ensureSuccess` only where every status from 400 upward is genuinely
+exceptional. It converts such a response to `UnexpectedStatus`; it does not
+change whether the network exchange completed.
+
 The complete response body is already bounded when the value reaches Solveig.
 `bodyChunks` and `foldBodyChunks` let a consumer process slices without
 constructing another full list, but they do not turn the client into an
@@ -77,6 +137,23 @@ Its callback receives status, headers, and a scoped `Stream` of binary chunks.
 optional cumulative quota. A stream fold can process the body without retaining
 it; returning early closes without draining the rest. The stream cannot escape
 its callback. See [streaming uploads and downloads](../http.md#streaming-uploads-and-downloads).
+
+Strict and streamed responses express different ownership:
+
+```text
+get url
+└── network resource closes before Response is returned
+    └── bounded body bytes are ordinary immutable data
+
+withResponse method url callback
+└── network resource remains open only inside callback
+    └── each next/fold demand may perform network IO
+```
+
+The rank-2 `scope` prevents the second stream from being stored in the callback
+result and used after its connection closes. Returning early deliberately
+drops unread bytes. If validation requires the entire body, consume and
+validate it before returning.
 
 ## Build non-GET requests
 
@@ -99,9 +176,21 @@ an explicit header overrides the default. `withBody` sends strict bytes,
 file incrementally. The client owns framing headers such as `Content-Length`.
 Use `request method url` only when code selects the method dynamically.
 
+Body setters replace an earlier configured body rather than combining two
+payloads. The client owns `Host`, `Content-Length`, and `Transfer-Encoding`;
+rejecting caller-supplied versions prevents contradictory framing. Ordinary
+headers remain semantic name/value pairs, and an explicit `Content-Type`
+overrides the default selected by a text, JSON, or form body.
+
 `requestStream` sends a demand-driven stream of binary chunks. A streamed body
 is one-shot: a redirect that requires replay fails explicitly. Use
 `withStreamResponse` when both upload and response should remain incremental.
+
+Strict text, byte, JSON, form, builder, and file bodies are replayable under
+the default policy because the client can produce them again; a file is rewound
+rather than copied into memory. A stream has effects and a current position, so
+silently running it twice would be unsound. `NoReplay` is available when the
+application does not authorize resending even a repeatable body.
 
 HTTPS verifies certificates. The public API has no switch that disables
 verification.
@@ -113,6 +202,13 @@ header, option, transport, TLS, redirect, replay, request-file, response-bound,
 UTF-8, managed-header, and unexpected-status failures. A function can retain
 this precise type or translate it at an application boundary with `mapError`.
 Every case has a useful `Show` representation.
+
+Keep `HttpError` in library functions that can use its structure. Translate it
+only at an application boundary. Mapping everything immediately to a string or
+generic `HostError` throws away whether retrying, changing credentials,
+reducing a body, or fixing a URL could help. A retry policy must also consider
+the method and whether the body can safely be repeated; a transport error alone
+does not prove that the server observed no request.
 
 ## Concurrent requests
 
@@ -133,12 +229,29 @@ The result follows URL input order. Use
 `mapConcurrentlyBoundedCompletionOrder` when a UI or probe should receive the
 same successful results in arrival order instead.
 
+The bound limits active worker actions created by this call; it is not a
+process-wide HTTP connection limit. Choose it from the remote service policy,
+your descriptor budget, and measurements. A large bound can worsen latency by
+creating queueing and rate-limit failures. Structured failure cancels the
+remaining workers and waits for their cleanup before `fetchAll` returns.
+
 A token for an authenticated API should come from `std.env.getEnv` or
 `requireEnv`, then be added as a header. Never put the secret directly in
 source or print it. Authentication usually raises rate limits but does not
 remove the service's usage policy; handle status and rate-limit headers.
 
 ## TCP clients
+
+A port is a 16-bit service number, represented by opaque `Port` rather than an
+ambiguous `Int`. `portFromInt` validates external data; `anyPort` is meaningful
+only when binding and asks the host to choose an available port. `IpAddress` is
+produced by `resolveHost`, and `Endpoint` pairs one resolved address with a
+port.
+
+`withTcpConnection` performs resolution and tries returned addresses in order
+until one connects. DNS runs on the bounded host worker pool, so it does not
+freeze the green-thread scheduler. Resolution and connection failure remain
+`NetError`, with host context retained.
 
 `withTcpConnection host port body` resolves the hostname and owns an outgoing
 connection in a fresh type-level scope:
@@ -163,6 +276,28 @@ guaranteed to correspond to one `receiveTcpBytes`. A real protocol must define
 framing—for example, a delimiter or a length prefix—and loop until a complete
 frame is available. `tcpBytes connection chunkSize` supplies the same bounded,
 demand-driven loop as a scoped `Stream`; it performs no read-ahead.
+
+For a fixed-size frame, the loop requests only the missing bytes:
+
+```solveig
+receiveExactly : forall scope. TcpConnection scope -> Int -> Bytes -> IO NetError Bytes
+receiveExactly connection wanted accumulated =
+    let missing = wanted - bytesLength accumulated
+    in if missing <= 0
+        then pureIO accumulated
+        else do
+            chunk <- receiveTcpBytes connection missing
+            if bytesLength chunk == 0
+                then failIO
+                    (NetHostError "fixed-size frame" $
+                        HostError EndOfFile "receiveExactly" "peer closed during a frame")
+                else receiveExactly connection wanted (bytesAppend accumulated chunk)
+```
+
+Production protocols must validate `wanted` before allocation and choose a
+maximum frame size. Delimiter-based protocols need an analogous maximum, or a
+peer that never sends the delimiter can force unbounded accumulation. Stream
+chunk boundaries are transport events, never application records.
 
 ## Raw TLS clients
 
@@ -197,6 +332,13 @@ PKI and hermetic tests. A name override changes the DNS name that must appear
 in the certificate; it does not weaken verification. Solveig intentionally
 offers no “accept any certificate” switch.
 
+TLS protects the connection only after a successful handshake. Certificate
+chain verification answers whether a configured trust root vouches for the
+certificate; server-name verification answers whether that certificate is for
+the host the program intended to reach. Encryption without both checks can
+protect traffic to the wrong peer, which is why the public API never exposes an
+insecure convenience flag.
+
 As with TCP, TLS does not infer application-message framing. `receiveTlsBytes`
 requires a positive maximum and returns one available plaintext chunk;
 `tlsBytes` repeats that operation only when demanded. A clean peer shutdown is
@@ -213,6 +355,11 @@ actual port separately. Validate externally supplied integers with
 a nested connection scope. Both resources close through `bracket` on normal
 return, typed failure, defect, cancellation, and timeout; neither can escape its
 callback.
+
+The listener scope and each accepted-connection scope are different lifetimes.
+A server may keep accepting after one connection closes, but an accepted
+connection cannot escape its own callback. The current API is a low-level
+loopback building block, not a public-internet HTTP server framework.
 
 ## UDP datagrams
 
@@ -232,6 +379,13 @@ between 1 and 65,535 bytes; a larger message is consumed and reported as an
 error rather than silently truncated. `datagrams` exposes repeated receives as
 a scoped stream, one demand per message.
 
+UDP does not promise delivery, uniqueness, or ordering. Applications that need
+acknowledgements, retransmission, deduplication, congestion control, or
+fragmentation policy must define them at the protocol layer—or choose TCP when
+its reliable ordered stream is the required abstraction. The receive bound
+protects one datagram, while UDP's lack of EOF means the owning scope, a
+failure, or interruption must terminate a receive loop.
+
 Solveig does not currently provide a high-level HTTP server framework. The
 tutorial's local program writes the small HTTP response itself over TCP so the
 client example remains hermetic.
@@ -246,7 +400,7 @@ project:
 3. Accepts three connections and scopes every connection.
 4. Runs three `get` clients through `mapConcurrentlyBoundedOrdered`.
 5. Closes the listener and every accepted connection through rank-2 scopes.
-6. Closes every socket, channel, listener, and child scope.
+6. Closes every connection, listener, worker, and child scope.
 
 Run it without internet access:
 
@@ -263,8 +417,26 @@ responses: 3
 
 The full source is intentionally kept in the tutorial project rather than
 duplicated here. Read it alongside this chapter: the `reply`,
-`finishConnection`, `acceptBatch`, and `runClients` functions each own one
-clear piece of the protocol.
+`serveBatch`, `runClients`, and `runFixture` functions each own one clear piece
+of the protocol.
+
+The program is deliberately a fixture, not a miniature reusable HTTP server:
+
+- `responseText` constructs one fixed response with an exact `Content-Length`.
+- `reply` waits until the client has sent some request bytes, then returns the
+  fixed response; it does not pretend that one TCP read contains a complete
+  general HTTP request.
+- `serveBatch` accepts exactly three connections, so its recursion has an
+  explicit termination condition.
+- `runClients` uses the high-level `get` API and a bound of three. Ordered
+  collection makes output deterministic even if requests finish differently.
+- `runFixture` owns the server through `withThread`, and `main` owns the
+  listener through `withTcpListener`. Leaving either lexical scope performs
+  cleanup before returning.
+
+This shape keeps the test hermetic: it binds only loopback, asks the host for an
+ephemeral port, uses no DNS beyond the numeric loopback address, and needs no
+public internet service or credential.
 
 ## Network design checklist
 
@@ -277,5 +449,8 @@ Before calling a network program complete, answer these questions:
 - How does cancellation wake blocked work?
 - Does output show completion order or intentionally restore input order?
 - Can tests use a loopback service instead of public internet?
+- Is a TCP/TLS chunk being mistaken for an application message?
+- Can a redirect or retry repeat this method and body safely?
+- Does streamed validation finish before the scoped response is closed?
 
 Next: [Parsers and JSON](08-parsers-and-json.md).

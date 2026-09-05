@@ -1,6 +1,18 @@
+import std.fs(FsError(..))
 import std.list(*)
 import std.io(*)
+import std.path(Path, pathFromString)
 import std.text(stringToChars, charsToString)
+
+fsToHost : FsError -> HostError
+fsToHost (FsHostError _ hostError) = hostError
+fsToHost error = HostError InvalidArgument "filesystem" (show error)
+
+requiredPath : String -> Path
+requiredPath spelling =
+    case pathFromString spelling of
+        Right path => path
+        | Left pathError => error (show pathError)
 
 data QuizCard = QuizCard String String
 
@@ -16,33 +28,33 @@ statePure value = State (fun state => (value, state))
 
 stateBind : forall s a b. State s a -> (a -> State s b) -> State s b
 stateBind action continuation =
-    State (fun state =>
-        case runState action state of
-            (value, nextState) => runState (continuation value) nextState)
+    State
+        (fun state =>
+            case runState action state of
+                (value, nextState) => runState (continuation value) nextState
+        )
 
 modifyState : forall s. (s -> s) -> State s ()
 modifyState f = State (fun state => ((), f state))
 
 instance Functor (State s) where
     fmap f action =
-        State (fun state =>
-            case runState action state of
-                (value, nextState) => (f value, nextState))
+        State
+            (fun state =>
+                case runState action state of
+                    (value, nextState) => (f value, nextState)
+            )
 
 instance Applicative (State s) where
     pure value = statePure value
-
     apply actionF actionX =
-        stateBind actionF (fun f =>
-            stateBind actionX (fun x =>
-                statePure (f x)))
+        stateBind actionF (fun f => stateBind actionX (fun x => statePure (f x)))
 
 instance Monad (State s) where
     bind action continuation = stateBind action continuation
 
 consNonEmpty : String -> [String] -> [String]
-consNonEmpty line rest =
-    if line == "" then rest else line :: rest
+consNonEmpty line rest = if line == "" then rest else line :: rest
 
 splitLines : String -> [String]
 splitLines text = splitLinesChars (stringToChars text) []
@@ -52,10 +64,9 @@ splitLinesChars chars current =
     case chars of
         [] => consNonEmpty (charsToString (reverse current)) []
         | c :: rest =>
-            if c == '\n' then
-                consNonEmpty (charsToString (reverse current)) (splitLinesChars rest [])
-            else
-                splitLinesChars rest (c :: current)
+            if c == '\n'
+                then consNonEmpty (charsToString (reverse current)) (splitLinesChars rest [])
+                else splitLinesChars rest (c :: current)
 
 splitQuestionAnswer : String -> (String, String)
 splitQuestionAnswer line = splitQuestionAnswerChars (stringToChars line) []
@@ -65,10 +76,9 @@ splitQuestionAnswerChars chars question =
     case chars of
         [] => (charsToString (reverse question), "")
         | c :: rest =>
-            if c == '|' then
-                (charsToString (reverse question), charsToString rest)
-            else
-                splitQuestionAnswerChars rest (c :: question)
+            if c == '|'
+                then (charsToString (reverse question), charsToString rest)
+                else splitQuestionAnswerChars rest (c :: question)
 
 parseCard : String -> QuizCard
 parseCard line =
@@ -97,10 +107,9 @@ scoreResponse response =
         (card, answer) =>
             case card of
                 QuizCard question expected =>
-                    if answer == expected then
-                        modifyState (fun score => score + 1)
-                    else
-                        statePure ()
+                    if answer == expected
+                        then modifyState (fun score => score + 1)
+                        else statePure ()
 
 scoreResponses : [(QuizCard, String)] -> State Int ()
 scoreResponses responses =
@@ -130,15 +139,14 @@ withNewline : String -> String
 withNewline text = appendString text "\n"
 
 main : Task ()
-main =
-    do
-        contents <- readFile "questions.txt"
-        let cards = parseQuiz contents
-        printLine "Solveig quiz"
-        responses <- askCards cards
-        let score = scoreQuiz responses
-        let total = lengthCards cards
-        let summary = summaryLine score total
-        printLine summary
-        writeFile "last-score.txt" (withNewline summary)
-        appendFile "score-history.txt" (withNewline summary)
+main = do
+    contents <- mapError fsToHost (std.fs.readFile (requiredPath "questions.txt"))
+    let cards = parseQuiz contents
+    printLine "Solveig quiz"
+    responses <- askCards cards
+    let score = scoreQuiz responses
+    let total = lengthCards cards
+    let summary = summaryLine score total
+    printLine summary
+    mapError fsToHost (std.fs.writeFile (requiredPath "last-score.txt") (withNewline summary))
+    mapError fsToHost (std.fs.appendFile (requiredPath "score-history.txt") (withNewline summary))

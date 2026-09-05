@@ -29,7 +29,7 @@ export (Port,
     receiveDatagram,
     datagrams)
 
-import prelude.prim
+import std.prim(Socket)
 import std.bytes(bytesLength)
 import std.stream(Stream, unfoldScoped)
 import std.task(bracket)
@@ -167,7 +167,7 @@ wrapAddress = IpAddress
 -- | Resolution runs on the bounded host worker pool. IPv4 addresses precede
 -- | IPv6 addresses so the loopback-only bind helpers remain portable.
 resolveHost : String -> IO NetError [IpAddress]
-resolveHost host = fmap (map wrapAddress) (atEndpoint host (prelude.prim.resolveHost host))
+resolveHost host = fmap (map wrapAddress) (atEndpoint host (std.prim.resolveHost host))
 
 -- | A scoped connected TCP byte stream.
 data TcpConnection scope = TcpConnection Socket
@@ -179,7 +179,7 @@ connectAddress : IpAddress -> Port -> IO NetError Socket
 connectAddress address port =
     atEndpoint
         (show (endpoint address port))
-        (prelude.prim.connect (ipAddressToString address) (portToInt port))
+        (std.prim.connect (ipAddressToString address) (portToInt port))
 
 connectAddresses : String -> Port -> [IpAddress] -> IO NetError Socket
 connectAddresses host _ [] = failIO (NoHostAddresses host)
@@ -196,7 +196,7 @@ openTcpConnection host port = do
 
 closeTcpConnection : forall scope. TcpConnection scope -> IO NetError ()
 closeTcpConnection (TcpConnection socket) =
-    atEndpoint "close TCP connection" (prelude.prim.closeSocket socket)
+    atEndpoint "close TCP connection" (std.prim.closeSocket socket)
 
 -- | Resolves, opens, and closes a TCP connection around a rank-2 callback.
 -- |
@@ -211,11 +211,11 @@ openTcpListener : Port -> IO NetError (TcpListener (), Port)
 openTcpListener port =
     fmap
         (fun (socket, actual) => (TcpListener socket, Port actual))
-        (atEndpoint ("listen on port " <> show port) (prelude.prim.listen (portToInt port)))
+        (atEndpoint ("listen on port " <> show port) (std.prim.listen (portToInt port)))
 
 closeTcpListener : forall scope. (TcpListener scope, Port) -> IO NetError ()
 closeTcpListener (TcpListener listener, _) =
-    atEndpoint "close TCP listener" (prelude.prim.closeSocket listener)
+    atEndpoint "close TCP listener" (std.prim.closeSocket listener)
 
 useTcpListener :
     forall result. (forall scope. TcpListener scope -> Port -> IO NetError result) ->
@@ -231,7 +231,7 @@ withTcpListener port use = bracket (openTcpListener port) closeTcpListener (useT
 openAcceptedTcpConnection :
     forall listenerScope. TcpListener listenerScope -> IO NetError (TcpConnection ())
 openAcceptedTcpConnection (TcpListener listener) =
-    fmap TcpConnection (atEndpoint "accept TCP connection" (prelude.prim.accept listener))
+    fmap TcpConnection (atEndpoint "accept TCP connection" (std.prim.accept listener))
 
 -- | Accepts and closes one TCP connection inside a fresh nested scope.
 withAcceptedTcpConnection :
@@ -244,14 +244,14 @@ withAcceptedTcpConnection listener use =
 -- | Sends the complete byte string on a connected TCP byte stream.
 sendTcpBytes : forall scope. TcpConnection scope -> Bytes -> IO NetError ()
 sendTcpBytes (TcpConnection socket) bytes =
-    atEndpoint "send TCP bytes" (prelude.prim.sendBytes socket bytes)
+    atEndpoint "send TCP bytes" (std.prim.sendBytes socket bytes)
 
 -- | Receives at most a positive number of TCP bytes; empty bytes mean EOF.
 receiveTcpBytes : forall scope. TcpConnection scope -> Int -> IO NetError Bytes
 receiveTcpBytes (TcpConnection socket) maximum =
     if maximum <= 0
         then failIO (InvalidTcpChunkSize maximum)
-        else atEndpoint "receive TCP bytes" (prelude.prim.recvBytes socket maximum)
+        else atEndpoint "receive TCP bytes" (std.prim.recvBytes socket maximum)
 
 tcpByteStep : forall scope. TcpConnection scope -> Int -> () -> IO NetError (Maybe (Bytes, ()))
 tcpByteStep connection chunkSize _ = do
@@ -288,11 +288,10 @@ openUdpSocket : Port -> IO NetError (UdpSocket (), Port)
 openUdpSocket port =
     fmap
         (fun (socket, actual) => (UdpSocket socket, Port actual))
-        (atEndpoint ("bind UDP port " <> show port) (prelude.prim.bindUdp (portToInt port)))
+        (atEndpoint ("bind UDP port " <> show port) (std.prim.bindUdp (portToInt port)))
 
 closeUdpSocket : forall scope. (UdpSocket scope, Port) -> IO NetError ()
-closeUdpSocket (UdpSocket socket, _) =
-    atEndpoint "close UDP socket" (prelude.prim.closeSocket socket)
+closeUdpSocket (UdpSocket socket, _) = atEndpoint "close UDP socket" (std.prim.closeSocket socket)
 
 useUdpSocket :
     forall result. (forall scope. UdpSocket scope -> Port -> IO NetError result) ->
@@ -310,7 +309,7 @@ sendDatagramTo : forall scope. UdpSocket scope -> Endpoint -> Bytes -> IO NetErr
 sendDatagramTo (UdpSocket socket) target bytes =
     atEndpoint
         ("send UDP datagram to " <> show target)
-        (prelude.prim.sendDatagram
+        (std.prim.sendDatagram
             socket
             (ipAddressToString (endpointAddress target), portToInt (endpointPort target), bytes))
 
@@ -344,7 +343,7 @@ receiveDatagram (UdpSocket socket) maximum =
         then failIO (InvalidDatagramSize maximum)
         else fmap
             datagramFromRaw
-            (atEndpoint "receive UDP datagram" $ prelude.prim.recvDatagram socket maximum)
+            (atEndpoint "receive UDP datagram" $ std.prim.recvDatagram socket maximum)
 
 datagramStep : forall scope. UdpSocket scope -> Int -> () -> IO NetError (Maybe (Datagram, ()))
 datagramStep socket maximum _ =
