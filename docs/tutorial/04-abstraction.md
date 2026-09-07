@@ -175,6 +175,52 @@ hash equally, but the exact integer is not a storage or wire format. `Float`
 has no `Hashable` instance because NaN makes ordinary floating equality
 non-reflexive.
 
+## Choose a collection by its job
+
+The standard library offers persistent collections: an update returns a new
+value while the old value remains valid. That fits pure functions naturally and
+makes sharing values between threads safe.
+
+Use the collection whose operations describe the problem:
+
+| Need | Type | Typical operations |
+| --- | --- | --- |
+| Recursive traversal, prepend, small pipelines | `[a]` | `map`, `filter`, `foldl`, `(::)` |
+| Indexed finite sequence | `std.vector.Vector a` | `fromList`, `index`, `update`, `length` |
+| Deterministic key order | `std.map.Map k v` | `lookup`, `insert`, `delete`, `toAscList` |
+| Equality-key lookup when sorted output is irrelevant | `std.hashmap.HashMap k v` | `lookup`, `insert`, `member` |
+| Unique values with deterministic order | `std.set.Set a` | `member`, `insert`, `union` |
+| First-in, first-out pure work queue | `std.queue.Queue a` | `enqueue`, `dequeue` |
+
+For example, accumulating request counts by route is a map problem rather than
+a repeated list-search problem:
+
+```solveig
+import std.map
+
+increment : String -> std.map.Map String Int -> std.map.Map String Int
+increment route counts =
+    let current =
+        case std.map.lookup route counts of
+            Nothing => 0
+            | Just count => count
+    in std.map.insert route (current + 1) counts
+
+routeCounts : [String] -> std.map.Map String Int
+routeCounts = foldl (flip increment) std.map.empty
+```
+
+Iteration order is an API decision. `Map` and `Set` give deterministic ordered
+traversal. A `HashMap` is appropriate when equality lookup dominates and output
+order is irrelevant; do not serialize its traversal order as a stable format.
+A `Vector` has safe lookup returning `Maybe`; absence at an external index is
+data, not a reason to introduce a partial helper.
+
+A persistent collection is still strict and finite. It does not make a large
+file or HTTP response incremental. Use a scoped `Stream` for input that should
+be pulled only as the consumer asks for it, then fold into the smallest strict
+summary the application needs.
+
 ## Point-free style
 
 A definition may omit an argument when composition is clearer:

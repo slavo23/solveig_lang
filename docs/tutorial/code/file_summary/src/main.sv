@@ -18,8 +18,8 @@ nonEmpty text = text /= ""
 
 main : Task ()
 main = do
-    contents <- mapError fsToHost (std.fs.readFile (requiredPath "input/readings.txt"))
-    let readings = filter nonEmpty (lines (trimAscii contents))
+    contents <- mapError fsToHost $ std.fs.readFile $ requiredPath "input/readings.txt"
+    let readings = filter nonEmpty $ lines $ trimAscii contents
     let report = "readings: " <> show (length readings) <> "\n"
-    mapError fsToHost (std.fs.writeFile (requiredPath "summary.txt") report)
+    mapError fsToHost $ std.fs.writeFile (requiredPath "summary.txt") report
     printStr report

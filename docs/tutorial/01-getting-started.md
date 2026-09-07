@@ -74,6 +74,22 @@ The output is:
 Hello from Solveig
 ```
 
+Before `main` runs, the driver loads the manifest and dependency graph, parses
+the selected modules, resolves names, checks kinds and types, verifies pattern
+coverage, and lowers the checked program for the VM. A misspelled import, type
+mismatch, or missing constructor branch is therefore a compile-time diagnostic
+with a source span; it is not deferred until a rarely used route happens to run.
+
+That gives a useful first workflow:
+
+1. Write the smallest signature describing the intended boundary.
+2. Let the first compiler diagnostic point to the earliest broken assumption.
+3. Run the formatter after the program parses.
+4. Execute the package and check behavior at its IO boundary.
+
+Do not remove a signature merely to silence a mismatch. Read it as a compact
+design claim, then decide whether the implementation or the claim is wrong.
+
 ## Read the types
 
 The colon introduces a type signature:
@@ -95,6 +111,12 @@ performed for its effect rather than a useful return value.
 `Task` is not a command that runs immediately when mentioned. It is a value
 describing an action. The runtime executes the action selected by the CLI entry
 point.
+
+Pure definitions and effectful actions can therefore be tested separately. A
+price calculation can have type `Order -> Int`; only loading the order or
+printing its invoice needs `IO`. Keeping that boundary narrow is not ceremonial
+functional style—it makes most business logic deterministic and removes host
+failures from its type.
 
 ## Definitions and application
 

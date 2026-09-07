@@ -9,7 +9,7 @@ fn language_tour_documentation_project_compiles_and_runs() {
     let repository = repository_root();
     run_copied_project(
         &repository.join("docs/tutorial/code/language_tour"),
-        "high: 12\n[\"ada@example.test\"]\n(\"answer\", 42)\n(7, \"seven\")\n[1, 2, 3]\n",
+        "high: 12\n[\"ada@example.test\"]\n(\"answer\", 42)\n(7, \"seven\")\n[1, 2, 3]\n[(\"/health\", 1), (\"/users\", 2)]\n",
         |_| {},
     );
 }
@@ -35,7 +35,7 @@ fn concurrent_jobs_documentation_project_compiles_and_runs() {
     let repository = repository_root();
     run_copied_project(
         &repository.join("docs/tutorial/code/concurrent_jobs"),
-        "results: [1, 4, 9, 16]\n",
+        "results: [1, 4, 9, 16]\noverlap: [\"invoice-101\", \"invoice-102\", \"invoice-103\"]\n",
         |_| {},
     );
 }
@@ -45,7 +45,17 @@ fn local_http_documentation_project_compiles_and_runs() {
     let repository = repository_root();
     run_copied_project(
         &repository.join("docs/tutorial/code/local_http"),
-        "responses: 3\n{\"message\":\"hello from Solveig\"}\n",
+        "responses: 3\nhello from Solveig\n",
+        |_| {},
+    );
+}
+
+#[test]
+fn tutorial_checks_documentation_project_compiles_and_runs() {
+    let repository = repository_root();
+    run_copied_project(
+        &repository.join("docs/tutorial/code/tutorial_checks"),
+        "all checks passed\n",
         |_| {},
     );
 }

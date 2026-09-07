@@ -279,4 +279,4 @@ number spellings cannot enter a `Json` value through the public API.
 - Does a recursive grammar make progress before recursion?
 - Are resource limits appropriate for the input's trust level?
 
-Next: [Packages, CLI, and editor](09-packages-and-tooling.md).
+Next: [Packages, testing, and tooling](09-packages-and-tooling.md).

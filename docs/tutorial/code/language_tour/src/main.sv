@@ -1,3 +1,5 @@
+import std.map
+
 data Shape = Square Int | Rectangle Int Int
 
 area : Shape -> Int
@@ -21,9 +23,7 @@ emails = map (fun (User _ address) => address)
 type Named a = (String, a)
 
 rename : String -> Named a -> Named a
-rename next named =
-    let (_, value) = named
-    in (next, value)
+rename next named = let (_, value) = named in (next, value)
 
 useIdentity : (forall a. a -> a) -> (Int, String)
 useIdentity identity = (identity 7, identity "seven")
@@ -34,6 +34,17 @@ polymorphicIdentity value = value
 prependOne : [Int] -> [Int]
 prependOne = (::) 1
 
+incrementRoute : String -> std.map.Map String Int -> std.map.Map String Int
+incrementRoute route counts =
+    let current =
+        case std.map.lookup route counts of
+            Nothing => 0
+            | Just count => count
+    in std.map.insert route (current + 1) counts
+
+routeCounts : [String] -> std.map.Map String Int
+routeCounts = foldl (flip incrementRoute) std.map.empty
+
 main : Task ()
 main = do
     printLine (render High <> ": " <> show (area (Rectangle 3 4)))
@@ -41,3 +52,4 @@ main = do
     printLine (show (rename "answer" ("old", 42)))
     printLine (show (useIdentity polymorphicIdentity))
     printLine (show (prependOne [2, 3]))
+    printLine $ show $ std.map.toAscList $ routeCounts ["/users", "/health", "/users"]

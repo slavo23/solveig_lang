@@ -27,6 +27,13 @@ status (Delivered timestamp) = "delivered at " <> show timestamp
 Equations belonging to one function must be adjacent. The compiler checks that
 matching is exhaustive and reports redundant branches.
 
+This is more than convenient syntax. The type rules out contradictory states:
+there is no `Delivery` that is both pending and delivered, and a delivered
+value always carries its timestamp. If a later version adds
+`DeliveryFailed String`, every total match that has not handled failure becomes
+a compiler diagnostic. That is useful maintenance pressure at precisely the
+places where policy must change.
+
 ## `case` expressions
 
 Use `case` when the scrutinee is computed locally:
@@ -129,6 +136,13 @@ recover action =
 `mapError` changes only the error channel. `fmap` changes only the success
 value. This makes error translation explicit at subsystem boundaries.
 
+Choose an error type at the layer that can make a recovery decision. An HTTP
+client module may retain `HttpError`; a user-service module can wrap it beside
+domain cases such as `UserNotFound UserId`; `main` can finally render or log the
+combined error. Translating everything to `String` near the bottom destroys
+the structure needed to decide whether to retry, return 404, or fix invalid
+configuration.
+
 ## Typed errors, defects, and interruption
 
 Solveig distinguishes three mechanisms:
@@ -145,8 +159,11 @@ file, a refused connection, invalid input, or an HTTP transport error. Use
 
 ## Cleanup is independent of success
 
-`finally action cleanup` runs cleanup when `action` succeeds or raises a typed
-error. `bracket acquire release use` protects the whole resource lifetime.
+`finally action cleanup` runs cleanup after success, typed failure, a defect,
+or interruption. If both the action and cleanup fail, the cleanup outcome wins;
+there is no hidden secondary-error channel. `bracket acquire release use`
+protects the whole resource lifetime, including the cancellation-sensitive gap
+between acquisition and installing release.
 Higher-level helpers such as `withFile`, `withTcpConnection`,
 `withTcpListener`, `withUdpSocket`, and `withThread` are built around that
 ownership model.

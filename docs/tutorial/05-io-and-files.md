@@ -38,8 +38,11 @@ main = do
     printLine message
 ```
 
-Pure `let` bindings are evaluated when demanded. Naming an expression neither
-turns it into IO nor forces it eagerly.
+Solveig is strict. The compiler lowers a `let` by evaluating its right-hand
+side, storing the result, and only then compiling the body. Naming an expression
+does not turn it into IO, but it also does not make that expression lazy. This
+matters for performance and defects: a costly pure calculation or `error` in a
+reached `let` happens even if the bound name is not used later.
 
 ## Choose the file abstraction
 
@@ -145,10 +148,10 @@ nonEmpty text = text /= ""
 
 main : Task ()
 main = do
-    contents <- mapError fsToHost (std.fs.readFile (requiredPath "input/readings.txt"))
-    let readings = filter nonEmpty (lines (trimAscii contents))
+    contents <- mapError fsToHost $ std.fs.readFile $ requiredPath "input/readings.txt"
+    let readings = filter nonEmpty $ lines $ trimAscii contents
     let report = "readings: " <> show (length readings) <> "\n"
-    mapError fsToHost (std.fs.writeFile (requiredPath "summary.txt") report)
+    mapError fsToHost $ std.fs.writeFile (requiredPath "summary.txt") report
     printStr report
 ```
 
@@ -308,4 +311,165 @@ Environment values belong to the runtime-local environment snapshot inherited
 by child processes. They are text, not secrets management; avoid printing
 tokens merely because retrieval is convenient.
 
-Next: [Errors and resource safety](06-errors-and-resources.md).
+For a required setting, preserve absence as `EnvError` instead of inventing a
+sentinel value:
+
+```solveig
+import std.env(EnvError, requireEnv)
+
+apiToken : IO EnvError String
+apiToken = requireEnv "SERVICE_TOKEN"
+```
+
+`loadEnvFile` reads at most 64 KiB of strict `NAME=VALUE` assignments and does
+not overwrite variables already present in the runtime environment. It is a
+small dotenv reader, not a shell: it performs no interpolation, command
+substitution, or sourcing. That makes configuration loading predictable and
+keeps a deployment-provided variable authoritative over a local file.
+
+## Time: duration, monotonic time, and wall time
+
+Time has three distinct public types because the values answer different
+questions:
+
+- `Duration` is a signed span. Construct one with `milliseconds`, `seconds`,
+  `microseconds`, or `nanoseconds`.
+- `Instant` is a reading from a runtime-local monotonic clock. Use it for
+  elapsed time, deadlines, and performance measurements.
+- `SystemTime` is wall-clock time relative to the Unix epoch. Use it for stored
+  timestamps and interoperability.
+
+This prevents accidentally passing “seconds since 1970” to `sleep`, or
+subtracting a wall-clock value from a monotonic reading. A real batch operation
+can be measured without choosing an integer unit until presentation:
+
+```solveig
+import std.time(durationToMilliseconds, measure)
+
+reportDuration : forall a. Task a -> Task a
+reportDuration action = do
+    (elapsed, value) <- measure action
+    printLine $ "completed in " <> show (durationToMilliseconds elapsed) <> " ms"
+    pureIO value
+```
+
+`measure` uses the monotonic clock, so a user or network time correction cannot
+make elapsed time jump backward. Use `getSystemTime` and
+`systemTimeNanoseconds` only when an epoch timestamp is required. Duration
+constructors saturate on integer overflow; unit conversions return whole units
+and truncate toward zero. `sleep` rounds a positive sub-millisecond duration up
+to one host millisecond and returns immediately for a non-positive duration.
+
+## Reproducible and secure randomness
+
+`std.random` deliberately separates reproducible pseudorandomness from host
+cryptographic randomness. An immutable `StdGen` is explicit state:
+
+```solveig
+import std.random(mkStdGen, randomRange)
+
+twoDice : StdGen -> Maybe ((Int, Int), StdGen)
+twoDice initial =
+    case randomRange 1 6 initial of
+        Nothing => Nothing
+        | Just (first, afterFirst) =>
+            case randomRange 1 6 afterFirst of
+                Nothing => Nothing
+                | Just (second, afterSecond) => Just ((first, second), afterSecond)
+
+replay : Maybe ((Int, Int), StdGen)
+replay = twoDice $ mkStdGen 20260905
+```
+
+The inclusive bounds are checked: reversed bounds return `Nothing`. Passing the
+returned generator to the next draw makes state progression visible; reusing
+the original generator intentionally repeats the same draw. A fixed seed gives
+the same sequence across runs, which is ideal for simulations and regression
+tests. `newStdGen` chooses a fresh runtime-local seed for non-security uses, but
+it is still not a cryptographic generator and there is no global mutable
+generator shared between threads.
+
+For session identifiers, password-reset tokens, encryption material, or any
+value whose unpredictability matters, use `secureRandomBytes`. It obtains the
+requested bytes from the operating system's cryptographic source and returns
+`IO SecureRandomError Bytes`. It is neither seeded nor reproducible. Keeping
+that operation in a separate API and error type makes a security boundary
+visible in code review.
+
+## Run child processes without a shell
+
+`std.process` passes a program and an argument list directly to the host process
+API. It does not invoke a shell, expand globs, interpolate variables, or treat
+spaces and punctuation in an argument as syntax. This is both easier to reason
+about and safer for user-provided arguments:
+
+```solveig
+import std.process(*)
+
+data CommandError =
+    CommandProcess ProcessError
+    | CommandFailed ExitCode
+    | CommandOutput Utf8Error
+
+gitStatus : IO CommandError String
+gitStatus =
+    case process "git" ["status", "--short"] of
+        Left error => failIO $ CommandProcess error
+        | Right request => do
+            result <- mapError CommandProcess $ runProcessLimited request 1048576
+            if isExitSuccess $ processExitCode result
+                then case processStdoutText result of
+                    Left error => failIO $ CommandOutput error
+                    | Right output => pureIO output
+                else failIO $ CommandFailed $ processExitCode result
+```
+
+`process` validates the executable and arguments before host work. The default
+request inherits the runtime working directory and environment, closes stdin,
+and captures stdout and stderr as bytes. Immutable builders configure a `Path`
+working directory, explicit environment changes, strict byte/text stdin, and
+capture or discard policy. Output remains binary until
+`processStdoutText`/`processStderrText` explicitly validate UTF-8.
+
+`runProcess` has unbounded capture and is suitable only when the child is
+trusted to produce small output. Application code should normally choose
+`runProcessLimited`; its limit applies independently to each captured output
+stream. `runProcessTimeout duration request` returns `Nothing` after expiry and
+does not abandon a zombie: the runtime closes pipes, terminates the direct
+child, and waits for it.
+
+For a large or interactive child, use `withProcess`. Its positive chunk size
+bounds each stdin write and stdout/stderr pull, while the rank-2 callback keeps
+the live handle from escaping its scope. If both captured streams can fill,
+drain them concurrently:
+
+```solveig
+import std.bytes(bytesLength)
+import std.process(*)
+import std.stream(Stream, fold)
+import std.task(concurrently)
+
+byteCount : forall scope. Stream scope ProcessError Bytes -> IO ProcessError Int
+byteCount = fold (fun total chunk => total + bytesLength chunk) 0
+
+drainChild : forall scope.
+    ProcessHandle scope -> IO ProcessError (Int, Int, ExitCode)
+drainChild child = do
+    (stdoutBytes, stderrBytes) <-
+        concurrently (byteCount $ processStdout child) (byteCount $ processStderr child)
+    status <- waitProcess child
+    pureIO (stdoutBytes, stderrBytes, status)
+```
+
+Sequentially draining stdout and then stderr can deadlock: the child may block
+writing a full stderr pipe while the parent waits for stdout EOF. The scoped
+API therefore exposes both streams and `concurrently` supplies the required
+two-sided drain. Leaving the callback by success, typed failure, defect, or
+interruption terminates a still-running child and unconditionally reaps it.
+
+Use `withStandardInput` for a finite request body. Use `pipeStandardInput` plus
+`writeProcessStdin` and `closeProcessStdin` for an interactive protocol, and
+keep each write no larger than the `withProcess` chunk size. `terminateProcess`
+is explicit early shutdown; ordinary scope cleanup provides the safety net.
+
+Next: [Concurrency](06-concurrency.md).

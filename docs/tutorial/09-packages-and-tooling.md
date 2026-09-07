@@ -1,4 +1,4 @@
-# 9. Packages, CLI, and editor
+# 9. Packages, testing, and tooling
 
 A Solveig package is a directory with `solveig.toml` and a `src/` tree. The
 package name is the root of its module namespace.
@@ -171,6 +171,92 @@ solveig fmt --check --project-root path/to/project
 The formatter's only style option is `--width`, which defaults to 100. A parse
 error leaves the complete selected file set unchanged. The current CLI does
 not provide a REPL, package manager, or test-runner command.
+
+## Write deterministic checks
+
+`std.testing` is a small library of composable values rather than a global test
+registry. An assertion returns `Either TestFailure ()`; a property check returns
+the next explicit random generator on success. Nothing runs at module load
+time, and importing a test does not mutate global state.
+
+Start with examples at domain boundaries:
+
+```solveig
+import std.testing(TestFailure, assert, assertEqual, checkAll)
+
+lineTotal : Int -> Int -> Int
+lineTotal quantity unitPriceCents = quantity * unitPriceCents
+
+examples : Either TestFailure ()
+examples =
+    checkAll
+        [
+            assertEqual "three subscriptions" 3750 $ lineTotal 3 1250,
+            assert "zero quantity is free" $ lineTotal 0 9999 == 0
+        ]
+```
+
+Labels should identify behavior, not implementation lines. `assertEqual`
+includes the displayed expected and actual values on failure. `checkAll`
+returns the first failure in deterministic list order, which keeps a command's
+output stable.
+
+Property checks complement examples by exploring many values under one
+invariant. They are explicitly seeded so a failure can be reproduced exactly:
+
+```solveig
+import std.random(mkStdGen)
+import std.testing(*)
+
+boundedInt : Int -> Int -> Gen Int
+boundedInt lower upper =
+    case chooseInt lower upper of
+        Nothing => error "test generator bounds are invalid"
+        | Just generator => generator
+
+nonNegativeLine : Gen (Int, Int)
+nonNegativeLine = pairGen (boundedInt 0 100) (boundedInt 0 100000)
+
+lineTotalIsNonNegative : (Int, Int) -> Bool
+lineTotalIsNonNegative (quantity, unitPriceCents) =
+    lineTotal quantity unitPriceCents >= 0
+
+property : Either TestFailure StdGen
+property =
+    checkProperty
+        "non-negative invoice lines"
+        500
+        nonNegativeLine
+        lineTotalIsNonNegative
+        (mkStdGen 20260905)
+```
+
+`chooseInt` uses inclusive bounds and `listOf` requires a non-negative length;
+both return `Maybe` so invalid generator configuration cannot masquerade as a
+test case. `constantGen`, `mapGen`, and `pairGen` build larger generators while
+threading one immutable `StdGen`. A failing `checkProperty` reports the
+one-based case number and generated value. It does not currently shrink the
+counterexample, so prefer generators whose displayed values stay diagnostic.
+
+Effectful checks stay explicit. `assertIO label action` runs an `IO e Bool` and
+retains its typed `e`; `assertWithResource` acquires, inspects, and releases a
+resource with `bracket`, including failure and cancellation paths. For network
+code, run a loopback fixture under `withThread` and assert decoded application
+values—not packet boundaries or public-internet timing. For concurrency, use
+channels to establish the required ordering, as chapter 6's overlap proof does.
+
+The complete [`tutorial_checks`](code/tutorial_checks/) project combines two
+examples with 500 generated invoice lines. Run it as an ordinary package:
+
+```sh
+solveig --project-root docs/tutorial/code/tutorial_checks
+```
+
+Its fixed seed makes the run reproducible. In a larger repository, create one
+small executable test package per subsystem or a test entry definition that
+combines its checks and exits nonzero on failure. The current CLI deliberately
+has no hidden discovery convention, so the test entry and execution policy are
+visible in project configuration and automation.
 
 ## Scratch files
 

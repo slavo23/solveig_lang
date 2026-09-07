@@ -133,8 +133,8 @@ import std.time(milliseconds, sleep)
 
 process : Int -> Task Int
 process value = do
-    sleep (milliseconds ((5 - value) * 10))
-    pureIO (value * value)
+    sleep $ milliseconds $ (5 - value) * 10
+    pureIO $ value * value
 
 main : Task ()
 main = do
@@ -182,6 +182,76 @@ from `ConcurrentInfrastructure hostError`. The example explicitly collapses
 that distinction because both its workers and `main` use `HostError`. An
 invalid non-positive capacity is `ConcurrentInfrastructure (HostError
 InvalidArgument ...)`.
+
+### Prove overlap without a flaky stopwatch
+
+The runnable `concurrent_jobs` project includes a stronger example than “the
+output looked fast.” Three invoice jobs each announce that they started and
+then wait on a release channel. A coordinator waits to observe all three start
+messages before releasing any of them:
+
+```solveig
+import std.channel(*)
+import std.task(concurrentHostError, concurrently, mapConcurrentlyBoundedOrdered)
+
+awaitStarts : Int -> Chan Int -> Task ()
+awaitStarts 0 _ = pureIO ()
+awaitStarts remaining started = do
+    _ <- recv started
+    awaitStarts (remaining - 1) started
+
+releaseWorkers : Int -> Chan () -> Task ()
+releaseWorkers 0 _ = pureIO ()
+releaseWorkers remaining release = do
+    send release ()
+    releaseWorkers (remaining - 1) release
+
+waitForRelease : Chan Int -> Chan () -> Int -> Task String
+waitForRelease started release invoiceId = do
+    send started invoiceId
+    _ <- recv release
+    pureIO $ "invoice-" <> show invoiceId
+
+coordinate : Chan Int -> Chan () -> Task ()
+coordinate started release = do
+    awaitStarts 3 started
+    releaseWorkers 3 release
+
+proveOverlap : Task [String]
+proveOverlap = do
+    started <- newChan
+    release <- newChan
+    (results, _) <-
+        concurrently
+            (mapError concurrentHostError $
+                mapConcurrentlyBoundedOrdered
+                    3
+                    (waitForRelease started release)
+                    [101, 102, 103])
+            (coordinate started release)
+    pureIO results
+```
+
+This is a logical proof of overlap, not a timing guess. A sequential traversal
+would start invoice 101 and block waiting for release; the coordinator would
+wait forever for 102 and 103. The program completes because three worker
+actions can all reach their waiting point. Ordered collection still returns
+`["invoice-101", "invoice-102", "invoice-103"]`.
+
+The same shape appears in backend work: load several independent customer
+records, call independent downstream services, or upload independent object
+parts. Concurrency wins when those actions spend meaningful time waiting and
+the external system permits overlap. It does not make dependent steps
+independent: authenticate, obtain a token, and then call an API remains a
+sequential data dependency.
+
+A useful review question is therefore not “can this be concurrent?” but:
+
+1. Are the operations independent, so reordering their progress is valid?
+2. Is waiting a substantial part of their cost?
+3. What external capacity gives the worker bound a principled value?
+4. What should happen to peers after one job fails?
+5. Must results retain input order, or should consumers see completion order?
 
 ## Explicit thread scopes
 
@@ -236,7 +306,7 @@ main = do
         (fun _ => do
             first <- recv values
             second <- recv values
-            printLine (show (first, second)))
+            printLine $ show (first, second))
 ```
 
 `recv` waits while an open channel is empty. `send` to an unbounded channel

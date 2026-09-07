@@ -96,6 +96,69 @@ allocate. Most programs need neither override because the defaults already
 bound strict requests; introduce one when the application's trust or storage
 policy requires it.
 
+### Put an API boundary around HTTP
+
+Application code should not pass raw `Response` values through the whole
+program. A small client function can own transport policy, status policy, and
+JSON decoding, returning the domain value callers actually need. The local
+tutorial project decodes `{"message":"hello from Solveig"}` with a direct
+decoder:
+
+```solveig
+import std.http(*)
+import std.json(Decoder, decodeJson, defaultJsonLimits, recordDecoder, requiredField, stringDecoder)
+import std.parser(foldReply)
+
+messageDecoder : Decoder () String
+messageDecoder = recordDecoder $ requiredField "message" stringDecoder
+
+decodeMessage : Bytes -> Either HostError String
+decodeMessage bytes =
+    foldReply
+        (fun _ message _ => Right message)
+        (fun _ _ parseError =>
+            Left $ HostError InvalidArgument "decode message response" $ show parseError)
+        (fun _ _ _ =>
+            Left $ HostError InvalidArgument "decode message response" "incomplete JSON")
+        (decodeJson defaultJsonLimits messageDecoder bytes)
+```
+
+`decodeJson` returns `ParseReply`, so all three outcomes are handled explicitly:
+a value, a positioned decoding error, or a request for more input. Complete
+strict bytes should not remain awaiting, but the branch keeps the boundary
+total. A production library would normally retain a domain `ApiError` sum
+instead of translating straight to `HostError`; this fixture uses one error
+type so it can share a small `Task` entry point.
+
+The request adds normal API metadata and checks status before decoding:
+
+```solveig
+httpAsHostError : HttpError -> HostError
+httpAsHostError (HttpHostError hostError) = hostError
+httpAsHostError error = HostError InvalidArgument "HTTP" $ show error
+
+fetchMessage : String -> Task String
+fetchMessage url = do
+    response <- mapError httpAsHostError $
+        getWith
+            (withHeader "Accept" "application/json" $
+                withQuery [("language", "solveig")] defaultOptions)
+            url
+    successful <-
+        case ensureSuccess response of
+            Left error => failIO $ httpAsHostError error
+            | Right value => pureIO value
+    case decodeMessage $ responseBody successful of
+        Left error => failIO error
+        | Right message => pureIO message
+```
+
+That order is deliberate: transport must succeed before there is a response;
+status policy decides whether the body represents success; decoding then turns
+the successful representation into the domain value. For APIs whose error
+bodies have a useful schema, decode them in the non-success branch instead of
+calling `ensureSuccess` and discarding that context.
+
 ## Status, headers, and body
 
 An HTTP 404 or 500 is a valid `Response`, not a transport failure. Inspect it:
@@ -155,6 +218,34 @@ result and used after its connection closes. Returning early deliberately
 drops unread bytes. If validation requires the entire body, consume and
 validate it before returning.
 
+A large download can be written incrementally instead of buffered as one
+`Response`:
+
+```solveig
+import std.io(WriteMode, hPutBytes, withFile)
+import std.stream(forEach)
+
+writeHttpChunk : Handle -> Bytes -> IO HttpError ()
+writeHttpChunk handle = mapError HttpHostError . hPutBytes handle
+
+downloadFile : String -> String -> IO HttpError ()
+downloadFile url destination =
+    withResponse Get url $ fun status _ body =>
+        if isSuccessful status
+            then mapError HttpHostError $
+                withFile destination WriteMode $ fun handle =>
+                    mapError httpAsHostError $ forEach (writeHttpChunk handle) body
+            else failIO $ UnexpectedStatus status
+```
+
+The scoped body drives one bounded network pull at a time and `hPutBytes`
+preserves arbitrary binary data. The destination is opened only after a 2xx
+status. If a later read fails, the partial file remains; a production downloader
+should write to an application-owned `.part` path and rename only after success,
+or deliberately retain it for a validated resume protocol. A chunk bound limits
+working memory, while `withMaximumResponseBytes` supplies an independent total
+download quota.
+
 ## Build non-GET requests
 
 Each familiar verb has a `With` form for reusable options:
@@ -169,6 +260,40 @@ postJson url value =
         (withHeader "Accept" "application/json" $ withJsonBody value defaultOptions)
         url
 ```
+
+Domain encoders keep request construction just as typed as response decoding:
+
+```solveig
+import std.http(HttpError(..), Response, defaultOptions, postWith, withJsonBody)
+import std.json(Encoder, encodeJsonValue, recordEncoder, requiredFieldEncoder, stringEncoder)
+
+data NewUser = NewUser String String
+
+userName : NewUser -> String
+userName (NewUser name _) = name
+
+userEmail : NewUser -> String
+userEmail (NewUser _ email) = email
+
+newUserEncoder : Encoder NewUser
+newUserEncoder =
+    recordEncoder
+        [
+            requiredFieldEncoder "name" userName stringEncoder,
+            requiredFieldEncoder "email" userEmail stringEncoder
+        ]
+
+createUser : String -> NewUser -> IO HttpError Response
+createUser url user =
+    case encodeJsonValue newUserEncoder user of
+        Left error => failIO $ RequestJsonError error
+        | Right json => postWith (withJsonBody json defaultOptions) url
+```
+
+Use `putWith` for full replacement, `patchWith` for a partial update,
+`deleteWith` for deletion, and `headWith` when only metadata is needed. Solveig
+does not assign application semantics to those verbs: the API contract still
+decides idempotency, validation, and which statuses are successful.
 
 `withTextBody`, `withJsonBody`, and `withFormBody` choose useful content types;
 an explicit header overrides the default. `withBody` sends strict bytes,
@@ -210,6 +335,59 @@ reducing a body, or fixing a URL could help. A retry policy must also consider
 the method and whether the body can safely be repeated; a transport error alone
 does not prove that the server observed no request.
 
+### Authentication, pagination, retries, and rate limits
+
+These policies belong above the transport call:
+
+- Read a bearer token with `requireEnv`, add `Authorization: Bearer ...` through
+  `withHeader`, and never log the configured options or secret. HTTPS protects
+  the token in transit; certificate verification remains mandatory.
+- Represent a page cursor as `Maybe String`. Add it with `withQuery`, decode the
+  returned items and next cursor, and recurse until `Nothing` or an
+  application-defined page/item limit. A page limit prevents a buggy service
+  from producing an endless traversal.
+- Retry only failures the application has classified as transient, only for
+  methods and bodies safe to repeat, and with a finite attempt count. A timeout
+  or disconnected response does not prove the server failed to process a POST.
+  An idempotency key supported by the service is an application protocol, not a
+  guarantee supplied by `std.http`.
+- Treat `429` and service-specific rate-limit headers as normal response policy.
+  Bound concurrent calls, honor the server's delay when trustworthy, and cap
+  the total retry window. More workers can reduce throughput when they create
+  throttling.
+
+Do not implement retry as unbounded recursion around `get`. A sound loop carries
+at least the remaining attempts and a `Duration` backoff, and it keeps the
+original typed error or final response when the budget is exhausted. Test it
+against a loopback fixture with a scripted sequence such as `503, 503, 200`;
+do not make a unit test depend on a public service.
+
+For example, this policy retries only completed `GET` responses with two
+explicitly transient statuses; transport failures propagate unchanged:
+
+```solveig
+import std.time(Duration, sleep)
+
+retryableStatus : Status -> Bool
+retryableStatus status =
+    let code = statusCode status
+    in or (code == 429) (code == 503)
+
+getWithRetries : Int -> Duration -> String -> IO HttpError Response
+getWithRetries remaining delay url = do
+    response <- get url
+    if and (remaining > 0) (retryableStatus $ responseStatus response)
+        then do
+            mapError HttpHostError $ sleep delay
+            getWithRetries (remaining - 1) delay url
+        else pureIO response
+```
+
+This is intentionally a narrow example, not a universal retry helper. A real
+client may parse `Retry-After`, add a total deadline, and randomize backoff, but
+those are service policies. Extending it to POST without an idempotency contract
+would change correctness, not merely performance.
+
 ## Concurrent requests
 
 HTTP waiting does not block other runnable Solveig threads. A bounded pool can
@@ -219,7 +397,7 @@ preserve the precise HTTP error type:
 fetchStatus : String -> IO HttpError Int
 fetchStatus url = do
     response <- get url
-    pureIO (statusCode (responseStatus response))
+    pureIO $ statusCode $ responseStatus response
 
 fetchAll : [String] -> IO (ConcurrentError HttpError) [Int]
 fetchAll = mapConcurrentlyBoundedOrdered 4 fetchStatus
@@ -361,6 +539,17 @@ A server may keep accepting after one connection closes, but an accepted
 connection cannot escape its own callback. The current API is a low-level
 loopback building block, not a public-internet HTTP server framework.
 
+That limitation matters for backend design. The current high-level HTTP API is
+a client. It covers the ordinary work of calling downstream services—verbs,
+query encoding, authentication headers, JSON/form/file bodies, redirects,
+deadlines, bounded and streamed responses, status inspection, and concurrent
+fan-out—but it does not provide routing, HTTP request parsing, response writers,
+middleware, keep-alive management, or a production accept loop. Do not build a
+public web service by copying the fixed TCP fixture below. Until a scoped HTTP
+server API exists, use Solveig for clients, workers, scheduled jobs, and custom
+bounded protocols, or place a deliberately designed host server boundary in
+front of it.
+
 ## UDP datagrams
 
 Use `withUdpSocket anyPort body` for connectionless messages. Unlike TCP, UDP
@@ -398,7 +587,8 @@ project:
 1. Binds a loopback listener on an automatically selected port.
 2. Starts the server in a `withThread` scope.
 3. Accepts three connections and scopes every connection.
-4. Runs three `get` clients through `mapConcurrentlyBoundedOrdered`.
+4. Runs three typed, JSON-decoding clients through
+   `mapConcurrentlyBoundedOrdered`.
 5. Closes the listener and every accepted connection through rank-2 scopes.
 6. Closes every connection, listener, worker, and child scope.
 
@@ -412,7 +602,7 @@ Expected output:
 
 ```text
 responses: 3
-{"message":"hello from Solveig"}
+hello from Solveig
 ```
 
 The full source is intentionally kept in the tutorial project rather than
@@ -422,14 +612,17 @@ of the protocol.
 
 The program is deliberately a fixture, not a miniature reusable HTTP server:
 
-- `responseText` constructs one fixed response with an exact `Content-Length`.
+- `fixtureResponse` constructs one fixed response with an exact
+  `Content-Length`.
 - `reply` waits until the client has sent some request bytes, then returns the
   fixed response; it does not pretend that one TCP read contains a complete
   general HTTP request.
 - `serveBatch` accepts exactly three connections, so its recursion has an
   explicit termination condition.
-- `runClients` uses the high-level `get` API and a bound of three. Ordered
-  collection makes output deterministic even if requests finish differently.
+- `fetchMessage` uses `getWith`, safely encoded query data, an `Accept` header,
+  explicit status policy, and a direct JSON decoder.
+- `runClients` uses a bound of three. Ordered collection makes output
+  deterministic even if requests finish differently.
 - `runFixture` owns the server through `withThread`, and `main` owns the
   listener through `withTcpListener`. Leaving either lexical scope performs
   cleanup before returning.

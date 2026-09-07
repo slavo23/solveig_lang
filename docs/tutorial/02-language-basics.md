@@ -78,6 +78,26 @@ swap pair =
 A refutable local pattern must be handled explicitly with `case`; a `let`
 pattern is required to cover every value of its type.
 
+Solveig evaluates strictly. When execution reaches a `let`, the compiler's
+bytecode lowering evaluates the right-hand side and stores it before continuing
+with the body:
+
+```solveig
+square : Int -> Int
+square value = value * value
+
+answer : Int
+answer =
+    let computed = square 21
+    in computed + 1
+```
+
+`computed` is a value, not a deferred thunk. Strictness makes space use and
+failure timing easier to see, but it means an unused reached binding is still
+work. `if` and `case` are control flow: they evaluate the scrutinee or condition
+and then only the selected branch. Use functions and streams when computation
+should happen on explicit demand.
+
 ## Anonymous functions
 
 `fun pattern => expression` creates a function:
@@ -126,7 +146,7 @@ Prefer existing combinators when they express the intent:
 ```solveig
 positiveSquares : [Int] -> [Int]
 positiveSquares values =
-    map (fun value => value * value) (filter (fun value => value > 0) values)
+    map (fun value => value * value) $ filter (fun value => value > 0) values
 ```
 
 Prelude supplies stack-safe `map`, `filter`, `append`, `concat`, generic strict
@@ -178,6 +198,11 @@ import std.text(trimAscii)
 displayClean : String -> String
 displayClean = show . trimAscii
 ```
+
+Read `render . normalize` from right to left: normalize the input, then render
+the result. Read `printLine $ render value` as ordinary application with the
+parentheses removed. Neither operator changes evaluation strategy; both only
+make the expression tree easier to read.
 
 Operators may be used as functions:
 
