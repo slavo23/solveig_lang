@@ -1,9 +1,11 @@
-import std.bytes(BytesBuilder,
+import std.bytes(
+    BytesBuilder,
     buildBytes,
     bytesBuilder,
     bytesToString,
     emptyBytesBuilder,
-    stringToBytes)
+    stringToBytes
+)
 import std.channel(newChan, recv, send, tryRecv)
 import std.fs(FsError(..))
 import std.list(range)
@@ -92,8 +94,8 @@ countedStep observed value =
     if value == 10
         then pureIO Nothing
         else do
-            send observed value
-            pureIO (Just (value, value + 1))
+                send observed value
+                pureIO (Just (value, value + 1))
 
 checkBackpressure : Task ()
 checkBackpressure = do
@@ -122,8 +124,8 @@ checkBackpressure = do
                         (and
                             (extra == Nothing)
                             (and
-                            (orderedFirst == 3)
-                            (and (orderedSecond == 1) (orderedThird == 2))))))))
+                                (orderedFirst == 3)
+                                (and (orderedSecond == 1) (orderedThird == 2))))))))
 
 failingStep : Int -> IO PullError (Maybe (Int, Int))
 failingStep value = if value == 3 then failIO PlannedPull else pureIO (Just (value, value + 1))

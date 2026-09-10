@@ -6,13 +6,7 @@ spin : () -> Int
 spin unit = spin unit
 
 body : Task ()
-body =
-    bindIO
-        (pureIO ())
-        (fun ignored =>
-            bindIO
-                (pureIO (spin ()))
-                (fun value => pureIO ()))
+body = bindIO (pureIO ()) (fun ignored => bindIO (pureIO (spin ())) (fun value => pureIO ()))
 
 cleanup : Chan () -> Task ()
 cleanup cleaned = do
@@ -24,10 +18,11 @@ worker cleaned = finally body (cleanup cleaned)
 
 pause : Int -> Task ()
 pause remaining =
-    if remaining == 0 then pureIO ()
-    else do
-        pureIO ()
-        pause (remaining - 1)
+    if remaining == 0
+        then pureIO ()
+        else do
+                pureIO ()
+                pause (remaining - 1)
 
 main : Task ()
 main = do

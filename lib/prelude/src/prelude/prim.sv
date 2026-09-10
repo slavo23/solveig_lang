@@ -1,4 +1,5 @@
-export (bindIO,
+export (
+    bindIO,
     bytesEq,
     catchDefectIO,
     catchIO,
@@ -61,4 +62,5 @@ export (bindIO,
     stringStartsWith,
     stringToChars,
     stringTrimAscii,
-    stringsConcat)
+    stringsConcat
+)

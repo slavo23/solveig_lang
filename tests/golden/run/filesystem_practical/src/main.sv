@@ -38,12 +38,12 @@ checkPaths =
             (and
                 (reduced == fixturePath "data/file.txt")
                 (and
-                (parent joined == Just (fixturePath "data/items"))
-                (and
-                (fileName joined == Just "file.txt")
-                (and
-                (extension joined == Just "txt")
-                (and (isRelative joined) (not (isAbsolute joined))))))))
+                    (parent joined == Just (fixturePath "data/items"))
+                    (and
+                        (fileName joined == Just "file.txt")
+                        (and
+                            (extension joined == Just "txt")
+                            (and (isRelative joined) (not (isAbsolute joined))))))))
 
 appendText : String -> String -> String
 appendText = (<>)

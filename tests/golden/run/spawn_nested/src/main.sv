@@ -2,10 +2,11 @@ import std.thread(*)
 
 pause : Int -> Task ()
 pause n =
-    if n == 0 then pureIO ()
-    else do
-        pureIO ()
-        pause (n - 1)
+    if n == 0
+        then pureIO ()
+        else do
+                pureIO ()
+                pause (n - 1)
 
 parent : () -> Task ()
 parent _ = do

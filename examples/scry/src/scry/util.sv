@@ -5,8 +5,7 @@ containsString needle haystack =
         | x :: rest => if x == needle then True else containsString needle rest
 
 uniqueCons : String -> [String] -> [String]
-uniqueCons value values =
-    if containsString value values then values else value :: values
+uniqueCons value values = if containsString value values then values else value :: values
 
 uniqueAppend : [String] -> [String] -> [String]
 uniqueAppend xs ys =

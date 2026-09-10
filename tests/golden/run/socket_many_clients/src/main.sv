@@ -21,8 +21,8 @@ serveClients listener remaining =
     if remaining == 0
         then pureIO ()
         else do
-            withAcceptedTcpConnection listener serveConnection
-            serveClients listener (remaining - 1)
+                withAcceptedTcpConnection listener serveConnection
+                serveClients listener (remaining - 1)
 
 runClient : forall scope. TcpConnection scope -> IO NetError Int
 runClient connection = do
@@ -42,16 +42,16 @@ spawnClients results port remaining =
     if remaining == 0
         then pureIO ()
         else do
-            _ <- spawn (client results port remaining)
-            spawnClients results port (remaining - 1)
+                _ <- spawn (client results port remaining)
+                spawnClients results port (remaining - 1)
 
 collectClients : Chan Int -> Int -> Int -> IO NetError Int
 collectClients results remaining total =
     if remaining == 0
         then pureIO total
         else do
-            completed <- mapError (hostToNet "result channel") (recv results)
-            collectClients results (remaining - 1) (total + completed)
+                completed <- mapError (hostToNet "result channel") (recv results)
+                collectClients results (remaining - 1) (total + completed)
 
 runClients : forall scope. TcpListener scope -> Port -> IO NetError ()
 runClients listener port = do

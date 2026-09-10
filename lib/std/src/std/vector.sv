@@ -3,10 +3,7 @@ export (Vector, empty, singleton, length, isEmpty, snoc, index, update, fromList
 -- | An immutable sequence with logarithmic indexing, updates, and right append.
 -- |
 -- | The balanced tree is persistent: updates share every untouched branch.
-data Vector a =
-    VectorEmpty
-  | VectorLeaf a
-  | VectorBranch Int Int (Vector a) (Vector a)
+data Vector a = VectorEmpty | VectorLeaf a | VectorBranch Int Int (Vector a) (Vector a)
 
 -- | Returns an empty vector.
 empty : forall a. Vector a
@@ -46,36 +43,39 @@ makeBranch left right =
 -- single or double rotation after changing one spine.
 balance : forall a. Vector a -> Vector a -> Vector a
 balance left right =
-    let leftHeight = vectorHeight left in
-    let rightHeight = vectorHeight right in
-    if leftHeight > rightHeight + 1 then
-        case left of
-            VectorBranch _ _ leftLeft leftRight =>
-                if vectorHeight leftLeft >= vectorHeight leftRight then
-                    makeBranch leftLeft (makeBranch leftRight right)
-                else
-                    case leftRight of
-                        VectorBranch _ _ middleLeft middleRight =>
-                            makeBranch
-                                (makeBranch leftLeft middleLeft)
-                                (makeBranch middleRight right)
+    let leftHeight =
+        vectorHeight left
+    in let rightHeight =
+        vectorHeight right
+    in if leftHeight > rightHeight + 1
+        then
+            case left of
+                VectorBranch _ _ leftLeft leftRight =>
+                    if vectorHeight leftLeft >= vectorHeight leftRight
+                        then makeBranch leftLeft (makeBranch leftRight right)
+                        else
+                            case leftRight of
+                                VectorBranch _ _ middleLeft middleRight =>
+                                    makeBranch
+                                        (makeBranch leftLeft middleLeft)
+                                        (makeBranch middleRight right)
+                                | _ => makeBranch left right
+                | _ => makeBranch left right
+        else if rightHeight > leftHeight + 1
+                then
+                    case right of
+                        VectorBranch _ _ rightLeft rightRight =>
+                            if vectorHeight rightRight >= vectorHeight rightLeft
+                                then makeBranch (makeBranch left rightLeft) rightRight
+                                else
+                                    case rightLeft of
+                                        VectorBranch _ _ middleLeft middleRight =>
+                                            makeBranch
+                                                (makeBranch left middleLeft)
+                                                (makeBranch middleRight rightRight)
+                                        | _ => makeBranch left right
                         | _ => makeBranch left right
-            | _ => makeBranch left right
-    else if rightHeight > leftHeight + 1 then
-        case right of
-            VectorBranch _ _ rightLeft rightRight =>
-                if vectorHeight rightRight >= vectorHeight rightLeft then
-                    makeBranch (makeBranch left rightLeft) rightRight
-                else
-                    case rightLeft of
-                        VectorBranch _ _ middleLeft middleRight =>
-                            makeBranch
-                                (makeBranch left middleLeft)
-                                (makeBranch middleRight rightRight)
-                        | _ => makeBranch left right
-            | _ => makeBranch left right
-    else
-        makeBranch left right
+                else makeBranch left right
 
 -- | Adds an element to the end in logarithmic time.
 snoc : forall a. Vector a -> a -> Vector a
@@ -86,38 +86,38 @@ snoc (VectorBranch _ _ left right) value = balance left (snoc right value)
 -- | Returns the element at a zero-based index in logarithmic time.
 index : forall a. Vector a -> Int -> Maybe a
 index vector offset =
-    if offset < 0 then Nothing
-    else if offset >= length vector then Nothing
-    else indexTree vector offset
+    if offset < 0
+        then Nothing
+        else if offset >= length vector then Nothing else indexTree vector offset
 
 indexTree : forall a. Vector a -> Int -> Maybe a
 indexTree VectorEmpty _ = Nothing
 indexTree (VectorLeaf value) 0 = Just value
 indexTree (VectorLeaf _) _ = Nothing
 indexTree (VectorBranch _ _ left right) offset =
-    let leftLength = length left in
-    if offset < leftLength then indexTree left offset
-    else indexTree right (offset - leftLength)
+    let leftLength =
+        length left
+    in if offset < leftLength then indexTree left offset else indexTree right (offset - leftLength)
 
 -- | Replaces an element at a zero-based index, sharing untouched branches.
 update : forall a. Vector a -> Int -> a -> Maybe (Vector a)
 update vector offset value =
-    if offset < 0 then Nothing
-    else if offset >= length vector then Nothing
-    else updateTree vector offset value
+    if offset < 0
+        then Nothing
+        else if offset >= length vector then Nothing else updateTree vector offset value
 
 updateTree : forall a. Vector a -> Int -> a -> Maybe (Vector a)
 updateTree VectorEmpty _ _ = Nothing
 updateTree (VectorLeaf _) 0 value = Just (VectorLeaf value)
 updateTree (VectorLeaf _) _ _ = Nothing
 updateTree (VectorBranch _ _ left right) offset value =
-    let leftLength = length left in
-    if offset < leftLength then
-        case updateTree left offset value of
+    let leftLength =
+        length left
+    in if offset < leftLength
+        then case updateTree left offset value of
             Nothing => Nothing
             | Just updatedLeft => Just (makeBranch updatedLeft right)
-    else
-        case updateTree right (offset - leftLength) value of
+        else case updateTree right (offset - leftLength) value of
             Nothing => Nothing
             | Just updatedRight => Just (makeBranch left updatedRight)
 
@@ -144,8 +144,7 @@ toList vector = toListInto vector []
 toListInto : forall a. Vector a -> [a] -> [a]
 toListInto VectorEmpty acc = acc
 toListInto (VectorLeaf value) acc = value :: acc
-toListInto (VectorBranch _ _ left right) acc =
-    toListInto left (toListInto right acc)
+toListInto (VectorBranch _ _ left right) acc = toListInto left (toListInto right acc)
 
 instance Functor Vector where
     fmap transform VectorEmpty = VectorEmpty
@@ -161,10 +160,7 @@ instance Traversable Vector where
     traverse _ VectorEmpty = pure VectorEmpty
     traverse transform (VectorLeaf value) = fmap VectorLeaf (transform value)
     traverse transform (VectorBranch height count left right) =
-        liftA2
-            (VectorBranch height count)
-            (traverse transform left)
-            (traverse transform right)
+        liftA2 (VectorBranch height count) (traverse transform left) (traverse transform right)
 
 instance Eq a => Eq (Vector a) where
     (==) left right = toList left == toList right

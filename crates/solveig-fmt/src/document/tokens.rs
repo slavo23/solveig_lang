@@ -186,30 +186,12 @@ pub(super) fn block_separator<'a>(
 pub(super) fn breakable_application(kind: SyntaxKind) -> bool {
     matches!(
         kind,
-        SyntaxKind::AppExpr | SyntaxKind::TypeApp | SyntaxKind::PatternHead | SyntaxKind::Predicate
+        SyntaxKind::AppExpr
+            | SyntaxKind::TypeApp
+            | SyntaxKind::PatternHead
+            | SyntaxKind::Predicate
+            | SyntaxKind::Constructor
     )
-}
-
-pub(super) fn generic_nesting(tree: &SyntaxTree, id: CstId) -> usize {
-    let mut nesting = 0;
-    let mut current = tree.parent(id);
-    while let Some(node) = current {
-        if matches!(
-            tree.node(node).kind(),
-            SyntaxKind::FunctionDef
-                | SyntaxKind::DoStmt
-                | SyntaxKind::CaseArm
-                | SyntaxKind::AppExpr
-                | SyntaxKind::LambdaExpr
-                | SyntaxKind::LetExpr
-                | SyntaxKind::IfExpr
-                | SyntaxKind::OpChain
-        ) {
-            nesting += 1;
-        }
-        current = tree.parent(node);
-    }
-    nesting
 }
 
 pub(super) fn node_boundaries(tree: &SyntaxTree, id: CstId) -> (Option<TokenId>, Option<TokenId>) {
@@ -261,6 +243,19 @@ pub(super) fn contains_layout(tree: &SyntaxTree, child: NodeOrToken) -> bool {
     }
 }
 
+pub(super) fn contains_comment(tree: &SyntaxTree, child: NodeOrToken) -> bool {
+    match child {
+        NodeOrToken::Node(id) => tree
+            .children(id)
+            .iter()
+            .any(|child| contains_comment(tree, *child)),
+        NodeOrToken::Token(id) => matches!(
+            tree.token(id).kind,
+            Token::LineComment | Token::BlockComment
+        ),
+    }
+}
+
 pub(super) fn starts_multiline_expression(tree: &SyntaxTree, child: NodeOrToken) -> bool {
     match child {
         NodeOrToken::Node(id) => {
@@ -277,6 +272,43 @@ pub(super) fn starts_multiline_expression(tree: &SyntaxTree, child: NodeOrToken)
                 tree.children(id)
                     .iter()
                     .any(|child| starts_multiline_expression(tree, *child))
+            } else {
+                false
+            }
+        }
+        NodeOrToken::Token(_) => false,
+    }
+}
+
+pub(super) fn starts_with_if_or_layout(tree: &SyntaxTree, child: NodeOrToken) -> bool {
+    match child {
+        NodeOrToken::Node(id) => {
+            if matches!(
+                tree.node(id).kind(),
+                SyntaxKind::IfExpr | SyntaxKind::DoExpr
+            ) {
+                true
+            } else if tree.node(id).kind() == SyntaxKind::Expr {
+                tree.children(id)
+                    .iter()
+                    .any(|child| starts_with_if_or_layout(tree, *child))
+            } else {
+                false
+            }
+        }
+        NodeOrToken::Token(_) => false,
+    }
+}
+
+pub(super) fn starts_with_do_expression(tree: &SyntaxTree, child: NodeOrToken) -> bool {
+    match child {
+        NodeOrToken::Node(id) => {
+            if tree.node(id).kind() == SyntaxKind::DoExpr {
+                true
+            } else if tree.node(id).kind() == SyntaxKind::Expr {
+                tree.children(id)
+                    .iter()
+                    .any(|child| starts_with_do_expression(tree, *child))
             } else {
                 false
             }

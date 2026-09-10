@@ -7,10 +7,11 @@ reader = do
 
 waitForWorkers : Int -> Task ()
 waitForWorkers n =
-    if n == 0 then pureIO ()
-    else do
-        _ <- readLine
-        waitForWorkers (n - 1)
+    if n == 0
+        then pureIO ()
+        else do
+                _ <- readLine
+                waitForWorkers (n - 1)
 
 main : Task ()
 main = do

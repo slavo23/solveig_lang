@@ -3,19 +3,13 @@ import std.thread(*)
 import std.channel(*)
 
 child : Chan () -> Task ()
-child gate =
-    finally
-        (recv gate)
-        (printLine "child-cleaned")
+child gate = finally (recv gate) (printLine "child-cleaned")
 
 body : ThreadId -> Task ()
 body thread = printLine "body"
 
 scopedChild : Chan () -> Chan () -> Task ()
-scopedChild gate cleaned =
-    finally
-        (recv gate)
-        (send cleaned ())
+scopedChild gate cleaned = finally (recv gate) (send cleaned ())
 
 scopedBody : Chan () -> Chan () -> ThreadId -> Task ()
 scopedBody entered gate thread = do
@@ -24,9 +18,7 @@ scopedBody entered gate thread = do
 
 owner : Chan () -> Chan () -> Chan () -> Chan () -> Task ()
 owner entered gate cleaned ownerDone =
-    finally
-        (withThread (scopedChild gate cleaned) (scopedBody entered gate))
-        (send ownerDone ())
+    finally (withThread (scopedChild gate cleaned) (scopedBody entered gate)) (send ownerDone ())
 
 main : Task ()
 main = do

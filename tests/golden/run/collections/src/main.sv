@@ -17,22 +17,10 @@ updatedVector =
         | Just vector => vector
 
 mapExample : std.map.Map Int String
-mapExample =
-    std.map.fromList
-        [ (3, "three")
-        , (1, "one")
-        , (4, "four")
-        , (2, "old")
-        , (2, "two")
-        ]
+mapExample = std.map.fromList [(3, "three"), (1, "one"), (4, "four"), (2, "old"), (2, "two")]
 
 queueExample : std.queue.Queue Int
-queueExample =
-    std.queue.enqueue
-        (std.queue.enqueue
-            (std.queue.enqueue std.queue.empty 1)
-            2)
-        3
+queueExample = std.queue.enqueue (std.queue.enqueue (std.queue.enqueue std.queue.empty 1) 2) 3
 
 minimumInt : Int
 minimumInt = (0 - 9223372036854775807) - 1

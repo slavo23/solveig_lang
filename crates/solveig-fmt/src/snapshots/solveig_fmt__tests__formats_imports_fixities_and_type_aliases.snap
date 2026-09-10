@@ -4,9 +4,11 @@ expression: "format_source(\"import std.http\\nimport std.io(*)\\nimport pkg.mod
 ---
 import std.http
 import std.io(*)
-import pkg.model as Model(User(..) as Account,
+import pkg.model as Model(
+    User(..) as Account,
     fetch as load,
-    (+++) as (<+>))
+    (+++) as (<+>)
+)
 
 infixl 5 +++, `append`
 type Handler e a = IO e (Result e a)

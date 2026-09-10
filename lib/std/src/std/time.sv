@@ -1,4 +1,5 @@
-export (Duration,
+export (
+    Duration,
     Instant,
     SystemTime,
     nanoseconds,
@@ -15,7 +16,8 @@ export (Duration,
     sleep,
     getMonotonicTime,
     getSystemTime,
-    measure)
+    measure
+)
 
 private (maximumInt, minimumInt, saturatingScale, saturatingDifference, sleepMilliseconds)
 
@@ -155,8 +157,8 @@ saturatingDifference started finished =
     if started < 0
         then if finished > maximumInt + started then maximumInt else finished - started
         else if started > 0
-            then if finished < minimumInt + started then minimumInt else finished - started
-            else finished
+                then if finished < minimumInt + started then minimumInt else finished - started
+                else finished
 
 -- | Returns a reading from an arbitrary runtime-local monotonic origin.
 getMonotonicTime : forall e. IO e Instant

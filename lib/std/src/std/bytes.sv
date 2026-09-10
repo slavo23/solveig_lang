@@ -1,4 +1,5 @@
-export (stringToBytes,
+export (
+    stringToBytes,
     bytesToString,
     bytesLength,
     bytesIndex,
@@ -9,7 +10,8 @@ export (stringToBytes,
     emptyBytesBuilder,
     bytesBuilder,
     appendBytesBuilder,
-    buildBytes)
+    buildBytes
+)
 
 import std.prim(*)
 import std.list(reverse)
@@ -92,8 +94,8 @@ bytesUtf8ValidPrefix bytes endOfInput = std.prim.bytesUtf8ValidPrefix bytes endO
 -- |
 -- | Builder concatenation takes constant time. buildBytes traverses all chunks
 -- | without consuming the call stack and allocates one packed result.
-data BytesBuilder =
-    EmptyBytesBuilder
+data BytesBuilder
+    = EmptyBytesBuilder
     | BytesChunk Bytes
     | AppendBytesBuilder BytesBuilder BytesBuilder
 

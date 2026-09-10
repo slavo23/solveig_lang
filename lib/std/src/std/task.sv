@@ -1,4 +1,5 @@
-export (catchDefect,
+export (
+    catchDefect,
     mask,
     finally,
     bracket,
@@ -9,9 +10,11 @@ export (catchDefect,
     ConcurrentError(..),
     concurrentHostError,
     mapConcurrentlyBoundedOrdered,
-    mapConcurrentlyBoundedCompletionOrder)
+    mapConcurrentlyBoundedCompletionOrder
+)
 
-private (asConcurrentInfrastructure,
+private (
+    asConcurrentInfrastructure,
     mapConcurrentlyBoundedWith,
     invalidConcurrency,
     runPooled,
@@ -24,7 +27,8 @@ private (asConcurrentInfrastructure,
     collectPooledOrdered,
     collectPooledMap,
     collectPooledCompletionOrder,
-    collectPooledReversed)
+    collectPooledReversed
+)
 
 import prelude.prim(catchDefectIO, maskIO, finallyIO, restoreMaskIO, raiseDefectIO)
 import std.channel(*)
@@ -95,35 +99,39 @@ withThread action body =
                     bracket
                         (spawn
                             (finally
-                            (bindIO
-                            (send started ())
-                            (fun firstReady =>
-                            bindIO
-                            (send started ())
-                            (fun secondReady =>
-                            catchError
-                            (bindIO (prelude.prim.restoreMaskIO action) (fun value => pureIO ()))
-                            (fun actionError => pureIO ())
-                            )
-                            ))
-                            (send finished ())))
+                                (bindIO
+                                    (send started ())
+                                    (fun firstReady =>
+                                        bindIO
+                                            (send started ())
+                                            (fun secondReady =>
+                                                catchError
+                                                    (bindIO
+                                                        (prelude.prim.restoreMaskIO action)
+                                                        (fun value => pureIO ()))
+                                                    (fun actionError => pureIO ())
+                                            )
+                                    ))
+                                (send finished ())))
                         (fun thread =>
                             catchError
-                            (bindIO
-                            (recv started)
-                            (fun ready => bindIO (killThread thread) (fun killed => recv finished)))
-                            (fun channelError =>
-                            error "structured concurrency internal channel closed"
-                            )
+                                (bindIO
+                                    (recv started)
+                                    (fun ready =>
+                                        bindIO (killThread thread) (fun killed => recv finished)
+                                    ))
+                                (fun channelError =>
+                                    error "structured concurrency internal channel closed"
+                                )
                         )
                         (fun thread =>
                             bindIO
-                            (catchError
-                            (recv started)
-                            (fun channelError =>
-                            error "structured concurrency internal channel closed"
-                            ))
-                            (fun ready => body thread)
+                                (catchError
+                                    (recv started)
+                                    (fun channelError =>
+                                        error "structured concurrency internal channel closed"
+                                    ))
+                                (fun ready => body thread)
                         )
                 )
         )
@@ -142,8 +150,8 @@ race left right =
                     (catchDefect
                         (bindIO
                             (catchError
-                            (bindIO left (fun value => pureIO (Right value)))
-                            (fun typedError => pureIO (Left typedError)))
+                                (bindIO left (fun value => pureIO (Right value)))
+                                (fun typedError => pureIO (Left typedError)))
                             (fun outcome => send outcomes (Left (Right outcome))))
                         (fun defect => send outcomes (Left (Left defect))))
                     (fun channelError => error "structured concurrency internal channel closed"))
@@ -151,39 +159,39 @@ race left right =
                     withThread
                         (catchError
                             (catchDefect
-                            (bindIO
-                            (catchError
-                            (bindIO right (fun value => pureIO (Right value)))
-                            (fun typedError => pureIO (Left typedError)))
-                            (fun outcome => send outcomes (Right (Right outcome))))
-                            (fun defect => send outcomes (Right (Left defect))))
+                                (bindIO
+                                    (catchError
+                                        (bindIO right (fun value => pureIO (Right value)))
+                                        (fun typedError => pureIO (Left typedError)))
+                                    (fun outcome => send outcomes (Right (Right outcome))))
+                                (fun defect => send outcomes (Right (Left defect))))
                             (fun channelError =>
-                            error "structured concurrency internal channel closed"
+                                error "structured concurrency internal channel closed"
                             ))
                         (fun rightThread =>
                             bindIO
-                            (catchError
-                            (recv outcomes)
-                            (fun channelError =>
-                            error "structured concurrency internal channel closed"
-                            ))
-                            (fun winner =>
-                            case winner of
-                                Left leftOutcome =>
-                                    case leftOutcome of
-                                        Left defect => prelude.prim.raiseDefectIO defect
-                                        | Right typedOutcome =>
-                                            case typedOutcome of
-                                                Left typedError => failIO typedError
-                                                | Right value => pureIO (Left value)
-                                | Right rightOutcome =>
-                                    case rightOutcome of
-                                        Left defect => prelude.prim.raiseDefectIO defect
-                                        | Right typedOutcome =>
-                                            case typedOutcome of
-                                                Left typedError => failIO typedError
-                                                | Right value => pureIO (Right value)
-                            )
+                                (catchError
+                                    (recv outcomes)
+                                    (fun channelError =>
+                                        error "structured concurrency internal channel closed"
+                                    ))
+                                (fun winner =>
+                                    case winner of
+                                        Left leftOutcome =>
+                                            case leftOutcome of
+                                                Left defect => prelude.prim.raiseDefectIO defect
+                                                | Right typedOutcome =>
+                                                    case typedOutcome of
+                                                        Left typedError => failIO typedError
+                                                        | Right value => pureIO (Left value)
+                                        | Right rightOutcome =>
+                                            case rightOutcome of
+                                                Left defect => prelude.prim.raiseDefectIO defect
+                                                | Right typedOutcome =>
+                                                    case typedOutcome of
+                                                        Left typedError => failIO typedError
+                                                        | Right value => pureIO (Right value)
+                                )
                         )
                 )
         )
@@ -202,8 +210,8 @@ concurrently left right =
                     (catchDefect
                         (bindIO
                             (catchError
-                            (bindIO left (fun value => pureIO (Right value)))
-                            (fun typedError => pureIO (Left typedError)))
+                                (bindIO left (fun value => pureIO (Right value)))
+                                (fun typedError => pureIO (Left typedError)))
                             (fun outcome => send outcomes (Left (Right outcome))))
                         (fun defect => send outcomes (Left (Left defect))))
                     (fun channelError => error "structured concurrency internal channel closed"))
@@ -211,61 +219,79 @@ concurrently left right =
                     withThread
                         (catchError
                             (catchDefect
-                            (bindIO
-                            (catchError
-                            (bindIO right (fun value => pureIO (Right value)))
-                            (fun typedError => pureIO (Left typedError)))
-                            (fun outcome => send outcomes (Right (Right outcome))))
-                            (fun defect => send outcomes (Right (Left defect))))
+                                (bindIO
+                                    (catchError
+                                        (bindIO right (fun value => pureIO (Right value)))
+                                        (fun typedError => pureIO (Left typedError)))
+                                    (fun outcome => send outcomes (Right (Right outcome))))
+                                (fun defect => send outcomes (Right (Left defect))))
                             (fun channelError =>
-                            error "structured concurrency internal channel closed"
+                                error "structured concurrency internal channel closed"
                             ))
                         (fun rightThread =>
                             bindIO
-                            (catchError
-                            (recv outcomes)
-                            (fun channelError =>
-                            error "structured concurrency internal channel closed"
-                            ))
-                            (fun first =>
-                            let firstAction =
-                                case first of
-                                    Left (Left defect) => prelude.prim.raiseDefectIO defect
-                                    | Left (Right (Left typedError)) => failIO typedError
-                                    | Left (Right (Right leftValue)) => pureIO (Left leftValue)
-                                    | Right (Left defect) => prelude.prim.raiseDefectIO defect
-                                    | Right (Right (Left typedError)) => failIO typedError
-                                    | Right (Right (Right rightValue)) => pureIO (Right rightValue)
-                            in bindIO
-                            firstAction
-                            (fun firstValue =>
-                            bindIO
-                            (catchError
-                            (recv outcomes)
-                            (fun channelError =>
-                            error "structured concurrency internal channel closed"
-                            ))
-                            (fun second =>
-                            case (firstValue, second) of
-                                (Left leftValue, Right (Left defect)) =>
-                                    prelude.prim.raiseDefectIO defect
-                                | (Left leftValue, Right (Right (Left typedError))) =>
-                                    failIO typedError
-                                | (Left leftValue, Right (Right (Right rightValue))) =>
-                                    pureIO (leftValue, rightValue)
-                                | (Right rightValue, Left (Left defect)) =>
-                                    prelude.prim.raiseDefectIO defect
-                                | (Right rightValue, Left (Right (Left typedError))) =>
-                                    failIO typedError
-                                | (Right rightValue, Left (Right (Right leftValue))) =>
-                                    pureIO (leftValue, rightValue)
-                                | (Left leftValue, Left duplicate) =>
-                                    error "structured child sent more than one outcome"
-                                | (Right rightValue, Right duplicate) =>
-                                    error "structured child sent more than one outcome"
-                            )
-                            )
-                            )
+                                (catchError
+                                    (recv outcomes)
+                                    (fun channelError =>
+                                        error "structured concurrency internal channel closed"
+                                    ))
+                                (fun first =>
+                                    let firstAction =
+                                        case first of
+                                            Left (Left defect) => prelude.prim.raiseDefectIO defect
+                                            | Left (Right (Left typedError)) => failIO typedError
+                                            | Left (Right (Right leftValue)) =>
+                                                pureIO (Left leftValue)
+                                            | Right (Left defect) =>
+                                                prelude.prim.raiseDefectIO defect
+                                            | Right (Right (Left typedError)) => failIO typedError
+                                            | Right (Right (Right rightValue)) =>
+                                                pureIO (Right rightValue)
+                                    in bindIO
+                                        firstAction
+                                        (fun firstValue =>
+                                            bindIO
+                                                (catchError
+                                                    (recv outcomes)
+                                                    (fun channelError =>
+                                                        error
+                                                            "structured concurrency internal channel closed"
+                                                    ))
+                                                (fun second =>
+                                                    case (firstValue, second) of
+                                                        (Left leftValue, Right (Left defect)) =>
+                                                            prelude.prim.raiseDefectIO defect
+                                                        | (
+                                                                Left leftValue,
+                                                                Right (Right (Left typedError))
+                                                            ) =>
+                                                            failIO typedError
+                                                        | (
+                                                                Left leftValue,
+                                                                Right (Right (Right rightValue))
+                                                            ) =>
+                                                            pureIO (leftValue, rightValue)
+                                                        | (Right rightValue, Left (Left defect)) =>
+                                                            prelude.prim.raiseDefectIO defect
+                                                        | (
+                                                                Right rightValue,
+                                                                Left (Right (Left typedError))
+                                                            ) =>
+                                                            failIO typedError
+                                                        | (
+                                                                Right rightValue,
+                                                                Left (Right (Right leftValue))
+                                                            ) =>
+                                                            pureIO (leftValue, rightValue)
+                                                        | (Left leftValue, Left duplicate) =>
+                                                            error
+                                                                "structured child sent more than one outcome"
+                                                        | (Right rightValue, Right duplicate) =>
+                                                            error
+                                                                "structured child sent more than one outcome"
+                                                )
+                                        )
+                                )
                         )
                 )
         )
@@ -317,21 +343,24 @@ mapConcurrentlyBoundedWith operation collect concurrency transform values =
     if concurrency < 1
         then failIO (invalidConcurrency operation concurrency)
         else if concurrency > 4294967295
-            then failIO (invalidConcurrency operation concurrency)
-            else let total =
-                std.list.length values
-            in if total == 0
-                then pureIO []
-                else do
-                    let workers = minOrd concurrency total
-                    jobs <- asConcurrentInfrastructure (std.channel.newBoundedChan workers)
-                    outcomes <- asConcurrentInfrastructure (std.channel.newBoundedChan total)
-                    withPooledWorkers
-                        workers
-                        transform
-                        jobs
-                        outcomes
-                        (runPooled collect jobs outcomes values total)
+                then failIO (invalidConcurrency operation concurrency)
+                else
+                    let total =
+                        std.list.length values
+                    in if total == 0
+                        then pureIO []
+                        else do
+                                let workers = minOrd concurrency total
+                                jobs <-
+                                    asConcurrentInfrastructure (std.channel.newBoundedChan workers)
+                                outcomes <-
+                                    asConcurrentInfrastructure (std.channel.newBoundedChan total)
+                                withPooledWorkers
+                                    workers
+                                    transform
+                                    jobs
+                                    outcomes
+                                    (runPooled collect jobs outcomes values total)
 
 invalidConcurrency : forall e. String -> Int -> ConcurrentError e
 invalidConcurrency operation concurrency =
@@ -360,9 +389,10 @@ withPooledWorkers :
 withPooledWorkers count transform jobs outcomes body =
     if count == 0
         then body
-        else withThread
-            (pooledWorker transform jobs outcomes)
-            (fun worker => withPooledWorkers (count - 1) transform jobs outcomes body)
+        else
+            withThread
+                (pooledWorker transform jobs outcomes)
+                (fun worker => withPooledWorkers (count - 1) transform jobs outcomes body)
 
 pooledWorker :
     forall e a b. (a -> IO e b) ->
@@ -382,11 +412,10 @@ pooledWorkerLoop :
 pooledWorkerLoop transform jobs outcomes = do
     job <- asConcurrentInfrastructure (std.channel.recv jobs)
     case job of
-        (index, value) =>
-            do
-                outcome <- captureWorker transform value
-                asConcurrentInfrastructure (std.channel.send outcomes (index, outcome))
-                pooledWorkerLoop transform jobs outcomes
+        (index, value) => do
+            outcome <- captureWorker transform value
+            asConcurrentInfrastructure (std.channel.send outcomes (index, outcome))
+            pooledWorkerLoop transform jobs outcomes
 
 captureWorker : forall e a b. (a -> IO e b) -> a -> IO (ConcurrentError e) (Either e b)
 captureWorker transform value =
@@ -413,11 +442,14 @@ collectPooledMap outcomes remaining ordered =
     if remaining == 0
         then pureIO ordered
         else do
-            indexed <- asConcurrentInfrastructure (std.channel.recv outcomes)
-            case indexed of
-                (_, Left workerError) => failIO (ConcurrentWorker workerError)
-                | (index, Right value) =>
-                    collectPooledMap outcomes (remaining - 1) (std.map.insert index value ordered)
+                indexed <- asConcurrentInfrastructure (std.channel.recv outcomes)
+                case indexed of
+                    (_, Left workerError) => failIO (ConcurrentWorker workerError)
+                    | (index, Right value) =>
+                        collectPooledMap
+                            outcomes
+                            (remaining - 1)
+                            (std.map.insert index value ordered)
 
 collectPooledCompletionOrder :
     forall e a. Chan (Int, (Either e a)) -> Int -> IO (ConcurrentError e) [a]
@@ -430,8 +462,8 @@ collectPooledReversed outcomes remaining reversed =
     if remaining == 0
         then pureIO reversed
         else do
-            indexed <- asConcurrentInfrastructure (std.channel.recv outcomes)
-            case indexed of
-                (_, Left workerError) => failIO (ConcurrentWorker workerError)
-                | (_, Right value) =>
-                    collectPooledReversed outcomes (remaining - 1) (value :: reversed)
+                indexed <- asConcurrentInfrastructure (std.channel.recv outcomes)
+                case indexed of
+                    (_, Left workerError) => failIO (ConcurrentWorker workerError)
+                    | (_, Right value) =>
+                        collectPooledReversed outcomes (remaining - 1) (value :: reversed)

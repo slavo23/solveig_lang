@@ -1,4 +1,5 @@
-export (Port,
+export (
+    Port,
     PortError(..),
     portFromInt,
     portToInt,
@@ -27,7 +28,8 @@ export (Port,
     sendDatagram,
     sendDatagramTo,
     receiveDatagram,
-    datagrams)
+    datagrams
+)
 
 import std.prim(Socket)
 import std.bytes(bytesLength)
@@ -134,8 +136,8 @@ endpointPort : Endpoint -> Port
 endpointPort (Endpoint _ port) = port
 
 -- | A validation, resolution, or socket failure with domain context retained.
-data NetError =
-    InvalidTcpChunkSize Int
+data NetError
+    = InvalidTcpChunkSize Int
     | InvalidDatagramSize Int
     | NoHostAddresses String
     | NetHostError String HostError
@@ -341,9 +343,10 @@ receiveDatagram : forall scope. UdpSocket scope -> Int -> IO NetError Datagram
 receiveDatagram (UdpSocket socket) maximum =
     if or (maximum <= 0) (maximum > 65535)
         then failIO (InvalidDatagramSize maximum)
-        else fmap
-            datagramFromRaw
-            (atEndpoint "receive UDP datagram" $ std.prim.recvDatagram socket maximum)
+        else
+            fmap
+                datagramFromRaw
+                (atEndpoint "receive UDP datagram" $ std.prim.recvDatagram socket maximum)
 
 datagramStep : forall scope. UdpSocket scope -> Int -> () -> IO NetError (Maybe (Datagram, ()))
 datagramStep socket maximum _ =

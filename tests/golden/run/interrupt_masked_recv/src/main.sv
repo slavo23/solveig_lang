@@ -8,11 +8,11 @@ waitMasked values ready =
         (do
             send ready ()
             _ <- recv values
-            printLine "unexpected receive")
+            printLine "unexpected receive"
+        )
 
 worker : Chan Int -> Chan () -> Chan () -> Task ()
-worker values ready cleaned =
-    finally (waitMasked values ready) (send cleaned ())
+worker values ready cleaned = finally (waitMasked values ready) (send cleaned ())
 
 main : Task ()
 main = do

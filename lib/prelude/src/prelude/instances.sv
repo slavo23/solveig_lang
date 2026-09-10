@@ -56,7 +56,9 @@ instance Eq HostErrorKind where
     (==) _ _ = False
 
 instance Eq HostError where
-    (==) (HostError leftKind leftOperation leftMessage) (HostError rightKind rightOperation rightMessage) =
+    (==)
+        (HostError leftKind leftOperation leftMessage)
+        (HostError rightKind rightOperation rightMessage) =
         and
             (leftKind == rightKind)
             (and (leftOperation == rightOperation) (leftMessage == rightMessage))
@@ -75,12 +77,10 @@ instance Eq a => Eq (List a) where
     (==) _ _ = False
 
 instance (Eq a, Eq b) => Eq (a, b) where
-    (==) (leftA, leftB) (rightA, rightB) =
-        if leftA == rightA then leftB == rightB else False
+    (==) (leftA, leftB) (rightA, rightB) = if leftA == rightA then leftB == rightB else False
 
 instance (Eq a, Eq b, Eq c) => Eq (a, b, c) where
-    (==) (a, b, c) (x, y, z) =
-        if a == x then if b == y then c == z else False else False
+    (==) (a, b, c) (x, y, z) = if a == x then if b == y then c == z else False else False
 
 instance (Eq a, Eq b, Eq c, Eq d) => Eq (a, b, c, d) where
     (==) (a, b, c, d) (w, x, y, z) =
@@ -88,19 +88,58 @@ instance (Eq a, Eq b, Eq c, Eq d) => Eq (a, b, c, d) where
 
 instance (Eq a, Eq b, Eq c, Eq d, Eq e) => Eq (a, b, c, d, e) where
     (==) (a, b, c, d, e) (v, w, x, y, z) =
-        if a == v then if b == w then if c == x then if d == y then e == z else False else False else False else False
+        if a == v
+            then
+                if b == w then if c == x then if d == y then e == z else False else False else False
+            else False
 
 instance (Eq a, Eq b, Eq c, Eq d, Eq e, Eq f) => Eq (a, b, c, d, e, f) where
     (==) (a, b, c, d, e, f) (u, v, w, x, y, z) =
-        if a == u then if b == v then if c == w then if d == x then if e == y then f == z else False else False else False else False else False
+        if a == u
+            then
+                if b == v
+                    then
+                        if c == w
+                            then if d == x then if e == y then f == z else False else False
+                            else False
+                    else False
+            else False
 
 instance (Eq a, Eq b, Eq c, Eq d, Eq e, Eq f, Eq g) => Eq (a, b, c, d, e, f, g) where
     (==) (a, b, c, d, e, f, g) (t, u, v, w, x, y, z) =
-        if a == t then if b == u then if c == v then if d == w then if e == x then if f == y then g == z else False else False else False else False else False else False
+        if a == t
+            then
+                if b == u
+                    then
+                        if c == v
+                            then
+                                if d == w
+                                    then if e == x then if f == y then g == z else False else False
+                                    else False
+                            else False
+                    else False
+            else False
 
 instance (Eq a, Eq b, Eq c, Eq d, Eq e, Eq f, Eq g, Eq h) => Eq (a, b, c, d, e, f, g, h) where
     (==) (a, b, c, d, e, f, g, h) (s, t, u, v, w, x, y, z) =
-        if a == s then if b == t then if c == u then if d == v then if e == w then if f == x then if g == y then h == z else False else False else False else False else False else False else False
+        if a == s
+            then
+                if b == t
+                    then
+                        if c == u
+                            then
+                                if d == v
+                                    then
+                                        if e == w
+                                            then
+                                                if f == x
+                                                    then if g == y then h == z else False
+                                                    else False
+                                            else False
+                                    else False
+                            else False
+                    else False
+            else False
 
 instance (Eq a, Eq b) => Eq (Either a b) where
     (==) (Left x) (Left y) = x == y
@@ -112,10 +151,9 @@ instance PartialOrd Int where
 
 instance PartialOrd Float where
     partialCompare x y =
-        if floatLt x y then Just LT
-        else if floatEq x y then Just EQ
-        else if floatGt x y then Just GT
-        else Nothing
+        if floatLt x y
+            then Just LT
+            else if floatEq x y then Just EQ else if floatGt x y then Just GT else Nothing
 
 instance PartialOrd Char where
     partialCompare x y = Just (charCompare x y)
@@ -172,81 +210,173 @@ instance (PartialOrd a, PartialOrd b, PartialOrd c) => PartialOrd (a, b, c) wher
             Nothing => Nothing
             | Just LT => Just LT
             | Just GT => Just GT
-            | Just EQ => case partialCompare b y of
-                Nothing => Nothing
-                | Just LT => Just LT
-                | Just GT => Just GT
-                | Just EQ => partialCompare c z
+            | Just EQ =>
+                case partialCompare b y of
+                    Nothing => Nothing
+                    | Just LT => Just LT
+                    | Just GT => Just GT
+                    | Just EQ => partialCompare c z
 
 instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d) => PartialOrd (a, b, c, d) where
     partialCompare (a, b, c, d) (w, x, y, z) =
         case partialCompare a w of
-            Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-            | Just EQ => case partialCompare b x of
-                Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                | Just EQ => case partialCompare c y of
-                    Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                    | Just EQ => partialCompare d z
+            Nothing => Nothing
+            | Just LT => Just LT
+            | Just GT => Just GT
+            | Just EQ =>
+                case partialCompare b x of
+                    Nothing => Nothing
+                    | Just LT => Just LT
+                    | Just GT => Just GT
+                    | Just EQ =>
+                        case partialCompare c y of
+                            Nothing => Nothing
+                            | Just LT => Just LT
+                            | Just GT => Just GT
+                            | Just EQ => partialCompare d z
 
-instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d, PartialOrd e) => PartialOrd (a, b, c, d, e) where
+instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d, PartialOrd e) =>
+    PartialOrd (a, b, c, d, e) where
     partialCompare (a, b, c, d, e) (v, w, x, y, z) =
         case partialCompare a v of
-            Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-            | Just EQ => case partialCompare b w of
-                Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                | Just EQ => case partialCompare c x of
-                    Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                    | Just EQ => case partialCompare d y of
-                        Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                        | Just EQ => partialCompare e z
+            Nothing => Nothing
+            | Just LT => Just LT
+            | Just GT => Just GT
+            | Just EQ =>
+                case partialCompare b w of
+                    Nothing => Nothing
+                    | Just LT => Just LT
+                    | Just GT => Just GT
+                    | Just EQ =>
+                        case partialCompare c x of
+                            Nothing => Nothing
+                            | Just LT => Just LT
+                            | Just GT => Just GT
+                            | Just EQ =>
+                                case partialCompare d y of
+                                    Nothing => Nothing
+                                    | Just LT => Just LT
+                                    | Just GT => Just GT
+                                    | Just EQ => partialCompare e z
 
-instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d, PartialOrd e, PartialOrd f) => PartialOrd (a, b, c, d, e, f) where
+instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d, PartialOrd e, PartialOrd f) =>
+    PartialOrd (a, b, c, d, e, f) where
     partialCompare (a, b, c, d, e, f) (u, v, w, x, y, z) =
         case partialCompare a u of
-            Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-            | Just EQ => case partialCompare b v of
-                Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                | Just EQ => case partialCompare c w of
-                    Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                    | Just EQ => case partialCompare d x of
-                        Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                        | Just EQ => case partialCompare e y of
-                            Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                            | Just EQ => partialCompare f z
+            Nothing => Nothing
+            | Just LT => Just LT
+            | Just GT => Just GT
+            | Just EQ =>
+                case partialCompare b v of
+                    Nothing => Nothing
+                    | Just LT => Just LT
+                    | Just GT => Just GT
+                    | Just EQ =>
+                        case partialCompare c w of
+                            Nothing => Nothing
+                            | Just LT => Just LT
+                            | Just GT => Just GT
+                            | Just EQ =>
+                                case partialCompare d x of
+                                    Nothing => Nothing
+                                    | Just LT => Just LT
+                                    | Just GT => Just GT
+                                    | Just EQ =>
+                                        case partialCompare e y of
+                                            Nothing => Nothing
+                                            | Just LT => Just LT
+                                            | Just GT => Just GT
+                                            | Just EQ => partialCompare f z
 
-instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d, PartialOrd e, PartialOrd f, PartialOrd g) => PartialOrd (a, b, c, d, e, f, g) where
+instance (
+        PartialOrd a,
+        PartialOrd b,
+        PartialOrd c,
+        PartialOrd d,
+        PartialOrd e,
+        PartialOrd f,
+        PartialOrd g
+    ) =>
+    PartialOrd (a, b, c, d, e, f, g) where
     partialCompare (a, b, c, d, e, f, g) (t, u, v, w, x, y, z) =
         case partialCompare a t of
-            Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-            | Just EQ => case partialCompare b u of
-                Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                | Just EQ => case partialCompare c v of
-                    Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                    | Just EQ => case partialCompare d w of
-                        Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                        | Just EQ => case partialCompare e x of
-                            Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                            | Just EQ => case partialCompare f y of
-                                Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                                | Just EQ => partialCompare g z
+            Nothing => Nothing
+            | Just LT => Just LT
+            | Just GT => Just GT
+            | Just EQ =>
+                case partialCompare b u of
+                    Nothing => Nothing
+                    | Just LT => Just LT
+                    | Just GT => Just GT
+                    | Just EQ =>
+                        case partialCompare c v of
+                            Nothing => Nothing
+                            | Just LT => Just LT
+                            | Just GT => Just GT
+                            | Just EQ =>
+                                case partialCompare d w of
+                                    Nothing => Nothing
+                                    | Just LT => Just LT
+                                    | Just GT => Just GT
+                                    | Just EQ =>
+                                        case partialCompare e x of
+                                            Nothing => Nothing
+                                            | Just LT => Just LT
+                                            | Just GT => Just GT
+                                            | Just EQ =>
+                                                case partialCompare f y of
+                                                    Nothing => Nothing
+                                                    | Just LT => Just LT
+                                                    | Just GT => Just GT
+                                                    | Just EQ => partialCompare g z
 
-instance (PartialOrd a, PartialOrd b, PartialOrd c, PartialOrd d, PartialOrd e, PartialOrd f, PartialOrd g, PartialOrd h) => PartialOrd (a, b, c, d, e, f, g, h) where
+instance (
+        PartialOrd a,
+        PartialOrd b,
+        PartialOrd c,
+        PartialOrd d,
+        PartialOrd e,
+        PartialOrd f,
+        PartialOrd g,
+        PartialOrd h
+    ) =>
+    PartialOrd (a, b, c, d, e, f, g, h) where
     partialCompare (a, b, c, d, e, f, g, h) (s, t, u, v, w, x, y, z) =
         case partialCompare a s of
-            Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-            | Just EQ => case partialCompare b t of
-                Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                | Just EQ => case partialCompare c u of
-                    Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                    | Just EQ => case partialCompare d v of
-                        Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                        | Just EQ => case partialCompare e w of
-                            Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                            | Just EQ => case partialCompare f x of
-                                Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                                | Just EQ => case partialCompare g y of
-                                    Nothing => Nothing | Just LT => Just LT | Just GT => Just GT
-                                    | Just EQ => partialCompare h z
+            Nothing => Nothing
+            | Just LT => Just LT
+            | Just GT => Just GT
+            | Just EQ =>
+                case partialCompare b t of
+                    Nothing => Nothing
+                    | Just LT => Just LT
+                    | Just GT => Just GT
+                    | Just EQ =>
+                        case partialCompare c u of
+                            Nothing => Nothing
+                            | Just LT => Just LT
+                            | Just GT => Just GT
+                            | Just EQ =>
+                                case partialCompare d v of
+                                    Nothing => Nothing
+                                    | Just LT => Just LT
+                                    | Just GT => Just GT
+                                    | Just EQ =>
+                                        case partialCompare e w of
+                                            Nothing => Nothing
+                                            | Just LT => Just LT
+                                            | Just GT => Just GT
+                                            | Just EQ =>
+                                                case partialCompare f x of
+                                                    Nothing => Nothing
+                                                    | Just LT => Just LT
+                                                    | Just GT => Just GT
+                                                    | Just EQ =>
+                                                        case partialCompare g y of
+                                                            Nothing => Nothing
+                                                            | Just LT => Just LT
+                                                            | Just GT => Just GT
+                                                            | Just EQ => partialCompare h z
 
 instance (PartialOrd a, PartialOrd b) => PartialOrd (Either a b) where
     partialCompare (Left x) (Left y) = partialCompare x y
@@ -307,68 +437,129 @@ instance (Ord a, Ord b) => Ord (a, b) where
 instance (Ord a, Ord b, Ord c) => Ord (a, b, c) where
     compare (a, b, c) (x, y, z) =
         case compare a x of
-            LT => LT | GT => GT
-            | EQ => case compare b y of LT => LT | GT => GT | EQ => compare c z
+            LT => LT
+            | GT => GT
+            | EQ =>
+                case compare b y of
+                    LT => LT
+                    | GT => GT
+                    | EQ => compare c z
 
 instance (Ord a, Ord b, Ord c, Ord d) => Ord (a, b, c, d) where
     compare (a, b, c, d) (w, x, y, z) =
         case compare a w of
-            LT => LT | GT => GT
-            | EQ => case compare b x of
-                LT => LT | GT => GT
-                | EQ => case compare c y of LT => LT | GT => GT | EQ => compare d z
+            LT => LT
+            | GT => GT
+            | EQ =>
+                case compare b x of
+                    LT => LT
+                    | GT => GT
+                    | EQ =>
+                        case compare c y of
+                            LT => LT
+                            | GT => GT
+                            | EQ => compare d z
 
 instance (Ord a, Ord b, Ord c, Ord d, Ord e) => Ord (a, b, c, d, e) where
     compare (a, b, c, d, e) (v, w, x, y, z) =
         case compare a v of
-            LT => LT | GT => GT
-            | EQ => case compare b w of
-                LT => LT | GT => GT
-                | EQ => case compare c x of
-                    LT => LT | GT => GT
-                    | EQ => case compare d y of LT => LT | GT => GT | EQ => compare e z
+            LT => LT
+            | GT => GT
+            | EQ =>
+                case compare b w of
+                    LT => LT
+                    | GT => GT
+                    | EQ =>
+                        case compare c x of
+                            LT => LT
+                            | GT => GT
+                            | EQ =>
+                                case compare d y of
+                                    LT => LT
+                                    | GT => GT
+                                    | EQ => compare e z
 
 instance (Ord a, Ord b, Ord c, Ord d, Ord e, Ord f) => Ord (a, b, c, d, e, f) where
     compare (a, b, c, d, e, f) (u, v, w, x, y, z) =
         case compare a u of
-            LT => LT | GT => GT
-            | EQ => case compare b v of
-                LT => LT | GT => GT
-                | EQ => case compare c w of
-                    LT => LT | GT => GT
-                    | EQ => case compare d x of
-                        LT => LT | GT => GT
-                        | EQ => case compare e y of LT => LT | GT => GT | EQ => compare f z
+            LT => LT
+            | GT => GT
+            | EQ =>
+                case compare b v of
+                    LT => LT
+                    | GT => GT
+                    | EQ =>
+                        case compare c w of
+                            LT => LT
+                            | GT => GT
+                            | EQ =>
+                                case compare d x of
+                                    LT => LT
+                                    | GT => GT
+                                    | EQ =>
+                                        case compare e y of
+                                            LT => LT
+                                            | GT => GT
+                                            | EQ => compare f z
 
 instance (Ord a, Ord b, Ord c, Ord d, Ord e, Ord f, Ord g) => Ord (a, b, c, d, e, f, g) where
     compare (a, b, c, d, e, f, g) (t, u, v, w, x, y, z) =
         case compare a t of
-            LT => LT | GT => GT
-            | EQ => case compare b u of
-                LT => LT | GT => GT
-                | EQ => case compare c v of
-                    LT => LT | GT => GT
-                    | EQ => case compare d w of
-                        LT => LT | GT => GT
-                        | EQ => case compare e x of
-                            LT => LT | GT => GT
-                            | EQ => case compare f y of LT => LT | GT => GT | EQ => compare g z
+            LT => LT
+            | GT => GT
+            | EQ =>
+                case compare b u of
+                    LT => LT
+                    | GT => GT
+                    | EQ =>
+                        case compare c v of
+                            LT => LT
+                            | GT => GT
+                            | EQ =>
+                                case compare d w of
+                                    LT => LT
+                                    | GT => GT
+                                    | EQ =>
+                                        case compare e x of
+                                            LT => LT
+                                            | GT => GT
+                                            | EQ =>
+                                                case compare f y of
+                                                    LT => LT
+                                                    | GT => GT
+                                                    | EQ => compare g z
 
-instance (Ord a, Ord b, Ord c, Ord d, Ord e, Ord f, Ord g, Ord h) => Ord (a, b, c, d, e, f, g, h) where
+instance (Ord a, Ord b, Ord c, Ord d, Ord e, Ord f, Ord g, Ord h) =>
+    Ord (a, b, c, d, e, f, g, h) where
     compare (a, b, c, d, e, f, g, h) (s, t, u, v, w, x, y, z) =
         case compare a s of
-            LT => LT | GT => GT
-            | EQ => case compare b t of
-                LT => LT | GT => GT
-                | EQ => case compare c u of
-                    LT => LT | GT => GT
-                    | EQ => case compare d v of
-                        LT => LT | GT => GT
-                        | EQ => case compare e w of
-                            LT => LT | GT => GT
-                            | EQ => case compare f x of
-                                LT => LT | GT => GT
-                                | EQ => case compare g y of LT => LT | GT => GT | EQ => compare h z
+            LT => LT
+            | GT => GT
+            | EQ =>
+                case compare b t of
+                    LT => LT
+                    | GT => GT
+                    | EQ =>
+                        case compare c u of
+                            LT => LT
+                            | GT => GT
+                            | EQ =>
+                                case compare d v of
+                                    LT => LT
+                                    | GT => GT
+                                    | EQ =>
+                                        case compare e w of
+                                            LT => LT
+                                            | GT => GT
+                                            | EQ =>
+                                                case compare f x of
+                                                    LT => LT
+                                                    | GT => GT
+                                                    | EQ =>
+                                                        case compare g y of
+                                                            LT => LT
+                                                            | GT => GT
+                                                            | EQ => compare h z
 
 instance (Ord a, Ord b) => Ord (Either a b) where
     compare (Left x) (Left y) = compare x y
@@ -422,9 +613,7 @@ instance Functor (Either e) where
     fmap f (Right x) = Right (f x)
 
 instance Functor (IO e) where
-    fmap f action =
-        prelude.builtins.bindIO action (fun value =>
-            prelude.builtins.pureIO (f value))
+    fmap f action = prelude.builtins.bindIO action (fun value => prelude.builtins.pureIO (f value))
 
 instance Applicative Maybe where
     pure x = Just x
@@ -443,9 +632,9 @@ instance Applicative (Either e) where
 instance Applicative (IO e) where
     pure value = prelude.builtins.pureIO value
     apply actionF actionX =
-        prelude.builtins.bindIO actionF (fun f =>
-            prelude.builtins.bindIO actionX (fun x =>
-                prelude.builtins.pureIO (f x)))
+        prelude.builtins.bindIO
+            actionF
+            (fun f => prelude.builtins.bindIO actionX (fun x => prelude.builtins.pureIO (f x)))
 
 instance Monad Maybe where
     bind Nothing f = Nothing
@@ -504,8 +693,7 @@ instance Show HostErrorKind where
     show OtherError = "other host error"
 
 instance Show HostError where
-    show (HostError kind operation message) =
-        operation <> ": " <> show kind <> ": " <> message
+    show (HostError kind operation message) = operation <> ": " <> show kind <> ": " <> message
 
 instance Show Utf8Error where
     show (InvalidUtf8 offset) = "invalid UTF-8 at byte " <> show offset
@@ -522,12 +710,10 @@ instance (Show a, Show b) => Show (a, b) where
         stringAppend "(" (stringAppend (show a) (stringAppend ", " (stringAppend (show b) ")")))
 
 instance (Show a, Show b, Show c) => Show (a, b, c) where
-    show (a, b, c) =
-        "(" <> show a <> ", " <> show b <> ", " <> show c <> ")"
+    show (a, b, c) = "(" <> show a <> ", " <> show b <> ", " <> show c <> ")"
 
 instance (Show a, Show b, Show c, Show d) => Show (a, b, c, d) where
-    show (a, b, c, d) =
-        "(" <> show a <> ", " <> show b <> ", " <> show c <> ", " <> show d <> ")"
+    show (a, b, c, d) = "(" <> show a <> ", " <> show b <> ", " <> show c <> ", " <> show d <> ")"
 
 instance (Show a, Show b, Show c, Show d, Show e) => Show (a, b, c, d, e) where
     show (a, b, c, d, e) =
@@ -535,15 +721,59 @@ instance (Show a, Show b, Show c, Show d, Show e) => Show (a, b, c, d, e) where
 
 instance (Show a, Show b, Show c, Show d, Show e, Show f) => Show (a, b, c, d, e, f) where
     show (a, b, c, d, e, f) =
-        "(" <> show a <> ", " <> show b <> ", " <> show c <> ", " <> show d <> ", " <> show e <> ", " <> show f <> ")"
+        "("
+            <> show a
+            <> ", "
+            <> show b
+            <> ", "
+            <> show c
+            <> ", "
+            <> show d
+            <> ", "
+            <> show e
+            <> ", "
+            <> show f
+            <> ")"
 
-instance (Show a, Show b, Show c, Show d, Show e, Show f, Show g) => Show (a, b, c, d, e, f, g) where
+instance (Show a, Show b, Show c, Show d, Show e, Show f, Show g) =>
+    Show (a, b, c, d, e, f, g) where
     show (a, b, c, d, e, f, g) =
-        "(" <> show a <> ", " <> show b <> ", " <> show c <> ", " <> show d <> ", " <> show e <> ", " <> show f <> ", " <> show g <> ")"
+        "("
+            <> show a
+            <> ", "
+            <> show b
+            <> ", "
+            <> show c
+            <> ", "
+            <> show d
+            <> ", "
+            <> show e
+            <> ", "
+            <> show f
+            <> ", "
+            <> show g
+            <> ")"
 
-instance (Show a, Show b, Show c, Show d, Show e, Show f, Show g, Show h) => Show (a, b, c, d, e, f, g, h) where
+instance (Show a, Show b, Show c, Show d, Show e, Show f, Show g, Show h) =>
+    Show (a, b, c, d, e, f, g, h) where
     show (a, b, c, d, e, f, g, h) =
-        "(" <> show a <> ", " <> show b <> ", " <> show c <> ", " <> show d <> ", " <> show e <> ", " <> show f <> ", " <> show g <> ", " <> show h <> ")"
+        "("
+            <> show a
+            <> ", "
+            <> show b
+            <> ", "
+            <> show c
+            <> ", "
+            <> show d
+            <> ", "
+            <> show e
+            <> ", "
+            <> show f
+            <> ", "
+            <> show g
+            <> ", "
+            <> show h
+            <> ")"
 
 instance (Show a, Show b) => Show (Either a b) where
     show (Left x) = stringAppend "Left " (show x)
@@ -574,36 +804,68 @@ instance (Monoid a, Monoid b, Monoid c) => Monoid (a, b, c) where
     empty = (empty, empty, empty)
 
 instance (Semigroup a, Semigroup b, Semigroup c, Semigroup d) => Semigroup (a, b, c, d) where
-    combine (a, b, c, d) (w, x, y, z) =
-        (combine a w, combine b x, combine c y, combine d z)
+    combine (a, b, c, d) (w, x, y, z) = (combine a w, combine b x, combine c y, combine d z)
 
 instance (Monoid a, Monoid b, Monoid c, Monoid d) => Monoid (a, b, c, d) where
     empty = (empty, empty, empty, empty)
 
-instance (Semigroup a, Semigroup b, Semigroup c, Semigroup d, Semigroup e) => Semigroup (a, b, c, d, e) where
+instance (Semigroup a, Semigroup b, Semigroup c, Semigroup d, Semigroup e) =>
+    Semigroup (a, b, c, d, e) where
     combine (a, b, c, d, e) (v, w, x, y, z) =
         (combine a v, combine b w, combine c x, combine d y, combine e z)
 
 instance (Monoid a, Monoid b, Monoid c, Monoid d, Monoid e) => Monoid (a, b, c, d, e) where
     empty = (empty, empty, empty, empty, empty)
 
-instance (Semigroup a, Semigroup b, Semigroup c, Semigroup d, Semigroup e, Semigroup f) => Semigroup (a, b, c, d, e, f) where
+instance (Semigroup a, Semigroup b, Semigroup c, Semigroup d, Semigroup e, Semigroup f) =>
+    Semigroup (a, b, c, d, e, f) where
     combine (a, b, c, d, e, f) (u, v, w, x, y, z) =
         (combine a u, combine b v, combine c w, combine d x, combine e y, combine f z)
 
-instance (Monoid a, Monoid b, Monoid c, Monoid d, Monoid e, Monoid f) => Monoid (a, b, c, d, e, f) where
+instance (Monoid a, Monoid b, Monoid c, Monoid d, Monoid e, Monoid f) =>
+    Monoid (a, b, c, d, e, f) where
     empty = (empty, empty, empty, empty, empty, empty)
 
-instance (Semigroup a, Semigroup b, Semigroup c, Semigroup d, Semigroup e, Semigroup f, Semigroup g) => Semigroup (a, b, c, d, e, f, g) where
+instance (
+        Semigroup a,
+        Semigroup b,
+        Semigroup c,
+        Semigroup d,
+        Semigroup e,
+        Semigroup f,
+        Semigroup g
+    ) =>
+    Semigroup (a, b, c, d, e, f, g) where
     combine (a, b, c, d, e, f, g) (t, u, v, w, x, y, z) =
         (combine a t, combine b u, combine c v, combine d w, combine e x, combine f y, combine g z)
 
-instance (Monoid a, Monoid b, Monoid c, Monoid d, Monoid e, Monoid f, Monoid g) => Monoid (a, b, c, d, e, f, g) where
+instance (Monoid a, Monoid b, Monoid c, Monoid d, Monoid e, Monoid f, Monoid g) =>
+    Monoid (a, b, c, d, e, f, g) where
     empty = (empty, empty, empty, empty, empty, empty, empty)
 
-instance (Semigroup a, Semigroup b, Semigroup c, Semigroup d, Semigroup e, Semigroup f, Semigroup g, Semigroup h) => Semigroup (a, b, c, d, e, f, g, h) where
+instance (
+        Semigroup a,
+        Semigroup b,
+        Semigroup c,
+        Semigroup d,
+        Semigroup e,
+        Semigroup f,
+        Semigroup g,
+        Semigroup h
+    ) =>
+    Semigroup (a, b, c, d, e, f, g, h) where
     combine (a, b, c, d, e, f, g, h) (s, t, u, v, w, x, y, z) =
-        (combine a s, combine b t, combine c u, combine d v, combine e w, combine f x, combine g y, combine h z)
+        (
+            combine a s,
+            combine b t,
+            combine c u,
+            combine d v,
+            combine e w,
+            combine f x,
+            combine g y,
+            combine h z
+        )
 
-instance (Monoid a, Monoid b, Monoid c, Monoid d, Monoid e, Monoid f, Monoid g, Monoid h) => Monoid (a, b, c, d, e, f, g, h) where
+instance (Monoid a, Monoid b, Monoid c, Monoid d, Monoid e, Monoid f, Monoid g, Monoid h) =>
+    Monoid (a, b, c, d, e, f, g, h) where
     empty = (empty, empty, empty, empty, empty, empty, empty, empty)

@@ -1,4 +1,5 @@
-export (Url,
+export (
+    Url,
     Method(..),
     Header,
     Status,
@@ -71,16 +72,19 @@ export (Url,
     findHeader,
     responseText,
     bodyChunks,
-    foldBodyChunks)
+    foldBodyChunks
+)
 
 import prelude.prim as CorePrim(stringLength, stringSlice)
-import std.prim as HostPrim(httpOpenRaw,
+import std.prim as HostPrim(
+    httpOpenRaw,
     httpRequestRaw,
     httpUploadStartRaw,
     httpUploadChunkRaw,
     httpUploadCloseRaw,
     hClose,
-    hGetBytes)
+    hGetBytes
+)
 import std.bytes(*)
 import std.text(*)
 import std.path(Path, pathToString)
@@ -149,8 +153,8 @@ instance Hashable Status where
 data Response = Response Status [Header] Bytes
 
 -- | Pure request-policy errors or a typed host HTTP failure.
-data HttpError =
-    InvalidUrl String
+data HttpError
+    = InvalidUrl String
     | InvalidHeaderName String
     | InvalidHeaderValue String
     | InvalidStatus Int
@@ -227,8 +231,8 @@ header name value =
     if not (validHeaderName name)
         then Left (InvalidHeaderName name)
         else if not (validHeaderValue value)
-            then Left (InvalidHeaderValue value)
-            else Right (Header name value)
+                then Left (InvalidHeaderValue value)
+                else Right (Header name value)
 
 -- | Returns a header's field name.
 headerName : Header -> String
@@ -315,12 +319,13 @@ foldChunksFrom size step state bytes offset =
         std.bytes.bytesLength bytes
     in if offset >= total
         then state
-        else foldChunksFrom
-            size
-            step
-            (step state (std.bytes.bytesSlice bytes offset size))
-            bytes
-            (offset + size)
+        else
+            foldChunksFrom
+                size
+                step
+                (step state (std.bytes.bytesSlice bytes offset size))
+                bytes
+                (offset + size)
 
 methodText : Method -> String
 methodText Get = "GET"
@@ -349,15 +354,16 @@ validUrlAuthority [] count = count > 0
 validUrlAuthority (character :: rest) count =
     if or (character == '/') (character == '?')
         then and (count > 0) (validUrlChars rest)
-        else let point =
-            std.text.charToCodePoint character
-        in if or
+        else
+            let point =
+                std.text.charToCodePoint character
+            in if or
                 (or (and (point >= 48) (point <= 57)) (and (point >= 65) (point <= 90)))
                 (or
                     (and (point >= 97) (point <= 122))
                     (containsCodePoint point [45, 46, 58, 91, 93]))
-            then validUrlAuthority rest (count + 1)
-            else False
+                then validUrlAuthority rest (count + 1)
+                else False
 
 validUrlChars : [Char] -> Bool
 validUrlChars [] = True
@@ -379,8 +385,8 @@ isHeaderNameChar character =
     let point =
         std.text.charToCodePoint character
     in if or
-            (and (point >= 48) (point <= 57))
-            (or (and (point >= 65) (point <= 90)) (and (point >= 97) (point <= 122)))
+        (and (point >= 48) (point <= 57))
+        (or (and (point >= 65) (point <= 90)) (and (point >= 97) (point <= 122)))
         then True
         else containsCodePoint point [33, 35, 36, 37, 38, 39, 42, 43, 45, 46, 94, 95, 96, 124, 126]
 
@@ -459,8 +465,8 @@ instance Show ReplayPolicy where
     show ReplayableBodies = "ReplayableBodies"
     show NoReplay = "NoReplay"
 
-data RequestBody =
-    EmptyBody
+data RequestBody
+    = EmptyBody
     | StrictBody Bytes
     | TextBody String
     | BuilderBody BytesBuilder
@@ -652,17 +658,20 @@ validateOptions options =
     in if headers <= 0
         then Left (InvalidHttpOption "response header bytes" headers)
         else if buffered < 0
-            then Left (InvalidHttpOption "buffered response bytes" buffered)
-            else if chunk <= 0
-            then Left (InvalidHttpOption "chunk bytes" chunk)
-            else if milliseconds <= 0
-            then Left (InvalidHttpOption "timeout milliseconds" milliseconds)
-            else case maximumResponseBytes options of
-                Just maximum =>
-                    if maximum < 0
-                    then Left (InvalidHttpOption "response bytes" maximum)
-                    else validateRedirects (redirectPolicy options)
-                | Nothing => validateRedirects (redirectPolicy options)
+                then Left (InvalidHttpOption "buffered response bytes" buffered)
+                else if chunk <= 0
+                        then Left (InvalidHttpOption "chunk bytes" chunk)
+                        else if milliseconds <= 0
+                                then Left (InvalidHttpOption "timeout milliseconds" milliseconds)
+                                else
+                                    case maximumResponseBytes options of
+                                        Just maximum =>
+                                            if maximum < 0
+                                                then
+                                                    Left
+                                                        (InvalidHttpOption "response bytes" maximum)
+                                                else validateRedirects (redirectPolicy options)
+                                        | Nothing => validateRedirects (redirectPolicy options)
 
 validateRedirects : RedirectPolicy -> Either HttpError ()
 validateRedirects NoRedirects = Right ()
@@ -873,18 +882,17 @@ feedUpload :
 feedUpload configured upload (handle, responseValue) =
     case responseValue of
         Just responseValue => pureIO (handle, responseValue)
-        | Nothing =>
-            do
-                step <- next upload
-                case step of
-                    StreamDone => continueUpload configured handle Nothing
-                    | StreamYield bytes rest =>
-                        if bytesLength bytes == 0
-                            then feedUpload configured rest (handle, Nothing)
-                            else do
+        | Nothing => do
+            step <- next upload
+            case step of
+                StreamDone => continueUpload configured handle Nothing
+                | StreamYield bytes rest =>
+                    if bytesLength bytes == 0
+                        then feedUpload configured rest (handle, Nothing)
+                        else do
                                 event <-
                                     mapError
-                                            (httpHostError
+                                        (httpHostError
                                             configured
                                             (maximumResponseBytes configured)) $
                                         HostPrim.httpUploadChunkRaw handle (Just bytes)
@@ -976,9 +984,11 @@ validateRequestHeaders [] = Right []
 validateRequestHeaders ((name, value) :: rest) =
     if isManagedHeader name
         then Left (ManagedRequestHeader name)
-        else case header name value of
-            Left error => Left error
-            | Right _ => fmap (fun valid => (name, value) :: valid) (validateRequestHeaders rest)
+        else
+            case header name value of
+                Left error => Left error
+                | Right _ =>
+                    fmap (fun valid => (name, value) :: valid) (validateRequestHeaders rest)
 
 isManagedHeader : String -> Bool
 isManagedHeader name =

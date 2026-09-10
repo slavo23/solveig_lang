@@ -1,6 +1,17 @@
 export (
-    Set, empty, singleton, size, isEmpty, member, insert, delete, fromList, toAscList, union,
-    intersection, difference
+    Set,
+    empty,
+    singleton,
+    size,
+    isEmpty,
+    member,
+    insert,
+    delete,
+    fromList,
+    toAscList,
+    union,
+    intersection,
+    difference
 )
 
 import std.map(*)
@@ -63,8 +74,9 @@ intersection left right = intersectionValues right (toAscList left) empty
 intersectionValues : forall a. Ord a => Set a -> [a] -> Set a -> Set a
 intersectionValues source [] result = result
 intersectionValues source (value :: rest) result =
-    if member value source then intersectionValues source rest (insert value result)
-    else intersectionValues source rest result
+    if member value source
+        then intersectionValues source rest (insert value result)
+        else intersectionValues source rest result
 
 -- | Returns the elements present in the first set but not the second.
 difference : forall a. Ord a => Set a -> Set a -> Set a
@@ -73,8 +85,9 @@ difference left right = differenceValues right (toAscList left) empty
 differenceValues : forall a. Ord a => Set a -> [a] -> Set a -> Set a
 differenceValues removed [] result = result
 differenceValues removed (value :: rest) result =
-    if member value removed then differenceValues removed rest result
-    else differenceValues removed rest (insert value result)
+    if member value removed
+        then differenceValues removed rest result
+        else differenceValues removed rest (insert value result)
 
 instance Eq a => Eq (Set a) where
     (==) left right = toAscList left == toAscList right

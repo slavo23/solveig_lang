@@ -6,8 +6,7 @@ printSecure : String -> IO SecureRandomError ()
 printSecure text = mapError SecureRandomHostError (printLine text)
 
 printLength : String -> Bytes -> IO SecureRandomError ()
-printLength label bytes =
-    printSecure (label <> intToString (bytesLength bytes))
+printLength label bytes = printSecure (label <> intToString (bytesLength bytes))
 
 invalidCount : IO SecureRandomError ()
 invalidCount =
@@ -20,7 +19,8 @@ invalidCount =
                 InvalidSecureRandomByteCount count =>
                     printSecure ("invalid count: " <> intToString count)
                 | SecureRandomHostError hostError =>
-                    printSecure ("unexpected host failure: " <> show hostError))
+                    printSecure ("unexpected host failure: " <> show hostError)
+        )
 
 main : IO SecureRandomError ()
 main = do

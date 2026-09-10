@@ -1,6 +1,18 @@
 export (
-    HashSet, empty, singleton, size, isEmpty, member, insert, delete, fromList,
-    toList, toAscList, union, intersection, difference
+    HashSet,
+    empty,
+    singleton,
+    size,
+    isEmpty,
+    member,
+    insert,
+    delete,
+    fromList,
+    toList,
+    toAscList,
+    union,
+    intersection,
+    difference
 )
 
 import std.hashmap
@@ -60,8 +72,7 @@ toList (MkHashSet map) = std.hashmap.keys map
 -- |
 -- | This is the canonical conversion for user-visible ordering.
 toAscList : forall a. Ord a => HashSet a -> [a]
-toAscList (MkHashSet dictionary) =
-    map (fun (value, _) => value) (std.hashmap.toAscList dictionary)
+toAscList (MkHashSet dictionary) = map (fun (value, _) => value) (std.hashmap.toAscList dictionary)
 
 -- | Returns the union of two sets in expected linear time in the left set.
 union : forall a. Hashable a => HashSet a -> HashSet a -> HashSet a
@@ -76,8 +87,9 @@ intersection left right = intersectionValues right (toList left) empty
 intersectionValues : forall a. Hashable a => HashSet a -> [a] -> HashSet a -> HashSet a
 intersectionValues _ [] result = result
 intersectionValues source (value :: rest) result =
-    if member value source then intersectionValues source rest (insert value result)
-    else intersectionValues source rest result
+    if member value source
+        then intersectionValues source rest (insert value result)
+        else intersectionValues source rest result
 
 -- | Returns elements present in the first set but not the second.
 -- |
@@ -88,35 +100,31 @@ difference left right = differenceValues right (toList left) empty
 differenceValues : forall a. Hashable a => HashSet a -> [a] -> HashSet a -> HashSet a
 differenceValues _ [] result = result
 differenceValues removed (value :: rest) result =
-    if member value removed then differenceValues removed rest result
-    else differenceValues removed rest (insert value result)
+    if member value removed
+        then differenceValues removed rest result
+        else differenceValues removed rest (insert value result)
 
 equalElements : forall a. Hashable a => HashSet a -> [a] -> Bool
 equalElements _ [] = True
-equalElements set (value :: rest) =
-    if member value set then equalElements set rest else False
+equalElements set (value :: rest) = if member value set then equalElements set rest else False
 
 hashElements : forall a. Hashable a => Int -> [a] -> Int
 hashElements total [] = total
-hashElements total (value :: rest) =
-    hashElements (total + hash value) rest
+hashElements total (value :: rest) = hashElements (total + hash value) rest
 
 instance Foldable HashSet where
     foldr combine initial set = foldr combine initial (toList set)
     foldl combine initial set = foldl combine initial (toList set)
 
 instance Hashable a => Eq (HashSet a) where
-    (==) left right =
-        and (size left == size right) (equalElements left (toList right))
+    (==) left right = and (size left == size right) (equalElements left (toList right))
 
 instance (Ord a, Show a) => Show (HashSet a) where
     show set = "fromList " <> show (toAscList set)
 
 instance Hashable a => Hashable (HashSet a) where
     hashWithSalt salt set =
-        hashWithSalt
-            (hashWithSalt salt (size set))
-            (hashElements 0 (toList set))
+        hashWithSalt (hashWithSalt salt (size set)) (hashElements 0 (toList set))
 
 instance Hashable a => Semigroup (HashSet a) where
     combine left right = union left right

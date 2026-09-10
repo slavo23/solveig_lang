@@ -436,7 +436,7 @@ fn hover_on_hole_inside_map_constructor_lambda_uses_hole_type() {
         result.diagnostics()
     );
 
-    let line = "    let intEntries = (map (fun iVal => Entry ?? iVal) (rangeInclusive 1 20000)) in";
+    let line = "        (map (fun iVal => Entry ?? iVal) (rangeInclusive 1 20000))";
     let hole_start = offset_in_line(&source, line, "??");
     let hover = compilation
         .hover_info(&file, hole_start)
@@ -478,7 +478,7 @@ fn hover_on_second_map_constructor_lambda_hole_shows_fill_suggestions() {
         result.diagnostics()
     );
 
-    let line = "    let intEntries = (map (fun iVal => Entry iVal ??) (rangeInclusive 1 20000)) in";
+    let line = "        (map (fun iVal => Entry iVal ??) (rangeInclusive 1 20000))";
     let hole_start = offset_in_line(&source, line, "??");
     let hover = compilation
         .hover_info(&file, hole_start)
@@ -899,7 +899,7 @@ fn hole_diagnostics_and_hovers_survive_incremental_recheck() {
         );
     }
 
-    let line = "    let intEntries = (map (fun iVal => Entry iVal ??) (rangeInclusive 1 20000)) in";
+    let line = "        (map (fun iVal => Entry iVal ??) (rangeInclusive 1 20000))";
     let hole_start = offset_in_line(&source, line, "??");
     let hover = compilation
         .hover_info(&file, hole_start)
@@ -1349,7 +1349,7 @@ fn hover_covers_quiz_literals_parens_lists_and_instance_methods() {
     let prompt = quiz
         .hover_info(
             &quiz_file,
-            offset_in_line(&quiz_source, r#"                printStr "> ""#, r#""> ""#) + 1,
+            offset_in_line(&quiz_source, r#"            printStr "> ""#, r#""> ""#) + 1,
         )
         .expect("prompt string literal hover should exist");
     assert_eq!(prompt.signature(), "String");
@@ -1532,20 +1532,27 @@ fn hover_covers_non_empty_and_nested_list_literal_brackets() {
         result.diagnostics()
     );
 
-    let outer_line = "    eq allSubsets3 [";
+    let outer_line =
+        "checkAllSubsets3 = eq allSubsets3 [[1, 2, 3], [1, 2], [1, 3], [1], [2, 3], [2], [3], []]";
     let outer_open = smoke
         .hover_info(&cool_file, offset_in_line(&cool_source, outer_line, "["))
         .expect("outer list opening bracket should hover");
     assert_eq!(outer_open.signature(), "[[Int]]");
 
-    let inner_line = "        [1, 2, 3],";
+    let inner_line = outer_line;
     let inner_open = smoke
-        .hover_info(&cool_file, offset_in_line(&cool_source, inner_line, "["))
+        .hover_info(
+            &cool_file,
+            offset_in_line(&cool_source, inner_line, "[1, 2, 3]"),
+        )
         .expect("inner list opening bracket should hover");
     assert_eq!(inner_open.signature(), "[Int]");
 
     let inner_close = smoke
-        .hover_info(&cool_file, offset_in_line(&cool_source, inner_line, "]"))
+        .hover_info(
+            &cool_file,
+            offset_in_line(&cool_source, inner_line, "[1, 2, 3]") + "[1, 2, 3".len(),
+        )
         .expect("inner list closing bracket should hover");
     assert_eq!(inner_close.signature(), "[Int]");
 }
@@ -1569,7 +1576,7 @@ fn hover_covers_direct_prelude_imported_references() {
 
     for (line, needle, expected) in [
         ("class Eq a where", "a where", "a : *"),
-        ("    (==) : a -> a -> Bool", "a", "a : *"),
+        ("        a -> a -> Bool", "a", "a : *"),
         ("class Functor f where", "f", "f : * -> *"),
         (
             "    fmap : forall a b. (a -> b) -> f a -> f b",
@@ -1594,7 +1601,7 @@ fn hover_covers_direct_prelude_imported_references() {
         (
             "mconcat xs = foldr combine empty xs",
             "foldr",
-            "class Foldable t\nfoldr : forall a b. (a -> b -> b) -> b -> t a -> b",
+            "class Foldable t\nfoldr :\n        forall a b. (a -> b -> b) -> b -> t a -> b",
         ),
     ] {
         let hover = compilation
@@ -1706,16 +1713,16 @@ fn hover_audits_quiz_game_sensitive_tokens() {
         " 86:31  `QuizCard` => QuizCard : String -> String -> QuizCard\n",
         " 86:40  `question` => question : String\n",
         " 86:49  `answer` => answer : String\n",
-        "102:1   `askCards` => askCards : [QuizCard] -> Task [(QuizCard, String)]\n",
-        "102:10  `cards` => cards : [QuizCard]\n",
-        "102:16  `=` => <none>\n",
-        "102:18  `mapM` => mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]\n",
-        "102:23  `askCard` => askCard : QuizCard -> Task (QuizCard, String)\n",
-        "102:31  `cards` => cards : [QuizCard]\n",
-        "146:5   `responses` => responses : [(QuizCard, String)]\n",
-        "146:15  `<-` => <none>\n",
-        "146:18  `askCards` => askCards : [QuizCard] -> Task [(QuizCard, String)]\n",
-        "146:27  `cards` => cards : [QuizCard]\n",
+        "101:1   `askCards` => askCards : [QuizCard] -> Task [(QuizCard, String)]\n",
+        "101:10  `cards` => cards : [QuizCard]\n",
+        "101:16  `=` => <none>\n",
+        "101:18  `mapM` => mapM : forall m a b. Monad m => (a -> m b) -> [a] -> m [b]\n",
+        "101:23  `askCard` => askCard : QuizCard -> Task (QuizCard, String)\n",
+        "101:31  `cards` => cards : [QuizCard]\n",
+        "144:5   `responses` => responses : [(QuizCard, String)]\n",
+        "144:15  `<-` => <none>\n",
+        "144:18  `askCards` => askCards : [QuizCard] -> Task [(QuizCard, String)]\n",
+        "144:27  `cards` => cards : [QuizCard]\n",
     );
 
     assert_eq!(actual, expected);

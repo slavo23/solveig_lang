@@ -68,9 +68,8 @@ main = do
     printLine ("resolved=" <> show (hasAddress addresses))
     result <- mapError netToHost (withUdpSocket anyPort withSender)
     case result of
-        (message, sourceMatches, emptySize, recovery) =>
-            do
-                printLine message
-                printLine ("source-port=" <> sourceMatches)
-                printLine ("empty-bytes=" <> emptySize)
-                printLine recovery
+        (message, sourceMatches, emptySize, recovery) => do
+            printLine message
+            printLine ("source-port=" <> sourceMatches)
+            printLine ("empty-bytes=" <> emptySize)
+            printLine recovery

@@ -10,32 +10,36 @@ statePure value = State (fun state => (value, state))
 
 stateBind : forall s a b. State s a -> (a -> State s b) -> State s b
 stateBind action continuation =
-    State (fun state =>
-        case runState action state of
-            (value, nextState) => runState (continuation value) nextState)
+    State
+        (fun state =>
+            case runState action state of
+                (value, nextState) => runState (continuation value) nextState
+        )
 
 instance Functor (State s) where
     fmap f action =
-        State (fun state =>
-            case runState action state of
-                (value, nextState) => (f value, nextState))
+        State
+            (fun state =>
+                case runState action state of
+                    (value, nextState) => (f value, nextState)
+            )
 
 instance Applicative (State s) where
     pure value = statePure value
-
     apply actionF actionX =
-        State (fun state =>
-            case runState actionF state of
-                (f, stateAfterF) =>
-                    case runState actionX stateAfterF of
-                        (x, stateAfterX) => (f x, stateAfterX))
+        State
+            (fun state =>
+                case runState actionF state of
+                    (f, stateAfterF) =>
+                        case runState actionX stateAfterF of
+                            (x, stateAfterX) => (f x, stateAfterX)
+            )
 
 instance Monad (State s) where
     bind action continuation = stateBind action continuation
 
 tick : State Int Int
-tick =
-    State (fun state => (state, (state + 1)))
+tick = State (fun state => (state, (state + 1)))
 
 maybeResult : Maybe Int
 maybeResult = do

@@ -20,13 +20,13 @@ fixtureBody =
 
 fixtureResponse : String
 fixtureResponse =
-    "HTTP/1.1 200 OK\u{d}\n" <>
-        "Content-Type: application/json\u{d}\n" <>
-        "ETag: local-etag\u{d}\n" <>
-        "Content-Length: " <>
-        show (std.bytes.bytesLength (std.bytes.stringToBytes fixtureBody)) <>
-        "\u{d}\nConnection: close\u{d}\n\u{d}\n" <>
-        fixtureBody
+    "HTTP/1.1 200 OK\u{d}\n"
+        <> "Content-Type: application/json\u{d}\n"
+        <> "ETag: local-etag\u{d}\n"
+        <> "Content-Length: "
+        <> show (std.bytes.bytesLength (std.bytes.stringToBytes fixtureBody))
+        <> "\u{d}\nConnection: close\u{d}\n\u{d}\n"
+        <> fixtureBody
 
 findHeaderEnd : Bytes -> Int -> Maybe Int
 findHeaderEnd bytes index =
@@ -37,8 +37,8 @@ findHeaderEnd bytes index =
                 (and
                     (byteAtIs bytes (index + 1) 10)
                     (and (byteAtIs bytes (index + 2) 13) (byteAtIs bytes (index + 3) 10)))
-            then Just (index + 4)
-            else findHeaderEnd bytes (index + 1)
+                then Just (index + 4)
+                else findHeaderEnd bytes (index + 1)
 
 byteAtIs : Bytes -> Int -> Int -> Bool
 byteAtIs bytes index expected =
@@ -50,12 +50,11 @@ readRequestHeaders : forall scope. TcpConnection scope -> Bytes -> IO std.net.Ne
 readRequestHeaders connection accumulated =
     case findHeaderEnd accumulated 0 of
         Just _ => pureIO accumulated
-        | Nothing =>
-            do
-                chunk <- std.net.receiveTcpBytes connection 1024
-                if std.bytes.bytesLength chunk == 0
-                    then pureIO accumulated
-                    else readRequestHeaders connection (std.bytes.bytesAppend accumulated chunk)
+        | Nothing => do
+            chunk <- std.net.receiveTcpBytes connection 1024
+            if std.bytes.bytesLength chunk == 0
+                then pureIO accumulated
+                else readRequestHeaders connection (std.bytes.bytesAppend accumulated chunk)
 
 sendFixtureResponse : forall scope. TcpConnection scope -> Bytes -> IO std.net.NetError ()
 sendFixtureResponse connection request = do

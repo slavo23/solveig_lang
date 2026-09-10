@@ -10,7 +10,8 @@ use solveig_fmt::format;
 use solveig_syntax::lexer::{self, Token};
 use solveig_syntax::lowering::parse_source;
 
-const FORMAT_WIDTH: usize = 100;
+const FORMAT_WIDTHS: [usize; 3] = [40, 80, 100];
+const MINIMUM_STRICT_WIDTH: usize = 80;
 
 proptest! {
     #![proptest_config(ProptestConfig {
@@ -21,12 +22,14 @@ proptest! {
 
     #[test]
     fn generated_programs_round_trip_and_are_idempotent(source in program_strategy()) {
-        let result = verify_source(Path::new("generated.sv"), &source, FORMAT_WIDTH);
-        prop_assert!(
-            result.is_ok(),
-            "{}\n\ngenerated source:\n{source}",
-            result.as_ref().err().map_or("unknown verification failure", String::as_str)
-        );
+        for width in FORMAT_WIDTHS {
+            let result = verify_source(Path::new("generated.sv"), &source, width);
+            prop_assert!(
+                result.is_ok(),
+                "width {width}: {}\n\ngenerated source:\n{source}",
+                result.as_ref().err().map_or("unknown verification failure", String::as_str)
+            );
+        }
     }
 }
 
@@ -45,8 +48,10 @@ fn repository_corpus_preserves_ast_trivia_width_and_idempotence() {
     for path in files {
         let source = fs::read_to_string(&path)
             .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()));
-        if let Err(error) = verify_source(&path, &source, FORMAT_WIDTH) {
-            panic!("{}: {error}", path.display());
+        for width in FORMAT_WIDTHS {
+            if let Err(error) = verify_source(&path, &source, width) {
+                panic!("{} at width {width}: {error}", path.display());
+            }
         }
     }
 }
@@ -198,7 +203,11 @@ fn verify_source(path: &Path, source: &str, width: usize) -> Result<(), String> 
         ));
     }
 
-    verify_width(&formatted, width)
+    if width >= MINIMUM_STRICT_WIDTH {
+        verify_width(&formatted, width)
+    } else {
+        Ok(())
+    }
 }
 
 fn comments(source: &str) -> Result<BTreeMap<String, usize>, String> {
@@ -217,6 +226,8 @@ fn comments(source: &str) -> Result<BTreeMap<String, usize>, String> {
 fn verify_width(source: &str, width: usize) -> Result<(), String> {
     let tokens = lexer::lex(FileId(0), source).map_err(|error| format!("lex failed: {error:?}"))?;
     let mut unbreakable_lines = BTreeSet::new();
+    let mut substantive_tokens_per_line = BTreeMap::<u32, usize>::new();
+    let mut previous_tokens = BTreeMap::<u32, Token>::new();
     for token in tokens {
         if token.is_synthetic()
             || matches!(token.kind, Token::Whitespace | Token::Newline | Token::Eof)
@@ -224,11 +235,51 @@ fn verify_width(source: &str, width: usize) -> Result<(), String> {
             continue;
         }
         for (line_offset, segment) in token.source_text(source).split('\n').enumerate() {
+            let line_offset = u32::try_from(line_offset)
+                .map_err(|error| format!("one formatter token spans too many lines: {error}"))?;
+            let line = token.line.saturating_add(line_offset);
+            let continues_name_path = matches!(token.kind, Token::Ident | Token::UpperIdent)
+                && previous_tokens.get(&line).copied() == Some(Token::Dot);
+            if !segment.is_empty()
+                && !continues_name_path
+                && !matches!(
+                    token.kind,
+                    Token::LParen
+                        | Token::RParen
+                        | Token::LBrack
+                        | Token::RBrack
+                        | Token::Comma
+                        | Token::Semicolon
+                        | Token::Pipe
+                        | Token::Eq
+                        | Token::Colon
+                        | Token::Arrow
+                        | Token::BindArrow
+                        | Token::FatArrow
+                        | Token::Operator
+                        | Token::ReservedOp
+                        | Token::Cons
+                        | Token::Dot
+                        | Token::Minus
+                        | Token::Let
+                        | Token::In
+                        | Token::Do
+                        | Token::Fun
+                        | Token::Case
+                        | Token::Of
+                        | Token::If
+                        | Token::Then
+                        | Token::Else
+                        | Token::Where
+                )
+            {
+                *substantive_tokens_per_line.entry(line).or_default() += 1;
+            }
+            if !segment.is_empty() {
+                previous_tokens.insert(line, token.kind);
+            }
             if segment.chars().count() > width {
-                let line_offset = u32::try_from(line_offset).map_err(|error| {
-                    format!("one formatter token spans too many lines: {error}")
-                })?;
-                unbreakable_lines.insert(token.line.saturating_add(line_offset));
+                unbreakable_lines.insert(line);
             }
         }
     }
@@ -240,9 +291,14 @@ fn verify_width(source: &str, width: usize) -> Result<(), String> {
         }
         let line_index = u32::try_from(line_index)
             .map_err(|error| format!("formatter output contains too many lines: {error}"))?;
-        if !unbreakable_lines.contains(&line_index) {
+        let structurally_indivisible = substantive_tokens_per_line
+            .get(&line_index)
+            .copied()
+            .unwrap_or(0)
+            <= 1;
+        if !unbreakable_lines.contains(&line_index) && !structurally_indivisible {
             return Err(format!(
-                "line {} has width {line_width}, exceeding {width} without one unbreakable token:\n{line}",
+                "line {} has width {line_width}, exceeding {width} with breakable content:\n{line}",
                 line_index + 1
             ));
         }

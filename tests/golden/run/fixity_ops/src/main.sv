@@ -18,7 +18,7 @@ sumSmall : [Int] -> Int
 sumSmall xs =
     case xs of
         [] => 0
-      | x :: rest => x + sumSmall rest
+        | x :: rest => x + sumSmall rest
 
 leftBuiltIn = 20 - 5 - 3
 rightDeclared = 1 ^^ 2 ^^ 3

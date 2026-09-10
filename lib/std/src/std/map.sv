@@ -1,16 +1,23 @@
 export (
-    Map, empty, singleton, size, isEmpty, lookup, member, insert, delete, fromList,
-    toAscList, keys, values
+    Map,
+    empty,
+    singleton,
+    size,
+    isEmpty,
+    lookup,
+    member,
+    insert,
+    delete,
+    fromList,
+    toAscList,
+    keys,
+    values
 )
 
 -- | An immutable ordered map backed by a persistent AVL tree.
-data Map k v =
-    MapEmpty
-  | MapNode Int Int k v (Map k v) (Map k v)
+data Map k v = MapEmpty | MapNode Int Int k v (Map k v) (Map k v)
 
-data RemoveMinimum k v =
-    NoMinimum
-  | RemovedMinimum k v (Map k v)
+data RemoveMinimum k v = NoMinimum | RemovedMinimum k v (Map k v)
 
 -- | Returns an empty map.
 empty : forall k v. Map k v
@@ -64,26 +71,27 @@ rotateRight MapEmpty = MapEmpty
 -- modified search spine, retaining logarithmic map operations.
 balance : forall k v. k -> v -> Map k v -> Map k v -> Map k v
 balance key value left right =
-    let leftHeight = mapHeight left in
-    let rightHeight = mapHeight right in
-    if leftHeight > rightHeight + 1 then
-        case left of
-            MapNode _ _ _ _ leftLeft leftRight =>
-                if mapHeight leftLeft >= mapHeight leftRight then
-                    rotateRight (makeNode key value left right)
-                else
-                    rotateRight (makeNode key value (rotateLeft left) right)
-            | MapEmpty => makeNode key value left right
-    else if rightHeight > leftHeight + 1 then
-        case right of
-            MapNode _ _ _ _ rightLeft rightRight =>
-                if mapHeight rightRight >= mapHeight rightLeft then
-                    rotateLeft (makeNode key value left right)
-                else
-                    rotateLeft (makeNode key value left (rotateRight right))
-            | MapEmpty => makeNode key value left right
-    else
-        makeNode key value left right
+    let leftHeight =
+        mapHeight left
+    in let rightHeight =
+        mapHeight right
+    in if leftHeight > rightHeight + 1
+        then
+            case left of
+                MapNode _ _ _ _ leftLeft leftRight =>
+                    if mapHeight leftLeft >= mapHeight leftRight
+                        then rotateRight (makeNode key value left right)
+                        else rotateRight (makeNode key value (rotateLeft left) right)
+                | MapEmpty => makeNode key value left right
+        else if rightHeight > leftHeight + 1
+                then
+                    case right of
+                        MapNode _ _ _ _ rightLeft rightRight =>
+                            if mapHeight rightRight >= mapHeight rightLeft
+                                then rotateLeft (makeNode key value left right)
+                                else rotateLeft (makeNode key value left (rotateRight right))
+                        | MapEmpty => makeNode key value left right
+                else makeNode key value left right
 
 -- | Finds a value by key in logarithmic time.
 lookup : forall k v. Ord k => k -> Map k v -> Maybe v
@@ -142,8 +150,7 @@ fromList = fromListInto empty
 
 fromListInto : forall k v. Ord k => Map k v -> [(k, v)] -> Map k v
 fromListInto map [] = map
-fromListInto map ((key, value) :: rest) =
-    fromListInto (insert key value map) rest
+fromListInto map ((key, value) :: rest) = fromListInto (insert key value map) rest
 
 -- | Returns entries in ascending key order.
 toAscList : forall k v. Map k v -> [(k, v)]
@@ -160,8 +167,7 @@ keys map = keysInto map []
 
 keysInto : forall k v. Map k v -> [k] -> [k]
 keysInto MapEmpty acc = acc
-keysInto (MapNode _ _ key _ left right) acc =
-    keysInto left (key :: keysInto right acc)
+keysInto (MapNode _ _ key _ left right) acc = keysInto left (key :: keysInto right acc)
 
 -- | Returns values in ascending key order.
 values : forall k v. Map k v -> [v]
@@ -169,8 +175,7 @@ values map = valuesInto map []
 
 valuesInto : forall k v. Map k v -> [v] -> [v]
 valuesInto MapEmpty acc = acc
-valuesInto (MapNode _ _ _ value left right) acc =
-    valuesInto left (value :: valuesInto right acc)
+valuesInto (MapNode _ _ _ value left right) acc = valuesInto left (value :: valuesInto right acc)
 
 instance Functor (Map k) where
     fmap transform MapEmpty = MapEmpty
@@ -184,8 +189,7 @@ instance Foldable (Map k) where
 pairLeftValue : forall k a. Map k a -> a -> (Map k a, a)
 pairLeftValue left value = (left, value)
 
-rebuildTraversedNode :
-    forall k v. Int -> Int -> k -> (Map k v, v) -> Map k v -> Map k v
+rebuildTraversedNode : forall k v. Int -> Int -> k -> (Map k v, v) -> Map k v -> Map k v
 rebuildTraversedNode height count key (left, value) right =
     MapNode height count key value left right
 
@@ -194,10 +198,7 @@ instance Traversable (Map k) where
     traverse transform (MapNode height count key value left right) =
         liftA2
             (rebuildTraversedNode height count key)
-            (liftA2
-                pairLeftValue
-                (traverse transform left)
-                (transform value))
+            (liftA2 pairLeftValue (traverse transform left) (transform value))
             (traverse transform right)
 
 instance (Eq k, Eq v) => Eq (Map k v) where
@@ -212,5 +213,4 @@ hashEntries salt ((key, value) :: rest) =
     hashEntries (hashWithSalt (hashWithSalt salt key) value) rest
 
 instance (Hashable k, Hashable v) => Hashable (Map k v) where
-    hashWithSalt salt map =
-        hashEntries (hashWithSalt salt (size map)) (toAscList map)
+    hashWithSalt salt map = hashEntries (hashWithSalt salt (size map)) (toAscList map)

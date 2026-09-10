@@ -23,13 +23,12 @@ runClient port =
     withTcpConnection
         "localhost"
         port
-        (fun connection =>
-            do
-                sendTcpBytes connection (stringToBytes "echo over TCP")
-                reply <- fold bytesAppend (stringToBytes "") (tcpBytes connection 4)
-                case bytesToString reply of
-                    Right text => pureIO text
-                    | Left _ => pureIO "invalid reply"
+        (fun connection => do
+            sendTcpBytes connection (stringToBytes "echo over TCP")
+            reply <- fold bytesAppend (stringToBytes "") (tcpBytes connection 4)
+            case bytesToString reply of
+                Right text => pureIO text
+                | Left _ => pureIO "invalid reply"
         )
 
 runFixture : forall scope. TcpListener scope -> Port -> IO NetError String

@@ -1,4 +1,5 @@
-export (FsError(..),
+export (
+    FsError(..),
     readFile,
     readFileLimited,
     readFileBytes,
@@ -21,9 +22,11 @@ export (FsError(..),
     removeFile,
     renameFile,
     getFileSize,
-    getModificationTime)
+    getModificationTime
+)
 
-import std.prim(appendFile,
+import std.prim(
+    appendFile,
     createDirectory,
     doesDirectoryExist,
     doesFileExist,
@@ -39,7 +42,8 @@ import std.prim(appendFile,
     writeFile,
     writeFileAtomic,
     writeFileBytes,
-    writeFileBytesAtomic)
+    writeFileBytesAtomic
+)
 import std.bytes(*)
 import std.io(IOMode(..), hClose, hGetBytes, hPutBytes, openFile)
 import std.path(Path, currentPath, pathFromHost, pathToString)
@@ -185,27 +189,29 @@ fileTextStep path chunkSize (handle, buffered, offset) =
         Left utf8Error => failIO (absoluteUtf8Error path offset utf8Error)
         | Right prefixLength =>
             if prefixLength > 0
-                then pureIO
-                    (Just
-                        (
-                            decodeUtf8Prefix buffered prefixLength,
+                then
+                    pureIO
+                        (Just
                             (
-                                handle,
-                                bytesSlice
-                                    buffered
-                                    prefixLength
-                                    (bytesLength buffered - prefixLength),
-                                offset + prefixLength
-                            )
-                        ))
+                                decodeUtf8Prefix buffered prefixLength,
+                                (
+                                    handle,
+                                    bytesSlice
+                                        buffered
+                                        prefixLength
+                                        (bytesLength buffered - prefixLength),
+                                    offset + prefixLength
+                                )
+                            ))
                 else do
-                    bytes <- atPath path (hGetBytes handle chunkSize)
-                    if bytesLength bytes == 0
-                        then finishText path handle buffered offset
-                        else fileTextStep
-                            path
-                            chunkSize
-                            (handle, bytesAppend buffered bytes, offset)
+                        bytes <- atPath path (hGetBytes handle chunkSize)
+                        if bytesLength bytes == 0
+                            then finishText path handle buffered offset
+                            else
+                                fileTextStep
+                                    path
+                                    chunkSize
+                                    (handle, bytesAppend buffered bytes, offset)
 
 finishText : Path -> Handle -> Bytes -> Int -> IO FsError (Maybe (String, (Handle, Bytes, Int)))
 finishText path handle buffered offset =
@@ -214,12 +220,13 @@ finishText path handle buffered offset =
         | Right prefixLength =>
             if prefixLength == 0
                 then pureIO Nothing
-                else pureIO
-                    (Just
-                        (
-                            decodeUtf8Prefix buffered prefixLength,
-                            (handle, stringToBytes "", offset + prefixLength)
-                        ))
+                else
+                    pureIO
+                        (Just
+                            (
+                                decodeUtf8Prefix buffered prefixLength,
+                                (handle, stringToBytes "", offset + prefixLength)
+                            ))
 
 fileLineStream : Path -> Int -> Handle -> Stream () FsError String
 fileLineStream path chunkSize handle =
@@ -234,42 +241,45 @@ fileLineStep path chunkSize (handle, builder, bufferedLength, pending, offset, e
     let newline =
         bytesFindAny pending 0 (stringToBytes "\n")
     in if newline < bytesLength pending
-        then emitLine
-            path
-            handle
-            builder
-            bufferedLength
-            pending
-            offset
-            endOfInput
-            newline
-            (newline + 1)
+        then
+            emitLine
+                path
+                handle
+                builder
+                bufferedLength
+                pending
+                offset
+                endOfInput
+                newline
+                (newline + 1)
         else if endOfInput
-            then if bufferedLength + bytesLength pending == 0
-                then pureIO Nothing
-                else emitLine
-                    path
-                    handle
-                    builder
-                    bufferedLength
-                    pending
-                    offset
-                    True
-                    (bytesLength pending)
-                    (bytesLength pending)
-            else do
-                bytes <- atPath path (hGetBytes handle chunkSize)
-                fileLineStep
-                    path
-                    chunkSize
-                    (
-                        handle,
-                        builder <> bytesBuilder pending,
-                        bufferedLength + bytesLength pending,
-                        bytes,
-                        offset,
-                        bytesLength bytes == 0
-                    )
+                then
+                    if bufferedLength + bytesLength pending == 0
+                        then pureIO Nothing
+                        else
+                            emitLine
+                                path
+                                handle
+                                builder
+                                bufferedLength
+                                pending
+                                offset
+                                True
+                                (bytesLength pending)
+                                (bytesLength pending)
+                else do
+                        bytes <- atPath path (hGetBytes handle chunkSize)
+                        fileLineStep
+                            path
+                            chunkSize
+                            (
+                                handle,
+                                builder <> bytesBuilder pending,
+                                bufferedLength + bytesLength pending,
+                                bytes,
+                                offset,
+                                bytesLength bytes == 0
+                            )
 
 emitLine :
     Path ->
@@ -305,9 +315,10 @@ stripCarriageReturn : Bytes -> Int -> Int
 stripCarriageReturn bytes lineEnd =
     if lineEnd == 0
         then 0
-        else case bytesIndex bytes (lineEnd - 1) of
-            Just 13 => lineEnd - 1
-            | _ => lineEnd
+        else
+            case bytesIndex bytes (lineEnd - 1) of
+                Just 13 => lineEnd - 1
+                | _ => lineEnd
 
 decodeFile : Path -> Int -> Bytes -> IO FsError String
 decodeFile path offset bytes =

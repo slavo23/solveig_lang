@@ -91,12 +91,11 @@ parseQuiz contents = map parseCard (splitLines contents)
 askCard : QuizCard -> Task (QuizCard, String)
 askCard card =
     case card of
-        QuizCard question expected =>
-            do
-                printLine question
-                printStr "> "
-                answer <- readLine
-                pure (card, answer)
+        QuizCard question expected => do
+            printLine question
+            printStr "> "
+            answer <- readLine
+            pure (card, answer)
 
 askCards : [QuizCard] -> Task [(QuizCard, String)]
 askCards cards = mapM askCard cards
@@ -115,10 +114,9 @@ scoreResponses : [(QuizCard, String)] -> State Int ()
 scoreResponses responses =
     case responses of
         [] => statePure ()
-        | response :: rest =>
-            do
-                scoreResponse response
-                scoreResponses rest
+        | response :: rest => do
+            scoreResponse response
+            scoreResponses rest
 
 scoreQuiz : [(QuizCard, String)] -> Int
 scoreQuiz responses =

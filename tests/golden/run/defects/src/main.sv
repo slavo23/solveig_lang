@@ -12,13 +12,11 @@ reportTypedError : HostError -> Task ()
 reportTypedError ioError = printLine "typed-error"
 
 explicitDefect : Task ()
-explicitDefect =
-    bindIO (pureIO ()) (fun ignored => pureIO (error "boom"))
+explicitDefect = bindIO (pureIO ()) (fun ignored => pureIO (error "boom"))
 
 divisionDefect : Task ()
 divisionDefect =
-    bindIO (pureIO ()) (fun ignored =>
-        bindIO (pureIO (div 1 0)) (fun value => pureIO ()))
+    bindIO (pureIO ()) (fun ignored => bindIO (pureIO (div 1 0)) (fun value => pureIO ()))
 
 release : String -> Task ()
 release resource = printLine (appendString "release " resource)
@@ -36,9 +34,5 @@ main = do
     catchDefect explicitDefect reportDefect
     catchDefect (catchError divisionDefect reportTypedError) reportDefect
     catchDefect (finally explicitDefect divisionDefect) reportDefect
-    catchDefect
-        (bracket (pureIO "resource") release use)
-        reportDefect
-    catchError
-        (catchDefect typedFailure reportDefect)
-        reportTypedError
+    catchDefect (bracket (pureIO "resource") release use) reportDefect
+    catchError (catchDefect typedFailure reportDefect) reportTypedError

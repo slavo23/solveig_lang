@@ -18,8 +18,4 @@ main = do
     printLine (show (bytesLength bytes))
     printByte (bytesIndex bytes 1)
     printByte (bytesIndex bytes 99)
-    printText
-        (bytesToString
-            (bytesAppend
-                (bytesSlice bytes 1 3)
-                (stringToBytes "!")))
+    printText (bytesToString (bytesAppend (bytesSlice bytes 1 3) (stringToBytes "!")))

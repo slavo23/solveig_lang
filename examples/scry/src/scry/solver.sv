@@ -7,8 +7,7 @@ lookupBinding : String -> [Binding] -> Maybe Term
 lookupBinding name bindings =
     case bindings of
         [] => Nothing
-        | Binding key value :: rest =>
-            if key == name then Just value else lookupBinding name rest
+        | Binding key value :: rest => if key == name then Just value else lookupBinding name rest
 
 walk : [Binding] -> Term -> Term
 walk bindings term =
@@ -22,22 +21,19 @@ walk bindings term =
 bindVar : String -> Term -> [Binding] -> Maybe [Binding]
 bindVar name term bindings =
     case term of
-        Var other =>
-            if name == other then
-                Just bindings
-            else
-                Just (Binding name term :: bindings)
+        Var other => if name == other then Just bindings else Just (Binding name term :: bindings)
         | Atom _ => Just (Binding name term :: bindings)
 
 unifyTerm : Term -> Term -> [Binding] -> Maybe [Binding]
 unifyTerm left right bindings =
-    let walkedLeft = walk bindings left in
-    let walkedRight = walk bindings right in
-        case (walkedLeft, walkedRight) of
-            (Atom a, Atom b) =>
-                if a == b then Just bindings else Nothing
-            | (Var name, term) => bindVar name term bindings
-            | (term, Var name) => bindVar name term bindings
+    let walkedLeft =
+        walk bindings left
+    in let walkedRight =
+        walk bindings right
+    in case (walkedLeft, walkedRight) of
+        (Atom a, Atom b) => if a == b then Just bindings else Nothing
+        | (Var name, term) => bindVar name term bindings
+        | (term, Var name) => bindVar name term bindings
 
 unifyArgs : [Term] -> [Term] -> [Binding] -> Maybe [Binding]
 unifyArgs left right bindings =
@@ -60,14 +56,10 @@ unifyPred left right bindings =
         Pred leftName leftArgs =>
             case right of
                 Pred rightName rightArgs =>
-                    if leftName == rightName then
-                        unifyArgs leftArgs rightArgs bindings
-                    else
-                        Nothing
+                    if leftName == rightName then unifyArgs leftArgs rightArgs bindings else Nothing
 
 freshName : String -> Int -> String
-freshName name depth =
-    appendString name (appendString "#" (show depth))
+freshName name depth = appendString name (appendString "#" (show depth))
 
 freshTerm : Int -> Term -> Term
 freshTerm depth term =
@@ -128,20 +120,15 @@ solveAll rules depth bindings goals =
         [] => bindings
         | goal :: rest =>
             let next =
-                concatMap
-                    (fun current => solveGoal rules depth current goal)
-                    bindings
-            in
-                solveAll rules (depth + 1) next rest
+                concatMap (fun current => solveGoal rules depth current goal) bindings
+            in solveAll rules (depth + 1) next rest
 
 solveAny : [Clause] -> Int -> [Binding] -> [Goal] -> [[Binding]]
 solveAny rules depth bindings goals =
     case goals of
         [] => []
         | goal :: rest =>
-            append
-                (solveGoal rules depth bindings goal)
-                (solveAny rules (depth + 1) bindings rest)
+            append (solveGoal rules depth bindings goal) (solveAny rules (depth + 1) bindings rest)
 
 solveGoal : [Clause] -> Int -> [Binding] -> Goal -> [[Binding]]
 solveGoal rules depth bindings goal =

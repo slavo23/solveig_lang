@@ -39,8 +39,7 @@ checks =
 main : Task ()
 main =
     case checks of
-        Left failure =>
-            do
-                printLine $ "failed: " <> failureMessage failure
-                exitFailure
+        Left failure => do
+            printLine $ "failed: " <> failureMessage failure
+            exitFailure
         | Right _ => printLine "all checks passed"

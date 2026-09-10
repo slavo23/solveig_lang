@@ -31,18 +31,33 @@ scanLog chars lineStart events infos warnings errors =
         [] => LogCounts events infos warnings errors
         | c :: rest =>
             if lineStart
-                then if c == 'I'
-                    then scanLog rest False (events + 1) (infos + 1) warnings errors
-                    else if c == 'W'
-                        then scanLog rest False (events + 1) infos (warnings + 1) errors
-                        else if c == 'E'
-                            then scanLog rest False (events + 1) infos warnings (errors + 1)
-                            else if c == '\n'
-                                then scanLog rest True events infos warnings errors
-                                else scanLog rest False (events + 1) infos warnings errors
+                then
+                    if c == 'I'
+                        then scanLog rest False (events + 1) (infos + 1) warnings errors
+                        else if c == 'W'
+                                then scanLog rest False (events + 1) infos (warnings + 1) errors
+                                else if c == 'E'
+                                        then
+                                            scanLog
+                                                rest
+                                                False
+                                                (events + 1)
+                                                infos
+                                                warnings
+                                                (errors + 1)
+                                        else if c == '\n'
+                                                then scanLog rest True events infos warnings errors
+                                                else
+                                                    scanLog
+                                                        rest
+                                                        False
+                                                        (events + 1)
+                                                        infos
+                                                        warnings
+                                                        errors
                 else if c == '\n'
-                    then scanLog rest True events infos warnings errors
-                    else scanLog rest False events infos warnings errors
+                        then scanLog rest True events infos warnings errors
+                        else scanLog rest False events infos warnings errors
 
 analyzeLog : String -> LogCounts
 analyzeLog contents = scanLog (stringToChars contents) True 0 0 0 0
@@ -103,8 +118,8 @@ collectResults results remaining summary =
     if remaining == 0
         then pureIO summary
         else do
-            result <- recv results
-            collectResults results (remaining - 1) (includeResult summary result)
+                result <- recv results
+                collectResults results (remaining - 1) (includeResult summary result)
 
 reportLine : String -> Int -> String
 reportLine label value = appendString label (appendString (show value) "\n")
@@ -135,14 +150,13 @@ runAudit jobs results =
                 (fun secondWorker =>
                     withThread
                         (worker jobs results)
-                        (fun thirdWorker =>
-                            do
-                                completed <-
-                                    concurrently
+                        (fun thirdWorker => do
+                            completed <-
+                                concurrently
                                     (enqueueJobs jobs)
                                     (collectResults results 5 emptySummary)
-                                case completed of
-                                    (produced, summary) => pureIO summary
+                            case completed of
+                                (produced, summary) => pureIO summary
                         )
                 )
         )

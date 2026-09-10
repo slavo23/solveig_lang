@@ -3,10 +3,11 @@ import std.channel(*)
 
 pause : Int -> Task ()
 pause n =
-    if n == 0 then pureIO ()
-    else do
-        pureIO ()
-        pause (n - 1)
+    if n == 0
+        then pureIO ()
+        else do
+                pureIO ()
+                pause (n - 1)
 
 worker : Chan () -> String -> Task ()
 worker done label = do

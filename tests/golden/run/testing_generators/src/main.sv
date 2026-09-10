@@ -42,10 +42,9 @@ main : Task ()
 main = do
     let seed = mkStdGen 12345
     case (generate sampleGenerator seed, generate sampleGenerator seed) of
-        ((first, _), (second, _)) =>
-            do
-                printLine ("samples=" <> show first)
-                printLine ("reproducible=" <> show (first == second))
+        ((first, _), (second, _)) => do
+            printLine ("samples=" <> show first)
+            printLine ("reproducible=" <> show (first == second))
     case generate (pairGen integerGenerator (constantGen "fixed")) seed of
         (pair, _) => printLine ("pair=" <> show pair)
     printLine ("invalid-generators=" <> show invalidGeneratorsRejected)

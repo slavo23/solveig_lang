@@ -40,14 +40,13 @@ makeTriple = (,,)
 
 main : (Int, Int, Int, Int, Int, Int, Int, Int)
 main =
-    ( sum2 (1, 2)
-    , sum3 (makeTriple 1 2 3)
-    , sumNested (1, (2, 3))
-    , sum4 (1, 2, 3, 4)
-    , sum5 (1, 2, 3, 4, 5)
-    , sum6 (1, 2, 3, 4, 5, 6)
-    , sum7 (1, 2, 3, 4, 5, 6, 7)
-    , sum8 (1, 2, 3, 4, 5, 6, 7, 8)
-        + scorePair (4, 5)
-        + score (Box (0, (6, 7)))
+    (
+        sum2 (1, 2),
+        sum3 (makeTriple 1 2 3),
+        sumNested (1, (2, 3)),
+        sum4 (1, 2, 3, 4),
+        sum5 (1, 2, 3, 4, 5),
+        sum6 (1, 2, 3, 4, 5, 6),
+        sum7 (1, 2, 3, 4, 5, 6, 7),
+        sum8 (1, 2, 3, 4, 5, 6, 7, 8) + scorePair (4, 5) + score (Box (0, (6, 7)))
     )

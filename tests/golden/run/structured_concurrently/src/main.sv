@@ -95,7 +95,8 @@ runCompletionPool started gates resultsChannel = do
             (mapConcurrentlyBoundedCompletionOrder 2 (completionWork started gates) [1, 2, 3, 4])
     send resultsChannel results
 
-checkCompletionPool : Chan Int -> (Chan (), Chan (), Chan (), Chan ()) -> Chan [Int] -> ThreadId -> Task ()
+checkCompletionPool :
+    Chan Int -> (Chan (), Chan (), Chan (), Chan ()) -> Chan [Int] -> ThreadId -> Task ()
 checkCompletionPool started gates resultsChannel _ = do
     _ <- recv started
     _ <- recv started

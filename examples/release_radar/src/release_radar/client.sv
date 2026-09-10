@@ -45,10 +45,10 @@ checkAccess base token =
             (std.http.getWith
                 (std.http.withHeaders (accessHeaders token) httpOptions)
                 (base <> "/rate_limit")))
-        (pureIO .
-            release_radar.model.GitHubAccessFailed .
-            release_radar.model.RequestFailure .
-            describeHttpError)
+        (pureIO
+            . release_radar.model.GitHubAccessFailed
+            . release_radar.model.RequestFailure
+            . describeHttpError)
 
 fetchRelease :
     String ->
@@ -62,10 +62,10 @@ fetchRelease base token cache repository =
             (std.http.getWith
                 (std.http.withHeaders (requestHeaders token cache repository) httpOptions)
                 (base <> "/repos/" <> repository <> "/releases/latest")))
-        (pureIO .
-            release_radar.model.ReleaseFailed repository .
-            release_radar.model.RequestFailure .
-            describeHttpError)
+        (pureIO
+            . release_radar.model.ReleaseFailed repository
+            . release_radar.model.RequestFailure
+            . describeHttpError)
 
 fetchSequential :
     String ->
@@ -93,16 +93,15 @@ fetchObserved base token cache repository = do
     printLine ("[start] " <> repository)
     measured <- std.time.measure (fetchRelease base token cache repository)
     case measured of
-        (elapsed, result) =>
-            do
-                printLine
-                    ("[done " <>
-                        show (durationToMilliseconds elapsed) <>
-                        " ms] " <>
-                        release_radar.model.releaseRepository result <>
-                        " — " <>
-                        release_radar.model.completionLabel result)
-                pureIO result
+        (elapsed, result) => do
+            printLine
+                ("[done "
+                    <> show (durationToMilliseconds elapsed)
+                    <> " ms] "
+                    <> release_radar.model.releaseRepository result
+                    <> " — "
+                    <> release_radar.model.completionLabel result)
+            pureIO result
 
 printResults : [release_radar.model.ReleaseResult] -> Task ()
 printResults = mapIO_ (printLine . release_radar.model.renderResult)

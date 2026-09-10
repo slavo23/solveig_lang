@@ -1,6 +1,15 @@
 export (
-    take, drop, takeWhile, dropWhile, zipWith, zip, reverse, range, rangeInclusive,
-    length, isEmpty
+    take,
+    drop,
+    takeWhile,
+    dropWhile,
+    zipWith,
+    zip,
+    reverse,
+    range,
+    rangeInclusive,
+    length,
+    isEmpty
 )
 
 -- | Takes at most n elements from the beginning of a finite list.
@@ -13,9 +22,9 @@ take count values = reverse (takeInto count values [])
 -- | Drops at most n elements from the beginning of a list.
 drop : forall a. Int -> [a] -> [a]
 drop count xs =
-    if count <= 0 then xs
-    else
-        case xs of
+    if count <= 0
+        then xs
+        else case xs of
             [] => []
             | _ :: rest => drop (count - 1) rest
 
@@ -29,8 +38,7 @@ takeWhile predicate values = reverse (takeWhileInto predicate values [])
 -- | Drops elements while the predicate is true.
 dropWhile : forall a. (a -> Bool) -> [a] -> [a]
 dropWhile predicate [] = []
-dropWhile predicate (x :: xs) =
-    if predicate x then dropWhile predicate xs else x :: xs
+dropWhile predicate (x :: xs) = if predicate x then dropWhile predicate xs else x :: xs
 
 -- | Combines corresponding elements from left to right until an input ends.
 -- |
@@ -53,15 +61,11 @@ reverseInto (y :: ys) acc = reverseInto ys (y :: acc)
 
 -- | Builds an ascending half-open integer range.
 range : Int -> Int -> [Int]
-range start end =
-    if start >= end then []
-    else rangeDown (end - 1) start []
+range start end = if start >= end then [] else rangeDown (end - 1) start []
 
 -- | Builds an ascending inclusive integer range.
 rangeInclusive : Int -> Int -> [Int]
-rangeInclusive start end =
-    if start > end then []
-    else rangeDown end start []
+rangeInclusive start end = if start > end then [] else rangeDown end start []
 
 -- | Returns the number of elements in a finite list.
 length : forall a. [a] -> Int
@@ -78,17 +82,17 @@ isEmpty _ = False
 
 takeInto : forall a. Int -> [a] -> [a] -> [a]
 takeInto count values reversed =
-    if count <= 0 then reversed
-    else
-        case values of
-            [] => reversed
-            | value :: rest => takeInto (count - 1) rest (value :: reversed)
+    if count <= 0
+        then reversed
+        else
+            case values of
+                [] => reversed
+                | value :: rest => takeInto (count - 1) rest (value :: reversed)
 
 takeWhileInto : forall a. (a -> Bool) -> [a] -> [a] -> [a]
 takeWhileInto predicate [] reversed = reversed
 takeWhileInto predicate (value :: rest) reversed =
-    if predicate value then takeWhileInto predicate rest (value :: reversed)
-    else reversed
+    if predicate value then takeWhileInto predicate rest (value :: reversed) else reversed
 
 zipWithInto : forall a b c. (a -> b -> c) -> [a] -> [b] -> [c] -> [c]
 zipWithInto combine (left :: leftRest) (right :: rightRest) reversed =
@@ -98,6 +102,8 @@ zipWithInto combine _ _ reversed = reversed
 -- | Builds an ascending range by counting down into an accumulator.
 rangeDown : Int -> Int -> [Int] -> [Int]
 rangeDown current start acc =
-    if current < start then acc
-    else if current == start then current :: acc
-    else rangeDown (current - 1) start (current :: acc)
+    if current < start
+        then acc
+        else if current == start
+                then current :: acc
+                else rangeDown (current - 1) start (current :: acc)

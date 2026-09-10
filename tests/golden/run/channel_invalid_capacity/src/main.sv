@@ -10,9 +10,7 @@ invalidChannel capacity = newBoundedChan capacity
 checkInvalid : String -> Int -> Task ()
 checkInvalid expected capacity =
     catchError
-        (bindIO
-            (invalidChannel capacity)
-            (fun channel => printLine "unexpected-success"))
+        (bindIO (invalidChannel capacity) (fun channel => printLine "unexpected-success"))
         (report expected)
 
 main : Task ()

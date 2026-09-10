@@ -21,10 +21,10 @@ instance Show Event where
 personDecoder : std.json.Decoder () Person
 personDecoder =
     std.json.recordDecoder
-        (Person <$>
-            std.json.requiredField "name" std.json.stringDecoder <*>
-            std.json.optionalFieldWithDefault "active" True std.json.boolDecoder <*>
-            std.json.optionalField "nickname" std.json.stringDecoder)
+        (Person
+            <$> std.json.requiredField "name" std.json.stringDecoder
+            <*> std.json.optionalFieldWithDefault "active" True std.json.boolDecoder
+            <*> std.json.optionalField "nickname" std.json.stringDecoder)
 
 personEncoder : std.json.Encoder Person
 personEncoder =
@@ -139,7 +139,8 @@ validatedNames =
                 (std.json.validateDecoder nonemptyName std.json.stringDecoder)))
 
 customPath : Either (std.json.DecodeError NameError) (std.vector.Vector String) -> String
-customPath (Left
+customPath
+    (Left
         (std.json.CustomDecodeError
             (std.json.JsonIndex index :: std.json.JsonField name :: [])
             EmptyName)) =

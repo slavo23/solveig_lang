@@ -1,4 +1,5 @@
-import std.bytes(BytesBuilder,
+import std.bytes(
+    BytesBuilder,
     appendBytesBuilder,
     buildBytes,
     bytesBuilder,
@@ -7,9 +8,11 @@ import std.bytes(BytesBuilder,
     bytesToString,
     bytesToStringReplacing,
     emptyBytesBuilder,
-    stringToBytes)
+    stringToBytes
+)
 import std.list(drop, length, range, take, takeWhile, zipWith)
-import std.text(TextBuilder,
+import std.text(
+    TextBuilder,
     appendTextBuilder,
     buildText,
     byteLength,
@@ -22,7 +25,8 @@ import std.text(TextBuilder,
     splitOnce,
     startsWith,
     textBuilder,
-    trimAscii)
+    trimAscii
+)
 
 ensure : String -> Bool -> Task ()
 ensure label condition =
@@ -46,9 +50,10 @@ buildByteChunks : Int -> BytesBuilder -> BytesBuilder
 buildByteChunks count builder =
     if count <= 0
         then builder
-        else buildByteChunks
-            (count - 1)
-            (appendBytesBuilder builder (bytesBuilder (stringToBytes "xy")))
+        else
+            buildByteChunks
+                (count - 1)
+                (appendBytesBuilder builder (bytesBuilder (stringToBytes "xy")))
 
 checkLists : Task ()
 checkLists =
@@ -71,22 +76,22 @@ checkLists =
     in let selectedM =
         filterM (fun value => Just (even value)) values
     in ensure
-    "stack-safe List transformations"
-    (and
-    (and
-    (and (length mapped == 20000) (lastOr 0 mapped == 20000))
-    (and (length selected == 10000) (lastOr 0 selected == 19998)))
-    (and
-    (and
-    (and (length prefix == 15000) (lastOr 0 prefix == 14999))
-    (and (length whilePrefix == 17500) (lastOr 0 whilePrefix == 17499)))
-    (and
-    (and (length zipped == 20000) (lastOr 0 zipped == 39998))
-    (and
-    (and (length appended == 20001) (lastOr 0 appended == 20000))
-    (and
-    (and (length flattened == 13001) (lastOr 0 flattened == 42))
-    (selectedSummary selectedM))))))
+        "stack-safe List transformations"
+        (and
+            (and
+                (and (length mapped == 20000) (lastOr 0 mapped == 20000))
+                (and (length selected == 10000) (lastOr 0 selected == 19998)))
+            (and
+                (and
+                    (and (length prefix == 15000) (lastOr 0 prefix == 14999))
+                    (and (length whilePrefix == 17500) (lastOr 0 whilePrefix == 17499)))
+                (and
+                    (and (length zipped == 20000) (lastOr 0 zipped == 39998))
+                    (and
+                        (and (length appended == 20001) (lastOr 0 appended == 20000))
+                        (and
+                            (and (length flattened == 13001) (lastOr 0 flattened == 42))
+                            (selectedSummary selectedM))))))
 
 selectedSummary : Maybe [Int] -> Bool
 selectedSummary (Just kept) = and (length kept == 10000) (lastOr 0 kept == 19998)
@@ -146,14 +151,14 @@ checkBuilders =
         "linear stack-safe builders"
         (and
             (and
-            (and (byteLength text == 40006) (textLength text == 40006))
-            (and (startsWith "start:abab" text) (splitOnce 'z' text == Nothing)))
+                (and (byteLength text == 40006) (textLength text == 40006))
+                (and (startsWith "start:abab" text) (splitOnce 'z' text == Nothing)))
             (and
-            (bytesLength bytes == 40006)
-            (and
-            (bytesToString (bytesSlice bytes 0 10) == Right "start:xyxy")
-            (buildText ((textBuilder "a" <> textBuilder "b") <> textBuilder "c") ==
-            buildText (textBuilder "a" <> (textBuilder "b" <> textBuilder "c"))))))
+                (bytesLength bytes == 40006)
+                (and
+                    (bytesToString (bytesSlice bytes 0 10) == Right "start:xyxy")
+                    (buildText ((textBuilder "a" <> textBuilder "b") <> textBuilder "c")
+                        == buildText (textBuilder "a" <> (textBuilder "b" <> textBuilder "c"))))))
 
 main : Task ()
 main = do

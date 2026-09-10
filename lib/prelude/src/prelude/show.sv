@@ -8,21 +8,26 @@ import prelude.typeclasses(*)
 -- | Escapes a character for display inside character literals.
 showCharPayload : Char -> String
 showCharPayload c =
-    if charEq c '\n' then "\\n"
-    else if charEq c '\t' then "\\t"
-    else if charEq c '\\' then "\\\\"
-    else if charEq c '\'' then "\\'"
-    else if charEq c '"' then "\\\""
-    else charToString c
+    if charEq c '\n'
+        then "\\n"
+        else if charEq c '\t'
+                then "\\t"
+                else if charEq c '\\'
+                        then "\\\\"
+                        else if charEq c '\''
+                                then "\\'"
+                                else if charEq c '"' then "\\\"" else charToString c
 
 -- | Escapes a character for display inside string literals.
 showStringPayload : Char -> String
 showStringPayload c =
-    if charEq c '\n' then "\\n"
-    else if charEq c '\t' then "\\t"
-    else if charEq c '\\' then "\\\\"
-    else if charEq c '"' then "\\\""
-    else charToString c
+    if charEq c '\n'
+        then "\\n"
+        else if charEq c '\t'
+                then "\\t"
+                else if charEq c '\\'
+                        then "\\\\"
+                        else if charEq c '"' then "\\\"" else charToString c
 
 -- | Renders the characters inside a string literal.
 showStringChars : [Char] -> String

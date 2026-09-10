@@ -1,17 +1,15 @@
 import std.thread(*)
 
 failAction : () -> Task ()
-failAction _ =
-    bindIO (pureIO ()) (fun _ =>
-        bindIO (pureIO (div 1 0)) (fun _ =>
-            pureIO ()))
+failAction _ = bindIO (pureIO ()) (fun _ => bindIO (pureIO (div 1 0)) (fun _ => pureIO ()))
 
 wait : Int -> Task ()
 wait n =
-    if n == 0 then pureIO ()
-    else do
-        pureIO ()
-        wait (n - 1)
+    if n == 0
+        then pureIO ()
+        else do
+                pureIO ()
+                wait (n - 1)
 
 main : Task ()
 main = do

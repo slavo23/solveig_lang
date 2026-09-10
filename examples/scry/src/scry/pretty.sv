@@ -18,11 +18,7 @@ renderPred : Pred -> String
 renderPred pred =
     case pred of
         Pred name terms =>
-            appendString
-                "("
-                (appendString
-                    (joinWith " " (name :: renderTerms terms))
-                    ")")
+            appendString "(" (appendString (joinWith " " (name :: renderTerms terms)) ")")
 
 renderGoal : Goal -> String
 renderGoal goal =
@@ -31,8 +27,7 @@ renderGoal goal =
         | GoalPred pred => renderPred pred
         | GoalAnd goals =>
             appendString "(and " (appendString (joinWith " " (renderGoals goals)) ")")
-        | GoalOr goals =>
-            appendString "(or " (appendString (joinWith " " (renderGoals goals)) ")")
+        | GoalOr goals => appendString "(or " (appendString (joinWith " " (renderGoals goals)) ")")
 
 renderGoals : [Goal] -> [String]
 renderGoals goals =
@@ -43,8 +38,7 @@ renderGoals goals =
 renderClause : Clause -> String
 renderClause clause =
     case clause of
-        Clause head GoalTrue =>
-            appendString "(fact " (appendString (renderPred head) ")")
+        Clause head GoalTrue => appendString "(fact " (appendString (renderPred head) ")")
         | Clause head body =>
             appendString
                 "(rule "
@@ -63,9 +57,7 @@ renderProgram clauses = linesOf (renderClauses clauses)
 
 renderBinding : [Binding] -> String -> String
 renderBinding bindings name =
-    appendString
-        name
-        (appendString " = " (renderTerm (walk bindings (Var name))))
+    appendString name (appendString " = " (renderTerm (walk bindings (Var name))))
 
 renderBindings : [Binding] -> [String] -> [String]
 renderBindings bindings names =

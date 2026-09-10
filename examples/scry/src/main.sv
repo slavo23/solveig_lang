@@ -51,25 +51,26 @@ repl clauses = do
     if line == ""
         then printLine "bye"
         else if line == ":quit"
-            then printLine "bye"
-            else if line == ":help"
-                then do
-                    printStr helpText
-                    repl clauses
-                else if line == ":rules"
-                    then do
-                        printStr (renderProgram clauses)
-                        repl clauses
-                    else do
-                        handleQuery clauses line
-                        repl clauses
+                then printLine "bye"
+                else if line == ":help"
+                        then
+                            do
+                                printStr helpText
+                                repl clauses
+                        else if line == ":rules"
+                                then
+                                    do
+                                        printStr (renderProgram clauses)
+                                        repl clauses
+                                else do
+                                        handleQuery clauses line
+                                        repl clauses
 
 main : Task ()
 main = do
     contents <- mapError fsToHost (std.fs.readFile (requiredPath "knowledge.scry"))
     case parseProgram contents of
         Nothing => printLine "Could not parse knowledge.scry"
-        | Just clauses =>
-            do
-                printLine (welcome clauses)
-                repl clauses
+        | Just clauses => do
+            printLine (welcome clauses)
+            repl clauses

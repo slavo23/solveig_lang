@@ -10,7 +10,7 @@ import mergesort(sampleSortedMergeSort)
 import knapsack(sampleTreeDp)
 import treeMap(fromList, Map, Entry(..), size)
 import tcTests.classes(advancedTypeclassRegressionMain)
-import tcTests.tcStressTest(typeclassSuperclassSuccessMain);
+import tcTests.tcStressTest(typeclassSuperclassSuccessMain) ;
 import tcTests.tcImportClient(importSmokeMain)
 import tcTests.coolStuff(coolTypeclassExamplesMain)
 
@@ -22,24 +22,32 @@ runQuicksortExample = sampleSortedQuickSort 20000
 runMergeSortExample = sampleSortedMergeSort 20000
 runKnapsackExample = sampleTreeDp
 
-
 treeFromList : Map Int Int
 treeFromList =
-    let intEntries = (map (fun iVal => Entry iVal iVal) (rangeInclusive 1 20000)) in
-        fromList intEntries
+    let intEntries =
+        (map (fun iVal => Entry iVal iVal) (rangeInclusive 1 20000))
+    in fromList intEntries
 
 {- if you want the results, just copy-paste the particular example directly into main -}
-runAllExamplesAndDiscardResult = 
-    let one = runSudokuReadyExample in
-    let two = runNQueensReadyExample in
-    let three = runBinaryTreeExample in 
-    let four = runBrainfuckExample in
-    let five = runQuicksortExample in
-    let six = runMergeSortExample in
-    let seven = runKnapsackExample in
-    let eight = advancedTypeclassRegressionMain in
-    let nine = typeclassSuperclassSuccessMain in
-    let ten = importSmokeMain in
-    let eleven = coolTypeclassExamplesMain in ()
+runAllExamplesAndDiscardResult =
+    let one =
+        runSudokuReadyExample
+    in let two =
+        runNQueensReadyExample
+    in let three =
+        runBinaryTreeExample
+    in let four =
+        runBrainfuckExample
+    in let five =
+        runQuicksortExample
+    in let six =
+        runMergeSortExample
+    in let seven =
+        runKnapsackExample
+    in let eight =
+        advancedTypeclassRegressionMain
+    in let nine =
+        typeclassSuperclassSuccessMain
+    in let ten = importSmokeMain in let eleven = coolTypeclassExamplesMain in ()
 
 main = runAllExamplesAndDiscardResult

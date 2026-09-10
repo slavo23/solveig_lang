@@ -7,7 +7,7 @@ import prelude.prim(*)
 data List a =
     -- | Adds one value to the front of a list.
     Cons a (List a)
-  | -- | The empty list.
+    | -- | The empty list.
     Nil
 
 -- | Applies a function to every element from left to right.
@@ -19,8 +19,7 @@ map transform values = reverseList (mapInto transform values [])
 
 mapInto : forall a b. (a -> b) -> [a] -> [b] -> [b]
 mapInto transform [] reversed = reversed
-mapInto transform (value :: rest) reversed =
-    mapInto transform rest (transform value :: reversed)
+mapInto transform (value :: rest) reversed = mapInto transform rest (transform value :: reversed)
 
 -- | Keeps the elements that satisfy a predicate, testing from left to right.
 -- |
@@ -32,8 +31,9 @@ filter predicate values = reverseList (filterInto predicate values [])
 filterInto : forall a. (a -> Bool) -> [a] -> [a] -> [a]
 filterInto predicate [] reversed = reversed
 filterInto predicate (value :: rest) reversed =
-    if predicate value then filterInto predicate rest (value :: reversed)
-    else filterInto predicate rest reversed
+    if predicate value
+        then filterInto predicate rest (value :: reversed)
+        else filterInto predicate rest reversed
 
 -- Package-internal implementation of the strict Foldable List fold.
 foldlList : forall a b. (b -> a -> b) -> b -> [a] -> b

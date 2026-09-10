@@ -1,4 +1,5 @@
-export (TlsTrust(..),
+export (
+    TlsTrust(..),
     TlsOptions,
     defaultTlsOptions,
     withTlsTrust,
@@ -12,7 +13,8 @@ export (TlsTrust(..),
     withTlsConnectionWith,
     sendTlsBytes,
     receiveTlsBytes,
-    tlsBytes)
+    tlsBytes
+)
 
 import prelude.builtins
 import std.prim(Socket)

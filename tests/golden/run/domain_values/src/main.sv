@@ -9,12 +9,12 @@ printPath =
     case (pathFromString "", pathFromString "data/input.txt") of
         (Left EmptyPath, Right path) =>
             printLine
-                ("path=" <>
-                    pathToString path <>
-                    ":" <>
-                    show (path == path) <>
-                    ":" <>
-                    show (hash path == hash path))
+                ("path="
+                    <> pathToString path
+                    <> ":"
+                    <> show (path == path)
+                    <> ":"
+                    <> show (hash path == hash path))
         | _ => printLine "path=wrong"
 
 printPort : Task ()
@@ -29,12 +29,12 @@ printTime =
     let duration =
         milliseconds 1250
     in printLine
-        ("duration=" <>
-            show (durationToMilliseconds duration) <>
-            ":" <>
-            show (durationToMicroseconds duration) <>
-            ":" <>
-            show (duration > nanoseconds 0))
+        ("duration="
+            <> show (durationToMilliseconds duration)
+            <> ":"
+            <> show (durationToMicroseconds duration)
+            <> ":"
+            <> show (duration > nanoseconds 0))
 
 requireUrl : String -> Url
 requireUrl spelling =
@@ -81,20 +81,20 @@ printHttp =
                 Left (InvalidUrl _)
             ) =>
             printLine
-                ("http=" <>
-                    show Get <>
-                    ":" <>
-                    urlToString url <>
-                    ":" <>
-                    headerName field <>
-                    "=" <>
-                    headerValue field <>
-                    ":" <>
-                    show (statusCode (requireStatus 204)) <>
-                    ":" <>
-                    show (maximumBufferedBodyBytes configured) <>
-                    ":" <>
-                    show (durationToMilliseconds (requestTimeout configured)))
+                ("http="
+                    <> show Get
+                    <> ":"
+                    <> urlToString url
+                    <> ":"
+                    <> headerName field
+                    <> "="
+                    <> headerValue field
+                    <> ":"
+                    <> show (statusCode (requireStatus 204))
+                    <> ":"
+                    <> show (maximumBufferedBodyBytes configured)
+                    <> ":"
+                    <> show (durationToMilliseconds (requestTimeout configured)))
         | _ => printLine "http=wrong"
 
 printProcess : Task ()
@@ -109,18 +109,18 @@ printProcess =
                     in let failure =
                         exitCodeFromInt 7
                     in printLine
-                        ("process=" <>
-                            processProgram processValue <>
-                            ":" <>
-                            show (processArguments processValue) <>
-                            ":" <>
-                            show success <>
-                            ":" <>
-                            show failure <>
-                            ":" <>
-                            show (isExitSuccess success) <>
-                            ":" <>
-                            show (exitCodeToInt failure))
+                        ("process="
+                            <> processProgram processValue
+                            <> ":"
+                            <> show (processArguments processValue)
+                            <> ":"
+                            <> show success
+                            <> ":"
+                            <> show failure
+                            <> ":"
+                            <> show (isExitSuccess success)
+                            <> ":"
+                            <> show (exitCodeToInt failure))
         | _ => printLine "process=wrong"
 
 main : Task ()

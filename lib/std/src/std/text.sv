@@ -1,8 +1,26 @@
 export (
-    stringToChars, charsToString, intToString, charToCodePoint, codePointToString,
-    length, byteLength, isEmpty, charAt, slice, byteSlice, startsWith, stripPrefix,
-    trimAscii, lines, splitOnce, TextBuilder, emptyTextBuilder, textBuilder,
-    charBuilder, appendTextBuilder, buildText
+    stringToChars,
+    charsToString,
+    intToString,
+    charToCodePoint,
+    codePointToString,
+    length,
+    byteLength,
+    isEmpty,
+    charAt,
+    slice,
+    byteSlice,
+    startsWith,
+    stripPrefix,
+    trimAscii,
+    lines,
+    splitOnce,
+    TextBuilder,
+    emptyTextBuilder,
+    textBuilder,
+    charBuilder,
+    appendTextBuilder,
+    buildText
 )
 
 import prelude.prim(*)
@@ -75,10 +93,12 @@ startsWith prefix text = prelude.prim.stringStartsWith text prefix
 -- | Removes an exact prefix when it is present.
 stripPrefix : String -> String -> Maybe String
 stripPrefix prefix text =
-    if startsWith prefix text then
-        let prefixBytes = byteLength prefix in
-        byteSlice prefixBytes (byteLength text - prefixBytes) text
-    else Nothing
+    if startsWith prefix text
+        then
+            let prefixBytes =
+                byteLength prefix
+            in byteSlice prefixBytes (byteLength text - prefixBytes) text
+        else Nothing
 
 -- | Removes ASCII spaces, tabs, carriage returns, and newlines at both ends.
 trimAscii : String -> String
@@ -93,44 +113,46 @@ lines text = reverse (linesFrom text 0 [])
 
 linesFrom : String -> Int -> [String] -> [String]
 linesFrom text start reversed =
-    let total = byteLength text in
-    if start >= total then reversed
-    else
-        let end = prelude.prim.stringFindCharFrom text start '\n' in
-        case byteSlice start (end - start) text of
+    let total =
+        byteLength text
+    in if start >= total
+        then reversed
+        else let end =
+            prelude.prim.stringFindCharFrom text start '\n'
+        in case byteSlice start (end - start) text of
             Nothing => prelude.prim.error "std.text.lines produced an invalid UTF-8 boundary"
             | Just line =>
-                if end == total then line :: reversed
-                else linesFrom text (end + 1) (line :: reversed)
+                if end == total
+                    then line :: reversed
+                    else linesFrom text (end + 1) (line :: reversed)
 
 -- | Splits text around the first occurrence of a delimiter.
 splitOnce : Char -> String -> Maybe (String, String)
 splitOnce delimiter text =
-    let position = prelude.prim.stringFindCharFrom text 0 delimiter in
-    let total = byteLength text in
-    if position == total then Nothing
-    else
-        let next = position + charByteLength delimiter in
-        case (byteSlice 0 position text, byteSlice next (total - next) text) of
-            (Just left, Just right) => Just (left, right)
-            | _ => prelude.prim.error "std.text.splitOnce produced an invalid UTF-8 boundary"
+    let position =
+        prelude.prim.stringFindCharFrom text 0 delimiter
+    in let total =
+        byteLength text
+    in if position == total
+        then Nothing
+        else
+            let next =
+                position + charByteLength delimiter
+            in case (byteSlice 0 position text, byteSlice next (total - next) text) of
+                (Just left, Just right) => Just (left, right)
+                | _ => prelude.prim.error "std.text.splitOnce produced an invalid UTF-8 boundary"
 
 charByteLength : Char -> Int
 charByteLength character =
-    let point = charToCodePoint character in
-    if point <= 127 then 1
-    else if point <= 2047 then 2
-    else if point <= 65535 then 3
-    else 4
+    let point =
+        charToCodePoint character
+    in if point <= 127 then 1 else if point <= 2047 then 2 else if point <= 65535 then 3 else 4
 
 -- | A compositional plan for constructing one String without repeated copying.
 -- |
 -- | Builder concatenation takes constant time. buildText traverses all chunks
 -- | without consuming the call stack and allocates one packed result.
-data TextBuilder =
-    EmptyTextBuilder
-  | TextChunk String
-  | AppendTextBuilder TextBuilder TextBuilder
+data TextBuilder = EmptyTextBuilder | TextChunk String | AppendTextBuilder TextBuilder TextBuilder
 
 instance Semigroup TextBuilder where
     combine = appendTextBuilder
@@ -144,8 +166,7 @@ emptyTextBuilder = EmptyTextBuilder
 
 -- | Builds a text builder containing one existing String without copying it.
 textBuilder : String -> TextBuilder
-textBuilder text =
-    if isEmpty text then EmptyTextBuilder else TextChunk text
+textBuilder text = if isEmpty text then EmptyTextBuilder else TextChunk text
 
 -- | Builds a text builder containing one Unicode scalar value.
 charBuilder : Char -> TextBuilder
@@ -169,9 +190,7 @@ builderChunks builder = reverse (builderChunksInto [builder] [])
 
 builderChunksInto : [TextBuilder] -> [String] -> [String]
 builderChunksInto [] reversed = reversed
-builderChunksInto (EmptyTextBuilder :: rest) reversed =
-    builderChunksInto rest reversed
-builderChunksInto (TextChunk text :: rest) reversed =
-    builderChunksInto rest (text :: reversed)
+builderChunksInto (EmptyTextBuilder :: rest) reversed = builderChunksInto rest reversed
+builderChunksInto (TextChunk text :: rest) reversed = builderChunksInto rest (text :: reversed)
 builderChunksInto (AppendTextBuilder left right :: rest) reversed =
     builderChunksInto (left :: right :: rest) reversed

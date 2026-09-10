@@ -1,4 +1,5 @@
-export (EnvError(..),
+export (
+    EnvError(..),
     getArgs,
     getEnv,
     getEnvOr,
@@ -9,7 +10,8 @@ export (EnvError(..),
     parseEnvFile,
     loadEnvFile,
     loadEnvFileLimited,
-    loadEnvFileIfExists)
+    loadEnvFileIfExists
+)
 
 import std.prim(getArgs, getEnv, setEnv, getEnvironment, getProgName)
 import std.fs(*)
@@ -19,8 +21,8 @@ import std.path(Path)
 import std.text(*)
 
 -- | A failure while resolving or loading application environment settings.
-data EnvError =
-    EnvHostError HostError
+data EnvError
+    = EnvHostError HostError
     | EnvFileError FsError
     | MissingEnv String
     | InvalidEnvLine Int String
@@ -104,9 +106,10 @@ loadEnvFileIfExists : Path -> IO EnvError Bool
 loadEnvFileIfExists path = do
     exists <- mapError EnvFileError (std.fs.doesFileExist path)
     if exists
-        then do
-            loadEnvFile path
-            pureIO True
+        then
+            do
+                loadEnvFile path
+                pureIO True
         else pureIO False
 
 parseEnvLines :
@@ -118,27 +121,29 @@ parseEnvLines (sourceLine :: rest) lineNumber names reversedEntries =
         std.text.trimAscii sourceLine
     in if or (std.text.isEmpty line) (std.text.startsWith "#" line)
         then parseEnvLines rest (lineNumber + 1) names reversedEntries
-        else let assignment =
-            case std.text.stripPrefix "export " line of
-                Nothing => line
-                | Just exported => std.text.trimAscii exported
-        in case std.text.splitOnce '=' assignment of
-            Nothing => Left (InvalidEnvLine lineNumber "expected NAME=VALUE")
-            | Just (rawName, rawValue) =>
-                let name =
-                    std.text.trimAscii rawName
-                in if not (validEnvName name)
-                    then Left (InvalidEnvLine lineNumber "invalid variable name")
-                    else if std.map.member name names
-                    then Left (InvalidEnvLine lineNumber "duplicate variable name")
-                    else case envValue lineNumber (std.text.trimAscii rawValue) of
-                        Left valueError => Left valueError
-                        | Right value =>
-                            parseEnvLines
-                            rest
-                            (lineNumber + 1)
-                            (std.map.insert name () names)
-                            ((name, value) :: reversedEntries)
+        else
+            let assignment =
+                case std.text.stripPrefix "export " line of
+                    Nothing => line
+                    | Just exported => std.text.trimAscii exported
+            in case std.text.splitOnce '=' assignment of
+                Nothing => Left (InvalidEnvLine lineNumber "expected NAME=VALUE")
+                | Just (rawName, rawValue) =>
+                    let name =
+                        std.text.trimAscii rawName
+                    in if not (validEnvName name)
+                        then Left (InvalidEnvLine lineNumber "invalid variable name")
+                        else if std.map.member name names
+                                then Left (InvalidEnvLine lineNumber "duplicate variable name")
+                                else
+                                    case envValue lineNumber (std.text.trimAscii rawValue) of
+                                        Left valueError => Left valueError
+                                        | Right value =>
+                                            parseEnvLines
+                                                rest
+                                                (lineNumber + 1)
+                                                (std.map.insert name () names)
+                                                ((name, value) :: reversedEntries)
 
 validEnvName : String -> Bool
 validEnvName name =

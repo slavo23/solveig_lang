@@ -82,13 +82,13 @@ traversableTupleLaws =
                 (and
                     (traverse Just ("a", False, 'x', (), 5) == Just ("a", False, 'x', (), 5))
                     (and
-                        (traverse Just ("a", False, 'x', (), LT, 6) ==
-                            Just ("a", False, 'x', (), LT, 6))
+                        (traverse Just ("a", False, 'x', (), LT, 6)
+                            == Just ("a", False, 'x', (), LT, 6))
                         (and
-                            (traverse Just ("a", False, 'x', (), LT, Just 1, 7) ==
-                            Just ("a", False, 'x', (), LT, Just 1, 7))
-                            (traverse Just ("a", False, 'x', (), LT, Just 1, [2], 8) ==
-                            Just ("a", False, 'x', (), LT, Just 1, [2], 8)))))))
+                            (traverse Just ("a", False, 'x', (), LT, Just 1, 7)
+                                == Just ("a", False, 'x', (), LT, Just 1, 7))
+                            (traverse Just ("a", False, 'x', (), LT, Just 1, [2], 8)
+                                == Just ("a", False, 'x', (), LT, Just 1, [2], 8)))))))
 
 hashTupleLaws : Bool
 hashTupleLaws =

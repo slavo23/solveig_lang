@@ -4,24 +4,24 @@ import std.text(intToString)
 
 printInts : Int -> StdGen -> Task ()
 printInts remaining generator =
-    if remaining <= 0 then
-        pureIO ()
-    else
-        case randomInt generator of
-            (value, next) => do
-                printLine (intToString value)
-                printInts (remaining - 1) next
+    if remaining <= 0
+        then pureIO ()
+        else
+            case randomInt generator of
+                (value, next) => do
+                    printLine (intToString value)
+                    printInts (remaining - 1) next
 
 printRanges : Int -> StdGen -> Task ()
 printRanges remaining generator =
-    if remaining <= 0 then
-        pureIO ()
-    else
-        case randomRange (-10) 10 generator of
-            Nothing => printLine "unexpected invalid range"
-            | Just (value, next) => do
-                printLine (intToString value)
-                printRanges (remaining - 1) next
+    if remaining <= 0
+        then pureIO ()
+        else
+            case randomRange (-10) 10 generator of
+                Nothing => printLine "unexpected invalid range"
+                | Just (value, next) => do
+                    printLine (intToString value)
+                    printRanges (remaining - 1) next
 
 printFresh : StdGen -> Task ()
 printFresh generator =

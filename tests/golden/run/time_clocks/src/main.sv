@@ -11,15 +11,13 @@ main = do
     printLine
         (appendString
             "monotonic delta: "
-            (intToString (durationToNanoseconds (instantDifference monotonicBefore monotonicAfter))))
+            (intToString
+                (durationToNanoseconds (instantDifference monotonicBefore monotonicAfter))))
     printLine
         (appendString
             "system delta: "
             (intToString (durationToNanoseconds (systemTimeDifference systemBefore systemAfter))))
-    printLine
-        (appendString
-            "whole seconds: "
-            (intToString (durationToSeconds (seconds 3))))
+    printLine (appendString "whole seconds: " (intToString (durationToSeconds (seconds 3))))
     printLine
         (appendString
             "positive saturation: "
@@ -27,5 +25,4 @@ main = do
     printLine
         (appendString
             "negative saturation: "
-            (intToString
-                (durationToNanoseconds (seconds ((-9223372036854775807) - 1)))))
+            (intToString (durationToNanoseconds (seconds ((-9223372036854775807) - 1)))))

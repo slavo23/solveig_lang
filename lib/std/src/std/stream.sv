@@ -1,7 +1,22 @@
 export (
-    Stream, StreamStep(..), StreamError(..), next, empty, singleton, unfold,
-    map, mapError, filter, take, chunksOf, fold, forEach, toListLimited,
-    fromList, fromText, fromBytes
+    Stream,
+    StreamStep(..),
+    StreamError(..),
+    next,
+    empty,
+    singleton,
+    unfold,
+    map,
+    mapError,
+    filter,
+    take,
+    chunksOf,
+    fold,
+    forEach,
+    toListLimited,
+    fromList,
+    fromText,
+    fromBytes
 )
 
 import prelude.builtins
@@ -14,9 +29,7 @@ import std.text(byteLength, charToCodePoint)
 -- |
 -- | StreamDone ends the stream. StreamYield returns exactly one value and the
 -- | stream that owns the next pull. A pull never runs before next requests it.
-data StreamStep scope e a =
-    StreamDone
-  | StreamYield a (Stream scope e a)
+data StreamStep scope e a = StreamDone | StreamYield a (Stream scope e a)
 
 -- | A strict pull-based sequence whose resource lifetime is identified by scope.
 -- |
@@ -28,10 +41,7 @@ data StreamStep scope e a =
 data Stream scope e a = Stream (IO e (StreamStep scope e a))
 
 -- | A validation failure from a bounded Stream combinator.
-data StreamError =
-    InvalidChunkSize Int
-  | InvalidStreamLimit Int
-  | StreamLimitExceeded Int
+data StreamError = InvalidChunkSize Int | InvalidStreamLimit Int | StreamLimitExceeded Int
 
 instance Eq StreamError where
     (==) (InvalidChunkSize left) (InvalidChunkSize right) = left == right
@@ -44,8 +54,7 @@ instance Show StreamError where
         "invalid stream chunk size " <> show size <> "; expected a positive Int"
     show (InvalidStreamLimit limit) =
         "invalid stream collection limit " <> show limit <> "; expected a non-negative Int"
-    show (StreamLimitExceeded limit) =
-        "stream contains more than " <> show limit <> " elements"
+    show (StreamLimitExceeded limit) = "stream contains more than " <> show limit <> " elements"
 
 instance Functor (Stream scope e) where
     fmap = map
@@ -79,13 +88,15 @@ unfold = unfoldScoped
 
 -- Package-internal constructor used by rank-2 resource producers. Keeping the
 -- scope universally quantified preserves the public escape-safety boundary.
-unfoldScoped : forall scope e state a. (state -> IO e (Maybe (a, state))) -> state -> Stream scope e a
+unfoldScoped :
+    forall scope e state a. (state -> IO e (Maybe (a, state))) -> state -> Stream scope e a
 unfoldScoped step state = Stream (fmap (unfoldScopedStep step) (step state))
 
-unfoldScopedStep : forall scope e state a. (state -> IO e (Maybe (a, state))) -> Maybe (a, state) -> StreamStep scope e a
+unfoldScopedStep :
+    forall scope e state a. (state -> IO e (Maybe (a, state))) ->
+    Maybe (a, state) -> StreamStep scope e a
 unfoldScopedStep step Nothing = StreamDone
-unfoldScopedStep step (Just (value, state)) =
-    StreamYield value (unfoldScoped step state)
+unfoldScopedStep step (Just (value, state)) = StreamYield value (unfoldScoped step state)
 
 -- | Transforms each value in order without prefetching or extra buffering.
 map : forall scope e a b. (a -> b) -> Stream scope e a -> Stream scope e b
@@ -93,21 +104,16 @@ map transform stream = Stream (fmap (mapStep transform) (next stream))
 
 mapStep : forall scope e a b. (a -> b) -> StreamStep scope e a -> StreamStep scope e b
 mapStep transform StreamDone = StreamDone
-mapStep transform (StreamYield value rest) =
-    StreamYield (transform value) (map transform rest)
+mapStep transform (StreamYield value rest) = StreamYield (transform value) (map transform rest)
 
 -- | Transforms typed pull failures without changing values or pull order.
 mapError : forall scope e f a. (e -> f) -> Stream scope e a -> Stream scope f a
 mapError transform stream =
-    Stream
-        (fmap
-            (mapErrorStep transform)
-            (prelude.builtins.mapError transform (next stream)))
+    Stream (fmap (mapErrorStep transform) (prelude.builtins.mapError transform (next stream)))
 
 mapErrorStep : forall scope e f a. (e -> f) -> StreamStep scope e a -> StreamStep scope f a
 mapErrorStep transform StreamDone = StreamDone
-mapErrorStep transform (StreamYield value rest) =
-    StreamYield value (mapError transform rest)
+mapErrorStep transform (StreamYield value rest) = StreamYield value (mapError transform rest)
 
 -- | Keeps values satisfying a pure predicate while preserving order.
 -- |
@@ -122,18 +128,16 @@ filterNext predicate stream = do
     case step of
         StreamDone => pureIO StreamDone
         | StreamYield value rest =>
-            if predicate value then
-                pureIO (StreamYield value (filter predicate rest))
-            else filterNext predicate rest
+            if predicate value
+                then pureIO (StreamYield value (filter predicate rest))
+                else filterNext predicate rest
 
 -- | Yields at most count values and performs no extra upstream pull.
 -- |
 -- | A non-positive count is an empty stream. For a scoped resource, consuming
 -- | the result and returning from the owner callback releases upstream early.
 take : forall scope e a. Int -> Stream scope e a -> Stream scope e a
-take count stream =
-    if count <= 0 then emptyScoped
-    else Stream (takeNext count stream)
+take count stream = if count <= 0 then emptyScoped else Stream (takeNext count stream)
 
 takeNext : forall scope e a. Int -> Stream scope e a -> IO e (StreamStep scope e a)
 takeNext count stream = do
@@ -141,11 +145,10 @@ takeNext count stream = do
     case step of
         StreamDone => pureIO StreamDone
         | StreamYield value rest =>
-            let remaining = count - 1 in
-            pureIO
-                (StreamYield
-                    value
-                    (if remaining == 0 then emptyScoped else take remaining rest))
+            let remaining =
+                count - 1
+            in pureIO
+                (StreamYield value (if remaining == 0 then emptyScoped else take remaining rest))
 
 -- | Groups consecutive values into non-empty lists of at most size elements.
 -- |
@@ -154,8 +157,7 @@ takeNext count stream = do
 -- | pulling upstream.
 chunksOf : forall scope e a. Int -> Stream scope e a -> Either StreamError (Stream scope e [a])
 chunksOf size stream =
-    if size <= 0 then Left (InvalidChunkSize size)
-    else Right (chunksOfValid size stream)
+    if size <= 0 then Left (InvalidChunkSize size) else Right (chunksOfValid size stream)
 
 chunksOfValid : forall scope e a. Int -> Stream scope e a -> Stream scope e [a]
 chunksOfValid size stream = Stream (pullChunk size stream 0 [])
@@ -165,17 +167,17 @@ pullChunk size stream count reversed = do
     step <- next stream
     case step of
         StreamDone =>
-            if count == 0 then pureIO StreamDone
-            else pureIO (StreamYield (reverse reversed) emptyScoped)
+            if count == 0
+                then pureIO StreamDone
+                else pureIO (StreamYield (reverse reversed) emptyScoped)
         | StreamYield value rest =>
-            let nextCount = count + 1 in
-            let nextReversed = value :: reversed in
-            if nextCount == size then
-                pureIO
-                    (StreamYield
-                        (reverse nextReversed)
-                        (chunksOfValid size rest))
-            else pullChunk size rest nextCount nextReversed
+            let nextCount =
+                count + 1
+            in let nextReversed =
+                value :: reversed
+            in if nextCount == size
+                then pureIO (StreamYield (reverse nextReversed) (chunksOfValid size rest))
+                else pullChunk size rest nextCount nextReversed
 
 -- | Strictly folds values from left to right using constant collection space.
 -- |
@@ -208,17 +210,20 @@ forEach action stream = do
 -- | StreamLimitExceeded; order is preserved and upstream is not drained.
 toListLimited : forall scope e a. Int -> Stream scope e a -> IO e (Either StreamError [a])
 toListLimited limit stream =
-    if limit < 0 then pureIO (Left (InvalidStreamLimit limit))
-    else collectLimited limit limit stream []
+    if limit < 0
+        then pureIO (Left (InvalidStreamLimit limit))
+        else collectLimited limit limit stream []
 
-collectLimited : forall scope e a. Int -> Int -> Stream scope e a -> [a] -> IO e (Either StreamError [a])
+collectLimited :
+    forall scope e a. Int -> Int -> Stream scope e a -> [a] -> IO e (Either StreamError [a])
 collectLimited limit remaining stream reversed = do
     step <- next stream
     case step of
         StreamDone => pureIO (Right (reverse reversed))
         | StreamYield value rest =>
-            if remaining == 0 then pureIO (Left (StreamLimitExceeded limit))
-            else collectLimited limit (remaining - 1) rest (value :: reversed)
+            if remaining == 0
+                then pureIO (Left (StreamLimitExceeded limit))
+                else collectLimited limit (remaining - 1) rest (value :: reversed)
 
 -- | Streams an existing finite List without copying it or reading ahead.
 -- | Finite adapters own no external lifetime and use the neutral scope ().
@@ -235,22 +240,19 @@ fromText text = unfold (textStep text) (0, byteLength text)
 
 textStep : forall e. String -> (Int, Int) -> IO e (Maybe (Char, (Int, Int)))
 textStep text (position, total) =
-    if position >= total then pureIO Nothing
-    else
-        case stringCharAtByte text position of
-            Nothing => error "std.stream.fromText lost a UTF-8 boundary"
-            | Just character =>
-                pureIO
-                    (Just
-                        (character, (position + charByteLength character, total)))
+    if position >= total
+        then pureIO Nothing
+        else
+            case stringCharAtByte text position of
+                Nothing => error "std.stream.fromText lost a UTF-8 boundary"
+                | Just character =>
+                    pureIO (Just (character, (position + charByteLength character, total)))
 
 charByteLength : Char -> Int
 charByteLength character =
-    let point = charToCodePoint character in
-    if point <= 127 then 1
-    else if point <= 2047 then 2
-    else if point <= 65535 then 3
-    else 4
+    let point =
+        charToCodePoint character
+    in if point <= 127 then 1 else if point <= 2047 then 2 else if point <= 65535 then 3 else 4
 
 -- | Streams integer byte values from an immutable Bytes value in constant time per pull.
 fromBytes : forall e. Bytes -> Stream () e Int
@@ -258,8 +260,9 @@ fromBytes bytes = unfold (bytesStep bytes) (0, bytesLength bytes)
 
 bytesStep : forall e. Bytes -> (Int, Int) -> IO e (Maybe (Int, (Int, Int)))
 bytesStep bytes (position, total) =
-    if position >= total then pureIO Nothing
-    else
-        case bytesIndex bytes position of
-            Nothing => error "std.stream.fromBytes lost an in-range byte index"
-            | Just byte => pureIO (Just (byte, (position + 1, total)))
+    if position >= total
+        then pureIO Nothing
+        else
+            case bytesIndex bytes position of
+                Nothing => error "std.stream.fromBytes lost an in-range byte index"
+                | Just byte => pureIO (Just (byte, (position + 1, total)))

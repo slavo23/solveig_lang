@@ -55,13 +55,15 @@ instance Traversable Maybe where
 
 instance Traversable List where
     traverse transform values =
-        fmap reverseList
+        fmap
+            reverseList
             (foldlList
                 (fun effectReversed value =>
                     liftA2
                         (fun reversed transformed => transformed :: reversed)
                         effectReversed
-                        (transform value))
+                        (transform value)
+                )
                 (pure [])
                 values)
 
@@ -104,9 +106,7 @@ instance Hashable Char where
 
 instance Hashable String where
     hashWithSalt salt value =
-        mixHash
-            (foldlList hashWithSalt (mixHash salt 1) (stringToChars value))
-            2
+        mixHash (foldlList hashWithSalt (mixHash salt 1) (stringToChars value)) 2
 
 instance Hashable () where
     hashWithSalt salt _ = mixHash salt 3
@@ -125,36 +125,72 @@ instance Hashable a => Hashable (Maybe a) where
     hashWithSalt salt (Just value) = hashWithSalt (mixHash salt 10) value
 
 instance Hashable a => Hashable (List a) where
-    hashWithSalt salt values =
-        mixHash (foldlList hashWithSalt (mixHash salt 11) values) 12
+    hashWithSalt salt values = mixHash (foldlList hashWithSalt (mixHash salt 11) values) 12
 
 instance (Hashable a, Hashable b) => Hashable (a, b) where
-    hashWithSalt salt (a, b) =
-        hashWithSalt (hashWithSalt (mixHash salt 13) a) b
+    hashWithSalt salt (a, b) = hashWithSalt (hashWithSalt (mixHash salt 13) a) b
 
 instance (Hashable a, Hashable b, Hashable c) => Hashable (a, b, c) where
-    hashWithSalt salt (a, b, c) =
-        hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 14) a) b) c
+    hashWithSalt salt (a, b, c) = hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 14) a) b) c
 
 instance (Hashable a, Hashable b, Hashable c, Hashable d) => Hashable (a, b, c, d) where
     hashWithSalt salt (a, b, c, d) =
         hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 15) a) b) c) d
 
-instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e) => Hashable (a, b, c, d, e) where
+instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e) =>
+    Hashable (a, b, c, d, e) where
     hashWithSalt salt (a, b, c, d, e) =
-        hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 16) a) b) c) d) e
+        hashWithSalt
+            (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 16) a) b) c) d)
+            e
 
-instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f) => Hashable (a, b, c, d, e, f) where
+instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f) =>
+    Hashable (a, b, c, d, e, f) where
     hashWithSalt salt (a, b, c, d, e, f) =
-        hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 17) a) b) c) d) e) f
+        hashWithSalt
+            (hashWithSalt
+                (hashWithSalt
+                    (hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 17) a) b) c)
+                    d)
+                e)
+            f
 
-instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g) => Hashable (a, b, c, d, e, f, g) where
+instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g) =>
+    Hashable (a, b, c, d, e, f, g) where
     hashWithSalt salt (a, b, c, d, e, f, g) =
-        hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 18) a) b) c) d) e) f) g
+        hashWithSalt
+            (hashWithSalt
+                (hashWithSalt
+                    (hashWithSalt
+                        (hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 18) a) b) c)
+                        d)
+                    e)
+                f)
+            g
 
-instance (Hashable a, Hashable b, Hashable c, Hashable d, Hashable e, Hashable f, Hashable g, Hashable h) => Hashable (a, b, c, d, e, f, g, h) where
+instance (
+        Hashable a,
+        Hashable b,
+        Hashable c,
+        Hashable d,
+        Hashable e,
+        Hashable f,
+        Hashable g,
+        Hashable h
+    ) =>
+    Hashable (a, b, c, d, e, f, g, h) where
     hashWithSalt salt (a, b, c, d, e, f, g, h) =
-        hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 19) a) b) c) d) e) f) g) h
+        hashWithSalt
+            (hashWithSalt
+                (hashWithSalt
+                    (hashWithSalt
+                        (hashWithSalt
+                            (hashWithSalt (hashWithSalt (hashWithSalt (mixHash salt 19) a) b) c)
+                            d)
+                        e)
+                    f)
+                g)
+            h
 
 instance (Hashable a, Hashable b) => Hashable (Either a b) where
     hashWithSalt salt (Left value) = hashWithSalt (mixHash salt 20) value

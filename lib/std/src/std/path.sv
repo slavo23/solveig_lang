@@ -1,4 +1,5 @@
-export (Path,
+export (
+    Path,
     PathError(..),
     pathFromString,
     pathToString,
@@ -10,7 +11,8 @@ export (Path,
     extension,
     normalise,
     isAbsolute,
-    isRelative)
+    isRelative
+)
 
 import std.prim(pathExtension, pathFileName, pathIsAbsolute, pathJoin, pathNormalise, pathParent)
 import std.text(charToCodePoint, stringToChars)

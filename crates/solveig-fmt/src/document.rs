@@ -12,7 +12,7 @@ mod tokens;
 use tokens::*;
 
 const INDENT: isize = 4;
-const INDENT_WIDTH: usize = 4;
+const DEFINITION_EQUALS_WIDTH: usize = 2;
 
 pub(super) type Document<'a> = BoxDoc<'a>;
 pub(super) type BoundedDocument<'a> = (Document<'a>, Option<TokenId>, Option<TokenId>);
@@ -36,12 +36,30 @@ pub(super) fn node<'a>(
         SyntaxKind::ClassDef | SyntaxKind::InstanceDef | SyntaxKind::DoExpr => {
             layout_block(tree, source, id, width)
         }
-        SyntaxKind::FunctionDef | SyntaxKind::DoStmt => {
-            layout_expression_parent(tree, source, id, width)
-                .unwrap_or_else(|| joined_node(tree, source, id, width))
-        }
+        SyntaxKind::FunctionDef => function_definition(tree, source, id, width)
+            .or_else(|| layout_expression_parent(tree, source, id, width))
+            .unwrap_or_else(|| joined_node(tree, source, id, width)),
+        SyntaxKind::DoStmt => layout_expression_parent(tree, source, id, width)
+            .or_else(|| binding_statement(tree, source, id, width))
+            .unwrap_or_else(|| joined_node(tree, source, id, width)),
+        SyntaxKind::LambdaExpr => lambda_expression(tree, source, id, width)
+            .or_else(|| layout_expression_parent(tree, source, id, width))
+            .unwrap_or_else(|| joined_node(tree, source, id, width)),
+        SyntaxKind::CaseArm => layout_expression_parent(tree, source, id, width)
+            .unwrap_or_else(|| joined_node(tree, source, id, width)),
+        SyntaxKind::DataDef => data_declaration(tree, source, id, width)
+            .unwrap_or_else(|| joined_node(tree, source, id, width)),
+        SyntaxKind::OpChain => operator_chain(tree, source, id, width)
+            .unwrap_or_else(|| joined_node(tree, source, id, width)),
         SyntaxKind::CaseExpr => case_expression(tree, source, id, width),
         SyntaxKind::LetExpr => let_expression(tree, source, id, width),
+        SyntaxKind::IfExpr => if_expression(tree, source, id, width)
+            .unwrap_or_else(|| joined_node(tree, source, id, width)),
+        SyntaxKind::ExportDecl
+        | SyntaxKind::PrivateDecl
+        | SyntaxKind::ReexportDecl
+        | SyntaxKind::ImportDecl => module_selection(tree, source, id, width)
+            .unwrap_or_else(|| joined_node(tree, source, id, width)),
         SyntaxKind::ParenExpr
         | SyntaxKind::TupleExpr
         | SyntaxKind::TuplePattern
@@ -63,15 +81,11 @@ fn joined_node<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usiz
         let parent = tree.node(parent).kind();
         kind == parent && (breakable_application(kind) || matches!(kind, SyntaxKind::LetExpr))
     });
-    let layout_statement = matches!(kind, SyntaxKind::DoStmt | SyntaxKind::CaseArm);
-    let maximum_generic_indent = (width / 4).max(INDENT_WIDTH * 2);
     let indent = if flattened
         || matches!(
             kind,
             SyntaxKind::Type | SyntaxKind::QualifiedType | SyntaxKind::TypeArrow
-        )
-        || (!layout_statement && generic_nesting(tree, id) * INDENT_WIDTH >= maximum_generic_indent)
-    {
+        ) {
         0
     } else {
         INDENT
@@ -80,6 +94,245 @@ fn joined_node<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usiz
         .0
         .nest(indent)
         .group()
+}
+
+fn module_selection<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+    width: usize,
+) -> Option<Document<'a>> {
+    let children = tree.children(id);
+    let open = token_position(tree, children, Token::LParen)?;
+    let close = children
+        .iter()
+        .enumerate()
+        .skip(open + 1)
+        .rfind(|(_, child)| {
+            matches!(child, NodeOrToken::Token(token) if tree.token(*token).kind == Token::RParen)
+        })
+        .map(|(position, _)| position)?;
+    let prefix = joined_children(tree, source, id, slice_to(children, open + 1), width).0;
+    let body = joined_children(tree, source, id, slice(children, open + 1, close), width).0;
+    let suffix = joined_children(
+        tree,
+        source,
+        id,
+        children.get(close..).unwrap_or(&[]),
+        width,
+    )
+    .0;
+
+    Some(
+        prefix
+            .append(BoxDoc::line_().append(body).nest(INDENT))
+            .append(BoxDoc::line_())
+            .append(suffix)
+            .group(),
+    )
+}
+
+fn function_definition<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+    width: usize,
+) -> Option<Document<'a>> {
+    let children = tree.children(id);
+    if children.iter().any(|child| contains_comment(tree, *child)) {
+        return None;
+    }
+    let equals = token_position(tree, children, Token::Eq)?;
+    let left_children = children.get(..equals).unwrap_or(&[]);
+    let inline_left = joined_children(tree, source, id, left_children, usize::MAX).0;
+    let inline_left = render_unbounded(&inline_left);
+    let available_width = width.saturating_sub(enclosing_declaration_indent(tree, id));
+    let left = if inline_left.chars().count() + DEFINITION_EQUALS_WIDTH <= available_width {
+        BoxDoc::text(inline_left)
+    } else {
+        let parts = declaration_head_parts(tree, source, id, left_children, width);
+        BoxDoc::intersperse(parts, BoxDoc::hardline()).nest(INDENT)
+    };
+    let equals_document =
+        joined_children(tree, source, id, slice(children, equals, equals + 1), width).0;
+    let body = joined_children(
+        tree,
+        source,
+        id,
+        children.get(equals + 1..).unwrap_or(&[]),
+        width,
+    );
+    body.1?;
+
+    let header = left.append(BoxDoc::space()).append(equals_document);
+    let starts_with_do = children
+        .get(equals + 1..)
+        .unwrap_or(&[])
+        .iter()
+        .any(|child| starts_with_do_expression(tree, *child));
+    Some(if starts_with_do {
+        header.append(BoxDoc::space()).append(body.0)
+    } else {
+        header
+            .append(BoxDoc::line().append(body.0).nest(INDENT))
+            .group()
+    })
+}
+
+fn declaration_head_parts<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    parent: CstId,
+    children: &[NodeOrToken],
+    width: usize,
+) -> Vec<Document<'a>> {
+    let Some(first) = first_emitted_child(tree, children) else {
+        return Vec::new();
+    };
+    let mut parts = Vec::new();
+    let mut position = first;
+    if matches!(
+        children.get(first),
+        Some(NodeOrToken::Token(token)) if tree.token(*token).kind == Token::LParen
+    ) && let Some(close) =
+        children
+            .iter()
+            .enumerate()
+            .skip(first + 1)
+            .find_map(|(index, child)| {
+                matches!(
+                    child,
+                    NodeOrToken::Token(token) if tree.token(*token).kind == Token::RParen
+                )
+                .then_some(index)
+            })
+    {
+        parts.push(
+            joined_children(
+                tree,
+                source,
+                parent,
+                slice(children, first, close + 1),
+                width,
+            )
+            .0,
+        );
+        position = close + 1;
+    }
+    if parts.is_empty() {
+        if let Some(document) = children
+            .get(first)
+            .and_then(|child| element(tree, source, *child, width))
+        {
+            parts.push(document.0);
+        }
+        position = first + 1;
+    }
+    parts.extend(
+        children
+            .get(position..)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|child| element(tree, source, *child, width).map(|document| document.0)),
+    );
+    parts
+}
+
+fn render_unbounded(document: &Document<'_>) -> String {
+    const MEASUREMENT_WIDTH: usize = 1_000_000;
+    let mut output = Vec::new();
+    document
+        .render(MEASUREMENT_WIDTH, &mut output)
+        .expect("ICE: rendering an in-memory formatter fragment must succeed");
+    String::from_utf8(output).expect("ICE: formatter fragments must contain valid UTF-8")
+}
+
+fn enclosing_declaration_indent(tree: &SyntaxTree, id: CstId) -> usize {
+    let mut indent = 0;
+    let mut parent = tree.parent(id);
+    while let Some(node) = parent {
+        if matches!(
+            tree.node(node).kind(),
+            SyntaxKind::ClassDef | SyntaxKind::InstanceDef
+        ) {
+            indent += usize::try_from(INDENT).expect("ICE: formatter indentation is positive");
+        }
+        parent = tree.parent(node);
+    }
+    indent
+}
+
+fn binding_statement<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+    width: usize,
+) -> Option<Document<'a>> {
+    let children = tree.children(id);
+    if children.iter().any(|child| contains_comment(tree, *child)) {
+        return None;
+    }
+    let equals = token_position(tree, children, Token::Eq)?;
+    let header = joined_children(tree, source, id, slice_to(children, equals + 1), width).0;
+    let body = joined_children(
+        tree,
+        source,
+        id,
+        children.get(equals + 1..).unwrap_or(&[]),
+        width,
+    );
+    body.1?;
+
+    Some(
+        header
+            .append(BoxDoc::line().append(body.0).nest(INDENT))
+            .group(),
+    )
+}
+
+fn lambda_expression<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+    width: usize,
+) -> Option<Document<'a>> {
+    let children = tree.children(id);
+    if children.iter().any(|child| contains_comment(tree, *child)) {
+        return None;
+    }
+    let arrow = token_position(tree, children, Token::FatArrow)?;
+    let mut parameters = children
+        .get(..arrow)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|child| element(tree, source, *child, width).map(|document| document.0));
+    let mut left = parameters.next()?;
+    if let Some(first_parameter) = parameters.next() {
+        left = left.append(BoxDoc::space()).append(first_parameter);
+    }
+    for parameter in parameters {
+        left = left.append(BoxDoc::line().append(parameter).nest(INDENT));
+    }
+    let left = left.group();
+    let arrow_document =
+        joined_children(tree, source, id, slice(children, arrow, arrow + 1), width).0;
+    let body_children = children.get(arrow + 1..).unwrap_or(&[]);
+    let body = joined_children(tree, source, id, body_children, width);
+    body.1?;
+    let header = left.append(BoxDoc::space()).append(arrow_document);
+
+    Some(
+        if body_children
+            .iter()
+            .any(|child| starts_with_do_expression(tree, *child))
+        {
+            header.append(BoxDoc::space()).append(body.0)
+        } else {
+            header
+                .append(BoxDoc::line().append(body.0).nest(INDENT))
+                .group()
+        },
+    )
 }
 
 fn layout_expression_parent<'a>(
@@ -109,7 +362,10 @@ fn layout_expression_parent<'a>(
     );
 
     let mut document = if let Some(previous) = prefix.2 {
-        let join = if matches!(tree.token(previous).kind, Token::Eq | Token::BindArrow) {
+        let join = if matches!(
+            tree.token(previous).kind,
+            Token::Eq | Token::BindArrow | Token::FatArrow
+        ) {
             BoxDoc::space()
         } else {
             separator(tree, tree.node(id).kind(), previous, body.1?)
@@ -124,6 +380,120 @@ fn layout_expression_parent<'a>(
             .append(suffix.0);
     }
     Some(document)
+}
+
+fn data_declaration<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+    width: usize,
+) -> Option<Document<'a>> {
+    let children = tree.children(id);
+    let equals = token_position(tree, children, Token::Eq)?;
+    if children
+        .get(equals + 1..)
+        .unwrap_or(&[])
+        .iter()
+        .any(|child| contains_comment(tree, *child))
+    {
+        return None;
+    }
+    let header = joined_children(tree, source, id, slice_to(children, equals), width).0;
+    let equals_document =
+        joined_children(tree, source, id, slice(children, equals, equals + 1), width).0;
+    let constructors = joined_children(
+        tree,
+        source,
+        id,
+        children.get(equals + 1..).unwrap_or(&[]),
+        width,
+    )
+    .0;
+
+    Some(
+        header
+            .append(
+                BoxDoc::line()
+                    .append(equals_document)
+                    .append(BoxDoc::space())
+                    .append(constructors)
+                    .nest(INDENT),
+            )
+            .group(),
+    )
+}
+
+fn operator_chain<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+    width: usize,
+) -> Option<Document<'a>> {
+    let children = tree.children(id);
+    if children.iter().any(|child| contains_comment(tree, *child)) {
+        return None;
+    }
+    let operators = children
+        .iter()
+        .enumerate()
+        .filter_map(|(position, child)| match child {
+            NodeOrToken::Node(child)
+                if tree.node(*child).kind() == SyntaxKind::BacktickOperator =>
+            {
+                Some(position)
+            }
+            NodeOrToken::Token(token)
+                if matches!(
+                    tree.token(*token).kind,
+                    Token::Operator | Token::ReservedOp | Token::Cons | Token::Dot | Token::Minus
+                ) =>
+            {
+                Some(position)
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let first_operator = *operators.first()?;
+
+    let mut document =
+        joined_children(tree, source, id, slice_to(children, first_operator), width).0;
+    for (index, operator_position) in operators.iter().copied().enumerate() {
+        let operand_end = operators.get(index + 1).copied().unwrap_or(children.len());
+        let operator = joined_children(
+            tree,
+            source,
+            id,
+            slice(children, operator_position, operator_position + 1),
+            width,
+        );
+        let operand = joined_children(
+            tree,
+            source,
+            id,
+            slice(children, operator_position + 1, operand_end),
+            width,
+        );
+        operand.1?;
+        let trailing = operator
+            .1
+            .is_some_and(|token| tree.token(token).source_text(source) == "$");
+        document = if trailing {
+            document
+                .append(BoxDoc::space())
+                .append(operator.0)
+                .append(BoxDoc::line().append(operand.0).nest(INDENT))
+        } else {
+            document.append(
+                BoxDoc::line()
+                    .append(operator.0)
+                    .append(BoxDoc::space())
+                    .append(operand.0)
+                    .nest(INDENT),
+            )
+        };
+    }
+
+    Some(document.group())
 }
 
 fn block<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usize) -> Document<'a> {
@@ -278,7 +648,7 @@ fn layout_block<'a>(
         if is_layout_separator(tree, *child) {
             push_nonempty_part(
                 &mut body_parts,
-                joined_children(
+                layout_block_part(
                     tree,
                     source,
                     id,
@@ -292,7 +662,7 @@ fn layout_block<'a>(
     }
     push_nonempty_part(
         &mut body_parts,
-        joined_children(tree, source, id, slice(children, start, body_end), width),
+        layout_block_part(tree, source, id, slice(children, start, body_end), width),
         part_indent,
     );
 
@@ -325,6 +695,74 @@ fn layout_block<'a>(
         ));
     }
     document
+}
+
+fn layout_block_part<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    parent: CstId,
+    children: &[NodeOrToken],
+    width: usize,
+) -> BoundedDocument<'a> {
+    if tree.node(parent).kind() == SyntaxKind::InstanceDef {
+        instance_equation(tree, source, parent, children, width)
+            .unwrap_or_else(|| joined_children(tree, source, parent, children, width))
+    } else {
+        joined_children(tree, source, parent, children, width)
+    }
+}
+
+fn instance_equation<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    parent: CstId,
+    children: &[NodeOrToken],
+    width: usize,
+) -> Option<BoundedDocument<'a>> {
+    if children.iter().any(|child| contains_comment(tree, *child)) {
+        return None;
+    }
+    let equals = token_position(tree, children, Token::Eq)?;
+    let left_children = children.get(..equals).unwrap_or(&[]);
+    let inline_left = joined_children(tree, source, parent, left_children, usize::MAX).0;
+    let inline_left = render_unbounded(&inline_left);
+    let left =
+        if inline_left.chars().count() + DEFINITION_EQUALS_WIDTH + usize::try_from(INDENT).ok()?
+            <= width
+        {
+            BoxDoc::text(inline_left)
+        } else {
+            let parts = declaration_head_parts(tree, source, parent, left_children, width);
+            BoxDoc::intersperse(parts, BoxDoc::hardline())
+        };
+    let equals_document = joined_children(
+        tree,
+        source,
+        parent,
+        slice(children, equals, equals + 1),
+        width,
+    )
+    .0;
+    let body_children = children.get(equals + 1..).unwrap_or(&[]);
+    let body = joined_children(tree, source, parent, body_children, width);
+    body.1?;
+    let header = left.append(BoxDoc::space()).append(equals_document);
+    let document = if body_children
+        .iter()
+        .any(|child| starts_with_do_expression(tree, *child))
+    {
+        header.append(BoxDoc::space()).append(body.0)
+    } else {
+        header.append(BoxDoc::line().append(body.0)).group()
+    };
+    let first = children
+        .iter()
+        .find_map(|child| first_boundary(tree, *child));
+    let last = children
+        .iter()
+        .rev()
+        .find_map(|child| last_boundary(tree, *child));
+    Some((document, first, last))
 }
 
 fn case_expression<'a>(
@@ -439,14 +877,8 @@ fn let_expression<'a>(
     };
 
     let header = joined_children(tree, source, id, slice_to(children, equals + 1), width).0;
-    let initializer = joined_children(
-        tree,
-        source,
-        id,
-        slice(children, equals + 1, in_keyword),
-        width,
-    )
-    .0;
+    let initializer_children = slice(children, equals + 1, in_keyword);
+    let initializer = joined_children(tree, source, id, initializer_children, width).0;
     let continuation = joined_children(
         tree,
         source,
@@ -456,11 +888,82 @@ fn let_expression<'a>(
     )
     .0;
 
+    let formatted_initializer = if initializer_children
+        .iter()
+        .any(|child| starts_with_do_expression(tree, *child))
+    {
+        BoxDoc::space().append(initializer)
+    } else {
+        BoxDoc::line().append(initializer).nest(INDENT)
+    };
+
     header
-        .append(BoxDoc::line().append(initializer).nest(INDENT))
+        .append(formatted_initializer)
         .append(BoxDoc::line())
         .append(continuation)
         .group()
+}
+
+fn if_expression<'a>(
+    tree: &'a SyntaxTree,
+    source: &'a str,
+    id: CstId,
+    width: usize,
+) -> Option<Document<'a>> {
+    let children = tree.children(id);
+    if children.iter().any(|child| contains_comment(tree, *child)) {
+        return None;
+    }
+    let then_keyword = token_position(tree, children, Token::Then)?;
+    let else_keyword = token_position_after(tree, children, Token::Else, then_keyword + 1)?;
+    let condition = joined_children(tree, source, id, slice_to(children, then_keyword), width).0;
+    let then_token = joined_children(
+        tree,
+        source,
+        id,
+        slice(children, then_keyword, then_keyword + 1),
+        width,
+    )
+    .0;
+    let then_body = joined_children(
+        tree,
+        source,
+        id,
+        slice(children, then_keyword + 1, else_keyword),
+        width,
+    )
+    .0;
+    let else_token = joined_children(
+        tree,
+        source,
+        id,
+        slice(children, else_keyword, else_keyword + 1),
+        width,
+    )
+    .0;
+    let else_children = children.get(else_keyword + 1..).unwrap_or(&[]);
+    let else_body = joined_children(tree, source, id, else_children, width).0;
+    let then_clause = then_token
+        .append(BoxDoc::line().append(then_body).nest(INDENT))
+        .group();
+    let else_separator = if else_children
+        .iter()
+        .any(|child| starts_with_if_or_layout(tree, *child))
+    {
+        BoxDoc::space()
+    } else {
+        BoxDoc::line()
+    };
+    let else_clause = else_token
+        .append(else_separator.append(else_body).nest(INDENT))
+        .group();
+
+    Some(
+        condition
+            .append(BoxDoc::line().append(then_clause).nest(INDENT))
+            .append(BoxDoc::line().append(else_clause).nest(INDENT))
+            .group(),
+    )
 }
 
 fn delimited<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usize) -> Document<'a> {
@@ -487,6 +990,7 @@ fn delimited<'a>(tree: &'a SyntaxTree, source: &'a str, id: CstId, width: usize)
                     | SyntaxKind::TuplePattern
                     | SyntaxKind::TupleType
                     | SyntaxKind::ListExpr
+                    | SyntaxKind::PredicateList
             ) {
                 open.append(BoxDoc::line_().append(body).nest(INDENT))
                     .append(BoxDoc::line_())

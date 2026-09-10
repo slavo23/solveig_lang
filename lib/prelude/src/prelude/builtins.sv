@@ -1,4 +1,5 @@
-export (Int,
+export (
+    Int,
     Float,
     Char,
     String,
@@ -42,7 +43,8 @@ export (Int,
     odd,
     not,
     and,
-    or)
+    or
+)
 
 import prelude.prim(*)
 
@@ -88,8 +90,8 @@ data Never
 -- |
 -- | The categories deliberately describe causes rather than individual
 -- | operations. Domain libraries add paths, endpoints, or policy context.
-data HostErrorKind =
-    AlreadyExists
+data HostErrorKind
+    = AlreadyExists
     | DoesNotExist
     | PermissionDenied
     | ResourceBusy

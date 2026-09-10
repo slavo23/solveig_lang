@@ -11,13 +11,13 @@ fixtureBody = "{\"message\":\"hello from Solveig\"}"
 
 fixtureResponse : String
 fixtureResponse =
-    "HTTP/1.1 200 OK\u{d}\n" <>
-        "Content-Type: application/json\u{d}\n" <>
-        "Content-Length: " <>
-        show (bytesLength (stringToBytes fixtureBody)) <>
-        "\u{d}\n" <>
-        "Connection: close\u{d}\n\u{d}\n" <>
-        fixtureBody
+    "HTTP/1.1 200 OK\u{d}\n"
+        <> "Content-Type: application/json\u{d}\n"
+        <> "Content-Length: "
+        <> show (bytesLength (stringToBytes fixtureBody))
+        <> "\u{d}\n"
+        <> "Connection: close\u{d}\n\u{d}\n"
+        <> fixtureBody
 
 netToHost : NetError -> HostError
 netToHost (NetHostError _ hostError) = hostError
@@ -80,16 +80,15 @@ runFixture : forall scope. TcpListener scope -> Port -> IO NetError ()
 runFixture listener port =
     withThread
         (serveBatch listener 3)
-        (fun _ =>
-            do
-                bodies <- mapError hostToNet (runClients port)
-                mapError hostToNet (printLine ("responses: " <> show (length bodies)))
-                mapError hostToNet $
-                    printLine
-                        (case bodies of
-                            first :: _ => first
-                            | [] => "none"
-                        )
+        (fun _ => do
+            bodies <- mapError hostToNet (runClients port)
+            mapError hostToNet (printLine ("responses: " <> show (length bodies)))
+            mapError hostToNet $
+                printLine
+                    (case bodies of
+                        first :: _ => first
+                        | [] => "none"
+                    )
         )
 
 main : Task ()

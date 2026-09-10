@@ -1,4 +1,5 @@
-export (Position,
+export (
+    Position,
     positionOffset,
     positionLine,
     positionColumn,
@@ -72,7 +73,8 @@ export (Position,
     parseBytes,
     parseTokenList,
     parseStream,
-    renderError)
+    renderError
+)
 
 import std.bytes(*)
 import std.list(*)
@@ -115,9 +117,9 @@ mergeConsumption ConsumedInput _ = ConsumedInput
 data InputStep input token =
     -- | Supplies one token and the cursor after that token.
     InputToken token input
-  | -- | Reports that a complete input has ended.
+    | -- | Reports that a complete input has ended.
     InputEnd
-  | -- | Reports that a partial input needs another externally supplied chunk.
+    | -- | Reports that a partial input needs another externally supplied chunk.
     InputAwait
 
 -- | Supplies the operations that let a parser consume an arbitrary input type.
@@ -126,11 +128,12 @@ data InputStep input token =
 -- | must retain newly supplied chunks while moving back to the checkpoint.
 -- | Destructive inputs therefore need a buffering adapter when backtracking is
 -- | possible.
-data InputOps input token = InputOps
-    (input -> InputStep input token)
-    (input -> Position)
-    (input -> input -> input)
-    (token -> String)
+data InputOps input token
+    = InputOps
+        (input -> InputStep input token)
+        (input -> Position)
+        (input -> input -> input)
+        (token -> String)
 
 -- | Reads the next token observation through an input adapter.
 nextInput : forall input token. InputOps input token -> input -> InputStep input token
@@ -153,13 +156,8 @@ describeInputToken (InputOps _ _ _ describe) token = describe token
 -- | Expected items are stored in deterministic order. Contexts run from the
 -- | nearest labeled grammar region outward. A structural reason describes a
 -- | parser contract failure such as repeating a parser that accepted no input.
-data ParseError custom = ParseError
-    Position
-    (Maybe String)
-    (std.set.Set String)
-    [String]
-    [custom]
-    (Maybe String)
+data ParseError custom
+    = ParseError Position (Maybe String) (std.set.Set String) [String] [custom] (Maybe String)
 
 -- | Returns the position at which a parse error was reported.
 errorPosition : forall custom. ParseError custom -> Position
@@ -187,32 +185,34 @@ errorReason (ParseError _ _ _ _ _ reason) = reason
 
 -- | Builds an empty structured error at the current input position.
 emptyError : forall input token custom. InputOps input token -> input -> ParseError custom
-emptyError ops input =
-    ParseError (inputPosition ops input) Nothing std.set.empty [] [] Nothing
+emptyError ops input = ParseError (inputPosition ops input) Nothing std.set.empty [] [] Nothing
 
 -- | Chooses the furthest error, merging deterministic details at equal offsets.
 -- |
 -- | This is the positioned error merge from Leijen and Meijer, Parsec (2001).
 mergeErrors : forall custom. ParseError custom -> ParseError custom -> ParseError custom
 mergeErrors left right =
-    let leftOffset = positionOffset (errorPosition left) in
-    let rightOffset = positionOffset (errorPosition right) in
-    if leftOffset > rightOffset then left
-    else if rightOffset > leftOffset then right
-    else mergeErrorsAtSamePosition left right
+    let leftOffset =
+        positionOffset (errorPosition left)
+    in let rightOffset =
+        positionOffset (errorPosition right)
+    in if leftOffset > rightOffset
+        then left
+        else if rightOffset > leftOffset then right else mergeErrorsAtSamePosition left right
 
 -- | Merges two errors already known to occupy the same position.
-mergeErrorsAtSamePosition : forall custom. ParseError custom -> ParseError custom -> ParseError custom
+mergeErrorsAtSamePosition :
+    forall custom. ParseError custom -> ParseError custom -> ParseError custom
 mergeErrorsAtSamePosition
     (ParseError position unexpectedLeft expectedLeft contextsLeft customLeft reasonLeft)
     (ParseError _ unexpectedRight expectedRight contextsRight customRight reasonRight) =
-        ParseError
-            position
-            (preferMaybe unexpectedLeft unexpectedRight)
-            (std.set.union expectedLeft expectedRight)
-            (preferList contextsLeft contextsRight)
-            (customLeft ++ customRight)
-            (preferMaybe reasonLeft reasonRight)
+    ParseError
+        position
+        (preferMaybe unexpectedLeft unexpectedRight)
+        (std.set.union expectedLeft expectedRight)
+        (preferList contextsLeft contextsRight)
+        (customLeft ++ customRight)
+        (preferMaybe reasonLeft reasonRight)
 
 -- | Keeps the first present optional value, otherwise returning the second.
 preferMaybe : forall a. Maybe a -> Maybe a -> Maybe a
@@ -232,9 +232,9 @@ preferList values _ = values
 data ParseReply input custom value =
     -- | Reports a parsed value and the unconsumed cursor.
     Parsed Consumption value input
-  | -- | Reports a structured failure and the cursor at that failure.
+    | -- | Reports a structured failure and the cursor at that failure.
     Rejected Consumption input (ParseError custom)
-  | -- | Requests more input and retains a pure resumption continuation.
+    | -- | Requests more input and retains a pure resumption continuation.
     Awaiting Consumption input (input -> ParseReply input custom value)
 
 -- | A compositional parser over an input type with caller-defined error values.
@@ -249,12 +249,11 @@ data Parser input custom value = Parser (input -> ParseReply input custom value)
 -- | This keeps ordinary clients independent of reply constructor patterns while
 -- | still exposing the suspended cursor and continuation needed by custom
 -- | streaming integrations.
-foldReply : forall input custom value result.
-    (Consumption -> value -> input -> result) ->
+foldReply :
+    forall input custom value result. (Consumption -> value -> input -> result) ->
     (Consumption -> input -> ParseError custom -> result) ->
     (Consumption -> input -> (input -> ParseReply input custom value) -> result) ->
-    ParseReply input custom value ->
-    result
+    ParseReply input custom value -> result
 foldReply onSuccess onFailure onAwait (Parsed consumption value rest) =
     onSuccess consumption value rest
 foldReply onSuccess onFailure onAwait (Rejected consumption rest error) =
@@ -263,13 +262,16 @@ foldReply onSuccess onFailure onAwait (Awaiting consumption suspended continue) 
     onAwait consumption suspended continue
 
 -- | Runs a parser from a supplied input cursor without requiring end-of-input.
-runParser : forall input custom value. Parser input custom value -> input -> ParseReply input custom value
+runParser :
+    forall input custom value. Parser input custom value -> input -> ParseReply input custom value
 runParser (Parser run) input = run input
 
 -- | Resumes an awaiting reply with an extended version of its suspended input.
 -- |
 -- | A reply that has already succeeded or failed is returned unchanged.
-resume : forall input custom value. ParseReply input custom value -> input -> ParseReply input custom value
+resume :
+    forall input custom value. ParseReply input custom value ->
+    input -> ParseReply input custom value
 resume (Awaiting _ _ continue) input = continue input
 resume (Parsed consumption value rest) _ = Parsed consumption value rest
 resume (Rejected consumption rest error) _ = Rejected consumption rest error
@@ -279,7 +281,9 @@ resume (Rejected consumption rest error) _ = Rejected consumption rest error
 -- | A partial input still returns Awaiting until its adapter is marked finished.
 -- | For text, a typical entry point is
 -- | `runComplete textInputOps parser (textInput source)`.
-runComplete : forall input token custom value. InputOps input token -> Parser input custom value -> input -> ParseReply input custom value
+runComplete :
+    forall input token custom value. InputOps input token ->
+    Parser input custom value -> input -> ParseReply input custom value
 runComplete ops parser input = runParser (keepLeft parser (endOfInput ops)) input
 
 -- | Produces a value without consuming input.
@@ -291,11 +295,10 @@ mapResult : forall input custom a b. (a -> b) -> Parser input custom a -> Parser
 mapResult transform parser = Parser (fun input => mapReply transform (runParser parser input))
 
 -- | Transforms every eventual success of a parser reply, including after suspension.
-mapReply : forall input custom a b. (a -> b) -> ParseReply input custom a -> ParseReply input custom b
-mapReply transform (Parsed consumption value rest) =
-    Parsed consumption (transform value) rest
-mapReply transform (Rejected consumption rest error) =
-    Rejected consumption rest error
+mapReply :
+    forall input custom a b. (a -> b) -> ParseReply input custom a -> ParseReply input custom b
+mapReply transform (Parsed consumption value rest) = Parsed consumption (transform value) rest
+mapReply transform (Rejected consumption rest error) = Rejected consumption rest error
 mapReply transform (Awaiting consumption suspended continue) =
     Awaiting consumption suspended (fun input => mapReply transform (continue input))
 
@@ -305,10 +308,9 @@ mapCustomError transform parser = Parser (mapReplyError transform . runParser pa
 
 mapReplyError : forall input e f a. (e -> f) -> ParseReply input e a -> ParseReply input f a
 mapReplyError _ (Parsed consumption value rest) = Parsed consumption value rest
-mapReplyError transform (Rejected
-        consumption
-        rest
-        (ParseError position unexpected expected contexts custom reason)) =
+mapReplyError
+    transform
+    (Rejected consumption rest (ParseError position unexpected expected contexts custom reason)) =
     Rejected
         consumption
         rest
@@ -322,26 +324,32 @@ mapReplyError transform (Awaiting consumption suspended continue) =
 -- | mapping, application, and fixed sequencing when the grammar is static.
 -- | Use `andThen identifier (fun name => parserForName name)` when the value
 -- | parsed on the left genuinely determines the grammar on the right.
-andThen : forall input custom a b. Parser input custom a -> (a -> Parser input custom b) -> Parser input custom b
-andThen parser continuation =
-    Parser (fun input => bindReply continuation (runParser parser input))
+andThen :
+    forall input custom a b. Parser input custom a ->
+    (a -> Parser input custom b) -> Parser input custom b
+andThen parser continuation = Parser (fun input => bindReply continuation (runParser parser input))
 
 -- | Continues an eventual successful reply through a value-dependent parser.
-bindReply : forall input custom a b. (a -> Parser input custom b) -> ParseReply input custom a -> ParseReply input custom b
+bindReply :
+    forall input custom a b. (a -> Parser input custom b) ->
+    ParseReply input custom a -> ParseReply input custom b
 bindReply continuation (Parsed consumption value rest) =
     addConsumption consumption (runParser (continuation value) rest)
-bindReply continuation (Rejected consumption rest error) =
-    Rejected consumption rest error
+bindReply continuation (Rejected consumption rest error) = Rejected consumption rest error
 bindReply continuation (Awaiting consumption suspended continue) =
     Awaiting consumption suspended (fun input => bindReply continuation (continue input))
 
 -- | Applies a parser-produced function to a parser-produced argument.
-applyParser : forall input custom a b. Parser input custom (a -> b) -> Parser input custom a -> Parser input custom b
+applyParser :
+    forall input custom a b. Parser input custom (a -> b) ->
+    Parser input custom a -> Parser input custom b
 applyParser parserFunction parserArgument =
     andThen parserFunction (fun transform => mapResult transform parserArgument)
 
 -- | Adds earlier consumption to every eventual outcome of a later parser.
-addConsumption : forall input custom value. Consumption -> ParseReply input custom value -> ParseReply input custom value
+addConsumption :
+    forall input custom value. Consumption ->
+    ParseReply input custom value -> ParseReply input custom value
 addConsumption previous (Parsed current value rest) =
     Parsed (mergeConsumption previous current) value rest
 addConsumption previous (Rejected current rest error) =
@@ -353,15 +361,19 @@ addConsumption previous (Awaiting current suspended continue) =
         (fun input => addConsumption previous (continue input))
 
 -- | Sequences two parsers and keeps both results in a pair.
-pair : forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom (a, b)
+pair :
+    forall input custom a b. Parser input custom a ->
+    Parser input custom b -> Parser input custom (a, b)
 pair left right = andThen left (fun a => mapResult (fun b => (a, b)) right)
 
 -- | Sequences two parsers and keeps only the result of the second.
-keepRight : forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom b
+keepRight :
+    forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom b
 keepRight left right = andThen left (fun _ => right)
 
 -- | Sequences two parsers and keeps only the result of the first.
-keepLeft : forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom a
+keepLeft :
+    forall input custom a b. Parser input custom a -> Parser input custom b -> Parser input custom a
 keepLeft left right = andThen left (fun value => mapResult (fun _ => value) right)
 
 -- | Tries the right parser only when the left parser fails without consuming.
@@ -370,24 +382,29 @@ keepLeft left right = andThen left (fun value => mapResult (fun _ => value) righ
 -- | left parser in attempt only when its consumed prefix is genuinely shared.
 -- | For example, alternatives for `"ab"` and `"ac"` need attempt around the
 -- | first token sequence; alternatives starting with different tokens do not.
-choice : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom value -> Parser input custom value
-choice ops left right =
-    Parser (fun input => chooseLeft ops input right (runParser left input))
+choice :
+    forall input token custom value. InputOps input token ->
+    Parser input custom value -> Parser input custom value -> Parser input custom value
+choice ops left right = Parser (fun input => chooseLeft ops input right (runParser left input))
 
 -- | Resolves the left reply of a choice, preserving its starting checkpoint.
-chooseLeft : forall input token custom value. InputOps input token -> input -> Parser input custom value -> ParseReply input custom value -> ParseReply input custom value
+chooseLeft :
+    forall input token custom value. InputOps input token ->
+    input ->
+    Parser input custom value -> ParseReply input custom value -> ParseReply input custom value
 chooseLeft ops checkpoint right (Rejected EmptyInput newest firstError) =
-    let restored = restoreInput ops checkpoint newest in
-    chooseRight firstError (runParser right restored)
+    let restored =
+        restoreInput ops checkpoint newest
+    in chooseRight firstError (runParser right restored)
 chooseLeft ops checkpoint right (Awaiting consumption suspended continue) =
-    Awaiting consumption suspended
-        (fun input => chooseLeft ops checkpoint right (continue input))
+    Awaiting consumption suspended (fun input => chooseLeft ops checkpoint right (continue input))
 chooseLeft _ _ _ (Parsed consumption value rest) = Parsed consumption value rest
-chooseLeft _ _ _ (Rejected ConsumedInput rest error) =
-    Rejected ConsumedInput rest error
+chooseLeft _ _ _ (Rejected ConsumedInput rest error) = Rejected ConsumedInput rest error
 
 -- | Merges an empty right-branch failure with the preceding left failure.
-chooseRight : forall input custom value. ParseError custom -> ParseReply input custom value -> ParseReply input custom value
+chooseRight :
+    forall input custom value. ParseError custom ->
+    ParseReply input custom value -> ParseReply input custom value
 chooseRight firstError (Rejected EmptyInput rest secondError) =
     Rejected EmptyInput rest (mergeErrors firstError secondError)
 chooseRight firstError (Awaiting consumption suspended continue) =
@@ -401,17 +418,19 @@ chooseRight _ (Rejected ConsumedInput rest error) = Rejected ConsumedInput rest 
 -- | the newest supplied source so chunks received while suspended are not lost.
 -- | Keep attempt as narrow as possible: wrap only the ambiguous prefix branch,
 -- | then let later failures remain committed and informative.
-attempt : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom value
-attempt ops parser =
-    Parser (fun input => attemptReply ops input (runParser parser input))
+attempt :
+    forall input token custom value. InputOps input token ->
+    Parser input custom value -> Parser input custom value
+attempt ops parser = Parser (fun input => attemptReply ops input (runParser parser input))
 
 -- | Restores every eventual failure of an attempted parser.
-attemptReply : forall input token custom value. InputOps input token -> input -> ParseReply input custom value -> ParseReply input custom value
+attemptReply :
+    forall input token custom value. InputOps input token ->
+    input -> ParseReply input custom value -> ParseReply input custom value
 attemptReply ops checkpoint (Rejected _ newest error) =
     Rejected EmptyInput (restoreInput ops checkpoint newest) error
 attemptReply ops checkpoint (Awaiting consumption suspended continue) =
-    Awaiting consumption suspended
-        (fun input => attemptReply ops checkpoint (continue input))
+    Awaiting consumption suspended (fun input => attemptReply ops checkpoint (continue input))
 attemptReply _ _ (Parsed consumption value rest) = Parsed consumption value rest
 
 -- | Commits every eventual failure of a parser, preventing later alternatives.
@@ -443,9 +462,15 @@ label expected parser = Parser (fun input => labelReply expected (runParser pars
 (<?>) parser expectedName = label expectedName parser
 
 -- | Labels every eventual empty failure while retaining committed diagnostics.
-labelReply : forall input custom value. String -> ParseReply input custom value -> ParseReply input custom value
-labelReply expected (Rejected EmptyInput rest (ParseError position unexpected _ contexts custom reason)) =
-    Rejected EmptyInput rest
+labelReply :
+    forall input custom value. String ->
+    ParseReply input custom value -> ParseReply input custom value
+labelReply
+    expected
+    (Rejected EmptyInput rest (ParseError position unexpected _ contexts custom reason)) =
+    Rejected
+        EmptyInput
+        rest
         (ParseError position unexpected (std.set.singleton expected) contexts custom reason)
 labelReply expected (Awaiting consumption suspended continue) =
     Awaiting consumption suspended (fun input => labelReply expected (continue input))
@@ -453,42 +478,65 @@ labelReply _ (Parsed consumption value rest) = Parsed consumption value rest
 labelReply _ (Rejected ConsumedInput rest error) = Rejected ConsumedInput rest error
 
 -- | Adds a grammar context to every eventual failure.
-context : forall input custom value. String -> Parser input custom value -> Parser input custom value
+context :
+    forall input custom value. String -> Parser input custom value -> Parser input custom value
 context name parser = Parser (fun input => contextReply name (runParser parser input))
 
 -- | Adds context to a reply without changing its consumption behavior.
-contextReply : forall input custom value. String -> ParseReply input custom value -> ParseReply input custom value
-contextReply name (Rejected consumption rest (ParseError position unexpected expected contexts custom reason)) =
-    Rejected consumption rest
+contextReply :
+    forall input custom value. String ->
+    ParseReply input custom value -> ParseReply input custom value
+contextReply
+    name
+    (Rejected consumption rest (ParseError position unexpected expected contexts custom reason)) =
+    Rejected
+        consumption
+        rest
         (ParseError position unexpected expected (name :: contexts) custom reason)
 contextReply name (Awaiting consumption suspended continue) =
     Awaiting consumption suspended (fun input => contextReply name (continue input))
 contextReply _ (Parsed consumption value rest) = Parsed consumption value rest
 
 -- | Fails without consuming input and records one expected item.
-expected : forall input token custom value. InputOps input token -> String -> Parser input custom value
+expected :
+    forall input token custom value. InputOps input token -> String -> Parser input custom value
 expected ops item =
-    Parser (fun input =>
-        case emptyError ops input of
-            ParseError position unexpected _ contexts custom reason =>
-                Rejected EmptyInput input
-                    (ParseError position unexpected (std.set.singleton item) contexts custom reason))
+    Parser
+        (fun input =>
+            case emptyError ops input of
+                ParseError position unexpected _ contexts custom reason =>
+                    Rejected
+                        EmptyInput
+                        input
+                        (ParseError
+                            position
+                            unexpected
+                            (std.set.singleton item)
+                            contexts
+                            custom
+                            reason)
+        )
 
 -- | Fails without consuming input and attaches a caller-defined error value.
 -- |
 -- | Use this after parsing enough input to detect a domain rule, such as a
 -- | reserved identifier. Surrounding sequencing determines whether it commits.
-customFailure : forall input token custom value. InputOps input token -> custom -> Parser input custom value
+customFailure :
+    forall input token custom value. InputOps input token -> custom -> Parser input custom value
 customFailure ops customValue =
-    Parser (fun input =>
-        Rejected EmptyInput input
-            (ParseError
-                (inputPosition ops input)
-                Nothing
-                std.set.empty
-                []
-                (customValue :: [])
-                Nothing))
+    Parser
+        (fun input =>
+            Rejected
+                EmptyInput
+                input
+                (ParseError
+                    (inputPosition ops input)
+                    Nothing
+                    std.set.empty
+                    []
+                    (customValue :: [])
+                    Nothing)
+        )
 
 -- | Delays construction of a recursive parser until the parser is run.
 -- |
@@ -510,69 +558,96 @@ anyToken ops = satisfy ops "token" (fun _ => True)
 -- |
 -- | A mismatching token is observed but not consumed, allowing ordinary choice
 -- | to try another branch from the same cursor.
-satisfy : forall input token custom. InputOps input token -> String -> (token -> Bool) -> Parser input custom token
+satisfy :
+    forall input token custom. InputOps input token ->
+    String -> (token -> Bool) -> Parser input custom token
 satisfy ops expectation predicate =
     Parser (fun input => satisfyStep ops expectation predicate input (nextInput ops input))
 
 -- | Converts one input observation into a satisfying-token parser reply.
-satisfyStep : forall input token custom. InputOps input token -> String -> (token -> Bool) -> input -> InputStep input token -> ParseReply input custom token
+satisfyStep :
+    forall input token custom. InputOps input token ->
+    String -> (token -> Bool) -> input -> InputStep input token -> ParseReply input custom token
 satisfyStep ops expectation predicate input (InputToken token rest) =
-    if predicate token then Parsed ConsumedInput token rest
-    else
-        case emptyError ops input of
-            ParseError position _ _ contexts custom reason =>
-                Rejected EmptyInput input
-                    (ParseError
-                        position
-                        (Just (describeInputToken ops token))
-                        (std.set.singleton expectation)
-                        contexts
-                        custom
-                        reason)
+    if predicate token
+        then Parsed ConsumedInput token rest
+        else
+            case emptyError ops input of
+                ParseError position _ _ contexts custom reason =>
+                    Rejected
+                        EmptyInput
+                        input
+                        (ParseError
+                            position
+                            (Just (describeInputToken ops token))
+                            (std.set.singleton expectation)
+                            contexts
+                            custom
+                            reason)
 satisfyStep ops expectation predicate input InputAwait =
-    Awaiting EmptyInput input
+    Awaiting
+        EmptyInput
+        input
         (fun extended => satisfyStep ops expectation predicate extended (nextInput ops extended))
 satisfyStep ops expectation predicate input InputEnd =
     case emptyError ops input of
         ParseError position _ _ contexts custom reason =>
-            Rejected EmptyInput input
-                (ParseError position (Just "end of input") (std.set.singleton expectation) contexts custom reason)
+            Rejected
+                EmptyInput
+                input
+                (ParseError
+                    position
+                    (Just "end of input")
+                    (std.set.singleton expectation)
+                    contexts
+                    custom
+                    reason)
 
 -- | Parses one exact token, using the supplied name in diagnostics.
-token : forall input token custom. Eq token => InputOps input token -> String -> token -> Parser input custom token
+token :
+    forall input token custom. Eq token =>
+    InputOps input token -> String -> token -> Parser input custom token
 token ops name wanted = satisfy ops name (fun actual => actual == wanted)
 
 -- | Parses an exact token sequence from left to right.
 -- |
 -- | A later mismatch is consumed because the shared prefix was consumed. Use
 -- | attempt at the choice site when another branch shares that prefix.
-tokens : forall input token custom. Eq token => InputOps input token -> String -> [token] -> Parser input custom [token]
+tokens :
+    forall input token custom. Eq token =>
+    InputOps input token -> String -> [token] -> Parser input custom [token]
 tokens ops name wanted = label name (tokensExact ops wanted)
 
 -- | Parses an exact token list without changing its expected label.
-tokensExact : forall input token custom. Eq token => InputOps input token -> [token] -> Parser input custom [token]
+tokensExact :
+    forall input token custom. Eq token =>
+    InputOps input token -> [token] -> Parser input custom [token]
 tokensExact ops [] = succeed []
 tokensExact ops (wanted :: rest) =
-    andThen (token ops (describeInputToken ops wanted) wanted) (fun value =>
-        mapResult (fun values => value :: values) (tokensExact ops rest))
+    andThen
+        (token ops (describeInputToken ops wanted) wanted)
+        (fun value => mapResult (fun values => value :: values) (tokensExact ops rest))
 
 -- | Succeeds only at final end-of-input without consuming anything.
 -- |
 -- | An unfinished partial input suspends until more input arrives or the input
 -- | adapter is marked complete.
 endOfInput : forall input token custom. InputOps input token -> Parser input custom ()
-endOfInput ops =
-    Parser (fun input => endStep ops input (nextInput ops input))
+endOfInput ops = Parser (fun input => endStep ops input (nextInput ops input))
 
 -- | Converts one input observation into an end-of-input reply.
-endStep : forall input token custom. InputOps input token -> input -> InputStep input token -> ParseReply input custom ()
+endStep :
+    forall input token custom. InputOps input token ->
+    input -> InputStep input token -> ParseReply input custom ()
 endStep ops input InputEnd = Parsed EmptyInput () input
 endStep ops input InputAwait =
     Awaiting EmptyInput input (fun extended => endStep ops extended (nextInput ops extended))
 endStep ops input (InputToken token _) =
     case emptyError ops input of
         ParseError position _ _ contexts custom reason =>
-            Rejected EmptyInput input
+            Rejected
+                EmptyInput
+                input
                 (ParseError
                     position
                     (Just (describeInputToken ops token))
@@ -586,21 +661,35 @@ endStep ops input (InputToken token _) =
 -- | An empty failure ends the repetition. A consumed failure propagates. A
 -- | successful iteration that consumed nothing becomes a committed structural
 -- | error instead of looping forever.
-manyFold : forall input token custom value accumulator. InputOps input token -> Parser input custom value -> accumulator -> (accumulator -> value -> accumulator) -> Parser input custom accumulator
+manyFold :
+    forall input token custom value accumulator. InputOps input token ->
+    Parser input custom value ->
+    accumulator -> (accumulator -> value -> accumulator) -> Parser input custom accumulator
 manyFold ops parser initial combine =
     Parser (fun input => manyFoldLoop ops parser combine EmptyInput initial input)
 
 -- | Runs the next iteration of a folding repetition.
-manyFoldLoop : forall input token custom value accumulator. InputOps input token -> Parser input custom value -> (accumulator -> value -> accumulator) -> Consumption -> accumulator -> input -> ParseReply input custom accumulator
+manyFoldLoop :
+    forall input token custom value accumulator. InputOps input token ->
+    Parser input custom value ->
+    (accumulator -> value -> accumulator) ->
+    Consumption -> accumulator -> input -> ParseReply input custom accumulator
 manyFoldLoop ops parser combine consumed accumulator input =
     manyFoldReply ops parser combine consumed accumulator (runParser parser input)
 
 -- | Resolves one eventual repetition result and continues when progress was made.
-manyFoldReply : forall input token custom value accumulator. InputOps input token -> Parser input custom value -> (accumulator -> value -> accumulator) -> Consumption -> accumulator -> ParseReply input custom value -> ParseReply input custom accumulator
+manyFoldReply :
+    forall input token custom value accumulator. InputOps input token ->
+    Parser input custom value ->
+    (accumulator -> value -> accumulator) ->
+    Consumption ->
+    accumulator -> ParseReply input custom value -> ParseReply input custom accumulator
 manyFoldReply ops parser combine consumed accumulator (Parsed EmptyInput _ rest) =
     case emptyError ops rest of
         ParseError position unexpected expectedItems contexts custom _ =>
-            Rejected ConsumedInput rest
+            Rejected
+                ConsumedInput
+                rest
                 (ParseError
                     position
                     unexpected
@@ -621,39 +710,52 @@ manyFoldReply ops parser combine consumed accumulator (Awaiting current suspende
         (fun input => manyFoldReply ops parser combine consumed accumulator (continue input))
 
 -- | Parses zero or more values into a source-ordered list.
-many : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom [value]
+many :
+    forall input token custom value. InputOps input token ->
+    Parser input custom value -> Parser input custom [value]
 many ops parser =
-    mapResult std.list.reverse
-        (manyFold ops parser [] (fun values value => value :: values))
+    mapResult std.list.reverse (manyFold ops parser [] (fun values value => value :: values))
 
 -- | Parses one or more values into a source-ordered list.
-some : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom [value]
+some :
+    forall input token custom value. InputOps input token ->
+    Parser input custom value -> Parser input custom [value]
 some ops parser =
-    andThen parser (fun first =>
-        mapResult (fun rest => first :: rest) (many ops parser))
+    andThen parser (fun first => mapResult (fun rest => first :: rest) (many ops parser))
 
 -- | Repeats a parser while discarding every successful result.
-skipMany : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom ()
+skipMany :
+    forall input token custom value. InputOps input token ->
+    Parser input custom value -> Parser input custom ()
 skipMany ops parser = manyFold ops parser () (fun _ _ => ())
 
 -- | Parses an optional value, returning Nothing only after an empty failure.
-optional : forall input token custom value. InputOps input token -> Parser input custom value -> Parser input custom (Maybe value)
+optional :
+    forall input token custom value. InputOps input token ->
+    Parser input custom value -> Parser input custom (Maybe value)
 optional ops parser = choice ops (mapResult Just parser) (succeed Nothing)
 
 -- | Parses a value surrounded by opening and closing parsers.
-between : forall input custom open close value. Parser input custom open -> Parser input custom close -> Parser input custom value -> Parser input custom value
+between :
+    forall input custom open close value. Parser input custom open ->
+    Parser input custom close -> Parser input custom value -> Parser input custom value
 between opening closing parser = keepRight opening (keepLeft parser closing)
 
 -- | Parses zero or more values separated by a separator parser.
 -- |
 -- | A consumed separator followed by a missing value is an error, so trailing
 -- | separators are rejected unless the element grammar handles them explicitly.
-separatedBy : forall input token custom value separator. InputOps input token -> Parser input custom value -> Parser input custom separator -> Parser input custom [value]
+separatedBy :
+    forall input token custom value separator. InputOps input token ->
+    Parser input custom value -> Parser input custom separator -> Parser input custom [value]
 separatedBy ops parser separator =
-    choice ops
-        (andThen parser (fun first =>
-            mapResult (fun rest => first :: rest)
-                (many ops (keepRight separator parser))))
+    choice
+        ops
+        (andThen
+            parser
+            (fun first =>
+                mapResult (fun rest => first :: rest) (many ops (keepRight separator parser))
+            ))
         (succeed [])
 
 -- | A complete persistent cursor over a list of tokens.
@@ -670,8 +772,7 @@ listInputOps describe = InputOps listNext listPosition listRestore describe
 -- | Advances a complete list cursor by one token.
 listNext : forall token. ListInput token -> InputStep (ListInput token) token
 listNext (ListInput _ []) = InputEnd
-listNext (ListInput offset (value :: rest)) =
-    InputToken value (ListInput (offset + 1) rest)
+listNext (ListInput offset (value :: rest)) = InputToken value (ListInput (offset + 1) rest)
 
 -- | Reports a list cursor position as a one-line token sequence.
 listPosition : forall token. ListInput token -> Position
@@ -698,10 +799,9 @@ textInputOps = InputOps textNext textPosition textRestore show
 textNext : TextInput -> InputStep TextInput Char
 textNext (TextInput _ _ _ []) = InputEnd
 textNext (TextInput offset line column (character :: rest)) =
-    if character == '\n' then
-        InputToken character (TextInput (offset + 1) (line + 1) 1 rest)
-    else
-        InputToken character (TextInput (offset + 1) line (column + 1) rest)
+    if character == '\n'
+        then InputToken character (TextInput (offset + 1) (line + 1) 1 rest)
+        else InputToken character (TextInput (offset + 1) line (column + 1) rest)
 
 -- | Returns the current text position.
 textPosition : TextInput -> Position
@@ -761,8 +861,7 @@ feedStream (StreamInput _ _ True) _ = Nothing
 -- | Appends a token chunk to a persistent stream in source order.
 appendStreamValues : forall token. std.vector.Vector token -> [token] -> std.vector.Vector token
 appendStreamValues values [] = values
-appendStreamValues values (token :: rest) =
-    appendStreamValues (std.vector.snoc values token) rest
+appendStreamValues values (token :: rest) = appendStreamValues (std.vector.snoc values token) rest
 
 -- | Marks a stream complete so an exhausted cursor reports final end-of-input.
 finishStream : forall token. StreamInput token -> StreamInput token
@@ -774,7 +873,9 @@ finishStream (StreamInput values offset _) = StreamInput values offset True
 -- | unfinished cursor, so the feed operation succeeds by construction.
 -- | Start with `runParser parser streamInput`, call supply for each available
 -- | token chunk, then call finishReply when no more chunks can arrive.
-supply : forall token custom value. ParseReply (StreamInput token) custom value -> [token] -> ParseReply (StreamInput token) custom value
+supply :
+    forall token custom value. ParseReply (StreamInput token) custom value ->
+    [token] -> ParseReply (StreamInput token) custom value
 supply (Awaiting consumption suspended continue) chunk =
     case feedStream suspended chunk of
         Just extended => continue extended
@@ -783,7 +884,9 @@ supply (Parsed consumption value rest) _ = Parsed consumption value rest
 supply (Rejected consumption rest error) _ = Rejected consumption rest error
 
 -- | Marks an awaiting stream reply complete and resumes it at final input.
-finishReply : forall token custom value. ParseReply (StreamInput token) custom value -> ParseReply (StreamInput token) custom value
+finishReply :
+    forall token custom value. ParseReply (StreamInput token) custom value ->
+    ParseReply (StreamInput token) custom value
 finishReply (Awaiting _ suspended continue) = continue (finishStream suspended)
 finishReply (Parsed consumption value rest) = Parsed consumption value rest
 finishReply (Rejected consumption rest error) = Rejected consumption rest error
@@ -874,13 +977,19 @@ streamRestore (StreamInput _ checkpointOffset _) (StreamInput newest _ finished)
 -- | unexpected input, expected items, contexts, and structural reasons keep the
 -- | same format for every parser.
 renderError : forall custom. (custom -> String) -> ParseError custom -> String
-renderError renderCustom (ParseError (Position offset line column) unexpected expectedItems contexts custom reason) =
-    "line " <> show line <>
-    ", column " <> show column <>
-    " (offset " <> show offset <> "): " <>
-    renderErrorBody unexpected (std.set.toAscList expectedItems) reason <>
-    renderContexts contexts <>
-    renderCustomErrors renderCustom custom
+renderError
+    renderCustom
+    (ParseError (Position offset line column) unexpected expectedItems contexts custom reason) =
+    "line "
+        <> show line
+        <> ", column "
+        <> show column
+        <> " (offset "
+        <> show offset
+        <> "): "
+        <> renderErrorBody unexpected (std.set.toAscList expectedItems) reason
+        <> renderContexts contexts
+        <> renderCustomErrors renderCustom custom
 
 instance Show custom => Show (ParseError custom) where
     show error = renderError show error
@@ -902,8 +1011,7 @@ renderContexts contexts = "; in " <> joinStrings " inside " contexts
 -- | Renders caller-defined errors after the structural diagnostic.
 renderCustomErrors : forall custom. (custom -> String) -> [custom] -> String
 renderCustomErrors _ [] = ""
-renderCustomErrors renderCustom custom =
-    "; " <> joinStrings "; " (map renderCustom custom)
+renderCustomErrors renderCustom custom = "; " <> joinStrings "; " (map renderCustom custom)
 
 -- | Joins strings with a separator without adding a trailing separator.
 joinStrings : String -> [String] -> String

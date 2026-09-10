@@ -7,8 +7,8 @@ import std.text(*)
 
 data RateInfo = RateInfo (Maybe String) (Maybe String) (Maybe String)
 
-data ReleaseFailure =
-    InvalidCredentials
+data ReleaseFailure
+    = InvalidCredentials
     | PrimaryRateLimited (Maybe String) String
     | SecondaryRateLimited (Maybe String) String
     | NoPublishedRelease
@@ -18,8 +18,8 @@ data ReleaseFailure =
 
 data GitHubAccess = GitHubAccessReady RateInfo | GitHubAccessFailed ReleaseFailure
 
-data ReleaseResult =
-    ReleaseFound String String String String String
+data ReleaseResult
+    = ReleaseFound String String String String String
     | ReleaseUnchanged String String
     | ReleaseFailed String ReleaseFailure
 
@@ -35,10 +35,11 @@ decodeAccess response =
     let code =
         std.http.statusCode (std.http.responseStatus response)
     in if code == 200
-        then case rateInfo response of
-            RateInfo _ (Just "0") reset =>
-                GitHubAccessFailed (PrimaryRateLimited reset (responseMessage response))
-            | info => GitHubAccessReady info
+        then
+            case rateInfo response of
+                RateInfo _ (Just "0") reset =>
+                    GitHubAccessFailed (PrimaryRateLimited reset (responseMessage response))
+                | info => GitHubAccessReady info
         else GitHubAccessFailed (failureForStatus response code)
 
 decodeResponse : String -> Maybe String -> std.http.Response -> ReleaseResult
@@ -46,19 +47,21 @@ decodeResponse repository cached response =
     let code =
         std.http.statusCode (std.http.responseStatus response)
     in if code == 304
-        then case cached of
-            Just etag => ReleaseUnchanged repository etag
-            | Nothing =>
-                ReleaseFailed
-                    repository
-                    (InvalidReleaseJson "server returned 304 without a cached ETag")
+        then
+            case cached of
+                Just etag => ReleaseUnchanged repository etag
+                | Nothing =>
+                    ReleaseFailed
+                        repository
+                        (InvalidReleaseJson "server returned 304 without a cached ETag")
         else if code /= 200
-            then ReleaseFailed repository (failureForStatus response code)
-            else let etag =
-                case std.http.findHeader "etag" response of
-                    Just value => value
-                    | Nothing => ""
-            in decodeReleaseJson repository etag (std.http.responseBody response)
+                then ReleaseFailed repository (failureForStatus response code)
+                else
+                    let etag =
+                        case std.http.findHeader "etag" response of
+                            Just value => value
+                            | Nothing => ""
+                    in decodeReleaseJson repository etag (std.http.responseBody response)
 
 decodeReleaseJson : String -> String -> Bytes -> ReleaseResult
 decodeReleaseJson repository etag body =
@@ -93,15 +96,16 @@ failureForStatus : std.http.Response -> Int -> ReleaseFailure
 failureForStatus _ 401 = InvalidCredentials
 failureForStatus response code =
     if or (code == 403) (code == 429)
-        then case std.http.findHeader "x-ratelimit-remaining" response of
-            Just "0" =>
-                PrimaryRateLimited
-                    (std.http.findHeader "x-ratelimit-reset" response)
-                    (responseMessage response)
-            | _ =>
-                SecondaryRateLimited
-                    (std.http.findHeader "retry-after" response)
-                    (responseMessage response)
+        then
+            case std.http.findHeader "x-ratelimit-remaining" response of
+                Just "0" =>
+                    PrimaryRateLimited
+                        (std.http.findHeader "x-ratelimit-reset" response)
+                        (responseMessage response)
+                | _ =>
+                    SecondaryRateLimited
+                        (std.http.findHeader "retry-after" response)
+                        (responseMessage response)
         else if code == 404 then NoPublishedRelease else HttpFailure code (responseMessage response)
 
 responseMessage : std.http.Response -> String

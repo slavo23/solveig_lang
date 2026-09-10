@@ -30,8 +30,7 @@ reportWinner winner =
         | Right value => printLine (appendString "right=" value)
 
 reportError : HostError -> Task ()
-reportError (HostError ResourceVanished _ _) =
-    printLine "race-error=ChannelClosed"
+reportError (HostError ResourceVanished _ _) = printLine "race-error=ChannelClosed"
 reportError other = printLine ("unexpected host error: " <> show other)
 
 main : Task ()
@@ -40,8 +39,6 @@ main = do
     reportWinner winner
     catchError
         (bindIO
-            (race
-                failClosed
-                errorLoser)
+            (race failClosed errorLoser)
             (fun unexpected => printLine "unexpected race success"))
         reportError

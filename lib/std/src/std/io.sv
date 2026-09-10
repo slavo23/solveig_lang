@@ -1,4 +1,5 @@
-export (IOMode(..),
+export (
+    IOMode(..),
     BufferMode(..),
     stdin,
     stdout,
@@ -14,17 +15,20 @@ export (IOMode(..),
     hPutBytes,
     hIsEOF,
     hSetBuffering,
-    withFile)
+    withFile
+)
 
 import prelude.prim as CorePrim(hFlush, hGetLine, hPutStr, hPutStrLn, stdin, stdout)
-import std.prim as HostPrim(hClose,
+import std.prim as HostPrim(
+    hClose,
     hGetBytes,
     hGetContents,
     hIsEOF,
     hPutBytes,
     hSetBuffering,
     openFile,
-    stderr)
+    stderr
+)
 import std.task(bracket)
 
 -- | How a file is opened.

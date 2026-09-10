@@ -5,10 +5,11 @@ spin n = if n == 0 then () else spin (n - 1)
 
 pause : Int -> Task ()
 pause n =
-    if n == 0 then pureIO ()
-    else do
-        pureIO ()
-        pause (n - 1)
+    if n == 0
+        then pureIO ()
+        else do
+                pureIO ()
+                pause (n - 1)
 
 spinner : () -> Task ()
 spinner _ = do

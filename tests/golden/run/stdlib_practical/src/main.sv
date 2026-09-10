@@ -17,10 +17,10 @@ fixtureBody = "{\"names\":[\"Ada\",\"Grace\",\"Linus\",\"Margaret\"]}"
 
 fixtureResponse : String
 fixtureResponse =
-    "HTTP/1.1 200 OK\u{d}\nContent-Type: application/json\u{d}\nContent-Length: " <>
-        show (std.bytes.bytesLength (std.bytes.stringToBytes fixtureBody)) <>
-        "\u{d}\nConnection: close\u{d}\n\u{d}\n" <>
-        fixtureBody
+    "HTTP/1.1 200 OK\u{d}\nContent-Type: application/json\u{d}\nContent-Length: "
+        <> show (std.bytes.bytesLength (std.bytes.stringToBytes fixtureBody))
+        <> "\u{d}\nConnection: close\u{d}\n\u{d}\n"
+        <> fixtureBody
 
 isDigit : Char -> Bool
 isDigit character = and (character >= '0') (character <= '9')

@@ -4,10 +4,7 @@ import scry.ast(*)
 
 isWhitespace : Char -> Bool
 isWhitespace c =
-    if c == ' ' then True
-    else if c == '\n' then True
-    else if c == '\t' then True
-    else False
+    if c == ' ' then True else if c == '\n' then True else if c == '\t' then True else False
 
 flushAtom : [Char] -> [Tok] -> [Tok]
 flushAtom current tokens =
@@ -20,14 +17,13 @@ tokenizeChars chars current tokens =
     case chars of
         [] => reverse (flushAtom current tokens)
         | c :: rest =>
-            if isWhitespace c then
-                tokenizeChars rest [] (flushAtom current tokens)
-            else if c == '(' then
-                tokenizeChars rest [] (TLParen :: flushAtom current tokens)
-            else if c == ')' then
-                tokenizeChars rest [] (TRParen :: flushAtom current tokens)
-            else
-                tokenizeChars rest (c :: current) tokens
+            if isWhitespace c
+                then tokenizeChars rest [] (flushAtom current tokens)
+                else if c == '('
+                        then tokenizeChars rest [] (TLParen :: flushAtom current tokens)
+                        else if c == ')'
+                                then tokenizeChars rest [] (TRParen :: flushAtom current tokens)
+                                else tokenizeChars rest (c :: current) tokens
 
 tokenize : String -> [Tok]
 tokenize text = tokenizeChars (stringToChars text) [] []
@@ -71,11 +67,7 @@ isVariableName name =
 termFromSExp : SExp -> Maybe Term
 termFromSExp sexp =
     case sexp of
-        SAtom name =>
-            if isVariableName name then
-                Just (Var name)
-            else
-                Just (Atom name)
+        SAtom name => if isVariableName name then Just (Var name) else Just (Atom name)
         | SList _ => Nothing
 
 termsFromSExps : [SExp] -> Maybe [Term]

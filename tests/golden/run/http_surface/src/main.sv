@@ -30,14 +30,14 @@ surface =
                                 (printLine ("chunks: " <> show (map std.bytes.bytesLength chunks)))
                                 (fun _ =>
                                     printLine
-                                    ("header: " <>
-                                    show
-                                    (std.http.findHeader
-                                    "etag"
-                                    (response
-                                    (mustStatus 200)
-                                    [mustHeader "ETag" "v1"]
-                                    (std.bytes.stringToBytes ""))))
+                                        ("header: "
+                                            <> show
+                                                (std.http.findHeader
+                                                    "etag"
+                                                    (response
+                                                        (mustStatus 200)
+                                                        [mustHeader "ETag" "v1"]
+                                                        (std.bytes.stringToBytes ""))))
                                 )
                         )
 

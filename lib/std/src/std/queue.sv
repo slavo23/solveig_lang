@@ -30,8 +30,7 @@ normalize queue = queue
 
 -- | Adds an element to the back in amortized constant time.
 enqueue : forall a. Queue a -> a -> Queue a
-enqueue (MkQueue count front rear) value =
-    normalize (MkQueue (count + 1) front (value :: rear))
+enqueue (MkQueue count front rear) value = normalize (MkQueue (count + 1) front (value :: rear))
 
 -- | Returns the front element without removing it.
 peek : forall a. Queue a -> Maybe a

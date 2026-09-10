@@ -29,13 +29,11 @@ decode (Right text) = text
 configuredProcess : String -> Task Process
 configuredProcess executable = do
     childDirectory <- requirePath "child"
-    initial <- requireProcess (process executable ["--project-root", ".", "--", "alpha", "two words"])
+    initial <-
+        requireProcess (process executable ["--project-root", ".", "--", "alpha", "two words"])
     overridden <- requireProcess (withEnvironment "SOLVEIG_L3_CHILD_VALUE" "overridden" initial)
     cleaned <- requireProcess (withoutEnvironment "SOLVEIG_L3_REMOVED" overridden)
-    pureIO
-        (withStandardInputText
-            "from-stdin\n"
-            (withWorkingDirectory childDirectory cleaned))
+    pureIO (withStandardInputText "from-stdin\n" (withWorkingDirectory childDirectory cleaned))
 
 reportRunProcessError : HostError -> Task ()
 reportRunProcessError ioError =
@@ -64,20 +62,21 @@ runFixture executable = do
         (processStderrBytes limited == processStderrBytes result)
         then printLine "limited-capture"
         else printLine "wrong-limited-capture"
-    tooLarge <- catchError
-        (bindIO
-            (mapError processToHost (runProcessLimited request 12))
-            (fun captured => pureIO "wrong-limit-success"))
-        reportLimitedError
+    tooLarge <-
+        catchError
+            (bindIO
+                (mapError processToHost (runProcessLimited request 12))
+                (fun captured => pureIO "wrong-limit-success"))
+            reportLimitedError
     printLine tooLarge
     discarded <- mapError processToHost (runProcess (discardStandardError request))
     if bytesLength (processStderrBytes discarded) == 0
         then printLine "discarded-stderr"
         else printLine "retained-stderr"
-    timed <- mapError processToHost
-        (runProcessTimeout
-            (milliseconds 1)
-            (withArgumentsOrDefect ["delay"] request))
+    timed <-
+        mapError
+            processToHost
+            (runProcessTimeout (milliseconds 1) (withArgumentsOrDefect ["delay"] request))
     case timed of
         Nothing => printLine "process-timeout"
         | Just completed => printLine "wrong-timeout-success"
@@ -99,8 +98,7 @@ runFailure executable = do
 
 childRequest : String -> String -> Task Process
 childRequest executable mode =
-    requireProcess
-        (process executable ["--project-root", "child", "--", mode])
+    requireProcess (process executable ["--project-root", "child", "--", mode])
 
 streamByteCount : forall scope. Stream scope ProcessError Bytes -> IO ProcessError Int
 streamByteCount = fold (fun total chunk => total + bytesLength chunk) 0
@@ -108,11 +106,17 @@ streamByteCount = fold (fun total chunk => total + bytesLength chunk) 0
 runStreamingPipes : String -> Task ()
 runStreamingPipes executable = do
     request <- childRequest executable "stream-burst"
-    (stdoutCount, stderrCount) <- mapError processToHost
-        (withProcess 4096 request (fun child =>
-            concurrently
-                (streamByteCount (processStdout child))
-                (streamByteCount (processStderr child))))
+    (stdoutCount, stderrCount) <-
+        mapError
+            processToHost
+            (withProcess
+                4096
+                request
+                (fun child =>
+                    concurrently
+                        (streamByteCount (processStdout child))
+                        (streamByteCount (processStderr child))
+                ))
     if and (stdoutCount == 163840) (stderrCount == 163840)
         then printLine "streaming-dual-pipe"
         else printLine "wrong-streaming-dual-pipe"
@@ -120,14 +124,11 @@ runStreamingPipes executable = do
 runStreamingDiscard : String -> Task ()
 runStreamingDiscard executable = do
     request <- childRequest executable "stream-burst"
-    (stdoutCount, stderrCount, status) <- mapError processToHost
-        (withProcess
-            4096
-            (discardStandardError request)
-            streamingDiscardSession)
-    if and
-        (and (stdoutCount == 163840) (stderrCount == 0))
-        (isExitSuccess status)
+    (stdoutCount, stderrCount, status) <-
+        mapError
+            processToHost
+            (withProcess 4096 (discardStandardError request) streamingDiscardSession)
+    if and (and (stdoutCount == 163840) (stderrCount == 0)) (isExitSuccess status)
         then printLine "streaming-discard"
         else printLine "wrong-streaming-discard"
 
@@ -141,27 +142,31 @@ streamingDiscardSession child = do
 runStreamingInput : String -> Task ()
 runStreamingInput executable = do
     request <- childRequest executable "stdin-echo"
-    outcome <- mapError processToHost
-        (withProcess
-            16
-            (pipeStandardInput (discardStandardError request))
-            streamingInputSession)
+    outcome <-
+        mapError
+            processToHost
+            (withProcess
+                16
+                (pipeStandardInput (discardStandardError request))
+                streamingInputSession)
     case outcome of
         (True, 13, status) =>
             if isExitSuccess status
-                then do
-                    printLine "streaming-input-bound"
-                    printLine "streaming-stdin"
+                then
+                    do
+                        printLine "streaming-input-bound"
+                        printLine "streaming-stdin"
                 else printLine "wrong-streaming-stdin-exit"
         | _ => printLine "wrong-streaming-stdin"
 
 streamingInputSession : forall scope. ProcessHandle scope -> IO ProcessError (Bool, Int, ExitCode)
 streamingInputSession child = do
-    bounded <- catchError
-        (bindIO
-            (writeProcessStdin child (stringToBytes "0123456789abcdefg"))
-            (fun _ => pureIO False))
-        inputBoundError
+    bounded <-
+        catchError
+            (bindIO
+                (writeProcessStdin child (stringToBytes "0123456789abcdefg"))
+                (fun _ => pureIO False))
+            inputBoundError
     writeProcessStdin child (stringToBytes "bounded-")
     writeProcessStdin child (stringToBytes "stdin")
     closeProcessStdin child
@@ -177,11 +182,9 @@ inputBoundError (ProcessHostError _ _) = pureIO False
 runExplicitTermination : String -> Task ()
 runExplicitTermination executable = do
     request <- childRequest executable "delayed-output"
-    (status, stdoutCount, stderrCount) <- mapError processToHost
-        (withProcess 32 request terminateSession)
-    if and
-        (and (not (isExitSuccess status)) (stdoutCount == 0))
-        (stderrCount == 0)
+    (status, stdoutCount, stderrCount) <-
+        mapError processToHost (withProcess 32 request terminateSession)
+    if and (and (not (isExitSuccess status)) (stdoutCount == 0)) (stderrCount == 0)
         then printLine "streaming-terminate"
         else printLine "wrong-streaming-terminate"
 
@@ -195,10 +198,10 @@ terminateSession child = do
 runScopedTimeout : String -> Task ()
 runScopedTimeout executable = do
     request <- childRequest executable "delayed-output"
-    result <- mapError processToHost
-        (timeout
-            (milliseconds 1)
-            (withProcess 32 request (fun child => waitProcess child)))
+    result <-
+        mapError
+            processToHost
+            (timeout (milliseconds 1) (withProcess 32 request (fun child => waitProcess child)))
     case result of
         Nothing => printLine "streaming-timeout"
         | Just status => printLine "wrong-streaming-timeout"

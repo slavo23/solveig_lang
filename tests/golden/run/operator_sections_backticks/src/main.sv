@@ -16,7 +16,7 @@ rightSection : Int
 rightSection = (+ 5) 7
 
 minusNegation : Int
-minusNegation = (- 5)
+minusNegation = (-5)
 
 minusLeftSection : Int
 minusLeftSection = (20 -) 3
@@ -41,11 +41,11 @@ patternBacktick =
 main : Int
 main =
     leftSection
-    + rightSection
-    + minusNegation
-    + minusLeftSection
-    + subtractSection
-    + rightNamedFixity
-    + leftNamedFixity
-    + mixedFixity
-    + patternBacktick
+        + rightSection
+        + minusNegation
+        + minusLeftSection
+        + subtractSection
+        + rightNamedFixity
+        + leftNamedFixity
+        + mixedFixity
+        + patternBacktick

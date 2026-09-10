@@ -4,10 +4,11 @@ import std.channel(*)
 
 pause : Int -> Task ()
 pause remaining =
-    if remaining == 0 then pureIO ()
-    else do
-        pureIO ()
-        pause (remaining - 1)
+    if remaining == 0
+        then pureIO ()
+        else do
+                pureIO ()
+                pause (remaining - 1)
 
 inner : Chan () -> Task ()
 inner ready = do
@@ -20,11 +21,11 @@ nested ready innerFinished =
         (do
             mask (inner ready)
             send innerFinished ()
-            pause 1000)
+            pause 1000
+        )
 
 worker : Chan () -> Chan () -> Chan () -> Task ()
-worker ready innerFinished cleaned =
-    finally (nested ready innerFinished) (send cleaned ())
+worker ready innerFinished cleaned = finally (nested ready innerFinished) (send cleaned ())
 
 main : Task ()
 main = do

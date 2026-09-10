@@ -18,6 +18,4 @@ transitiveImportedSuperclassOk = sameViaNeed 10 10
 importSmokeMain : Int
 
 importSmokeMain =
-    let a = methodImportedByClassSelection in
-    let b = transitiveImportedSuperclassOk in
-    123
+    let a = methodImportedByClassSelection in let b = transitiveImportedSuperclassOk in 123

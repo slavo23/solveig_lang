@@ -1,9 +1,47 @@
 export (
-    Ordering(..), Eq, eq, notEq, PartialOrd, Ord, less, lessEq, greater, greaterEq,
-    minOrd, maxOrd, clampOrd, totalCompareFloat, Num, div, mod, subtract, Fractional,
-    Functor, (<$>), Applicative, (<*>), liftA2, applyRight, applyLeft, (<*), (*>),
-    Monad, (>>=), thenM, (>>), Show, Semigroup, (<>), Monoid, mconcat,
-    Foldable, foldMap, Traversable, sequenceA, Hashable, hash
+    Ordering(..),
+    Eq,
+    eq,
+    notEq,
+    PartialOrd,
+    Ord,
+    less,
+    lessEq,
+    greater,
+    greaterEq,
+    minOrd,
+    maxOrd,
+    clampOrd,
+    totalCompareFloat,
+    Num,
+    div,
+    mod,
+    subtract,
+    Fractional,
+    Functor,
+    (<$>),
+    Applicative,
+    (<*>),
+    liftA2,
+    applyRight,
+    applyLeft,
+    (<*),
+    (*>),
+    Monad,
+    (>>=),
+    thenM,
+    (>>),
+    Show,
+    Semigroup,
+    (<>),
+    Monoid,
+    mconcat,
+    Foldable,
+    foldMap,
+    Traversable,
+    sequenceA,
+    Hashable,
+    hash
 )
 
 import prelude.builtins(*)
@@ -21,16 +59,17 @@ infixr 6 <>
 data Ordering =
     -- | The first value is less than the second.
     LT
-  | -- | The values compare as equal.
+    | -- | The values compare as equal.
     EQ
-  | -- | The first value is greater than the second.
+    | -- | The first value is greater than the second.
     GT
 
 -- | Values that can be checked for equality.
 class Eq a where
     -- | Checks whether two values are equal.
-    (==) : a -> a -> Bool
-    -- | Checks whether two values are different.
+    (==) :
+        a -> a -> Bool
+        -- | Checks whether two values are different.
     (/=) : a -> a -> Bool
     default (/=) x y = not (x == y)
 
@@ -48,14 +87,18 @@ notEq = (/=)
 -- | ordering. Ordinary relational operators therefore remain honest about NaN.
 class Eq a => PartialOrd a where
     -- | Compares two values, returning Nothing when they are unordered.
-    partialCompare : a -> a -> Maybe Ordering
-    -- | Checks whether the first value is less than the second.
-    (<) : a -> a -> Bool
-    -- | Checks whether the first value is less than or equal to the second.
-    (<=) : a -> a -> Bool
-    -- | Checks whether the first value is greater than the second.
-    (>) : a -> a -> Bool
-    -- | Checks whether the first value is greater than or equal to the second.
+    partialCompare :
+        a -> a -> Maybe Ordering
+        -- | Checks whether the first value is less than the second.
+    (<) :
+        a -> a -> Bool
+        -- | Checks whether the first value is less than or equal to the second.
+    (<=) :
+        a -> a -> Bool
+        -- | Checks whether the first value is greater than the second.
+    (>) :
+        a -> a -> Bool
+        -- | Checks whether the first value is greater than or equal to the second.
     (>=) : a -> a -> Bool
     default (<) x y =
         case partialCompare x y of
@@ -107,10 +150,7 @@ maxOrd x y = if x <= y then y else x
 
 -- | Restricts a value to an inclusive range in a total order.
 clampOrd : forall a. Ord a => a -> a -> a -> a
-clampOrd low high x =
-    if x < low then low
-    else if high < x then high
-    else x
+clampOrd low high x = if x < low then low else if high < x then high else x
 
 -- | Gives floating-point values an explicit deterministic IEEE total order.
 -- |
@@ -124,12 +164,15 @@ totalCompareFloat x y = prelude.prim.floatTotalCompare x y
 -- | The class uses operations that can also be implemented by a future BigInt.
 class Num a where
     -- | Adds two numbers.
-    (+) : a -> a -> a
-    -- | Subtracts the second number from the first.
-    (-) : a -> a -> a
-    -- | Multiplies two numbers.
-    (*) : a -> a -> a
-    -- | Negates a number.
+    (+) :
+        a -> a -> a
+        -- | Subtracts the second number from the first.
+    (-) :
+        a -> a -> a
+        -- | Multiplies two numbers.
+    (*) :
+        a -> a -> a
+        -- | Negates a number.
     negate : a -> a
     default (-) x y = x + negate y
 
@@ -162,8 +205,9 @@ class Functor f where
 -- | Functors that can lift values and apply wrapped functions.
 class Functor f => Applicative f where
     -- | Lifts a plain value into a context.
-    pure : forall a. a -> f a
-    -- | Applies a wrapped function to a wrapped value.
+    pure :
+        forall a. a -> f a
+        -- | Applies a wrapped function to a wrapped value.
     apply : forall a b. f (a -> b) -> f a -> f b
 
 -- | Operator form of applicative function application.
@@ -238,8 +282,9 @@ mconcat xs = foldr combine empty xs
 -- | separate `foldl'`. Instances must preserve the container's logical order.
 class Foldable t where
     -- | Folds from right to left without requiring a recursive user stack.
-    foldr : forall a b. (a -> b -> b) -> b -> t a -> b
-    -- | Strictly folds from left to right.
+    foldr :
+        forall a b. (a -> b -> b) -> b -> t a -> b
+        -- | Strictly folds from left to right.
     foldl : forall a b. (b -> a -> b) -> b -> t a -> b
 
 -- | Maps every element to a monoid and combines the results in logical order.

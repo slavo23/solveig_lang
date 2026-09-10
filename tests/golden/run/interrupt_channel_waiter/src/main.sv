@@ -9,8 +9,7 @@ waitForValue values ready = do
     printLine "unexpected receive"
 
 worker : Chan Int -> Chan () -> Chan () -> Task ()
-worker values ready cleaned =
-    finally (waitForValue values ready) (send cleaned ())
+worker values ready cleaned = finally (waitForValue values ready) (send cleaned ())
 
 main : Task ()
 main = do

@@ -32,10 +32,7 @@ filterM predicate values =
     fmap
         concat
         (traverse
-            (fun value =>
-                fmap
-                    (fun keep => if keep then [value] else [])
-                    (predicate value))
+            (fun value => fmap (fun keep => if keep then [value] else []) (predicate value))
             values)
 
 -- | Runs two IO actions and keeps the result of the second.
@@ -45,5 +42,4 @@ seqIO left right = prelude.builtins.bindIO left (fun value => right)
 -- | Runs an IO action for every element and discards the results.
 mapIO_ : forall e a. (a -> IO e ()) -> [a] -> IO e ()
 mapIO_ f [] = prelude.builtins.pureIO ()
-mapIO_ f (y :: ys) =
-    prelude.builtins.bindIO (f y) (fun value => mapIO_ f ys)
+mapIO_ f (y :: ys) = prelude.builtins.bindIO (f y) (fun value => mapIO_ f ys)

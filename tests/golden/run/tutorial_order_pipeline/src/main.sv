@@ -4,18 +4,15 @@ import std.channel(*)
 
 data Order = Order Int Int
 
-data Fulfilment =
-    Accepted Int
-  | RejectedOrder Int String
+data Fulfilment = Accepted Int | RejectedOrder Int String
 
 validateOrder : Order -> Fulfilment
 validateOrder (Order orderId quantity) =
-    if quantity <= 0 then
-        RejectedOrder orderId "quantity must be positive"
-    else if quantity > 50 then
-        RejectedOrder orderId "manual review required"
-    else
-        Accepted orderId
+    if quantity <= 0
+        then RejectedOrder orderId "quantity must be positive"
+        else if quantity > 50
+                then RejectedOrder orderId "manual review required"
+                else Accepted orderId
 
 processOrder : Chan Fulfilment -> Order -> Task ()
 processOrder results order = do
@@ -29,7 +26,8 @@ worker jobs results =
         (fun error =>
             case error of
                 HostError ResourceVanished _ _ => pureIO ()
-                | other => failIO other)
+                | other => failIO other
+        )
 
 workerStep : Chan Order -> Chan Fulfilment -> Task ()
 workerStep jobs results = do
@@ -53,11 +51,11 @@ countAccepted result =
 
 collect : Chan Fulfilment -> Int -> Int -> Task Int
 collect results remaining accepted =
-    if remaining == 0 then
-        pureIO accepted
-    else do
-        result <- recv results
-        collect results (remaining - 1) (accepted + countAccepted result)
+    if remaining == 0
+        then pureIO accepted
+        else do
+                result <- recv results
+                collect results (remaining - 1) (accepted + countAccepted result)
 
 runPipeline : Chan Order -> Chan Fulfilment -> Task Int
 runPipeline jobs results =
@@ -67,11 +65,11 @@ runPipeline jobs results =
             withThread
                 (worker jobs results)
                 (fun secondWorker => do
-                    completed <- concurrently
-                        (produce jobs)
-                        (collect results 4 0)
+                    completed <- concurrently (produce jobs) (collect results 4 0)
                     case completed of
-                        (produced, accepted) => pureIO accepted))
+                        (produced, accepted) => pureIO accepted
+                )
+        )
 
 main : Task ()
 main = do
