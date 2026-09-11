@@ -95,6 +95,7 @@ mod entailment_tests {
         let names = Names::new();
         let env = TypeCheckEnv {
             constructor_types: FxHashMap::default(),
+            hole_constructor_ids: Vec::new(),
             func_schemes: FxHashMap::default(),
             class_defs: FxHashMap::from_iter([
                 (

@@ -582,7 +582,7 @@ fn server_capabilities(encoding: PositionEncodingKind) -> ServerCapabilities {
         document_range_formatting_provider: Some(OneOf::Left(true)),
         completion_provider: Some(CompletionOptions {
             resolve_provider: Some(false),
-            trigger_characters: Some(vec![".".to_string()]),
+            trigger_characters: Some(vec![".".to_string(), "(".to_string(), ",".to_string()]),
             ..CompletionOptions::default()
         }),
         signature_help_provider: Some(SignatureHelpOptions {

@@ -219,6 +219,7 @@ pub type CheckedModule = ResolvedModule<TcMetadata, Span>;
 #[derive(Debug)]
 pub struct TypeCheckEnv {
     pub constructor_types: FxHashMap<CtorId, Ty>,
+    pub hole_constructor_ids: Vec<CtorId>,
     pub func_schemes: FxHashMap<DefId, Scheme>,
     pub class_defs: FxHashMap<ClassId, ClassDefinition>,
     pub instance_defs: Vec<InstanceDefinition<Span>>,
@@ -232,6 +233,7 @@ pub struct TypeCheckEnv {
 #[derive(Clone, Copy)]
 pub struct ModuleTables<'a> {
     pub constructor_types: &'a FxHashMap<CtorId, Ty>,
+    pub hole_constructor_ids: &'a [CtorId],
     pub class_defs: &'a FxHashMap<ClassId, ClassDefinition>,
     pub instance_defs: &'a [InstanceDefinition<Span>],
     pub tycon_table: &'a TyConTable,
@@ -251,6 +253,7 @@ impl TypeCheckEnv {
     pub fn from_module(module: &ResolvedModule<Span>) -> Self {
         Self {
             constructor_types: module.constructor_types.clone(),
+            hole_constructor_ids: sorted_constructor_ids(&module.constructor_types),
             func_schemes: module.func_schemes.clone(),
             class_defs: module
                 .class_defs
@@ -271,6 +274,7 @@ impl TypeCheckEnv {
 
         Self {
             constructor_types: module.constructor_types.clone(),
+            hole_constructor_ids: sorted_constructor_ids(&module.constructor_types),
             func_schemes: module.func_schemes.clone(),
             class_defs: module
                 .class_defs
@@ -306,6 +310,7 @@ impl<'a> ModuleTables<'a> {
     fn from_env(env: &'a TypeCheckEnv) -> Self {
         Self {
             constructor_types: &env.constructor_types,
+            hole_constructor_ids: &env.hole_constructor_ids,
             class_defs: &env.class_defs,
             instance_defs: &env.instance_defs,
             tycon_table: &env.tycon_table,
@@ -314,6 +319,12 @@ impl<'a> ModuleTables<'a> {
             tycon_kinds: &env.tycon_kinds,
         }
     }
+}
+
+fn sorted_constructor_ids(constructors: &FxHashMap<CtorId, Ty>) -> Vec<CtorId> {
+    let mut ids = constructors.keys().copied().collect::<Vec<_>>();
+    ids.sort();
+    ids
 }
 
 impl CheckDelta {
@@ -351,6 +362,7 @@ mod tests {
         let names = Names::new();
         let mut env = TypeCheckEnv {
             constructor_types: FxHashMap::default(),
+            hole_constructor_ids: Vec::new(),
             func_schemes: FxHashMap::default(),
             class_defs: FxHashMap::default(),
             instance_defs: Vec::new(),
@@ -389,6 +401,7 @@ mod tests {
         let class_id = names.class_id("C");
         let env = TypeCheckEnv {
             constructor_types: FxHashMap::default(),
+            hole_constructor_ids: Vec::new(),
             func_schemes: FxHashMap::default(),
             class_defs: FxHashMap::from_iter([(
                 class_id,
@@ -584,6 +597,7 @@ mod tests {
         let superclass = Predicate::named(&mut names, &superclass_name, vec![Ty::TyVar(param)]);
         let env = TypeCheckEnv {
             constructor_types: FxHashMap::default(),
+            hole_constructor_ids: Vec::new(),
             func_schemes: FxHashMap::default(),
             class_defs: FxHashMap::from_iter([(
                 class_id,
@@ -651,6 +665,7 @@ mod tests {
 
         let env = TypeCheckEnv {
             constructor_types: FxHashMap::default(),
+            hole_constructor_ids: Vec::new(),
             func_schemes: FxHashMap::default(),
             class_defs: FxHashMap::default(),
             instance_defs: Vec::new(),

@@ -54,6 +54,33 @@ fn offset_in_line(source: &str, line: &str, needle: &str) -> usize {
     line_start + needle_offset
 }
 
+fn source_position(source: &str, offset: usize) -> SourcePosition {
+    let prefix = source
+        .get(..offset)
+        .expect("test offset should be a UTF-8 boundary");
+    let line = u32::try_from(prefix.bytes().filter(|byte| *byte == b'\n').count())
+        .expect("test line number should fit in u32");
+    let line_start = prefix.rfind('\n').map_or(0, |index| index + 1);
+    let character =
+        u32::try_from(prefix.len() - line_start).expect("test character should fit in u32");
+
+    SourcePosition::new(line, character)
+}
+
+fn hole_actions_at(
+    compilation: &mut Compilation,
+    source_path: &Path,
+    source: &str,
+    hole_offset: usize,
+) -> Vec<SourceCodeAction> {
+    compilation.code_actions_at_range(
+        source_path,
+        source_position(source, hole_offset),
+        source_position(source, hole_offset + 2),
+        PositionEncoding::Utf8,
+    )
+}
+
 #[test]
 fn typed_hole_actions_fill_suggested_constructor_and_recheck() {
     let project_root = temp_root("hole");
@@ -84,6 +111,190 @@ main = ??
     compilation.set_overlay(&source_path, fixed);
     let result = compilation.check(true).expect("fixed check should finish");
     assert!(result.success(), "{:#?}", result.diagnostics());
+
+    drop(project_root);
+}
+
+#[test]
+fn typed_hole_actions_use_one_sound_polymorphic_instantiation() {
+    let project_root = temp_root("polymorphic_hole");
+    let source_path = project_root.join("scratch.sv");
+    let source = r#"data Pair a = Pair a a
+
+use : (forall a. a -> a -> Pair a) -> Int -> String -> Pair Int
+use build count text = ??
+
+main : Pair Int
+main = use Pair 1 "ignored"
+"#;
+    write_source(&source_path, source);
+    let mut compilation = Compilation::for_source_file(&source_path);
+    let hole = source
+        .find("??")
+        .expect("test source should contain a hole");
+
+    let actions = hole_actions_at(&mut compilation, &source_path, source, hole);
+
+    action_named(&actions, "Fill hole with `build count count`");
+    assert!(
+        actions
+            .iter()
+            .all(|action| !action.title().contains("build count text")),
+        "one polymorphic instantiation must not mix Int and String arguments: {actions:#?}"
+    );
+    for action in &actions {
+        let fixed = apply_action(source, action);
+        compilation.set_overlay(&source_path, fixed);
+        let result = compilation
+            .check(true)
+            .expect("every offered polymorphic fill should recheck");
+        assert!(
+            result.success(),
+            "offered hole fill did not typecheck: {}\n{:#?}",
+            action.title(),
+            result.diagnostics()
+        );
+    }
+
+    drop(project_root);
+}
+
+#[test]
+fn typed_hole_actions_do_not_guess_an_unconstrained_result() {
+    let project_root = temp_root("unconstrained_hole");
+    let source_path = project_root.join("scratch.sv");
+    let source = "choose value = ??\n";
+    write_source(&source_path, source);
+    let mut compilation = Compilation::for_source_file(&source_path);
+    let hole = source
+        .find("??")
+        .expect("test source should contain a hole");
+
+    let actions = hole_actions_at(&mut compilation, &source_path, source, hole);
+
+    assert!(
+        actions.is_empty(),
+        "an unconstrained result has no evidence-backed fill: {actions:#?}"
+    );
+
+    drop(project_root);
+}
+
+#[test]
+fn typed_hole_actions_never_expose_an_opaque_constructor() {
+    let project_root = temp_root("opaque_constructor_hole");
+    let source_path = project_root.join("src/main.sv");
+    let source = r#"import opaque_constructor_hole.secret(Secret)
+
+build : Int -> Secret
+build value = ??
+
+main : Int
+main = 1
+"#;
+    write_source(
+        &project_root.join("solveig.toml"),
+        "[package]\nname = \"opaque_constructor_hole\"\nversion = \"0.1.0\"\n\n[language]\nentry = \"main\"\n",
+    );
+    write_source(
+        &project_root.join("src/secret.sv"),
+        "export (Secret)\n\ndata Secret = Secret Int\n",
+    );
+    write_source(&source_path, source);
+    let mut compilation = Compilation::new(&project_root);
+    let hole = source
+        .find("??")
+        .expect("test source should contain a hole");
+
+    let actions = hole_actions_at(&mut compilation, &source_path, source, hole);
+
+    assert!(
+        actions
+            .iter()
+            .all(|action| !action.title().contains("Secret")),
+        "an opaque constructor must never become an editor insertion: {actions:#?}"
+    );
+
+    drop(project_root);
+}
+
+#[test]
+fn typed_hole_actions_offer_an_explicitly_imported_constructor() {
+    let project_root = temp_root("visible_constructor_hole");
+    let source_path = project_root.join("src/main.sv");
+    let source = r#"import visible_constructor_hole.secret(Secret(..))
+
+build : Int -> Secret
+build value = ??
+
+main : Int
+main = 1
+"#;
+    write_source(
+        &project_root.join("solveig.toml"),
+        "[package]\nname = \"visible_constructor_hole\"\nversion = \"0.1.0\"\n\n[language]\nentry = \"main\"\n",
+    );
+    write_source(
+        &project_root.join("src/secret.sv"),
+        "export (Secret(..))\n\ndata Secret = Secret Int\n",
+    );
+    write_source(&source_path, source);
+    let mut compilation = Compilation::new(&project_root);
+    let hole = source
+        .find("??")
+        .expect("test source should contain a hole");
+
+    let actions = hole_actions_at(&mut compilation, &source_path, source, hole);
+    let action = action_named(&actions, "Fill hole with `Secret value`");
+    let fixed = apply_action(source, action);
+    compilation.set_overlay(&source_path, fixed);
+    let result = compilation.check(true).expect("fixed check should finish");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    drop(project_root);
+}
+
+#[test]
+fn typed_hole_actions_filter_normal_and_instance_method_locals_by_type() {
+    let project_root = temp_root("local_holes");
+    let source_path = project_root.join("scratch.sv");
+    let source = r#"data User = User String Int
+
+choose : Int -> String -> Int
+choose number text = ??
+
+class Label a where
+    label : a -> String
+
+instance Label User where
+    label (User name age) = ??
+
+main : Int
+main = choose 1 "one"
+"#;
+    write_source(&source_path, source);
+    let mut compilation = Compilation::for_source_file(&source_path);
+    let mut holes = source.match_indices("??").map(|(offset, _)| offset);
+    let normal_hole = holes.next().expect("normal function hole should exist");
+    let instance_hole = holes.next().expect("instance method hole should exist");
+
+    let normal_actions = hole_actions_at(&mut compilation, &source_path, source, normal_hole);
+    action_named(&normal_actions, "Fill hole with `number`");
+    assert!(
+        normal_actions
+            .iter()
+            .all(|action| !action.title().contains("text")),
+        "String local must not fill an Int hole: {normal_actions:#?}"
+    );
+
+    let instance_actions = hole_actions_at(&mut compilation, &source_path, source, instance_hole);
+    action_named(&instance_actions, "Fill hole with `name`");
+    assert!(
+        instance_actions
+            .iter()
+            .all(|action| !action.title().contains("age")),
+        "Int pattern local must not fill a String method hole: {instance_actions:#?}"
+    );
 
     drop(project_root);
 }

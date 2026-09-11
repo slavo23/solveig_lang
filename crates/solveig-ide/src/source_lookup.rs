@@ -69,14 +69,6 @@ pub(super) fn source_file_id_in_source_map(source_map: &SourceMap, file: &Path) 
         .and_then(|(index, _)| file_id_from_index(index))
 }
 
-pub(super) fn span_contains_offset(span: &Range<usize>, offset: usize) -> bool {
-    if span.start == span.end {
-        offset == span.start
-    } else {
-        span.start <= offset && offset < span.end
-    }
-}
-
 pub(super) fn import_module_name_span(
     source: &str,
     import_span: Span,

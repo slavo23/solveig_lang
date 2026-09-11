@@ -25,9 +25,9 @@ use solveig_resolve::project::{
     instance_method_equation_group_indices, project_module_selection,
 };
 use solveig_syntax::ast::{
-    ClassMethod, DocComment, ImportDecl, InstanceMethod, ModuleName, ModuleSelection, ParsedModule,
-    Spanned, SurfaceConstructor, SurfaceDefinition, SurfaceDoStmt, SurfaceExpr, SurfacePattern,
-    SurfacePredicate, SurfaceTy,
+    ClassMethod, DocComment, ImportDecl, InstanceMethod, ModuleEntity, ModuleName, ModuleSelection,
+    ParsedModule, Spanned, SurfaceConstructor, SurfaceDefinition, SurfaceDoStmt, SurfaceExpr,
+    SurfacePattern, SurfacePredicate, SurfaceTy,
 };
 use solveig_syntax::syntax::SyntaxKind;
 use std::cell::RefCell;

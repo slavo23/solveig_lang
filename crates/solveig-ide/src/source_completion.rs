@@ -125,7 +125,8 @@ impl SourceCompletionCandidate {
 
         self.visible_span.is_none_or(|span| {
             let offset = usize::try_from(offset).unwrap_or(usize::MAX);
-            source_lookup::span_contains_offset(&span.to_usize_range(), offset)
+            let span = span.to_usize_range();
+            span.start <= offset && offset <= span.end
         })
     }
 

@@ -94,6 +94,7 @@ impl TypeChecker<'_> {
             span: self.get_file_span(span),
             expected_type: self.zonk_type(&ctx.apply(ty)),
             context: self.context_bindings(ctx),
+            constructors_in_scope: self.tables.hole_constructor_ids.to_vec(),
         });
     }
     pub fn finalize_holes(&mut self) {

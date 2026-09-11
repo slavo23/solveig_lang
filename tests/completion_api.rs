@@ -70,9 +70,12 @@ fn package_completion_items(test_name: &str, source: &str) -> Vec<SourceCompleti
     );
     write_source(
         &root.join("src/core.sv"),
-        r#"export (Widget(..), value, other)
+        r#"export (Widget(..), Render, value, other)
 
 data Widget = MkWidget Int
+
+class Render a where
+    render : a -> String
 
 value = 1
 other = 2
@@ -157,7 +160,137 @@ main = prelude.builtins.$COMPLETETrue
 }
 
 #[test]
+fn header_completion_steps_through_modules_and_imported_exports() {
+    let modules = completion_items(
+        r#"import std.$COMPLETE
+
+main : Int
+main = 1
+"#,
+    );
+
+    assert_item(&modules, "channel", SourceCompletionItemKind::Module);
+    assert_item(&modules, "http", SourceCompletionItemKind::Module);
+    assert!(find_item(&modules, "send").is_none());
+
+    let exports = completion_items(
+        r#"import std.channel($COMPLETE)
+
+main : Int
+main = 1
+"#,
+    );
+
+    assert_item(&exports, "newChan", SourceCompletionItemKind::Function);
+    assert_item(&exports, "send", SourceCompletionItemKind::Function);
+    assert!(find_item(&exports, "if").is_none());
+    assert!(find_item(&exports, "readFile").is_none());
+
+    let partial = completion_items(
+        r#"import std.channel(se$COMPLETE)
+
+main : Int
+main = 1
+"#,
+    );
+    assert_item(&partial, "send", SourceCompletionItemKind::Function);
+    assert!(find_item(&partial, "readFile").is_none());
+
+    let remaining = completion_items(
+        r#"import std.channel(send, $COMPLETE)
+
+main : Int
+main = 1
+"#,
+    );
+    assert_item(&remaining, "recv", SourceCompletionItemKind::Function);
+    assert!(find_item(&remaining, "send").is_none());
+}
+
+#[test]
+fn module_selection_completion_uses_the_correct_visibility_projection() {
+    let exports = completion_items(
+        r#"export ($COMPLETE)
+
+data Widget = MkWidget Int
+
+class Render a where
+    render : a -> String
+
+answer : Int
+answer = 42
+"#,
+    );
+
+    assert_item(&exports, "Widget", SourceCompletionItemKind::Type);
+    assert_item(&exports, "Render", SourceCompletionItemKind::Class);
+    assert!(find_item(&exports, "MkWidget").is_none());
+    assert!(find_item(&exports, "render").is_none());
+    assert_item(&exports, "answer", SourceCompletionItemKind::Function);
+    assert!(find_item(&exports, "map").is_none());
+    assert!(find_item(&exports, "if").is_none());
+
+    let private = completion_items(
+        r#"private ($COMPLETE)
+
+data Widget = MkWidget Int
+
+class Render a where
+    render : a -> String
+
+answer : Int
+answer = 42
+"#,
+    );
+    assert_item(&private, "Widget", SourceCompletionItemKind::Type);
+    assert_item(&private, "Render", SourceCompletionItemKind::Class);
+    assert_item(&private, "answer", SourceCompletionItemKind::Function);
+    assert!(find_item(&private, "MkWidget").is_none());
+    assert!(find_item(&private, "render").is_none());
+    assert!(find_item(&private, "map").is_none());
+
+    let partial = completion_items(
+        r#"export (an$COMPLETE)
+
+answer : Int
+answer = 42
+"#,
+    );
+    assert_item(&partial, "answer", SourceCompletionItemKind::Function);
+    assert!(find_item(&partial, "map").is_none());
+
+    let reexports = completion_items(
+        r#"reexport std.channel($COMPLETE)
+
+main : Int
+main = 1
+"#,
+    );
+
+    assert_item(
+        &reexports,
+        "newBoundedChan",
+        SourceCompletionItemKind::Function,
+    );
+    assert_item(&reexports, "recv", SourceCompletionItemKind::Function);
+    assert!(find_item(&reexports, "readFile").is_none());
+}
+
+#[test]
 fn project_completion_respects_import_selection_qualification_and_aliases() {
+    let header = package_completion_items(
+        "selectable_import_entities",
+        r#"import completion_pkg.core($COMPLETE)
+
+main = 1
+"#,
+    );
+    assert_item(&header, "Widget", SourceCompletionItemKind::Type);
+    assert_item(&header, "Render", SourceCompletionItemKind::Class);
+    assert_item(&header, "value", SourceCompletionItemKind::Function);
+    assert!(find_item(&header, "MkWidget").is_none());
+    assert!(find_item(&header, "render").is_none());
+
     let unqualified = package_completion_items(
         "selected_imports",
         r#"import completion_pkg.core(value as answer, Widget)
@@ -258,4 +391,14 @@ main = if True then $COMPLETE
 
     assert_item(&items, "else", SourceCompletionItemKind::Keyword);
     assert_item(&items, "then", SourceCompletionItemKind::Keyword);
+}
+
+#[test]
+fn completion_keeps_function_parameters_visible_at_the_typed_prefix_end() {
+    let items = completion_items(
+        r#"add x1 = x$COMPLETE
+"#,
+    );
+
+    assert_item(&items, "x1", SourceCompletionItemKind::Variable);
 }

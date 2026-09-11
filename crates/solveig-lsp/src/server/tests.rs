@@ -135,7 +135,10 @@ fn initialize_capabilities_use_full_sync_and_negotiate_utf8() {
         .completion_provider
         .expect("completion provider should be advertised");
     assert_eq!(completion.resolve_provider, Some(false));
-    assert_eq!(completion.trigger_characters, Some(vec![".".to_string()]));
+    assert_eq!(
+        completion.trigger_characters,
+        Some(vec![".".to_string(), "(".to_string(), ",".to_string()])
+    );
     let signature_help = capabilities
         .signature_help_provider
         .expect("signature-help provider should be advertised");
@@ -365,6 +368,65 @@ main = prelude.builtins.True
             .as_ref()
             .is_some_and(|detail| detail.contains("Bool"))
     );
+
+    server.shutdown(()).await.expect("shutdown should succeed");
+    drop(project_root);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn text_document_completion_returns_only_selected_module_exports() {
+    let project_root = temp_root("server_header_completion");
+    let source = project_root.join("scratch.sv");
+    let text = r#"import std.channel()
+
+main : Int
+main = 1
+"#;
+    write_source(&source, text);
+    let uri = Url::from_file_path(&source).expect("test path should become a file URI");
+    let root_uri =
+        Url::from_directory_path(&project_root).expect("test root should become a file URI");
+    let mut server = LspServer::new(ClientSocket::new_closed());
+
+    server
+        .initialize(initialize_params(root_uri))
+        .await
+        .expect("initialize should succeed");
+    assert!(
+        server
+            .did_open(DidOpenTextDocumentParams {
+                text_document: TextDocumentItem {
+                    uri: uri.clone(),
+                    language_id: "solveig".to_string(),
+                    version: 1,
+                    text: text.to_string(),
+                },
+            })
+            .is_continue()
+    );
+    flush_checks(&server);
+
+    let completion = server
+        .completion(CompletionParams {
+            text_document_position: TextDocumentPositionParams {
+                text_document: TextDocumentIdentifier { uri },
+                position: Position::new(0, 19),
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+            context: None,
+        })
+        .await
+        .expect("completion request should succeed")
+        .expect("completion response should exist");
+    let CompletionResponse::Array(items) = completion else {
+        panic!("completion should return an item array");
+    };
+
+    assert!(items.iter().any(|item| item.label == "send"));
+    assert!(items.iter().any(|item| item.label == "newChan"));
+    assert!(items.iter().all(|item| item.label != "map"));
+    assert!(items.iter().all(|item| item.label != "readFile"));
 
     server.shutdown(()).await.expect("shutdown should succeed");
     drop(project_root);

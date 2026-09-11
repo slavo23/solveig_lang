@@ -1,11 +1,16 @@
 //! Source-level completion collection and filtering.
+//! Expression candidates remain scope-aware; header selections use their CST context.
 
 use super::*;
+use solveig_syntax::cst::CstId;
 
+mod module_selection;
 mod typed;
 
+use module_selection::{completion_context, module_selection_items};
+
 pub(super) use typed::{
-    TypedModuleCompletionInput, typed_local_completion_candidates,
+    TypedModuleCompletionInput, module_entity_completion_items, typed_local_completion_candidates,
     typed_module_completion_candidates,
 };
 
@@ -20,31 +25,40 @@ struct CompletionKey {
     kind: SourceCompletionItemKind,
 }
 
-struct CompletionContext {
-    qualifier: Option<String>,
+enum CompletionContext {
+    Scope { qualifier: Option<String> },
+    ModuleSelection { kind: SyntaxKind, node: CstId },
 }
 
 pub(super) fn completion_items_in_compilation(
+    session: &Session,
+    snapshot: &CompilationSnapshot,
     artifacts: &CompilationArtifacts,
-    source_map: &SourceMap,
     candidates: &[SourceCompletionCandidate],
-    file: &Path,
-    position: SourcePosition,
-    encoding: PositionEncoding,
+    target: position::PositionTarget,
 ) -> Vec<SourceCompletionItem> {
-    let Some(target) =
-        position::target_at_position_in_artifacts(artifacts, source_map, file, position, encoding)
-    else {
-        return Vec::new();
+    let context = completion_context(artifacts, target);
+    if let CompletionContext::ModuleSelection { kind, node } = context {
+        return sort_completion_items(module_selection_items(
+            session,
+            snapshot,
+            candidates,
+            target.file,
+            u32::try_from(target.offset).unwrap_or(u32::MAX),
+            kind,
+            node,
+        ));
+    }
+    let CompletionContext::Scope { qualifier } = context else {
+        solveig_base::ice!("scope completion context must remain after module selection return")
     };
-    let context = completion_context(source_map, target.file, target.offset);
     let mut by_key = BTreeMap::<CompletionKey, SourceCompletionItem>::new();
 
     for candidate in candidates {
         if !candidate.is_visible_at(
             target.file,
             u32::try_from(target.offset).unwrap_or(u32::MAX),
-            context.qualifier.as_deref(),
+            qualifier.as_deref(),
         ) {
             continue;
         }
@@ -65,7 +79,10 @@ pub(super) fn completion_items_in_compilation(
             .or_insert(item);
     }
 
-    let mut items = by_key.into_values().collect::<Vec<_>>();
+    sort_completion_items(by_key.into_values().collect())
+}
+
+fn sort_completion_items(mut items: Vec<SourceCompletionItem>) -> Vec<SourceCompletionItem> {
     items.sort_by_key(|item| (completion_kind_rank(item.kind()), item.label().to_string()));
     items
 }
@@ -106,32 +123,6 @@ fn completion_kind_rank(kind: SourceCompletionItemKind) -> u8 {
         SourceCompletionItemKind::Module => 4,
         SourceCompletionItemKind::Keyword => 5,
     }
-}
-
-fn completion_context(source_map: &SourceMap, file: FileId, offset: usize) -> CompletionContext {
-    let Some(source) = source_map.files().get(file.0 as usize) else {
-        return CompletionContext { qualifier: None };
-    };
-    let offset = offset.min(source.src.len());
-    let Some(prefix) = source.src.get(..offset) else {
-        return CompletionContext { qualifier: None };
-    };
-    let start = prefix
-        .rfind(|ch: char| !completion_path_char(ch))
-        .map_or(0, |index| index + 1);
-    let Some(path) = source.src.get(start..offset) else {
-        return CompletionContext { qualifier: None };
-    };
-    let qualifier = path.rfind('.').and_then(|dot| {
-        let qualifier = path.get(..dot)?;
-        (!qualifier.is_empty()).then(|| qualifier.to_string())
-    });
-
-    CompletionContext { qualifier }
-}
-
-fn completion_path_char(ch: char) -> bool {
-    ch == '.' || ch == '_' || ch.is_ascii_alphanumeric()
 }
 
 fn push_module_path_candidates(

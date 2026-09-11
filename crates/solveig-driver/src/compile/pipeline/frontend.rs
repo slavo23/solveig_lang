@@ -564,6 +564,15 @@ impl<'a> FrontendState<'a> {
 
         let mut check_env = TypeCheckEnv::from_module(resolved);
 
+        check_env.hole_constructor_ids.extend(
+            imported_typed
+                .iter()
+                .flat_map(|imported| imported.unqualified.constructor_ids.values())
+                .copied(),
+        );
+        check_env.hole_constructor_ids.sort();
+        check_env.hole_constructor_ids.dedup();
+
         check_env.func_schemes.extend(func_schemes);
         check_env.tycon_kinds.extend(tycon_kinds);
         check_env.constructor_types.extend(constructor_types);

@@ -41,6 +41,75 @@ The current server provides:
 - whole-document formatting and structural range formatting through the
   canonical Solveig formatter.
 
+## Completion in expressions and module headers
+
+Completion follows the meaning of the cursor's syntactic context. In an
+expression, it includes only names that can be referenced there: function
+parameters, pattern and `do` binders whose scope has begun, current-module
+declarations, imported names, constructors, class methods, and expression
+keywords. For example, while editing
+
+```solveig
+add x1 = x
+```
+
+completion after the final `x` includes `x1`. A binder from a different arm,
+a later `do` statement, or a function body that has already ended is not in
+scope. After a qualifier such as `channel.`, the result is restricted to that
+module or import alias rather than mixed with unqualified names.
+
+Module headers have a different namespace. After `import std.`, completion
+steps through available module path segments such as `channel` and `http`.
+Inside a selection such as
+
+```solveig
+import std.channel(newChan, )
+```
+
+it offers selectable exports of `std.channel`; it does not mix in Prelude
+keywords or exports from another standard-library module. The same rule
+applies to `reexport`. `export (...)` and `private (...)` instead offer legal
+entities declared by the current module. Names already present in the same
+selection are omitted.
+
+Selections use Solveig's entity rules. A data constructor is exposed through
+its owning type, as in `Widget(..)`, so completion offers `Widget` rather than
+the constructor `MkWidget`. Likewise, selecting a class exposes its methods,
+so the list offers the class name rather than each method separately. These
+rules match name resolution; completion never proposes syntax that the
+resolver would reject merely because that name exists in an internal table.
+
+The server advertises `.`, `(`, and `,` as completion triggers. It also keeps
+header completion available while the current selection name is only partly
+typed and therefore temporarily fails resolution. In that state labels and
+visibility come from parsed declarations and module APIs; type details are
+added whenever checked metadata is available. Prefix and fuzzy filtering are
+left to the editor client.
+
+## Typed-hole suggestions
+
+Write `??` where an expression is missing. The diagnostic shows the inferred
+expected type and the bindings in lexical scope. When the checker can prove a
+small fill from those facts, the editor offers it as a quick fix. For example:
+
+```solveig
+choose : Int -> String -> Int
+choose number label = ??
+```
+
+`number` is a valid suggestion; `label` is not. The same type-directed
+filtering applies inside explicit typeclass instance methods, including names
+introduced by method patterns.
+
+Suggestions are deliberately sound and conservative. A polymorphic function
+application uses one consistent instantiation for its result and every
+argument. Constructors are offered only when their owning type was imported
+with constructors or is locally visible; an opaque import never leaks a
+constructor into an edit. Candidates with unsolved class constraints, argument
+types that would have to be guessed, or an unresolved expected result are not
+offered. The diagnostic still remains useful in those cases, but the server
+does not present a speculative edit as if it were known to typecheck.
+
 ## Project discovery
 
 For an opened `.sv` file, the server walks upward and uses the nearest directory

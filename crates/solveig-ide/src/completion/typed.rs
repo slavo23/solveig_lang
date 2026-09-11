@@ -1,4 +1,5 @@
 //! Typed completion candidates from checked module APIs and retained term bodies.
+//! Surface API facts keep labels available while mid-edit code cannot be checked.
 
 use super::*;
 
@@ -31,7 +32,7 @@ pub(crate) fn typed_module_completion_candidates(
     } = input;
     let mut out = Vec::new();
     let (tycon_table, class_table) =
-        completion_display_tables(session, names, local_typed_api, typed_apis);
+        completion_display_tables(session, names, Some(local_typed_api), typed_apis);
     let tables = PrettyTables::new(names, &tycon_table, &class_table);
 
     let local_api = local_api.local_view();
@@ -116,82 +117,111 @@ fn typed_api_candidates(
     qualifier: Option<&str>,
     tables: PrettyTables<'_>,
 ) -> Vec<SourceCompletionCandidate> {
+    api_completion_items(session, module_api, Some(typed_api), tables)
+        .into_iter()
+        .map(|item| scoped_completion_candidate(item, file, qualifier))
+        .collect()
+}
+
+pub(crate) fn module_entity_completion_items(
+    session: &Session,
+    names: &Names,
+    module_api: &ModuleApi,
+    typed_api: Option<&TypedModuleApi>,
+    typed_apis: &FxHashMap<ModuleName, SharedTypedModuleApi>,
+) -> Vec<SourceCompletionItem> {
+    let (tycon_table, class_table) =
+        completion_display_tables(session, names, typed_api, typed_apis);
+    api_completion_items(
+        session,
+        module_api,
+        typed_api,
+        PrettyTables::new(names, &tycon_table, &class_table),
+    )
+    .into_iter()
+    .filter(|item| {
+        !matches!(
+            item.kind(),
+            SourceCompletionItemKind::Constructor | SourceCompletionItemKind::Method
+        )
+    })
+    .collect()
+}
+
+fn api_completion_items(
+    session: &Session,
+    module_api: &ModuleApi,
+    typed_api: Option<&TypedModuleApi>,
+    tables: PrettyTables<'_>,
+) -> Vec<SourceCompletionItem> {
     let mut out = Vec::new();
 
     for (name, def_id) in &module_api.terms {
-        if let Some(scheme) = typed_api.term_schemes.get(def_id) {
-            out.push(scoped_completion_candidate(
-                SourceCompletionItem::new(
-                    session.str(*name).to_string(),
-                    term_completion_kind(typed_api, *def_id),
-                )
-                .with_optional_detail(pretty_scheme_detail(scheme, tables))
-                .with_optional_documentation(doc_for_def(typed_api, *def_id)),
-                file,
-                qualifier,
-            ));
-        }
+        let detail = typed_api
+            .and_then(|api| api.term_schemes.get(def_id))
+            .and_then(|scheme| pretty_scheme_detail(scheme, tables));
+        out.push(
+            SourceCompletionItem::new(
+                session.str(*name).to_string(),
+                term_completion_kind(module_api, *name),
+            )
+            .with_optional_detail(detail)
+            .with_optional_documentation(doc_for_def(module_api, typed_api, *def_id)),
+        );
     }
 
     for (name, def_id) in &module_api.constructors {
-        if let Some(ty) = typed_api.constructor_types.get(def_id) {
-            out.push(scoped_completion_candidate(
-                SourceCompletionItem::new(
-                    session.str(*name).to_string(),
-                    SourceCompletionItemKind::Constructor,
-                )
-                .with_optional_detail(pretty_ty_detail(ty, tables))
-                .with_optional_documentation(doc_for_def(typed_api, *def_id)),
-                file,
-                qualifier,
-            ));
-        }
+        let detail = typed_api
+            .and_then(|api| api.constructor_types.get(def_id))
+            .and_then(|ty| pretty_ty_detail(ty, tables));
+        out.push(
+            SourceCompletionItem::new(
+                session.str(*name).to_string(),
+                SourceCompletionItemKind::Constructor,
+            )
+            .with_optional_detail(detail)
+            .with_optional_documentation(doc_for_def(module_api, typed_api, *def_id)),
+        );
     }
 
     for (name, def_id) in &module_api.types {
-        out.push(scoped_completion_candidate(
+        out.push(
             SourceCompletionItem::new(
                 session.str(*name).to_string(),
                 SourceCompletionItemKind::Type,
             )
             .with_optional_detail(
                 typed_api
-                    .type_kinds
-                    .get(def_id)
+                    .and_then(|api| api.type_kinds.get(def_id))
                     .map(|kind| format!("kind {}", kind.pretty())),
             )
-            .with_optional_documentation(doc_for_def(typed_api, *def_id)),
-            file,
-            qualifier,
-        ));
+            .with_optional_documentation(doc_for_def(module_api, typed_api, *def_id)),
+        );
     }
 
     for (name, def_id) in &module_api.type_aliases {
-        out.push(scoped_completion_candidate(
+        out.push(
             SourceCompletionItem::new(
                 session.str(*name).to_string(),
                 SourceCompletionItemKind::Type,
             )
             .with_detail("type alias")
-            .with_optional_documentation(doc_for_def(typed_api, *def_id)),
-            file,
-            qualifier,
-        ));
+            .with_optional_documentation(doc_for_def(module_api, typed_api, *def_id)),
+        );
     }
 
     for (name, def_id) in &module_api.classes {
-        if let Some(class_def) = typed_api.class_defs.get(def_id) {
-            out.push(scoped_completion_candidate(
-                SourceCompletionItem::new(
-                    session.str(*name).to_string(),
-                    SourceCompletionItemKind::Class,
-                )
-                .with_detail(class_detail(tables.names, class_def))
-                .with_optional_documentation(doc_for_def(typed_api, *def_id)),
-                file,
-                qualifier,
-            ));
-        }
+        let detail = typed_api
+            .and_then(|api| api.class_defs.get(def_id))
+            .map(|class_def| class_detail(tables.names, class_def));
+        out.push(
+            SourceCompletionItem::new(
+                session.str(*name).to_string(),
+                SourceCompletionItemKind::Class,
+            )
+            .with_optional_detail(detail)
+            .with_optional_documentation(doc_for_def(module_api, typed_api, *def_id)),
+        );
     }
 
     out
@@ -200,20 +230,22 @@ fn typed_api_candidates(
 fn completion_display_tables(
     session: &Session,
     names: &Names,
-    local_typed_api: &TypedModuleApi,
+    local_typed_api: Option<&TypedModuleApi>,
     typed_apis: &FxHashMap<ModuleName, SharedTypedModuleApi>,
 ) -> (TyConTable, ClassTable) {
     let mut tycon_table = TyConTable::new();
     let mut class_table = ClassTable::new();
 
     seed_completion_primitive_tycons(session, &mut tycon_table);
-    extend_completion_display_tables(
-        session,
-        names,
-        &mut tycon_table,
-        &mut class_table,
-        local_typed_api,
-    );
+    if let Some(local_typed_api) = local_typed_api {
+        extend_completion_display_tables(
+            session,
+            names,
+            &mut tycon_table,
+            &mut class_table,
+            local_typed_api,
+        );
+    }
     for typed_api in typed_apis.values() {
         extend_completion_display_tables(
             session,
@@ -339,11 +371,11 @@ fn scoped_completion_candidate(
     }
 }
 
-fn term_completion_kind(typed_api: &TypedModuleApi, def_id: DefId) -> SourceCompletionItemKind {
-    if typed_api
-        .class_defs
+fn term_completion_kind(module_api: &ModuleApi, name: Symbol) -> SourceCompletionItemKind {
+    if module_api
+        .class_methods
         .values()
-        .any(|class_def| class_def.methods.iter().any(|method| method.id == def_id))
+        .any(|methods| methods.contains(&name))
     {
         SourceCompletionItemKind::Method
     } else {
@@ -351,8 +383,15 @@ fn term_completion_kind(typed_api: &TypedModuleApi, def_id: DefId) -> SourceComp
     }
 }
 
-fn doc_for_def(typed_api: &TypedModuleApi, def_id: DefId) -> Option<String> {
-    typed_api.docs.get(&def_id).map(|doc| doc.text.clone())
+fn doc_for_def(
+    module_api: &ModuleApi,
+    typed_api: Option<&TypedModuleApi>,
+    def_id: DefId,
+) -> Option<String> {
+    typed_api
+        .and_then(|api| api.docs.get(&def_id))
+        .or_else(|| module_api.docs.get(&def_id))
+        .map(|doc| doc.text.clone())
 }
 
 fn class_detail(names: &Names, class_def: &ClassDefinition) -> String {

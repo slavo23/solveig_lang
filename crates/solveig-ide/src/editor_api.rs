@@ -403,13 +403,21 @@ impl<'a> ProjectSnapshotView<'a> {
             self.session,
             self.snapshot,
             |artifacts, candidates| {
-                completion_items_in_compilation(
+                let Some(target) = position::target_at_position_in_artifacts(
                     artifacts,
                     self.source_map,
-                    candidates,
                     file.as_ref(),
                     position,
                     encoding,
+                ) else {
+                    return Vec::new();
+                };
+                completion_items_in_compilation(
+                    self.session,
+                    self.snapshot,
+                    artifacts,
+                    candidates,
+                    target,
                 )
             },
         )
