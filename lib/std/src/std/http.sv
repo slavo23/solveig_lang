@@ -159,17 +159,17 @@ data HttpError
     | InvalidHeaderValue String
     | InvalidStatus Int
     | InvalidHttpOption String Int
-    | TransportError HostError
-    | TlsError HostError
-    | RedirectError HostError
+    | TransportError IOError
+    | TlsError IOError
+    | RedirectError IOError
     | ResponseHeadersTooLarge Int
     | ResponseBodyTooLarge Int
-    | HttpHostError HostError
+    | HttpIOError IOError
     | InvalidResponseUtf8 Utf8Error
     | ManagedRequestHeader String
-    | RequestFileError Path HostError
+    | RequestFileError Path IOError
     | RequestJsonError JsonError
-    | BodyReplayError HostError
+    | BodyReplayError IOError
     | ConflictingRequestBody
     | UnexpectedStatus Status
 
@@ -185,7 +185,7 @@ instance Eq HttpError where
     (==) (RedirectError left) (RedirectError right) = left == right
     (==) (ResponseHeadersTooLarge left) (ResponseHeadersTooLarge right) = left == right
     (==) (ResponseBodyTooLarge left) (ResponseBodyTooLarge right) = left == right
-    (==) (HttpHostError left) (HttpHostError right) = left == right
+    (==) (HttpIOError left) (HttpIOError right) = left == right
     (==) (InvalidResponseUtf8 left) (InvalidResponseUtf8 right) = left == right
     (==) (ManagedRequestHeader left) (ManagedRequestHeader right) = left == right
     (==) (RequestFileError leftPath left) (RequestFileError rightPath right) =
@@ -202,18 +202,18 @@ instance Show HttpError where
     show (InvalidHeaderValue value) = "invalid HTTP header value " <> show value
     show (InvalidStatus code) = "invalid HTTP status " <> show code
     show (InvalidHttpOption name value) = "invalid HTTP " <> name <> " limit " <> show value
-    show (TransportError hostError) = "HTTP transport: " <> show hostError
-    show (TlsError hostError) = "HTTP TLS: " <> show hostError
-    show (RedirectError hostError) = "HTTP redirect: " <> show hostError
+    show (TransportError ioError) = "HTTP transport: " <> show ioError
+    show (TlsError ioError) = "HTTP TLS: " <> show ioError
+    show (RedirectError ioError) = "HTTP redirect: " <> show ioError
     show (ResponseHeadersTooLarge maximum) =
         "HTTP response headers exceed " <> show maximum <> " bytes"
     show (ResponseBodyTooLarge maximum) = "HTTP response body exceeds " <> show maximum <> " bytes"
-    show (HttpHostError hostError) = "HTTP: " <> show hostError
+    show (HttpIOError ioError) = "HTTP: " <> show ioError
     show (InvalidResponseUtf8 utf8Error) = "HTTP response: " <> show utf8Error
     show (ManagedRequestHeader name) = "HTTP manages the request header " <> show name
-    show (RequestFileError path hostError) = "HTTP upload " <> show path <> ": " <> show hostError
+    show (RequestFileError path ioError) = "HTTP upload " <> show path <> ": " <> show ioError
     show (RequestJsonError jsonError) = "HTTP request JSON: " <> show jsonError
-    show (BodyReplayError hostError) = "HTTP body replay: " <> show hostError
+    show (BodyReplayError ioError) = "HTTP body replay: " <> show ioError
     show ConflictingRequestBody = "HTTP stream upload conflicts with the configured request body"
     show (UnexpectedStatus status) = "unexpected HTTP status " <> show status
 
@@ -752,7 +752,7 @@ requestWith configured method spelling =
             let maximum =
                 bufferedMaximum configured
             in fmap responseFromRaw $
-                mapError (httpHostError configured (Just maximum)) $
+                mapError (httpIOError configured (Just maximum)) $
                 HostPrim.httpRequestRaw prepared (limitsToRaw configured (Just maximum))
 
 -- | Sends a one-shot scoped byte stream and buffers the bounded response.
@@ -812,7 +812,7 @@ withResponseWith configured method spelling use =
         Left policyError => failIO policyError
         | Right prepared =>
             bracket
-                (mapError (httpHostError configured (maximumResponseBytes configured)) $
+                (mapError (httpIOError configured (maximumResponseBytes configured)) $
                     HostPrim.httpOpenRaw
                         prepared
                         (limitsToRaw configured (maximumResponseBytes configured)))
@@ -851,7 +851,7 @@ withStreamResponseWith configured method upload spelling use =
         Left policyError => failIO policyError
         | Right prepared =>
             bracket
-                (mapError (httpHostError configured (maximumResponseBytes configured)) $
+                (mapError (httpIOError configured (maximumResponseBytes configured)) $
                     HostPrim.httpUploadStartRaw
                         prepared
                         (limitsToRaw configured (maximumResponseBytes configured)))
@@ -892,9 +892,7 @@ feedUpload configured upload (handle, responseValue) =
                         else do
                                 event <-
                                     mapError
-                                        (httpHostError
-                                            configured
-                                            (maximumResponseBytes configured)) $
+                                        (httpIOError configured (maximumResponseBytes configured)) $
                                         HostPrim.httpUploadChunkRaw handle (Just bytes)
                                 feedUpload configured rest event
 
@@ -902,14 +900,14 @@ continueUpload :
     HttpOptions -> Handle -> Maybe Bytes -> IO HttpError (Handle, (Int, [(String, String)], Handle))
 continueUpload configured handle bytes = do
     event <-
-        mapError (httpHostError configured (maximumResponseBytes configured)) $
+        mapError (httpIOError configured (maximumResponseBytes configured)) $
             HostPrim.httpUploadChunkRaw handle bytes
     case event of
         (nextHandle, Just responseValue) => pureIO (nextHandle, responseValue)
         | (nextHandle, Nothing) => continueUpload configured nextHandle Nothing
 
 closeUpload : RawUploadEvent -> IO HttpError ()
-closeUpload (handle, _) = mapError HttpHostError $ HostPrim.httpUploadCloseRaw handle
+closeUpload (handle, _) = mapError HttpIOError $ HostPrim.httpUploadCloseRaw handle
 
 type RawBody = (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])
 type RawRequest = (String, String, [(String, String)], [(String, String)], RawBody)
@@ -1018,32 +1016,32 @@ redirectCount : RedirectPolicy -> Int
 redirectCount NoRedirects = 0
 redirectCount (FollowRedirects count) = count
 
-httpHostError : HttpOptions -> Maybe Int -> HostError -> HttpError
-httpHostError configured maximum hostError =
-    case hostErrorOperation hostError of
-        "httpTransport" => TransportError hostError
-        | "httpTls" => TlsError hostError
-        | "httpRedirect" => RedirectError hostError
-        | "httpBodyReplay" => BodyReplayError hostError
-        | "httpRequestFile" => requestFileError configured hostError
+httpIOError : HttpOptions -> Maybe Int -> IOError -> HttpError
+httpIOError configured maximum ioError =
+    case ioErrorOperation ioError of
+        "httpTransport" => TransportError ioError
+        | "httpTls" => TlsError ioError
+        | "httpRedirect" => RedirectError ioError
+        | "httpBodyReplay" => BodyReplayError ioError
+        | "httpRequestFile" => requestFileError configured ioError
         | "httpResponseHeaders" => ResponseHeadersTooLarge (maximumHeaderBytes configured)
-        | "httpResponseBody" => responseBodyLimitError maximum hostError
-        | _ => HttpHostError hostError
+        | "httpResponseBody" => responseBodyLimitError maximum ioError
+        | _ => HttpIOError ioError
 
-requestFileError : HttpOptions -> HostError -> HttpError
-requestFileError configured hostError =
+requestFileError : HttpOptions -> IOError -> HttpError
+requestFileError configured ioError =
     let RequestContent _ _ body =
         requestContent configured
     in case body of
-        FileBody path => RequestFileError path hostError
-        | _ => HttpHostError hostError
+        FileBody path => RequestFileError path ioError
+        | _ => HttpIOError ioError
 
-responseBodyLimitError : Maybe Int -> HostError -> HttpError
+responseBodyLimitError : Maybe Int -> IOError -> HttpError
 responseBodyLimitError (Just maximum) _ = ResponseBodyTooLarge maximum
-responseBodyLimitError Nothing hostError = HttpHostError hostError
+responseBodyLimitError Nothing ioError = HttpIOError ioError
 
 closeResponse : (Int, [(String, String)], Handle) -> IO HttpError ()
-closeResponse (_, _, handle) = mapError HttpHostError $ HostPrim.hClose handle
+closeResponse (_, _, handle) = mapError HttpIOError $ HostPrim.hClose handle
 
 responseByteStep : HttpOptions -> Handle -> () -> IO HttpError (Maybe (Bytes, ()))
 responseByteStep configured handle _ = do
@@ -1051,11 +1049,11 @@ responseByteStep configured handle _ = do
         mapError (responseReadError configured) $ HostPrim.hGetBytes handle (chunkBytes configured)
     if bytesLength bytes == 0 then pureIO Nothing else pureIO (Just (bytes, ()))
 
-responseReadError : HttpOptions -> HostError -> HttpError
-responseReadError configured hostError =
-    if hostErrorOperation hostError == "httpResponseBody"
-        then responseBodyLimitError (maximumResponseBytes configured) hostError
-        else TransportError hostError
+responseReadError : HttpOptions -> IOError -> HttpError
+responseReadError configured ioError =
+    if ioErrorOperation ioError == "httpResponseBody"
+        then responseBodyLimitError (maximumResponseBytes configured) ioError
+        else TransportError ioError
 
 responseFromRaw : (Int, [(String, String)], Bytes) -> Response
 responseFromRaw (code, rawHeaders, body) =

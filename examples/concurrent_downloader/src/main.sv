@@ -19,25 +19,25 @@ emptyBytes = stringToBytes ""
 maxResponseBytes : Int
 maxResponseBytes = 1048576
 
-netToHost : NetError -> HostError
-netToHost (NetHostError _ hostError) = hostError
-netToHost error = HostError InvalidArgument "network" (show error)
+netToIO : NetError -> IOError
+netToIO (NetIOError _ ioError) = ioError
+netToIO error = IOError InvalidArgument "network" (show error)
 
-hostToNet : HostError -> NetError
-hostToNet hostError = NetHostError "downloader" hostError
+ioToNet : IOError -> NetError
+ioToNet ioError = NetIOError "downloader" ioError
 
 netTask : forall a. IO NetError a -> Task a
-netTask = mapError netToHost
+netTask = mapError netToIO
 
 taskToNet : forall a. Task a -> IO NetError a
-taskToNet = mapError hostToNet
+taskToNet = mapError ioToNet
 
-utf8ToHost : Utf8Error -> HostError
-utf8ToHost error = HostError InvalidArgument "bytesToString" (show error)
+utf8ToIO : Utf8Error -> IOError
+utf8ToIO error = IOError InvalidArgument "bytesToString" (show error)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -46,7 +46,7 @@ requiredPath spelling =
         | Left pathError => error (show pathError)
 
 writeFileTask : Path -> String -> Task ()
-writeFileTask path = mapError fsToHost . std.fs.writeFile path
+writeFileTask path = mapError fsToIO . std.fs.writeFile path
 
 byteIs : Bytes -> Int -> Int -> Bool
 byteIs bytes index expected =
@@ -75,10 +75,7 @@ readHeaders socket accumulated =
             if bytesLength chunk == 0
                 then
                     failIO
-                        (HostError
-                            EndOfFile
-                            "readHeaders"
-                            "connection ended before the HTTP headers")
+                        (IOError EndOfFile "readHeaders" "connection ended before the HTTP headers")
                 else readHeaders socket (bytesAppend accumulated chunk)
 
 readResponse : forall scope. TcpConnection scope -> Bytes -> Task Bytes
@@ -89,7 +86,7 @@ readResponse socket accumulated = do
         else if bytesLength accumulated + bytesLength chunk > maxResponseBytes
                 then
                     failIO
-                        (HostError
+                        (IOError
                             ResourceExhausted
                             "readResponse"
                             "HTTP response exceeded the one-megabyte limit")
@@ -132,7 +129,7 @@ serveConnectionBody connection = do
     requestBytes <- readHeaders connection emptyBytes
     case bytesToString requestBytes of
         Right request => netTask (sendTcpBytes connection (stringToBytes (responseFor request)))
-        | Left error => failIO (utf8ToHost error)
+        | Left error => failIO (utf8ToIO error)
 
 serveConnection : forall scope. TcpConnection scope -> IO NetError ()
 serveConnection connection = taskToNet (serveConnectionBody connection)
@@ -149,12 +146,12 @@ successfulStatus : Bytes -> Bool
 successfulStatus response =
     and (byteIs response 9 50) (and (byteIs response 10 48) (byteIs response 11 48))
 
-responseBody : Bytes -> Either HostError Bytes
+responseBody : Bytes -> Either IOError Bytes
 responseBody response =
     case findHeaderEnd response 0 of
         Just start => Right (bytesSlice response start (bytesLength response - start))
         | Nothing =>
-            Left (HostError ProtocolError "responseBody" "HTTP response has no header terminator")
+            Left (IOError ProtocolError "responseBody" "HTTP response has no header terminator")
 
 fetchWith : forall scope. String -> String -> TcpConnection scope -> Task Bytes
 fetchWith host path socket = do
@@ -165,7 +162,7 @@ fetchWith host path socket = do
             case responseBody response of
                 Right body => pureIO body
                 | Left error => failIO error
-        else failIO (HostError ProtocolError "fetch" (appendString "HTTP request failed: " path))
+        else failIO (IOError ProtocolError "fetch" (appendString "HTTP request failed: " path))
 
 fetch : String -> Port -> String -> String -> Task Bytes
 fetch address port host path =
@@ -205,9 +202,9 @@ downloadAttempt results fetcher address port host path output = do
                 Right contents => do
                     writeFileTask output contents
                     send results (Downloaded (bytesLength body))
-                | Left error => failIO (utf8ToHost error)
+                | Left error => failIO (utf8ToIO error)
         | Nothing =>
-            failIO (HostError TimeExpired "download" "HTTP request timed out after five seconds")
+            failIO (IOError TimeExpired "download" "HTTP request timed out after five seconds")
 
 worker :
     Chan DownloadJob ->
@@ -309,7 +306,7 @@ runInternet : Task ()
 runInternet = do
     printLine "downloading from http://neverssl.com with two workers"
     case portFromInt 80 of
-        Left error => failIO (HostError InvalidArgument "portFromInt" (show error))
+        Left error => failIO (IOError InvalidArgument "portFromInt" (show error))
         | Right port => runPool fetchInternet "neverssl.com" port "neverssl.com" enqueueInternetJobs
 
 useLocalServer : List String -> Bool

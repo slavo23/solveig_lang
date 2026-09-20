@@ -15,9 +15,9 @@ data AuditSummary = AuditSummary Int Int Int Int Int Int
 emptySummary : AuditSummary
 emptySummary = AuditSummary 0 0 0 0 0 0
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -67,12 +67,12 @@ auditOne results (LogJob path) =
     catchError
         (auditFile results path)
         (fun error =>
-            if hostErrorOperation error == "readFile" then send results MissingLog else failIO error
+            if ioErrorOperation error == "readFile" then send results MissingLog else failIO error
         )
 
 auditFile : Chan AuditResult -> Path -> Task ()
 auditFile results path = do
-    contents <- mapError fsToHost (std.fs.readFile path)
+    contents <- mapError fsToIO (std.fs.readFile path)
     send results (Audited (analyzeLog contents))
 
 worker : Chan LogJob -> Chan AuditResult -> Task ()
@@ -80,7 +80,7 @@ worker jobs results =
     catchError
         (workerStep jobs results)
         (fun error =>
-            case hostErrorKind error of
+            case ioErrorKind error of
                 ResourceVanished => pureIO ()
                 | _ => failIO error
         )
@@ -168,6 +168,6 @@ main = do
     summary <- runAudit jobs results
     closeChan results
     let reportPath = requiredPath "output/report.txt"
-    mapError fsToHost (std.fs.writeFile reportPath (renderReport summary))
-    report <- mapError fsToHost (std.fs.readFile reportPath)
+    mapError fsToIO (std.fs.writeFile reportPath (renderReport summary))
+    report <- mapError fsToIO (std.fs.readFile reportPath)
     printStr report

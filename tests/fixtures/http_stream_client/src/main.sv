@@ -22,13 +22,12 @@ collect body =
         (Streams.fold (fun builder bytes => builder <> bytesBuilder bytes) emptyBytesBuilder body)
 
 say : String -> IO HttpError ()
-say = mapError HttpHostError . printLine
+say = mapError HttpIOError . printLine
 
 classify : HttpError -> String
 classify (ResponseBodyTooLarge _) = "limit"
-classify (TransportError host) =
-    if hostErrorKind host == TimeExpired then "timeout" else "transport"
-classify (HttpHostError host) = if hostErrorKind host == TimeExpired then "timeout" else "host"
+classify (TransportError host) = if ioErrorKind host == TimeExpired then "timeout" else "transport"
+classify (HttpIOError host) = if ioErrorKind host == TimeExpired then "timeout" else "host"
 classify problem = show problem
 
 report : String -> IO HttpError String -> IO HttpError ()
@@ -55,36 +54,34 @@ gated base =
         (withChunkBytes 2 (limits 6))
         Get
         (requestAt base "/gated")
-        (fun status _ body =>
-            do
-                _ <- get (requestAt base "/headers-seen")
-                first <- Streams.next body
-                case first of
-                    StreamDone => say "gated:unexpected-eof"
-                    | StreamYield bytes rest =>
-                        do
-                            _ <- get (requestAt base "/chunk-seen")
-                            (builder, bounded) <-
-                                Streams.fold
-                                    appendCheckedChunk
-                                    (bytesBuilder bytes, bytesLength bytes <= 2)
-                                    rest
-                            let result = buildBytes builder
-                            say
-                                ("gated:" <>
-                                    show (statusCode status) <>
-                                    ":" <>
-                                    show (map (bytesIndex result) [0, 1, 2, 3, 4, 5]) <>
-                                    ":" <>
-                                    show bounded)
+        (fun status _ body => do
+            _ <- get (requestAt base "/headers-seen")
+            first <- Streams.next body
+            case first of
+                StreamDone => say "gated:unexpected-eof"
+                | StreamYield bytes rest => do
+                    _ <- get (requestAt base "/chunk-seen")
+                    (builder, bounded) <-
+                        Streams.fold
+                            appendCheckedChunk
+                            (bytesBuilder bytes, bytesLength bytes <= 2)
+                            rest
+                    let result = buildBytes builder
+                    say
+                        ("gated:"
+                            <> show (statusCode status)
+                            <> ":"
+                            <> show (map (bytesIndex result) [0, 1, 2, 3, 4, 5])
+                            <> ":"
+                            <> show bounded)
         )
 
 parkBody :
     forall scope. Chan () ->
     Chan () -> Status -> [Header] -> Stream scope HttpError Bytes -> IO HttpError ()
 parkBody entered parked _ _ _ = do
-    _ <- mapError HttpHostError (std.channel.send entered ())
-    mapError HttpHostError (std.channel.recv parked)
+    _ <- mapError HttpIOError (std.channel.send entered ())
+    mapError HttpIOError (std.channel.recv parked)
 
 run : String -> IO HttpError ()
 run base = do
@@ -123,7 +120,7 @@ run base = do
     parked <- std.channel.newChan
     withThread
         (withResponse Get (requestAt base "/cancel") (parkBody entered parked))
-        (fun _ => mapError HttpHostError (std.channel.recv entered))
+        (fun _ => mapError HttpIOError (std.channel.recv entered))
     say "cancel:closed"
     report
         "blocked"

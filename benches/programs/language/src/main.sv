@@ -9,9 +9,9 @@ import std.map(*)
 import std.queue(*)
 import std.vector(*)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -108,13 +108,14 @@ byteLoop : Int -> Bytes -> Int -> Int
 byteLoop remaining bytes total =
     if remaining == 0
         then total
-        else let half =
-            bytesSlice bytes 0 8
-        in let joined =
-            bytesAppend half half
-        in case bytesIndex joined 0 of
-            Nothing => byteLoop (remaining - 1) joined total
-            | Just first => byteLoop (remaining - 1) joined (total + bytesLength joined + first)
+        else
+            let half =
+                bytesSlice bytes 0 8
+            in let joined =
+                bytesAppend half half
+            in case bytesIndex joined 0 of
+                Nothing => byteLoop (remaining - 1) joined total
+                | Just first => byteLoop (remaining - 1) joined (total + bytesLength joined + first)
 
 stringBytesMain : Int
 stringBytesMain =
@@ -127,18 +128,17 @@ readMany path remaining completed =
     if remaining == 0
         then pureIO completed
         else do
-            bytes <- mapError fsToHost (std.fs.readFileBytes (requiredPath path))
-            let next = if bytesLength bytes == 0 then completed else completed + 1
-            readMany path (remaining - 1) next
+                bytes <- mapError fsToIO (std.fs.readFileBytes (requiredPath path))
+                let next = if bytesLength bytes == 0 then completed else completed + 1
+                readMany path (remaining - 1) next
 
 fileIoMain : Task ()
 fileIoMain = do
     args <- getArgs
     case args of
-        path :: _ =>
-            do
-                completed <- readMany path 64 0
-                printLine (show completed)
+        path :: _ => do
+            completed <- readMany path 64 0
+            printLine (show completed)
         | [] => error "file IO benchmark requires an input path"
 
 sendMany : Chan Int -> Int -> Task ()
@@ -146,16 +146,16 @@ sendMany channel remaining =
     if remaining == 0
         then pureIO ()
         else do
-            send channel remaining
-            sendMany channel (remaining - 1)
+                send channel remaining
+                sendMany channel (remaining - 1)
 
 receiveMany : Chan Int -> Int -> Int -> Task Int
 receiveMany channel remaining total =
     if remaining == 0
         then pureIO total
         else do
-            value <- recv channel
-            receiveMany channel (remaining - 1) (total + value)
+                value <- recv channel
+                receiveMany channel (remaining - 1) (total + value)
 
 channelMain : Task ()
 channelMain = do
@@ -179,9 +179,10 @@ sumIndexed : (Int -> Maybe Int) -> Int -> Int -> Int
 sumIndexed lookupIndex remaining total =
     if remaining == 0
         then total
-        else case lookupIndex (mod (remaining * 37) 1024) of
-            Nothing => error "collection benchmark index escaped its bounds"
-            | Just value => sumIndexed lookupIndex (remaining - 1) (total + value)
+        else
+            case lookupIndex (mod (remaining * 37) 1024) of
+                Nothing => error "collection benchmark index escaped its bounds"
+                | Just value => sumIndexed lookupIndex (remaining - 1) (total + value)
 
 vectorIndexMain : Int
 vectorIndexMain = sumIndexed (std.vector.index benchmarkVector) 2000 0

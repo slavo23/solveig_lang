@@ -3,7 +3,7 @@ import std.random(*)
 import std.text(intToString)
 
 printSecure : String -> IO SecureRandomError ()
-printSecure text = mapError SecureRandomHostError (printLine text)
+printSecure text = mapError SecureRandomIOError (printLine text)
 
 printLength : String -> Bytes -> IO SecureRandomError ()
 printLength label bytes = printSecure (label <> intToString (bytesLength bytes))
@@ -18,8 +18,8 @@ invalidCount =
             case randomError of
                 InvalidSecureRandomByteCount count =>
                     printSecure ("invalid count: " <> intToString count)
-                | SecureRandomHostError hostError =>
-                    printSecure ("unexpected host failure: " <> show hostError)
+                | SecureRandomIOError ioError =>
+                    printSecure ("unexpected I/O failure: " <> show ioError)
         )
 
 main : IO SecureRandomError ()

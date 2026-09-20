@@ -53,7 +53,7 @@ use solveig_ast::ast::{
     ClassDefinition, ClassId, ClassTable, CtorId, CtorTable, DefId, Ev, InstanceId, Kind, ModuleId,
     Names, PRIM_TYS, PrettyTables, Scheme, TermDefinition, TermExpr, TermExprNode, Ty, TyConId,
     TyConTable, TyVarId, VarRef, prelude_defect_tycon_id, prelude_either_tycon_id,
-    prelude_host_error_tycon_id, prelude_list_tycon_id, prelude_maybe_tycon_id,
+    prelude_io_error_tycon_id, prelude_list_tycon_id, prelude_maybe_tycon_id,
     prelude_ordering_tycon_id, prelude_tuple_tycon_id, prelude_utf8_error_tycon_id,
     std_buffer_mode_tycon_id, std_io_mode_tycon_id, std_process_result_tycon_id,
 };

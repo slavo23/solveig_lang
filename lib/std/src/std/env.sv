@@ -22,13 +22,13 @@ import std.text(*)
 
 -- | A failure while resolving or loading application environment settings.
 data EnvError
-    = EnvHostError HostError
+    = EnvIOError IOError
     | EnvFileError FsError
     | MissingEnv String
     | InvalidEnvLine Int String
 
 instance Eq EnvError where
-    (==) (EnvHostError left) (EnvHostError right) = left == right
+    (==) (EnvIOError left) (EnvIOError right) = left == right
     (==) (EnvFileError left) (EnvFileError right) = left == right
     (==) (MissingEnv left) (MissingEnv right) = left == right
     (==) (InvalidEnvLine leftLine leftReason) (InvalidEnvLine rightLine rightReason) =
@@ -36,7 +36,7 @@ instance Eq EnvError where
     (==) _ _ = False
 
 instance Show EnvError where
-    show (EnvHostError hostError) = "environment: " <> show hostError
+    show (EnvIOError ioError) = "environment: " <> show ioError
     show (EnvFileError fileError) = "environment file: " <> show fileError
     show (MissingEnv name) = "missing environment variable " <> name
     show (InvalidEnvLine line reason) =
@@ -63,7 +63,7 @@ getEnvOr name fallback =
 -- | Reads a required environment variable or returns MissingEnv.
 requireEnv : String -> IO EnvError String
 requireEnv name = do
-    value <- mapError EnvHostError (getEnv name)
+    value <- mapError EnvIOError (getEnv name)
     case value of
         Nothing => failIO (MissingEnv name)
         | Just found => pureIO found
@@ -188,8 +188,8 @@ quotedEnvValue lineNumber quote characters =
 setMissingEntries : [(String, String)] -> IO EnvError ()
 setMissingEntries [] = pureIO ()
 setMissingEntries ((name, value) :: rest) = do
-    existing <- mapError EnvHostError (getEnv name)
+    existing <- mapError EnvIOError (getEnv name)
     case existing of
-        Nothing => mapError EnvHostError (setEnv name value)
+        Nothing => mapError EnvIOError (setEnv name value)
         | Just _ => pureIO ()
     setMissingEntries rest

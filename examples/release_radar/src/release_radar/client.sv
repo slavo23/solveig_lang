@@ -80,7 +80,7 @@ fetchConcurrentObserved :
     release_radar.cache.Cache -> [String] -> Task [release_radar.model.ReleaseResult]
 fetchConcurrentObserved workers base token cache repositories =
     mapError
-        std.task.concurrentHostError
+        std.task.concurrentIOError
         (std.task.mapConcurrentlyBoundedOrdered
             workers
             (fetchObserved base token cache)

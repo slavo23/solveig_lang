@@ -20,11 +20,11 @@ export (
     Tuple7(..),
     Tuple8(..),
     Never,
-    HostErrorKind(..),
-    HostError(..),
-    hostErrorKind,
-    hostErrorOperation,
-    hostErrorMessage,
+    IOErrorKind(..),
+    IOError(..),
+    ioErrorKind,
+    ioErrorOperation,
+    ioErrorMessage,
     Utf8Error(..),
     Defect(..),
     Task,
@@ -86,11 +86,11 @@ data Tuple8 a b c d e f g h = MkTuple8 a b c d e f g h
 -- | An error type with no possible values.
 data Never
 
--- | Stable, cross-platform categories for low-level host failures.
+-- | Stable, cross-platform categories for low-level I/O failures.
 -- |
 -- | The categories deliberately describe causes rather than individual
 -- | operations. Domain libraries add paths, endpoints, or policy context.
-data HostErrorKind
+data IOErrorKind
     = AlreadyExists
     | DoesNotExist
     | PermissionDenied
@@ -108,20 +108,20 @@ data HostErrorKind
     | ProtocolError
     | OtherError
 
--- | A low-level failure with a stable category, operation, and host message.
-data HostError = HostError HostErrorKind String String
+-- | A low-level I/O failure with a stable category, operation, and platform message.
+data IOError = IOError IOErrorKind String String
 
--- | Returns a host error's stable category.
-hostErrorKind : HostError -> HostErrorKind
-hostErrorKind (HostError kind _ _) = kind
+-- | Returns an I/O error's stable category.
+ioErrorKind : IOError -> IOErrorKind
+ioErrorKind (IOError kind _ _) = kind
 
 -- | Returns the low-level operation that failed.
-hostErrorOperation : HostError -> String
-hostErrorOperation (HostError _ operation _) = operation
+ioErrorOperation : IOError -> String
+ioErrorOperation (IOError _ operation _) = operation
 
 -- | Returns the platform message retained for diagnostics.
-hostErrorMessage : HostError -> String
-hostErrorMessage (HostError _ _ message) = message
+ioErrorMessage : IOError -> String
+ioErrorMessage (IOError _ _ message) = message
 
 -- | A failure to decode strict UTF-8 text.
 data Utf8Error =
@@ -139,8 +139,8 @@ data Defect =
     | -- | The runtime exceeded the managed heap-object limit.
     HeapExhausted
 
--- | An IO action that can fail at the low-level host boundary.
-type Task a = IO HostError a
+-- | An IO action that can fail while interacting with the outside world.
+type Task a = IO IOError a
 
 -- | Creates an IO action that immediately returns a value.
 pureIO : forall e a. a -> IO e a

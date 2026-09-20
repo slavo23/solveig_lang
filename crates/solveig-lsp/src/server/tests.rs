@@ -1072,8 +1072,10 @@ async fn text_document_hover_renders_prelude_type_alias() {
 
     let range = hover.range.expect("Task hover should carry a range");
     let markdown = hover_markup_value(hover);
-    assert!(markdown.contains("```solveig\ntype Task a = IO HostError a\n```"));
-    assert!(markdown.contains("An IO action that can fail at the low-level host boundary."));
+    assert!(markdown.contains("```solveig\ntype Task a = IO IOError a\n```"));
+    assert!(
+        markdown.contains("An IO action that can fail while interacting with the outside world.")
+    );
     assert!(markdown.contains("Defined in `prelude.builtins`"));
     assert_eq!(range, Range::new(Position::new(0, 7), Position::new(0, 11)));
 

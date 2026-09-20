@@ -8,7 +8,7 @@ reportDefect defect =
         | StackExhausted => printLine "stack-exhausted"
         | HeapExhausted => printLine "heap-exhausted"
 
-reportTypedError : HostError -> Task ()
+reportTypedError : IOError -> Task ()
 reportTypedError ioError = printLine "typed-error"
 
 explicitDefect : Task ()
@@ -27,7 +27,7 @@ use resource = do
     divisionDefect
 
 typedFailure : Task ()
-typedFailure = failIO (HostError OtherError "typedFailure" "typed")
+typedFailure = failIO (IOError OtherError "typedFailure" "typed")
 
 main : Task ()
 main = do

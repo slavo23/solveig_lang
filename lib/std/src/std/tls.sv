@@ -72,20 +72,20 @@ tlsServerName : TlsOptions -> Maybe String
 tlsServerName (TlsOptions _ serverName) = serverName
 
 -- | A network, configuration, verification, or TLS transport failure.
-data TlsError = InvalidTlsChunkSize Int | TlsNetworkError NetError | TlsHostError String HostError
+data TlsError = InvalidTlsChunkSize Int | TlsNetworkError NetError | TlsIOError String IOError
 
 instance Eq TlsError where
     (==) (InvalidTlsChunkSize left) (InvalidTlsChunkSize right) = left == right
     (==) (TlsNetworkError left) (TlsNetworkError right) = left == right
-    (==) (TlsHostError leftContext leftHost) (TlsHostError rightContext rightHost) =
-        and (leftContext == rightContext) (leftHost == rightHost)
+    (==) (TlsIOError leftContext leftIOError) (TlsIOError rightContext rightIOError) =
+        and (leftContext == rightContext) (leftIOError == rightIOError)
     (==) _ _ = False
 
 instance Show TlsError where
     show (InvalidTlsChunkSize size) =
         "invalid TLS chunk size " <> show size <> "; expected a positive Int"
     show (TlsNetworkError networkError) = "TLS network setup: " <> show networkError
-    show (TlsHostError context hostError) = "TLS " <> context <> ": " <> show hostError
+    show (TlsIOError context ioError) = "TLS " <> context <> ": " <> show ioError
 
 -- | A verified, encrypted byte stream whose lifetime is identified by scope.
 data TlsConnection scope = TlsConnection Socket
@@ -108,7 +108,7 @@ startTlsAndUse :
 startTlsAndUse options host use (TcpConnection socket) = do
     let serverName = verifiedName host options
     mapError
-        (TlsHostError ("handshake with " <> serverName))
+        (TlsIOError ("handshake with " <> serverName))
         (std.prim.startTlsClient socket (serverName, trustPem (tlsTrust options)))
     use (TlsConnection socket)
 
@@ -134,7 +134,7 @@ withTlsConnectionWith options host port use =
 -- | Sends the complete byte string as encrypted application data.
 sendTlsBytes : forall scope. TlsConnection scope -> Bytes -> IO TlsError ()
 sendTlsBytes (TlsConnection socket) bytes =
-    mapError (TlsHostError "send bytes") $ std.prim.sendBytes socket bytes
+    mapError (TlsIOError "send bytes") $ std.prim.sendBytes socket bytes
 
 -- | Receives at most a positive number of decrypted bytes; empty bytes mean a
 -- | peer close_notify. An unannounced TCP EOF is rejected as truncated TLS.
@@ -142,7 +142,7 @@ receiveTlsBytes : forall scope. TlsConnection scope -> Int -> IO TlsError Bytes
 receiveTlsBytes (TlsConnection socket) maximum =
     if maximum <= 0
         then failIO (InvalidTlsChunkSize maximum)
-        else mapError (TlsHostError "receive bytes") $ std.prim.recvBytes socket maximum
+        else mapError (TlsIOError "receive bytes") $ std.prim.recvBytes socket maximum
 
 tlsByteStep : forall scope. TlsConnection scope -> Int -> () -> IO TlsError (Maybe (Bytes, ()))
 tlsByteStep connection chunkSize _ = do

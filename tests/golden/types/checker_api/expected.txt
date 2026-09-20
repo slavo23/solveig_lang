@@ -33,18 +33,18 @@ prelude.builtins.catchError : forall e f a. IO e a -> (e -> IO f a) -> IO f a
 prelude.builtins.error : forall a. String -> a
 prelude.builtins.even : Int -> Bool
 prelude.builtins.failIO : forall e a. e -> IO e a
-prelude.builtins.hostErrorKind : HostError -> HostErrorKind
-prelude.builtins.hostErrorMessage : HostError -> String
-prelude.builtins.hostErrorOperation : HostError -> String
+prelude.builtins.ioErrorKind : IOError -> IOErrorKind
+prelude.builtins.ioErrorMessage : IOError -> String
+prelude.builtins.ioErrorOperation : IOError -> String
 prelude.builtins.mapError : forall e f a. (e -> f) -> IO e a -> IO f a
 prelude.builtins.not : Bool -> Bool
 prelude.builtins.odd : Int -> Bool
 prelude.builtins.or : Bool -> Bool -> Bool
 prelude.builtins.orElse : forall e f a. IO e a -> IO f a -> IO f a
-prelude.builtins.printLine : String -> IO HostError ()
-prelude.builtins.printStr : String -> IO HostError ()
+prelude.builtins.printLine : String -> IO IOError ()
+prelude.builtins.printStr : String -> IO IOError ()
 prelude.builtins.pureIO : forall e a. a -> IO e a
-prelude.builtins.readLine : IO HostError String
+prelude.builtins.readLine : IO IOError String
 prelude.control.composeK : forall m a b c. Monad m => (a -> m b) -> (b -> m c) -> a -> m c
 prelude.control.filterM : forall m a. Monad m => (a -> m Bool) -> [a] -> m [a]
 prelude.control.join : forall m a. Monad m => m (m a) -> m a
@@ -94,10 +94,10 @@ prelude.prim.floatSub : Float -> Float -> Float
 prelude.prim.floatToInt : Float -> Int
 prelude.prim.floatToString : Float -> String
 prelude.prim.floatTotalCompare : Float -> Float -> Ordering
-prelude.prim.hFlush : Handle -> IO HostError ()
-prelude.prim.hGetLine : Handle -> IO HostError String
-prelude.prim.hPutStr : Handle -> String -> IO HostError ()
-prelude.prim.hPutStrLn : Handle -> String -> IO HostError ()
+prelude.prim.hFlush : Handle -> IO IOError ()
+prelude.prim.hGetLine : Handle -> IO IOError String
+prelude.prim.hPutStr : Handle -> String -> IO IOError ()
+prelude.prim.hPutStrLn : Handle -> String -> IO IOError ()
 prelude.prim.intAdd : Int -> Int -> Int
 prelude.prim.intCompare : Int -> Int -> Ordering
 prelude.prim.intDiv : Int -> Int -> Int
@@ -184,20 +184,20 @@ std.bytes.bytesToStringReplacing : Bytes -> String
 std.bytes.bytesUtf8ValidPrefix : Bytes -> Bool -> Either Utf8Error Int
 std.bytes.emptyBytesBuilder : BytesBuilder
 std.bytes.stringToBytes : String -> Bytes
-std.channel.closeChan : forall a. Chan a -> IO HostError ()
-std.channel.invalidCapacity : Int -> HostError
-std.channel.newBoundedChan : forall a. Int -> IO HostError (Chan a)
+std.channel.closeChan : forall a. Chan a -> IO IOError ()
+std.channel.invalidCapacity : Int -> IOError
+std.channel.newBoundedChan : forall a. Int -> IO IOError (Chan a)
 std.channel.newChan : forall e a. IO e (Chan a)
-std.channel.recv : forall a. Chan a -> IO HostError a
-std.channel.send : forall a. Chan a -> a -> IO HostError ()
-std.channel.tryRecv : forall a. Chan a -> IO HostError (Maybe a)
+std.channel.recv : forall a. Chan a -> IO IOError a
+std.channel.send : forall a. Chan a -> a -> IO IOError ()
+std.channel.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
 std.env.allValidEnvNameChars : [Char] -> Bool
 std.env.envValue : Int -> String -> Either EnvError String
 std.env.getArgs : forall e. IO e [String]
-std.env.getEnv : String -> IO HostError (Maybe String)
-std.env.getEnvOr : String -> String -> IO HostError String
-std.env.getEnvironment : IO HostError [(String, String)]
-std.env.getProgName : IO HostError String
+std.env.getEnv : String -> IO IOError (Maybe String)
+std.env.getEnvOr : String -> String -> IO IOError String
+std.env.getEnvironment : IO IOError [(String, String)]
+std.env.getProgName : IO IOError String
 std.env.loadEnvFile : Path -> IO EnvError ()
 std.env.loadEnvFileIfExists : Path -> IO EnvError Bool
 std.env.loadEnvFileLimited : Path -> Int -> IO EnvError ()
@@ -205,14 +205,14 @@ std.env.parseEnvFile : String -> Either EnvError [(String, String)]
 std.env.parseEnvLines : [String] -> Int -> Map String () -> [(String, String)] -> Either EnvError [(String, String)]
 std.env.quotedEnvValue : Int -> Char -> [Char] -> Either EnvError String
 std.env.requireEnv : String -> IO EnvError String
-std.env.setEnv : String -> String -> IO HostError ()
+std.env.setEnv : String -> String -> IO IOError ()
 std.env.setMissingEntries : [(String, String)] -> IO EnvError ()
 std.env.validEnvName : String -> Bool
 std.env.validEnvNameStart : Char -> Bool
 std.fs.absoluteUtf8Error : Path -> Int -> Utf8Error -> FsError
 std.fs.appendFile : Path -> String -> IO FsError ()
 std.fs.appendFileBytes : Path -> Bytes -> IO FsError ()
-std.fs.atPath : forall a. Path -> IO HostError a -> IO FsError a
+std.fs.atPath : forall a. Path -> IO IOError a -> IO FsError a
 std.fs.createDirectory : Path -> IO FsError ()
 std.fs.decodeFile : Path -> Int -> Bytes -> IO FsError String
 std.fs.decodeUtf8Prefix : Bytes -> Int -> String
@@ -350,7 +350,7 @@ std.http.headerFromRaw : (String, String) -> Header
 std.http.headerName : Header -> String
 std.http.headerValue : Header -> String
 std.http.headersFromList : [(String, String)] -> Either HttpError [Header]
-std.http.httpHostError : HttpOptions -> Maybe Int -> HostError -> HttpError
+std.http.httpIOError : HttpOptions -> Maybe Int -> IOError -> HttpError
 std.http.isHeaderNameChar : Char -> Bool
 std.http.isManagedHeader : String -> Bool
 std.http.isSuccessful : Status -> Bool
@@ -378,18 +378,18 @@ std.http.redirectPolicy : HttpOptions -> RedirectPolicy
 std.http.replayPolicy : HttpOptions -> ReplayPolicy
 std.http.request : Method -> String -> IO HttpError Response
 std.http.requestContent : HttpOptions -> RequestContent
-std.http.requestFileError : HttpOptions -> HostError -> HttpError
+std.http.requestFileError : HttpOptions -> IOError -> HttpError
 std.http.requestStream : forall upload. Method -> Stream upload HttpError Bytes -> String -> IO HttpError Response
 std.http.requestStreamWith : forall upload. HttpOptions -> Method -> Stream upload HttpError Bytes -> String -> IO HttpError Response
 std.http.requestTimeout : HttpOptions -> Duration
 std.http.requestWith : HttpOptions -> Method -> String -> IO HttpError Response
 std.http.response : Status -> [Header] -> Bytes -> Response
 std.http.responseBody : Response -> Bytes
-std.http.responseBodyLimitError : Maybe Int -> HostError -> HttpError
+std.http.responseBodyLimitError : Maybe Int -> IOError -> HttpError
 std.http.responseByteStep : HttpOptions -> Handle -> () -> IO HttpError (Maybe (Bytes, ()))
 std.http.responseFromRaw : (Int, [(String, String)], Bytes) -> Response
 std.http.responseHeaders : Response -> [Header]
-std.http.responseReadError : HttpOptions -> HostError -> HttpError
+std.http.responseReadError : HttpOptions -> IOError -> HttpError
 std.http.responseStatus : Response -> Status
 std.http.responseText : Response -> Either HttpError String
 std.http.setBody : RequestBody -> RequestContent -> RequestContent
@@ -434,21 +434,21 @@ std.http.withStreamResponseWith : forall upload result. HttpOptions -> Method ->
 std.http.withTextBody : String -> HttpOptions -> HttpOptions
 std.http.withTimeout : Duration -> HttpOptions -> HttpOptions
 std.http.withoutBody : HttpOptions -> HttpOptions
-std.io.hClose : Handle -> IO HostError ()
-std.io.hFlush : Handle -> IO HostError ()
-std.io.hGetBytes : Handle -> Int -> IO HostError Bytes
-std.io.hGetContents : Handle -> IO HostError String
-std.io.hGetLine : Handle -> IO HostError String
-std.io.hIsEOF : Handle -> IO HostError Bool
-std.io.hPutBytes : Handle -> Bytes -> IO HostError ()
-std.io.hPutStr : Handle -> String -> IO HostError ()
-std.io.hPutStrLn : Handle -> String -> IO HostError ()
-std.io.hSetBuffering : Handle -> BufferMode -> IO HostError ()
-std.io.openFile : String -> IOMode -> IO HostError Handle
+std.io.hClose : Handle -> IO IOError ()
+std.io.hFlush : Handle -> IO IOError ()
+std.io.hGetBytes : Handle -> Int -> IO IOError Bytes
+std.io.hGetContents : Handle -> IO IOError String
+std.io.hGetLine : Handle -> IO IOError String
+std.io.hIsEOF : Handle -> IO IOError Bool
+std.io.hPutBytes : Handle -> Bytes -> IO IOError ()
+std.io.hPutStr : Handle -> String -> IO IOError ()
+std.io.hPutStrLn : Handle -> String -> IO IOError ()
+std.io.hSetBuffering : Handle -> BufferMode -> IO IOError ()
+std.io.openFile : String -> IOMode -> IO IOError Handle
 std.io.stderr : Handle
 std.io.stdin : Handle
 std.io.stdout : Handle
-std.io.withFile : forall a. String -> IOMode -> (Handle -> IO HostError a) -> IO HostError a
+std.io.withFile : forall a. String -> IOMode -> (Handle -> IO IOError a) -> IO IOError a
 std.json.accumulateDigits : Int -> Int -> Int -> [Int] -> Maybe Int
 std.json.accumulateZeros : Int -> Int -> Int -> Int -> Maybe Int
 std.json.allZeroDigits : [Int] -> Bool
@@ -643,7 +643,7 @@ std.map.toAscListInto : forall k v. Map k v -> [(k, v)] -> [(k, v)]
 std.map.values : forall k v. Map k v -> [v]
 std.map.valuesInto : forall k v. Map k v -> [v] -> [v]
 std.net.anyPort : Port
-std.net.atEndpoint : forall a. String -> IO HostError a -> IO NetError a
+std.net.atEndpoint : forall a. String -> IO IOError a -> IO NetError a
 std.net.closeTcpConnection : forall scope. TcpConnection scope -> IO NetError ()
 std.net.closeTcpListener : forall scope. (TcpListener scope, Port) -> IO NetError ()
 std.net.closeUdpSocket : forall scope. (UdpSocket scope, Port) -> IO NetError ()
@@ -797,9 +797,9 @@ std.path.parent : Path -> Maybe Path
 std.path.pathFromHost : String -> Path
 std.path.pathFromString : String -> Either PathError Path
 std.path.pathToString : Path -> String
-std.prim.accept : Socket -> IO HostError Socket
-std.prim.appendFile : String -> String -> IO HostError ()
-std.prim.bindUdp : Int -> IO HostError (Socket, Int)
+std.prim.accept : Socket -> IO IOError Socket
+std.prim.appendFile : String -> String -> IO IOError ()
+std.prim.bindUdp : Int -> IO IOError (Socket, Int)
 std.prim.bytesAppend : Bytes -> Bytes -> Bytes
 std.prim.bytesConcat : [Bytes] -> Bytes
 std.prim.bytesFindAny : Bytes -> Int -> Bytes -> Int
@@ -813,87 +813,87 @@ std.prim.bytesSpanRange : Bytes -> Int -> Int -> Int -> Int
 std.prim.bytesToString : Bytes -> Either Utf8Error String
 std.prim.bytesToStringReplacing : Bytes -> String
 std.prim.bytesUtf8ValidPrefix : Bytes -> Bool -> Either Utf8Error Int
-std.prim.closeChan : forall a. Chan a -> IO HostError ()
-std.prim.closeProcess : ChildProcess -> IO HostError ()
-std.prim.closeProcessStdin : ChildProcess -> IO HostError ()
-std.prim.closeSocket : Socket -> IO HostError ()
-std.prim.connect : String -> Int -> IO HostError Socket
-std.prim.createDirectory : String -> IO HostError ()
-std.prim.doesDirectoryExist : String -> IO HostError Bool
-std.prim.doesFileExist : String -> IO HostError Bool
-std.prim.exitWith : forall a. Int -> IO HostError a
+std.prim.closeChan : forall a. Chan a -> IO IOError ()
+std.prim.closeProcess : ChildProcess -> IO IOError ()
+std.prim.closeProcessStdin : ChildProcess -> IO IOError ()
+std.prim.closeSocket : Socket -> IO IOError ()
+std.prim.connect : String -> Int -> IO IOError Socket
+std.prim.createDirectory : String -> IO IOError ()
+std.prim.doesDirectoryExist : String -> IO IOError Bool
+std.prim.doesFileExist : String -> IO IOError Bool
+std.prim.exitWith : forall a. Int -> IO IOError a
 std.prim.getArgs : forall e. IO e [String]
-std.prim.getCurrentDirectory : IO HostError String
-std.prim.getEnv : String -> IO HostError (Maybe String)
-std.prim.getEnvironment : IO HostError [(String, String)]
-std.prim.getFileSize : String -> IO HostError Int
-std.prim.getModificationTime : String -> IO HostError Int
+std.prim.getCurrentDirectory : IO IOError String
+std.prim.getEnv : String -> IO IOError (Maybe String)
+std.prim.getEnvironment : IO IOError [(String, String)]
+std.prim.getFileSize : String -> IO IOError Int
+std.prim.getModificationTime : String -> IO IOError Int
 std.prim.getMonotonicTime : forall e. IO e Int
-std.prim.getProgName : IO HostError String
+std.prim.getProgName : IO IOError String
 std.prim.getSystemTime : forall e. IO e Int
-std.prim.hClose : Handle -> IO HostError ()
-std.prim.hGetBytes : Handle -> Int -> IO HostError Bytes
-std.prim.hGetContents : Handle -> IO HostError String
-std.prim.hIsEOF : Handle -> IO HostError Bool
-std.prim.hPutBytes : Handle -> Bytes -> IO HostError ()
-std.prim.hSetBuffering : Handle -> BufferMode -> IO HostError ()
-std.prim.httpOpenRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Int, [(String, String)], Handle)
-std.prim.httpRequestRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Int, [(String, String)], Bytes)
-std.prim.httpUploadChunkRaw : Handle -> Maybe Bytes -> IO HostError (Handle, Maybe (Int, [(String, String)], Handle))
-std.prim.httpUploadCloseRaw : Handle -> IO HostError ()
-std.prim.httpUploadStartRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO HostError (Handle, Maybe (Int, [(String, String)], Handle))
-std.prim.killThread : ThreadId -> IO HostError ()
-std.prim.listDirectory : String -> IO HostError [String]
-std.prim.listen : Int -> IO HostError (Socket, Int)
+std.prim.hClose : Handle -> IO IOError ()
+std.prim.hGetBytes : Handle -> Int -> IO IOError Bytes
+std.prim.hGetContents : Handle -> IO IOError String
+std.prim.hIsEOF : Handle -> IO IOError Bool
+std.prim.hPutBytes : Handle -> Bytes -> IO IOError ()
+std.prim.hSetBuffering : Handle -> BufferMode -> IO IOError ()
+std.prim.httpOpenRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO IOError (Int, [(String, String)], Handle)
+std.prim.httpRequestRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO IOError (Int, [(String, String)], Bytes)
+std.prim.httpUploadChunkRaw : Handle -> Maybe Bytes -> IO IOError (Handle, Maybe (Int, [(String, String)], Handle))
+std.prim.httpUploadCloseRaw : Handle -> IO IOError ()
+std.prim.httpUploadStartRaw : (String, String, [(String, String)], [(String, String)], (Int, Maybe Bytes, [Bytes], Maybe String, [(String, String)])) -> (Int, Maybe Int, Int, Int, Bool) -> IO IOError (Handle, Maybe (Int, [(String, String)], Handle))
+std.prim.killThread : ThreadId -> IO IOError ()
+std.prim.listDirectory : String -> IO IOError [String]
+std.prim.listen : Int -> IO IOError (Socket, Int)
 std.prim.mkStdGen : Int -> StdGen
 std.prim.newBoundedChan : forall e a. Int -> IO e (Chan a)
 std.prim.newChan : forall e a. IO e (Chan a)
 std.prim.newStdGen : forall e. IO e StdGen
-std.prim.openFile : String -> IOMode -> IO HostError Handle
+std.prim.openFile : String -> IOMode -> IO IOError Handle
 std.prim.pathExtension : String -> Maybe String
 std.prim.pathFileName : String -> Maybe String
 std.prim.pathIsAbsolute : String -> Bool
 std.prim.pathJoin : String -> String -> String
 std.prim.pathNormalise : String -> String
 std.prim.pathParent : String -> Maybe String
-std.prim.printLine : String -> IO HostError ()
-std.prim.printStr : String -> IO HostError ()
+std.prim.printLine : String -> IO IOError ()
+std.prim.printStr : String -> IO IOError ()
 std.prim.randomInt : StdGen -> (Int, StdGen)
 std.prim.randomRange : Int -> Int -> StdGen -> (Int, StdGen)
-std.prim.readFile : String -> IO HostError String
-std.prim.readFileBytes : String -> IO HostError Bytes
-std.prim.readFileBytesLimited : String -> Int -> IO HostError Bytes
-std.prim.readFileLimited : String -> Int -> IO HostError String
-std.prim.readLine : IO HostError String
-std.prim.readProcessStderr : ChildProcess -> Int -> IO HostError Bytes
-std.prim.readProcessStdout : ChildProcess -> Int -> IO HostError Bytes
-std.prim.recv : forall a. Chan a -> IO HostError a
-std.prim.recvBytes : Socket -> Int -> IO HostError Bytes
-std.prim.recvDatagram : Socket -> Int -> IO HostError (Bytes, String, Int)
-std.prim.removeFile : String -> IO HostError ()
-std.prim.renameFile : String -> String -> IO HostError ()
-std.prim.resolveHost : String -> IO HostError [String]
-std.prim.runProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ProcessResult
-std.prim.secureRandomBytes : Int -> IO HostError Bytes
-std.prim.send : forall a. Chan a -> a -> IO HostError ()
-std.prim.sendBytes : Socket -> Bytes -> IO HostError ()
-std.prim.sendDatagram : Socket -> (String, Int, Bytes) -> IO HostError ()
-std.prim.setCurrentDirectory : String -> IO HostError ()
-std.prim.setEnv : String -> String -> IO HostError ()
-std.prim.sleep : Int -> IO HostError ()
+std.prim.readFile : String -> IO IOError String
+std.prim.readFileBytes : String -> IO IOError Bytes
+std.prim.readFileBytesLimited : String -> Int -> IO IOError Bytes
+std.prim.readFileLimited : String -> Int -> IO IOError String
+std.prim.readLine : IO IOError String
+std.prim.readProcessStderr : ChildProcess -> Int -> IO IOError Bytes
+std.prim.readProcessStdout : ChildProcess -> Int -> IO IOError Bytes
+std.prim.recv : forall a. Chan a -> IO IOError a
+std.prim.recvBytes : Socket -> Int -> IO IOError Bytes
+std.prim.recvDatagram : Socket -> Int -> IO IOError (Bytes, String, Int)
+std.prim.removeFile : String -> IO IOError ()
+std.prim.renameFile : String -> String -> IO IOError ()
+std.prim.resolveHost : String -> IO IOError [String]
+std.prim.runProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO IOError ProcessResult
+std.prim.secureRandomBytes : Int -> IO IOError Bytes
+std.prim.send : forall a. Chan a -> a -> IO IOError ()
+std.prim.sendBytes : Socket -> Bytes -> IO IOError ()
+std.prim.sendDatagram : Socket -> (String, Int, Bytes) -> IO IOError ()
+std.prim.setCurrentDirectory : String -> IO IOError ()
+std.prim.setEnv : String -> String -> IO IOError ()
+std.prim.sleep : Int -> IO IOError ()
 std.prim.spawn : forall e f. IO e () -> IO f ThreadId
-std.prim.startProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO HostError ChildProcess
-std.prim.startTlsClient : Socket -> (String, Maybe Bytes) -> IO HostError ()
+std.prim.startProcessConfigured : (String, [String], (String, Bool, [(String, String)], [String], (Bool, Bytes), Bool, Bool, Maybe Int)) -> IO IOError ChildProcess
+std.prim.startTlsClient : Socket -> (String, Maybe Bytes) -> IO IOError ()
 std.prim.stderr : Handle
 std.prim.stringToBytes : String -> Bytes
-std.prim.terminateProcess : ChildProcess -> IO HostError Int
-std.prim.tryRecv : forall a. Chan a -> IO HostError (Maybe a)
-std.prim.waitProcess : ChildProcess -> IO HostError Int
-std.prim.writeFile : String -> String -> IO HostError ()
-std.prim.writeFileAtomic : String -> String -> IO HostError ()
-std.prim.writeFileBytes : String -> Bytes -> IO HostError ()
-std.prim.writeFileBytesAtomic : String -> Bytes -> IO HostError ()
-std.prim.writeProcessStdin : ChildProcess -> Bytes -> IO HostError ()
+std.prim.terminateProcess : ChildProcess -> IO IOError Int
+std.prim.tryRecv : forall a. Chan a -> IO IOError (Maybe a)
+std.prim.waitProcess : ChildProcess -> IO IOError Int
+std.prim.writeFile : String -> String -> IO IOError ()
+std.prim.writeFileAtomic : String -> String -> IO IOError ()
+std.prim.writeFileBytes : String -> Bytes -> IO IOError ()
+std.prim.writeFileBytesAtomic : String -> Bytes -> IO IOError ()
+std.prim.writeProcessStdin : ChildProcess -> Bytes -> IO IOError ()
 std.process.argumentsContainNull : [String] -> Bool
 std.process.captureStandardError : Process -> Process
 std.process.captureStandardOutput : Process -> Process
@@ -907,15 +907,15 @@ std.process.discardStandardError : Process -> Process
 std.process.discardStandardOutput : Process -> Process
 std.process.exitCodeFromInt : Int -> ExitCode
 std.process.exitCodeToInt : ExitCode -> Int
-std.process.exitFailure : forall a. IO HostError a
-std.process.exitSuccess : forall a. IO HostError a
-std.process.exitWith : forall a. ExitCode -> IO HostError a
+std.process.exitFailure : forall a. IO IOError a
+std.process.exitSuccess : forall a. IO IOError a
+std.process.exitWith : forall a. ExitCode -> IO IOError a
 std.process.inheritProcessEnvironment : Process -> Process
 std.process.inheritProcessWorkingDirectory : Process -> Process
 std.process.inheritsEnvironment : ProcessEnvironmentBase -> Bool
 std.process.invalidEnvironmentName : String -> Bool
 std.process.isExitSuccess : ExitCode -> Bool
-std.process.mapProcessHostError : forall a. Process -> IO HostError a -> IO ProcessError a
+std.process.mapProcessIOError : forall a. Process -> IO IOError a -> IO ProcessError a
 std.process.pipeStandardInput : Process -> Process
 std.process.process : String -> [String] -> Either ProcessError Process
 std.process.processArguments : Process -> [String]
@@ -965,7 +965,7 @@ std.queue.peek : forall a. Queue a -> Maybe a
 std.queue.singleton : forall a. a -> Queue a
 std.queue.toList : forall a. Queue a -> [a]
 std.random.mkStdGen : Int -> StdGen
-std.random.newStdGen : IO HostError StdGen
+std.random.newStdGen : IO IOError StdGen
 std.random.randomInt : StdGen -> (Int, StdGen)
 std.random.randomRange : Int -> Int -> StdGen -> Maybe (Int, StdGen)
 std.random.secureRandomBytes : Int -> IO SecureRandomError Bytes
@@ -1013,7 +1013,7 @@ std.stream.toListLimited : forall scope e a. Int -> Stream scope e a -> IO e (Ei
 std.stream.unfold : forall e state a. (state -> IO e (Maybe (a, state))) -> state -> Stream () e a
 std.stream.unfoldScoped : forall scope e state a. (state -> IO e (Maybe (a, state))) -> state -> Stream scope e a
 std.stream.unfoldScopedStep : forall scope e state a. (state -> IO e (Maybe (a, state))) -> Maybe (a, state) -> StreamStep scope e a
-std.task.asConcurrentInfrastructure : forall e a. IO HostError a -> IO (ConcurrentError e) a
+std.task.asConcurrentInfrastructure : forall e a. IO IOError a -> IO (ConcurrentError e) a
 std.task.bracket : forall e resource cleanup a. IO e resource -> (resource -> IO e cleanup) -> (resource -> IO e a) -> IO e a
 std.task.captureWorker : forall e a b. (a -> IO e b) -> a -> IO (ConcurrentError e) (Either e b)
 std.task.catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
@@ -1021,7 +1021,7 @@ std.task.collectPooledCompletionOrder : forall e a. Chan (Int, Either e a) -> In
 std.task.collectPooledMap : forall e a. Chan (Int, Either e a) -> Int -> Map Int a -> IO (ConcurrentError e) (Map Int a)
 std.task.collectPooledOrdered : forall e a. Chan (Int, Either e a) -> Int -> IO (ConcurrentError e) [a]
 std.task.collectPooledReversed : forall e a. Chan (Int, Either e a) -> Int -> [a] -> IO (ConcurrentError e) [a]
-std.task.concurrentHostError : ConcurrentError HostError -> HostError
+std.task.concurrentIOError : ConcurrentError IOError -> IOError
 std.task.concurrently : forall e a b. IO e a -> IO e b -> IO e (a, b)
 std.task.enqueuePooled : forall e a. Chan (Int, a) -> [a] -> Int -> IO (ConcurrentError e) ()
 std.task.finally : forall e a b. IO e a -> IO e b -> IO e a
@@ -1080,7 +1080,7 @@ std.text.stringToChars : String -> [Char]
 std.text.stripPrefix : String -> String -> Maybe String
 std.text.textBuilder : String -> TextBuilder
 std.text.trimAscii : String -> String
-std.thread.killThread : ThreadId -> IO HostError ()
+std.thread.killThread : ThreadId -> IO IOError ()
 std.thread.spawn : forall childError e. IO childError () -> IO e ThreadId
 std.time.durationToMicroseconds : Duration -> Int
 std.time.durationToMilliseconds : Duration -> Int
@@ -1098,7 +1098,7 @@ std.time.nanoseconds : Int -> Duration
 std.time.saturatingDifference : Int -> Int -> Int
 std.time.saturatingScale : Int -> Int -> Int
 std.time.seconds : Int -> Duration
-std.time.sleep : Duration -> IO HostError ()
+std.time.sleep : Duration -> IO IOError ()
 std.time.sleepMilliseconds : Duration -> Int
 std.time.systemTimeDifference : SystemTime -> SystemTime -> Duration
 std.time.systemTimeFromNanoseconds : Int -> SystemTime

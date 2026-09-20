@@ -69,7 +69,7 @@ constructor names.
 ## Typed IO and defects
 
 ```solveig
-type Task a = IO HostError a
+type Task a = IO IOError a
 
 pureIO : forall e a. a -> IO e a
 bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
@@ -80,8 +80,8 @@ orElse : forall e f a. IO e a -> IO f a -> IO f a
 error : forall a. String -> a
 ```
 
-`HostError` carries a stable `HostErrorKind`, an operation, and a diagnostic
-host message. Domain modules wrap it in types such as `FsError`, `NetError`,
+`IOError` carries a stable `IOErrorKind`, an operation, and a diagnostic
+platform message. Domain modules wrap it in types such as `FsError`, `NetError`,
 and `ProcessError`; strict UTF-8 decoding uses the separate `Utf8Error` type.
 Defects remain distinct:
 

@@ -6,20 +6,20 @@ import std.stream(Stream, fold)
 import std.task(concurrently, timeout)
 import std.time(milliseconds)
 
-processToHost : ProcessError -> HostError
-processToHost (ProcessHostError _ hostError) = hostError
-processToHost (InvalidProcess reason) = HostError InvalidArgument "process" reason
+processToIO : ProcessError -> IOError
+processToIO (ProcessIOError _ ioError) = ioError
+processToIO (InvalidProcess reason) = IOError InvalidArgument "process" reason
 
 requireProcess : Either ProcessError Process -> Task Process
 requireProcess request =
     case request of
-        Left error => failIO (processToHost error)
+        Left error => failIO (processToIO error)
         | Right processValue => pureIO processValue
 
 requirePath : String -> Task Path
 requirePath spelling =
     case pathFromString spelling of
-        Left error => failIO (HostError InvalidArgument "path" (show error))
+        Left error => failIO (IOError InvalidArgument "path" (show error))
         | Right path => pureIO path
 
 decode : Either Utf8Error String -> String
@@ -35,15 +35,15 @@ configuredProcess executable = do
     cleaned <- requireProcess (withoutEnvironment "SOLVEIG_L3_REMOVED" overridden)
     pureIO (withStandardInputText "from-stdin\n" (withWorkingDirectory childDirectory cleaned))
 
-reportRunProcessError : HostError -> Task ()
+reportRunProcessError : IOError -> Task ()
 reportRunProcessError ioError =
-    if hostErrorOperation ioError == "runProcess"
+    if ioErrorOperation ioError == "runProcess"
         then printLine "run-process-error"
         else printLine "wrong-error"
 
-reportLimitedError : HostError -> Task String
+reportLimitedError : IOError -> Task String
 reportLimitedError ioError =
-    if hostErrorOperation ioError == "runProcess"
+    if ioErrorOperation ioError == "runProcess"
         then pureIO "process-output-limit"
         else pureIO "wrong-limited-error"
 
@@ -52,11 +52,11 @@ runFixture executable = do
     setEnv "SOLVEIG_L3_CHILD_VALUE" "inherited"
     setEnv "SOLVEIG_L3_REMOVED" "hidden"
     request <- configuredProcess executable
-    result <- mapError processToHost (runProcess request)
+    result <- mapError processToIO (runProcess request)
     printLine ("exit=" <> show (exitCodeToInt (processExitCode result)))
     printStr (decode (processStdoutText result))
     printStr (decode (processStderrText result))
-    limited <- mapError processToHost (runProcessLimited request 128)
+    limited <- mapError processToIO (runProcessLimited request 128)
     if and
         (processStdoutBytes limited == processStdoutBytes result)
         (processStderrBytes limited == processStderrBytes result)
@@ -65,17 +65,17 @@ runFixture executable = do
     tooLarge <-
         catchError
             (bindIO
-                (mapError processToHost (runProcessLimited request 12))
+                (mapError processToIO (runProcessLimited request 12))
                 (fun captured => pureIO "wrong-limit-success"))
             reportLimitedError
     printLine tooLarge
-    discarded <- mapError processToHost (runProcess (discardStandardError request))
+    discarded <- mapError processToIO (runProcess (discardStandardError request))
     if bytesLength (processStderrBytes discarded) == 0
         then printLine "discarded-stderr"
         else printLine "retained-stderr"
     timed <-
         mapError
-            processToHost
+            processToIO
             (runProcessTimeout (milliseconds 1) (withArgumentsOrDefect ["delay"] request))
     case timed of
         Nothing => printLine "process-timeout"
@@ -90,7 +90,7 @@ withArgumentsOrDefect arguments processValue =
 runFailure : String -> Task ()
 runFailure executable = do
     request <- requireProcess (process executable ["--definitely-invalid-l3-flag"])
-    result <- mapError processToHost (runProcess request)
+    result <- mapError processToIO (runProcess request)
     printLine ("failure-exit=" <> show (exitCodeToInt (processExitCode result)))
     if bytesLength (processStderrBytes result) == 0
         then printLine "missing-failure-stderr"
@@ -108,7 +108,7 @@ runStreamingPipes executable = do
     request <- childRequest executable "stream-burst"
     (stdoutCount, stderrCount) <-
         mapError
-            processToHost
+            processToIO
             (withProcess
                 4096
                 request
@@ -126,7 +126,7 @@ runStreamingDiscard executable = do
     request <- childRequest executable "stream-burst"
     (stdoutCount, stderrCount, status) <-
         mapError
-            processToHost
+            processToIO
             (withProcess 4096 (discardStandardError request) streamingDiscardSession)
     if and (and (stdoutCount == 163840) (stderrCount == 0)) (isExitSuccess status)
         then printLine "streaming-discard"
@@ -144,7 +144,7 @@ runStreamingInput executable = do
     request <- childRequest executable "stdin-echo"
     outcome <-
         mapError
-            processToHost
+            processToIO
             (withProcess
                 16
                 (pipeStandardInput (discardStandardError request))
@@ -177,13 +177,13 @@ streamingInputSession child = do
 
 inputBoundError : ProcessError -> IO ProcessError Bool
 inputBoundError (InvalidProcess _) = pureIO True
-inputBoundError (ProcessHostError _ _) = pureIO False
+inputBoundError (ProcessIOError _ _) = pureIO False
 
 runExplicitTermination : String -> Task ()
 runExplicitTermination executable = do
     request <- childRequest executable "delayed-output"
     (status, stdoutCount, stderrCount) <-
-        mapError processToHost (withProcess 32 request terminateSession)
+        mapError processToIO (withProcess 32 request terminateSession)
     if and (and (not (isExitSuccess status)) (stdoutCount == 0)) (stderrCount == 0)
         then printLine "streaming-terminate"
         else printLine "wrong-streaming-terminate"
@@ -200,7 +200,7 @@ runScopedTimeout executable = do
     request <- childRequest executable "delayed-output"
     result <-
         mapError
-            processToHost
+            processToIO
             (timeout (milliseconds 1) (withProcess 32 request (fun child => waitProcess child)))
     case result of
         Nothing => printLine "streaming-timeout"
@@ -221,7 +221,7 @@ main = do
             missing <- requireProcess (process "solveig-l3-command-that-does-not-exist-9d42" [])
             catchError
                 (bindIO
-                    (mapError processToHost (runProcess missing))
+                    (mapError processToIO (runProcess missing))
                     (fun result => printLine "wrong-success"))
                 reportRunProcessError
         | _ => printLine "missing-test-executable"

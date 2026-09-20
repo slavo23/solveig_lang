@@ -9,7 +9,7 @@ result:
 IO error result
 ```
 
-`Task result` is the common alias `IO HostError result`. More specific modules
+`Task result` is the common alias `IO IOError result`. More specific modules
 use more informative errors—for example, filesystem actions return
 `IO FsError result` so a failure retains its `Path`.
 
@@ -125,7 +125,7 @@ stream instead of inventing a very large limit.
 
 The tutorial's [`file_summary`](code/file_summary/) project reads four lines,
 writes a summary, and prints it. Its filesystem error is converted to
-`HostError` only where it joins the Prelude printing actions in `main`:
+`IOError` only where it joins the Prelude printing actions in `main`:
 
 ```solveig
 import std.fs(FsError(..))
@@ -133,9 +133,9 @@ import std.list(length)
 import std.path(Path, pathFromString)
 import std.text(lines, trimAscii)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost fileError = HostError InvalidArgument "filesystem" (show fileError)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO fileError = IOError InvalidArgument "filesystem" (show fileError)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -148,10 +148,10 @@ nonEmpty text = text /= ""
 
 main : Task ()
 main = do
-    contents <- mapError fsToHost $ std.fs.readFile $ requiredPath "input/readings.txt"
+    contents <- mapError fsToIO $ std.fs.readFile $ requiredPath "input/readings.txt"
     let readings = filter nonEmpty $ lines $ trimAscii contents
     let report = "readings: " <> show (length readings) <> "\n"
-    mapError fsToHost $ std.fs.writeFile (requiredPath "summary.txt") report
+    mapError fsToIO $ std.fs.writeFile (requiredPath "summary.txt") report
     printStr report
 ```
 
@@ -169,7 +169,7 @@ readings: 4
 
 `mapError` changes only the error channel; it does not catch a failure or turn
 it into a successful value. A larger application would often define its own
-sum error type instead of collapsing `FsError` into `HostError`.
+sum error type instead of collapsing `FsError` into `IOError`.
 
 ## Handle-based IO
 
@@ -253,15 +253,15 @@ readOrDefault path fallback =
         (readFile path)
         (fun fileError =>
             case fileError of
-                FsHostError _ hostError =>
-                    if hostErrorKind hostError == DoesNotExist
+                FsIOError _ ioError =>
+                    if ioErrorKind ioError == DoesNotExist
                         then pureIO fallback
                         else failIO fileError
                 | FsInvalidUtf8 _ _ => failIO fileError)
 ```
 
 Matching `DoesNotExist` avoids hiding permission failures, malformed UTF-8,
-resource exhaustion, or unrelated host errors. `FsInvalidUtf8` preserves both
+resource exhaustion, or unrelated I/O errors. `FsInvalidUtf8` preserves both
 the path and the invalid byte offset.
 
 ## Filesystem state and atomic replacement

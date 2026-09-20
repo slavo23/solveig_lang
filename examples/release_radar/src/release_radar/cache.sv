@@ -6,9 +6,9 @@ import release_radar.model(*)
 
 data Cache = Cache (std.map.Map String String)
 
-fsToHost : std.fs.FsError -> HostError
-fsToHost (std.fs.FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : std.fs.FsError -> IOError
+fsToIO (std.fs.FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 empty : Cache
 empty = Cache std.map.empty
@@ -27,9 +27,9 @@ insertCacheLine entries line =
 
 loadCache : Path -> Task Cache
 loadCache path = do
-    exists <- mapError fsToHost (std.fs.doesFileExist path)
+    exists <- mapError fsToIO (std.fs.doesFileExist path)
     if exists
-        then fmap parseCache (mapError fsToHost (std.fs.readFileLimited path 65536))
+        then fmap parseCache (mapError fsToIO (std.fs.readFileLimited path 65536))
         else pureIO empty
 
 updateCache : Cache -> [release_radar.model.ReleaseResult] -> Cache
@@ -49,4 +49,4 @@ appendCacheEntry : (String, String) -> String -> String
 appendCacheEntry (repository, etag) rest = repository <> "\t" <> etag <> "\n" <> rest
 
 writeCache : Path -> Cache -> Task ()
-writeCache path = mapError fsToHost . std.fs.writeFile path . cacheText
+writeCache path = mapError fsToIO . std.fs.writeFile path . cacheText

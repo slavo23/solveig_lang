@@ -101,7 +101,7 @@ queues owned by the scheduler, not stored inside the channel object.
 
 - `newChan` creates an unbounded queue.
 - `newBoundedChan capacity` requires a value from 1 through `u32::MAX`.
-  Invalid capacity raises `HostError InvalidArgument` with the rejected value
+  Invalid capacity raises `IOError InvalidArgument` with the rejected value
   in its diagnostic message;
   capacity zero is not a rendezvous channel.
 - `send` hands its value directly to the oldest waiting receiver, otherwise
@@ -111,9 +111,9 @@ queues owned by the scheduler, not stored inside the channel object.
   sender.
 - `tryRecv` never parks. It returns `Nothing` only for an open empty channel.
 - `closeChan` is idempotent. Already queued values remain readable. After they
-  are drained, receives fail with `HostError ResourceVanished`; sends fail
+  are drained, receives fail with `IOError ResourceVanished`; sends fail
   immediately. The operation and message identify the closed channel. Closing
-  also wakes blocked senders and receivers with that typed host error.
+  also wakes blocked senders and receivers with that typed I/O error.
 
 Channel mutation is the first old-to-young heap edge in Solveig. The runtime
 applies the generational write barrier when queueing a value, traces queued

@@ -1,6 +1,6 @@
 # Input and output
 
-Solveig's `Task a` is `IO HostError a`: an inert description that the runtime
+Solveig's `Task a` is `IO IOError a`: an inert description that the runtime
 performs when it runs `main`. Blocking file and standard-input operations run
 on the bounded IO worker pool, so a blocked handle does not block lightweight
 threads or the scheduler. Open files are distributed across that pool and all
@@ -47,8 +47,8 @@ copyText source destination =
             hPutStr output contents))
 ```
 
-Using a closed handle raises `HostError ResourceVanished` with the attempted
-operation recorded in `hostErrorOperation`. Handle identities
+Using a closed handle raises `IOError ResourceVanished` with the attempted
+operation recorded in `ioErrorOperation`. Handle identities
 are not reused within a runtime, so a stale identity cannot alias a later file.
 
 ## Scoped file streams
@@ -91,7 +91,7 @@ hFlush : Handle -> Task ()
 ```
 
 `openFile` resolves relative paths against the logical working directory and
-returns `HostError` with operation `openFile` on failure.
+returns `IOError` with operation `openFile` on failure.
 
 - `ReadMode` opens an existing readable file.
 - `WriteMode` creates the file if necessary and truncates an existing file.
@@ -100,7 +100,7 @@ returns `HostError` with operation `openFile` on failure.
   truncating or creating it.
 
 `hClose` first flushes buffered output and closes the logical handle. Closing
-an already closed handle returns `HostError ResourceVanished`. `hFlush`
+an already closed handle returns `IOError ResourceVanished`. `hFlush`
 writes pending output to the host stream; failures retain operation `hFlush`.
 Normal runtime shutdown makes a
 best-effort flush, but it cannot report failures to a finished program and is
@@ -115,7 +115,7 @@ hIsEOF : Handle -> Task Bool
 ```
 
 Text is decoded strictly as UTF-8. Invalid UTF-8, a handle opened without read
-permission, or a host read failure returns `HostError` with the attempted
+permission, or an underlying read failure returns `IOError` with the attempted
 operation retained. `hGetLine`
 removes `\n` and an immediately preceding `\r`; at EOF it returns `""`. Use
 `hIsEOF` first when an empty final line must be distinguished from EOF.
@@ -139,7 +139,7 @@ hPutStrLn : Handle -> String -> Task ()
 Both operations encode `String` as UTF-8. `hPutStrLn` appends `\n`; it does not
 translate it to the host platform's native text newline. A handle opened
 without write permission, a closed handle, or a host write failure returns
-`HostError` with its portable kind and operation. Success means the text reached the selected
+`IOError` with its portable kind and operation. Success means the text reached the selected
 language buffer; use `hFlush` when the host must observe it immediately.
 
 ## Buffering
@@ -156,7 +156,7 @@ hSetBuffering : Handle -> BufferMode -> Task ()
 `NoBuffering` writes each operation immediately. `LineBuffering` flushes after
 an operation that writes a newline. `BlockBuffering Nothing` uses an 8 KiB
 default; `BlockBuffering (Just size)` uses a positive byte size. A non-positive
-or host-unrepresentable size returns `HostError InvalidArgument`.
+or platform-unrepresentable size returns `IOError InvalidArgument`.
 
 Changing buffering first flushes pending writes and preserves the logical read
 position. A failure retains operation `hSetBuffering`. Terminal `stdout` and
@@ -180,14 +180,14 @@ printStr : String -> Task ()
 `printLine` uses `hPutStrLn stdout`. `printStr` uses
 `hPutStr stdout` and then flushes, preserving its practical prompt-writing
 behavior regardless of redirection. Direct `hPutStr` calls retain full control
-over buffering. Failures use `HostError`; its operation distinguishes reads,
+over buffering. Failures use `IOError`; its operation distinguishes reads,
 writes, and flushes, including when a standard handle was explicitly closed.
 
 ## Whole-file text input
 
 ```solveig
 data FsError =
-    FsHostError Path HostError
+    FsIOError Path IOError
   | FsInvalidUtf8 Path Utf8Error
 
 readFile : Path -> IO FsError String
@@ -206,7 +206,7 @@ appendFileBytes : Path -> Bytes -> IO FsError ()
 before succeeding and retain the path in `FsError`. `readFile` has no library
 size bound and should be used only when the complete input comfortably fits
 memory. `readFileLimited path maximum` counts encoded bytes, reads at most
-`maximum + 1`, and reports a wrapped `HostError ResourceExhausted` when the
+`maximum + 1`, and reports a wrapped `IOError ResourceExhausted` when the
 input is larger or `InvalidArgument` when the maximum is invalid. This is a
 runtime-enforced bound, not a metadata pre-check that can race with file growth.
 
@@ -215,7 +215,7 @@ files; callers do not have to invent an arbitrary limit. Use the bounded forms
 at an untrusted-input boundary and scoped streams when input may not fit in
 memory. `writeFileAtomic` and `writeFileBytesAtomic` write and sync a sibling
 temporary file before replacing the destination with one host rename. A host
-that cannot atomically replace an existing destination returns `FsHostError`;
+that cannot atomically replace an existing destination returns `FsIOError`;
 the old destination remains intact and the temporary file is removed.
 
 ## Byte input and output
@@ -231,14 +231,14 @@ hPutBytes : Handle -> Bytes -> Task ()
 These operations transfer arbitrary bytes without encoding or newline
 translation. `readFileBytes` strictly reads and allocates the entire file with
 no library size bound. `readFileBytesLimited path maximum` reads at most the
-non-negative byte limit and raises `HostError ResourceExhausted` if the file has
+non-negative byte limit and raises `IOError ResourceExhausted` if the file has
 even one more byte; the runtime reads no more than `maximum + 1` bytes to make
 that decision, so it does not rely on racy file metadata. A negative or
-host-unrepresentable maximum also reports a wrapped `HostError InvalidArgument`.
+host-unrepresentable maximum also reports a wrapped `IOError InvalidArgument`.
 
 `writeFileBytes` creates or replaces a file just like `writeFile`, but writes
 the supplied bytes unchanged. They bypass handle buffering and raise a
-`FsError` containing a `HostError` carrying `readFileBytes` or
+`FsError` containing an `IOError` carrying `readFileBytes` or
 `writeFileBytes` as its operation.
 
 `hGetBytes handle maximum` reads at most the non-negative `maximum`. It returns
@@ -246,13 +246,13 @@ fewer bytes at EOF and returns empty bytes when called at EOF or with zero.
 Regular files fill the requested count unless EOF is reached; `stdin` may
 return a shorter chunk when that is what the embedding host stream makes
 available. A negative or host-unrepresentable maximum, a non-readable or
-closed handle, and host failures raise `HostError` with operation `hGetBytes`.
+closed handle, and I/O failures raise `IOError` with operation `hGetBytes`.
 
 `hPutBytes` uses precisely the same buffer as text output. Under line
 buffering, a byte value `10` triggers a flush; block-buffer sizes count bytes.
 Success means the bytes reached the language buffer, so use `hFlush` when the
 host must observe them immediately. A non-writable or closed handle and host
-failures raise `HostError` with operation `hPutBytes`.
+failures raise `IOError` with operation `hPutBytes`.
 
 Text and byte operations can be mixed on one handle without changing its
 logical position. Text input still decodes strictly: invalid UTF-8 raises the
@@ -274,7 +274,7 @@ The runtime snapshots UTF-8 host environment entries at startup. `setEnv`
 changes this runtime-local copy, and subsequent environment reads observe the
 change; it does not mutate the host process's global environment. Names must be
 non-empty and contain neither `=` nor NUL,
-and values cannot contain NUL. Invalid inputs return `HostError
+and values cannot contain NUL. Invalid inputs return `IOError
 InvalidArgument` with the environment operation retained. `getEnvironment`
 is sorted by variable name for deterministic
 iteration.
@@ -358,8 +358,8 @@ secureRandomBytes : Int -> IO SecureRandomError Bytes
 `secureRandomBytes count` asks the operating system's preferred
 cryptographically secure source for exactly `count` bytes. The function name
 states that the integer is a byte count, and a negative count returns
-`InvalidSecureRandomByteCount` without reaching the host. Host failures are
-retained as `SecureRandomHostError HostError`.
+`InvalidSecureRandomByteCount` without reaching the host. I/O failures are
+retained as `SecureRandomIOError IOError`.
 
 This effect is intentionally unrelated to `StdGen`: it has no seed, returns no
 generator state, is not deterministic under captured or virtual-time execution,
@@ -444,7 +444,7 @@ resolution. The target must already be a directory.
 `Path` values are validated with `pathFromString`; their representation is
 not interchangeable with text. `listDirectory` returns immediate entry paths,
 excludes `.` and `..`, and
-sorts them lexically. A non-UTF-8 entry name is a wrapped `HostError
+sorts them lexically. A non-UTF-8 entry name is a wrapped `IOError
 InvalidArgument`.
 `createDirectory` creates exactly one directory and requires its parent to
 exist. `doesFileExist` and `doesDirectoryExist` return `False` for a missing
@@ -499,7 +499,7 @@ Captured streams are arbitrary `Bytes`. Decode explicitly with
 `processStdoutText` or `processStderrText`; malformed UTF-8 remains
 `Utf8Error` rather than being misreported as a process failure. Failure to
 start, write input, read output, or wait returns
-`ProcessHostError processValue hostError`. Use an absolute path
+`ProcessIOError processValue ioError`. Use an absolute path
 for a specific executable. A bare program name uses the host executable search
 path; a relative path containing components resolves against the logical cwd.
 
@@ -606,7 +606,7 @@ bits to a parent process.
 ## Platform notes
 
 File sharing and permission errors retain the host operating system's message
-inside `HostError`, so wording differs by platform. Match `HostErrorKind`, not
+inside `IOError`, so wording differs by platform. Match `IOErrorKind`, not
 that platform message, when control flow depends on the cause.
 `ReadWriteMode` does not request file creation on any platform. Files are opened
 in binary host mode and Solveig performs UTF-8 decoding and newline handling,

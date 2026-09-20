@@ -2,18 +2,18 @@ export (SecureRandomError(..), mkStdGen, newStdGen, randomInt, randomRange, secu
 
 import std.prim(*)
 
--- | A caller or host failure while obtaining cryptographic random bytes.
-data SecureRandomError = InvalidSecureRandomByteCount Int | SecureRandomHostError HostError
+-- | A caller or I/O failure while obtaining cryptographic random bytes.
+data SecureRandomError = InvalidSecureRandomByteCount Int | SecureRandomIOError IOError
 
 instance Eq SecureRandomError where
     (==) (InvalidSecureRandomByteCount left) (InvalidSecureRandomByteCount right) = left == right
-    (==) (SecureRandomHostError left) (SecureRandomHostError right) = left == right
+    (==) (SecureRandomIOError left) (SecureRandomIOError right) = left == right
     (==) _ _ = False
 
 instance Show SecureRandomError where
     show (InvalidSecureRandomByteCount count) =
         "secure randomness byte count must be non-negative, got " <> show count
-    show (SecureRandomHostError hostError) = "secure randomness: " <> show hostError
+    show (SecureRandomIOError ioError) = "secure randomness: " <> show ioError
 
 -- | Creates a deterministic immutable random generator from a chosen seed.
 mkStdGen : Int -> StdGen
@@ -37,9 +37,9 @@ randomRange lower upper generator =
 -- | cryptographically secure random source.
 -- |
 -- | This operation is deliberately separate from StdGen: its output is not
--- | deterministic or reproducible, and it returns a typed host failure.
+-- | deterministic or reproducible, and it returns a typed I/O failure.
 secureRandomBytes : Int -> IO SecureRandomError Bytes
 secureRandomBytes count =
     if count < 0
         then failIO (InvalidSecureRandomByteCount count)
-        else mapError SecureRandomHostError (std.prim.secureRandomBytes count)
+        else mapError SecureRandomIOError (std.prim.secureRandomBytes count)

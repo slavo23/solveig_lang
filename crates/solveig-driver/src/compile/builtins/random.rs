@@ -6,7 +6,7 @@ pub(super) fn random_builtin_specs(
     names: &mut Names,
     int: &Ty,
     bytes: &Ty,
-    host_error: &Ty,
+    io_error: &Ty,
 ) -> Vec<PrimitiveBuiltinSpec> {
     let std_gen = Ty::make_con_id(PRIM_TYS.std_gen);
     let pair_int_gen = Ty::make_app(
@@ -47,7 +47,7 @@ pub(super) fn random_builtin_specs(
             "secureRandomBytes",
             BUILTIN_SECURE_RANDOM_BYTES,
             1,
-            unary(int.clone(), io_of(host_error.clone(), bytes.clone())),
+            unary(int.clone(), io_of(io_error.clone(), bytes.clone())),
         ),
     ]
 }

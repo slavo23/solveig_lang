@@ -7,9 +7,9 @@ import scry.pretty(*)
 import scry.solver(*)
 import scry.util(*)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -68,7 +68,7 @@ repl clauses = do
 
 main : Task ()
 main = do
-    contents <- mapError fsToHost (std.fs.readFile (requiredPath "knowledge.scry"))
+    contents <- mapError fsToIO (std.fs.readFile (requiredPath "knowledge.scry"))
     case parseProgram contents of
         Nothing => printLine "Could not parse knowledge.scry"
         | Just clauses => do

@@ -194,8 +194,8 @@ pub fn prelude_maybe_nothing_ctor_id(names: &mut Names) -> CtorId {
     names.ctor_id(PRELUDE_MAYBE_NOTHING_NAME)
 }
 
-pub fn prelude_host_error_tycon_id(names: &mut Names) -> TyConId {
-    names.tycon_id(PRELUDE_HOST_ERROR_NAME)
+pub fn prelude_io_error_tycon_id(names: &mut Names) -> TyConId {
+    names.tycon_id(PRELUDE_IO_ERROR_NAME)
 }
 
 pub fn prelude_utf8_error_tycon_id(names: &mut Names) -> TyConId {
@@ -286,37 +286,37 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         PRELUDE_ORDERING_LT_NAME => CtorRuntimeRole::PreludeOrderingLt,
         PRELUDE_ORDERING_EQ_NAME => CtorRuntimeRole::PreludeOrderingEq,
         PRELUDE_ORDERING_GT_NAME => CtorRuntimeRole::PreludeOrderingGt,
-        PRELUDE_HOST_ERROR_CTOR_NAME => CtorRuntimeRole::PreludeHostError,
-        PRELUDE_HOST_ERROR_KIND_ALREADY_EXISTS_NAME => CtorRuntimeRole::PreludeHostAlreadyExists,
-        PRELUDE_HOST_ERROR_KIND_DOES_NOT_EXIST_NAME => CtorRuntimeRole::PreludeHostDoesNotExist,
-        PRELUDE_HOST_ERROR_KIND_PERMISSION_DENIED_NAME => {
-            CtorRuntimeRole::PreludeHostPermissionDenied
+        PRELUDE_IO_ERROR_CTOR_NAME => CtorRuntimeRole::PreludeIOError,
+        PRELUDE_IO_ERROR_KIND_ALREADY_EXISTS_NAME => CtorRuntimeRole::PreludeIOErrorAlreadyExists,
+        PRELUDE_IO_ERROR_KIND_DOES_NOT_EXIST_NAME => CtorRuntimeRole::PreludeIOErrorDoesNotExist,
+        PRELUDE_IO_ERROR_KIND_PERMISSION_DENIED_NAME => {
+            CtorRuntimeRole::PreludeIOErrorPermissionDenied
         }
-        PRELUDE_HOST_ERROR_KIND_RESOURCE_BUSY_NAME => CtorRuntimeRole::PreludeHostResourceBusy,
-        PRELUDE_HOST_ERROR_KIND_RESOURCE_EXHAUSTED_NAME => {
-            CtorRuntimeRole::PreludeHostResourceExhausted
+        PRELUDE_IO_ERROR_KIND_RESOURCE_BUSY_NAME => CtorRuntimeRole::PreludeIOErrorResourceBusy,
+        PRELUDE_IO_ERROR_KIND_RESOURCE_EXHAUSTED_NAME => {
+            CtorRuntimeRole::PreludeIOErrorResourceExhausted
         }
-        PRELUDE_HOST_ERROR_KIND_END_OF_FILE_NAME => CtorRuntimeRole::PreludeHostEndOfFile,
-        PRELUDE_HOST_ERROR_KIND_INVALID_ARGUMENT_NAME => {
-            CtorRuntimeRole::PreludeHostInvalidArgument
+        PRELUDE_IO_ERROR_KIND_END_OF_FILE_NAME => CtorRuntimeRole::PreludeIOErrorEndOfFile,
+        PRELUDE_IO_ERROR_KIND_INVALID_ARGUMENT_NAME => {
+            CtorRuntimeRole::PreludeIOErrorInvalidArgument
         }
-        PRELUDE_HOST_ERROR_KIND_UNSUPPORTED_OPERATION_NAME => {
-            CtorRuntimeRole::PreludeHostUnsupportedOperation
+        PRELUDE_IO_ERROR_KIND_UNSUPPORTED_OPERATION_NAME => {
+            CtorRuntimeRole::PreludeIOErrorUnsupportedOperation
         }
-        PRELUDE_HOST_ERROR_KIND_TIME_EXPIRED_NAME => CtorRuntimeRole::PreludeHostTimeExpired,
-        PRELUDE_HOST_ERROR_KIND_RESOURCE_VANISHED_NAME => {
-            CtorRuntimeRole::PreludeHostResourceVanished
+        PRELUDE_IO_ERROR_KIND_TIME_EXPIRED_NAME => CtorRuntimeRole::PreludeIOErrorTimeExpired,
+        PRELUDE_IO_ERROR_KIND_RESOURCE_VANISHED_NAME => {
+            CtorRuntimeRole::PreludeIOErrorResourceVanished
         }
-        PRELUDE_HOST_ERROR_KIND_INTERRUPTED_NAME => CtorRuntimeRole::PreludeHostInterrupted,
-        PRELUDE_HOST_ERROR_KIND_NETWORK_UNREACHABLE_NAME => {
-            CtorRuntimeRole::PreludeHostNetworkUnreachable
+        PRELUDE_IO_ERROR_KIND_INTERRUPTED_NAME => CtorRuntimeRole::PreludeIOErrorInterrupted,
+        PRELUDE_IO_ERROR_KIND_NETWORK_UNREACHABLE_NAME => {
+            CtorRuntimeRole::PreludeIOErrorNetworkUnreachable
         }
-        PRELUDE_HOST_ERROR_KIND_CONNECTION_REFUSED_NAME => {
-            CtorRuntimeRole::PreludeHostConnectionRefused
+        PRELUDE_IO_ERROR_KIND_CONNECTION_REFUSED_NAME => {
+            CtorRuntimeRole::PreludeIOErrorConnectionRefused
         }
-        PRELUDE_HOST_ERROR_KIND_ADDRESS_IN_USE_NAME => CtorRuntimeRole::PreludeHostAddressInUse,
-        PRELUDE_HOST_ERROR_KIND_PROTOCOL_ERROR_NAME => CtorRuntimeRole::PreludeHostProtocolError,
-        PRELUDE_HOST_ERROR_KIND_OTHER_ERROR_NAME => CtorRuntimeRole::PreludeHostOtherError,
+        PRELUDE_IO_ERROR_KIND_ADDRESS_IN_USE_NAME => CtorRuntimeRole::PreludeIOErrorAddressInUse,
+        PRELUDE_IO_ERROR_KIND_PROTOCOL_ERROR_NAME => CtorRuntimeRole::PreludeIOErrorProtocolError,
+        PRELUDE_IO_ERROR_KIND_OTHER_ERROR_NAME => CtorRuntimeRole::PreludeIOErrorOtherError,
         PRELUDE_UTF8_ERROR_INVALID_NAME => CtorRuntimeRole::PreludeUtf8ErrorInvalid,
         STD_PROCESS_RESULT_CTOR_NAME => CtorRuntimeRole::StdProcessResult,
         STD_IO_MODE_READ_NAME => CtorRuntimeRole::StdIoModeRead,
@@ -555,23 +555,23 @@ pub enum CtorRuntimeRole {
     PreludeOrderingLt,
     PreludeOrderingEq,
     PreludeOrderingGt,
-    PreludeHostError,
-    PreludeHostAlreadyExists,
-    PreludeHostDoesNotExist,
-    PreludeHostPermissionDenied,
-    PreludeHostResourceBusy,
-    PreludeHostResourceExhausted,
-    PreludeHostEndOfFile,
-    PreludeHostInvalidArgument,
-    PreludeHostUnsupportedOperation,
-    PreludeHostTimeExpired,
-    PreludeHostResourceVanished,
-    PreludeHostInterrupted,
-    PreludeHostNetworkUnreachable,
-    PreludeHostConnectionRefused,
-    PreludeHostAddressInUse,
-    PreludeHostProtocolError,
-    PreludeHostOtherError,
+    PreludeIOError,
+    PreludeIOErrorAlreadyExists,
+    PreludeIOErrorDoesNotExist,
+    PreludeIOErrorPermissionDenied,
+    PreludeIOErrorResourceBusy,
+    PreludeIOErrorResourceExhausted,
+    PreludeIOErrorEndOfFile,
+    PreludeIOErrorInvalidArgument,
+    PreludeIOErrorUnsupportedOperation,
+    PreludeIOErrorTimeExpired,
+    PreludeIOErrorResourceVanished,
+    PreludeIOErrorInterrupted,
+    PreludeIOErrorNetworkUnreachable,
+    PreludeIOErrorConnectionRefused,
+    PreludeIOErrorAddressInUse,
+    PreludeIOErrorProtocolError,
+    PreludeIOErrorOtherError,
     PreludeUtf8ErrorInvalid,
     StdProcessResult,
     StdIoModeRead,

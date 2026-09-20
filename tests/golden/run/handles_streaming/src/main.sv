@@ -4,55 +4,55 @@ import std.thread(*)
 import std.channel(*)
 import std.io(*)
 
-ignoreError : HostError -> Task ()
+ignoreError : IOError -> Task ()
 ;
 ignoreError ioError = pureIO ()
 ;
 
-reportClosedRead : HostError -> Task String
+reportClosedRead : IOError -> Task String
 ;
 reportClosedRead ioError =
-    if hostErrorOperation ioError == "handle read"
+    if ioErrorOperation ioError == "handle read"
         then pureIO "closed-read"
         else pureIO "wrong-read-error"
 ;
 
-reportClosedWrite : String -> HostError -> Task String
+reportClosedWrite : String -> IOError -> Task String
 ;
 reportClosedWrite expected ioError =
-    if hostErrorOperation ioError == "handle write"
+    if ioErrorOperation ioError == "handle write"
         then pureIO expected
         else pureIO "wrong-write-error"
 ;
 
-reportOpen : HostError -> Task String
+reportOpen : IOError -> Task String
 ;
 reportOpen ioError =
-    if hostErrorOperation ioError == "openFile"
+    if ioErrorOperation ioError == "openFile"
         then pureIO "open-error"
         else pureIO "wrong-open-error"
 ;
 
-reportClose : HostError -> Task String
+reportClose : IOError -> Task String
 ;
 reportClose ioError =
-    if hostErrorOperation ioError == "hClose"
+    if ioErrorOperation ioError == "hClose"
         then pureIO "close-error"
         else pureIO "wrong-close-error"
 ;
 
-reportFlush : HostError -> Task String
+reportFlush : IOError -> Task String
 ;
 reportFlush ioError =
-    if hostErrorOperation ioError == "hFlush"
+    if ioErrorOperation ioError == "hFlush"
         then pureIO "flush-error"
         else pureIO "wrong-flush-error"
 ;
 
-reportBuffering : HostError -> Task String
+reportBuffering : IOError -> Task String
 ;
 reportBuffering ioError =
-    if hostErrorOperation ioError == "hSetBuffering"
+    if ioErrorOperation ioError == "hSetBuffering"
         then pureIO "buffering-error"
         else pureIO "wrong-buffering-error"
 ;
@@ -82,7 +82,7 @@ failAfterSharing : Chan Handle -> Handle -> Task ()
 ;
 failAfterSharing escaped file = do
     send escaped file
-    failIO (HostError OtherError "handle write" "planned")
+    failIO (IOError OtherError "handle write" "planned")
 
 waitAfterSharing : Chan Handle -> Chan () -> Handle -> Task ()
 ;

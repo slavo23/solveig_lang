@@ -4,12 +4,12 @@ import std.net(*)
 import std.task(*)
 import std.thread(*)
 
-netToHost : NetError -> HostError
-netToHost (NetHostError _ hostError) = hostError
-netToHost error = HostError InvalidArgument "network" (show error)
+netToIO : NetError -> IOError
+netToIO (NetIOError _ ioError) = ioError
+netToIO error = IOError InvalidArgument "network" (show error)
 
-hostToNet : String -> HostError -> NetError
-hostToNet context hostError = NetHostError context hostError
+ioToNet : String -> IOError -> NetError
+ioToNet context ioError = NetIOError context ioError
 
 serveConnection : forall scope. TcpConnection scope -> IO NetError ()
 serveConnection connection = do
@@ -35,7 +35,7 @@ runClient connection = do
 client : Chan Int -> Port -> Int -> IO NetError ()
 client results port _ = do
     completed <- withTcpConnection "localhost" port runClient
-    mapError (hostToNet "result channel") (send results completed)
+    mapError (ioToNet "result channel") (send results completed)
 
 spawnClients : Chan Int -> Port -> Int -> IO NetError ()
 spawnClients results port remaining =
@@ -50,18 +50,18 @@ collectClients results remaining total =
     if remaining == 0
         then pureIO total
         else do
-                completed <- mapError (hostToNet "result channel") (recv results)
+                completed <- mapError (ioToNet "result channel") (recv results)
                 collectClients results (remaining - 1) (total + completed)
 
 runClients : forall scope. TcpListener scope -> Port -> IO NetError ()
 runClients listener port = do
-    results <- mapError (hostToNet "result channel") (newBoundedChan 16)
+    results <- mapError (ioToNet "result channel") (newBoundedChan 16)
     spawnClients results port 16
     completed <- collectClients results 16 0
-    mapError (hostToNet "stdout") (printLine (show completed))
+    mapError (ioToNet "stdout") (printLine (show completed))
 
 runFixture : forall scope. TcpListener scope -> Port -> IO NetError ()
 runFixture listener port = withThread (serveClients listener 16) (fun _ => runClients listener port)
 
 main : Task ()
-main = mapError netToHost (withTcpListener anyPort runFixture)
+main = mapError netToIO (withTcpListener anyPort runFixture)

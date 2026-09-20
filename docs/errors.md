@@ -29,15 +29,15 @@ invariant failure into an ordinary program value.
 
 `IO e a` describes an action that can either fail with an ordinary value of
 type `e` or succeed with a value of type `a`. The Prelude alias
-`Task a = IO HostError a` is the convenient type for low-level host actions and
+`Task a = IO IOError a` is the convenient type for low-level I/O actions and
 ordinary `main` functions.
 
-`HostError` is deliberately small and stable. Its kind describes the cause,
-its operation identifies the primitive boundary, and its message retains host
+`IOError` is deliberately small and stable. Its kind describes the cause,
+its operation identifies the primitive boundary, and its message retains platform
 detail for diagnostics:
 
 ```solveig
-data HostErrorKind =
+data IOErrorKind =
     AlreadyExists
   | DoesNotExist
   | PermissionDenied
@@ -55,12 +55,12 @@ data HostErrorKind =
   | ProtocolError
   | OtherError
 
-data HostError = HostError HostErrorKind String String
+data IOError = IOError IOErrorKind String String
 ```
 
-Use `hostErrorKind`, `hostErrorOperation`, and `hostErrorMessage` when logic
-needs one field. Prefer the stable kind for decisions; host message wording can
-differ between operating systems. `Show HostError` already produces a useful
+Use `ioErrorKind`, `ioErrorOperation`, and `ioErrorMessage` when logic
+needs one field. Prefer the stable kind for decisions; platform message wording can
+differ between operating systems. `Show IOError` already produces a useful
 diagnostic, so applications do not need exhaustive rendering functions.
 
 A typed failure short-circuits `bind`: later actions in the same sequence do
@@ -70,11 +70,11 @@ not run. It remains a value rather than unwinding the ordinary call stack.
 `orElse` discards the first error and runs a fallback.
 
 ```solveig
-reportHostError : HostError -> Task ()
-reportHostError hostError =
-    if hostErrorKind hostError == DoesNotExist then
+reportIOError : IOError -> Task ()
+reportIOError ioError =
+    if ioErrorKind ioError == DoesNotExist then
         printLine "required input does not exist"
-    else printLine (show hostError)
+    else printLine (show ioError)
 
 printSettings : Task ()
 printSettings = do
@@ -82,10 +82,10 @@ printSettings = do
     printLine contents
 
 main : Task ()
-main = catchError printSettings reportHostError
+main = catchError printSettings reportIOError
 ```
 
-Higher-level libraries expose domain errors rather than growing `HostError`
+Higher-level libraries expose domain errors rather than growing `IOError`
 with one constructor per operation:
 
 ```solveig
@@ -97,29 +97,29 @@ listConfigDirectory path = mapError ConfigFile (std.fs.listDirectory path)
 
 The current standard library provides `FsError`, `ProcessError`, `NetError`,
 `HttpError`, and `EnvError`. Each has `Eq` and `Show`, preserves useful domain
-context, and may wrap the original host cause. HTTP also retains transport,
+context, and may wrap the original I/O cause. HTTP also retains transport,
 TLS, redirect, and response-bound policy cases rather than reducing them to a
 generic protocol failure. Strict UTF-8 decoding is pure
 and uses `Utf8Error` (`InvalidUtf8 byteOffset`) rather than pretending that a
-decoding problem is host IO.
+decoding problem is I/O.
 
 `NetError` distinguishes invalid TCP chunk and UDP datagram bounds, the
-defensive no-address case, and `NetHostError context cause`. Oversized UDP
-messages use a resource-exhausted host cause and are never returned truncated.
+defensive no-address case, and `NetIOError context cause`. Oversized UDP
+messages use a resource-exhausted I/O cause and are never returned truncated.
 
 Bounded worker traversal also preserves the distinction:
 
 ```solveig
 data ConcurrentError e =
-    ConcurrentInfrastructure HostError
+    ConcurrentInfrastructure IOError
   | ConcurrentWorker e
 
 mapConcurrentlyBoundedOrdered :
     Int -> (a -> IO e b) -> [a] -> IO (ConcurrentError e) [b]
 ```
 
-For workers already using `Task`, `concurrentHostError` explicitly collapses
-both cases back to `HostError` when that loss of distinction is appropriate.
+For workers already using `Task`, `concurrentIOError` explicitly collapses
+both cases back to `IOError` when that loss of distinction is appropriate.
 
 Do not use a defect for a missing file, invalid request, failed lookup, or
 another expected outcome. Giving that outcome a type makes recovery visible to

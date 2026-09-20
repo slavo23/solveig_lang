@@ -4,32 +4,32 @@ use super::io_worker::filesystem::FilesystemFailure;
 use super::io_worker::{IoFailure, TlsFailure};
 use super::*;
 
-fn host_error_kind(error: &std::io::Error) -> CtorRuntimeRole {
+fn io_error_kind(error: &std::io::Error) -> CtorRuntimeRole {
     match error.kind() {
-        std::io::ErrorKind::AlreadyExists => CtorRuntimeRole::PreludeHostAlreadyExists,
-        std::io::ErrorKind::NotFound => CtorRuntimeRole::PreludeHostDoesNotExist,
-        std::io::ErrorKind::PermissionDenied => CtorRuntimeRole::PreludeHostPermissionDenied,
-        std::io::ErrorKind::WouldBlock => CtorRuntimeRole::PreludeHostResourceBusy,
+        std::io::ErrorKind::AlreadyExists => CtorRuntimeRole::PreludeIOErrorAlreadyExists,
+        std::io::ErrorKind::NotFound => CtorRuntimeRole::PreludeIOErrorDoesNotExist,
+        std::io::ErrorKind::PermissionDenied => CtorRuntimeRole::PreludeIOErrorPermissionDenied,
+        std::io::ErrorKind::WouldBlock => CtorRuntimeRole::PreludeIOErrorResourceBusy,
         std::io::ErrorKind::OutOfMemory | std::io::ErrorKind::WriteZero => {
-            CtorRuntimeRole::PreludeHostResourceExhausted
+            CtorRuntimeRole::PreludeIOErrorResourceExhausted
         }
-        std::io::ErrorKind::UnexpectedEof => CtorRuntimeRole::PreludeHostEndOfFile,
+        std::io::ErrorKind::UnexpectedEof => CtorRuntimeRole::PreludeIOErrorEndOfFile,
         std::io::ErrorKind::InvalidInput | std::io::ErrorKind::InvalidData => {
-            CtorRuntimeRole::PreludeHostInvalidArgument
+            CtorRuntimeRole::PreludeIOErrorInvalidArgument
         }
-        std::io::ErrorKind::Unsupported => CtorRuntimeRole::PreludeHostUnsupportedOperation,
-        std::io::ErrorKind::TimedOut => CtorRuntimeRole::PreludeHostTimeExpired,
+        std::io::ErrorKind::Unsupported => CtorRuntimeRole::PreludeIOErrorUnsupportedOperation,
+        std::io::ErrorKind::TimedOut => CtorRuntimeRole::PreludeIOErrorTimeExpired,
         std::io::ErrorKind::ConnectionReset
         | std::io::ErrorKind::ConnectionAborted
         | std::io::ErrorKind::NotConnected
-        | std::io::ErrorKind::BrokenPipe => CtorRuntimeRole::PreludeHostResourceVanished,
-        std::io::ErrorKind::Interrupted => CtorRuntimeRole::PreludeHostInterrupted,
+        | std::io::ErrorKind::BrokenPipe => CtorRuntimeRole::PreludeIOErrorResourceVanished,
+        std::io::ErrorKind::Interrupted => CtorRuntimeRole::PreludeIOErrorInterrupted,
         std::io::ErrorKind::NetworkUnreachable | std::io::ErrorKind::AddrNotAvailable => {
-            CtorRuntimeRole::PreludeHostNetworkUnreachable
+            CtorRuntimeRole::PreludeIOErrorNetworkUnreachable
         }
-        std::io::ErrorKind::ConnectionRefused => CtorRuntimeRole::PreludeHostConnectionRefused,
-        std::io::ErrorKind::AddrInUse => CtorRuntimeRole::PreludeHostAddressInUse,
-        _ => CtorRuntimeRole::PreludeHostOtherError,
+        std::io::ErrorKind::ConnectionRefused => CtorRuntimeRole::PreludeIOErrorConnectionRefused,
+        std::io::ErrorKind::AddrInUse => CtorRuntimeRole::PreludeIOErrorAddressInUse,
+        _ => CtorRuntimeRole::PreludeIOErrorOtherError,
     }
 }
 
@@ -267,13 +267,13 @@ impl Interpreter<'_> {
         &mut self,
         failure: IoFailure,
     ) -> Result<Value, RuntimeError> {
-        let error = self.alloc_host_error_for_failure(failure)?;
+        let error = self.alloc_io_error_for_failure(failure)?;
         self.alloc_typed_failure_action(error)
     }
 
     pub(super) fn alloc_channel_closed_action(&mut self) -> Result<Value, RuntimeError> {
-        let error = self.alloc_host_error(
-            CtorRuntimeRole::PreludeHostResourceVanished,
+        let error = self.alloc_io_error(
+            CtorRuntimeRole::PreludeIOErrorResourceVanished,
             "channel operation",
             "channel is closed",
         )?;
@@ -317,7 +317,7 @@ impl Interpreter<'_> {
         result
     }
 
-    pub(super) fn alloc_host_error_for_failure(
+    pub(super) fn alloc_io_error_for_failure(
         &mut self,
         failure: IoFailure,
     ) -> Result<Value, RuntimeError> {
@@ -330,8 +330,8 @@ impl Interpreter<'_> {
             IoFailure::ReadFileLimited { path, source } => {
                 self.alloc_path_io_error("readFileLimited", &path, &source)
             }
-            IoFailure::ReadFileTooLarge { path, maximum } => self.alloc_host_error(
-                CtorRuntimeRole::PreludeHostResourceExhausted,
+            IoFailure::ReadFileTooLarge { path, maximum } => self.alloc_io_error(
+                CtorRuntimeRole::PreludeIOErrorResourceExhausted,
                 "readFileLimited",
                 &format!(
                     "{} exceeds the configured limit of {maximum} bytes",
@@ -347,16 +347,18 @@ impl Interpreter<'_> {
                 &path,
                 &source,
             ),
-            IoFailure::GetEnv(message) => {
-                self.alloc_host_error(CtorRuntimeRole::PreludeHostOtherError, "getEnv", &message)
-            }
-            IoFailure::SetEnv(message) => self.alloc_host_error(
-                CtorRuntimeRole::PreludeHostInvalidArgument,
+            IoFailure::GetEnv(message) => self.alloc_io_error(
+                CtorRuntimeRole::PreludeIOErrorOtherError,
+                "getEnv",
+                &message,
+            ),
+            IoFailure::SetEnv(message) => self.alloc_io_error(
+                CtorRuntimeRole::PreludeIOErrorInvalidArgument,
                 "setEnv",
                 &message,
             ),
-            IoFailure::Process(failure) => self.alloc_host_error(
-                host_error_kind(&failure.source),
+            IoFailure::Process(failure) => self.alloc_io_error(
+                io_error_kind(&failure.source),
                 "runProcess",
                 &format!("{}: {}", failure.program, failure.source),
             ),
@@ -392,8 +394,8 @@ impl Interpreter<'_> {
                     source_path,
                     destination,
                     source,
-                } => self.alloc_host_error(
-                    host_error_kind(&source),
+                } => self.alloc_io_error(
+                    io_error_kind(&source),
                     "renameFile",
                     &format!(
                         "{} -> {}: {source}",
@@ -432,39 +434,39 @@ impl Interpreter<'_> {
                 HandleFailure::SetBuffering { label, source } => {
                     self.alloc_labeled_io_error("hSetBuffering", &label, &source)
                 }
-                HandleFailure::HttpBodyTooLarge { maximum } => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostResourceExhausted,
+                HandleFailure::HttpBodyTooLarge { maximum } => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorResourceExhausted,
                     "httpResponseBody",
                     &format!("response body exceeds {maximum} bytes"),
                 ),
             },
-            IoFailure::Connect { host, port, source } => self.alloc_host_error(
-                host_error_kind(&source),
+            IoFailure::Connect { host, port, source } => self.alloc_io_error(
+                io_error_kind(&source),
                 "connect",
                 &format!("{host}:{port}: {source}"),
             ),
             IoFailure::Tls(failure) => match failure {
-                TlsFailure::Configuration(message) => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostInvalidArgument,
+                TlsFailure::Configuration(message) => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorInvalidArgument,
                     "startTlsClient",
                     &message,
                 ),
-                TlsFailure::Protocol { operation, message } => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostProtocolError,
+                TlsFailure::Protocol { operation, message } => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorProtocolError,
                     operation,
                     &message,
                 ),
                 TlsFailure::Transport { operation, source } => {
-                    self.alloc_host_error(host_error_kind(&source), operation, &source.to_string())
+                    self.alloc_io_error(io_error_kind(&source), operation, &source.to_string())
                 }
             },
-            IoFailure::ResolveHost { host, source } => self.alloc_host_error(
-                host_error_kind(&source),
+            IoFailure::ResolveHost { host, source } => self.alloc_io_error(
+                io_error_kind(&source),
                 "resolveHost",
                 &format!("{host}: {source}"),
             ),
-            IoFailure::Listen { port, source } => self.alloc_host_error(
-                host_error_kind(&source),
+            IoFailure::Listen { port, source } => self.alloc_io_error(
+                io_error_kind(&source),
                 "listen",
                 &format!("port {port}: {source}"),
             ),
@@ -472,56 +474,56 @@ impl Interpreter<'_> {
             IoFailure::Send(error) => self.alloc_std_io_error("sendBytes", &error),
             IoFailure::Recv(error) => self.alloc_std_io_error("recvBytes", &error),
             IoFailure::CloseSocket(error) => self.alloc_std_io_error("closeSocket", &error),
-            IoFailure::BindUdp { port, source } => self.alloc_host_error(
-                host_error_kind(&source),
+            IoFailure::BindUdp { port, source } => self.alloc_io_error(
+                io_error_kind(&source),
                 "bindUdp",
                 &format!("port {port}: {source}"),
             ),
             IoFailure::SendDatagram(error) => self.alloc_std_io_error("sendDatagram", &error),
             IoFailure::RecvDatagram(error) => self.alloc_std_io_error("recvDatagram", &error),
-            IoFailure::DatagramTooLarge { maximum } => self.alloc_host_error(
-                CtorRuntimeRole::PreludeHostResourceExhausted,
+            IoFailure::DatagramTooLarge { maximum } => self.alloc_io_error(
+                CtorRuntimeRole::PreludeIOErrorResourceExhausted,
                 "recvDatagram",
                 &format!("datagram exceeds {maximum} bytes"),
             ),
             IoFailure::Http(failure) => match failure {
-                super::http::HttpFailure::Transport(message) => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostProtocolError,
+                super::http::HttpFailure::Transport(message) => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorProtocolError,
                     "httpTransport",
                     &message,
                 ),
-                super::http::HttpFailure::Tls(message) => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostProtocolError,
+                super::http::HttpFailure::Tls(message) => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorProtocolError,
                     "httpTls",
                     &message,
                 ),
-                super::http::HttpFailure::Timeout(message) => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostTimeExpired,
+                super::http::HttpFailure::Timeout(message) => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorTimeExpired,
                     "httpTimeout",
                     &message,
                 ),
-                super::http::HttpFailure::Redirect(message) => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostProtocolError,
+                super::http::HttpFailure::Redirect(message) => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorProtocolError,
                     "httpRedirect",
                     &message,
                 ),
-                super::http::HttpFailure::Replay(message) => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostProtocolError,
+                super::http::HttpFailure::Replay(message) => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorProtocolError,
                     "httpBodyReplay",
                     &message,
                 ),
-                super::http::HttpFailure::RequestFile(message) => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostProtocolError,
+                super::http::HttpFailure::RequestFile(message) => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorProtocolError,
                     "httpRequestFile",
                     &message,
                 ),
-                super::http::HttpFailure::HeadersTooLarge(maximum) => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostResourceExhausted,
+                super::http::HttpFailure::HeadersTooLarge(maximum) => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorResourceExhausted,
                     "httpResponseHeaders",
                     &format!("response headers exceed {maximum} bytes"),
                 ),
-                super::http::HttpFailure::BodyTooLarge(maximum) => self.alloc_host_error(
-                    CtorRuntimeRole::PreludeHostResourceExhausted,
+                super::http::HttpFailure::BodyTooLarge(maximum) => self.alloc_io_error(
+                    CtorRuntimeRole::PreludeIOErrorResourceExhausted,
                     "httpResponseBody",
                     &format!("response body exceeds {maximum} bytes"),
                 ),
@@ -534,7 +536,7 @@ impl Interpreter<'_> {
         operation: &str,
         error: &std::io::Error,
     ) -> Result<Value, RuntimeError> {
-        self.alloc_host_error(host_error_kind(error), operation, &error.to_string())
+        self.alloc_io_error(io_error_kind(error), operation, &error.to_string())
     }
 
     fn alloc_path_io_error(
@@ -543,8 +545,8 @@ impl Interpreter<'_> {
         path: &std::path::Path,
         error: &std::io::Error,
     ) -> Result<Value, RuntimeError> {
-        self.alloc_host_error(
-            host_error_kind(error),
+        self.alloc_io_error(
+            io_error_kind(error),
             operation,
             &format!("{}: {error}", path.display()),
         )
@@ -556,14 +558,14 @@ impl Interpreter<'_> {
         label: &str,
         error: &std::io::Error,
     ) -> Result<Value, RuntimeError> {
-        self.alloc_host_error(
-            host_error_kind(error),
+        self.alloc_io_error(
+            io_error_kind(error),
             operation,
             &format!("{label}: {error}"),
         )
     }
 
-    fn alloc_host_error(
+    fn alloc_io_error(
         &mut self,
         kind_role: CtorRuntimeRole,
         operation: &str,
@@ -582,12 +584,12 @@ impl Interpreter<'_> {
         let &[kind, operation_value, message_value] = self
             .temporary_roots
             .get(checkpoint..checkpoint + 3)
-            .expect("ICE: HostError roots disappeared during allocation")
+            .expect("ICE: IOError roots disappeared during allocation")
         else {
-            solveig_base::ice!("HostError root slice did not retain exactly three values")
+            solveig_base::ice!("IOError root slice did not retain exactly three values")
         };
         let result = VmCtx::new(self).alloc_data3_ctor(
-            CtorRuntimeRole::PreludeHostError,
+            CtorRuntimeRole::PreludeIOError,
             kind,
             operation_value,
             message_value,
@@ -724,8 +726,8 @@ impl Interpreter<'_> {
 }
 
 #[cfg(test)]
-mod host_error_kind_tests {
-    use super::host_error_kind;
+mod io_error_kind_tests {
+    use super::io_error_kind;
     use solveig_ast::ast::CtorRuntimeRole;
     use std::io::ErrorKind;
 
@@ -734,62 +736,65 @@ mod host_error_kind_tests {
         let cases = [
             (
                 ErrorKind::AlreadyExists,
-                CtorRuntimeRole::PreludeHostAlreadyExists,
+                CtorRuntimeRole::PreludeIOErrorAlreadyExists,
             ),
             (
                 ErrorKind::NotFound,
-                CtorRuntimeRole::PreludeHostDoesNotExist,
+                CtorRuntimeRole::PreludeIOErrorDoesNotExist,
             ),
             (
                 ErrorKind::PermissionDenied,
-                CtorRuntimeRole::PreludeHostPermissionDenied,
+                CtorRuntimeRole::PreludeIOErrorPermissionDenied,
             ),
             (
                 ErrorKind::WouldBlock,
-                CtorRuntimeRole::PreludeHostResourceBusy,
+                CtorRuntimeRole::PreludeIOErrorResourceBusy,
             ),
             (
                 ErrorKind::OutOfMemory,
-                CtorRuntimeRole::PreludeHostResourceExhausted,
+                CtorRuntimeRole::PreludeIOErrorResourceExhausted,
             ),
             (
                 ErrorKind::UnexpectedEof,
-                CtorRuntimeRole::PreludeHostEndOfFile,
+                CtorRuntimeRole::PreludeIOErrorEndOfFile,
             ),
             (
                 ErrorKind::InvalidInput,
-                CtorRuntimeRole::PreludeHostInvalidArgument,
+                CtorRuntimeRole::PreludeIOErrorInvalidArgument,
             ),
             (
                 ErrorKind::Unsupported,
-                CtorRuntimeRole::PreludeHostUnsupportedOperation,
+                CtorRuntimeRole::PreludeIOErrorUnsupportedOperation,
             ),
-            (ErrorKind::TimedOut, CtorRuntimeRole::PreludeHostTimeExpired),
+            (
+                ErrorKind::TimedOut,
+                CtorRuntimeRole::PreludeIOErrorTimeExpired,
+            ),
             (
                 ErrorKind::BrokenPipe,
-                CtorRuntimeRole::PreludeHostResourceVanished,
+                CtorRuntimeRole::PreludeIOErrorResourceVanished,
             ),
             (
                 ErrorKind::Interrupted,
-                CtorRuntimeRole::PreludeHostInterrupted,
+                CtorRuntimeRole::PreludeIOErrorInterrupted,
             ),
             (
                 ErrorKind::NetworkUnreachable,
-                CtorRuntimeRole::PreludeHostNetworkUnreachable,
+                CtorRuntimeRole::PreludeIOErrorNetworkUnreachable,
             ),
             (
                 ErrorKind::ConnectionRefused,
-                CtorRuntimeRole::PreludeHostConnectionRefused,
+                CtorRuntimeRole::PreludeIOErrorConnectionRefused,
             ),
             (
                 ErrorKind::AddrInUse,
-                CtorRuntimeRole::PreludeHostAddressInUse,
+                CtorRuntimeRole::PreludeIOErrorAddressInUse,
             ),
-            (ErrorKind::Other, CtorRuntimeRole::PreludeHostOtherError),
+            (ErrorKind::Other, CtorRuntimeRole::PreludeIOErrorOtherError),
         ];
 
         for (kind, expected) in cases {
-            assert_eq!(host_error_kind(&std::io::Error::from(kind)), expected);
+            assert_eq!(io_error_kind(&std::io::Error::from(kind)), expected);
         }
     }
 }

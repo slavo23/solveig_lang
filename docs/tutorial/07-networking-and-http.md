@@ -112,14 +112,14 @@ import std.parser(foldReply)
 messageDecoder : Decoder () String
 messageDecoder = recordDecoder $ requiredField "message" stringDecoder
 
-decodeMessage : Bytes -> Either HostError String
+decodeMessage : Bytes -> Either IOError String
 decodeMessage bytes =
     foldReply
         (fun _ message _ => Right message)
         (fun _ _ parseError =>
-            Left $ HostError InvalidArgument "decode message response" $ show parseError)
+            Left $ IOError InvalidArgument "decode message response" $ show parseError)
         (fun _ _ _ =>
-            Left $ HostError InvalidArgument "decode message response" "incomplete JSON")
+            Left $ IOError InvalidArgument "decode message response" "incomplete JSON")
         (decodeJson defaultJsonLimits messageDecoder bytes)
 ```
 
@@ -127,26 +127,26 @@ decodeMessage bytes =
 a value, a positioned decoding error, or a request for more input. Complete
 strict bytes should not remain awaiting, but the branch keeps the boundary
 total. A production library would normally retain a domain `ApiError` sum
-instead of translating straight to `HostError`; this fixture uses one error
+instead of translating straight to `IOError`; this fixture uses one error
 type so it can share a small `Task` entry point.
 
 The request adds normal API metadata and checks status before decoding:
 
 ```solveig
-httpAsHostError : HttpError -> HostError
-httpAsHostError (HttpHostError hostError) = hostError
-httpAsHostError error = HostError InvalidArgument "HTTP" $ show error
+httpAsIOError : HttpError -> IOError
+httpAsIOError (HttpIOError ioError) = ioError
+httpAsIOError error = IOError InvalidArgument "HTTP" $ show error
 
 fetchMessage : String -> Task String
 fetchMessage url = do
-    response <- mapError httpAsHostError $
+    response <- mapError httpAsIOError $
         getWith
             (withHeader "Accept" "application/json" $
                 withQuery [("language", "solveig")] defaultOptions)
             url
     successful <-
         case ensureSuccess response of
-            Left error => failIO $ httpAsHostError error
+            Left error => failIO $ httpAsIOError error
             | Right value => pureIO value
     case decodeMessage $ responseBody successful of
         Left error => failIO error
@@ -226,15 +226,15 @@ import std.io(WriteMode, hPutBytes, withFile)
 import std.stream(forEach)
 
 writeHttpChunk : Handle -> Bytes -> IO HttpError ()
-writeHttpChunk handle = mapError HttpHostError . hPutBytes handle
+writeHttpChunk handle = mapError HttpIOError . hPutBytes handle
 
 downloadFile : String -> String -> IO HttpError ()
 downloadFile url destination =
     withResponse Get url $ fun status _ body =>
         if isSuccessful status
-            then mapError HttpHostError $
+            then mapError HttpIOError $
                 withFile destination WriteMode $ fun handle =>
-                    mapError httpAsHostError $ forEach (writeHttpChunk handle) body
+                    mapError httpAsIOError $ forEach (writeHttpChunk handle) body
             else failIO $ UnexpectedStatus status
 ```
 
@@ -322,7 +322,7 @@ verification.
 
 ## Typed HTTP errors
 
-`HttpError` keeps pure validation separate from host IO. It distinguishes URL,
+`HttpError` keeps pure validation separate from external I/O. It distinguishes URL,
 header, option, transport, TLS, redirect, replay, request-file, response-bound,
 UTF-8, managed-header, and unexpected-status failures. A function can retain
 this precise type or translate it at an application boundary with `mapError`.
@@ -330,7 +330,7 @@ Every case has a useful `Show` representation.
 
 Keep `HttpError` in library functions that can use its structure. Translate it
 only at an application boundary. Mapping everything immediately to a string or
-generic `HostError` throws away whether retrying, changing credentials,
+generic `IOError` throws away whether retrying, changing credentials,
 reducing a body, or fixing a URL could help. A retry policy must also consider
 the method and whether the body can safely be repeated; a transport error alone
 does not prove that the server observed no request.
@@ -378,7 +378,7 @@ getWithRetries remaining delay url = do
     response <- get url
     if and (remaining > 0) (retryableStatus $ responseStatus response)
         then do
-            mapError HttpHostError $ sleep delay
+            mapError HttpIOError $ sleep delay
             getWithRetries (remaining - 1) delay url
         else pureIO response
 ```
@@ -445,8 +445,8 @@ echo host port message =
         reply <- receiveTcpBytes connection 4096
         case bytesToString reply of
             Right text => pureIO text
-            | Left error => failIO (NetHostError "decode echo" $
-                HostError InvalidArgument "bytesToString" (show error)))
+            | Left error => failIO (NetIOError "decode echo" $
+                IOError InvalidArgument "bytesToString" (show error)))
 ```
 
 TCP is a byte stream, not a message protocol. One `sendTcpBytes` is not
@@ -467,8 +467,8 @@ receiveExactly connection wanted accumulated =
             chunk <- receiveTcpBytes connection missing
             if bytesLength chunk == 0
                 then failIO
-                    (NetHostError "fixed-size frame" $
-                        HostError EndOfFile "receiveExactly" "peer closed during a frame")
+                    (NetIOError "fixed-size frame" $
+                        IOError EndOfFile "receiveExactly" "peer closed during a frame")
                 else receiveExactly connection wanted (bytesAppend accumulated chunk)
 ```
 

@@ -25,7 +25,7 @@ worker jobs results =
         (workerStep jobs results)
         (fun error =>
             case error of
-                HostError ResourceVanished _ _ => pureIO ()
+                IOError ResourceVanished _ _ => pureIO ()
                 | other => failIO other
         )
 

@@ -135,20 +135,20 @@ messagePath =
         Right path => path
         | Left pathError => error (show pathError)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost fileError = HostError InvalidArgument "filesystem" (show fileError)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO fileError = IOError InvalidArgument "filesystem" (show fileError)
 
 main : Task ()
 main = do
-    text <- mapError fsToHost (readFile messagePath)
+    text <- mapError fsToIO (readFile messagePath)
     printStr text
 ```
 
 Concurrent work can be scoped and bounded:
 
 ```solveig
-import std.task(concurrentHostError, mapConcurrentlyBoundedOrdered)
+import std.task(concurrentIOError, mapConcurrentlyBoundedOrdered)
 import std.time(milliseconds, sleep)
 
 work : Int -> Task Int
@@ -158,7 +158,7 @@ work value = do
 
 main : Task ()
 main = do
-    results <- mapError concurrentHostError (mapConcurrentlyBoundedOrdered 4 work [1, 2, 3, 4, 5, 6])
+    results <- mapError concurrentIOError (mapConcurrentlyBoundedOrdered 4 work [1, 2, 3, 4, 5, 6])
     printLine (show results)
 ```
 

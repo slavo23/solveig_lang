@@ -19,12 +19,12 @@ fixtureResponse =
         <> "Connection: close\u{d}\n\u{d}\n"
         <> fixtureBody
 
-netToHost : NetError -> HostError
-netToHost (NetHostError _ hostError) = hostError
-netToHost error = HostError InvalidArgument "network" (show error)
+netToIO : NetError -> IOError
+netToIO (NetIOError _ ioError) = ioError
+netToIO error = IOError InvalidArgument "network" (show error)
 
-hostToNet : HostError -> NetError
-hostToNet hostError = NetHostError "fixture" hostError
+ioToNet : IOError -> NetError
+ioToNet ioError = NetIOError "fixture" ioError
 
 reply : forall scope. TcpConnection scope -> IO NetError ()
 reply connection = do
@@ -37,34 +37,34 @@ serveBatch listener remaining = do
     withAcceptedTcpConnection listener reply
     serveBatch listener (remaining - 1)
 
-httpAsHostError : HttpError -> HostError
-httpAsHostError (HttpHostError hostError) = hostError
-httpAsHostError error = HostError InvalidArgument "HTTP" (show error)
+httpAsIOError : HttpError -> IOError
+httpAsIOError (HttpIOError ioError) = ioError
+httpAsIOError error = IOError InvalidArgument "HTTP" (show error)
 
 messageDecoder : Decoder () String
 messageDecoder = recordDecoder $ requiredField "message" stringDecoder
 
-decodeMessage : Bytes -> Either HostError String
+decodeMessage : Bytes -> Either IOError String
 decodeMessage bytes =
     foldReply
         (fun _ message _ => Right message)
         (fun _ _ parseError =>
-            Left $ HostError InvalidArgument "decode message response" $ show parseError
+            Left $ IOError InvalidArgument "decode message response" $ show parseError
         )
-        (fun _ _ _ => Left $ HostError InvalidArgument "decode message response" "incomplete JSON")
+        (fun _ _ _ => Left $ IOError InvalidArgument "decode message response" "incomplete JSON")
         (decodeJson defaultJsonLimits messageDecoder bytes)
 
 fetchMessage : String -> Task String
 fetchMessage url = do
     response <-
-        mapError httpAsHostError $
+        mapError httpAsIOError $
             getWith
                 (withHeader "Accept" "application/json" $
                     withQuery [("language", "solveig")] defaultOptions)
                 url
     successful <-
         case ensureSuccess response of
-            Left error => failIO $ httpAsHostError error
+            Left error => failIO $ httpAsIOError error
             | Right value => pureIO value
     case decodeMessage $ std.http.responseBody successful of
         Left error => failIO error
@@ -74,16 +74,16 @@ runClients : Port -> Task [String]
 runClients port =
     let url =
         "http://127.0.0.1:" <> show port <> "/message"
-    in mapError concurrentHostError $ mapConcurrentlyBoundedOrdered 3 fetchMessage [url, url, url]
+    in mapError concurrentIOError $ mapConcurrentlyBoundedOrdered 3 fetchMessage [url, url, url]
 
 runFixture : forall scope. TcpListener scope -> Port -> IO NetError ()
 runFixture listener port =
     withThread
         (serveBatch listener 3)
         (fun _ => do
-            bodies <- mapError hostToNet (runClients port)
-            mapError hostToNet (printLine ("responses: " <> show (length bodies)))
-            mapError hostToNet $
+            bodies <- mapError ioToNet (runClients port)
+            mapError ioToNet (printLine ("responses: " <> show (length bodies)))
+            mapError ioToNet $
                 printLine
                     (case bodies of
                         first :: _ => first
@@ -92,4 +92,4 @@ runFixture listener port =
         )
 
 main : Task ()
-main = mapError netToHost (withTcpListener anyPort runFixture)
+main = mapError netToIO (withTcpListener anyPort runFixture)

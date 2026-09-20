@@ -391,7 +391,7 @@ streams in addition to `getCurrentDirectory`, `setCurrentDirectory`,
 `doesFileExist`, `doesDirectoryExist`, `listDirectory`, `createDirectory`,
 `removeFile`, `renameFile`, `getFileSize`, and `getModificationTime`. Its
 actions return `IO FsError a`, retaining path context while keeping invalid
-UTF-8 distinct from the underlying host cause. They accept opaque `Path`
+UTF-8 distinct from the underlying I/O cause. They accept opaque `Path`
 values constructed with `pathFromString`;
 `getModificationTime` returns `SystemTime`, not a bare integer.
 
@@ -457,7 +457,7 @@ import std.time(Duration, sleep)
 
 `std.channel` provides `newChan`, `newBoundedChan`, `send`, `recv`, `tryRecv`,
 and `closeChan`. An invalid bounded capacity is a typed
-`HostError InvalidArgument` rather than a defect.
+`IOError InvalidArgument` rather than a defect.
 `std.thread` exposes raw `spawn` and `killThread`.
 
 Prefer `std.task` when lifetime or results matter:

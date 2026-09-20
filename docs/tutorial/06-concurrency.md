@@ -2,7 +2,7 @@
 
 Concurrency lets one program make progress on multiple tasks while some are
 waiting for timers, files, sockets, or other tasks. Solveig runs lightweight
-language threads on its VM and moves blocking host IO to a bounded worker
+language threads on its VM and moves blocking I/O to a bounded worker
 boundary so another runnable language thread can continue.
 
 Concurrency is not the same as parallel CPU execution. Its most immediate
@@ -22,7 +22,7 @@ evaluate Solveig code or inspect VM values.
 This gives four important consequences:
 
 1. Thousands of waiting green threads need not imply thousands of OS threads.
-2. When one green thread waits on `sleep`, a channel, or supported host IO, the
+2. When one green thread waits on `sleep`, a channel, or supported I/O, the
    scheduler can run another.
 3. Two CPU-heavy Solveig expressions do not execute bytecode in parallel. They
    take turns at calls, backward jumps, allocations, and reduction-budget
@@ -128,7 +128,7 @@ For a list of independent `Task` operations, use
 `mapConcurrentlyBoundedOrdered`:
 
 ```solveig
-import std.task(concurrentHostError, mapConcurrentlyBoundedOrdered)
+import std.task(concurrentIOError, mapConcurrentlyBoundedOrdered)
 import std.time(milliseconds, sleep)
 
 process : Int -> Task Int
@@ -138,7 +138,7 @@ process value = do
 
 main : Task ()
 main = do
-    results <- mapError concurrentHostError (mapConcurrentlyBoundedOrdered 3 process [1, 2, 3, 4])
+    results <- mapError concurrentIOError (mapConcurrentlyBoundedOrdered 3 process [1, 2, 3, 4])
     printLine ("results: " <> show results)
 ```
 
@@ -178,9 +178,9 @@ property of the machine's CPU count.
 
 When any operation fails, the pool stops and its scoped workers are cancelled
 and joined. The generic result distinguishes `ConcurrentWorker workerError`
-from `ConcurrentInfrastructure hostError`. The example explicitly collapses
-that distinction because both its workers and `main` use `HostError`. An
-invalid non-positive capacity is `ConcurrentInfrastructure (HostError
+from `ConcurrentInfrastructure ioError`. The example explicitly collapses
+that distinction because both its workers and `main` use `IOError`. An
+invalid non-positive capacity is `ConcurrentInfrastructure (IOError
 InvalidArgument ...)`.
 
 ### Prove overlap without a flaky stopwatch
@@ -192,7 +192,7 @@ messages before releasing any of them:
 
 ```solveig
 import std.channel(*)
-import std.task(concurrentHostError, concurrently, mapConcurrentlyBoundedOrdered)
+import std.task(concurrentIOError, concurrently, mapConcurrentlyBoundedOrdered)
 
 awaitStarts : Int -> Chan Int -> Task ()
 awaitStarts 0 _ = pureIO ()
@@ -223,7 +223,7 @@ proveOverlap = do
     release <- newChan
     (results, _) <-
         concurrently
-            (mapError concurrentHostError $
+            (mapError concurrentIOError $
                 mapConcurrentlyBoundedOrdered
                     3
                     (waitForRelease started release)
@@ -314,7 +314,7 @@ queues immediately. `tryRecv` returns `Nothing` instead of waiting when no value
 is ready.
 
 After `closeChan`, queued values remain receivable. Once they are exhausted,
-`recv` and `tryRecv` fail with a `HostError` whose `ResourceVanished` kind and
+`recv` and `tryRecv` fail with an `IOError` whose `ResourceVanished` kind and
 message identify the closed channel; sending to a closed channel fails the
 same way. `tryRecv` returns `Nothing` only for an open, currently empty channel.
 Closing is useful for protocols where “no more values” is meaningful.
@@ -376,7 +376,7 @@ Solveig keeps three exit mechanisms distinct:
   handler.
 
 Blocking operations such as `recv`, a full-channel `send`, `sleep`, socket IO,
-and supported host IO are interruption points. When their scope is cancelled,
+and supported I/O are interruption points. When their scope is cancelled,
 they wake instead of keeping a parent stuck forever.
 
 Use `finally` or `bracket` for cleanup. `mask` defers interruption during a

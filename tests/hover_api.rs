@@ -165,10 +165,10 @@ fn hover_renders_prelude_type_alias_at_reference() {
         .hover_info(&file, offset_in_line(&source, "main : Task ()", "Task"))
         .expect("Task alias reference should have hover");
 
-    assert_eq!(hover.signature(), "type Task a = IO HostError a");
+    assert_eq!(hover.signature(), "type Task a = IO IOError a");
     assert_eq!(
         hover.documentation(),
-        Some("An IO action that can fail at the low-level host boundary.")
+        Some("An IO action that can fail while interacting with the outside world.")
     );
     assert!(
         hover

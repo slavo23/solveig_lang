@@ -1,17 +1,17 @@
 import std.channel(*)
 
-closedRecv : HostError -> Task Int
-closedRecv (HostError ResourceVanished _ _) = do
+closedRecv : IOError -> Task Int
+closedRecv (IOError ResourceVanished _ _) = do
     printLine "recv-closed"
     pureIO 0
 closedRecv _ = pureIO (-1)
 
-closedSend : HostError -> Task ()
-closedSend (HostError ResourceVanished _ _) = printLine "send-closed"
+closedSend : IOError -> Task ()
+closedSend (IOError ResourceVanished _ _) = printLine "send-closed"
 closedSend _ = printLine "unexpected-error"
 
-closedTry : HostError -> Task (Maybe Int)
-closedTry (HostError ResourceVanished _ _) = do
+closedTry : IOError -> Task (Maybe Int)
+closedTry (IOError ResourceVanished _ _) = do
     printLine "try-closed"
     pureIO Nothing
 closedTry _ = pureIO (Just (-1))

@@ -36,7 +36,7 @@ instance Eq Ordering where
     (==) GT GT = True
     (==) _ _ = False
 
-instance Eq HostErrorKind where
+instance Eq IOErrorKind where
     (==) AlreadyExists AlreadyExists = True
     (==) DoesNotExist DoesNotExist = True
     (==) PermissionDenied PermissionDenied = True
@@ -55,10 +55,10 @@ instance Eq HostErrorKind where
     (==) OtherError OtherError = True
     (==) _ _ = False
 
-instance Eq HostError where
+instance Eq IOError where
     (==)
-        (HostError leftKind leftOperation leftMessage)
-        (HostError rightKind rightOperation rightMessage) =
+        (IOError leftKind leftOperation leftMessage)
+        (IOError rightKind rightOperation rightMessage) =
         and
             (leftKind == rightKind)
             (and (leftOperation == rightOperation) (leftMessage == rightMessage))
@@ -674,7 +674,7 @@ instance Show Ordering where
     show EQ = "EQ"
     show GT = "GT"
 
-instance Show HostErrorKind where
+instance Show IOErrorKind where
     show AlreadyExists = "already exists"
     show DoesNotExist = "does not exist"
     show PermissionDenied = "permission denied"
@@ -690,10 +690,10 @@ instance Show HostErrorKind where
     show ConnectionRefused = "connection refused"
     show AddressInUse = "address in use"
     show ProtocolError = "protocol error"
-    show OtherError = "other host error"
+    show OtherError = "other I/O error"
 
-instance Show HostError where
-    show (HostError kind operation message) = operation <> ": " <> show kind <> ": " <> message
+instance Show IOError where
+    show (IOError kind operation message) = operation <> ": " <> show kind <> ": " <> message
 
 instance Show Utf8Error where
     show (InvalidUtf8 offset) = "invalid UTF-8 at byte " <> show offset

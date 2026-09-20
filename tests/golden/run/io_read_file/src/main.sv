@@ -1,9 +1,9 @@
 import std.fs(FsError(..))
 import std.path(Path, pathFromString)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -13,5 +13,5 @@ requiredPath spelling =
 
 main : Task ()
 main = do
-    contents <- mapError fsToHost (std.fs.readFile (requiredPath "questions.txt"))
+    contents <- mapError fsToIO (std.fs.readFile (requiredPath "questions.txt"))
     printStr contents

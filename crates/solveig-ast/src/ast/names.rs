@@ -322,30 +322,28 @@ pub const COMPILER_FALSE_NAME: &str = "prelude.builtins.False";
 pub const PRELUDE_MAYBE_NAME: &str = "prelude.builtins.Maybe";
 pub const PRELUDE_MAYBE_JUST_NAME: &str = "prelude.builtins.Just";
 pub const PRELUDE_MAYBE_NOTHING_NAME: &str = "prelude.builtins.Nothing";
-pub const PRELUDE_HOST_ERROR_NAME: &str = "prelude.builtins.HostError";
-pub const PRELUDE_HOST_ERROR_CTOR_NAME: &str = "prelude.builtins.HostError";
-pub const PRELUDE_HOST_ERROR_KIND_ALREADY_EXISTS_NAME: &str = "prelude.builtins.AlreadyExists";
-pub const PRELUDE_HOST_ERROR_KIND_DOES_NOT_EXIST_NAME: &str = "prelude.builtins.DoesNotExist";
-pub const PRELUDE_HOST_ERROR_KIND_PERMISSION_DENIED_NAME: &str =
-    "prelude.builtins.PermissionDenied";
-pub const PRELUDE_HOST_ERROR_KIND_RESOURCE_BUSY_NAME: &str = "prelude.builtins.ResourceBusy";
-pub const PRELUDE_HOST_ERROR_KIND_RESOURCE_EXHAUSTED_NAME: &str =
+pub const PRELUDE_IO_ERROR_NAME: &str = "prelude.builtins.IOError";
+pub const PRELUDE_IO_ERROR_CTOR_NAME: &str = "prelude.builtins.IOError";
+pub const PRELUDE_IO_ERROR_KIND_ALREADY_EXISTS_NAME: &str = "prelude.builtins.AlreadyExists";
+pub const PRELUDE_IO_ERROR_KIND_DOES_NOT_EXIST_NAME: &str = "prelude.builtins.DoesNotExist";
+pub const PRELUDE_IO_ERROR_KIND_PERMISSION_DENIED_NAME: &str = "prelude.builtins.PermissionDenied";
+pub const PRELUDE_IO_ERROR_KIND_RESOURCE_BUSY_NAME: &str = "prelude.builtins.ResourceBusy";
+pub const PRELUDE_IO_ERROR_KIND_RESOURCE_EXHAUSTED_NAME: &str =
     "prelude.builtins.ResourceExhausted";
-pub const PRELUDE_HOST_ERROR_KIND_END_OF_FILE_NAME: &str = "prelude.builtins.EndOfFile";
-pub const PRELUDE_HOST_ERROR_KIND_INVALID_ARGUMENT_NAME: &str = "prelude.builtins.InvalidArgument";
-pub const PRELUDE_HOST_ERROR_KIND_UNSUPPORTED_OPERATION_NAME: &str =
+pub const PRELUDE_IO_ERROR_KIND_END_OF_FILE_NAME: &str = "prelude.builtins.EndOfFile";
+pub const PRELUDE_IO_ERROR_KIND_INVALID_ARGUMENT_NAME: &str = "prelude.builtins.InvalidArgument";
+pub const PRELUDE_IO_ERROR_KIND_UNSUPPORTED_OPERATION_NAME: &str =
     "prelude.builtins.UnsupportedOperation";
-pub const PRELUDE_HOST_ERROR_KIND_TIME_EXPIRED_NAME: &str = "prelude.builtins.TimeExpired";
-pub const PRELUDE_HOST_ERROR_KIND_RESOURCE_VANISHED_NAME: &str =
-    "prelude.builtins.ResourceVanished";
-pub const PRELUDE_HOST_ERROR_KIND_INTERRUPTED_NAME: &str = "prelude.builtins.Interrupted";
-pub const PRELUDE_HOST_ERROR_KIND_NETWORK_UNREACHABLE_NAME: &str =
+pub const PRELUDE_IO_ERROR_KIND_TIME_EXPIRED_NAME: &str = "prelude.builtins.TimeExpired";
+pub const PRELUDE_IO_ERROR_KIND_RESOURCE_VANISHED_NAME: &str = "prelude.builtins.ResourceVanished";
+pub const PRELUDE_IO_ERROR_KIND_INTERRUPTED_NAME: &str = "prelude.builtins.Interrupted";
+pub const PRELUDE_IO_ERROR_KIND_NETWORK_UNREACHABLE_NAME: &str =
     "prelude.builtins.NetworkUnreachable";
-pub const PRELUDE_HOST_ERROR_KIND_CONNECTION_REFUSED_NAME: &str =
+pub const PRELUDE_IO_ERROR_KIND_CONNECTION_REFUSED_NAME: &str =
     "prelude.builtins.ConnectionRefused";
-pub const PRELUDE_HOST_ERROR_KIND_ADDRESS_IN_USE_NAME: &str = "prelude.builtins.AddressInUse";
-pub const PRELUDE_HOST_ERROR_KIND_PROTOCOL_ERROR_NAME: &str = "prelude.builtins.ProtocolError";
-pub const PRELUDE_HOST_ERROR_KIND_OTHER_ERROR_NAME: &str = "prelude.builtins.OtherError";
+pub const PRELUDE_IO_ERROR_KIND_ADDRESS_IN_USE_NAME: &str = "prelude.builtins.AddressInUse";
+pub const PRELUDE_IO_ERROR_KIND_PROTOCOL_ERROR_NAME: &str = "prelude.builtins.ProtocolError";
+pub const PRELUDE_IO_ERROR_KIND_OTHER_ERROR_NAME: &str = "prelude.builtins.OtherError";
 pub const PRELUDE_UTF8_ERROR_NAME: &str = "prelude.builtins.Utf8Error";
 pub const PRELUDE_UTF8_ERROR_INVALID_NAME: &str = "prelude.builtins.InvalidUtf8";
 pub const STD_PROCESS_RESULT_NAME: &str = "std.process.ProcessResult";

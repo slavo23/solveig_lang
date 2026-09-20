@@ -29,9 +29,9 @@ certificatePath (_ :: spelling :: _) =
         | Left pathError => error (show pathError)
 certificatePath _ = error "missing fixture certificate path"
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 optionsFor : Bytes -> TlsOptions
 optionsFor certificate =
@@ -44,29 +44,29 @@ collectReply connection = do
 
 showReply : Bytes -> String
 showReply bytes =
-    show (bytesLength bytes) <>
-        ":" <>
-        show (bytesIndex bytes 0) <>
-        ":" <>
-        show (bytesIndex bytes 1) <>
-        ":" <>
-        show (bytesIndex bytes 3)
+    show (bytesLength bytes)
+        <> ":"
+        <> show (bytesIndex bytes 0)
+        <> ":"
+        <> show (bytesIndex bytes 1)
+        <> ":"
+        <> show (bytesIndex bytes 3)
 
 showTlsFailure : TlsError -> String
 showTlsFailure (InvalidTlsChunkSize _) = "chunk"
 showTlsFailure (TlsNetworkError _) = "network"
-showTlsFailure (TlsHostError _ hostError) =
-    case hostErrorKind hostError of
+showTlsFailure (TlsIOError _ ioError) =
+    case ioErrorKind ioError of
         InvalidArgument => "configuration"
         | ProtocolError => "protocol"
         | ResourceVanished => "vanished"
         | _ => "host"
 
-tlsToHost : TlsError -> HostError
-tlsToHost failure = HostError InvalidArgument "tls" (show failure)
+tlsToIO : TlsError -> IOError
+tlsToIO failure = IOError InvalidArgument "tls" (show failure)
 
 tlsTask : forall a. IO TlsError a -> Task a
-tlsTask = mapError tlsToHost
+tlsTask = mapError tlsToIO
 
 captureTls : forall a. IO TlsError a -> IO TlsError (Either TlsError a)
 captureTls action = catchError (fmap Right action) (fun failure => pureIO (Left failure))
@@ -94,7 +94,7 @@ cancelThenCollect connection = do
 main : Task ()
 main = do
     arguments <- getArgs
-    certificate <- mapError fsToHost (std.fs.readFileBytes (certificatePath arguments))
+    certificate <- mapError fsToIO (std.fs.readFileBytes (certificatePath arguments))
     let port = fixturePort arguments
     let options = optionsFor certificate
     reply <- tlsTask $ withTlsConnectionWith options "localhost" port collectReply

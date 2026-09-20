@@ -4,9 +4,9 @@ import std.io(*)
 import std.path(Path, pathFromString)
 import std.text(stringToChars, charsToString)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -138,7 +138,7 @@ withNewline text = appendString text "\n"
 
 main : Task ()
 main = do
-    contents <- mapError fsToHost (std.fs.readFile (requiredPath "questions.txt"))
+    contents <- mapError fsToIO (std.fs.readFile (requiredPath "questions.txt"))
     let cards = parseQuiz contents
     printLine "Solveig quiz"
     responses <- askCards cards
@@ -146,5 +146,5 @@ main = do
     let total = lengthCards cards
     let summary = summaryLine score total
     printLine summary
-    mapError fsToHost (std.fs.writeFile (requiredPath "last-score.txt") (withNewline summary))
-    mapError fsToHost (std.fs.appendFile (requiredPath "score-history.txt") (withNewline summary))
+    mapError fsToIO (std.fs.writeFile (requiredPath "last-score.txt") (withNewline summary))
+    mapError fsToIO (std.fs.appendFile (requiredPath "score-history.txt") (withNewline summary))

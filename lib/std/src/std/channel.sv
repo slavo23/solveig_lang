@@ -15,9 +15,9 @@ newBoundedChan capacity =
                 then failIO (invalidCapacity capacity)
                 else std.prim.newBoundedChan capacity
 
-invalidCapacity : Int -> HostError
+invalidCapacity : Int -> IOError
 invalidCapacity capacity =
-    HostError
+    IOError
         InvalidArgument
         "newBoundedChan"
         ("capacity must be between 1 and 4294967295, got " <> show capacity)

@@ -123,10 +123,10 @@ fn wraps_long_function_heads_without_coupling_them_to_the_body() {
 fn wraps_instance_method_patterns_before_constructor_internals() {
     assert_eq!(
         format_source(
-            "instance Eq HostError where\n (==) (HostError leftKind leftOperation leftMessage) (HostError rightKind rightOperation rightMessage)=True\n",
+            "instance Eq IOError where\n (==) (IOError leftKind leftOperation leftMessage) (IOError rightKind rightOperation rightMessage)=True\n",
             100,
         ),
-        "instance Eq HostError where\n    (==)\n        (HostError leftKind leftOperation leftMessage)\n        (HostError rightKind rightOperation rightMessage) =\n        True\n"
+        "instance Eq IOError where\n    (==)\n        (IOError leftKind leftOperation leftMessage)\n        (IOError rightKind rightOperation rightMessage) =\n        True\n"
     );
 }
 
@@ -255,10 +255,10 @@ fn formats_mixed_operator_chains() {
 fn formats_composition_leading_and_dollar_trailing() {
     assert_eq!(
         format_source(
-            "pipeline=validate . decode . normalize\nload path=mapError fsToHost $ readFileLimited path 1048576\n",
+            "pipeline=validate . decode . normalize\nload path=mapError fsToIO $ readFileLimited path 1048576\n",
             32,
         ),
-        "pipeline =\n    validate\n        . decode\n        . normalize\nload path =\n    mapError fsToHost $\n        readFileLimited\n            path\n            1048576\n"
+        "pipeline =\n    validate\n        . decode\n        . normalize\nload path =\n    mapError fsToIO $\n        readFileLimited\n            path\n            1048576\n"
     );
 }
 

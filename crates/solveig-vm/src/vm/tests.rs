@@ -396,14 +396,14 @@ fn raised_defect_value_survives_collection() {
 #[test]
 fn host_io_failure_becomes_the_matching_typed_error_constructor() {
     const OTHER_ERROR_TAG: u16 = 2;
-    const HOST_ERROR_TAG: u16 = 3;
+    const IO_ERROR_TAG: u16 = 3;
     let program = program_with_ctors(
         vec![global("main", int(0))],
         Vec::new(),
         &[
             ctor_spec(
                 CtorId(300),
-                CtorRuntimeRole::PreludeHostOtherError,
+                CtorRuntimeRole::PreludeIOErrorOtherError,
                 "prelude.builtins.OtherError",
                 "OtherError",
                 OTHER_ERROR_TAG,
@@ -411,10 +411,10 @@ fn host_io_failure_becomes_the_matching_typed_error_constructor() {
             ),
             ctor_spec(
                 CtorId(301),
-                CtorRuntimeRole::PreludeHostError,
-                "prelude.builtins.HostError",
-                "HostError",
-                HOST_ERROR_TAG,
+                CtorRuntimeRole::PreludeIOError,
+                "prelude.builtins.IOError",
+                "IOError",
+                IO_ERROR_TAG,
                 3,
             ),
         ],
@@ -435,13 +435,13 @@ fn host_io_failure_becomes_the_matching_typed_error_constructor() {
         solveig_base::ice!("stdout failure did not become a failed IO action");
     };
     let HeapObject::DataN { tag, fields } = *runtime.heap.get(*error) else {
-        solveig_base::ice!("stdout failure did not use HostError");
+        solveig_base::ice!("stdout failure did not use IOError");
     };
-    assert_eq!(tag, HOST_ERROR_TAG);
+    assert_eq!(tag, IO_ERROR_TAG);
     let [Value::Obj(kind), Value::Obj(operation), Value::Obj(message)] =
         runtime.heap.payload_slice(*error, fields)
     else {
-        solveig_base::ice!("HostError did not have kind, operation, and message fields");
+        solveig_base::ice!("IOError did not have kind, operation, and message fields");
     };
     assert!(matches!(
         runtime.heap.get(*kind),
@@ -453,7 +453,7 @@ fn host_io_failure_becomes_the_matching_typed_error_constructor() {
         bytes: operation_bytes,
     } = runtime.heap.get(*operation)
     else {
-        solveig_base::ice!("HostError operation was not represented as String");
+        solveig_base::ice!("IOError operation was not represented as String");
     };
     assert_eq!(
         runtime.heap.str_value(*operation, *operation_bytes),
@@ -476,13 +476,13 @@ fn host_io_failure_becomes_the_matching_typed_error_constructor() {
         solveig_base::ice!("stdin failure did not become a failed IO action");
     };
     let HeapObject::DataN { tag, fields } = *runtime.heap.get(*error) else {
-        solveig_base::ice!("stdin failure did not use HostError");
+        solveig_base::ice!("stdin failure did not use IOError");
     };
-    assert_eq!(tag, HOST_ERROR_TAG);
+    assert_eq!(tag, IO_ERROR_TAG);
     let [Value::Obj(kind), Value::Obj(operation), Value::Obj(message)] =
         runtime.heap.payload_slice(*error, fields)
     else {
-        solveig_base::ice!("HostError did not have kind, operation, and message fields");
+        solveig_base::ice!("IOError did not have kind, operation, and message fields");
     };
     assert!(matches!(
         runtime.heap.get(*kind),
@@ -494,7 +494,7 @@ fn host_io_failure_becomes_the_matching_typed_error_constructor() {
         bytes: operation_bytes,
     } = runtime.heap.get(*operation)
     else {
-        solveig_base::ice!("HostError operation was not represented as String");
+        solveig_base::ice!("IOError operation was not represented as String");
     };
     assert_eq!(
         runtime.heap.str_value(*operation, *operation_bytes),

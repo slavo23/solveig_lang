@@ -167,9 +167,9 @@ import std.fs(FsError(..))
 import std.io(*)
 import std.path(Path, pathFromString)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -178,7 +178,7 @@ requiredPath spelling =
         | Left pathError => error (show pathError)
 
 asTask : forall a. IO FsError a -> Task a
-asTask = mapError fsToHost
+asTask = mapError fsToIO
 
 readBytes : Handle -> Task Bytes;
 readBytes input = hGetBytes input 64;
@@ -370,9 +370,9 @@ fn file_io_reads_writes_and_appends_project_relative_text() {
         r#"import std.fs(FsError(..))
 import std.path(Path, pathFromString)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -383,9 +383,9 @@ requiredPath spelling =
 main : Task ()
 main = do
     let score = requiredPath "score.txt"
-    mapError fsToHost (std.fs.writeFile score "seed\n")
-    mapError fsToHost (std.fs.appendFile score "extra\n")
-    contents <- mapError fsToHost (std.fs.readFile score)
+    mapError fsToIO (std.fs.writeFile score "seed\n")
+    mapError fsToIO (std.fs.appendFile score "extra\n")
+    contents <- mapError fsToIO (std.fs.readFile score)
     printStr contents
 "#,
     );

@@ -18,9 +18,9 @@ data PullError = PlannedPull
 
 data ObservedError = ObservedPull
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -30,15 +30,15 @@ requiredPath spelling =
 
 withFileByteStream :
     forall result. Int ->
-    String -> (forall scope. std.stream.Stream scope HostError Bytes -> Task result) -> Task result
+    String -> (forall scope. std.stream.Stream scope IOError Bytes -> Task result) -> Task result
 withFileByteStream chunkSize spelling use =
     let path =
         requiredPath spelling
-    in mapError fsToHost $
+    in mapError fsToIO $
         std.fs.withFileByteStream
             chunkSize
             path
-            (fun stream => mapError (FsHostError path) $ use (std.stream.mapError fsToHost stream))
+            (fun stream => mapError (FsIOError path) $ use (std.stream.mapError fsToIO stream))
 
 ensure : String -> Bool -> Task ()
 ensure label condition =
@@ -162,7 +162,7 @@ checkBounds = do
                     (invalidLimit == Left (std.stream.InvalidStreamLimit (-1)))
                     (isInvalidChunk invalidChunk))))
 
-invalidChunkResult : Either std.stream.StreamError (std.stream.Stream () HostError [Int])
+invalidChunkResult : Either std.stream.StreamError (std.stream.Stream () IOError [Int])
 invalidChunkResult = std.stream.chunksOf 0 (std.stream.fromList [1])
 
 isInvalidChunk :
@@ -173,28 +173,27 @@ isInvalidChunk _ = False
 appendChunk : BytesBuilder -> Bytes -> BytesBuilder
 appendChunk builder bytes = builder <> bytesBuilder bytes
 
-readPrefix : forall scope. std.stream.Stream scope HostError Bytes -> Task String
+readPrefix : forall scope. std.stream.Stream scope IOError Bytes -> Task String
 readPrefix stream = do
     builder <- std.stream.fold appendChunk emptyBytesBuilder (std.stream.take 2 stream)
     case bytesToString (buildBytes builder) of
         Left utf8Error => error "fixture bytes were not UTF-8"
         | Right text => pureIO text
 
-typedStreamFailure : forall scope. std.stream.Stream scope HostError Bytes -> Task ()
-typedStreamFailure stream = failIO (HostError OtherError "stream-consumer" "planned")
+typedStreamFailure : forall scope. std.stream.Stream scope IOError Bytes -> Task ()
+typedStreamFailure stream = failIO (IOError OtherError "stream-consumer" "planned")
 
-reportTypedStreamFailure : HostError -> Task Bool
-reportTypedStreamFailure hostError = pureIO (hostErrorOperation hostError == "stream-consumer")
+reportTypedStreamFailure : IOError -> Task Bool
+reportTypedStreamFailure ioError = pureIO (ioErrorOperation ioError == "stream-consumer")
 
-defectStreamFailure : forall scope. std.stream.Stream scope HostError Bytes -> Task ()
+defectStreamFailure : forall scope. std.stream.Stream scope IOError Bytes -> Task ()
 defectStreamFailure stream = bindIO (pureIO ()) (fun ignored => pureIO (error "stream defect"))
 
 reportDefect : Defect -> Task Bool
 reportDefect (Error "stream defect") = pureIO True
 reportDefect _ = pureIO False
 
-interruptUse :
-    forall scope. Chan () -> Chan () -> std.stream.Stream scope HostError Bytes -> Task ()
+interruptUse : forall scope. Chan () -> Chan () -> std.stream.Stream scope IOError Bytes -> Task ()
 interruptUse ready gate stream = do
     first <- std.stream.next stream
     send ready ()

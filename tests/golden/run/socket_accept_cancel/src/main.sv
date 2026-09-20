@@ -1,9 +1,9 @@
 import std.net(*)
 import std.task(*)
 
-netToHost : NetError -> HostError
-netToHost (NetHostError _ hostError) = hostError
-netToHost error = HostError InvalidArgument "network" (show error)
+netToIO : NetError -> IOError
+netToIO (NetIOError _ ioError) = ioError
+netToIO error = IOError InvalidArgument "network" (show error)
 
 waitForClient : forall scope. TcpListener scope -> IO NetError ()
 waitForClient listener = withAcceptedTcpConnection listener (fun _ => pureIO ())
@@ -16,5 +16,5 @@ cancelAccept listener _ = withThread (waitForClient listener) finishScope
 
 main : Task ()
 main = do
-    mapError netToHost (withTcpListener anyPort cancelAccept)
+    mapError netToIO (withTcpListener anyPort cancelAccept)
     printLine "accept-cancelled"

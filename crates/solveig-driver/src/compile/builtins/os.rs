@@ -13,9 +13,9 @@ pub(super) fn os_builtin_specs(
     string: &Ty,
     bytes: &Ty,
     bool_ty: &Ty,
-    host_error: &Ty,
+    io_error: &Ty,
 ) -> Vec<PrimitiveBuiltinSpec> {
-    let task = |value| io_of(host_error.clone(), value);
+    let task = |value| io_of(io_error.clone(), value);
     let maybe_string = Ty::make_app(
         Ty::make_con_id(prelude_maybe_tycon_id(names)),
         string.clone(),

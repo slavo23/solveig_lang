@@ -2,7 +2,7 @@
 
 This application is a practical bounded worker pool. Three scoped green
 threads read five requested log files. One path is deliberately absent; its
-`HostError DoesNotExist` is handled locally with `catchError` and becomes a normal
+`IOError DoesNotExist` is handled locally with `catchError` and becomes a normal
 `MissingLog` result instead of aborting the batch.
 
 Both channels have capacity two. The small job channel prevents the producer

@@ -14,26 +14,26 @@ instance Show DomainError where
 domainFailure : IO DomainError ()
 domainFailure = failIO Missing
 
-testHostError : String -> HostError
-testHostError operation = HostError OtherError operation "test failure"
+testIOError : String -> IOError
+testIOError operation = IOError OtherError operation "test failure"
 
-toHostError : DomainError -> HostError
-toHostError Missing = testHostError "mapped"
+toIOError : DomainError -> IOError
+toIOError Missing = testIOError "mapped"
 
-reportOperation : String -> String -> HostError -> Task ()
-reportOperation expected label hostError =
-    if hostErrorOperation hostError == expected
+reportOperation : String -> String -> IOError -> Task ()
+reportOperation expected label ioError =
+    if ioErrorOperation ioError == expected
         then printLine label
-        else printLine ("unexpected operation " <> hostErrorOperation hostError)
+        else printLine ("unexpected operation " <> ioErrorOperation ioError)
 
-reportMapped : HostError -> Task ()
+reportMapped : IOError -> Task ()
 reportMapped error = reportOperation "mapped" "mapped-error" error
 
-reportWrite : HostError -> Task ()
+reportWrite : IOError -> Task ()
 reportWrite error = reportOperation "writeFile" "write-file-error" error
 
 reportFs : String -> String -> FsError -> Task ()
-reportFs operation label (FsHostError _ hostError) = reportOperation operation label hostError
+reportFs operation label (FsIOError _ ioError) = reportOperation operation label ioError
 reportFs _ label (FsInvalidUtf8 _ _) = printLine ("unexpected UTF-8 failure in " <> label)
 
 reportReadFs : FsError -> Task ()
@@ -46,7 +46,7 @@ reportAppendFs : FsError -> Task ()
 reportAppendFs = reportFs "appendFile" "append-file-error"
 
 infrastructureError : ConcurrentError DomainError
-infrastructureError = ConcurrentInfrastructure (HostError PermissionDenied "openFile" "denied")
+infrastructureError = ConcurrentInfrastructure (IOError PermissionDenied "openFile" "denied")
 
 fixturePath : String -> Path
 fixturePath spelling =
@@ -65,19 +65,19 @@ releaseResource name = printLine (appendString "release " name)
 
 useResource : String -> Task ()
 useResource name =
-    bindIO (printLine (appendString "use " name)) (fun value => failIO (testHostError "use"))
+    bindIO (printLine (appendString "use " name)) (fun value => failIO (testIOError "use"))
 
 cleanupFailure : Task ()
 cleanupFailure =
     catchError
-        (finally (failIO (testHostError "body")) (printLine "cleanup-failure"))
+        (finally (failIO (testIOError "body")) (printLine "cleanup-failure"))
         (fun error => printLine "caught-failure")
 
 bodyFailure : Task ()
-bodyFailure = failIO (testHostError "body")
+bodyFailure = failIO (testIOError "body")
 
 releaseFailure : Task ()
-releaseFailure = failIO (testHostError "writeFile")
+releaseFailure = failIO (testIOError "writeFile")
 
 cleanupReplacesFailure : Task ()
 cleanupReplacesFailure = catchError (finally bodyFailure releaseFailure) reportWrite
@@ -89,10 +89,10 @@ bracketFailure =
         (fun error => printLine "caught-bracket")
 
 fallbackAction : Task ()
-fallbackAction = orElse (failIO (testHostError "first")) (printLine "fallback")
+fallbackAction = orElse (failIO (testIOError "first")) (printLine "fallback")
 
 stopAction : Task ()
-stopAction = failIO (testHostError "stop")
+stopAction = failIO (testIOError "stop")
 
 skippedBind : Task ()
 skippedBind =
@@ -107,7 +107,7 @@ main = do
     cleanupFailure
     cleanupReplacesFailure
     bracketFailure
-    catchError (mapError toHostError domainFailure) reportMapped
+    catchError (mapError toIOError domainFailure) reportMapped
     fallbackAction
     skippedBind
     catchError
@@ -115,12 +115,12 @@ main = do
         reportReadFs
     catchError (std.fs.writeFile (fixturePath "missing/child.txt") "text") reportWriteFs
     catchError (std.fs.appendFile (fixturePath "missing/child.txt") "text") reportAppendFs
-    let denied = HostError PermissionDenied "openFile" "denied"
+    let denied = IOError PermissionDenied "openFile" "denied"
     printLine (show denied)
-    printLine (show (FsHostError (fixturePath "settings.conf") denied))
-    printLine (show (ProcessHostError (fixtureProcess "tool") denied))
-    printLine (show (NetHostError "example.test:443" denied))
-    printLine (show (HttpHostError denied))
+    printLine (show (FsIOError (fixturePath "settings.conf") denied))
+    printLine (show (ProcessIOError (fixtureProcess "tool") denied))
+    printLine (show (NetIOError "example.test:443" denied))
+    printLine (show (HttpIOError denied))
     printLine (show (ResponseBodyTooLarge 1024))
     printLine (show (InvalidResponseUtf8 (InvalidUtf8 7)))
     printLine (show (MissingEnv "TOKEN"))

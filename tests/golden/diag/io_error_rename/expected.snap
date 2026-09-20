@@ -1,0 +1,12 @@
+---
+source: tests/snapshot_support.rs
+expression: actual
+---
+[RES0003] Error: unknown type constructor `HostError`
+   ╭─[ $WORKSPACE/tests/golden/diag/io_error_rename/src/main.sv:1:11 ]
+   │
+ 1 │ main : IO HostError ()
+   │           ────┬────
+   │               ╰────── no type constructor named `HostError` is in scope here
+───╯
+resolve error

@@ -140,14 +140,14 @@ data NetError
     = InvalidTcpChunkSize Int
     | InvalidDatagramSize Int
     | NoHostAddresses String
-    | NetHostError String HostError
+    | NetIOError String IOError
 
 instance Eq NetError where
     (==) (InvalidTcpChunkSize left) (InvalidTcpChunkSize right) = left == right
     (==) (InvalidDatagramSize left) (InvalidDatagramSize right) = left == right
     (==) (NoHostAddresses left) (NoHostAddresses right) = left == right
-    (==) (NetHostError leftContext leftHost) (NetHostError rightContext rightHost) =
-        and (leftContext == rightContext) (leftHost == rightHost)
+    (==) (NetIOError leftContext leftIOError) (NetIOError rightContext rightIOError) =
+        and (leftContext == rightContext) (leftIOError == rightIOError)
     (==) _ _ = False
 
 instance Show NetError where
@@ -156,10 +156,10 @@ instance Show NetError where
     show (InvalidDatagramSize size) =
         "invalid UDP datagram bound " <> show size <> "; expected 1 through 65535 bytes"
     show (NoHostAddresses host) = "host resolved without an IP address: " <> host
-    show (NetHostError context hostError) = "network " <> context <> ": " <> show hostError
+    show (NetIOError context ioError) = "network " <> context <> ": " <> show ioError
 
 atEndpoint : forall a. String -> Task a -> IO NetError a
-atEndpoint context operation = mapError (NetHostError context) operation
+atEndpoint context operation = mapError (NetIOError context) operation
 
 wrapAddress : String -> IpAddress
 wrapAddress = IpAddress

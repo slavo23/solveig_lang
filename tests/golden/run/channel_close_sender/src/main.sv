@@ -1,8 +1,8 @@
 import std.thread(*)
 import std.channel(*)
 
-reportClosed : Chan String -> HostError -> Task ()
-reportClosed result (HostError ResourceVanished _ _) = send result "sender-closed"
+reportClosed : Chan String -> IOError -> Task ()
+reportClosed result (IOError ResourceVanished _ _) = send result "sender-closed"
 reportClosed result _ = send result "unexpected-error"
 
 sender : Chan Int -> Chan () -> Chan String -> Task ()

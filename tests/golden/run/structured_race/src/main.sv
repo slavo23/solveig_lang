@@ -21,7 +21,7 @@ errorLoser =
         (printLine "error-loser-cleaned")
 
 failClosed : Task String
-failClosed = failIO (HostError ResourceVanished "channel operation" "channel is closed")
+failClosed = failIO (IOError ResourceVanished "channel operation" "channel is closed")
 
 reportWinner : Either String String -> Task ()
 reportWinner winner =
@@ -29,9 +29,9 @@ reportWinner winner =
         Left value => printLine (appendString "left=" value)
         | Right value => printLine (appendString "right=" value)
 
-reportError : HostError -> Task ()
-reportError (HostError ResourceVanished _ _) = printLine "race-error=ChannelClosed"
-reportError other = printLine ("unexpected host error: " <> show other)
+reportError : IOError -> Task ()
+reportError (IOError ResourceVanished _ _) = printLine "race-error=ChannelClosed"
+reportError other = printLine ("unexpected I/O error: " <> show other)
 
 main : Task ()
 main = do

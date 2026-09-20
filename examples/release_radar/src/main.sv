@@ -81,7 +81,7 @@ runLocal repositories =
 liveToken : IO std.env.EnvError (Maybe String)
 liveToken = do
     _ <- std.env.loadEnvFileIfExists envPath
-    fmap usableToken (mapError std.env.EnvHostError (std.env.getEnv "GITHUB_TOKEN"))
+    fmap usableToken (mapError std.env.EnvIOError (std.env.getEnv "GITHUB_TOKEN"))
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -139,7 +139,7 @@ liveMode _ = False
 
 main : Task ()
 main = do
-    repositoryText <- mapError fsToHost (std.fs.readFileLimited repositoryPath 65536)
+    repositoryText <- mapError fsToIO (std.fs.readFileLimited repositoryPath 65536)
     let repositories = repositoriesFromText repositoryText
     if std.list.isEmpty repositories
         then error "repos.txt must contain at least one repository"

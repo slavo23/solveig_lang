@@ -206,10 +206,10 @@ printSectionEither (Left error) = printLine (show error)
 
 failingChunkStep : Int -> Task (Maybe ([Char], Int))
 failingChunkStep 0 = pureIO (Just (std.text.stringToChars "section", 1))
-failingChunkStep _ = failIO (HostError OtherError "parser chunks" "planned")
+failingChunkStep _ = failIO (IOError OtherError "parser chunks" "planned")
 
-reportChunkFailure : HostError -> Task String
-reportChunkFailure error = pureIO (hostErrorOperation error)
+reportChunkFailure : IOError -> Task String
+reportChunkFailure error = pureIO (ioErrorOperation error)
 
 upstreamFailure : Task String
 upstreamFailure =
@@ -244,7 +244,7 @@ sectionResult (Right value) = showSection value
 
 rejectingChunks : Int -> Task (Maybe ([Char], Int))
 rejectingChunks 0 = pureIO (Just (std.text.stringToChars "not a section", 1))
-rejectingChunks _ = failIO (HostError OtherError "unexpected read ahead" "planned")
+rejectingChunks _ = failIO (IOError OtherError "unexpected read ahead" "planned")
 
 earlyRejection : Task String
 earlyRejection =

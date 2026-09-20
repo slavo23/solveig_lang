@@ -52,12 +52,12 @@ printCwd =
     case pathFromString "src/main.sv" of
         Left error => printLine "cwd-wrong"
         | Right manifest => do
-            exists <- mapError fsToHost (doesFileExist manifest)
+            exists <- mapError fsToIO (doesFileExist manifest)
             if exists then printLine "cwd-ok" else printLine "cwd-wrong"
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost (FsInvalidUtf8 _ utf8Error) = HostError OtherError "fs" (show utf8Error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO (FsInvalidUtf8 _ utf8Error) = IOError OtherError "fs" (show utf8Error)
 
 main : Task ()
 main = do

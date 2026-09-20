@@ -689,6 +689,36 @@ main = answer
 }
 
 #[test]
+fn inferred_signature_action_uses_io_error_vocabulary() {
+    let project_root = temp_root("io_error_signature");
+    let source_path = project_root.join("scratch.sv");
+    let source = "main = printLine \"ok\"\n";
+    write_source(&source_path, source);
+    let mut compilation = Compilation::for_source_file(&source_path);
+
+    let result = compilation.check(true).expect("check should finish");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    let actions = compilation.code_actions_at_range(
+        &source_path,
+        SourcePosition::new(0, 0),
+        SourcePosition::new(0, 4),
+        PositionEncoding::Utf16,
+    );
+    let action = action_named(&actions, "Add type signature for `main`");
+    let fixed = apply_action(source, action);
+
+    assert_eq!(fixed, "main : IO IOError ()\nmain = printLine \"ok\"\n");
+    assert!(!fixed.contains("HostError"), "{fixed}");
+
+    compilation.set_overlay(&source_path, fixed);
+    let result = compilation.check(true).expect("fixed check should finish");
+    assert!(result.success(), "{:#?}", result.diagnostics());
+
+    drop(project_root);
+}
+
+#[test]
 fn inferred_signature_action_inserts_source_friendly_polymorphic_scheme() {
     let project_root = temp_root("polymorphic_signature");
     let source_path = project_root.join("scratch.sv");

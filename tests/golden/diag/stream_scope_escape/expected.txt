@@ -15,6 +15,6 @@
     │ │
     │ ╰─────────────────── this expression has type `IO FsError ()`
     │
-    │     Note: but it was required to have type `IO HostError ()`
+    │     Note: but it was required to have type `IO IOError ()`
 ────╯
 type error

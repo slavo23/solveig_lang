@@ -143,18 +143,18 @@ instance Show Process where
             <> " "
             <> show (processArguments processValue)
 
--- | A child-process validation or host failure.
-data ProcessError = InvalidProcess String | ProcessHostError Process HostError
+-- | A child-process validation or I/O failure.
+data ProcessError = InvalidProcess String | ProcessIOError Process IOError
 
 instance Eq ProcessError where
     (==) (InvalidProcess left) (InvalidProcess right) = left == right
-    (==) (ProcessHostError leftProcess leftHost) (ProcessHostError rightProcess rightHost) =
-        and (leftProcess == rightProcess) (leftHost == rightHost)
+    (==) (ProcessIOError leftProcess leftIOError) (ProcessIOError rightProcess rightIOError) =
+        and (leftProcess == rightProcess) (leftIOError == rightIOError)
     (==) _ _ = False
 
 instance Show ProcessError where
     show (InvalidProcess reason) = "invalid process: " <> reason
-    show (ProcessHostError processValue hostError) = show processValue <> ": " <> show hostError
+    show (ProcessIOError processValue ioError) = show processValue <> ": " <> show ioError
 
 -- | Builds a process request after validating the program and arguments.
 process : String -> [String] -> Either ProcessError Process
@@ -407,7 +407,7 @@ runProcessWithLimit processValue maximum =
                     failIO (InvalidProcess "streamed standard input requires withProcess")
                 | StrictInput stdinBytes =>
                     mapError
-                        (ProcessHostError processValue)
+                        (ProcessIOError processValue)
                         (std.prim.runProcessConfigured
                             (
                                 programName,
@@ -443,10 +443,10 @@ withProcess chunkSize processValue use =
         then failIO (InvalidProcess "the process stream chunk size must be positive")
         else
             bracket
-                (mapProcessHostError
+                (mapProcessIOError
                     processValue
                     (std.prim.startProcessConfigured (streamingProcessRequest processValue)))
-                (fun child => mapProcessHostError processValue (std.prim.closeProcess child))
+                (fun child => mapProcessIOError processValue (std.prim.closeProcess child))
                 (fun child => use (processHandle processValue child chunkSize))
 
 -- The public callback is universal in scope, so this private implementation
@@ -477,12 +477,12 @@ processStderr (ProcessHandle processValue child chunkSize _ (ProcessOutputs _ st
 
 processStdoutStep : Process -> ChildProcess -> Int -> () -> IO ProcessError (Maybe (Bytes, ()))
 processStdoutStep processValue child chunkSize _ = do
-    bytes <- mapProcessHostError processValue (std.prim.readProcessStdout child chunkSize)
+    bytes <- mapProcessIOError processValue (std.prim.readProcessStdout child chunkSize)
     streamBytes bytes
 
 processStderrStep : Process -> ChildProcess -> Int -> () -> IO ProcessError (Maybe (Bytes, ()))
 processStderrStep processValue child chunkSize _ = do
-    bytes <- mapProcessHostError processValue (std.prim.readProcessStderr child chunkSize)
+    bytes <- mapProcessIOError processValue (std.prim.readProcessStderr child chunkSize)
     streamBytes bytes
 
 streamBytes : Bytes -> IO ProcessError (Maybe (Bytes, ()))
@@ -503,27 +503,27 @@ writeProcessStdin (ProcessHandle processValue child chunkSize input _) bytes =
                             ("standard-input chunk exceeds withProcess chunk size of "
                                 <> show chunkSize
                                 <> " bytes"))
-                else mapProcessHostError processValue (std.prim.writeProcessStdin child bytes)
+                else mapProcessIOError processValue (std.prim.writeProcessStdin child bytes)
 
 -- | Flushes, closes streamed stdin, and is idempotent after a successful close.
 closeProcessStdin : forall scope. ProcessHandle scope -> IO ProcessError ()
 closeProcessStdin (ProcessHandle processValue child _ input _) =
     case input of
         StrictInput _ => failIO (InvalidProcess "closeProcessStdin requires pipeStandardInput")
-        | StreamInput => mapProcessHostError processValue (std.prim.closeProcessStdin child)
+        | StreamInput => mapProcessIOError processValue (std.prim.closeProcessStdin child)
 
 -- | Waits for natural child completion without closing unread output streams.
 waitProcess : forall scope. ProcessHandle scope -> IO ProcessError ExitCode
 waitProcess (ProcessHandle processValue child _ _ _) =
-    fmap ExitCode (mapProcessHostError processValue (std.prim.waitProcess child))
+    fmap ExitCode (mapProcessIOError processValue (std.prim.waitProcess child))
 
 -- | Terminates and reaps the direct child while leaving its pipes readable to EOF.
 terminateProcess : forall scope. ProcessHandle scope -> IO ProcessError ExitCode
 terminateProcess (ProcessHandle processValue child _ _ _) =
-    fmap ExitCode (mapProcessHostError processValue (std.prim.terminateProcess child))
+    fmap ExitCode (mapProcessIOError processValue (std.prim.terminateProcess child))
 
-mapProcessHostError : forall a. Process -> IO HostError a -> IO ProcessError a
-mapProcessHostError processValue = mapError (ProcessHostError processValue)
+mapProcessIOError : forall a. Process -> IO IOError a -> IO ProcessError a
+mapProcessIOError processValue = mapError (ProcessIOError processValue)
 
 streamingProcessRequest processValue =
     case processValue of

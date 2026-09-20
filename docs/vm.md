@@ -638,7 +638,7 @@ fallible reservation and fills it through `getrandom`, which delegates to the
 operating system's preferred cryptographically secure source. The completion
 crosses back as ordinary owned bytes and is allocated only at the scheduler
 safe point. Negative or unrepresentable counts and host entropy failures become
-typed `HostError` values; no `StdGen`, timer, or runtime-local seeder state is
+typed `IOError` values; no `StdGen`, timer, or runtime-local seeder state is
 read or changed.
 
 ## Typed channels
@@ -647,7 +647,7 @@ read or changed.
 `Chan` heap objects. `newChan` creates an unbounded queue and quantifies its
 typed error parameter so it composes contextually with any `IO e`. The public
 `std.channel.newBoundedChan` requires a capacity from 1 through `u32::MAX` and
-raises `HostError InvalidArgument` before creating
+raises `IOError InvalidArgument` before creating
 the primitive action.
 
 `send` hands a value directly to the oldest waiting receiver, appends it to the
@@ -658,8 +658,8 @@ wakes the oldest parked sender. `tryRecv` performs the same dequeue without
 parking and returns `Nothing` only for an open empty channel.
 
 `closeChan` is idempotent and retains values already queued. Once those values
-are drained, `recv` and `tryRecv` fail with `HostError ResourceVanished`; `send` fails with
-the same typed `HostError ResourceVanished` immediately. Closing wakes every parked sender and
+are drained, `recv` and `tryRecv` fail with `IOError ResourceVanished`; `send` fails with
+the same typed `IOError ResourceVanished` immediately. Closing wakes every parked sender and
 receiver with that failure. Sender and receiver waiter queues are independently
 FIFO, as are queued values. Wait queues live in `Runtime`, not the heap object:
 their channel keys and parked sender values are roots rewritten by collection.
@@ -686,8 +686,8 @@ this state transition:
    match, stores the plain result on the process, and returns it to the FIFO
    run queue. That process converts text into a heap string at its next
    allocation safe point on the scheduler thread. Bytes likewise become an
-   immutable heap byte string only after wakeup. A host error becomes the
-   stable `HostErrorKind`, operation, and message and an inert `Fail` action there; it
+   immutable heap byte string only after wakeup. A I/O error becomes the
+   stable `IOErrorKind`, operation, and message and an inert `Fail` action there; it
    does not enter the VM defect channel.
 
 If interruption cancels a blocked request, its request-table entry becomes a
@@ -746,7 +746,7 @@ crossing the worker boundary. The worker invokes no shell, closes stdin, owns
 the direct child through termination and reap, and drains both output pipes
 concurrently. The scheduler later allocates the three-field `ProcessResult`.
 A non-zero status is data, while spawn/wait/UTF-8/limit failures map to
-`ProcessError` wrapping the classified `HostError`. Cancellation tombstones
+`ProcessError` wrapping the classified `IOError`. Cancellation tombstones
 the language request and signals
 the worker to terminate and reap the child before posting the discarded
 completion.

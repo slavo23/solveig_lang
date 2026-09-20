@@ -4,7 +4,7 @@ import std.channel(*)
 import std.process(*)
 import std.io(*)
 
-ignoreError : HostError -> Task ()
+ignoreError : IOError -> Task ()
 ;
 ignoreError error = printLine "typed handler ran"
 ;

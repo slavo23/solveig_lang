@@ -1,5 +1,5 @@
 import std.channel(*)
-import std.task(concurrentHostError, concurrently, mapConcurrentlyBoundedOrdered)
+import std.task(concurrentIOError, concurrently, mapConcurrentlyBoundedOrdered)
 import std.time(milliseconds, sleep)
 
 process : Int -> Task Int
@@ -36,14 +36,14 @@ proveOverlap = do
     release <- newChan
     (results, _) <-
         concurrently
-            (mapError concurrentHostError $
+            (mapError concurrentIOError $
                 mapConcurrentlyBoundedOrdered 3 (waitForRelease started release) [101, 102, 103])
             (coordinate started release)
     pureIO results
 
 main : Task ()
 main = do
-    results <- mapError concurrentHostError (mapConcurrentlyBoundedOrdered 3 process [1, 2, 3, 4])
+    results <- mapError concurrentIOError (mapConcurrentlyBoundedOrdered 3 process [1, 2, 3, 4])
     printLine ("results: " <> show results)
     overlapping <- proveOverlap
     printLine $ "overlap: " <> show overlapping

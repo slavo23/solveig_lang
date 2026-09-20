@@ -11,13 +11,13 @@ fixturePath spelling =
         Right path => path
         | Left pathError => error ("invalid fixture path: " <> show pathError)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost (FsInvalidUtf8 path utf8Error) =
-    HostError InvalidArgument "filesystemUtf8" (show path <> ": " <> show utf8Error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO (FsInvalidUtf8 path utf8Error) =
+    IOError InvalidArgument "filesystemUtf8" (show path <> ": " <> show utf8Error)
 
 asTask : forall a. IO FsError a -> Task a
-asTask = mapError fsToHost
+asTask = mapError fsToIO
 
 ensure : String -> Bool -> Task ()
 ensure label condition =

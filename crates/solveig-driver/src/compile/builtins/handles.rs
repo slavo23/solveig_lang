@@ -8,12 +8,12 @@ pub(super) fn handle_builtin_specs(
     string: &Ty,
     bytes: &Ty,
     bool_ty: &Ty,
-    host_error: &Ty,
+    io_error: &Ty,
 ) -> Vec<PrimitiveBuiltinSpec> {
     let handle = Ty::make_con_id(PRIM_TYS.handle);
     let io_mode = Ty::make_con_id(std_io_mode_tycon_id(names));
     let buffer_mode = Ty::make_con_id(std_buffer_mode_tycon_id(names));
-    let task = |value| io_of(host_error.clone(), value);
+    let task = |value| io_of(io_error.clone(), value);
 
     vec![
         prim_spec(

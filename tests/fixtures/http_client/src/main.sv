@@ -15,8 +15,8 @@ showHttpError (TlsError _) = "tls"
 showHttpError (RedirectError _) = "redirect"
 showHttpError (ResponseHeadersTooLarge maximum) = "headers-too-large:" <> show maximum
 showHttpError (ResponseBodyTooLarge maximum) = "body-too-large:" <> show maximum
-showHttpError (HttpHostError hostError) =
-    case hostErrorKind hostError of
+showHttpError (HttpIOError ioError) =
+    case ioErrorKind ioError of
         TimeExpired => "timeout"
         | _ => "host"
 showHttpError (InvalidResponseUtf8 _) = "invalid-response-utf8"
@@ -33,15 +33,15 @@ printResponse label response =
         Left error => failIO error
         | Right body =>
             mapError
-                HttpHostError
+                HttpIOError
                 (printLine
-                    (label <>
-                        ":" <>
-                        show (std.http.statusCode (std.http.responseStatus response)) <>
-                        ":" <>
-                        show (std.http.findHeader "etag" response) <>
-                        ":" <>
-                        body))
+                    (label
+                        <> ":"
+                        <> show (std.http.statusCode (std.http.responseStatus response))
+                        <> ":"
+                        <> show (std.http.findHeader "etag" response)
+                        <> ":"
+                        <> body))
 
 fetch : String -> std.http.HttpOptions -> String -> Task ()
 fetch label configured spelling =
@@ -82,11 +82,9 @@ main = do
     let tlsBase = tlsArgument args
     catchError
         (std.http.getWith
-                (withHeaders
-                    [("Accept", "text/plain")]
-                    (limits 65536 1024 1000 std.http.NoRedirects))
-                (base <> "/chunked") >>=
-            printResponse "fetch")
+            (withHeaders [("Accept", "text/plain")] (limits 65536 1024 1000 std.http.NoRedirects))
+            (base <> "/chunked")
+            >>= printResponse "fetch")
         (fun error => printLine ("fetch:" <> showHttpError error))
     fetch "chunked" (limits 65536 1024 1000 (std.http.FollowRedirects 2)) (base <> "/chunked")
     fetch "redirect" (limits 65536 1024 1000 (std.http.FollowRedirects 2)) (base <> "/redirect")

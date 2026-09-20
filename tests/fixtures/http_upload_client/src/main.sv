@@ -18,15 +18,15 @@ failingBodyStep : Int -> IO HttpError (Maybe (Bytes, Int))
 failingBodyStep step =
     if step == 0
         then pureIO $ Just (stringToBytes "partial", 1)
-        else failIO $ HttpHostError $ HostError OtherError "fixtureUpload" "planned"
+        else failIO $ HttpIOError $ IOError OtherError "fixtureUpload" "planned"
 
 failingBody : Streams.Stream () HttpError Bytes
 failingBody = Streams.unfold failingBodyStep 0
 
 slowBodyStep : Chan () -> Int -> IO HttpError (Maybe (Bytes, Int))
 slowBodyStep entered _ = do
-    mapError HttpHostError $ send entered ()
-    mapError HttpHostError $ sleep $ seconds 3600
+    mapError HttpIOError $ send entered ()
+    mapError HttpIOError $ sleep $ seconds 3600
     pureIO Nothing
 
 slowBody : Chan () -> Streams.Stream () HttpError Bytes
@@ -39,13 +39,13 @@ collect : forall scope. Streams.Stream scope HttpError Bytes -> IO HttpError Byt
 collect stream = fmap buildBytes (Streams.fold appendChunk emptyBytesBuilder stream)
 
 say : String -> IO HttpError ()
-say = mapError HttpHostError . printLine
+say = mapError HttpIOError . printLine
 
-httpAsHostError : HttpError -> HostError
-httpAsHostError problem =
+httpAsIOError : HttpError -> IOError
+httpAsIOError problem =
     case problem of
-        HttpHostError host => host
-        | _ => HostError InvalidArgument "HTTP" (show problem)
+        HttpIOError host => host
+        | _ => IOError InvalidArgument "HTTP" (show problem)
 
 sayResponse : String -> Response -> IO HttpError ()
 sayResponse label response =
@@ -86,8 +86,8 @@ expectSourceFailure action =
             say "source-failure:unexpected"
         ) (fun problem =>
             case problem of
-                HttpHostError host =>
-                    if hostErrorOperation host == "fixtureUpload"
+                HttpIOError host =>
+                    if ioErrorOperation host == "fixtureUpload"
                         then say "source-failure:planned"
                         else failIO problem
                 | _ => failIO problem
@@ -95,10 +95,10 @@ expectSourceFailure action =
 
 cancelUpload : String -> IO HttpError ()
 cancelUpload url = do
-    entered <- mapError HttpHostError newChan
-    mapError HttpHostError $
+    entered <- mapError HttpIOError newChan
+    mapError HttpIOError $
         withThread
-            (mapError httpAsHostError $ requestStream Post (slowBody entered) url)
+            (mapError httpAsIOError $ requestStream Post (slowBody entered) url)
             (fun _ => recv entered)
     say "cancel-upload:closed"
 
@@ -176,6 +176,6 @@ main = do
         base :: payload :: _ =>
             case pathFromString payload of
                 Left problem => printLine $ show problem
-                | Right path => mapError httpAsHostError $ catchError (run base path) (say . show)
+                | Right path => mapError httpAsIOError $ catchError (run base path) (say . show)
         | [] => printLine "missing fixture URL"
         | _ => printLine "missing fixture payload path"

@@ -429,7 +429,7 @@ main =
         "helpText",
     );
     assert!(
-        do_label.contains("printStr : String -> IO HostError ()"),
+        do_label.contains("printStr : String -> IO IOError ()"),
         "{do_label}"
     );
     assert!(!do_label.contains("thenM"));

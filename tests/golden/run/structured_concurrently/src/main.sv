@@ -61,7 +61,7 @@ runBoundedPool : Chan Int -> Chan () -> Chan [Int] -> Task ()
 runBoundedPool started release resultsChannel = do
     results <-
         mapError
-            concurrentHostError
+            concurrentIOError
             (mapConcurrentlyBoundedOrdered 2 (boundedWork started release) [1, 2, 3])
     send resultsChannel results
 
@@ -91,7 +91,7 @@ runCompletionPool : Chan Int -> (Chan (), Chan (), Chan (), Chan ()) -> Chan [In
 runCompletionPool started gates resultsChannel = do
     results <-
         mapError
-            concurrentHostError
+            concurrentIOError
             (mapConcurrentlyBoundedCompletionOrder 2 (completionWork started gates) [1, 2, 3, 4])
     send resultsChannel results
 
@@ -124,7 +124,7 @@ expectPooledFailure =
         reportPooledFailure
 
 reportInvalidPool : ConcurrentError PooledError -> Task ()
-reportInvalidPool (ConcurrentInfrastructure (HostError InvalidArgument _ _)) =
+reportInvalidPool (ConcurrentInfrastructure (IOError InvalidArgument _ _)) =
     printLine "pooled-error=InvalidArgument"
 reportInvalidPool _ = error "unexpected invalid pool error"
 
@@ -152,8 +152,7 @@ main = do
             (fun unexpected => error "unexpected concurrent failure")
     case pair of
         (leftValue, rightValue) => printLine (appendString "pair=7," rightValue)
-    ordered <-
-        mapError concurrentHostError (mapConcurrentlyBoundedOrdered 2 pooledWork [1, 2, 3, 4])
+    ordered <- mapError concurrentIOError (mapConcurrentlyBoundedOrdered 2 pooledWork [1, 2, 3, 4])
     printLine ("ordered=" <> show ordered)
     completionStarted <- newChan
     firstGate <- newChan

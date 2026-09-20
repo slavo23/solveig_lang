@@ -8,7 +8,7 @@ export (
     concurrently,
     timeout,
     ConcurrentError(..),
-    concurrentHostError,
+    concurrentIOError,
     mapConcurrentlyBoundedOrdered,
     mapConcurrentlyBoundedCompletionOrder
 )
@@ -38,7 +38,7 @@ import std.time(Duration, sleep)
 import std.thread(spawn, killThread)
 
 -- | Distinguishes a pool/channel failure from a failure returned by one worker.
-data ConcurrentError e = ConcurrentInfrastructure HostError | ConcurrentWorker e
+data ConcurrentError e = ConcurrentInfrastructure IOError | ConcurrentWorker e
 
 instance Eq e => Eq (ConcurrentError e) where
     (==) (ConcurrentInfrastructure left) (ConcurrentInfrastructure right) = left == right
@@ -46,13 +46,13 @@ instance Eq e => Eq (ConcurrentError e) where
     (==) _ _ = False
 
 instance Show e => Show (ConcurrentError e) where
-    show (ConcurrentInfrastructure hostError) = "concurrency infrastructure: " <> show hostError
+    show (ConcurrentInfrastructure ioError) = "concurrency infrastructure: " <> show ioError
     show (ConcurrentWorker workerError) = "concurrent worker: " <> show workerError
 
 -- | Collapses a pool running Task workers back to Task at an explicit boundary.
-concurrentHostError : ConcurrentError HostError -> HostError
-concurrentHostError (ConcurrentInfrastructure hostError) = hostError
-concurrentHostError (ConcurrentWorker hostError) = hostError
+concurrentIOError : ConcurrentError IOError -> IOError
+concurrentIOError (ConcurrentInfrastructure ioError) = ioError
+concurrentIOError (ConcurrentWorker ioError) = ioError
 
 -- | Handles defects raised while executing an IO action's installed scope.
 catchDefect : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
@@ -365,7 +365,7 @@ mapConcurrentlyBoundedWith operation collect concurrency transform values =
 invalidConcurrency : forall e. String -> Int -> ConcurrentError e
 invalidConcurrency operation concurrency =
     ConcurrentInfrastructure
-        (HostError
+        (IOError
             InvalidArgument
             operation
             ("concurrency must be between 1 and 4294967295, got " <> show concurrency))
@@ -402,7 +402,7 @@ pooledWorker transform jobs outcomes =
         (pooledWorkerLoop transform jobs outcomes)
         (fun poolError =>
             case poolError of
-                ConcurrentInfrastructure (HostError ResourceVanished _ _) => pureIO ()
+                ConcurrentInfrastructure (IOError ResourceVanished _ _) => pureIO ()
                 | _ => failIO poolError
         )
 
@@ -423,7 +423,7 @@ captureWorker transform value =
 
 retainWorkerError : forall e b. ConcurrentError e -> IO (ConcurrentError e) (Either e b)
 retainWorkerError (ConcurrentWorker workerError) = pureIO (Left workerError)
-retainWorkerError (ConcurrentInfrastructure hostError) = failIO (ConcurrentInfrastructure hostError)
+retainWorkerError (ConcurrentInfrastructure ioError) = failIO (ConcurrentInfrastructure ioError)
 
 enqueuePooled : forall e a. Chan (Int, a) -> [a] -> Int -> IO (ConcurrentError e) ()
 enqueuePooled jobs [] _ = asConcurrentInfrastructure (std.channel.closeChan jobs)

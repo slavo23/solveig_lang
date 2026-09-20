@@ -3,12 +3,12 @@ import std.net(*)
 import std.stream(fold)
 import std.task(*)
 
-netToHost : NetError -> HostError
-netToHost (NetHostError _ hostError) = hostError
-netToHost error = HostError InvalidArgument "network" (show error)
+netToIO : NetError -> IOError
+netToIO (NetIOError _ ioError) = ioError
+netToIO error = IOError InvalidArgument "network" (show error)
 
 netTask : forall a. IO NetError a -> Task a
-netTask = mapError netToHost
+netTask = mapError netToIO
 
 echoConnection : forall scope. TcpConnection scope -> IO NetError ()
 echoConnection connection = do

@@ -52,21 +52,21 @@ import std.task(bracket)
 import std.time(SystemTime, systemTimeFromNanoseconds)
 
 -- | A filesystem failure with the path context known by the public operation.
-data FsError = FsHostError Path HostError | FsInvalidUtf8 Path Utf8Error
+data FsError = FsIOError Path IOError | FsInvalidUtf8 Path Utf8Error
 
 instance Eq FsError where
-    (==) (FsHostError leftPath leftHost) (FsHostError rightPath rightHost) =
-        and (leftPath == rightPath) (leftHost == rightHost)
+    (==) (FsIOError leftPath leftIOError) (FsIOError rightPath rightIOError) =
+        and (leftPath == rightPath) (leftIOError == rightIOError)
     (==) (FsInvalidUtf8 leftPath leftUtf8) (FsInvalidUtf8 rightPath rightUtf8) =
         and (leftPath == rightPath) (leftUtf8 == rightUtf8)
     (==) _ _ = False
 
 instance Show FsError where
-    show (FsHostError path hostError) = "filesystem " <> show path <> ": " <> show hostError
+    show (FsIOError path ioError) = "filesystem " <> show path <> ": " <> show ioError
     show (FsInvalidUtf8 path utf8Error) = "filesystem " <> show path <> ": " <> show utf8Error
 
 atPath : forall a. Path -> Task a -> IO FsError a
-atPath path operation = mapError (FsHostError path) operation
+atPath path operation = mapError (FsIOError path) operation
 
 -- | Strictly reads an entire trusted file as UTF-8 text.
 -- |
@@ -100,7 +100,7 @@ writeFile path contents = atPath path (std.prim.writeFile (pathToString path) co
 -- | The complete replacement is written and synced beside the destination
 -- | before one host rename makes it visible. Failure removes the temporary file
 -- | and leaves the previous destination untouched. Hosts unable to replace an
--- | existing destination atomically return a typed host failure.
+-- | existing destination atomically return a typed I/O failure.
 writeFileAtomic : Path -> String -> IO FsError ()
 writeFileAtomic path contents = atPath path (std.prim.writeFileAtomic (pathToString path) contents)
 
@@ -338,9 +338,9 @@ absoluteUtf8Error path base (InvalidUtf8 offset) = FsInvalidUtf8 path (InvalidUt
 invalidChunkSize : forall a. Path -> String -> Int -> IO FsError a
 invalidChunkSize path operation chunkSize =
     failIO
-        (FsHostError
+        (FsIOError
             path
-            (HostError
+            (IOError
                 InvalidArgument
                 operation
                 ("chunk size must be positive, got " <> show chunkSize)))

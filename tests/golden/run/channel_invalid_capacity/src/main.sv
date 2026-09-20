@@ -1,7 +1,7 @@
 import std.channel(*)
 
-report : String -> HostError -> Task ()
-report expected (HostError InvalidArgument _ _) = printLine expected
+report : String -> IOError -> Task ()
+report expected (IOError InvalidArgument _ _) = printLine expected
 report _ _ = printLine "unexpected-error"
 
 invalidChannel : Int -> Task (Chan Int)

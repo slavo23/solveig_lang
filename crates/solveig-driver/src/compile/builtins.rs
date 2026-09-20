@@ -151,7 +151,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let thread_id = Ty::make_con_id(PRIM_TYS.thread_id);
     let socket = Ty::make_con_id(PRIM_TYS.socket);
     let defect = Ty::make_con_id(prelude_defect_tycon_id(names));
-    let host_error = Ty::make_con_id(prelude_host_error_tycon_id(names));
+    let io_error = Ty::make_con_id(prelude_io_error_tycon_id(names));
     let ordering = Ty::make_con_id(prelude_ordering_tycon_id(names));
     let list = Ty::make_con_id(prelude_list_tycon_id(names));
     let string_list = Ty::make_app(list.clone(), string.clone());
@@ -165,10 +165,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let b = Ty::TyVar(b_id);
     let chan_a = Ty::make_app(Ty::make_con_id(PRIM_TYS.chan), a.clone());
     let maybe_a = Ty::make_app(Ty::make_con_id(prelude_maybe_tycon_id(names)), a.clone());
-    let resolve_host = unary(
-        string.clone(),
-        io_of(host_error.clone(), string_list.clone()),
-    );
+    let resolve_host = unary(string.clone(), io_of(io_error.clone(), string_list.clone()));
     let listener_result = tuple(names, &[socket.clone(), int.clone()]);
     let datagram_result = tuple(names, &[bytes.clone(), string.clone(), int.clone()]);
     let datagram_send = tuple(names, &[string.clone(), int.clone(), bytes.clone()]);
@@ -229,9 +226,9 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
         &[Ty::make_con_id(PRIM_TYS.handle), maybe_http_stream],
     );
     let handle_specs =
-        handles::handle_builtin_specs(names, &int, &string, &bytes, &bool_ty, &host_error);
-    let os_specs = os::os_builtin_specs(names, &int, &string, &bytes, &bool_ty, &host_error);
-    let random_specs = random::random_builtin_specs(names, &int, &bytes, &host_error);
+        handles::handle_builtin_specs(names, &int, &string, &bytes, &bool_ty, &io_error);
+    let os_specs = os::os_builtin_specs(names, &int, &string, &bytes, &bool_ty, &io_error);
+    let random_specs = random::random_builtin_specs(names, &int, &bytes, &io_error);
     let data_specs = data::data_builtin_specs(names);
 
     let mut specs = vec![
@@ -394,7 +391,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[string.clone(), int.clone()],
-                io_of(host_error.clone(), socket.clone()),
+                io_of(io_error.clone(), socket.clone()),
             ),
         ),
         prim_spec(
@@ -403,7 +400,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[socket.clone(), tls_config],
-                io_of(host_error.clone(), Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec("resolveHost", BUILTIN_RESOLVE_HOST, 1, resolve_host),
@@ -413,7 +410,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[http_request.clone(), http_limits.clone()],
-                io_of(host_error.clone(), http_response),
+                io_of(io_error.clone(), http_response),
             ),
         ),
         prim_spec(
@@ -422,7 +419,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[http_request.clone(), http_limits.clone()],
-                io_of(host_error.clone(), http_stream),
+                io_of(io_error.clone(), http_stream),
             ),
         ),
         prim_spec(
@@ -431,7 +428,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[http_request, http_limits],
-                io_of(host_error.clone(), http_upload_event.clone()),
+                io_of(io_error.clone(), http_upload_event.clone()),
             ),
         ),
         prim_spec(
@@ -446,7 +443,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
                         bytes.clone(),
                     ),
                 ],
-                io_of(host_error.clone(), http_upload_event),
+                io_of(io_error.clone(), http_upload_event),
             ),
         ),
         prim_spec(
@@ -455,7 +452,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             1,
             unary(
                 Ty::make_con_id(PRIM_TYS.handle),
-                io_of(host_error.clone(), Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec(
@@ -464,14 +461,14 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             1,
             unary(
                 int.clone(),
-                io_of(host_error.clone(), listener_result.clone()),
+                io_of(io_error.clone(), listener_result.clone()),
             ),
         ),
         prim_spec(
             "accept",
             BUILTIN_ACCEPT,
             1,
-            unary(socket.clone(), io_of(host_error.clone(), socket.clone())),
+            unary(socket.clone(), io_of(io_error.clone(), socket.clone())),
         ),
         prim_spec(
             "sendBytes",
@@ -479,7 +476,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[socket.clone(), Ty::make_con_id(PRIM_TYS.bytes)],
-                io_of(host_error.clone(), Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec(
@@ -488,20 +485,20 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[socket.clone(), int.clone()],
-                io_of(host_error.clone(), Ty::make_con_id(PRIM_TYS.bytes)),
+                io_of(io_error.clone(), Ty::make_con_id(PRIM_TYS.bytes)),
             ),
         ),
         prim_spec(
             "closeSocket",
             BUILTIN_CLOSE_SOCKET,
             1,
-            unary(socket.clone(), io_of(host_error.clone(), Ty::TyUnit)),
+            unary(socket.clone(), io_of(io_error.clone(), Ty::TyUnit)),
         ),
         prim_spec(
             "bindUdp",
             BUILTIN_BIND_UDP,
             1,
-            unary(int.clone(), io_of(host_error.clone(), listener_result)),
+            unary(int.clone(), io_of(io_error.clone(), listener_result)),
         ),
         prim_spec(
             "sendDatagram",
@@ -509,7 +506,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[socket.clone(), datagram_send],
-                io_of(host_error.clone(), Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec(
@@ -518,7 +515,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[socket, int.clone()],
-                io_of(host_error.clone(), datagram_result),
+                io_of(io_error.clone(), datagram_result),
             ),
         ),
         prim_spec(
@@ -616,7 +613,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             1,
             arr(
                 std::slice::from_ref(&string),
-                io_of(host_error.clone(), Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec(
@@ -625,14 +622,14 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             1,
             arr(
                 std::slice::from_ref(&string),
-                io_of(host_error.clone(), Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec(
             "readLine",
             BUILTIN_READ_LINE,
             0,
-            Scheme::mono(io_of(host_error.clone(), string.clone())),
+            Scheme::mono(io_of(io_error.clone(), string.clone())),
         ),
         prim_spec(
             "getArgs",
@@ -644,7 +641,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "readFile",
             BUILTIN_READ_FILE,
             1,
-            unary(string.clone(), io_of(host_error.clone(), string.clone())),
+            unary(string.clone(), io_of(io_error.clone(), string.clone())),
         ),
         prim_spec(
             "readFileLimited",
@@ -652,7 +649,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[string.clone(), int.clone()],
-                io_of(host_error.clone(), string.clone()),
+                io_of(io_error.clone(), string.clone()),
             ),
         ),
         prim_spec(
@@ -661,7 +658,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[string.clone(), string.clone()],
-                io_of(host_error.clone(), Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec(
@@ -670,7 +667,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             2,
             arr(
                 &[string.clone(), string],
-                io_of(host_error.clone(), Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec(
@@ -706,7 +703,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             poly_arr(
                 std::slice::from_ref(&a_id),
                 &[chan_a.clone(), a.clone()],
-                io_of(host_error.clone(), Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec(
@@ -716,7 +713,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             poly_arr(
                 std::slice::from_ref(&a_id),
                 std::slice::from_ref(&chan_a),
-                io_of(host_error.clone(), a.clone()),
+                io_of(io_error.clone(), a.clone()),
             ),
         ),
         prim_spec(
@@ -726,7 +723,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             poly_arr(
                 std::slice::from_ref(&a_id),
                 std::slice::from_ref(&chan_a),
-                io_of(host_error.clone(), maybe_a),
+                io_of(io_error.clone(), maybe_a),
             ),
         ),
         prim_spec(
@@ -736,14 +733,14 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             poly_arr(
                 std::slice::from_ref(&a_id),
                 std::slice::from_ref(&chan_a),
-                io_of(host_error.clone(), Ty::TyUnit),
+                io_of(io_error.clone(), Ty::TyUnit),
             ),
         ),
         prim_spec(
             "killThread",
             BUILTIN_KILL_THREAD,
             1,
-            unary(thread_id, io_of(host_error.clone(), Ty::TyUnit)),
+            unary(thread_id, io_of(io_error.clone(), Ty::TyUnit)),
         ),
         prim_spec(
             "getMonotonicTime",
@@ -761,7 +758,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             "sleep",
             BUILTIN_SLEEP,
             1,
-            unary(int.clone(), io_of(host_error, Ty::TyUnit)),
+            unary(int.clone(), io_of(io_error, Ty::TyUnit)),
         ),
         prim_spec(
             "maskIO",

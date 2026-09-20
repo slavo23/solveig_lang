@@ -4,10 +4,10 @@ import std.list(length)
 import std.path(*)
 import std.time(SystemTime, systemTimeNanoseconds)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost (FsInvalidUtf8 path utf8Error) =
-    HostError InvalidArgument "filesystemUtf8" (show path <> ": " <> show utf8Error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO (FsInvalidUtf8 path utf8Error) =
+    IOError InvalidArgument "filesystemUtf8" (show path <> ": " <> show utf8Error)
 
 fixturePath : String -> Path
 fixturePath spelling =
@@ -16,42 +16,42 @@ fixturePath spelling =
         | Left pathError => error ("invalid fixture path: " <> show pathError)
 
 getCurrentDirectory : Task Path
-getCurrentDirectory = mapError fsToHost std.fs.getCurrentDirectory
+getCurrentDirectory = mapError fsToIO std.fs.getCurrentDirectory
 
 setCurrentDirectory : String -> Task ()
-setCurrentDirectory path = mapError fsToHost (std.fs.setCurrentDirectory (fixturePath path))
+setCurrentDirectory path = mapError fsToIO (std.fs.setCurrentDirectory (fixturePath path))
 
 doesFileExist : String -> Task Bool
-doesFileExist path = mapError fsToHost (std.fs.doesFileExist (fixturePath path))
+doesFileExist path = mapError fsToIO (std.fs.doesFileExist (fixturePath path))
 
 doesDirectoryExist : Path -> Task Bool
-doesDirectoryExist path = mapError fsToHost (std.fs.doesDirectoryExist path)
+doesDirectoryExist path = mapError fsToIO (std.fs.doesDirectoryExist path)
 
 listDirectory : String -> Task [String]
 listDirectory path =
-    fmap (map pathToString) (mapError fsToHost (std.fs.listDirectory (fixturePath path)))
+    fmap (map pathToString) (mapError fsToIO (std.fs.listDirectory (fixturePath path)))
 
 createDirectory : String -> Task ()
-createDirectory path = mapError fsToHost (std.fs.createDirectory (fixturePath path))
+createDirectory path = mapError fsToIO (std.fs.createDirectory (fixturePath path))
 
 removeFile : String -> Task ()
-removeFile path = mapError fsToHost (std.fs.removeFile (fixturePath path))
+removeFile path = mapError fsToIO (std.fs.removeFile (fixturePath path))
 
 renameFile : String -> String -> Task ()
 renameFile source destination =
-    mapError fsToHost (std.fs.renameFile (fixturePath source) (fixturePath destination))
+    mapError fsToIO (std.fs.renameFile (fixturePath source) (fixturePath destination))
 
 getFileSize : String -> Task Int
-getFileSize path = mapError fsToHost (std.fs.getFileSize (fixturePath path))
+getFileSize path = mapError fsToIO (std.fs.getFileSize (fixturePath path))
 
 getModificationTime : String -> Task SystemTime
-getModificationTime path = mapError fsToHost (std.fs.getModificationTime (fixturePath path))
+getModificationTime path = mapError fsToIO (std.fs.getModificationTime (fixturePath path))
 
 readFile : String -> Task String
-readFile = mapError fsToHost . std.fs.readFile . fixturePath
+readFile = mapError fsToIO . std.fs.readFile . fixturePath
 
 writeFile : String -> String -> Task ()
-writeFile path = mapError fsToHost . std.fs.writeFile (fixturePath path)
+writeFile path = mapError fsToIO . std.fs.writeFile (fixturePath path)
 
 lookupEnvironment : String -> [(String, String)] -> Maybe String
 ;
@@ -72,7 +72,7 @@ printRequired : String -> Task ()
 ;
 printRequired name =
     catchError
-        (bindIO (requireEnv name) (mapError EnvHostError . printLine))
+        (bindIO (requireEnv name) (mapError EnvIOError . printLine))
         (fun envError => printLine (show envError))
 ;
 
@@ -95,17 +95,17 @@ printEnvParse (Right entries) = printLine ("env entries " <> show (length entrie
 printEnvParse (Left envError) = printLine (show envError)
 ;
 
-ignoreExistingDirectory : HostError -> Task ()
+ignoreExistingDirectory : IOError -> Task ()
 ;
 ignoreExistingDirectory ioError =
-    if hostErrorOperation ioError == "createDirectory" then pureIO () else failIO ioError
+    if ioErrorOperation ioError == "createDirectory" then pureIO () else failIO ioError
 ;
 
-reportError : HostError -> Task ()
+reportError : IOError -> Task ()
 ;
 reportError ioError =
     let operation =
-        hostErrorOperation ioError
+        ioErrorOperation ioError
     in if operation == "getEnv"
         then printLine "get-env-error"
         else if operation == "setEnv"

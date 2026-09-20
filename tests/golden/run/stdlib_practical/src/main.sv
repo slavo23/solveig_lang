@@ -52,16 +52,16 @@ parseWorkers text =
             workersParser
             (std.parser.textInput (std.text.trimAscii text)))
 
-httpAsHostError : std.http.HttpError -> HostError
-httpAsHostError (HttpHostError hostError) = hostError
-httpAsHostError error = HostError InvalidArgument "HTTP" (show error)
+httpAsIOError : std.http.HttpError -> IOError
+httpAsIOError (HttpIOError ioError) = ioError
+httpAsIOError error = IOError InvalidArgument "HTTP" (show error)
 
-netToHost : std.net.NetError -> HostError
-netToHost (std.net.NetHostError _ hostError) = hostError
-netToHost error = HostError InvalidArgument "network" (show error)
+netToIO : std.net.NetError -> IOError
+netToIO (std.net.NetIOError _ ioError) = ioError
+netToIO error = IOError InvalidArgument "network" (show error)
 
-hostToNet : HostError -> std.net.NetError
-hostToNet hostError = std.net.NetHostError "fixture" hostError
+ioToNet : IOError -> std.net.NetError
+ioToNet ioError = std.net.NetIOError "fixture" ioError
 
 serveConnection : forall scope. TcpConnection scope -> IO std.net.NetError ()
 serveConnection connection = do
@@ -72,18 +72,18 @@ serveOnce : forall scope. TcpListener scope -> IO std.net.NetError ()
 serveOnce listener = std.net.withAcceptedTcpConnection listener serveConnection
 
 withFixture : forall a. (String -> Task a) -> Task a
-withFixture action = mapError netToHost (std.net.withTcpListener anyPort (runFixture action))
+withFixture action = mapError netToIO (std.net.withTcpListener anyPort (runFixture action))
 
 runFixture :
     forall a scope. (String -> Task a) -> TcpListener scope -> Port -> IO std.net.NetError a
 runFixture action listener port =
     std.task.withThread
         (serveOnce listener)
-        (fun _ => mapError hostToNet (action ("http://127.0.0.1:" <> show port)))
+        (fun _ => mapError ioToNet (action ("http://127.0.0.1:" <> show port)))
 
 fetchNames : String -> Task (Either std.testing.TestFailure (Int, (std.vector.Vector String)))
 fetchNames base = do
-    response <- mapError httpAsHostError (std.http.get (base <> "/names"))
+    response <- mapError httpAsIOError (std.http.get (base <> "/names"))
     let status = std.http.statusCode (std.http.responseStatus response)
     pureIO
         (std.parser.foldReply
@@ -131,9 +131,9 @@ isNothing : Maybe a -> Bool
 isNothing Nothing = True
 isNothing (Just _) = False
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -143,8 +143,7 @@ requiredPath spelling =
 
 main : Task ()
 main = do
-    settings <-
-        mapError fsToHost (std.fs.readFileLimited (requiredPath "fixture/settings.txt") 1024)
+    settings <- mapError fsToIO (std.fs.readFileLimited (requiredPath "fixture/settings.txt") 1024)
     workers <- resultOrExit (parseWorkers settings)
     fetched <- withFixture fetchNames
     response <- resultOrExit fetched

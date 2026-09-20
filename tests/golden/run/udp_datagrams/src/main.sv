@@ -3,9 +3,9 @@ import std.net(*)
 import std.stream(StreamStep(..), next)
 import std.task(withThread)
 
-netToHost : NetError -> HostError
-netToHost (NetHostError _ hostError) = hostError
-netToHost error = HostError InvalidArgument "network" (show error)
+netToIO : NetError -> IOError
+netToIO (NetIOError _ ioError) = ioError
+netToIO error = IOError InvalidArgument "network" (show error)
 
 hasAddress : [IpAddress] -> Bool
 hasAddress [] = False
@@ -64,9 +64,9 @@ withSender receiver receiverPort = withUdpSocket anyPort (exchange receiver rece
 
 main : Task ()
 main = do
-    addresses <- mapError netToHost (resolveHost "localhost")
+    addresses <- mapError netToIO (resolveHost "localhost")
     printLine ("resolved=" <> show (hasAddress addresses))
-    result <- mapError netToHost (withUdpSocket anyPort withSender)
+    result <- mapError netToIO (withUdpSocket anyPort withSender)
     case result of
         (message, sourceMatches, emptySize, recovery) => do
             printLine message

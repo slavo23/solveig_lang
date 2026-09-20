@@ -7,12 +7,12 @@ import std.time(*)
 emptyBytes : Bytes
 emptyBytes = std.bytes.stringToBytes ""
 
-netToHost : std.net.NetError -> HostError
-netToHost (std.net.NetHostError _ hostError) = hostError
-netToHost error = HostError InvalidArgument "network" (show error)
+netToIO : std.net.NetError -> IOError
+netToIO (std.net.NetIOError _ ioError) = ioError
+netToIO error = IOError InvalidArgument "network" (show error)
 
-hostToNet : HostError -> std.net.NetError
-hostToNet hostError = std.net.NetHostError "fixture" hostError
+ioToNet : IOError -> std.net.NetError
+ioToNet ioError = std.net.NetIOError "fixture" ioError
 
 fixtureBody : String
 fixtureBody =
@@ -58,7 +58,7 @@ readRequestHeaders connection accumulated =
 
 sendFixtureResponse : forall scope. TcpConnection scope -> Bytes -> IO std.net.NetError ()
 sendFixtureResponse connection request = do
-    mapError hostToNet (std.time.sleep (std.time.milliseconds (requestDelay request)))
+    mapError ioToNet (std.time.sleep (std.time.milliseconds (requestDelay request)))
     std.net.sendTcpBytes connection (std.bytes.stringToBytes fixtureResponse)
 
 requestDelay : Bytes -> Int
@@ -79,8 +79,8 @@ serveOne : forall scope. TcpListener scope -> Int -> IO std.net.NetError ()
 serveOne listener _ = std.net.withAcceptedTcpConnection listener serveConnection
 
 concurrentToNet : std.task.ConcurrentError std.net.NetError -> std.net.NetError
-concurrentToNet (std.task.ConcurrentInfrastructure hostError) =
-    std.net.NetHostError "fixture server" hostError
+concurrentToNet (std.task.ConcurrentInfrastructure ioError) =
+    std.net.NetIOError "fixture server" ioError
 concurrentToNet (std.task.ConcurrentWorker networkError) = networkError
 
 serveFixture : forall scope. TcpListener scope -> Int -> IO std.net.NetError ()
@@ -93,11 +93,11 @@ serveFixture listener total =
 
 withFixture : forall a. Int -> (String -> Task a) -> Task a
 withFixture requestCount action =
-    mapError netToHost (std.net.withTcpListener std.net.anyPort (runFixture requestCount action))
+    mapError netToIO (std.net.withTcpListener std.net.anyPort (runFixture requestCount action))
 
 runFixture :
     forall a scope. Int -> (String -> Task a) -> TcpListener scope -> Port -> IO std.net.NetError a
 runFixture requestCount action listener port =
     std.task.withThread
         (serveFixture listener requestCount)
-        (fun _ => mapError hostToNet (action ("http://127.0.0.1:" <> show port)))
+        (fun _ => mapError ioToNet (action ("http://127.0.0.1:" <> show port)))

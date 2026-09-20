@@ -3,9 +3,9 @@ import std.fs(FsError(..))
 import std.io(*)
 import std.path(Path, pathFromString)
 
-fsToHost : FsError -> HostError
-fsToHost (FsHostError _ hostError) = hostError
-fsToHost error = HostError InvalidArgument "filesystem" (show error)
+fsToIO : FsError -> IOError
+fsToIO (FsIOError _ ioError) = ioError
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -14,7 +14,7 @@ requiredPath spelling =
         | Left pathError => error (show pathError)
 
 asTask : forall a. IO FsError a -> Task a
-asTask = mapError fsToHost
+asTask = mapError fsToIO
 
 showByte : Maybe Int -> String
 ;
@@ -30,18 +30,18 @@ printBytes bytes = do
     printLine (showByte (bytesIndex bytes 0))
     printLine (showByte (bytesIndex bytes 1))
 
-reportNegative : HostError -> Task String
+reportNegative : IOError -> Task String
 ;
 reportNegative ioError =
-    if hostErrorOperation ioError == "handle read"
+    if ioErrorOperation ioError == "handle read"
         then pureIO "negative-read"
         else pureIO "wrong-negative-error"
 ;
 
-reportFileLimit : String -> HostError -> Task String
+reportFileLimit : String -> IOError -> Task String
 ;
 reportFileLimit expected ioError =
-    if hostErrorOperation ioError == "readFileLimited"
+    if ioErrorOperation ioError == "readFileLimited"
         then pureIO expected
         else pureIO "wrong-file-limit-error"
 ;
