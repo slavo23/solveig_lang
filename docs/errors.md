@@ -134,12 +134,16 @@ typed contract:
 data Defect =
     Error String
   | DivisionByZero
+  | IntegerOverflow
   | StackExhausted
   | HeapExhausted
 ```
 
-`error message` raises `Error message`. Integer `div` and `mod` raise
-`DivisionByZero` for a zero divisor. The VM raises `StackExhausted` or
+`error message` raises `Error message`. Integral division and remainder raise
+`DivisionByZero` for a zero divisor. Checked `Int` addition, subtraction,
+multiplication, negation, absolute value, division, and exponentiation raise
+`IntegerOverflow` when the exact result is outside the signed 64-bit range.
+Use `BigInt` when growth is an ordinary part of the domain. The VM raises `StackExhausted` or
 `HeapExhausted` before exceeding its managed process-stack or live-object
 ceiling. Heap exhaustion is reported only after a full collection confirms
 that the retained live set is still at the ceiling.
@@ -155,6 +159,7 @@ reportDefect defect =
     case defect of
         Error message => printLine (appendString "error: " message)
         | DivisionByZero => printLine "division by zero"
+        | IntegerOverflow => printLine "integer overflow"
         | StackExhausted => printLine "stack exhausted"
         | HeapExhausted => printLine "heap exhausted"
 

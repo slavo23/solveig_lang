@@ -6,6 +6,7 @@ use super::*;
 
 mod data;
 mod handles;
+mod numbers;
 mod os;
 mod random;
 mod schemes;
@@ -64,6 +65,9 @@ fn seed_primitive_builtin_terms(
 }
 
 fn is_prelude_primitive(name: &str) -> bool {
+    if name.starts_with("int") || name.starts_with("float") || name.starts_with("bigInt") {
+        return true;
+    }
     // Defaulting new primitives to private std ownership prevents an omitted
     // classification from accidentally publishing a host operation.
     matches!(
@@ -230,6 +234,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
     let os_specs = os::os_builtin_specs(names, &int, &string, &bytes, &bool_ty, &io_error);
     let random_specs = random::random_builtin_specs(names, &int, &bytes, &io_error);
     let data_specs = data::data_builtin_specs(names);
+    let number_specs = numbers::numeric_builtin_specs(names, &int, &float, &bool_ty, &ordering);
 
     let mut specs = vec![
         prim_spec(
@@ -383,6 +388,7 @@ fn primitive_builtin_specs(names: &mut Names) -> Vec<PrimitiveBuiltinSpec> {
             unary(float, int.clone()),
         ),
     ];
+    specs.extend(number_specs);
     specs.extend(data_specs);
     specs.extend([
         prim_spec(

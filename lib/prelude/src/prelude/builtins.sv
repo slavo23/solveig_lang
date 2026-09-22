@@ -1,5 +1,6 @@
 export (
     Int,
+    BigInt,
     Float,
     Char,
     String,
@@ -134,6 +135,8 @@ data Defect =
     Error String
     | -- | Integer division or modulo used a zero divisor.
     DivisionByZero
+    | -- | A fixed-width Int operation could not represent its exact result.
+    IntegerOverflow
     | -- | A process exceeded the managed VM stack limit.
     StackExhausted
     | -- | The runtime exceeded the managed heap-object limit.

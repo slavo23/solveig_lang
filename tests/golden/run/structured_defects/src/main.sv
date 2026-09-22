@@ -13,6 +13,7 @@ report defect =
     case defect of
         Error message => printLine (appendString "Error=" message)
         | DivisionByZero => printLine "DivisionByZero"
+        | IntegerOverflow => printLine "IntegerOverflow"
         | StackExhausted => printLine "StackExhausted"
         | HeapExhausted => printLine "HeapExhausted"
 
@@ -28,5 +29,6 @@ main : Task ()
 main = do
     runDefect (Error "boom")
     runDefect DivisionByZero
+    runDefect IntegerOverflow
     runDefect StackExhausted
     runDefect HeapExhausted

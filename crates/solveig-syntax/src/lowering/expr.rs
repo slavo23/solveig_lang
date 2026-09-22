@@ -291,10 +291,10 @@ impl CstToAst<'_> {
         let token = self.cst.token(first);
         match token.kind {
             Token::Int => {
-                let value = self.lower_int_literal(first)?;
+                let value = self.lower_integer_literal(first);
                 Ok(self.sp_between(
                     node,
-                    SurfaceExpr::Literal(SurfaceLiteral::Int(value)),
+                    SurfaceExpr::Literal(value),
                     token.start(),
                     token.end(),
                 ))

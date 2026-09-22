@@ -39,6 +39,15 @@ impl BytecodeLowerer {
             globals,
             constructor_arities: program.constructor_arities.clone(),
             string_constants: program.string_constants.clone(),
+            big_int_constants: program
+                .big_int_constants
+                .iter()
+                .map(|value| {
+                    value.parse::<num_bigint::BigInt>().unwrap_or_else(|_error| {
+                        solveig_base::ice!("lowering produced an invalid BigInt constant `{value}`")
+                    })
+                })
+                .collect(),
             string_literals: program.string_literals.clone(),
         }
     }
@@ -221,6 +230,7 @@ impl BytecodeLowerer {
             }
             CCExpr::Unit => builder.emit(Instr::PushUnit),
             CCExpr::Int(n) => builder.emit(Instr::PushInt(*n)),
+            CCExpr::BigIntConst(index) => builder.emit(Instr::PushBigInt(*index)),
             CCExpr::Float(n) => builder.emit(Instr::PushFloat(*n)),
             CCExpr::Char(ch) => builder.emit(Instr::PushChar(*ch)),
             CCExpr::StrConst(index) => builder.emit(Instr::PushStr(*index)),
@@ -473,6 +483,7 @@ fn expression_local_slot(expr: &CCExpr, env: &LocalEnv) -> Option<u16> {
         CCExpr::Located(..)
         | CCExpr::Unit
         | CCExpr::Int(_)
+        | CCExpr::BigIntConst(_)
         | CCExpr::Float(_)
         | CCExpr::Char(_)
         | CCExpr::StrConst(_)

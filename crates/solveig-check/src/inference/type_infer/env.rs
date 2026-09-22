@@ -1,4 +1,5 @@
 type Span = Range<usize>;
+type PatternCheckResult = (Context, PatternNode<Span>, Vec<(String, Ty)>);
 
 #[derive(Clone, Debug)]
 pub struct TcMetadata {
@@ -50,9 +51,16 @@ pub struct TypeChecker<'a> {
     givens: Vec<GivenEvidence>,
     wanteds: Vec<Wanted>,
     evar_solutions: FxHashMap<EvarId, Ty>,
+    numeric_defaults: FxHashMap<EvarId, NumericDefault>,
     evidence_solutions: FxHashMap<EvVarId, Ev>,
     holes: Vec<HoleInfo>,
     warnings: Vec<TypeError>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum NumericDefault {
+    Int,
+    BigInt,
 }
 
 #[derive(Clone)]
@@ -62,6 +70,7 @@ struct TypeCheckerCheckpoint {
     givens: Vec<GivenEvidence>,
     wanteds: Vec<Wanted>,
     evar_solutions: FxHashMap<EvarId, Ty>,
+    numeric_defaults: FxHashMap<EvarId, NumericDefault>,
     evidence_solutions: FxHashMap<EvVarId, Ev>,
     holes: Vec<HoleInfo>,
     warnings: Vec<TypeError>,
@@ -93,6 +102,7 @@ impl<'a> TypeChecker<'a> {
             givens: Vec::new(),
             wanteds: Vec::new(),
             evar_solutions: FxHashMap::default(),
+            numeric_defaults: FxHashMap::default(),
             evidence_solutions: FxHashMap::default(),
             holes: Vec::new(),
             warnings: Vec::new(),
@@ -196,6 +206,7 @@ impl<'a> TypeChecker<'a> {
             givens: self.givens.clone(),
             wanteds: self.wanteds.clone(),
             evar_solutions: self.evar_solutions.clone(),
+            numeric_defaults: self.numeric_defaults.clone(),
             evidence_solutions: self.evidence_solutions.clone(),
             holes: self.holes.clone(),
             warnings: self.warnings.clone(),
@@ -207,6 +218,7 @@ impl<'a> TypeChecker<'a> {
         self.givens = checkpoint.givens;
         self.wanteds = checkpoint.wanteds;
         self.evar_solutions = checkpoint.evar_solutions;
+        self.numeric_defaults = checkpoint.numeric_defaults;
         self.evidence_solutions = checkpoint.evidence_solutions;
         self.holes = checkpoint.holes;
         self.warnings = checkpoint.warnings;

@@ -19,6 +19,7 @@ const PRELUDE_CONTROL_SRC: &str = include_str!("../../../lib/prelude/src/prelude
 const PRELUDE_SHOW_SRC: &str = include_str!("../../../lib/prelude/src/prelude/show.sv");
 const PRELUDE_INSTANCES_SRC: &str = include_str!("../../../lib/prelude/src/prelude/instances.sv");
 const STD_BYTES_SRC: &str = include_str!("../../../lib/std/src/std/bytes.sv");
+const STD_BIGINT_SRC: &str = include_str!("../../../lib/std/src/std/bigint.sv");
 const STD_CHANNEL_SRC: &str = include_str!("../../../lib/std/src/std/channel.sv");
 const STD_ENV_SRC: &str = include_str!("../../../lib/std/src/std/env.sv");
 const STD_FS_SRC: &str = include_str!("../../../lib/std/src/std/fs.sv");
@@ -29,6 +30,7 @@ const STD_IO_SRC: &str = include_str!("../../../lib/std/src/std/io.sv");
 const STD_JSON_SRC: &str = include_str!("../../../lib/std/src/std/json.sv");
 const STD_LIST_SRC: &str = include_str!("../../../lib/std/src/std/list.sv");
 const STD_MAP_SRC: &str = include_str!("../../../lib/std/src/std/map.sv");
+const STD_MATH_SRC: &str = include_str!("../../../lib/std/src/std/math.sv");
 const STD_NET_SRC: &str = include_str!("../../../lib/std/src/std/net.sv");
 const STD_PARSER_SRC: &str = include_str!("../../../lib/std/src/std/parser.sv");
 const STD_PATH_SRC: &str = include_str!("../../../lib/std/src/std/path.sv");
@@ -63,6 +65,7 @@ pub(crate) fn embedded_library_source(module: &str) -> Option<&'static str> {
         "prelude.show" => Some(PRELUDE_SHOW_SRC),
         "prelude.instances" => Some(PRELUDE_INSTANCES_SRC),
         "std.bytes" => Some(STD_BYTES_SRC),
+        "std.bigint" => Some(STD_BIGINT_SRC),
         "std.channel" => Some(STD_CHANNEL_SRC),
         "std.env" => Some(STD_ENV_SRC),
         "std.fs" => Some(STD_FS_SRC),
@@ -73,6 +76,7 @@ pub(crate) fn embedded_library_source(module: &str) -> Option<&'static str> {
         "std.json" => Some(STD_JSON_SRC),
         "std.list" => Some(STD_LIST_SRC),
         "std.map" => Some(STD_MAP_SRC),
+        "std.math" => Some(STD_MATH_SRC),
         "std.net" => Some(STD_NET_SRC),
         "std.parser" => Some(STD_PARSER_SRC),
         "std.path" => Some(STD_PATH_SRC),
@@ -114,6 +118,7 @@ pub(crate) fn embedded_library_modules(package: &str) -> &'static [&'static str]
         ],
         "std" => &[
             "std/bytes.sv",
+            "std/bigint.sv",
             "std/channel.sv",
             "std/env.sv",
             "std/fs.sv",
@@ -124,6 +129,7 @@ pub(crate) fn embedded_library_modules(package: &str) -> &'static [&'static str]
             "std/json.sv",
             "std/list.sv",
             "std/map.sv",
+            "std/math.sv",
             "std/net.sv",
             "std/parser.sv",
             "std/path.sv",

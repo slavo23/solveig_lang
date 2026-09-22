@@ -112,7 +112,7 @@ fn checked_project_docs_include_importable_declarations() {
     assert_eq!(
         docs.get("std.json.JsonNumber"),
         Some(
-            &"An exact RFC 8259 number spelling.\n\nThe representation retains decimal digits and exponent text rather than\nrounding through Float. The representation is private: use the smart\nconstructors to preserve the invariant that every JsonNumber is valid.\nA future BigInt representation can be added without changing Json's\nnumber case."
+            &"An exact RFC 8259 number spelling.\n\nThe representation retains decimal digits and exponent text rather than\nrounding through Float. The representation is private: use the smart\nconstructors to preserve the invariant that every JsonNumber is valid.\nThis remains distinct from BigInt because JSON numbers may contain a\ndecimal fraction or exponent and decoding must retain their exact spelling."
                 .to_string()
         )
     );

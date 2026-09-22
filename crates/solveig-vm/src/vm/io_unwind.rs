@@ -181,6 +181,7 @@ impl Interpreter<'_> {
             | HeapObject::PartialCtor { .. }
             | HeapObject::Str { .. }
             | HeapObject::Bytes { .. }
+            | HeapObject::BigInt { .. }
             | HeapObject::Chan(_)
             | HeapObject::IoAction(_)
             | HeapObject::Forwarded(_) => return false,
@@ -198,6 +199,10 @@ impl Interpreter<'_> {
             }
             DefectKind::DivisionByZero => VmCtx::new(self)
                 .nullary_ctor(CtorRuntimeRole::PreludeDefectDivisionByZero, "division"),
+            DefectKind::IntegerOverflow => VmCtx::new(self).nullary_ctor(
+                CtorRuntimeRole::PreludeDefectIntegerOverflow,
+                "integer overflow",
+            ),
             DefectKind::StackExhausted => VmCtx::new(self).nullary_ctor(
                 CtorRuntimeRole::PreludeDefectStackExhausted,
                 "stack exhaustion",

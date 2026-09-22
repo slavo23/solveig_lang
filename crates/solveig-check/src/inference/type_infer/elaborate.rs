@@ -169,7 +169,27 @@ impl TypeChecker<'_> {
             TermExpr::Hole => TermExpr::Hole,
             TermExpr::Unit => TermExpr::Unit,
             TermExpr::Var(name) => TermExpr::Var(name.clone()),
-            TermExpr::Lit(lit_val) => TermExpr::Lit(lit_val.clone()),
+            TermExpr::Lit(lit_val) => {
+                let literal = match (&zonked_meta.inferred_type, lit_val) {
+                    (Ty::TyCon(id), Literal::Int(value)) if *id == PRIM_TYS.big_int => {
+                        Literal::BigInt(value.to_string())
+                    }
+                    (Ty::TyCon(id), Literal::Int(value)) if *id == PRIM_TYS.float => {
+                        Literal::Float(*value as f64)
+                    }
+                    (Ty::TyCon(id), Literal::BigInt(value)) if *id == PRIM_TYS.float => {
+                        Literal::Float(value.parse::<f64>().unwrap_or_else(|_| {
+                            if value.starts_with('-') {
+                                f64::NEG_INFINITY
+                            } else {
+                                f64::INFINITY
+                            }
+                        }))
+                    }
+                    _ => lit_val.clone(),
+                };
+                TermExpr::Lit(literal)
+            }
             TermExpr::Con(id) => TermExpr::Con(*id),
             TermExpr::App(func, arg) => TermExpr::App(
                 Box::new(self.zonk_expr(func)),

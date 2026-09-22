@@ -47,6 +47,25 @@ use solveig_ast::ast::{
     BuiltinId, CtorRuntimeInfo, CtorRuntimeRole,
 };
 use solveig_ast::ast::{
+    BUILTIN_BIG_INT_ABS, BUILTIN_BIG_INT_ADD, BUILTIN_BIG_INT_COMPARE, BUILTIN_BIG_INT_DIV,
+    BUILTIN_BIG_INT_EQ, BUILTIN_BIG_INT_FROM_INT, BUILTIN_BIG_INT_MOD, BUILTIN_BIG_INT_MUL,
+    BUILTIN_BIG_INT_NEG, BUILTIN_BIG_INT_POW, BUILTIN_BIG_INT_QUOT, BUILTIN_BIG_INT_REM,
+    BUILTIN_BIG_INT_SIGNUM, BUILTIN_BIG_INT_SUB, BUILTIN_BIG_INT_TO_FLOAT, BUILTIN_BIG_INT_TO_INT,
+    BUILTIN_BIG_INT_TO_STRING, BUILTIN_FLOAT_ABS, BUILTIN_FLOAT_ACOS, BUILTIN_FLOAT_ASIN,
+    BUILTIN_FLOAT_ATAN, BUILTIN_FLOAT_ATAN2, BUILTIN_FLOAT_CBRT, BUILTIN_FLOAT_CEIL,
+    BUILTIN_FLOAT_COPY_SIGN, BUILTIN_FLOAT_COS, BUILTIN_FLOAT_COSH, BUILTIN_FLOAT_EXP,
+    BUILTIN_FLOAT_EXP2, BUILTIN_FLOAT_FLOOR, BUILTIN_FLOAT_HYPOT, BUILTIN_FLOAT_IS_FINITE,
+    BUILTIN_FLOAT_IS_INFINITE, BUILTIN_FLOAT_IS_NAN, BUILTIN_FLOAT_LOG, BUILTIN_FLOAT_LOG2,
+    BUILTIN_FLOAT_LOG10, BUILTIN_FLOAT_POW, BUILTIN_FLOAT_ROUND, BUILTIN_FLOAT_SIGNUM,
+    BUILTIN_FLOAT_SIN, BUILTIN_FLOAT_SINH, BUILTIN_FLOAT_SQRT, BUILTIN_FLOAT_TAN,
+    BUILTIN_FLOAT_TANH, BUILTIN_FLOAT_TRUNCATE, BUILTIN_INT_ABS, BUILTIN_INT_MIX_HASH,
+    BUILTIN_INT_POW, BUILTIN_INT_QUOT, BUILTIN_INT_REM, BUILTIN_INT_SIGNUM,
+};
+use solveig_ast::ast::{
+    BUILTIN_BIG_INT_PARSE, BUILTIN_BIG_INT_PARSE_BASE, BUILTIN_BIG_INT_TO_STRING_BASE,
+    BUILTIN_FLOAT_TO_BIG_INT, BUILTIN_FLOAT_TO_INT_MAYBE,
+};
+use solveig_ast::ast::{
     BUILTIN_CLOSE_PROCESS, BUILTIN_CLOSE_PROCESS_STDIN, BUILTIN_READ_PROCESS_STDERR,
     BUILTIN_READ_PROCESS_STDOUT, BUILTIN_START_PROCESS_CONFIGURED, BUILTIN_TERMINATE_PROCESS,
     BUILTIN_WAIT_PROCESS, BUILTIN_WRITE_PROCESS_STDIN,
@@ -111,6 +130,10 @@ impl<'context, 'runtime> VmCtx<'context, 'runtime> {
 
     fn alloc_bytes(&mut self, value: &[u8]) -> Value {
         self.interpreter.heap.alloc_bytes(value)
+    }
+
+    fn alloc_big_int(&mut self, value: num_bigint::BigInt) -> Value {
+        self.interpreter.heap.alloc_big_int(value)
     }
 
     fn temporary_root(&self, index: usize, builtin: &str, label: &str) -> Value {
@@ -308,6 +331,11 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_INT_DIV, "intDiv", 2, int_div),
     builtin!(BUILTIN_INT_MOD, "intMod", 2, int_mod),
     builtin!(BUILTIN_INT_NEG, "intNeg", 1, int_neg),
+    builtin!(BUILTIN_INT_QUOT, "intQuot", 2, int_quot),
+    builtin!(BUILTIN_INT_REM, "intRem", 2, int_rem),
+    builtin!(BUILTIN_INT_ABS, "intAbs", 1, int_abs),
+    builtin!(BUILTIN_INT_SIGNUM, "intSignum", 1, int_signum),
+    builtin!(BUILTIN_INT_POW, "intPow", 2, int_pow),
     builtin!(BUILTIN_INT_EQ, "intEq", 2, int_eq),
     builtin!(BUILTIN_INT_LT, "intLt", 2, int_lt),
     builtin!(BUILTIN_INT_LE, "intLe", 2, int_le),
@@ -319,6 +347,40 @@ static ALL_BUILTINS: &[Builtin] = &[
     builtin!(BUILTIN_FLOAT_MUL, "floatMul", 2, float_mul),
     builtin!(BUILTIN_FLOAT_DIV, "floatDiv", 2, float_div),
     builtin!(BUILTIN_FLOAT_NEG, "floatNeg", 1, float_neg),
+    builtin!(BUILTIN_FLOAT_ABS, "floatAbs", 1, float_abs),
+    builtin!(BUILTIN_FLOAT_SIGNUM, "floatSignum", 1, float_signum),
+    builtin!(BUILTIN_FLOAT_POW, "floatPow", 2, float_pow),
+    builtin!(BUILTIN_FLOAT_SQRT, "floatSqrt", 1, float_sqrt),
+    builtin!(BUILTIN_FLOAT_CBRT, "floatCbrt", 1, float_cbrt),
+    builtin!(BUILTIN_FLOAT_HYPOT, "floatHypot", 2, float_hypot),
+    builtin!(BUILTIN_FLOAT_EXP, "floatExp", 1, float_exp),
+    builtin!(BUILTIN_FLOAT_EXP2, "floatExp2", 1, float_exp2),
+    builtin!(BUILTIN_FLOAT_LOG, "floatLog", 1, float_log),
+    builtin!(BUILTIN_FLOAT_LOG2, "floatLog2", 1, float_log2),
+    builtin!(BUILTIN_FLOAT_LOG10, "floatLog10", 1, float_log10),
+    builtin!(BUILTIN_FLOAT_SIN, "floatSin", 1, float_sin),
+    builtin!(BUILTIN_FLOAT_COS, "floatCos", 1, float_cos),
+    builtin!(BUILTIN_FLOAT_TAN, "floatTan", 1, float_tan),
+    builtin!(BUILTIN_FLOAT_ASIN, "floatAsin", 1, float_asin),
+    builtin!(BUILTIN_FLOAT_ACOS, "floatAcos", 1, float_acos),
+    builtin!(BUILTIN_FLOAT_ATAN, "floatAtan", 1, float_atan),
+    builtin!(BUILTIN_FLOAT_ATAN2, "floatAtan2", 2, float_atan2),
+    builtin!(BUILTIN_FLOAT_SINH, "floatSinh", 1, float_sinh),
+    builtin!(BUILTIN_FLOAT_COSH, "floatCosh", 1, float_cosh),
+    builtin!(BUILTIN_FLOAT_TANH, "floatTanh", 1, float_tanh),
+    builtin!(BUILTIN_FLOAT_FLOOR, "floatFloor", 1, float_floor),
+    builtin!(BUILTIN_FLOAT_CEIL, "floatCeil", 1, float_ceil),
+    builtin!(BUILTIN_FLOAT_TRUNCATE, "floatTruncate", 1, float_truncate),
+    builtin!(BUILTIN_FLOAT_ROUND, "floatRound", 1, float_round),
+    builtin!(BUILTIN_FLOAT_IS_NAN, "floatIsNaN", 1, float_is_nan),
+    builtin!(
+        BUILTIN_FLOAT_IS_INFINITE,
+        "floatIsInfinite",
+        1,
+        float_is_infinite
+    ),
+    builtin!(BUILTIN_FLOAT_IS_FINITE, "floatIsFinite", 1, float_is_finite),
+    builtin!(BUILTIN_FLOAT_COPY_SIGN, "floatCopySign", 2, float_copy_sign),
     builtin!(BUILTIN_FLOAT_EQ, "floatEq", 2, float_eq),
     builtin!(BUILTIN_FLOAT_LT, "floatLt", 2, float_lt),
     builtin!(BUILTIN_FLOAT_LE, "floatLe", 2, float_le),
@@ -332,8 +394,66 @@ static ALL_BUILTINS: &[Builtin] = &[
     ),
     builtin!(BUILTIN_INT_TO_FLOAT, "intToFloat", 1, int_to_float),
     builtin!(BUILTIN_FLOAT_TO_INT, "floatToInt", 1, float_to_int),
+    builtin!(
+        BUILTIN_FLOAT_TO_INT_MAYBE,
+        "floatToIntMaybe",
+        1,
+        float_to_int_maybe
+    ),
+    builtin!(
+        BUILTIN_FLOAT_TO_BIG_INT,
+        "floatToBigInt",
+        1,
+        float_to_big_int
+    ),
     builtin!(BUILTIN_INT_TO_STRING, "intToString", 1, int_to_string),
+    builtin!(BUILTIN_INT_MIX_HASH, "intMixHash", 2, int_mix_hash),
     builtin!(BUILTIN_FLOAT_TO_STRING, "floatToString", 1, float_to_string),
+    builtin!(
+        BUILTIN_BIG_INT_FROM_INT,
+        "bigIntFromInt",
+        1,
+        big_int_from_int
+    ),
+    builtin!(BUILTIN_BIG_INT_TO_INT, "bigIntToInt", 1, big_int_to_int),
+    builtin!(
+        BUILTIN_BIG_INT_TO_FLOAT,
+        "bigIntToFloat",
+        1,
+        big_int_to_float
+    ),
+    builtin!(
+        BUILTIN_BIG_INT_TO_STRING,
+        "bigIntToString",
+        1,
+        big_int_to_string
+    ),
+    builtin!(BUILTIN_BIG_INT_ADD, "bigIntAdd", 2, big_int_add),
+    builtin!(BUILTIN_BIG_INT_SUB, "bigIntSub", 2, big_int_sub),
+    builtin!(BUILTIN_BIG_INT_MUL, "bigIntMul", 2, big_int_mul),
+    builtin!(BUILTIN_BIG_INT_NEG, "bigIntNeg", 1, big_int_neg),
+    builtin!(BUILTIN_BIG_INT_ABS, "bigIntAbs", 1, big_int_abs),
+    builtin!(BUILTIN_BIG_INT_SIGNUM, "bigIntSignum", 1, big_int_signum),
+    builtin!(BUILTIN_BIG_INT_DIV, "bigIntDiv", 2, big_int_div),
+    builtin!(BUILTIN_BIG_INT_MOD, "bigIntMod", 2, big_int_mod),
+    builtin!(BUILTIN_BIG_INT_QUOT, "bigIntQuot", 2, big_int_quot),
+    builtin!(BUILTIN_BIG_INT_REM, "bigIntRem", 2, big_int_rem),
+    builtin!(BUILTIN_BIG_INT_POW, "bigIntPow", 2, big_int_pow),
+    builtin!(BUILTIN_BIG_INT_EQ, "bigIntEq", 2, big_int_eq),
+    builtin!(BUILTIN_BIG_INT_COMPARE, "bigIntCompare", 2, big_int_compare),
+    builtin!(BUILTIN_BIG_INT_PARSE, "bigIntParse", 1, big_int_parse),
+    builtin!(
+        BUILTIN_BIG_INT_PARSE_BASE,
+        "bigIntParseBase",
+        2,
+        big_int_parse_base
+    ),
+    builtin!(
+        BUILTIN_BIG_INT_TO_STRING_BASE,
+        "bigIntToStringBase",
+        2,
+        big_int_to_string_base
+    ),
     builtin!(BUILTIN_CHAR_TO_STRING, "charToString", 1, char_to_string),
     builtin!(BUILTIN_STRING_LENGTH, "stringLength", 1, string_length),
     builtin!(

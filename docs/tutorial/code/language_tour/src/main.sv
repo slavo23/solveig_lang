@@ -1,4 +1,6 @@
 import std.map
+import std.bigint(parse)
+import std.math(hypot)
 
 data Shape = Square Int | Rectangle Int Int
 
@@ -53,3 +55,5 @@ main = do
     printLine (show (useIdentity polymorphicIdentity))
     printLine (show (prependOne [2, 3]))
     printLine $ show $ std.map.toAscList $ routeCounts ["/users", "/health", "/users"]
+    printLine $ "3-4-5 diagonal: " <> show (hypot 3.0 4.0)
+    printLine $ "large integer: " <> show (parse "123456789012345678901234567890")

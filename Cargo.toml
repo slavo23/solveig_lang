@@ -70,6 +70,10 @@ camino = { version = "1.2.1", features = ["serde1"] }
 ena = "0.14.4"
 getrandom = { version = "0.4.3", features = ["std"] }
 la-arena = "0.3.1"
+libm = "0.2.16"
+num-bigint = "0.4.6"
+num-integer = "0.1.46"
+num-traits = "0.2.19"
 petgraph = "0.8.3"
 pretty = "0.12.5"
 proptest = "1"

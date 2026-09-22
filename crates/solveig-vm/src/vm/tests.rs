@@ -2114,6 +2114,7 @@ fn program_with_bool_ctor_specs(
         globals,
         functions,
         constructor_arities,
+        big_int_constants: Vec::new(),
         string_constants: Vec::new(),
         string_literals: Vec::new(),
     }

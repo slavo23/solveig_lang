@@ -720,6 +720,7 @@ pub struct RuntimeError {
 pub(crate) enum DefectKind {
     Error(String),
     DivisionByZero,
+    IntegerOverflow,
     StackExhausted,
     HeapExhausted,
 }
@@ -753,6 +754,7 @@ impl RuntimeError {
         let message = match &defect {
             DefectKind::Error(message) => format!("uncaught defect: Error {message:?}"),
             DefectKind::DivisionByZero => "uncaught defect: DivisionByZero".to_string(),
+            DefectKind::IntegerOverflow => "uncaught defect: IntegerOverflow".to_string(),
             DefectKind::StackExhausted => "uncaught defect: StackExhausted".to_string(),
             DefectKind::HeapExhausted => "uncaught defect: HeapExhausted".to_string(),
         };

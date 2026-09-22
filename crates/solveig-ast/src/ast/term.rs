@@ -193,6 +193,7 @@ impl<A, P> ExprNode<MatchArm<A, P>, P> {
 #[derive(Clone, Debug)]
 pub enum Literal {
     Int(i64),
+    BigInt(String),
     Float(f64),
     Char(char),
     Str(StrLitId),

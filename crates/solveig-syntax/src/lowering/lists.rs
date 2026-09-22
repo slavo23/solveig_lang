@@ -86,20 +86,6 @@ pub(super) fn list_ty(
     )
 }
 
-pub(super) fn int_pattern(
-    value: i64,
-    start: usize,
-    end: usize,
-    cst_id: CstId,
-) -> Spanned<SurfacePattern> {
-    sp(
-        SurfacePattern::Lit(SurfaceLiteral::Int(value)),
-        start,
-        end,
-        cst_id,
-    )
-}
-
 pub(super) fn literal_pattern(
     literal: SurfaceLiteral,
     start: usize,

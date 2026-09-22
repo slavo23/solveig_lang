@@ -11,6 +11,7 @@ pub enum IRExpr {
     BVar(usize),
     FVar(usize),
     Int(i64),
+    BigIntConst(u32),
     Float(f64),
     Char(char),
     StrConst(u32),
@@ -41,6 +42,7 @@ pub struct IRProgram {
     pub globals: Vec<IRGlobalDef>,
     pub constructor_arities: Vec<CtorRuntimeInfo>,
     pub string_constants: Vec<String>,
+    pub big_int_constants: Vec<String>,
     pub string_literals: Vec<String>,
 }
 

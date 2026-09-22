@@ -91,6 +91,7 @@ impl DisplayValue<'_> {
                 HeapObject::Bytes { bytes } => {
                     format!("<bytes {}>", bytes.len())
                 }
+                HeapObject::BigInt { value } => self.heap.big_int_value(id, *value).to_string(),
                 HeapObject::IoAction(_) => "<io>".into(),
                 HeapObject::Chan(_) => "<channel>".into(),
                 HeapObject::Forwarded(_) => {

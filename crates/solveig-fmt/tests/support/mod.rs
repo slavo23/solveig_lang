@@ -266,6 +266,7 @@ fn pattern_shape(session: &Session, pattern: &SurfacePattern) -> String {
 fn literal_shape(literal: &SurfaceLiteral) -> String {
     match literal {
         SurfaceLiteral::Int(value) => format!("int({value})"),
+        SurfaceLiteral::BigInt(value) => format!("bigint({value})"),
         SurfaceLiteral::Float(value) => format!("float({:x})", value.to_bits()),
         SurfaceLiteral::Char(value) => format!("char({value:?})"),
         SurfaceLiteral::Str(value) => format!("string({value:?})"),

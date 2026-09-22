@@ -79,6 +79,7 @@ impl TypeChecker<'_> {
 
         let mut elaborated_arms: Vec<CaseArmNode<TcMetadata, Span>> =
             Vec::with_capacity(arms.len());
+        let mut checked_patterns = Vec::with_capacity(arms.len());
 
         for (arm_index, arm) in arms.iter().enumerate() {
             let arm_marker = ContextEntry::Marker {
@@ -88,7 +89,7 @@ impl TypeChecker<'_> {
             let arm_ctx = theta.clone().add_entry(arm_marker.clone());
             let scrutinee_in_arm = arm_ctx.apply(&scrutinee_type);
 
-            let (delta, bindings) =
+            let (delta, checked_pattern, bindings) =
                 self.check_pattern(arm_ctx, &arm.node.pattern, &scrutinee_in_arm)?;
 
             let body_ctx = self.add_pattern_bindings(delta, &bindings);
@@ -109,8 +110,15 @@ impl TypeChecker<'_> {
 
             elaborated_arms.push(CaseArmNode::new(
                 CaseArm {
-                    pattern: arm.node.pattern.clone(),
+                    pattern: checked_pattern.clone(),
                     expr: elaborated_body,
+                },
+                arm.anno.clone(),
+            ));
+            checked_patterns.push(CaseArmNode::new(
+                CaseArm {
+                    pattern: checked_pattern,
+                    expr: arm.node.expr.clone(),
                 },
                 arm.anno.clone(),
             ));
@@ -124,7 +132,7 @@ impl TypeChecker<'_> {
             self.tables.ctor_table,
             self.pretty_tables(),
             &scrutinee_type_for_exhaustiveness,
-            arms,
+            &checked_patterns,
             span.clone(),
         );
 
@@ -210,6 +218,7 @@ impl TypeChecker<'_> {
         let mut theta = gamma.add_entry(ContextEntry::ExVar(result_evar, Kind::Star));
 
         let mut elaborated_arms = Vec::with_capacity(arms.len());
+        let mut checked_pattern_arms = Vec::with_capacity(arms.len());
 
         for (arm_index, arm) in arms.iter().enumerate() {
             let arm_marker = ContextEntry::Marker {
@@ -218,12 +227,14 @@ impl TypeChecker<'_> {
 
             let mut arm_ctx = theta.clone().add_entry(arm_marker.clone());
             let mut bindings = Vec::new();
+            let mut checked_patterns = Vec::with_capacity(arm.node.patterns.len());
 
             for (pattern, scrutinee_type) in arm.node.patterns.iter().zip(scrutinee_types.iter()) {
                 let scrutinee_in_arm = arm_ctx.apply(scrutinee_type);
-                let (next_ctx, pattern_bindings) =
+                let (next_ctx, checked_pattern, pattern_bindings) =
                     self.check_pattern(arm_ctx, pattern, &scrutinee_in_arm)?;
                 arm_ctx = next_ctx;
+                checked_patterns.push(checked_pattern);
                 bindings.extend(pattern_bindings);
             }
 
@@ -245,8 +256,15 @@ impl TypeChecker<'_> {
 
             elaborated_arms.push(MatchArmNode::new(
                 MatchArm {
-                    patterns: arm.node.patterns.clone(),
+                    patterns: checked_patterns.clone(),
                     expr: elaborated_body,
+                },
+                arm.anno.clone(),
+            ));
+            checked_pattern_arms.push(MatchArmNode::new(
+                MatchArm {
+                    patterns: checked_patterns,
+                    expr: arm.node.expr.clone(),
                 },
                 arm.anno.clone(),
             ));
@@ -263,7 +281,7 @@ impl TypeChecker<'_> {
             self.tables.ctor_table,
             self.pretty_tables(),
             &scrutinee_types_for_exhaustiveness,
-            arms,
+            &checked_pattern_arms,
             span.clone(),
         );
 
@@ -288,12 +306,16 @@ impl TypeChecker<'_> {
         ctx: Context,
         pattern: &PatternNode<Span>,
         scrutinee_type: &Ty,
-    ) -> TcResult<(Context, Vec<(String, Ty)>)> {
+    ) -> TcResult<PatternCheckResult> {
         let scrutinee_type = ctx.apply(scrutinee_type);
 
         match &pattern.node {
-            Pattern::Wild => Ok((ctx, vec![])),
-            Pattern::Var(name) => Ok((ctx, vec![(name.clone(), scrutinee_type)])),
+            Pattern::Wild => Ok((ctx, pattern.clone(), vec![])),
+            Pattern::Var(name) => Ok((
+                ctx,
+                pattern.clone(),
+                vec![(name.clone(), scrutinee_type)],
+            )),
             Pattern::Lit(lit) => {
                 if matches!(lit, Literal::Float(_)) {
                     return Err(TypeError::UnsupportedFloatPattern {
@@ -301,7 +323,13 @@ impl TypeChecker<'_> {
                     });
                 }
 
-                let literal_type = self.literal_type(lit);
+                let checked_literal = match (&scrutinee_type, lit) {
+                    (Ty::TyCon(id), Literal::Int(value)) if *id == PRIM_TYS.big_int => {
+                        Literal::BigInt(value.to_string())
+                    }
+                    _ => lit.clone(),
+                };
+                let literal_type = self.literal_type(&checked_literal);
 
                 let theta = self.solve_subtype(
                     ctx.clone(),
@@ -310,7 +338,11 @@ impl TypeChecker<'_> {
                     self.get_file_span(pattern.anno.clone()),
                 )?;
 
-                Ok((theta, vec![]))
+                Ok((
+                    theta,
+                    PatternNode::new(Pattern::Lit(checked_literal), pattern.anno.clone()),
+                    vec![],
+                ))
             }
             Pattern::Con(constructor_id, sub_patterns) => {
                 let constructor_type = self
@@ -339,15 +371,24 @@ impl TypeChecker<'_> {
                 )?;
 
                 let mut bindings = Vec::new();
+                let mut checked_sub_patterns = Vec::with_capacity(sub_patterns.len());
                 for (sub_pattern, field_type) in sub_patterns.iter().zip(field_types.iter()) {
                     let field_type_applied = theta.apply(field_type);
-                    let (new_ctx, sub_bindings) =
+                    let (new_ctx, checked_sub_pattern, sub_bindings) =
                         self.check_pattern(theta, sub_pattern, &field_type_applied)?;
                     theta = new_ctx;
+                    checked_sub_patterns.push(checked_sub_pattern);
                     bindings.extend(sub_bindings);
                 }
 
-                Ok((theta, bindings))
+                Ok((
+                    theta,
+                    PatternNode::new(
+                        Pattern::Con(*constructor_id, checked_sub_patterns),
+                        pattern.anno.clone(),
+                    ),
+                    bindings,
+                ))
             }
         }
     }

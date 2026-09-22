@@ -143,6 +143,7 @@ fn global_load_program() -> BytecodeProgram {
             },
         ],
         constructor_arities: bool_constructors(),
+        big_int_constants: Vec::new(),
         string_constants: Vec::new(),
         string_literals: Vec::new(),
     }
@@ -164,6 +165,7 @@ fn program(slot_count: u16, code: Vec<Instr>) -> BytecodeProgram {
             chunk: 0,
         }],
         constructor_arities: bool_constructors(),
+        big_int_constants: Vec::new(),
         string_constants: Vec::new(),
         string_literals: Vec::new(),
     }

@@ -3,6 +3,7 @@
 
 use crate::handle::{Buffering, FileMode};
 use crate::values::{ObjId, Value};
+use num_bigint::BigInt;
 use solveig_base::FxHashSet;
 
 const DEFAULT_NURSERY_SLOTS: usize = 32_768;
@@ -46,6 +47,9 @@ pub enum HeapObject {
     },
     Bytes {
         bytes: ByteRef,
+    },
+    BigInt {
+        value: BigIntRef,
     },
     Chan(Chan),
     IoAction(IoAction),
@@ -335,6 +339,7 @@ pub struct Heap {
     pub(crate) free_list: Vec<u32>,
     pub(crate) payloads: PayloadStore,
     pub(crate) bytes: ByteStore,
+    pub(crate) big_ints: BigIntStore,
     pub(crate) nursery_slot_count: usize,
     pub(crate) allocation_limit: usize,
     pub(crate) promoted_since_major: usize,
@@ -358,6 +363,7 @@ impl Default for Heap {
             free_list: Vec::new(),
             payloads: PayloadStore::default(),
             bytes: ByteStore::default(),
+            big_ints: BigIntStore::default(),
             nursery_slot_count,
             allocation_limit: nursery_slot_count,
             promoted_since_major: 0,
@@ -495,6 +501,7 @@ impl Heap {
             | HeapObject::DataN { .. }
             | HeapObject::Str { .. }
             | HeapObject::Bytes { .. }
+            | HeapObject::BigInt { .. }
             | HeapObject::IoAction(_) => None,
             HeapObject::Forwarded(_) => {
                 solveig_base::ice!("forwarding entry escaped minor collection")
@@ -632,6 +639,10 @@ impl Heap {
         self.bytes.copy_nursery_to_old(span)
     }
 
+    pub(crate) fn promote_big_int(&mut self, value: BigIntRef) -> BigIntRef {
+        self.big_ints.copy_nursery_to_old(value)
+    }
+
     pub(crate) fn free_old_object_payloads(&mut self, obj: &HeapObject) {
         match obj {
             HeapObject::Closure { captures, .. } => self.payloads.free_old_span(*captures),
@@ -651,6 +662,7 @@ impl Heap {
             HeapObject::Str { bytes } | HeapObject::Bytes { bytes } => {
                 self.bytes.free_old_span(*bytes);
             }
+            HeapObject::BigInt { value } => self.big_ints.free_old(*value),
             HeapObject::Data0 { .. }
             | HeapObject::Data1 { .. }
             | HeapObject::Data2 { .. }
@@ -679,10 +691,20 @@ impl Heap {
         self.bytes.as_slice(self.is_nursery_id(owner), bytes)
     }
 
+    pub fn alloc_big_int(&mut self, value: BigInt) -> Value {
+        let value = self.big_ints.alloc_nursery(value);
+        self.alloc(HeapObject::BigInt { value })
+    }
+
+    pub fn big_int_value(&self, owner: ObjId, value: BigIntRef) -> &BigInt {
+        self.big_ints.get(self.is_nursery_id(owner), value)
+    }
+
     pub(crate) fn finish_minor_collection(&mut self, promoted: usize) {
         self.nursery.clear();
         self.payloads.clear_nursery();
         self.bytes.clear_nursery();
+        self.big_ints.clear_nursery();
         self.allocation_limit = self.nursery_slot_count;
         self.promoted_since_major = self
             .promoted_since_major
@@ -1097,6 +1119,74 @@ pub struct ByteStore {
     nursery_bytes: Vec<u8>,
     old_bytes: Vec<u8>,
     old_free: Vec<ByteRef>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BigIntRef(u32);
+
+#[derive(Debug, Default)]
+pub struct BigIntStore {
+    nursery_values: Vec<BigInt>,
+    old_values: Vec<Option<BigInt>>,
+    old_free: Vec<u32>,
+}
+
+impl BigIntStore {
+    fn alloc_nursery(&mut self, value: BigInt) -> BigIntRef {
+        let index = u32::try_from(self.nursery_values.len())
+            .unwrap_or_else(|_| solveig_base::ice!("BigInt nursery index overflow"));
+        self.nursery_values.push(value);
+        BigIntRef(index)
+    }
+
+    fn get(&self, nursery: bool, value: BigIntRef) -> &BigInt {
+        if nursery {
+            self.nursery_values
+                .get(value.0 as usize)
+                .unwrap_or_else(|| solveig_base::ice!("dangling nursery BigInt ref"))
+        } else {
+            self.old_values
+                .get(value.0 as usize)
+                .and_then(Option::as_ref)
+                .unwrap_or_else(|| solveig_base::ice!("dangling old-generation BigInt ref"))
+        }
+    }
+
+    fn copy_nursery_to_old(&mut self, source: BigIntRef) -> BigIntRef {
+        let value = self
+            .nursery_values
+            .get(source.0 as usize)
+            .cloned()
+            .unwrap_or_else(|| solveig_base::ice!("promoted nursery BigInt ref is dangling"));
+        let index =
+            if let Some(index) = self.old_free.pop() {
+                *self.old_values.get_mut(index as usize).unwrap_or_else(|| {
+                    solveig_base::ice!("BigInt free-list index out of bounds")
+                }) = Some(value);
+                index
+            } else {
+                let index = u32::try_from(self.old_values.len())
+                    .unwrap_or_else(|_| solveig_base::ice!("old-generation BigInt index overflow"));
+                self.old_values.push(Some(value));
+                index
+            };
+        BigIntRef(index)
+    }
+
+    fn free_old(&mut self, value: BigIntRef) {
+        let slot = self
+            .old_values
+            .get_mut(value.0 as usize)
+            .unwrap_or_else(|| solveig_base::ice!("freed BigInt ref is out of bounds"));
+        if slot.take().is_none() {
+            solveig_base::ice!("BigInt ref was freed twice");
+        }
+        self.old_free.push(value.0);
+    }
+
+    fn clear_nursery(&mut self) {
+        self.nursery_values.clear();
+    }
 }
 
 impl ByteStore {

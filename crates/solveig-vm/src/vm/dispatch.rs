@@ -183,6 +183,20 @@ impl Interpreter<'_> {
             match instr {
                 Instr::PushUnit => self.push(Value::Unit),
                 Instr::PushInt(n) => self.push(Value::Int(n)),
+                Instr::PushBigInt(index) => {
+                    let value = program
+                        .big_int_constants
+                        .get(index as usize)
+                        .cloned()
+                        .unwrap_or_else(|| {
+                            solveig_base::ice!(
+                                "bytecode references missing BigInt constant {index}"
+                            )
+                        });
+                    self.safe_point();
+                    let value = self.heap.alloc_big_int(value);
+                    self.push(value);
+                }
                 Instr::PushFloat(n) => self.push(Value::Float(n)),
                 Instr::PushChar(ch) => self.push(Value::Char(ch)),
                 Instr::PushStr(index) => {
@@ -270,7 +284,10 @@ impl Interpreter<'_> {
                 Instr::Unary(op) => {
                     let rhs = self.pop_int();
                     self.push(match op {
-                        solveig_ast::ast::UnOp::Neg => Value::Int(rhs.wrapping_neg()),
+                        solveig_ast::ast::UnOp::Neg => rhs
+                            .checked_neg()
+                            .map(Value::Int)
+                            .ok_or_else(|| RuntimeError::defect(DefectKind::IntegerOverflow))?,
                     });
                 }
                 Instr::Binary(op) => {
@@ -471,9 +488,18 @@ impl Interpreter<'_> {
     #[inline(always)]
     fn evaluate_binary(&self, op: BinOp, lhs: i64, rhs: i64) -> Result<Value, RuntimeError> {
         Ok(match op {
-            BinOp::Plus => Value::Int(lhs.wrapping_add(rhs)),
-            BinOp::Minus => Value::Int(lhs.wrapping_sub(rhs)),
-            BinOp::Mult => Value::Int(lhs.wrapping_mul(rhs)),
+            BinOp::Plus => Value::Int(
+                lhs.checked_add(rhs)
+                    .ok_or_else(|| RuntimeError::defect(DefectKind::IntegerOverflow))?,
+            ),
+            BinOp::Minus => Value::Int(
+                lhs.checked_sub(rhs)
+                    .ok_or_else(|| RuntimeError::defect(DefectKind::IntegerOverflow))?,
+            ),
+            BinOp::Mult => Value::Int(
+                lhs.checked_mul(rhs)
+                    .ok_or_else(|| RuntimeError::defect(DefectKind::IntegerOverflow))?,
+            ),
             BinOp::Div => Value::Int(builtins::int_div_or_defect(lhs, rhs)?),
             BinOp::Less => self.bool_value(lhs < rhs),
             BinOp::Greater => self.bool_value(lhs > rhs),
@@ -551,6 +577,12 @@ fn match_pattern_inner(
         }
         LowerPattern::Lit(lit_val) => match (lit_val, value) {
             (Literal::Int(expected), Value::Int(actual)) => *expected == actual,
+            (Literal::BigInt(expected), Value::Obj(id)) => match heap.get(id) {
+                HeapObject::BigInt { value } => expected
+                    .parse::<num_bigint::BigInt>()
+                    .is_ok_and(|expected| heap.big_int_value(id, *value) == &expected),
+                _ => false,
+            },
             (Literal::Float(expected), Value::Float(actual)) => {
                 expected.to_bits() == actual.to_bits()
             }

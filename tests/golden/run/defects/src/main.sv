@@ -5,6 +5,7 @@ reportDefect defect =
     case defect of
         Error message => printLine (appendString "error=" message)
         | DivisionByZero => printLine "division-by-zero"
+        | IntegerOverflow => printLine "integer-overflow"
         | StackExhausted => printLine "stack-exhausted"
         | HeapExhausted => printLine "heap-exhausted"
 

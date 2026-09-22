@@ -72,6 +72,26 @@ prelude.list.map : forall a b. (a -> b) -> [a] -> [b]
 prelude.list.mapInto : forall a b. (a -> b) -> [a] -> [b] -> [b]
 prelude.list.reverseList : forall a. [a] -> [a]
 prelude.list.reverseListInto : forall a. [a] -> [a] -> [a]
+prelude.prim.bigIntAbs : BigInt -> BigInt
+prelude.prim.bigIntAdd : BigInt -> BigInt -> BigInt
+prelude.prim.bigIntCompare : BigInt -> BigInt -> Ordering
+prelude.prim.bigIntDiv : BigInt -> BigInt -> BigInt
+prelude.prim.bigIntEq : BigInt -> BigInt -> Bool
+prelude.prim.bigIntFromInt : Int -> BigInt
+prelude.prim.bigIntMod : BigInt -> BigInt -> BigInt
+prelude.prim.bigIntMul : BigInt -> BigInt -> BigInt
+prelude.prim.bigIntNeg : BigInt -> BigInt
+prelude.prim.bigIntParse : String -> Maybe BigInt
+prelude.prim.bigIntParseBase : Int -> String -> Maybe BigInt
+prelude.prim.bigIntPow : BigInt -> Int -> BigInt
+prelude.prim.bigIntQuot : BigInt -> BigInt -> BigInt
+prelude.prim.bigIntRem : BigInt -> BigInt -> BigInt
+prelude.prim.bigIntSignum : BigInt -> BigInt
+prelude.prim.bigIntSub : BigInt -> BigInt -> BigInt
+prelude.prim.bigIntToFloat : BigInt -> Float
+prelude.prim.bigIntToInt : BigInt -> Maybe Int
+prelude.prim.bigIntToString : BigInt -> String
+prelude.prim.bigIntToStringBase : Int -> BigInt -> Maybe String
 prelude.prim.bindIO : forall e a b. IO e a -> (a -> IO e b) -> IO e b
 prelude.prim.bytesEq : Bytes -> Bytes -> Bool
 prelude.prim.catchDefectIO : forall e a. IO e a -> (Defect -> IO e a) -> IO e a
@@ -85,23 +105,55 @@ prelude.prim.codePointToString : Int -> Maybe String
 prelude.prim.error : forall a. String -> a
 prelude.prim.failIO : forall e a. e -> IO e a
 prelude.prim.finallyIO : forall e a b. IO e a -> IO e b -> IO e a
+prelude.prim.floatAbs : Float -> Float
+prelude.prim.floatAcos : Float -> Float
 prelude.prim.floatAdd : Float -> Float -> Float
+prelude.prim.floatAsin : Float -> Float
+prelude.prim.floatAtan : Float -> Float
+prelude.prim.floatAtan2 : Float -> Float -> Float
+prelude.prim.floatCbrt : Float -> Float
+prelude.prim.floatCeil : Float -> Float
+prelude.prim.floatCopySign : Float -> Float -> Float
+prelude.prim.floatCos : Float -> Float
+prelude.prim.floatCosh : Float -> Float
 prelude.prim.floatDiv : Float -> Float -> Float
 prelude.prim.floatEq : Float -> Float -> Bool
+prelude.prim.floatExp : Float -> Float
+prelude.prim.floatExp2 : Float -> Float
+prelude.prim.floatFloor : Float -> Float
 prelude.prim.floatGe : Float -> Float -> Bool
 prelude.prim.floatGt : Float -> Float -> Bool
+prelude.prim.floatHypot : Float -> Float -> Float
+prelude.prim.floatIsFinite : Float -> Bool
+prelude.prim.floatIsInfinite : Float -> Bool
+prelude.prim.floatIsNaN : Float -> Bool
 prelude.prim.floatLe : Float -> Float -> Bool
+prelude.prim.floatLog : Float -> Float
+prelude.prim.floatLog10 : Float -> Float
+prelude.prim.floatLog2 : Float -> Float
 prelude.prim.floatLt : Float -> Float -> Bool
 prelude.prim.floatMul : Float -> Float -> Float
 prelude.prim.floatNeg : Float -> Float
+prelude.prim.floatPow : Float -> Float -> Float
+prelude.prim.floatRound : Float -> Float
+prelude.prim.floatSignum : Float -> Float
+prelude.prim.floatSin : Float -> Float
+prelude.prim.floatSinh : Float -> Float
+prelude.prim.floatSqrt : Float -> Float
 prelude.prim.floatSub : Float -> Float -> Float
+prelude.prim.floatTan : Float -> Float
+prelude.prim.floatTanh : Float -> Float
+prelude.prim.floatToBigInt : Float -> Maybe BigInt
 prelude.prim.floatToInt : Float -> Int
+prelude.prim.floatToIntMaybe : Float -> Maybe Int
 prelude.prim.floatToString : Float -> String
 prelude.prim.floatTotalCompare : Float -> Float -> Ordering
+prelude.prim.floatTruncate : Float -> Float
 prelude.prim.hFlush : Handle -> IO IOError ()
 prelude.prim.hGetLine : Handle -> IO IOError String
 prelude.prim.hPutStr : Handle -> String -> IO IOError ()
 prelude.prim.hPutStrLn : Handle -> String -> IO IOError ()
+prelude.prim.intAbs : Int -> Int
 prelude.prim.intAdd : Int -> Int -> Int
 prelude.prim.intCompare : Int -> Int -> Ordering
 prelude.prim.intDiv : Int -> Int -> Int
@@ -110,9 +162,14 @@ prelude.prim.intGe : Int -> Int -> Bool
 prelude.prim.intGt : Int -> Int -> Bool
 prelude.prim.intLe : Int -> Int -> Bool
 prelude.prim.intLt : Int -> Int -> Bool
+prelude.prim.intMixHash : Int -> Int -> Int
 prelude.prim.intMod : Int -> Int -> Int
 prelude.prim.intMul : Int -> Int -> Int
 prelude.prim.intNeg : Int -> Int
+prelude.prim.intPow : Int -> Int -> Int
+prelude.prim.intQuot : Int -> Int -> Int
+prelude.prim.intRem : Int -> Int -> Int
+prelude.prim.intSignum : Int -> Int
 prelude.prim.intSub : Int -> Int -> Int
 prelude.prim.intToFloat : Int -> Float
 prelude.prim.intToString : Int -> String
@@ -140,6 +197,8 @@ prelude.show.showCharPayload : Char -> String
 prelude.show.showListItems : forall a. Show a => [a] -> String
 prelude.show.showStringChars : [Char] -> String
 prelude.show.showStringPayload : Char -> String
+prelude.typeclasses.% : forall a. Integral a => a -> a -> a
+prelude.typeclasses.** : Float -> Float -> Float
 prelude.typeclasses.*> : forall f a b. Applicative f => f a -> f b -> f b
 prelude.typeclasses.<$> : forall f a b. Functor f => (a -> b) -> f a -> f b
 prelude.typeclasses.<* : forall f a b. Applicative f => f a -> f b -> f a
@@ -147,10 +206,10 @@ prelude.typeclasses.<*> : forall f a b. Applicative f => f (a -> b) -> f a -> f 
 prelude.typeclasses.<> : forall a. Semigroup a => a -> a -> a
 prelude.typeclasses.>> : forall m a b. Monad m => m a -> m b -> m b
 prelude.typeclasses.>>= : forall m a b. Monad m => m a -> (a -> m b) -> m b
+prelude.typeclasses.^ : forall a. Num a => a -> Int -> a
 prelude.typeclasses.applyLeft : forall f a b. Applicative f => f a -> f b -> f a
 prelude.typeclasses.applyRight : forall f a b. Applicative f => f a -> f b -> f b
 prelude.typeclasses.clampOrd : forall a. Ord a => a -> a -> a -> a
-prelude.typeclasses.div : Int -> Int -> Int
 prelude.typeclasses.eq : forall a. Eq a => a -> a -> Bool
 prelude.typeclasses.foldMap : forall t a m. (Foldable t, Monoid m) => (a -> m) -> t a -> m
 prelude.typeclasses.greater : forall a. PartialOrd a => a -> a -> Bool
@@ -163,12 +222,19 @@ prelude.typeclasses.maxOrd : forall a. Ord a => a -> a -> a
 prelude.typeclasses.mconcat : forall a. Monoid a => [a] -> a
 prelude.typeclasses.minOrd : forall a. Ord a => a -> a -> a
 prelude.typeclasses.mixHash : Int -> Int -> Int
-prelude.typeclasses.mod : Int -> Int -> Int
 prelude.typeclasses.notEq : forall a. Eq a => a -> a -> Bool
 prelude.typeclasses.sequenceA : forall t f a. (Traversable t, Applicative f) => t (f a) -> f (t a)
 prelude.typeclasses.subtract : forall a. Num a => a -> a -> a
 prelude.typeclasses.thenM : forall m a b. Monad m => m a -> m b -> m b
+prelude.typeclasses.toBigInt : Int -> BigInt
 prelude.typeclasses.totalCompareFloat : Float -> Float -> Ordering
+std.bigint.fromInt : Int -> BigInt
+std.bigint.parse : String -> Maybe BigInt
+std.bigint.parseBase : Int -> String -> Maybe BigInt
+std.bigint.toFloat : BigInt -> Float
+std.bigint.toInt : BigInt -> Maybe Int
+std.bigint.toString : BigInt -> String
+std.bigint.toStringBase : Int -> BigInt -> Maybe String
 std.bytes.appendBytesBuilder : BytesBuilder -> BytesBuilder -> BytesBuilder
 std.bytes.buildBytes : BytesBuilder -> Bytes
 std.bytes.builderChunks : BytesBuilder -> [Bytes]
@@ -646,6 +712,45 @@ std.map.toAscList : forall k v. Map k v -> [(k, v)]
 std.map.toAscListInto : forall k v. Map k v -> [(k, v)] -> [(k, v)]
 std.map.values : forall k v. Map k v -> [v]
 std.map.valuesInto : forall k v. Map k v -> [v] -> [v]
+std.math.acos : Float -> Float
+std.math.approximatelyEqual : Float -> Float -> Float -> Float -> Bool
+std.math.asin : Float -> Float
+std.math.atan : Float -> Float
+std.math.atan2 : Float -> Float -> Float
+std.math.cbrt : Float -> Float
+std.math.ceiling : Float -> Float
+std.math.copySign : Float -> Float -> Float
+std.math.cos : Float -> Float
+std.math.cosh : Float -> Float
+std.math.cube : forall a. Num a => a -> a
+std.math.e : Float
+std.math.exp : Float -> Float
+std.math.exp2 : Float -> Float
+std.math.floor : Float -> Float
+std.math.fromInt : Int -> Float
+std.math.hypot : Float -> Float -> Float
+std.math.isFinite : Float -> Bool
+std.math.isInfinite : Float -> Bool
+std.math.isNaN : Float -> Bool
+std.math.ln : Float -> Float
+std.math.log10 : Float -> Float
+std.math.log2 : Float -> Float
+std.math.logBase : Float -> Float -> Float
+std.math.maxFloat : Float -> Float -> Float
+std.math.pi : Float
+std.math.round : Float -> Float
+std.math.sin : Float -> Float
+std.math.sinh : Float -> Float
+std.math.sqrt : Float -> Float
+std.math.square : forall a. Num a => a -> a
+std.math.tan : Float -> Float
+std.math.tanh : Float -> Float
+std.math.tau : Float
+std.math.toDegrees : Float -> Float
+std.math.toRadians : Float -> Float
+std.math.truncate : Float -> Float
+std.math.truncateToBigInt : Float -> Maybe BigInt
+std.math.truncateToInt : Float -> Maybe Int
 std.net.anyPort : Port
 std.net.atEndpoint : forall a. String -> IO IOError a -> IO NetError a
 std.net.closeTcpConnection : forall scope. TcpConnection scope -> IO NetError ()

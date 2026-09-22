@@ -14,10 +14,13 @@ export (
     clampOrd,
     totalCompareFloat,
     Num,
-    div,
-    mod,
+    (^),
+    Integral,
+    (%),
     subtract,
     Fractional,
+    (**),
+    toBigInt,
     Functor,
     (<$>),
     Applicative,
@@ -50,7 +53,8 @@ import prelude.prim(*)
 
 infix 4 ==, /=, <, <=, >, >=
 infixl 6 +, -
-infixl 7 *, /
+infixl 7 *, /, %
+infixr 8 ^, **
 infixl 4 <$>, <*>, <*, *>
 infixl 1 >>=, >>
 infixr 6 <>
@@ -173,16 +177,39 @@ class Num a where
     (*) :
         a -> a -> a
         -- | Negates a number.
-    negate : a -> a
+    negate :
+        a -> a
+        -- | Returns a number's magnitude.
+    abs :
+        a -> a
+        -- | Returns -1, 0, or 1 according to a number's sign.
+    signum :
+        a -> a
+        -- | Raises a value to a non-negative Int power.
+    powNat : a -> Int -> a
     default (-) x y = x + negate y
 
--- | Divides two integers using integer division.
-div : Int -> Int -> Int
-div x y = intDiv x y
+-- | Whole-number types with both floor and truncating division.
+class Num a => Integral a where
+    -- | Division rounded toward negative infinity.
+    div :
+        a -> a -> a
+        -- | Remainder paired with div; it has the divisor's sign.
+    mod :
+        a -> a -> a
+        -- | Division truncated toward zero.
+    quot :
+        a -> a -> a
+        -- | Remainder paired with quot; it has the dividend's sign.
+    rem : a -> a -> a
 
--- | Returns the integer remainder after division.
-mod : Int -> Int -> Int
-mod x y = intMod x y
+-- | Operator alias for floor remainder.
+(%) : forall a. Integral a => a -> a -> a
+(%) = mod
+
+-- | Raises a numeric value to a non-negative Int power.
+(^) : forall a. Num a => a -> Int -> a
+(^) = powNat
 
 -- | Subtracts the first argument from the second.
 subtract : forall a. Num a => a -> a -> a
@@ -192,6 +219,14 @@ subtract x y = y - x
 class Num a => Fractional a where
     -- | Divides one fractional value by another.
     (/) : a -> a -> a
+
+-- | Raises a Float to a floating-point power.
+(**) : Float -> Float -> Float
+(**) x y = floatPow x y
+
+-- | Converts a fixed-width Int to an exact arbitrary-precision integer.
+toBigInt : Int -> BigInt
+toBigInt = bigIntFromInt
 
 -- | Type constructors whose contents can be transformed.
 class Functor f where
@@ -318,7 +353,7 @@ class Eq a => Hashable a where
 hash : forall a. Hashable a => a -> Int
 hash value = hashWithSalt 0 value
 
--- Package-internal deterministic mixing primitive. Int overflow is the
--- language's defined wrapping arithmetic and is intentional here.
+-- Package-internal deterministic mixing primitive. Its modular arithmetic is
+-- deliberately confined to hashing; ordinary Int arithmetic remains checked.
 mixHash : Int -> Int -> Int
-mixHash salt value = salt * 16777619 + value
+mixHash salt value = intMixHash salt value

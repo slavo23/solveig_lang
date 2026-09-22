@@ -6,6 +6,7 @@ use super::*;
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) enum LitPat {
     Int(i64),
+    BigInt(String),
     Float(u64),
     Char(char),
     Str(solveig_ast::ast::StrLitId),
@@ -15,6 +16,7 @@ impl LitPat {
     pub(super) fn from_literal(lit: &Literal) -> Self {
         match lit {
             Literal::Int(value) => LitPat::Int(*value),
+            Literal::BigInt(value) => LitPat::BigInt(value.clone()),
             Literal::Float(value) => LitPat::Float(value.to_bits()),
             Literal::Char(value) => LitPat::Char(*value),
             Literal::Str(id) => LitPat::Str(*id),
@@ -24,6 +26,7 @@ impl LitPat {
     pub(super) fn pretty(&self, names: &Names) -> String {
         match self {
             LitPat::Int(value) => value.to_string(),
+            LitPat::BigInt(value) => value.clone(),
             LitPat::Float(bits) => f64::from_bits(*bits).to_string(),
             LitPat::Char(value) => format!("'{}'", escape_char_literal(*value)),
             LitPat::Str(id) => {

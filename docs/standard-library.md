@@ -22,6 +22,8 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.queue` | Persistent FIFO queues |
 | `std.text` | Packed UTF-8 scans, explicit scalar/byte operations, and linear text construction |
 | `std.bytes` | Strict/replacement UTF-8 decoding, binary slicing, and linear binary construction |
+| `std.bigint` | Safe arbitrary-precision conversions, parsing, and radix rendering |
+| `std.math` | Floating constants, elementary functions, classification, and safe conversions |
 | `std.stream` | Strict pull streams, scoped resource lifetimes, bounded collection, and finite adapters |
 | `std.parser` | Generic parser combinators with structured errors and streaming input |
 | `std.json` | Bounded byte-level JSON, exact numbers, path-aware decoders, and symmetric encoders |
@@ -38,6 +40,61 @@ discovery, package manifests, and the Prelude/std boundary.
 | `std.random` | Explicit deterministic pseudorandom state and separate host-secure bytes |
 | `std.net` | Scoped TCP streams, UDP datagrams, endpoints, and hostname resolution |
 | `std.tls` | Verified scoped TLS client streams with platform or explicit PEM trust |
+
+## Big integers and floating-point math
+
+Use `BigInt` for exact whole numbers that can exceed the signed 64-bit `Int`
+range. Arithmetic and ordering are provided by the Prelude; `std.bigint` owns
+the conversion and textual boundary:
+
+```solveig
+import std.bigint(parse, parseBase, toInt, toStringBase)
+
+decimal : Maybe BigInt
+decimal = parse "123456789012345678901234567890"
+
+hexadecimal : Maybe BigInt
+hexadecimal = parseBase 16 "7fffffffffffffff"
+
+binaryAnswer : Maybe String
+binaryAnswer = toStringBase 2 (toBigInt 42)
+
+smallEnough : BigInt -> Maybe Int
+smallEnough = toInt
+```
+
+Parsing accepts an optional sign and otherwise requires only valid digits—no
+whitespace, prefixes, or separators. Bases 2 through 36 are supported and
+rendering uses lowercase digits. Invalid text, an invalid base, or narrowing
+overflow returns `Nothing`; it is ordinary input failure, not a defect.
+
+`std.math` operates on IEEE 754 binary64 `Float` values. It includes `pi`,
+`tau`, `e`, powers and roots, exponential and logarithmic functions,
+trigonometric and hyperbolic functions, `hypot`, rounding, angle conversion,
+classification, and tolerance-aware comparison:
+
+```solveig
+import std.math(approximatelyEqual, hypot, isFinite, pi, sin, toDegrees)
+
+length : Float
+length = hypot 3.0 4.0
+
+angle : Float
+angle = toDegrees pi
+
+stableZeroTest : Bool
+stableZeroTest = approximatelyEqual 0.000000000001 0.000000000001 (sin pi) 0.0
+
+usable : Bool
+usable = isFinite length
+```
+
+Domain errors follow IEEE 754: for example, `sqrt (-1.0)` is NaN and `ln 0.0`
+is negative infinity. Inspect them with `isNaN`, `isInfinite`, and `isFinite`.
+`truncateToInt` and `truncateToBigInt` return `Nothing` for NaN or infinity;
+`truncateToInt` also rejects out-of-range values. `fromInt` may round large
+integers because not every 64-bit integer is exactly representable as a
+binary64 Float.
 
 ## Lists and text
 

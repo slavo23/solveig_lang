@@ -196,6 +196,7 @@ impl<'a> Resolver<'a> {
     fn resolve_literal(&mut self, lit: &SurfaceLiteral) -> Literal {
         match lit {
             SurfaceLiteral::Int(value) => Literal::Int(*value),
+            SurfaceLiteral::BigInt(value) => Literal::BigInt(value.clone()),
             SurfaceLiteral::Float(value) => Literal::Float(*value),
             SurfaceLiteral::Char(value) => Literal::Char(*value),
             SurfaceLiteral::Str(value) => Literal::Str(self.names.intern_string_literal(value)),

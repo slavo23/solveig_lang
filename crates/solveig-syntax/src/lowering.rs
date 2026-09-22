@@ -13,7 +13,7 @@ use crate::parser::{ParseError, ParsedCst, parse};
 use crate::syntax::{Event, SyntaxKind};
 
 use lists::{
-    cons_pattern, int_pattern, list_expr, list_nil_expr, list_nil_pattern, list_pattern, list_ty,
+    cons_pattern, list_expr, list_nil_expr, list_nil_pattern, list_pattern, list_ty,
     literal_pattern,
 };
 use tuples::{

@@ -11,6 +11,9 @@ The commonly used primitive types are:
 anInteger : Int
 anInteger = 42
 
+anExactLargeInteger : BigInt
+anExactLargeInteger = 1000000000000000000000000000000
+
 aFloat : Float
 aFloat = 2.5
 
@@ -35,8 +38,93 @@ message : String
 message = "hello, " <> "world"
 ```
 
-`+`, `-`, and `*` use the `Num` typeclass. `/` uses `Fractional` and therefore
-works with `Float`; integer division and remainder are `div` and `mod`.
+`Int` is a signed 64-bit integer. Its arithmetic is checked: a result outside
+`-9223372036854775808` through `9223372036854775807` raises the
+`IntegerOverflow` defect instead of silently wrapping. Use `BigInt` when the
+mathematical result must grow without a fixed bound. `Float` is IEEE 754
+binary64; it has finite precision and includes infinities and NaN. Solveig does
+not currently provide an arbitrary-precision floating type.
+
+## Choosing a numeric type
+
+Whole-number literals use their context. A literal in a declared `BigInt` or
+`Float` position becomes that type, while an unconstrained ordinary literal
+defaults to `Int`. A whole literal outside the `Int` range starts as `BigInt`.
+The checker waits for the surrounding numeric expression before applying that
+default, so operand order does not change the result:
+
+```solveig
+requestCount : Int
+requestCount = 42
+
+worldPopulationEstimate : BigInt
+worldPopulationEstimate = 8100000000
+
+nextEstimate : BigInt
+nextEstimate = 1 + worldPopulationEstimate
+
+ratio : Float
+ratio = 2 / 3
+```
+
+This is contextual literal typing, not implicit conversion of stored values.
+Once a value is an `Int`, use `toBigInt`; once it is a `BigInt`, import
+`std.bigint.toInt` and handle the possible overflow:
+
+```solveig
+import std.bigint(parse, toInt, toStringBase)
+
+exact : BigInt
+exact = toBigInt 42
+
+narrowed : Maybe Int
+narrowed = toInt exact
+
+fromConfig : Maybe BigInt
+fromConfig = parse "340282366920938463463374607431768211455"
+
+asHex : Maybe String
+asHex = toStringBase 16 exact
+```
+
+`+`, `-`, `*`, `negate`, `abs`, `signum`, and `^` use `Num`. The exponent of
+`^` is a non-negative `Int`; a negative exponent is a defect, and an `Int`
+power can still raise `IntegerOverflow`. `/` uses `Fractional`; `**` is
+floating-point exponentiation.
+
+Integral division has two deliberately named families. For negative inputs,
+the difference matters:
+
+```solveig
+floorDivision = (div (-7) 3, mod (-7) 3) -- (-3, 2)
+truncatingDivision = (quot (-7) 3, rem (-7) 3) -- (-2, -1)
+```
+
+`div` rounds toward negative infinity and `mod` has the divisor's sign.
+`quot` rounds toward zero and `rem` has the dividend's sign. The `%` operator
+is an alias for `mod`. All four raise `DivisionByZero` for a zero divisor.
+
+For scientific and geometric work, import the named operations from
+`std.math`:
+
+```solveig
+import std.math(approximatelyEqual, hypot, pi, sin, toDegrees)
+
+diagonal : Float
+diagonal = hypot 3.0 4.0
+
+straightAngle : Float
+straightAngle = toDegrees pi
+
+closeEnough : Bool
+closeEnough = approximatelyEqual 0.000000000001 0.000000000001 (sin pi) 0.0
+```
+
+Floating-point equality is exact and NaN is unordered. For measured or
+computed quantities, `approximatelyEqual absoluteTolerance relativeTolerance`
+usually expresses the intended comparison better. The two tolerances cover
+different regimes: absolute tolerance matters near zero, while relative
+tolerance scales with magnitude.
 
 ## Conditional expressions
 

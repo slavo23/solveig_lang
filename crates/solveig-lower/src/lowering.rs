@@ -39,6 +39,8 @@ struct LowerCtx {
     next_global: usize,
     string_constants: Vec<String>,
     string_indices: FxHashMap<StrLitId, u32>,
+    big_int_constants: Vec<String>,
+    big_int_indices: FxHashMap<String, u32>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -222,6 +224,18 @@ impl LowerCtx {
         index
     }
 
+    fn big_int_constant_index(&mut self, value: &str) -> u32 {
+        if let Some(index) = self.big_int_indices.get(value) {
+            return *index;
+        }
+
+        let index = u32::try_from(self.big_int_constants.len())
+            .expect("ICE: BigInt constant pool exceeded u32 capacity");
+        self.big_int_constants.push(value.to_string());
+        self.big_int_indices.insert(value.to_string(), index);
+        index
+    }
+
     fn push_pattern_binders<A>(&mut self, pattern: &PatternNode<A>) {
         match &pattern.node {
             Pattern::Var(name) => self.push_term(name),
@@ -279,6 +293,7 @@ where
         TermExpr::Var(name) => ctx.resolve_var(name),
         TermExpr::Lit(lit) => match lit {
             Literal::Int(n) => Rc::new(IRExpr::Int(*n)),
+            Literal::BigInt(n) => Rc::new(IRExpr::BigIntConst(ctx.big_int_constant_index(n))),
             Literal::Float(n) => Rc::new(IRExpr::Float(*n)),
             Literal::Char(ch) => Rc::new(IRExpr::Char(*ch)),
             Literal::Str(id) => Rc::new(IRExpr::StrConst(ctx.string_constant_index(*id))),
@@ -817,6 +832,7 @@ fn match_heads_equal(left: &LowerMatchHead, right: &LowerMatchHead) -> bool {
 fn literals_equal(left: &Literal, right: &Literal) -> bool {
     match (left, right) {
         (Literal::Int(left), Literal::Int(right)) => left == right,
+        (Literal::BigInt(left), Literal::BigInt(right)) => left == right,
         (Literal::Float(left), Literal::Float(right)) => left.to_bits() == right.to_bits(),
         (Literal::Char(left), Literal::Char(right)) => left == right,
         (Literal::Str(left), Literal::Str(right)) => left == right,
@@ -1452,6 +1468,8 @@ where
         next_global,
         string_constants: Vec::new(),
         string_indices: FxHashMap::default(),
+        big_int_constants: Vec::new(),
+        big_int_indices: FxHashMap::default(),
     };
 
     let mut ir_globals = module
@@ -1546,6 +1564,7 @@ where
         globals: ir_globals,
         constructor_arities,
         string_constants: ctx.string_constants,
+        big_int_constants: ctx.big_int_constants,
         string_literals: names.string_literals().to_vec(),
     }
 }

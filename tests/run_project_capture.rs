@@ -521,6 +521,22 @@ fn prelude_int_division_by_zero_reports_runtime_error() {
 }
 
 #[test]
+fn prelude_int_overflow_reports_structured_defect() {
+    let _guard = project_run_lock();
+    let project_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/runtime/int_surface_overflow");
+
+    let err = run_project_capture(&project_root, "main")
+        .expect_err("checked Int overflow should report a runtime defect");
+
+    assert!(
+        err.to_string()
+            .contains("runtime error: uncaught defect: IntegerOverflow"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn catch_defect_recovers_from_managed_stack_exhaustion() {
     let _guard = project_run_lock();
     let project_root = write_temp_project(
@@ -543,6 +559,7 @@ report defect =
         StackExhausted => printLine "stack-caught"
         | Error message => printLine "unexpected-error"
         | DivisionByZero => printLine "unexpected-division"
+        | IntegerOverflow => printLine "unexpected-overflow"
         | HeapExhausted => printLine "unexpected-heap"
 
 main : Task ()
@@ -591,6 +608,7 @@ report defect =
         HeapExhausted => printLine "heap-caught"
         | Error message => printLine "unexpected-error"
         | DivisionByZero => printLine "unexpected-division"
+        | IntegerOverflow => printLine "unexpected-overflow"
         | StackExhausted => printLine "unexpected-stack"
 
 main : Task ()

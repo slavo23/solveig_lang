@@ -12,6 +12,7 @@ pub enum CCExpr {
     Located(FileSpan, Rc<CCExpr>),
     Unit,
     Int(i64),
+    BigIntConst(u32),
     Float(f64),
     Char(char),
     StrConst(u32),
@@ -82,6 +83,7 @@ pub struct CCProgram {
     pub functions: Vec<CCFunction>,
     pub constructor_arities: Vec<CtorRuntimeInfo>,
     pub string_constants: Vec<String>,
+    pub big_int_constants: Vec<String>,
     pub string_literals: Vec<String>,
 }
 

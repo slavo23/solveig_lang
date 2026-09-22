@@ -83,8 +83,8 @@ import std.vector(*)
 -- | The representation retains decimal digits and exponent text rather than
 -- | rounding through Float. The representation is private: use the smart
 -- | constructors to preserve the invariant that every JsonNumber is valid.
--- | A future BigInt representation can be added without changing Json's
--- | number case.
+-- | This remains distinct from BigInt because JSON numbers may contain a
+-- | decimal fraction or exponent and decoding must retain their exact spelling.
 data JsonNumber = JsonNumber String
 
 -- | A JSON value with persistent arrays and deterministically ordered objects.

@@ -1,4 +1,21 @@
 impl TypeChecker<'_> {
+    fn should_defer_integer_literal(&self, evar: EvarId) -> bool {
+        self.wanteds.iter().any(|wanted| {
+            self.tables
+                .class_defs
+                .get(&wanted.pred.class_id)
+                .is_some_and(|class| {
+                    matches!(class.short_name.as_str(), "Num" | "Integral" | "Fractional")
+                })
+                && wanted
+                    .pred
+                    .args
+                    .iter()
+                    .map(|arg| self.zonk_type(arg))
+                    .any(|arg| matches!(arg, Ty::TyExVar(id) if id == evar))
+        })
+    }
+
     pub fn solve_checking(
         &mut self,
         ctx: Context,
@@ -11,6 +28,59 @@ impl TypeChecker<'_> {
         match (&expr.node, expected_type) {
             (TermExpr::Unit, Ty::TyUnit) => {
                 let elaborated = elab_node(TermExpr::Unit, span, Ty::TyUnit);
+                Ok((ctx, elaborated))
+            }
+
+            (TermExpr::Lit(Literal::Int(value)), Ty::TyCon(id))
+                if *id == PRIM_TYS.big_int =>
+            {
+                let literal = Literal::BigInt(value.to_string());
+                let elaborated = elab_node(TermExpr::Lit(literal), span, expected_type.clone());
+                Ok((ctx, elaborated))
+            }
+
+            (TermExpr::Lit(Literal::Int(value)), Ty::TyCon(id)) if *id == PRIM_TYS.float => {
+                let literal = Literal::Float(*value as f64);
+                let elaborated = elab_node(TermExpr::Lit(literal), span, expected_type.clone());
+                Ok((ctx, elaborated))
+            }
+
+            (TermExpr::Lit(Literal::BigInt(value)), Ty::TyCon(id))
+                if *id == PRIM_TYS.float =>
+            {
+                let value = value.parse::<f64>().unwrap_or_else(|_| {
+                    if value.starts_with('-') {
+                        f64::NEG_INFINITY
+                    } else {
+                        f64::INFINITY
+                    }
+                });
+                let elaborated = elab_node(
+                    TermExpr::Lit(Literal::Float(value)),
+                    span,
+                    expected_type.clone(),
+                );
+                Ok((ctx, elaborated))
+            }
+
+            (TermExpr::Lit(literal), Ty::TyExVar(id))
+                if matches!(literal, Literal::Int(_) | Literal::BigInt(_))
+                    && self.should_defer_integer_literal(*id) =>
+            {
+                let preference = if matches!(literal, Literal::BigInt(_)) {
+                    NumericDefault::BigInt
+                } else {
+                    NumericDefault::Int
+                };
+                self.numeric_defaults
+                    .entry(*id)
+                    .and_modify(|current| *current = (*current).max(preference))
+                    .or_insert(preference);
+                let elaborated = elab_node(
+                    TermExpr::Lit(literal.clone()),
+                    span,
+                    expected_type.clone(),
+                );
                 Ok((ctx, elaborated))
             }
 
@@ -775,6 +845,8 @@ pub fn check_and_elab_module(
                     match checker.solve_checking(group_ctx.clone(), &func_def.body, &expected_type)
                     {
                         Ok((final_ctx, elaborated)) => {
+                            let wanted_range = checker.current_wanted_range_from(wanted_start);
+                            checker.default_numeric_evars(&final_ctx, wanted_range.clone());
                             let unresolved = checker.solve_wanteds_from(wanted_start);
 
                             if !unresolved.is_empty() {
@@ -789,7 +861,7 @@ pub fn check_and_elab_module(
                                 index,
                                 elaborated,
                                 FunctionSignatureSource::Explicit(sig.clone()),
-                                checker.current_wanted_range_from(wanted_start),
+                                wanted_range,
                             ));
                         }
 
@@ -853,6 +925,7 @@ pub fn check_and_elab_module(
                 .get(index)
                 .expect("ICE: function dependency group index out of bounds");
             let checkpoint = checker.checkpoint();
+            checker.default_numeric_evars(&group_ctx, wanted_range.clone());
             let (final_scheme, final_body) = match signature_source {
                 FunctionSignatureSource::Explicit(sig) => {
                     let final_scheme = checker.zonk_scheme(&sig);

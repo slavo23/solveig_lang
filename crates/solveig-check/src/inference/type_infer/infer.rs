@@ -34,6 +34,9 @@ impl TypeChecker<'_> {
     fn int_type(&self) -> Ty {
         Ty::make_con_id(PRIM_TYS.int)
     }
+    fn big_int_type(&self) -> Ty {
+        Ty::make_con_id(PRIM_TYS.big_int)
+    }
     fn float_type(&self) -> Ty {
         Ty::make_con_id(PRIM_TYS.float)
     }
@@ -46,6 +49,7 @@ impl TypeChecker<'_> {
     fn literal_type(&self, lit: &Literal) -> Ty {
         match lit {
             Literal::Int(_) => self.int_type(),
+            Literal::BigInt(_) => self.big_int_type(),
             Literal::Float(_) => self.float_type(),
             Literal::Char(_) => self.char_type(),
             Literal::Str(_) => self.string_type(),

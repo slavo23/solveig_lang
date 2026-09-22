@@ -10,6 +10,7 @@ use super::*;
 
 pub struct PrimTys {
     pub int: TyConId,
+    pub big_int: TyConId,
     pub float: TyConId,
     pub char: TyConId,
     pub string: TyConId,
@@ -40,19 +41,27 @@ pub const PRIM_TYS: PrimTys = PrimTys {
     handle: TyConId(10),
     std_gen: TyConId(11),
     child_process: TyConId(12),
+    big_int: TyConId(13),
     true_ctor: CtorId(0),
     false_ctor: CtorId(1),
 };
 
 impl PrimTys {
-    pub fn open_primitive_tycon_ids(self) -> [TyConId; 4] {
-        [self.int, self.float, self.char, self.string]
+    pub fn open_primitive_tycon_ids(self) -> [TyConId; 5] {
+        [self.int, self.big_int, self.float, self.char, self.string]
     }
 }
 
 pub fn compiler_primitive_tycon_infos(names: &mut Names) -> Vec<(TyConId, TyConInfo)> {
     vec![
         compiler_primitive_tycon_info(names, PRIM_TYS.int, COMPILER_INT_NAME, "Int", Kind::Star),
+        compiler_primitive_tycon_info(
+            names,
+            PRIM_TYS.big_int,
+            COMPILER_BIG_INT_NAME,
+            "BigInt",
+            Kind::Star,
+        ),
         compiler_primitive_tycon_info(
             names,
             PRIM_TYS.float,
@@ -130,6 +139,7 @@ pub fn compiler_primitive_tycon_infos(names: &mut Names) -> Vec<(TyConId, TyConI
 pub fn compiler_primitive_tycon_kinds() -> FxHashMap<TyConId, Kind> {
     FxHashMap::from_iter([
         (PRIM_TYS.int, Kind::Star),
+        (PRIM_TYS.big_int, Kind::Star),
         (PRIM_TYS.float, Kind::Star),
         (PRIM_TYS.char, Kind::Star),
         (PRIM_TYS.string, Kind::Star),
@@ -330,6 +340,7 @@ pub fn runtime_ctor_role(names: &Names, ctor: CtorId) -> CtorRuntimeRole {
         PRELUDE_EITHER_RIGHT_NAME => CtorRuntimeRole::PreludeEitherRight,
         PRELUDE_DEFECT_ERROR_NAME => CtorRuntimeRole::PreludeDefectError,
         PRELUDE_DEFECT_DIVISION_BY_ZERO_NAME => CtorRuntimeRole::PreludeDefectDivisionByZero,
+        PRELUDE_DEFECT_INTEGER_OVERFLOW_NAME => CtorRuntimeRole::PreludeDefectIntegerOverflow,
         PRELUDE_DEFECT_STACK_EXHAUSTED_NAME => CtorRuntimeRole::PreludeDefectStackExhausted,
         PRELUDE_DEFECT_HEAP_EXHAUSTED_NAME => CtorRuntimeRole::PreludeDefectHeapExhausted,
         _ => CtorRuntimeRole::Ordinary,
@@ -585,6 +596,7 @@ pub enum CtorRuntimeRole {
     PreludeEitherRight,
     PreludeDefectError,
     PreludeDefectDivisionByZero,
+    PreludeDefectIntegerOverflow,
     PreludeDefectStackExhausted,
     PreludeDefectHeapExhausted,
 }

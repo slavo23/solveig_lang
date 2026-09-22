@@ -4,5 +4,6 @@ expression: actual
 ---
 Error=boom
 DivisionByZero
+IntegerOverflow
 StackExhausted
 HeapExhausted

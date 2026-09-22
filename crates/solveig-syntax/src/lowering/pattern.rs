@@ -184,9 +184,9 @@ impl CstToAst<'_> {
         let first = self.required_token(node, tokens.first().copied(), "expected pattern")?;
         match self.cst.token(first).kind {
             Token::Int => {
-                let value = self.lower_int_literal(first)?;
+                let value = self.lower_integer_literal(first);
                 let token = self.cst.token(first);
-                Ok(int_pattern(value, token.start(), token.end(), node))
+                Ok(literal_pattern(value, token.start(), token.end(), node))
             }
             Token::Float => {
                 let value = self.lower_float_literal(first)?;
@@ -279,11 +279,17 @@ impl CstToAst<'_> {
 
         match number_token.kind {
             Token::Int => {
-                let value = self.lower_int_literal(number)?;
-                let value = value.checked_neg().ok_or_else(|| {
-                    self.error_at_token(number, "integer literal pattern is too small")
-                })?;
-                Ok(int_pattern(
+                let value = match self.lower_integer_literal(number) {
+                    SurfaceLiteral::Int(value) => value.checked_neg().map_or_else(
+                        || SurfaceLiteral::BigInt(format!("-{value}")),
+                        SurfaceLiteral::Int,
+                    ),
+                    SurfaceLiteral::BigInt(digits) => SurfaceLiteral::BigInt(format!("-{digits}")),
+                    SurfaceLiteral::Float(_) | SurfaceLiteral::Char(_) | SurfaceLiteral::Str(_) => {
+                        solveig_base::ice!("integer token lowered to a non-integer literal")
+                    }
+                };
+                Ok(literal_pattern(
                     value,
                     minus_token.start(),
                     number_token.end(),

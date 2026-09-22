@@ -9,7 +9,11 @@ doctest = false
 [dependencies]
 getrandom.workspace = true
 la-arena.workspace = true
+libm.workspace = true
 mio = { version = "1.2.2", features = ["net", "os-poll"] }
+num-bigint.workspace = true
+num-integer.workspace = true
+num-traits.workspace = true
 rustls = { version = "0.23.43", default-features = false, features = ["ring", "std", "tls12"] }
 rustls-platform-verifier = "0.7.0"
 solveig-ast = { path = "../solveig-ast" }

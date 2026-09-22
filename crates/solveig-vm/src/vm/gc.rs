@@ -354,6 +354,9 @@ fn copy_object_side_payloads(heap: &mut Heap, object: HeapObject) -> HeapObject 
         HeapObject::Bytes { bytes } => HeapObject::Bytes {
             bytes: heap.promote_bytes(bytes),
         },
+        HeapObject::BigInt { value } => HeapObject::BigInt {
+            value: heap.promote_big_int(value),
+        },
         HeapObject::Chan(mut channel) => {
             channel.queue = heap.promote_payload(channel.queue);
             HeapObject::Chan(channel)
@@ -409,7 +412,10 @@ fn rewrite_promoted_object(
         HeapObject::Chan(channel) => {
             rewrite_old_payload(heap, channel.queue, worklist, promoted);
         }
-        HeapObject::Data0 { .. } | HeapObject::Str { .. } | HeapObject::Bytes { .. } => {}
+        HeapObject::Data0 { .. }
+        | HeapObject::Str { .. }
+        | HeapObject::Bytes { .. }
+        | HeapObject::BigInt { .. } => {}
         HeapObject::Forwarded(_) => {
             solveig_base::ice!("forwarding entry reached promoted-object scan");
         }
@@ -536,7 +542,10 @@ fn mark_old_object_children(heap: &mut Heap, id: ObjId, worklist: &mut Vec<ObjId
         }
         HeapObject::IoAction(action) => io_action::mark_old(heap, action, worklist),
         HeapObject::Chan(channel) => mark_old_payload(heap, channel.queue, worklist),
-        HeapObject::Data0 { .. } | HeapObject::Str { .. } | HeapObject::Bytes { .. } => {}
+        HeapObject::Data0 { .. }
+        | HeapObject::Str { .. }
+        | HeapObject::Bytes { .. }
+        | HeapObject::BigInt { .. } => {}
         HeapObject::Forwarded(_) => {
             solveig_base::ice!("forwarding entry reached old-generation marking");
         }
@@ -621,7 +630,10 @@ fn assert_object_children_live(
         HeapObject::Chan(channel) => {
             assert_payload_live(heap, id, channel.queue, seen, worklist);
         }
-        HeapObject::Data0 { .. } | HeapObject::Str { .. } | HeapObject::Bytes { .. } => {}
+        HeapObject::Data0 { .. }
+        | HeapObject::Str { .. }
+        | HeapObject::Bytes { .. }
+        | HeapObject::BigInt { .. } => {}
         HeapObject::Forwarded(_) => {
             solveig_base::ice!("forwarding entry reached debug heap walk");
         }

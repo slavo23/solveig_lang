@@ -10,6 +10,9 @@ import prelude.typeclasses(*)
 instance Eq Int where
     (==) x y = intEq x y
 
+instance Eq BigInt where
+    (==) x y = bigIntEq x y
+
 instance Eq Float where
     (==) x y = floatEq x y
 
@@ -148,6 +151,9 @@ instance (Eq a, Eq b) => Eq (Either a b) where
 
 instance PartialOrd Int where
     partialCompare x y = Just (intCompare x y)
+
+instance PartialOrd BigInt where
+    partialCompare x y = Just (bigIntCompare x y)
 
 instance PartialOrd Float where
     partialCompare x y =
@@ -387,6 +393,9 @@ instance (PartialOrd a, PartialOrd b) => PartialOrd (Either a b) where
 instance Ord Int where
     compare x y = intCompare x y
 
+instance Ord BigInt where
+    compare x y = bigIntCompare x y
+
 instance Ord Char where
     compare x y = charCompare x y
 
@@ -571,11 +580,40 @@ instance Num Int where
     (+) x y = intAdd x y
     (*) x y = intMul x y
     negate x = intNeg x
+    abs x = intAbs x
+    signum x = intSignum x
+    powNat x exponent = intPow x exponent
+
+instance Integral Int where
+    div x y = intDiv x y
+    mod x y = intMod x y
+    quot x y = intQuot x y
+    rem x y = intRem x y
+
+instance Num BigInt where
+    (+) x y = bigIntAdd x y
+    (*) x y = bigIntMul x y
+    negate x = bigIntNeg x
+    abs x = bigIntAbs x
+    signum x = bigIntSignum x
+    powNat x exponent = bigIntPow x exponent
+
+instance Integral BigInt where
+    div x y = bigIntDiv x y
+    mod x y = bigIntMod x y
+    quot x y = bigIntQuot x y
+    rem x y = bigIntRem x y
 
 instance Num Float where
     (+) x y = floatAdd x y
     (*) x y = floatMul x y
     negate x = floatNeg x
+    abs x = floatAbs x
+    signum x = floatSignum x
+    powNat x exponent =
+        if intLt exponent 0
+            then prelude.builtins.error "negative exponent used with (^)"
+            else floatPow x (intToFloat exponent)
 
 instance Fractional Float where
     (/) x y = floatDiv x y
@@ -652,6 +690,12 @@ instance Monad (IO e) where
 
 instance Show Int where
     show value = intToString value
+
+instance Show BigInt where
+    show value = bigIntToString value
+
+instance Hashable BigInt where
+    hashWithSalt salt value = hashWithSalt salt (bigIntToString value)
 
 instance Show Float where
     show value = floatToString value

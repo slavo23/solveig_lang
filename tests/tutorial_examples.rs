@@ -9,7 +9,7 @@ fn language_tour_documentation_project_compiles_and_runs() {
     let repository = repository_root();
     run_copied_project(
         &repository.join("docs/tutorial/code/language_tour"),
-        "high: 12\n[\"ada@example.test\"]\n(\"answer\", 42)\n(7, \"seven\")\n[1, 2, 3]\n[(\"/health\", 1), (\"/users\", 2)]\n",
+        "high: 12\n[\"ada@example.test\"]\n(\"answer\", 42)\n(7, \"seven\")\n[1, 2, 3]\n[(\"/health\", 1), (\"/users\", 2)]\n3-4-5 diagonal: 5\nlarge integer: Just 123456789012345678901234567890\n",
         |_| {},
     );
 }

@@ -504,9 +504,10 @@ fn compiler_builtin_doc(name: &str) -> Option<&'static str> {
     })
 }
 
-fn compiler_prelude_type_entries() -> [(&'static str, TyConId); 11] {
+fn compiler_prelude_type_entries() -> [(&'static str, TyConId); 12] {
     [
         ("Int", PRIM_TYS.int),
+        ("BigInt", PRIM_TYS.big_int),
         ("Float", PRIM_TYS.float),
         ("Char", PRIM_TYS.char),
         ("String", PRIM_TYS.string),

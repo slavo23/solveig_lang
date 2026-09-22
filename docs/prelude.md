@@ -30,6 +30,7 @@ The compiler provides these types:
 
 ```solveig
 Int
+BigInt
 Float
 Char
 String
@@ -89,6 +90,7 @@ Defects remain distinct:
 data Defect =
     Error String
   | DivisionByZero
+  | IntegerOverflow
   | StackExhausted
   | HeapExhausted
 ```
@@ -145,9 +147,26 @@ The comparison hierarchy separates partial and total orders:
 partialCompare : forall a. PartialOrd a => a -> a -> Maybe Ordering
 compare : forall a. Ord a => a -> a -> Ordering
 (+), (-), (*) : forall a. Num a => a -> a -> a
+abs, signum : forall a. Num a => a -> a
+(^) : forall a. Num a => a -> Int -> a
+div, mod, quot, rem : forall a. Integral a => a -> a -> a
+(%) : forall a. Integral a => a -> a -> a
 (/) : forall a. Fractional a => a -> a -> a
+(**) : Float -> Float -> Float
 show : forall a. Show a => a -> String
 ```
+
+`Int` is checked signed 64-bit arithmetic; overflow raises
+`IntegerOverflow`. `BigInt` is arbitrary precision and has `Eq`, `PartialOrd`,
+`Ord`, `Num`, `Integral`, `Show`, and `Hashable` instances. Whole literals use
+an expected `Int`, `BigInt`, or `Float` type; unconstrained whole literals
+default narrowly to `Int`, and out-of-range literals default to `BigInt`.
+Fractional constraints default numeric literals to `Float`.
+
+`div`/`mod` use floor division, while `quot`/`rem` truncate toward zero. `%` is
+the operator spelling of `mod`. `^` accepts a non-negative `Int` exponent;
+`**` accepts a floating exponent. Safe narrowing and radix parsing/rendering
+are in `std.bigint`, and extended floating operations are in `std.math`.
 
 `Float` has `Eq` and `PartialOrd`, but deliberately has no `Ord`: a comparison
 with NaN produces `Nothing`, and ordinary relational operators return `False`.

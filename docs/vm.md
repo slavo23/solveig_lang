@@ -55,7 +55,7 @@ either an immediate value or one opaque heap location:
 
 | Variant | Meaning |
 |---|---|
-| `Unit`, `Int`, `Float`, `Char` | Primitive strict values. Integer arithmetic uses `i64`; equality and hashing compare floats by their bit pattern. |
+| `Unit`, `Int`, `Float`, `Char` | Primitive strict values. `Int` is checked `i64`; `Float` is IEEE binary64. Value-level float equality and hashing compare bits, while language equality follows its Prelude instance. |
 | `ThreadId(u32)` | Opaque language-visible green-process identity. It is not a heap location and has no numeric language operations. |
 | `CtorFn { tag, arity }` | Unsaturated constructor function. Nullary constructors are represented by cached `Data0` objects instead. |
 | `FunctionRef { chunk, arity }` | Capture-free callable function. |
@@ -68,6 +68,7 @@ or callable with bound state:
 |---|---|
 | `Closure` | Function chunk plus captured values in `PayloadStore`. |
 | `PartialApp` | Function chunk, captures, and already-applied arguments. |
+| `BigInt` | A compact `BigIntRef` into the heap-owned arbitrary-precision integer store. |
 | `PartialCtor` | Constructor tag/arity plus already-applied fields. |
 | `Data0`, `Data1`, `Data2`, `DataN` | Saturated algebraic data, with zero to two fields inline and larger payloads in `PayloadStore`. |
 | `Str` | Immutable UTF-8 bytes in `ByteStore`. |

@@ -1,6 +1,7 @@
 //! Bytecode instruction definitions and closure IR compilation.
 //! The VM executes chunks produced here from lowered Solveig programs.
 
+use num_bigint::BigInt;
 use solveig_ast::ast::{BinOp, BuiltinId, CtorRuntimeInfo, Literal, StrLitId, UnOp};
 use solveig_base::{FileSpan, FxHashMap};
 use std::collections::BTreeSet;
@@ -17,6 +18,7 @@ const NON_EXHAUSTIVE_CASE_TRAP: u16 = 1;
 pub enum Instr {
     PushUnit,
     PushInt(i64),
+    PushBigInt(u32),
     PushFloat(f64),
     PushChar(char),
     PushStr(u32),
@@ -142,6 +144,7 @@ pub struct BytecodeProgram {
     pub globals: Vec<CompiledGlobal>,
     pub constructor_arities: Vec<CtorRuntimeInfo>,
     pub string_constants: Vec<String>,
+    pub big_int_constants: Vec<BigInt>,
     pub string_literals: Vec<String>,
 }
 

@@ -151,6 +151,7 @@ fn format_instr(instr: &Instr) -> String {
     match instr {
         Instr::PushUnit => "PushUnit".to_string(),
         Instr::PushInt(n) => format!("PushInt {n}"),
+        Instr::PushBigInt(index) => format!("PushBigInt const#{index}"),
         Instr::PushFloat(n) => format!("PushFloat {n}"),
         Instr::PushChar(ch) => format!("PushChar '{}'", escape_char_literal(*ch)),
         Instr::PushStr(index) => format!("PushStr const#{index}"),
@@ -231,6 +232,7 @@ fn format_pattern(pattern: &LowerPattern) -> String {
         LowerPattern::Wild => "_".to_string(),
         LowerPattern::Lit(lit_val) => match lit_val {
             Literal::Int(i_val) => format!("Int({i_val})"),
+            Literal::BigInt(value) => format!("BigInt({value})"),
             Literal::Float(value) => format!("Float({value})"),
             Literal::Char(value) => format!("Char('{}')", escape_char_literal(*value)),
             Literal::Str(id) => format!("StrLit({})", id.0),

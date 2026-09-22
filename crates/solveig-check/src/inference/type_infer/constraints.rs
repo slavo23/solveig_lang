@@ -678,6 +678,7 @@ impl TypeChecker<'_> {
         ty: &Ty,
         wanted_range: Range<usize>,
     ) -> Result<GeneralizedInferred, TypeError> {
+        self.default_numeric_evars(ctx, wanted_range.clone());
         let zonked = self.zonk_type(&ctx.apply(ty));
 
         let mut evars = Vec::new();
@@ -720,6 +721,47 @@ impl TypeChecker<'_> {
             subst,
             retained,
         })
+    }
+
+    pub(super) fn default_numeric_evars(&mut self, ctx: &Context, wanted_range: Range<usize>) {
+        let mut pending: FxHashMap<EvarId, NumericDefault> = FxHashMap::default();
+        for (evar, preference) in self.numeric_defaults.clone() {
+            let current = self.zonk_type(&ctx.apply(&Self::evar_type(evar)));
+            if let Ty::TyExVar(target) = current {
+                pending
+                    .entry(target)
+                    .and_modify(|current| *current = (*current).max(preference))
+                    .or_insert(preference);
+            }
+        }
+
+        for (evar, preference) in pending {
+            let needs_fractional = self
+                .wanteds
+                .get(wanted_range.clone())
+                .into_iter()
+                .flatten()
+                .any(|wanted| {
+                    self.tables
+                        .class_defs
+                        .get(&wanted.pred.class_id)
+                        .is_some_and(|class| class.short_name == "Fractional")
+                        && wanted
+                            .pred
+                            .args
+                            .iter()
+                            .map(|arg| self.zonk_type(&ctx.apply(arg)))
+                            .any(|arg| matches!(arg, Ty::TyExVar(id) if id == evar))
+                });
+            let default = if needs_fractional {
+                self.float_type()
+            } else if preference == NumericDefault::BigInt {
+                self.big_int_type()
+            } else {
+                self.int_type()
+            };
+            self.evar_solutions.insert(evar, default);
+        }
     }
     fn current_wanted_range_from(&self, start: usize) -> Range<usize> {
         start..self.wanteds.len()

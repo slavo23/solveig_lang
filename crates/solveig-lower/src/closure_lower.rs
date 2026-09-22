@@ -85,6 +85,7 @@ impl ClosureLowerer {
             functions,
             constructor_arities: program.constructor_arities.clone(),
             string_constants: program.string_constants.clone(),
+            big_int_constants: program.big_int_constants.clone(),
             string_literals: program.string_literals.clone(),
         }
     }
@@ -230,6 +231,7 @@ impl<'a> ExprLowerer<'a> {
             }
             IRExpr::Unit => Rc::new(CCExpr::Unit),
             IRExpr::Int(n) => Rc::new(CCExpr::Int(*n)),
+            IRExpr::BigIntConst(index) => Rc::new(CCExpr::BigIntConst(*index)),
             IRExpr::Float(n) => Rc::new(CCExpr::Float(*n)),
             IRExpr::Char(ch) => Rc::new(CCExpr::Char(*ch)),
             IRExpr::StrConst(index) => Rc::new(CCExpr::StrConst(*index)),
@@ -567,6 +569,7 @@ mod tests {
                 )),
             }],
             constructor_arities: Vec::new(),
+            big_int_constants: Vec::new(),
             string_constants: Vec::new(),
             string_literals: Vec::new(),
         };
@@ -597,6 +600,7 @@ mod tests {
                 )),
             }],
             constructor_arities: Vec::new(),
+            big_int_constants: Vec::new(),
             string_constants: Vec::new(),
             string_literals: Vec::new(),
         };

@@ -95,6 +95,14 @@ impl CstToAst<'_> {
             .map_err(|_err| self.push_literal_error(token))
     }
 
+    pub(super) fn lower_integer_literal(&self, token: TokenId) -> SurfaceLiteral {
+        let digits = self.token_text(token);
+        digits.parse::<i64>().map_or_else(
+            |_error| SurfaceLiteral::BigInt(digits.to_string()),
+            SurfaceLiteral::Int,
+        )
+    }
+
     pub(super) fn lower_float_literal(&mut self, token: TokenId) -> Result<f64, ParseError> {
         self.token_text(token)
             .parse::<f64>()
