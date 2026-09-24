@@ -55,6 +55,75 @@ fn captures_smoke_suite_output() {
 }
 
 #[test]
+fn ray_tracer_streams_a_deterministic_512_square_scene_with_the_default_heap() {
+    let _guard = project_run_lock();
+    let repository = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let example = repository.join("examples/ray_tracer");
+    let project_root = temp_project_root("ray_tracer");
+    fs::create_dir_all(project_root.join("src"))
+        .expect("ray tracer temp source directory should be creatable");
+    fs::create_dir_all(project_root.join("output"))
+        .expect("ray tracer temp output directory should be creatable");
+    fs::copy(
+        example.join("solveig.toml"),
+        project_root.join("solveig.toml"),
+    )
+    .expect("ray tracer manifest should be copied");
+    fs::copy(
+        example.join("src/main.sv"),
+        project_root.join("src/main.sv"),
+    )
+    .expect("ray tracer source should be copied");
+
+    let run = Command::new(env!("CARGO_BIN_EXE_solveig"))
+        .arg("--verify-core")
+        .arg("--project-root")
+        .arg(&project_root)
+        .env_remove("SOLVEIG_HEAP_LIMIT")
+        .env_remove("SOLVEIG_GC_STRESS")
+        .env_remove("SOLVEIG_GC_THRESHOLD")
+        .output()
+        .expect("ray tracer CLI should run");
+
+    assert!(
+        run.status.success(),
+        "ray tracer failed with the default heap\nstdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(run.stdout).expect("ray tracer stdout should be UTF-8"),
+        "wrote output/scene.ppm (512x512)\n"
+    );
+    let ppm = fs::read_to_string(project_root.join("output/scene.ppm"))
+        .expect("ray tracer should write its PPM image");
+    let mut tokens = ppm.split_ascii_whitespace();
+    assert_eq!(tokens.next(), Some("P3"));
+    assert_eq!(tokens.next(), Some("512"));
+    assert_eq!(tokens.next(), Some("512"));
+    assert_eq!(tokens.next(), Some("255"));
+    let channels = tokens
+        .map(|token| {
+            token
+                .parse::<u8>()
+                .unwrap_or_else(|error| panic!("invalid PPM channel `{token}`: {error}"))
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(channels.len(), 512 * 512 * 3);
+
+    let pixel = |x: usize, y: usize| {
+        let start = (y * 512 + x) * 3;
+        &channels[start..start + 3]
+    };
+    assert_eq!(pixel(0, 0), [181, 211, 248]);
+    assert_eq!(pixel(256, 256), [216, 123, 117]);
+    assert_eq!(pixel(110, 270), [120, 148, 196]);
+    assert_eq!(pixel(403, 280), [219, 200, 181]);
+    assert_eq!(pixel(256, 400), [34, 50, 38]);
+    assert_eq!(pixel(256, 511), [124, 172, 104]);
+}
+
+#[test]
 fn quiz_game_example_reads_file_prompts_scores_and_writes_reports() {
     let _guard = project_run_lock();
     let project_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/quiz_game");
