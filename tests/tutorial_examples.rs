@@ -5,58 +5,48 @@ use solveig_driver::run_project_capture;
 use tempfile::TempDir;
 
 #[test]
-fn language_tour_documentation_project_compiles_and_runs() {
+fn log_audit_tutorial_application_compiles_and_runs() {
     let repository = repository_root();
-    run_copied_project(
-        &repository.join("docs/tutorial/code/language_tour"),
-        "high: 12\n[\"ada@example.test\"]\n(\"answer\", 42)\n(7, \"seven\")\n[1, 2, 3]\n[(\"/health\", 1), (\"/users\", 2)]\n3-4-5 diagonal: 5\nlarge integer: Just 123456789012345678901234567890\n",
-        |_| {},
+    let output = run_copied_project(&repository.join("examples/log_audit"));
+
+    assert_eq!(
+        output,
+        "Solveig log audit\n\
+         files analyzed: 4\n\
+         files missing: 1\n\
+         events: 14\n\
+         info: 8\n\
+         warnings: 3\n\
+         errors: 3\n"
     );
 }
 
 #[test]
-fn file_summary_documentation_project_compiles_and_runs() {
+fn release_radar_tutorial_application_compiles_and_runs_hermetically() {
     let repository = repository_root();
-    run_copied_project(
-        &repository.join("docs/tutorial/code/file_summary"),
-        "readings: 4\n",
-        |root| {
-            assert_eq!(
-                fs::read_to_string(root.join("summary.txt"))
-                    .expect("file tutorial should create its report"),
-                "readings: 4\n"
-            );
-        },
-    );
-}
+    let output = run_copied_project(&repository.join("examples/release_radar"));
 
-#[test]
-fn concurrent_jobs_documentation_project_compiles_and_runs() {
-    let repository = repository_root();
-    run_copied_project(
-        &repository.join("docs/tutorial/code/concurrent_jobs"),
-        "results: [1, 4, 9, 16]\noverlap: [\"invoice-101\", \"invoice-102\", \"invoice-103\"]\n",
-        |_| {},
+    assert!(
+        output.starts_with("release radar: deterministic local concurrency comparison\n"),
+        "unexpected Release Radar prelude:\n{output}"
     );
-}
-
-#[test]
-fn local_http_documentation_project_compiles_and_runs() {
-    let repository = repository_root();
-    run_copied_project(
-        &repository.join("docs/tutorial/code/local_http"),
-        "responses: 3\nhello from Solveig\n",
-        |_| {},
+    assert!(
+        output.contains("local comparison: sequential "),
+        "Release Radar should report its controlled comparison:\n{output}"
     );
-}
-
-#[test]
-fn tutorial_checks_documentation_project_compiles_and_runs() {
-    let repository = repository_root();
-    run_copied_project(
-        &repository.join("docs/tutorial/code/tutorial_checks"),
-        "all checks passed\n",
-        |_| {},
+    assert!(
+        output.contains("checked 40 repositories with a bounded 4-worker pool\n"),
+        "Release Radar should report its bounded workload:\n{output}"
+    );
+    assert_eq!(
+        output.matches("[start] ").count(),
+        40,
+        "every configured repository should start exactly once"
+    );
+    assert_eq!(
+        output.matches("[done ").count(),
+        40,
+        "every configured repository should complete exactly once"
     );
 }
 
@@ -64,19 +54,12 @@ fn repository_root() -> &'static Path {
     Path::new(env!("CARGO_MANIFEST_DIR"))
 }
 
-fn run_copied_project(source: &Path, expected_output: &str, check_files: impl FnOnce(&Path)) {
+fn run_copied_project(source: &Path) -> String {
     let temporary = TempDir::new().expect("tutorial project temp directory should be creatable");
     copy_tree(source, temporary.path());
 
-    let output = run_project_capture(temporary.path(), "main")
-        .expect("tutorial documentation project should compile and run");
-    assert_eq!(
-        output,
-        expected_output,
-        "tutorial project {}",
-        source.display()
-    );
-    check_files(temporary.path());
+    run_project_capture(temporary.path(), "main")
+        .expect("tutorial application should compile and run")
 }
 
 fn copy_tree(source: &Path, destination: &Path) {

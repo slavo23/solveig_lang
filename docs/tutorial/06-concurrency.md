@@ -1,13 +1,19 @@
-# 6. Concurrency
+# 8. Make independent work overlap
 
-Concurrency lets one program make progress on multiple tasks while some are
-waiting for timers, files, sockets, or other tasks. Solveig runs lightweight
-language threads on its VM and moves blocking I/O to a bounded worker
-boundary so another runnable language thread can continue.
+Release Radar spends far more time waiting for responses than decoding them.
+Log Audit has a producer, several file workers, and a collector that must stay
+live together. Concurrency lets both applications make progress while one part
+waits for timers, files, sockets, channels, or another task. Solveig runs
+lightweight language threads on its VM and moves blocking I/O to bounded host
+boundaries so another runnable language thread can continue.
 
 Concurrency is not the same as parallel CPU execution. Its most immediate
 benefit is overlapping waits. Whether a particular workload becomes faster is
 an empirical question; measure the real program rather than assuming.
+
+**Skip ahead:** readers familiar with structured concurrency should study
+[bounded concurrent mapping](#bounded-concurrent-mapping) for Release Radar and
+[Log Audit's bounded pipeline](#log-audits-bounded-pipeline).
 
 ## A useful runtime model
 
@@ -124,33 +130,34 @@ way to abandon a live resource.
 
 ## Bounded concurrent mapping
 
-For a list of independent `Task` operations, use
-`mapConcurrentlyBoundedOrdered`:
+For a list of independent operations, use
+`mapConcurrentlyBoundedOrdered`. Release Radar's checked client keeps the
+worker error type until one explicit mapping:
 
 ```solveig
-import std.task(concurrentIOError, mapConcurrentlyBoundedOrdered)
-import std.time(milliseconds, sleep)
-
-process : Int -> Task Int
-process value = do
-    sleep $ milliseconds $ (5 - value) * 10
-    pureIO $ value * value
-
-main : Task ()
-main = do
-    results <- mapError concurrentIOError (mapConcurrentlyBoundedOrdered 3 process [1, 2, 3, 4])
-    printLine ("results: " <> show results)
+fetchConcurrentObserved :
+    Int ->
+    String ->
+    Maybe String ->
+    Cache -> [String] -> Task [ReleaseResult]
+fetchConcurrentObserved workers base token cache repositories =
+    mapError
+        concurrentIOError
+        (mapConcurrentlyBoundedOrdered
+            workers
+            (fetchObserved base token cache)
+            repositories)
 ```
 
-This complete program is in [`concurrent_jobs`](code/concurrent_jobs/). Three
-workers may be active at once. The larger-numbered jobs deliberately wait less,
-but the result is still `[1, 4, 9, 16]` because the combinator restores input
-order.
+The caller passes `workerCount = 4`. At most four fetch actions are active in
+this pool. Each worker prints its own completion immediately, so those lines
+show observed completion order. The returned `[ReleaseResult]` follows
+`repos.txt` order because the combinator restores input order.
 
 Follow one run conceptually:
 
 1. A feeder places indexed jobs into a bounded channel.
-2. Three scoped workers receive jobs. When one sleeps, another worker can run.
+2. Four scoped workers receive jobs. When one waits on HTTP, another can run.
 3. Each worker sends its index and outcome to a result channel.
 4. The collector stores results by index, then reconstructs input order.
 5. Leaving the combinator cancels and joins the feeder and every worker.
@@ -178,72 +185,58 @@ property of the machine's CPU count.
 
 When any operation fails, the pool stops and its scoped workers are cancelled
 and joined. The generic result distinguishes `ConcurrentWorker workerError`
-from `ConcurrentInfrastructure ioError`. The example explicitly collapses
+from `ConcurrentInfrastructure ioError`. Release Radar explicitly collapses
 that distinction because both its workers and `main` use `IOError`. An
 invalid non-positive capacity is `ConcurrentInfrastructure (IOError
 InvalidArgument ...)`.
 
-### Prove overlap without a flaky stopwatch
+### Demonstrate useful overlap
 
-The runnable `concurrent_jobs` project includes a stronger example than “the
-output looked fast.” Three invoice jobs each announce that they started and
-then wait on a release channel. A coordinator waits to observe all three start
-messages before releasing any of them:
+Release Radar's default mode measures the same repository list twice against
+the same local service: once with `mapM`, then with the bounded pool. The
+fixture derives a 30–199 ms delay from each request's bytes. No public network,
+DNS service, account, or rate limiter contributes noise.
 
 ```solveig
-import std.channel(*)
-import std.task(concurrentIOError, concurrently, mapConcurrentlyBoundedOrdered)
-
-awaitStarts : Int -> Chan Int -> Task ()
-awaitStarts 0 _ = pureIO ()
-awaitStarts remaining started = do
-    _ <- recv started
-    awaitStarts (remaining - 1) started
-
-releaseWorkers : Int -> Chan () -> Task ()
-releaseWorkers 0 _ = pureIO ()
-releaseWorkers remaining release = do
-    send release ()
-    releaseWorkers (remaining - 1) release
-
-waitForRelease : Chan Int -> Chan () -> Int -> Task String
-waitForRelease started release invoiceId = do
-    send started invoiceId
-    _ <- recv release
-    pureIO $ "invoice-" <> show invoiceId
-
-coordinate : Chan Int -> Chan () -> Task ()
-coordinate started release = do
-    awaitStarts 3 started
-    releaseWorkers 3 release
-
-proveOverlap : Task [String]
-proveOverlap = do
-    started <- newChan
-    release <- newChan
-    (results, _) <-
-        concurrently
-            (mapError concurrentIOError $
-                mapConcurrentlyBoundedOrdered
-                    3
-                    (waitForRelease started release)
-                    [101, 102, 103])
-            (coordinate started release)
-    pureIO results
+runLocalAgainst : [String] -> String -> Task ()
+runLocalAgainst repositories base = do
+    sequential <- measure (fetchSequential base Nothing empty repositories)
+    case sequential of
+        (sequentialNanos, _) => do
+            concurrent <-
+                measure
+                    (fetchConcurrentObserved
+                        workerCount
+                        base
+                        Nothing
+                        empty
+                        repositories)
+            case concurrent of
+                (concurrentNanos, results) =>
+                    reportLocalComparison
+                        repositories
+                        sequentialNanos
+                        results
+                        concurrentNanos
 ```
 
-This is a logical proof of overlap, not a timing guess. A sequential traversal
-would start invoice 101 and block waiting for release; the coordinator would
-wait forever for 102 and 103. The program completes because three worker
-actions can all reach their waiting point. Ordered collection still returns
-`["invoice-101", "invoice-102", "invoice-103"]`.
+`reportLocalComparison` fails if the concurrent duration is not smaller. This
+is an application demonstration under controlled delays, not a general
+benchmark claim. It establishes the situation where concurrency wins: many
+independent operations spend most of their time waiting and the service allows
+four of them to overlap.
 
-The same shape appears in backend work: load several independent customer
-records, call independent downstream services, or upload independent object
-parts. Concurrency wins when those actions spend meaningful time waiting and
-the external system permits overlap. It does not make dependent steps
-independent: authenticate, obtain a token, and then call an API remains a
-sequential data dependency.
+For a unit test that should not depend on a stopwatch at all, use channels as a
+barrier: require all workers to announce that they reached a waiting point
+before releasing any. A sequential traversal cannot satisfy that protocol,
+while a pool with the required capacity can. The repository's concurrency
+fixtures use channel ordering and deterministic scheduler mode for exact
+behavioral assertions; elapsed-time measurement is reserved for the real local
+application.
+
+Concurrency does not make dependent steps independent. Loading credentials,
+checking access, and then issuing authenticated requests remains ordered by
+data dependencies.
 
 A useful review question is therefore not “can this be concurrent?” but:
 
@@ -364,6 +357,68 @@ Messages may arrive at the collector in completion order. Attach an index when
 the final output must reproduce input order. This is exactly the distinction
 between a concurrent schedule and a deterministic presentation.
 
+## Log Audit's bounded pipeline
+
+Log Audit uses the explicit primitives because it has a multi-stage protocol,
+not merely a list map:
+
+```text
+enqueueJobs
+    │
+    ▼
+bounded Chan LogJob (capacity 2)
+    │
+    ├── worker 1 ─┐
+    ├── worker 2 ─┼──▶ bounded Chan AuditResult (capacity 2) ──▶ collectResults
+    └── worker 3 ─┘
+```
+
+The actual owner is `runAudit`:
+
+```solveig
+runAudit : Chan LogJob -> Chan AuditResult -> Task AuditSummary
+runAudit jobs results =
+    withThread
+        (worker jobs results)
+        (fun firstWorker =>
+            withThread
+                (worker jobs results)
+                (fun secondWorker =>
+                    withThread
+                        (worker jobs results)
+                        (fun thirdWorker => do
+                            completed <-
+                                concurrently
+                                    (enqueueJobs jobs)
+                                    (collectResults results 5 emptySummary)
+                            case completed of
+                                (produced, summary) => pureIO summary
+                        )
+                )
+        )
+```
+
+The three thread identifiers and producer result are intentionally unused; the
+scopes are present for ownership. Producer and collector must overlap. If the
+program enqueued all five jobs before starting the collector, a capacity-two
+jobs queue and capacity-two results queue could form this deadlock:
+
+1. workers fill the results queue;
+2. workers stop receiving jobs because they are blocked sending results;
+3. the producer blocks because the jobs queue is full;
+4. no collector is running to free result capacity.
+
+`concurrently enqueueJobs collectResults` ensures the consumer is live while
+the producer and workers can be backpressured. The producer closes only the
+jobs channel because it knows when no jobs remain. The collector receives a
+known count. `main` closes the results channel after all five outcomes have
+been collected.
+
+Results may arrive in any order, but `AuditSummary` is an order-independent
+aggregation. Unlike Release Radar, Log Audit does not need to attach indexes and
+restore presentation order. Choosing the result algebra carefully can remove
+ordering work.
+
 ## Failure and cancellation
 
 Solveig keeps three exit mechanisms distinct:
@@ -442,4 +497,52 @@ delays before drawing conclusions from the public internet. Remote caches,
 rate limits, and network variation can otherwise overwhelm the effect you want
 to measure.
 
-Next: [Networking and HTTP](07-networking-and-http.md).
+## Deliberate error: removing one concurrent participant
+
+If Log Audit runs `enqueueJobs jobs` to completion before starting
+`collectResults`, the program can block forever under its existing capacities.
+The types still agree: channel protocols include temporal facts that `Chan a`
+cannot express. The runtime's all-threads-blocked diagnostic identifies the
+symptom; the ownership diagram identifies the cycle.
+
+## Checkpoint
+
+Run both concurrency designs:
+
+```sh
+cargo run -- --project-root examples/log_audit
+cargo run -- --project-root examples/release_radar
+```
+
+For Log Audit, account for every send, receive, close, and scope. For Release
+Radar, compare completion lines with the final ordered report and explain why
+they differ.
+
+## Exercises
+
+1. Reduce both Log Audit channel capacities to one in a scratch copy. Explain
+   why correct concurrent producer/collector ownership still makes progress.
+2. Change Release Radar's worker count to one. Predict the timing relationship
+   and completion order.
+3. Choose completion-order or input-order mapping for a health dashboard and
+   justify the user-visible contract.
+4. Design failure policy for three independent downstream calls when one fails:
+   cancel peers, keep partial results, or represent every outcome as domain
+   data.
+5. Explain why green threads improve these waiting workloads but do not execute
+   two ray-tracing pixels on two CPU cores.
+
+## Recap
+
+- Solveig schedules green threads on one bytecode-executing OS thread.
+- Supported blocking IO suspends the green thread through bounded host
+  machinery; it does not freeze the scheduler.
+- Structured combinators cancel and join children before returning.
+- Worker and queue bounds are correctness and resource policies.
+- Ordered results, completion order, and execution schedule are distinct.
+- Channels type messages but cannot prove protocol liveness or close ownership.
+- Log Audit uses an explicit bounded pipeline; Release Radar uses a bounded map.
+- Controlled local delay demonstrates useful overlap without claiming CPU
+  parallelism or public-network benchmark results.
+
+Next: [Finish and operate the application](09-packages-and-tooling.md).

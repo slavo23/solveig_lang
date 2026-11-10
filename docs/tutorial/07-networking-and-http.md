@@ -1,6 +1,8 @@
-# 7. Networking and HTTP
+# 7. Build a typed HTTP client
 
-Solveig has three networking layers:
+Release Radar is a client application. It should express “fetch the latest
+release,” not manually resolve DNS, frame an HTTP message, or drive TLS. Solveig
+has three networking layers:
 
 - `std.net` exposes TCP connections and listeners as byte streams.
 - `std.tls` adds verified encryption to an outgoing byte stream.
@@ -9,6 +11,11 @@ Solveig has three networking layers:
 
 Use `std.http` for web APIs. Use `std.tls` for a custom encrypted client
 protocol, and `std.net` for plaintext custom protocols or server-side TCP/UDP.
+
+**Skip ahead:** if HTTP client fundamentals are familiar, start with
+[Release Radar's client boundary](#put-an-api-boundary-around-http), then read
+[authentication, pagination, retries, and rate limits](#authentication-pagination-retries-and-rate-limits)
+and the local fixture.
 
 ## Build the right mental model
 
@@ -100,64 +107,59 @@ policy requires it.
 
 Application code should not pass raw `Response` values through the whole
 program. A small client function can own transport policy, status policy, and
-JSON decoding, returning the domain value callers actually need. The local
-tutorial project decodes `{"message":"hello from Solveig"}` with a direct
-decoder:
+JSON decoding, returning the domain value callers actually need. Release Radar
+starts with an explicit policy:
 
 ```solveig
 import std.http(*)
-import std.json(Decoder, decodeJson, defaultJsonLimits, recordDecoder, requiredField, stringDecoder)
-import std.parser(foldReply)
+import std.time(*)
 
-messageDecoder : Decoder () String
-messageDecoder = recordDecoder $ requiredField "message" stringDecoder
-
-decodeMessage : Bytes -> Either IOError String
-decodeMessage bytes =
-    foldReply
-        (fun _ message _ => Right message)
-        (fun _ _ parseError =>
-            Left $ IOError InvalidArgument "decode message response" $ show parseError)
-        (fun _ _ _ =>
-            Left $ IOError InvalidArgument "decode message response" "incomplete JSON")
-        (decodeJson defaultJsonLimits messageDecoder bytes)
+httpOptions : HttpOptions
+httpOptions =
+    withRedirectPolicy NoRedirects
+        (withTimeout
+            (milliseconds 10000)
+            (withMaximumBufferedBodyBytes
+                1048576
+                (withMaximumHeaderBytes 65536 defaultOptions)))
 ```
 
-`decodeJson` returns `ParseReply`, so all three outcomes are handled explicitly:
-a value, a positioned decoding error, or a request for more input. Complete
-strict bytes should not remain awaiting, but the branch keeps the boundary
-total. A production library would normally retain a domain `ApiError` sum
-instead of translating straight to `IOError`; this fixture uses one error
-type so it can share a small `Task` entry point.
+Redirects are disabled because an `Authorization` header must not be forwarded
+to a different origin. The complete body is capped at one MiB, metadata at 64
+KiB, and the request at ten seconds. These are application choices layered on
+safe library defaults.
 
-The request adds normal API metadata and checks status before decoding:
+The request adds normal API metadata, optional authentication and cache
+validation, then converts the transport result into a domain value:
 
 ```solveig
-httpAsIOError : HttpError -> IOError
-httpAsIOError (HttpIOError ioError) = ioError
-httpAsIOError error = IOError InvalidArgument "HTTP" $ show error
-
-fetchMessage : String -> Task String
-fetchMessage url = do
-    response <- mapError httpAsIOError $
-        getWith
-            (withHeader "Accept" "application/json" $
-                withQuery [("language", "solveig")] defaultOptions)
-            url
-    successful <-
-        case ensureSuccess response of
-            Left error => failIO $ httpAsIOError error
-            | Right value => pureIO value
-    case decodeMessage $ responseBody successful of
-        Left error => failIO error
-        | Right message => pureIO message
+fetchRelease :
+    String ->
+    Maybe String -> Cache -> String -> Task ReleaseResult
+fetchRelease base token cache repository =
+    catchError
+        (fmap
+            (decodeResponse repository (etagFor repository cache))
+            (getWith
+                (withHeaders (requestHeaders token cache repository) httpOptions)
+                (base <> "/repos/" <> repository <> "/releases/latest")))
+        (pureIO
+            . ReleaseFailed repository
+            . RequestFailure
+            . describeHttpError)
 ```
 
-That order is deliberate: transport must succeed before there is a response;
-status policy decides whether the body represents success; decoding then turns
-the successful representation into the domain value. For APIs whose error
-bodies have a useful schema, decode them in the non-success branch instead of
-calling `ensureSuccess` and discarding that context.
+This is copied from
+[`release_radar.client`](../../examples/release_radar/src/release_radar/client.sv);
+the imported names are qualified in the complete module. `catchError` changes
+a typed `HttpError` into the domain constructor `RequestFailure`.
+`decodeResponse` separately interprets status, headers, cached ETags, success
+JSON, and API error JSON. Transport must succeed before there is a response;
+status chooses the representation; decoding then constructs the domain value.
+
+This client does not call `ensureSuccess`, because GitHub's `304`, `401`,
+`403`, `404`, and `429` responses have distinct application meanings and
+useful headers or bodies.
 
 ## Status, headers, and body
 
@@ -579,57 +581,80 @@ Solveig does not currently provide a high-level HTTP server framework. The
 tutorial's local program writes the small HTTP response itself over TCP so the
 client example remains hermetic.
 
-## Complete local HTTP program
+## Release Radar's local HTTP fixture
 
-[`local_http`](code/local_http/) does all of the following in one runnable
-project:
+Release Radar's default mode exercises the real client without internet access.
+The complete fixture is
+[`release_radar.fixture`](../../examples/release_radar/src/release_radar/fixture.sv).
+It does all of the following:
 
-1. Binds a loopback listener on an automatically selected port.
-2. Starts the server in a `withThread` scope.
-3. Accepts three connections and scopes every connection.
-4. Runs three typed, JSON-decoding clients through
-   `mapConcurrentlyBoundedOrdered`.
-5. Closes the listener and every accepted connection through rank-2 scopes.
-6. Closes every connection, listener, worker, and child scope.
+1. binds an IPv4 loopback listener on `anyPort`;
+2. starts a scoped server with `withThread`;
+3. accepts the exact number of requests the comparison will make;
+4. scopes every accepted connection;
+5. reads until the HTTP header terminator rather than assuming one TCP receive;
+6. delays each response deterministically from request bytes;
+7. writes a fixed, correctly length-framed JSON response.
 
-Run it without internet access:
+The framing loop is real code:
+
+```solveig
+readRequestHeaders : forall scope. TcpConnection scope -> Bytes -> IO NetError Bytes
+readRequestHeaders connection accumulated =
+    case findHeaderEnd accumulated 0 of
+        Just _ => pureIO accumulated
+        | Nothing => do
+            chunk <- receiveTcpBytes connection 1024
+            if bytesLength chunk == 0
+                then pureIO accumulated
+                else readRequestHeaders connection (bytesAppend accumulated chunk)
+```
+
+This is sufficient for the controlled fixture because the generated client
+headers are small. It is not a general HTTP request parser: it has no explicit
+total header quota, request-body support, routing, keep-alive loop, or public
+accept policy. The fixture remains private application test infrastructure.
+
+`withFixture` maps the listener error at one boundary and passes the generated
+base URL to the real application action:
+
+```solveig
+withFixture : forall a. Int -> (String -> Task a) -> Task a
+withFixture requestCount action =
+    mapError netToIO (withTcpListener anyPort (runFixture requestCount action))
+```
+
+The callback cannot receive a live listener, so it cannot accidentally let
+that resource escape. The nested server thread is also joined or cancelled
+before `runFixture` returns.
+
+Run the hermetic client and fixture together:
 
 ```sh
-solveig --project-root docs/tutorial/code/local_http
+cargo run -- --project-root examples/release_radar
 ```
 
-Expected output:
+The exact millisecond measurements and worker completion lines vary. The
+contract is that the concurrent duration beats the sequential duration for the
+same delayed workload, every repository produces a decoded result, and the
+final report returns to `repos.txt` order.
 
-```text
-responses: 3
-hello from Solveig
+Run live GitHub HTTPS only when you deliberately choose external access:
+
+```sh
+cargo run -- --project-root examples/release_radar -- --live
 ```
 
-The full source is intentionally kept in the tutorial project rather than
-duplicated here. Read it alongside this chapter: the `reply`,
-`serveBatch`, `runClients`, and `runFixture` functions each own one clear piece
-of the protocol.
+The [example README](../../examples/release_radar/README.md) documents optional
+`GITHUB_TOKEN`, dotenv precedence, rate limits, and ETag cache behavior.
 
-The program is deliberately a fixture, not a miniature reusable HTTP server:
+## Deliberate error: treating HTTP status as transport failure
 
-- `fixtureResponse` constructs one fixed response with an exact
-  `Content-Length`.
-- `reply` waits until the client has sent some request bytes, then returns the
-  fixed response; it does not pretend that one TCP read contains a complete
-  general HTTP request.
-- `serveBatch` accepts exactly three connections, so its recursion has an
-  explicit termination condition.
-- `fetchMessage` uses `getWith`, safely encoded query data, an `Accept` header,
-  explicit status policy, and a direct JSON decoder.
-- `runClients` uses a bound of three. Ordered collection makes output
-  deterministic even if requests finish differently.
-- `runFixture` owns the server through `withThread`, and `main` owns the
-  listener through `withTcpListener`. Leaving either lexical scope performs
-  cleanup before returning.
-
-This shape keeps the test hermetic: it binds only loopback, asks the host for an
-ephemeral port, uses no DNS beyond the numeric loopback address, and needs no
-public internet service or credential.
+If `fetchRelease` calls `ensureSuccess`, a `304 Not Modified` becomes
+`UnexpectedStatus` before cache policy can observe it. The types still
+compile, but the application model is wrong. A client boundary must decide
+which statuses are normal domain outcomes before applying a generic success
+predicate.
 
 ## Network design checklist
 
@@ -646,4 +671,40 @@ Before calling a network program complete, answer these questions:
 - Can a redirect or retry repeat this method and body safely?
 - Does streamed validation finish before the scoped response is closed?
 
-Next: [Parsers and JSON](08-parsers-and-json.md).
+## Checkpoint
+
+Run the default Release Radar mode and locate:
+
+1. the client body's one-MiB strict limit;
+2. the ten-second request timeout;
+3. the disabled redirect policy;
+4. the header terminator loop in the fixture;
+5. the point where `HttpError` becomes `ReleaseFailure`.
+
+## Exercises
+
+1. Add a harmless query parameter in a scratch copy using `withQuery`; do not
+   concatenate an unescaped value into the URL.
+2. Classify `200`, `304`, `401`, `403`, `404`, and `429` as transport
+   success plus domain policy.
+3. Design a paginated fetch with both a maximum page count and bounded
+   concurrency inside a page.
+4. Explain why a streamed POST body cannot automatically be replayed across a
+   redirect.
+5. Choose between strict `get` and `withResponse` for a 2 GiB artifact.
+
+## Recap
+
+- `std.http` is the requests-style client surface; ordinary callers do not
+  assemble sockets or framing records.
+- Library defaults bound headers, body, time, and redirects; applications can
+  refine policy through immutable options.
+- HTTP status is response data, distinct from DNS, TLS, transport, timeout, and
+  bound failures.
+- Request bodies have replay semantics; streamed bodies are one-shot.
+- TLS certificate and server-name verification cannot be disabled.
+- TCP is an unframed byte stream; UDP preserves datagrams without promising
+  delivery or order.
+- Release Radar's loopback service is a hermetic fixture, not a web framework.
+
+Next: [Make independent work overlap](06-concurrency.md).

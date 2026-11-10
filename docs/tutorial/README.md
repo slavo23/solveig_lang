@@ -1,90 +1,99 @@
 # The Solveig tutorial
 
-Welcome to Solveig. This tutorial starts with small pure functions and grows
-into programs that read files, validate data, run child processes, coordinate
-concurrent work, communicate through channels, and call HTTP APIs.
+This is a course in building reliable Solveig programs, not a catalog of
+syntax. It follows two applications that are compiled and exercised in this
+repository:
 
-The intended reader is a working programmer or CS student who knows the usual
-ideas—functions, data structures, files, and network requests—but need not know
-Haskell. Each chapter first builds a mental model, then applies it to a
-realistic task, and finally states the operational details that matter in
-production. When a behavior depends on the compiler or VM, the text describes
-the implemented behavior rather than relying on analogy with another language.
+- [Log Audit](../../examples/log_audit/) turns several log files into one
+  deterministic report. It begins as pure text analysis and grows into a
+  bounded, concurrent file program.
+- [Release Radar](../../examples/release_radar/) checks release metadata over
+  HTTP. Its default mode is a hermetic loopback demonstration; live GitHub
+  access is opt-in.
 
-## Learning path
+The intended reader is a working programmer or CS student. Familiarity with
+functions and ordinary data structures helps, but neither Haskell nor prior
+functional-programming experience is assumed. Experienced FP readers can use
+the **Skip ahead** notes in each chapter.
 
-Read the chapters in order on a first pass:
+## How the course works
 
-1. [Getting started](01-getting-started.md) creates and runs a package.
-2. [Language basics](02-language-basics.md) covers values, functions,
-   expressions, lists, tuples, and operators.
-3. [Data, patterns, and errors](03-data-and-patterns.md) introduces algebraic
-   data types, exhaustive pattern matching, `Maybe`, `Either`, and typed IO.
-4. [Abstraction](04-abstraction.md) covers modules, polymorphism, type aliases,
-   typeclasses, instances, higher-order functions, and point-free style.
-5. [IO and files](05-io-and-files.md) explains `Task`, `do`, handles, cleanup,
-   filesystem operations, environment variables, time, randomness, and child
-   processes.
-6. [Concurrency](06-concurrency.md) develops a precise mental model for green
-   threads, structured lifetimes, bounded parallelism, channels, cancellation,
-   and timeouts.
-7. [Networking and HTTP](07-networking-and-http.md) covers TCP and the
-   high-level HTTP client, including concurrent requests and a fully local,
-   testable web program.
-8. [Parsers and JSON](08-parsers-and-json.md) shows generic parser combinators,
-   incremental replies, JSON decoding, and input limits.
-9. [Packages, testing, and tooling](09-packages-and-tooling.md) explains local
-   libraries, deterministic tests, the CLI, program arguments, and the editor.
+Every chapter has the same contract:
 
-Reference pages under `docs/` are organized by API. The tutorial is organized
-by what you are trying to learn.
+1. start from an application need;
+2. build the language model needed to meet it;
+3. point to the exact checked source that uses the idea;
+4. show a deliberate mistake and explain the compiler diagnostic;
+5. finish with a runnable checkpoint, exercises, and a recap.
 
-## Runnable tutorial projects
+Complete source links always name repository files. Short snippets are copied
+from those sources or are explicitly labeled as isolated illustrations. Claims
+about evaluation, typing, cancellation, ownership, buffering, or limits are
+grounded in the compiler, VM, standard-library source, and executable tests.
 
-Complete projects live in [`code/`](code/), not in the repository's example
-applications:
-
-- [`language_tour`](code/language_tour/) exercises data, patterns, aliases,
-  typeclasses, higher-rank functions, tuples, persistent maps, and point-free
-  functions.
-- [`file_summary`](code/file_summary/) reads a text file and writes a report.
-- [`concurrent_jobs`](code/concurrent_jobs/) runs a bounded worker pool.
-- [`local_http`](code/local_http/) starts a loopback TCP server and fetches from
-  it with three concurrent HTTP clients.
-- [`tutorial_checks`](code/tutorial_checks/) combines example-based assertions
-  with a reproducible property test.
-
-They are executed by the repository test suite, so the checked-in programs
-cannot silently drift away from the language and standard-library APIs. Run one
-from the repository root with:
+Run either application from the repository root with Cargo:
 
 ```sh
-cargo run -- --project-root docs/tutorial/code/concurrent_jobs
+cargo run -- --project-root examples/log_audit
+cargo run -- --project-root examples/release_radar
 ```
 
-With an installed compiler, use:
+With an installed compiler, omit `cargo run --`:
 
 ```sh
-solveig --project-root docs/tutorial/code/concurrent_jobs
+solveig --project-root examples/log_audit
 ```
 
-The file project creates `summary.txt`. If you are experimenting, copy that
-project to a temporary directory first or remove the generated file afterward.
+## Core course
 
-## Conventions
+1. [Run, change, and diagnose a program](01-getting-started.md) establishes the
+   package model and the read–compile–run loop with Log Audit.
+2. [Transform log data with pure functions](02-language-basics.md) introduces
+   values, expressions, functions, lists, recursion, local bindings, tuples,
+   and readable operator use.
+3. [Model valid states with data and patterns](03-data-and-patterns.md) turns
+   file outcomes and summaries into algebraic data rather than conventions.
+4. [Cross the IO boundary](05-io-and-files.md) covers `IO`, `Task`, paths,
+   filesystem errors, cleanup, streams, environment, time, randomness, and
+   child processes.
+5. [Organize and test an application](04-abstraction.md) covers polymorphism,
+   higher-order functions, modules, visibility, typeclasses, collections, and
+   deterministic checks.
+6. [Decode an external service response](08-parsers-and-json.md) moves into
+   Release Radar through parser replies, bounded JSON, and domain decoding.
+7. [Build a typed HTTP client](07-networking-and-http.md) develops requests,
+   responses, limits, errors, authentication, redirects, and a local fixture.
+8. [Make independent work overlap](06-concurrency.md) explains structured
+   concurrency, bounded mapping, channels, backpressure, cancellation, and why
+   the two applications choose different concurrency tools.
+9. [Finish and operate the application](09-packages-and-tooling.md) covers
+   configuration, caching, CLI arguments, packages, tests, formatting, and the
+   editor.
 
-Code marked `solveig` belongs in an `.sv` source file. Shell commands are
-marked `sh`; manifest files are marked `toml`.
+The file numbers remain stable for existing links; the sequence above is the
+pedagogical order.
 
-Most examples use explicit signatures. Solveig can infer many of them, but a
-signature documents intent and makes error messages easier to understand.
-Standard-library imports are explicit; the Prelude is automatically in scope.
+## Deep workshops
 
-Snippets containing only an expression are deliberately excerpts and use names
-introduced immediately around them. Programs linked from `code/` are complete,
-formatted packages exercised by the Rust integration suite. The tutorial uses
-`(.)` for a genuine value-transformation pipeline and `($)` to remove noisy
-parentheses; it keeps named arguments where point-free code would hide control
-flow or error policy.
+After the course, use the [workshop index](workshops/README.md):
 
-Continue with [Getting started](01-getting-started.md).
+- build and reason about Log Audit's manual bounded worker pool;
+- trace Scry from source text through parsing and evaluation;
+- implement and test message framing over TCP and UDP;
+- stream files, HTTP bodies, and child-process pipes without hidden growth;
+- understand the ray tracer from vector algebra to bounded PPM output.
+
+## Reading conventions
+
+Code marked `solveig` belongs in an `.sv` file. Shell commands are marked
+`sh`, manifests are `toml`, and expected terminal output is `text`.
+
+Signatures are included when they clarify a boundary. The examples use `(.)`
+for genuine transformation pipelines and `($)` to remove parenthesis noise;
+they retain named arguments when point-free style would obscure control flow,
+resource lifetime, or error policy.
+
+The tutorial teaches choices. The [documentation map](../README.md) leads to
+the exhaustive reference.
+
+Continue with [Run, change, and diagnose a program](01-getting-started.md).

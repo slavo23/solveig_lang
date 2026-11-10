@@ -1,6 +1,0 @@
-[package]
-name = "concurrent_jobs"
-version = "0.1.0"
-
-[language]
-entry = "main"

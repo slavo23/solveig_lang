@@ -1,7 +1,15 @@
-# 4. Functions, modules, and typeclasses
+# 5. Organize and test an application
 
-Solveig's abstraction tools are small but composable: parametric polymorphism,
-higher-order functions, modules, type aliases, typeclasses, and instances.
+Log Audit fits in one source file, but Release Radar has distinct policies for
+HTTP, JSON/domain decoding, caching, a local fixture, and orchestration. This
+chapter explains the tools that let those parts remain small: polymorphism,
+higher-order functions, modules, aliases, typeclasses, and persistent
+collections.
+
+**Skip ahead:** experienced FP readers should inspect
+[`examples/release_radar/src`](../../examples/release_radar/src/) and read
+[modules as architecture](#modules-as-architecture) plus
+[testing the boundaries](#testing-the-boundaries).
 
 ## Polymorphic functions
 
@@ -57,7 +65,7 @@ Aliases may take parameters, but every use must supply all of the alias's type
 arguments. If higher-kinded partial application is required, define a real
 `data` type instead.
 
-## Modules
+## Modules as architecture
 
 Every `.sv` file below `src/` is a module. For package `shop`,
 `src/order/price.sv` has the fully qualified name `shop.order.price`.
@@ -80,6 +88,49 @@ firstThree = std.list.take 3
 
 When two unqualified imports provide the same name, Solveig reports ambiguity
 instead of silently selecting one.
+
+Release Radar uses the same mechanism for an application:
+
+```text
+src/
+├── main.sv
+└── release_radar/
+    ├── cache.sv
+    ├── client.sv
+    ├── fixture.sv
+    └── model.sv
+```
+
+`main.sv` imports responsibilities, not one undifferentiated utility module:
+
+```solveig
+import release_radar.cache(*)
+import release_radar.client(*)
+import release_radar.fixture(*)
+import release_radar.model(*)
+```
+
+- `model` owns domain types, JSON decoding, status interpretation, and
+  rendering.
+- `client` owns request construction, transport errors, and fetching.
+- `cache` owns the persistent ETag format and atomic replacement.
+- `fixture` owns the loopback HTTP service used by the hermetic mode.
+- `main` owns configuration, mode selection, measurement, and reporting.
+
+This direction keeps transport code dependent on the domain model, while the
+model does not depend on the application's orchestration.
+
+For a reusable package, declare its external surface:
+
+```solveig
+export (Config, loadConfig)
+private (validateRawConfig)
+```
+
+`Config(..)` exports public constructors; `Config` alone keeps them opaque
+outside the package. A `reexport package.module(...)` declaration can build a
+facade. Release Radar is an application and uses package-internal modules, so
+it does not need to manufacture a public library API.
 
 ## Typeclasses
 
@@ -258,4 +309,76 @@ useIdentity polymorphic = (polymorphic 7, polymorphic "seven")
 Higher-rank code normally needs a written signature because inference cannot
 guess where the inner quantifier belongs.
 
-Next: [IO and files](05-io-and-files.md).
+## Testing the boundaries
+
+Solveig currently has no special test declaration or hidden test runtime. A
+test is an ordinary package or entry point that computes checks, prints useful
+context, and exits nonzero on failure. Repository integration tests also
+compile and execute examples through the same driver used by the CLI.
+
+Good application boundaries make deterministic checks straightforward:
+
+- `analyzeLog`, `includeResult`, `decodeReleaseJson`, and cache merging are
+  pure functions.
+- Release Radar's default mode starts its own loopback TCP listener and calls
+  the real HTTP client against it.
+- The live GitHub mode is opt-in; it is not required for the hermetic course or
+  repository validation.
+- Seeded `StdGen` values make generated cases replayable.
+- `SOLVEIG_SCHED_DETERMINISTIC=1` is a test/debug scheduler mode, not a
+  semantic guarantee that production concurrency has one completion order.
+
+Test observable contracts rather than private call structure. Log Audit's
+golden check asserts the exact report. Release Radar's local path asserts typed
+decoding and that independent delayed requests overlap, while final results are
+restored to input order.
+
+## Deliberate error: importing the wrong layer
+
+If `release_radar.model` imports `release_radar.client` while `client`
+already imports `model`, the package has a module cycle. The compiler rejects
+that architecture; it does not initialize modules in a guessed order. Move the
+shared domain type to the lower-level module or invert the dependency.
+
+Likewise, two wildcard imports that expose the same unqualified name produce an
+ambiguity diagnostic. Repair the namespace with a precise import or a qualified
+reference, not by relying on import order.
+
+## Checkpoint
+
+Run both applications:
+
+```sh
+cargo run -- --project-root examples/log_audit
+cargo run -- --project-root examples/release_radar
+```
+
+Then trace one Release Radar result through `client.fetchRelease`,
+`model.decodeResponse`, and `main.printSummary`. Each transition should
+cross a named module boundary for a reason.
+
+## Exercises
+
+1. Decide whether Log Audit's `LogCounts` needs a `Show` instance or whether
+   its user-facing `renderReport` is the better abstraction.
+2. Replace a list lookup problem with either `Map` or `HashMap`; justify the
+   iteration-order contract.
+3. Sketch a library facade for the Release Radar decoder using `export` and
+   `reexport`, without exposing constructors that callers should not build.
+4. Identify one place where point-free style improves the actual source and
+   one where it would hide error policy.
+
+## Recap
+
+- Polymorphism restricts implementations to behavior valid for every type.
+- Higher-order functions and partial application let applications name policy
+  once and supply context gradually.
+- `data` creates a distinct type; `type` only gives an existing type a name.
+- Modules should follow responsibilities and dependency direction.
+- Typeclasses express shared operations; instances supply type-specific
+  behavior.
+- Persistent collections preserve old values, but remain strict and finite.
+- Tests are ordinary, deterministic programs plus repository integration
+  checks; external live services are not a prerequisite.
+
+Next: [Decode an external service response](08-parsers-and-json.md).

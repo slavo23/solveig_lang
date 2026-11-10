@@ -1,187 +1,220 @@
-# 1. Getting started
+# 1. Run, change, and diagnose a program
 
-This chapter creates the smallest normal Solveig project and explains every
-file in it.
+The fastest way to learn a language is to operate a real program before taking
+it apart. In this chapter you will run Log Audit, locate its package boundary,
+make one visible change, and read one type error.
 
-## Install the command
+**Skip ahead:** if you already understand package manifests, expression
+languages, and static type errors, run the checkpoint and continue with
+[pure transformations](02-language-basics.md).
 
-Solveig is currently installed from source. You need Rust and Cargo:
+## Build the compiler
 
-```sh
-git clone https://github.com/slavo23/solveig_lang.git
-cd solveig_lang
-cargo install --path . --force
-```
-
-The installed binary contains the Prelude and standard library. If you also
-want editor navigation into their source, copy the library trees beside the
-binary:
+From the repository root:
 
 ```sh
-INSTALL_ROOT="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}"
-mkdir -p "$INSTALL_ROOT/bin/lib/prelude" "$INSTALL_ROOT/bin/lib/std"
-cp -R lib/prelude/. "$INSTALL_ROOT/bin/lib/prelude"
-cp -R lib/std/. "$INSTALL_ROOT/bin/lib/std"
+cargo build
+target/debug/solveig --help
 ```
 
-Check the result:
+You can use `cargo run --` in every command below; Cargo then builds the
+compiler if necessary and forwards the remaining arguments to Solveig.
+
+## Run Log Audit
 
 ```sh
-solveig --help
+cargo run -- --project-root examples/log_audit
 ```
 
-## Create a package
-
-Make a directory named `hello`:
+The program prints the contents it wrote to `output/report.txt`:
 
 ```text
-hello/
+Solveig log audit
+files analyzed: 4
+files missing: 1
+events: 14
+info: 8
+warnings: 3
+errors: 3
+```
+
+This is a hermetic checkpoint. All input files are under
+[`examples/log_audit/logs`](../../examples/log_audit/logs/); one requested
+path is intentionally absent. No network access or machine-specific
+configuration is involved.
+
+## A package has a manifest and source tree
+
+Log Audit has this shape:
+
+```text
+examples/log_audit/
 ├── solveig.toml
+├── logs/
+├── output/
 └── src/
     └── main.sv
 ```
 
-The manifest identifies the package and its entry module:
+The manifest is small:
 
 ```toml
 [package]
-name = "hello"
+name = "log_audit"
 version = "0.1.0"
 
 [language]
 entry = "main"
 ```
 
-Put this program in `src/main.sv`:
+`--project-root` names the directory containing this manifest. The entry
+module defaults to `src/main.sv`; the manifest selects the top-level entry
+definition `main`. A project is not inferred from the shell's current
+directory when you provide `--project-root`, so repository commands remain
+repeatable.
 
-```solveig
-greeting : String
-greeting = "Hello from Solveig"
+## Read from the boundary inward
 
-main : Task ()
-main = printLine greeting
-```
-
-Run it:
-
-```sh
-solveig --project-root path/to/hello
-```
-
-The output is:
-
-```text
-Hello from Solveig
-```
-
-Before `main` runs, the driver loads the manifest and dependency graph, parses
-the selected modules, resolves names, checks kinds and types, verifies pattern
-coverage, and lowers the checked program for the VM. A misspelled import, type
-mismatch, or missing constructor branch is therefore a compile-time diagnostic
-with a source span; it is not deferred until a rarely used route happens to run.
-
-That gives a useful first workflow:
-
-1. Write the smallest signature describing the intended boundary.
-2. Let the first compiler diagnostic point to the earliest broken assumption.
-3. Run the formatter after the program parses.
-4. Execute the package and check behavior at its IO boundary.
-
-Do not remove a signature merely to silence a mismatch. Read it as a compact
-design claim, then decide whether the implementation or the claim is wrong.
-
-## Read the types
-
-The colon introduces a type signature:
-
-```solveig
-greeting : String
-```
-
-`greeting` is a text value. `main` has a different kind of type:
+Start at the type of `main` in
+[`src/main.sv`](../../examples/log_audit/src/main.sv):
 
 ```solveig
 main : Task ()
+main = do
+    jobs <- newBoundedChan 2
+    results <- newBoundedChan 2
+    summary <- runAudit jobs results
+    closeChan results
+    let reportPath = requiredPath "output/report.txt"
+    mapError fsToIO (std.fs.writeFile reportPath (renderReport summary))
+    report <- mapError fsToIO (std.fs.readFile reportPath)
+    printStr report
 ```
 
-`Task a` describes an action that can interact with the outside world and, on
-success, produces an `a`. Here `a` is `()`, the unit value, because printing is
-performed for its effect rather than a useful return value.
+Read `Task ()` as “an action that may perform ordinary host IO, may fail with
+`IOError`, and returns unit on success.” `Task a` is the public alias for
+`IO IOError a`. The error parameter is not hidden by the runtime; APIs with a
+more specific error type keep it until the program deliberately maps or
+handles it.
 
-`Task` is not a command that runs immediately when mentioned. It is a value
-describing an action. The runtime executes the action selected by the CLI entry
-point.
+`do` sequences actions. In `name <- action`, the action runs and its success
+value is bound to `name` for the following statements. A `let` binding is
+pure and does not run an effect. The last line determines the block's result.
 
-Pure definitions and effectful actions can therefore be tested separately. A
-price calculation can have type `Order -> Int`; only loading the order or
-printing its invoice needs `IO`. Keeping that boundary narrow is not ceremonial
-functional style—it makes most business logic deterministic and removes host
-failures from its type.
+Solveig is expression-oriented: `if`, `case`, `let`, and `do` produce
+values. There is no separate statement language hidden inside a function body.
 
-## Definitions and application
+## Imports are explicit
 
-A definition gives a name to an expression:
+The top of the file contains:
 
 ```solveig
-double : Int -> Int
-double number = number * 2
-
-answer : Int
-answer = double 21
+import std.task(*)
+import std.channel(*)
+import std.fs(FsError(..))
+import std.path(Path, pathFromString)
+import std.text(stringToChars)
 ```
 
-Function application uses spaces: `double 21`. It binds more tightly than
-operators, so `double 10 + 1` means `(double 10) + 1`.
+The Prelude is in scope automatically. Standard-library modules are not.
 
-Functions are curried. A two-argument signature:
+- `import std.path(Path, pathFromString)` adds exactly those visible names
+  unqualified.
+- `FsError(..)` imports the type and its public constructors.
+- `import std.task(*)` deliberately opens the module's complete public API.
+- `import std.text` by itself is qualified-only; use `text.lines` or
+  `std.text.lines`.
 
-```solveig
-add : Int -> Int -> Int
-```
+Precise imports make dependencies visible. Wildcard imports are useful in an
+application module that intentionally consumes most of a focused API, but
+library interfaces generally benefit from explicit lists.
 
-means that `add 2` is itself a function waiting for one `Int`:
+## Make a visible change
 
-```solveig
-add : Int -> Int -> Int
-add left right = left + right
-
-addTwo : Int -> Int
-addTwo = add 2
-```
-
-## Imports
-
-Small universal definitions such as `Maybe`, lists, arithmetic, `show`, and
-`Task` come from the implicit Prelude. The larger standard library is explicit:
-
-```solveig
-import std.text(length, trimAscii)
-
-cleanLength : String -> Int
-cleanLength text = length (trimAscii text)
-```
-
-Import a whole module when several names make the code clearer:
-
-```solveig
-import std.text(*)
-
-cleanLength : String -> Int
-cleanLength text = std.text.length (std.text.trimAscii text)
-```
-
-Qualified names are especially useful when two modules export the same name.
-
-## What the runner looks for
-
-`[language].entry` selects a source module, not a function. The default CLI
-entry definition is named `main`. You can run another definition in that module:
+Copy the example to a scratch directory before experimenting:
 
 ```sh
-solveig --project-root path/to/hello --entry greeting
+cp -R examples/log_audit /tmp/solveig-log-audit
 ```
 
-The selected definition may be a pure value or an IO action. For applications,
-`main : Task ()` is the conventional shape.
+In `/tmp/solveig-log-audit/src/main.sv`, change the first string in
+`renderReport` from `"Solveig log audit\n"` to
+`"Daily service log audit\n"`, then run:
 
-Next: [Language basics](02-language-basics.md).
+```sh
+cargo run -- --project-root /tmp/solveig-log-audit
+```
+
+The first line changes; the counts do not. You changed presentation, while the
+analysis and IO pipeline remained untouched. That separation is what the next
+chapters will explain.
+
+## Read a type error as a constraint report
+
+Now make `reportLine` inconsistent:
+
+```solveig
+reportLine : String -> Int -> String
+reportLine label value = appendString label value
+```
+
+`appendString` requires two `String` arguments, but the signature says
+`value` is an `Int`. The compiler rejects the application at `value` and
+reports the incompatible expected and actual types. It does not insert an
+implicit numeric-to-text conversion. The checked implementation uses
+`show value` explicitly:
+
+```solveig
+reportLine : String -> Int -> String
+reportLine label value = appendString label (appendString (show value) "\n")
+```
+
+When a diagnostic is long, begin with the primary source span and the two types.
+The notes explain where each constraint came from. See the
+[diagnostics guide](../diagnostics.md) for import, exhaustiveness, effect, and
+module errors.
+
+## Formatting is part of the loop
+
+Format the copied package and then verify it is stable:
+
+```sh
+cargo run -- fmt --project-root /tmp/solveig-log-audit
+cargo run -- fmt --check --project-root /tmp/solveig-log-audit
+```
+
+The formatter parses before writing and refuses invalid source. It may choose
+`(.)` or `($)` layouts already present in the source, but it does not change
+program meaning.
+
+## Checkpoint
+
+Restore the correct `reportLine`, run the copied project, and confirm:
+
+1. the command exits successfully;
+2. the report contains four analyzed files and one missing file;
+3. `output/report.txt` exactly matches terminal output;
+4. `fmt --check` succeeds.
+
+The repository test suite checks the canonical application against its expected
+output. Your scratch copy lets you change it without modifying that baseline.
+
+## Exercises
+
+1. Change only the report labels, not the data model.
+2. Add another existing log file to the copied project and update the number
+   passed to `collectResults`. Predict which totals change before running it.
+3. Misspell `renderReport` at its call site. Identify the primary diagnostic
+   before reading any suggestions.
+
+## Recap
+
+- A Solveig project is rooted at `solveig.toml` and source lives under
+  `src/`.
+- Signatures describe both values and effect/error boundaries.
+- Standard-library imports are explicit; the Prelude is automatic.
+- `do` sequences effects, while `let` introduces a pure value.
+- The compiler does not silently coerce `Int` to `String`.
+- Run, diagnose, format, and rerun is the basic development loop.
+
+Next: [Transform log data with pure functions](02-language-basics.md).

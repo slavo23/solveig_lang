@@ -1,316 +1,296 @@
-# 2. Language basics
+# 2. Transform log data with pure functions
 
-Solveig programs are built from expressions. An `if`, a `case`, a function,
-and a `let` all produce values; they are not statement-only forms.
+Log Audit has to answer a simple question: how many lines begin with `I`,
+`W`, or `E`? The useful lesson is not log syntax. It is how to isolate a
+deterministic transformation from files, threads, and printing.
 
-## Primitive values
+**Skip ahead:** readers comfortable with curried functions, immutable values,
+algebraic lists, and tail recursion can go directly to
+[the complete scan](#trace-the-complete-scan).
 
-The commonly used primitive types are:
+## Values and signatures
 
-```solveig
-anInteger : Int
-anInteger = 42
-
-anExactLargeInteger : BigInt
-anExactLargeInteger = 1000000000000000000000000000000
-
-aFloat : Float
-aFloat = 2.5
-
-aCharacter : Char
-aCharacter = 'S'
-
-someText : String
-someText = "Solveig"
-
-aFlag : Bool
-aFlag = True
-
-nothingUseful : ()
-nothingUseful = ()
-```
-
-Strings support escapes such as `\n`, `\t`, `\"`, and Unicode scalar escapes
-such as `\u{1f984}`. String concatenation is `<>`:
+The application gives every major boundary a signature:
 
 ```solveig
-message : String
-message = "hello, " <> "world"
+analyzeLog : String -> LogCounts
+renderReport : AuditSummary -> String
+reportLine : String -> Int -> String
 ```
 
-`Int` is a signed 64-bit integer. Its arithmetic is checked: a result outside
-`-9223372036854775808` through `9223372036854775807` raises the
-`IntegerOverflow` defect instead of silently wrapping. Use `BigInt` when the
-mathematical result must grow without a fixed bound. `Float` is IEEE 754
-binary64; it has finite precision and includes infinities and NaN. Solveig does
-not currently provide an arbitrary-precision floating type.
+`->` associates to the right. The last signature means:
 
-## Choosing a numeric type
+```text
+String -> (Int -> String)
+```
 
-Whole-number literals use their context. A literal in a declared `BigInt` or
-`Float` position becomes that type, while an unconstrained ordinary literal
-defaults to `Int`. A whole literal outside the `Int` range starts as `BigInt`.
-The checker waits for the surrounding numeric expression before applying that
-default, so operand order does not change the result:
+Calling `reportLine "warnings: "` returns a function waiting for an `Int`.
+Ordinary calls therefore need no commas or call parentheses:
 
 ```solveig
-requestCount : Int
-requestCount = 42
-
-worldPopulationEstimate : BigInt
-worldPopulationEstimate = 8100000000
-
-nextEstimate : BigInt
-nextEstimate = 1 + worldPopulationEstimate
-
-ratio : Float
-ratio = 2 / 3
+reportLine "warnings: " warnings
 ```
 
-This is contextual literal typing, not implicit conversion of stored values.
-Once a value is an `Int`, use `toBigInt`; once it is a `BigInt`, import
-`std.bigint.toInt` and handle the possible overflow:
+Function application binds more tightly than infix operators. Parentheses are
+needed when an expression, rather than one atom, is an argument:
 
 ```solveig
-import std.bigint(parse, toInt, toStringBase)
-
-exact : BigInt
-exact = toBigInt 42
-
-narrowed : Maybe Int
-narrowed = toInt exact
-
-fromConfig : Maybe BigInt
-fromConfig = parse "340282366920938463463374607431768211455"
-
-asHex : Maybe String
-asHex = toStringBase 16 exact
+show (warnings + errors)
 ```
 
-`+`, `-`, `*`, `negate`, `abs`, `signum`, and `^` use `Num`. The exponent of
-`^` is a non-negative `Int`; a negative exponent is a defect, and an `Int`
-power can still raise `IntegerOverflow`. `/` uses `Fractional`; `**` is
-floating-point exponentiation.
+## Primitive data used here
 
-Integral division has two deliberately named families. For negative inputs,
-the difference matters:
+Log Audit uses:
+
+- `Int` for checked signed 64-bit counts;
+- `BigInt` for arbitrary-precision integers;
+- `Bool` for `True` and `False`;
+- `Char` for one Unicode scalar value such as `'W'` or `'\n'`;
+- `String` for text;
+- `()` for a successful action with no interesting value.
+
+Solveig also has `Float` for floating-point work. Use `Int` for ordinary
+bounded counts, `BigInt` where integer size is not known in advance, and
+`Float` where the domain is approximate. The numeric reference, conversions,
+division semantics, and instances are listed in
+[the Prelude guide](../prelude.md).
+
+Numeric literals are resolved from context. Unconstrained whole literals
+default to `Int`, while an out-of-range literal defaults to `BigInt`.
+`Int` arithmetic is checked: overflow and integral division by zero are
+runtime defects rather than wrapping results.
+
+## Definitions are equations
+
+A top-level definition has a name, arguments, `=`, and an expression:
 
 ```solveig
-floorDivision = (div (-7) 3, mod (-7) 3) -- (-3, 2)
-truncatingDivision = (quot (-7) 3, rem (-7) 3) -- (-2, -1)
+analyzeLog : String -> LogCounts
+analyzeLog contents = scanLog (stringToChars contents) True 0 0 0 0
 ```
 
-`div` rounds toward negative infinity and `mod` has the divisor's sign.
-`quot` rounds toward zero and `rem` has the dividend's sign. The `%` operator
-is an alias for `mod`. All four raise `DivisionByZero` for a zero divisor.
+Arguments are immutable bindings. “Updating a counter” means calling the next
+recursive step with a new value. The old value remains valid; no variable is
+assigned in place.
 
-For scientific and geometric work, import the named operations from
-`std.math`:
+Multiple equations may pattern-match arguments:
 
 ```solveig
-import std.math(approximatelyEqual, hypot, pi, sin, toDegrees)
-
-diagonal : Float
-diagonal = hypot 3.0 4.0
-
-straightAngle : Float
-straightAngle = toDegrees pi
-
-closeEnough : Bool
-closeEnough = approximatelyEqual 0.000000000001 0.000000000001 (sin pi) 0.0
+messageSuffix : String -> String
+messageSuffix message = if std.text.isEmpty message then "" else ": " <> message
 ```
 
-Floating-point equality is exact and NaN is unordered. For measured or
-computed quantities, `approximatelyEqual absoluteTolerance relativeTolerance`
-usually expresses the intended comparison better. The two tolerances cover
-different regimes: absolute tolerance matters near zero, while relative
-tolerance scales with magnitude.
+Log Audit mostly uses `case` because the scan has several pieces of state.
+Both forms compile through the same pattern machinery.
 
-## Conditional expressions
+## Expressions, not statements
 
-Both branches must have the same type:
+`if` has both branches because it returns a value:
 
 ```solveig
-absolute : Int -> Int
-absolute value = if value < 0 then 0 - value else value
+severityName : Char -> String
+severityName marker =
+    if marker == 'I'
+        then "info"
+        else if marker == 'W' then "warning" else "other"
 ```
 
-Because the whole form is an expression, it can appear inside another call:
+This isolated illustration is pure. Both branches must have compatible types.
+Omitting `else`, or returning an `Int` from only one branch, is a type error.
+
+`let` introduces local values:
 
 ```solveig
-label : Bool -> String
-label enabled = "status: " <> (if enabled then "on" else "off")
+let nextEvents = events + 1
+in scanLog rest False nextEvents infos warnings errors
 ```
 
-## Local definitions
-
-Use `let ... in ...` when a name clarifies one expression:
+Inside a `do` block, the layout form omits `in`:
 
 ```solveig
-hypotenuseSquared : Int -> Int -> Int
-hypotenuseSquared width height =
-    let widthSquared = width * width
-    in let heightSquared = height * height
-    in widthSquared + heightSquared
+let reportPath = requiredPath "output/report.txt"
+mapError fsToIO (std.fs.writeFile reportPath report)
 ```
 
-Local bindings may use patterns:
+The first form is one pure expression. The second is `do` notation syntax.
+
+## Lists expose their shape
+
+`stringToChars contents` produces `[Char]`. Lists are immutable and
+singly-linked. Their two shapes are:
 
 ```solveig
-swap : forall a b. (a, b) -> (b, a)
-swap pair =
-    let (left, right) = pair
-    in (right, left)
+[]
+c :: rest
 ```
 
-A refutable local pattern must be handled explicitly with `case`; a `let`
-pattern is required to cover every value of its type.
-
-Solveig evaluates strictly. When execution reaches a `let`, the compiler's
-bytecode lowering evaluates the right-hand side and stores it before continuing
-with the body:
+`[]` is empty. `c :: rest` has first element `c` and remaining list
+`rest`. The scanner consumes one constructor at a time:
 
 ```solveig
-square : Int -> Int
-square value = value * value
-
-answer : Int
-answer =
-    let computed = square 21
-    in computed + 1
+case chars of
+    [] => LogCounts events infos warnings errors
+    | c :: rest => ...
 ```
 
-`computed` is a value, not a deferred thunk. Strictness makes space use and
-failure timing easier to see, but it means an unused reached binding is still
-work. `if` and `case` are control flow: they evaluate the scrutinee or condition
-and then only the selected branch. Use functions and streams when computation
-should happen on explicit demand.
+The compiler checks pattern coverage. If a function handles `c :: rest` but
+not `[]`, it reports a non-exhaustive match rather than assuming an impossible
+input.
 
-## Anonymous functions
-
-`fun pattern => expression` creates a function:
+List literals are convenient for finite configuration:
 
 ```solveig
-incrementAll : [Int] -> [Int]
-incrementAll = map (fun value => value + 1)
-
-ignore : forall a. a -> ()
-ignore = fun _ => ()
+["api", "billing", "search"]
 ```
 
-Patterns can unpack arguments directly:
+For library transformations, prefer `map`, `filter`, and folds where they
+state the operation directly. Use explicit recursion when, as in `scanLog`,
+several state values advance together and the termination argument is obvious.
+
+## Trace the complete scan
+
+The checked implementation is
+[`scanLog`](../../examples/log_audit/src/main.sv). Its state is:
+
+- unconsumed characters;
+- whether the next character begins a line;
+- total events;
+- info, warning, and error counts.
+
+At end of input it constructs the result. At the start of a line it classifies
+the first character. Elsewhere it only watches for the next newline. One branch
+from the real function is:
 
 ```solveig
-second : forall a b. (a, b) -> b
-second = fun (_, value) => value
+if c == 'W'
+    then scanLog rest False (events + 1) infos (warnings + 1) errors
+    else if c == 'E'
+            then
+                scanLog
+                    rest
+                    False
+                    (events + 1)
+                    infos
+                    warnings
+                    (errors + 1)
+            else ...
 ```
 
-Lambda parameters, top-level equations, `case` branches, and `let` bindings
-share the same pattern language.
+The recursive call is in tail position: after it returns, this function has no
+more work. Solveig's runtime executes this application using the language's
+normal call machinery; the important source-level property is bounded state,
+not a claim that every recursion pattern is automatically converted into a
+loop.
 
-## Lists
+Try tracing `"W cache miss\nI recovered\n"`:
 
-All elements of a list have one type:
+1. `W` at line start increments events and warnings.
+2. Characters through `\n` leave counters unchanged.
+3. The newline makes the next position a line start.
+4. `I` increments events and info.
+5. End of input returns `LogCounts 2 1 1 0`.
+
+Blank lines do not count as events. An unrecognized nonblank first character
+counts as an event but not as one of the three named severities. These are
+application semantics visible in the branches, not behavior supplied by a
+library.
+
+## Build text deliberately
+
+The application uses both `appendString` and the `(<>)` operator. They are
+equivalent ways to concatenate strings:
 
 ```solveig
-numbers : [Int]
-numbers = [10, 20, 30]
-
-moreNumbers : [Int]
-moreNumbers = 5 :: numbers
+reportLine label value = appendString label (appendString (show value) "\n")
 ```
 
-`[]` is empty and `head :: tail` is a non-empty list. Recursive equations make
-the two cases visible:
+A shorter equivalent isolated definition is:
 
 ```solveig
-sumList : [Int] -> Int
-sumList [] = 0
-sumList (value :: rest) = value + sumList rest
+reportLine label value = label <> show value <> "\n"
 ```
 
-Prefer existing combinators when they express the intent:
+`show` is explicit. Solveig does not interpolate arbitrary values into
+strings or coerce them at concatenation sites.
+
+Use `($)` to remove a final pair of parentheses:
 
 ```solveig
-positiveSquares : [Int] -> [Int]
-positiveSquares values =
-    map (fun value => value * value) $ filter (fun value => value > 0) values
+printLine $ show result
 ```
 
-Prelude supplies stack-safe `map`, `filter`, `append`, `concat`, generic strict
-`foldl`, stack-safe `foldr`, and `(++)`. `std.list` adds stack-safe `take`,
-`takeWhile`, `zip`, and `zipWith`, plus tail-recursive `drop`, `dropWhile`,
-`reverse`, ranges, and `length`. Lists are strict finite sequences; incremental
-or unbounded input uses the streaming APIs rather than an infinite List.
-
-## Tuples
-
-Tuples group a fixed number of possibly different types:
+Use `(.)` when the intermediate value is genuinely irrelevant:
 
 ```solveig
-person : (String, Int)
-person = ("Ada", 36)
-
-measurement : (String, Int, Bool)
-measurement = ("temperature", 21, True)
+printResult : AuditSummary -> Task ()
+printResult = printLine . renderReport
 ```
 
-Solveig supports tuple arities two through eight. Parentheses delimit tuple
-syntax; they are not an extra layer in a signature. For example:
+The second definition is an isolated equivalent, not part of Log Audit. Do not
+force point-free style across branching or error handling; names are cheaper
+than hidden control flow.
+
+## Tuples for temporary grouping
+
+Tuples group a fixed number of values without defining a domain type:
 
 ```solveig
-measure : forall a. Task a -> Task (Int, a)
+("warnings", 3)
+(elapsed, result)
 ```
 
-means “a task returning an integer and an `a`.” Nested tuples remain distinct:
+Pattern matching takes them apart:
 
 ```solveig
-nested : (String, (Int, Bool))
-nested = ("reading", (21, True))
+case measured of
+    (elapsed, result) => ...
 ```
 
-Patterns preserve that structure:
+Solveig supports tuple arities two through eight. Log counts are not a tuple
+because their positions have domain meaning; the next chapter gives that state
+a constructor.
+
+## A useful deliberate error
+
+Change the base case to:
 
 ```solveig
-enabled : (String, (Int, Bool)) -> Bool
-enabled (_, (_, flag)) = flag
+[] => (events, warnings)
 ```
 
-## Pipelines and operator sections
+The branch now returns a tuple, while the other path recursively returns
+`LogCounts`. The compiler reports that the alternatives do not agree. The
+repair is not a cast: both branches must describe the same result model.
 
-Function composition is `(.)` and low-precedence application is `($)`:
+## Checkpoint
 
-```solveig
-import std.text(trimAscii)
+Run Log Audit:
 
-displayClean : String -> String
-displayClean = show . trimAscii
+```sh
+cargo run -- --project-root examples/log_audit
 ```
 
-Read `render . normalize` from right to left: normalize the input, then render
-the result. Read `printLine $ render value` as ordinary application with the
-parentheses removed. Neither operator changes evaluation strategy; both only
-make the expression tree easier to read.
+Then inspect the five input logs and predict the six report numbers. Verify the
+prediction against the output. This checks that you understand the pure scan,
+not only how to invoke the executable.
 
-Operators may be used as functions:
+## Exercises
 
-```solveig
-addOne : Int -> Int
-addOne = (+) 1
+1. In a scratch copy, recognize a `D` marker as an event without adding a new
+   field. Which count changes?
+2. Write a pure `totalProblems : LogCounts -> Int` after reading the
+   constructor syntax in the next chapter.
+3. Explain why `String -> Int -> String` permits partial application.
+4. Replace one nested `appendString` expression with `(<>)`, format the
+   package, and compare readability.
 
-prepend : forall a. a -> [a] -> [a]
-prepend value = (::) value
-```
+## Recap
 
-Sections partially apply one side:
+- Function application uses spaces and is curried.
+- Bindings are immutable; recursion passes new state.
+- `if`, `case`, and `let` are expressions.
+- Lists are built from `[]` and `(::)`; patterns expose those constructors.
+- Domain values deserve named types; tuples are best for temporary grouping.
+- `show`, `(.)`, and `($)` are explicit tools, not implicit magic.
 
-```solveig
-greaterThanTen : Int -> Bool
-greaterThanTen = (> 10)
-```
-
-Backticks let a regular function appear infix, while parentheses let an
-operator appear prefix. User-defined operators declare associativity and
-precedence with `infix`, `infixl`, or `infixr`.
-
-Next: [Data, patterns, and errors](03-data-and-patterns.md).
+Next: [Model valid states with data and patterns](03-data-and-patterns.md).

@@ -615,8 +615,10 @@ otherwise follow host syntax and filesystem semantics.
 
 ## Complete tutorial programs
 
-The [file IO tutorial](tutorial/05-io-and-files.md) builds a complete program
-that reads a text file and writes a report. The [concurrency
-tutorial](tutorial/06-concurrency.md) then shows how to add bounded work without
-mixing file ownership, error recovery, and scheduling into one unexplained
-example. Both chapters link to runnable projects under `docs/tutorial/code/`.
+The [file IO tutorial](tutorial/05-io-and-files.md) develops the boundary of the
+checked [Log Audit](../examples/log_audit/) application. The
+[concurrency tutorial](tutorial/06-concurrency.md) then compares its explicit
+bounded pipeline with Release Radar's bounded HTTP map. The longer
+[streams and processes workshop](tutorial/workshops/04-streams-and-processes.md)
+uses the executable process fixture to cover concurrent pipe draining, bounded
+stdin, termination, timeout, cleanup, and reaping.

@@ -1,7 +1,11 @@
-# 8. Parsers and JSON
+# 6. Decode an external service response
 
-`std.parser` is a generic parser-combinator library. It is generic in three
-directions:
+Release Radar receives bytes from an HTTP response. Before the application can
+say “latest release,” it must distinguish transport failure, HTTP status, JSON
+syntax, JSON shape, and domain validation. This chapter develops that boundary
+from the generic parser model to the checked Release Radar decoder.
+
+`std.parser` is generic in three directions:
 
 ```solveig
 Parser input customError value
@@ -14,6 +18,9 @@ Parser input customError value
 The supplied adapters cover text, bytes, lists of tokens, and feedable token
 streams. A custom checkpointable input can use the same combinators by defining
 `InputOps input token`.
+
+**Skip ahead:** readers familiar with parser combinators can begin at
+[Release Radar's decoding pipeline](#release-radars-decoding-pipeline).
 
 ## A first text parser
 
@@ -269,6 +276,83 @@ application-specific policy. Because the `JsonNumber` representation is
 private, rendering only needs to enforce the selected output limits; invalid
 number spellings cannot enter a `Json` value through the public API.
 
+## Release Radar's decoding pipeline
+
+Release Radar deliberately keeps transport and decoding separate.
+[`client.fetchRelease`](../../examples/release_radar/src/release_radar/client.sv)
+produces an `std.http.Response`; then
+[`model.decodeResponse`](../../examples/release_radar/src/release_radar/model.sv)
+interprets status, cache state, headers, and body.
+
+First, status determines which body contract applies:
+
+```solveig
+decodeResponse : String -> Maybe String -> std.http.Response -> ReleaseResult
+decodeResponse repository cached response =
+    let code =
+        std.http.statusCode (std.http.responseStatus response)
+    in if code == 304
+        then
+            case cached of
+                Just etag => ReleaseUnchanged repository etag
+                | Nothing =>
+                    ReleaseFailed
+                        repository
+                        (InvalidReleaseJson "server returned 304 without a cached ETag")
+        else if code /= 200
+                then ReleaseFailed repository (failureForStatus response code)
+                else
+                    let etag =
+                        case std.http.findHeader "etag" response of
+                            Just value => value
+                            | Nothing => ""
+                    in decodeReleaseJson repository etag (std.http.responseBody response)
+```
+
+The program does not attempt to decode a successful-release object from a
+`304` or error response. That prevents one decoder from accumulating unrelated
+status-dependent optional fields.
+
+The body is already bounded by the HTTP client policy. JSON adds its own
+structural limits and produces a three-way parser reply:
+
+```solveig
+decodeReleaseJson : String -> String -> Bytes -> ReleaseResult
+decodeReleaseJson repository etag body =
+    std.parser.foldReply
+        (fun _ value _ => releaseFromJson repository etag value)
+        (fun _ _ _ => ReleaseFailed repository (InvalidReleaseJson "invalid release JSON"))
+        (fun _ _ _ => ReleaseFailed repository (InvalidReleaseJson "incomplete release JSON"))
+        (std.json.parseJson std.json.defaultJsonLimits body)
+```
+
+Finally, pattern matching validates the object shape. `stringField` accepts
+only a present `JsonString`; a missing, null, numeric, or nested value is not
+silently coerced:
+
+```solveig
+stringField : String -> std.map.Map String std.json.Json -> Maybe String
+stringField name object =
+    case std.map.lookup name object of
+        Just (JsonString value) => Just value
+        | _ => Nothing
+```
+
+Release Radar uses the generic tree because it also decodes different error
+body shapes in the same module. A larger stable schema could use `Decoder`
+and `recordDecoder` to build the domain value directly.
+
+## Deliberate error: treating syntax as schema
+
+A successfully parsed `JsonObject` does not imply that `tag_name` exists or
+is a string. If code assumes a field and introduces a partial lookup, malformed
+external input becomes a defect. The checked code uses `Maybe` at each lookup
+and returns `InvalidReleaseJson`; the failure remains ordinary domain data.
+
+Likewise, an `Awaiting` reply after complete HTTP bytes means incomplete JSON,
+not transport success. `foldReply` forces the application to choose that
+case.
+
 ## Parser design checklist
 
 - Does the grammar require complete input or accept a prefix?
@@ -279,4 +363,37 @@ number spellings cannot enter a `Json` value through the public API.
 - Does a recursive grammar make progress before recursion?
 - Are resource limits appropriate for the input's trust level?
 
-Next: [Packages, testing, and tooling](09-packages-and-tooling.md).
+## Checkpoint
+
+Run Release Radar's hermetic mode:
+
+```sh
+cargo run -- --project-root examples/release_radar
+```
+
+The local fixture returns the same release-shaped JSON for every configured
+repository, but varies response delay. Trace one body through `parseJson`,
+`releaseFromJson`, and `renderResult`.
+
+## Exercises
+
+1. In a scratch copy, remove `published_at` from `fixtureBody` and predict
+   the typed result before running it.
+2. Change `tag_name` to a JSON number. Explain why parsing succeeds but domain
+   decoding fails.
+3. Design a `Decoder () ReleasePayload` for the three required string fields.
+4. Identify two independent size policies in the HTTP-plus-JSON path and
+   explain which allocation each controls.
+
+## Recap
+
+- Parser replies distinguish success, rejection, and a need for more input.
+- Consumption and commitment govern safe backtracking.
+- JSON syntax, JSON shape, and application validation are separate stages.
+- `JsonLimits` makes hostile-input policy explicit.
+- Exact JSON numbers are not forced through floating point.
+- Release Radar interprets status before selecting a body decoder.
+- External fields are validated by type and presence; no coercion or partial
+  lookup is required.
+
+Next: [Build a typed HTTP client](07-networking-and-http.md).

@@ -1,6 +1,0 @@
-[package]
-name = "tutorial_checks"
-version = "0.1.0"
-
-[language]
-entry = "main"

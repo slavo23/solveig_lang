@@ -1,9 +1,9 @@
-# 5. IO and files
+# 4. Cross the IO boundary
 
-Pure expressions describe values. Reading a file, printing, asking the clock,
-and starting a process depend on the outside world, so Solveig represents them
-as `IO` values. The type records both the failure type and the successful
-result:
+Log Audit's pure scanner has no way to read `logs/api.log`—and that is a
+feature. Reading a file, printing, asking a clock, and starting a process depend
+on the outside world, so Solveig represents them as `IO` values. The type
+records both the failure type and the successful result:
 
 ```solveig
 IO error result
@@ -12,6 +12,10 @@ IO error result
 `Task result` is the common alias `IO IOError result`. More specific modules
 use more informative errors—for example, filesystem actions return
 `IO FsError result` so a failure retains its `Path`.
+
+**Skip ahead:** if typed IO and scoped resource management are familiar, read
+[the complete Log Audit boundary](#the-complete-log-audit-boundary), then use
+the time, randomness, and process sections as a practical reference.
 
 ## Sequencing actions with `do`
 
@@ -121,21 +125,19 @@ pre-check. The host reads at most one byte past the limit to distinguish an
 exact fit from overflow. When input may not fit memory at all, use a scoped
 stream instead of inventing a very large limit.
 
-## A complete file program
+## The complete Log Audit boundary
 
-The tutorial's [`file_summary`](code/file_summary/) project reads four lines,
-writes a summary, and prints it. Its filesystem error is converted to
-`IOError` only where it joins the Prelude printing actions in `main`:
+The checked [Log Audit source](../../examples/log_audit/src/main.sv) converts a
+filesystem error only where that specific action joins the application's
+`Task` boundary:
 
 ```solveig
 import std.fs(FsError(..))
-import std.list(length)
 import std.path(Path, pathFromString)
-import std.text(lines, trimAscii)
 
 fsToIO : FsError -> IOError
 fsToIO (FsIOError _ ioError) = ioError
-fsToIO fileError = IOError InvalidArgument "filesystem" (show fileError)
+fsToIO error = IOError InvalidArgument "filesystem" (show error)
 
 requiredPath : String -> Path
 requiredPath spelling =
@@ -143,33 +145,28 @@ requiredPath spelling =
         Right path => path
         | Left pathError => error (show pathError)
 
-nonEmpty : String -> Bool
-nonEmpty text = text /= ""
-
-main : Task ()
-main = do
-    contents <- mapError fsToIO $ std.fs.readFile $ requiredPath "input/readings.txt"
-    let readings = filter nonEmpty $ lines $ trimAscii contents
-    let report = "readings: " <> show (length readings) <> "\n"
-    mapError fsToIO $ std.fs.writeFile (requiredPath "summary.txt") report
-    printStr report
-```
-
-Run it from the repository root:
-
-```sh
-solveig --project-root docs/tutorial/code/file_summary
-```
-
-The output is:
-
-```text
-readings: 4
+auditFile : Chan AuditResult -> Path -> Task ()
+auditFile results path = do
+    contents <- mapError fsToIO (std.fs.readFile path)
+    send results (Audited (analyzeLog contents))
 ```
 
 `mapError` changes only the error channel; it does not catch a failure or turn
-it into a successful value. A larger application would often define its own
-sum error type instead of collapsing `FsError` into `IOError`.
+it into a successful value. `auditOne` separately uses `catchError` to turn
+the expected missing-file case into `MissingLog` and re-raises other
+`IOError` values. Translation and recovery are different decisions.
+
+At the outer boundary, the program replaces one report and reads it back:
+
+```solveig
+let reportPath = requiredPath "output/report.txt"
+mapError fsToIO (std.fs.writeFile reportPath (renderReport summary))
+report <- mapError fsToIO (std.fs.readFile reportPath)
+printStr report
+```
+
+Reading the report back is not required for writing. The application does it so
+the terminal displays the exact artifact produced by the filesystem action.
 
 ## Handle-based IO
 
@@ -472,4 +469,49 @@ Use `withStandardInput` for a finite request body. Use `pipeStandardInput` plus
 keep each write no larger than the `withProcess` chunk size. `terminateProcess`
 is explicit early shutdown; ordinary scope cleanup provides the safety net.
 
-Next: [Concurrency](06-concurrency.md).
+## Deliberate error: mixing error channels
+
+If `auditFile` calls `std.fs.readFile path` directly inside `Task ()`, the
+compiler cannot unify `FsError` with `IOError`. The repair is an explicit
+policy—keep `IO FsError` in the caller, or use `mapError fsToIO`—not an
+unchecked exception conversion.
+
+## Checkpoint
+
+Run Log Audit and inspect `output/report.txt`:
+
+```sh
+cargo run -- --project-root examples/log_audit
+```
+
+Then answer these boundary questions:
+
+1. Which definitions are pure and can be evaluated without a filesystem?
+2. Where does `FsError` become `IOError`?
+3. Which missing-file failure becomes domain data?
+4. Which resource-owning examples in this chapter use a rank-2 callback?
+
+## Exercises
+
+1. In a scratch copy, replace `readFile` with `readFileLimited path 1024`.
+   Explain what the bound protects.
+2. Write a pure function that chooses an output path, leaving the write itself
+   in `main`.
+3. Decide whether a large child-process output should use
+   `runProcessLimited` or `withProcess`, and state the memory policy.
+4. Use a fixed `StdGen` seed to generate a repeatable test sequence; explain
+   why the same code must not generate a password-reset token.
+
+## Recap
+
+- `IO error result` keeps both the failure and success type visible.
+- `Task a` is `IO IOError a`, not a separate untyped effect system.
+- `std.fs` owns path-aware file operations; `std.io` owns lower-level
+  handles.
+- Strict reads need a trust argument, a size limit, or a streaming design.
+- Scoped callbacks close files, streams, sockets, and processes on every exit.
+- `Duration`, `Instant`, and `SystemTime` represent different domains.
+- Seeded pseudorandomness and host cryptographic randomness are separate APIs.
+- Child processes are direct, binary-safe, bounded when requested, and reaped.
+
+Next: [Organize and test an application](04-abstraction.md).

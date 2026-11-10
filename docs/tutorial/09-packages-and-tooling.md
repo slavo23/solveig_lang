@@ -1,7 +1,16 @@
-# 9. Packages, testing, and tooling
+# 9. Finish and operate the application
+
+An application is complete only when its configuration, persistent state,
+failure output, deterministic checks, formatting, and editor workflow are as
+deliberate as its core algorithm. Release Radar supplies a concrete model while
+this chapter covers the underlying package and tooling rules.
 
 A Solveig package is a directory with `solveig.toml` and a `src/` tree. The
 package name is the root of its module namespace.
+
+**Skip ahead:** experienced readers can go to
+[operate Release Radar](#operate-release-radar), then
+[write deterministic checks](#write-deterministic-checks).
 
 ## Project layout
 
@@ -172,6 +181,63 @@ The formatter's only style option is `--width`, which defaults to 100. A parse
 error leaves the complete selected file set unchanged. The current CLI does
 not provide a REPL, package manager, or test-runner command.
 
+## Operate Release Radar
+
+The default command is hermetic:
+
+```sh
+cargo run -- --project-root examples/release_radar
+```
+
+Live access is an explicit program argument after the Solveig CLI separator:
+
+```sh
+cargo run -- --project-root examples/release_radar -- --live
+```
+
+`liveMode` pattern-matches the argument list. Any invocation without a leading
+`--live` remains local.
+
+Live mode loads an optional `.env`, then reads `GITHUB_TOKEN` from the
+runtime environment:
+
+```solveig
+liveToken : IO EnvError (Maybe String)
+liveToken = do
+    _ <- loadEnvFileIfExists envPath
+    fmap usableToken (mapError EnvIOError (getEnv "GITHUB_TOKEN"))
+```
+
+The environment already present in the process takes precedence over the file.
+The loader reads a bounded, non-executable assignment format; it does not source
+a shell. The program never prints the token. It also disables HTTP redirects so
+the authorization header cannot be forwarded to another origin.
+
+`repos.txt` is ordinary bounded input. Blank lines and lines beginning with
+`#` are ignored. An empty resulting list is a program error with a direct
+message, rather than a successful run that did no work.
+
+Live results update a small ETag cache:
+
+```solveig
+updateCache : Cache -> [ReleaseResult] -> Cache
+updateCache (Cache entries) results = Cache (foldl updateEntry entries results)
+
+writeCache : Path -> Cache -> Task ()
+writeCache path = mapError fsToIO . writeFile path . cacheText
+```
+
+Successful and unchanged results update entries; failures preserve the previous
+entry. `Map` gives deterministic ascending serialization. The current example
+replaces the cache with `writeFile`; it does **not** claim crash-atomic cache
+replacement. An application that requires old-or-new visibility should choose
+`writeFileAtomic`.
+
+Operational output has two levels. Worker `[start]` and `[done]` lines show
+live progress in completion order. The final report is input-ordered and gives
+typed explanations for credentials, primary and secondary rate limits, missing
+releases, HTTP failure, invalid JSON, and request failure.
+
 ## Write deterministic checks
 
 `std.testing` is a small library of composable values rather than a global test
@@ -243,20 +309,24 @@ retains its typed `e`; `assertWithResource` acquires, inspects, and releases a
 resource with `bracket`, including failure and cancellation paths. For network
 code, run a loopback fixture under `withThread` and assert decoded application
 values—not packet boundaries or public-internet timing. For concurrency, use
-channels to establish the required ordering, as chapter 6's overlap proof does.
+channels to establish the required ordering, as chapter 8 describes.
 
-The complete [`tutorial_checks`](code/tutorial_checks/) project combines two
-examples with 500 generated invoice lines. Run it as an ordinary package:
+The checked
+[`testing_generators`](../../tests/golden/run/testing_generators/src/main.sv)
+fixture exercises reproducible generation, paired generators, invalid
+configuration, a passing property, diagnostic failing properties, and scoped
+resource release. Run it as an ordinary package:
 
 ```sh
-solveig --project-root docs/tutorial/code/tutorial_checks
+solveig --project-root tests/golden/run/testing_generators
 ```
 
-Its fixed seed makes the run reproducible. In a larger repository, create one
-small executable test package per subsystem or a test entry definition that
-combines its checks and exits nonzero on failure. The current CLI deliberately
-has no hidden discovery convention, so the test entry and execution policy are
-visible in project configuration and automation.
+Its fixed `mkStdGen 12345` seed makes the sample and failure case reproducible.
+The expected output is checked by the Rust golden runner. In an application,
+create one small executable test package per subsystem or a test entry
+definition that combines checks and exits nonzero on failure. The current CLI
+deliberately has no hidden discovery convention, so the test entry and
+execution policy are visible in project configuration and automation.
 
 ## Scratch files
 
@@ -329,6 +399,64 @@ Useful checks are:
 The [package reference](../packages.md), [formatting guide](../formatting.md),
 [diagnostics reference](../diagnostics.md), and [language-server guide](../lsp.md)
 provide the detailed lookup tables.
+
+## Deliberate error: confusing compiler and program arguments
+
+`solveig --project-root examples/release_radar --live` asks the Solveig CLI to
+parse `--live` and is rejected because it is not a compiler option. The
+separator is part of the execution contract:
+
+```sh
+solveig --project-root examples/release_radar -- --live
+```
+
+Everything after `--` is returned by `std.env.getArgs`. Keeping those two
+namespaces distinct prevents application flags from accidentally changing
+compiler behavior.
+
+## Course checkpoint
+
+From a clean checkout:
+
+```sh
+cargo build
+cargo run -- --verify-core --project-root examples/log_audit
+cargo run -- --verify-core --project-root examples/release_radar
+cargo run -- fmt --check --project-root examples/log_audit
+cargo run -- fmt --check --project-root examples/release_radar
+```
+
+Use the editor to navigate from `fetchRelease` to `decodeResponse`, inspect
+the inferred type of one local binding, and introduce then repair one
+exhaustiveness error in a scratch copy.
+
+## Exercises
+
+1. Add a local library package containing only Release Radar's domain decoder.
+   Design its `export` surface before moving code.
+2. Change cache writing to `writeFileAtomic` and explain the guarantee gained
+   and the concurrency guarantee still absent.
+3. Add a deterministic example assertion for `parseCache . cacheText` over a
+   cache with two entries.
+4. Configure format-on-save for Solveig only, then verify the CLI formatter
+   agrees with the editor.
+5. Document one intentional current boundary—no registry, no HTTP server
+   framework, or no REPL—without implying an unavailable workaround.
+
+## Recap
+
+- Package manifests define module roots, entry modules, local dependencies, and
+  program entry names.
+- External visibility is explicit; opaque types and precise re-exports preserve
+  abstraction.
+- Compiler flags precede `--`; application arguments follow it.
+- Configuration loading has precedence, size, and secrecy policies.
+- Persistent cache formats need deterministic ordering and an explicit write
+  durability policy.
+- Tests are ordinary explicit programs; seeded generators and loopback services
+  keep them reproducible.
+- The CLI formatter and language server operate on the same language syntax and
+  package model.
 
 ## Where to go next
 
