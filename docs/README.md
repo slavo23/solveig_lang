@@ -46,6 +46,7 @@ The reference pages summarize that source; they do not define a second API.
 - [Virtual machine](vm.md)
 - [Debugging hooks](debugging-hooks.md)
 - [Benchmark policy and recorded methodology](benchmarks.md)
+- [Test suites, tiers, and contributor commands](testing.md)
 - [`plan_v3/`](../plan_v3/) for architecture, decisions, registries, and
   evidence-backed progress
 

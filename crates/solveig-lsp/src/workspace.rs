@@ -155,7 +155,7 @@ impl ServerState {
         self.workspace_for_path(path);
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "ide-tests"))]
     pub(crate) fn check_all(&mut self) -> Vec<(Url, Vec<Diagnostic>)> {
         let outcomes = check_workspaces(self.check_plan(), self.encoding, self.config);
         self.finish_check(outcomes)
@@ -212,7 +212,7 @@ impl ServerState {
         )
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, feature = "ide-tests"))]
     pub(crate) fn previous_diagnostic_count(&self) -> usize {
         self.previous_diagnostics.values().map(BTreeSet::len).sum()
     }
@@ -263,7 +263,7 @@ impl ServerState {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "ide-tests"))]
 impl ServerState {
     pub(crate) fn hover(&self, uri: &Url, position: Position) -> Option<Hover> {
         let (path, encoding, _config, snapshot) = self.snapshot_for_uri(uri)?;
@@ -710,8 +710,14 @@ fn compilation_for(root: &Path, first_file: &Path) -> Compilation {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "ide-tests"))]
 pub(crate) mod tests {
+    #![expect(
+        clippy::indexing_slicing,
+        clippy::panic,
+        reason = "LSP tests use direct fixture assertions to preserve failure context"
+    )]
+
     use super::*;
     use crate::diagnostics::INFERRED_SIGNATURE_DIAGNOSTIC_CODE;
     use async_lsp::lsp_types::{

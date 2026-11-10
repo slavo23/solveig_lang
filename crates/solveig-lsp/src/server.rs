@@ -666,5 +666,5 @@ fn workspace_roots(params: &InitializeParams) -> Vec<PathBuf> {
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "ide-tests"))]
 mod tests;

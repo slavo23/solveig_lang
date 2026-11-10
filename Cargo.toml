@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2024"
 autotests = false
 
+[features]
+comprehensive-tests = []
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -42,8 +45,13 @@ name = "vm"
 harness = false
 
 [[test]]
+name = "conformance"
+path = "tests/conformance.rs"
+
+[[test]]
 name = "integration"
 path = "tests/integration.rs"
+required-features = ["comprehensive-tests"]
 
 [lints]
 workspace = true
@@ -63,6 +71,7 @@ members = [
     "crates/solveig-resolve",
     "crates/solveig-syntax",
     "crates/solveig-vm",
+    "tools/xtask",
 ]
 
 [workspace.dependencies]

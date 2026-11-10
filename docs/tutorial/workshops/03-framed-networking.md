@@ -11,7 +11,7 @@ Release Radar's
 Run the focused fixtures through the golden suite:
 
 ```sh
-cargo test --test golden_runner
+cargo xtask test host
 ```
 
 ## Scope ownership first

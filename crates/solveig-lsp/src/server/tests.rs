@@ -1,3 +1,8 @@
+#![expect(
+    clippy::panic,
+    reason = "LSP tests panic with the exact missing protocol or fixture invariant"
+)]
+
 use super::*;
 use crate::server_config::{formatting_width, server_config_from_initialize};
 use crate::workspace::DEFAULT_FORMAT_LINE_WIDTH;

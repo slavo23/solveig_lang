@@ -9,7 +9,7 @@ fixture.
 Run the fixture through:
 
 ```sh
-cargo test --test golden_runner
+cargo xtask test host
 ```
 
 The golden runner supplies the current Solveig executable as the child program,

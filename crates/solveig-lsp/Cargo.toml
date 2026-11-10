@@ -6,6 +6,9 @@ edition = "2024"
 [lib]
 doctest = false
 
+[features]
+ide-tests = []
+
 [dependencies]
 solveig-base = { path = "../solveig-base", version = "0.1.0" }
 solveig-driver = { path = "../solveig-driver", version = "0.1.0" }
