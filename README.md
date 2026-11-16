@@ -63,3 +63,9 @@ repository build workflow, project layout, compiler diagnostics, and formatting.
   and their responsibilities.
 - [Packages and modules](docs/packages.md) — manifests, imports, visibility,
   re-exports, and local dependencies.
+
+## License
+
+Solveig is available under your choice of the [Apache License 2.0](LICENSE-APACHE)
+or the [MIT license](LICENSE-MIT). Contributions are accepted under the same
+terms; see [COPYRIGHT](COPYRIGHT) for details.

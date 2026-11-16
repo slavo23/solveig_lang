@@ -129,7 +129,7 @@
     "language"
   ],
   "author": "",
-  "license": "ISC",
+  "license": "MIT OR Apache-2.0",
   "repository": {
     "type": "git",
     "url": "https://github.com/slavo23/lang_experiments.git"
